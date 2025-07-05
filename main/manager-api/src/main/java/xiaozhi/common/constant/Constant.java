@@ -97,10 +97,6 @@ public interface Constant {
     String SERVER_MQTT_GATEWAY = "server.mqtt_gateway";
 
     /**
-     * websocket地址
-     */
-
-    /**
      * ota地址
      */
     String SERVER_OTA = "server.ota";
