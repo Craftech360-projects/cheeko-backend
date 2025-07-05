@@ -12,6 +12,8 @@ from core.utils.util import check_model_key
 from core.providers.tts.base import TTSProviderBase
 from core.handle.abortHandle import handleAbortMessage
 from core.providers.tts.dto.dto import SentenceType, ContentType, InterfaceType
+from asyncio import Task
+
 
 TAG = __name__
 logger = setup_logging()
@@ -141,6 +143,7 @@ class TTSProvider(TTSProviderBase):
         super().__init__(config, delete_audio_file)
         self.ws = None
         self.interface_type = InterfaceType.DUAL_STREAM
+        self._monitor_task = None  # 监听任务引用
         self.appId = config.get("appid")
         self.access_token = config.get("access_token")
         self.cluster = config.get("cluster")
@@ -157,7 +160,9 @@ class TTSProvider(TTSProviderBase):
         self.opus_encoder = opus_encoder_utils.OpusEncoderUtils(
             sample_rate=16000, channels=1, frame_size_ms=60
         )
-        check_model_key("TTS", self.access_token)
+        model_key_msg = check_model_key("TTS", self.access_token)
+        if model_key_msg:
+            logger.bind(tag=TAG).error(model_key_msg)
 
     async def open_audio_channels(self, conn):
         try:
@@ -202,6 +207,10 @@ class TTSProvider(TTSProviderBase):
                 if message.sentence_type == SentenceType.FIRST:
                     # 初始化参数
                     try:
+                        if not getattr(self.conn, "sentence_id", None): 
+                            self.conn.sentence_id = uuid.uuid4().hex
+                            logger.bind(tag=TAG).info(f"自动生成新的 会话ID: {self.conn.sentence_id}")
+
                         logger.bind(tag=TAG).info("开始启动TTS会话...")
                         future = asyncio.run_coroutine_threadsafe(
                             self.start_session(self.conn.sentence_id),
@@ -264,10 +273,9 @@ class TTSProvider(TTSProviderBase):
         try:
             # 建立新连接
             if self.ws is None:
-                await handleAbortMessage(self.conn)
-                logger.bind(tag=TAG).error(f"WebSocket连接不存在，终止发送文本")
+                logger.bind(tag=TAG).warning(f"WebSocket连接不存在，终止发送文本")
                 return
-            
+
             #  过滤Markdown
             filtered_text = MarkdownCleaner.clean_markdown(text)
 
@@ -287,6 +295,25 @@ class TTSProvider(TTSProviderBase):
     async def start_session(self, session_id):
         logger.bind(tag=TAG).info(f"开始会话～～{session_id}")
         try:
+            task = self._monitor_task
+            if (
+                task is not None
+                and isinstance(task, Task)
+                and not task.done()
+            ):
+                logger.bind(tag=TAG).info("等待上一个监听任务结束...")
+                if self.ws is not None:
+                    logger.bind(tag=TAG).info("强制关闭上一个WebSocket连接以唤醒监听任务...")
+                    try:
+                        await self.ws.close()
+                    except Exception as e:
+                        logger.bind(tag=TAG).warning(f"关闭上一个ws异常: {e}")
+                    self.ws = None
+                try:
+                    await asyncio.wait_for(task, timeout=8)
+                except Exception as e:
+                    logger.bind(tag=TAG).warning(f"等待监听任务异常: {e}")
+                self._monitor_task = None
             # 建立新连接
             await self._ensure_connection()
 
@@ -457,6 +484,8 @@ class TTSProvider(TTSProviderBase):
                 except:
                     pass
                 self.ws = None
+            # 监听任务退出时清理引用
+            self._monitor_task = None
 
     async def send_event(
         self,

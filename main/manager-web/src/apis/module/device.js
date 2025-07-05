@@ -51,10 +51,11 @@ export default {
                 });
             }).send();
     },
-    enableOtaUpgrade(id, status, callback) {
+    updateDeviceInfo(id, payload, callback) {
         RequestService.sendRequest()
-            .url(`${getServiceUrl()}/device/enableOta/${id}/${status}`)
+            .url(`${getServiceUrl()}/device/update/${id}`)
             .method('PUT')
+            .data(payload)
             .success((res) => {
                 RequestService.clearRequestTime()
                 callback(res)
@@ -63,8 +64,25 @@ export default {
                 console.error('更新OTA状态失败:', err)
                 this.$message.error(err.msg || '更新OTA状态失败')
                 RequestService.reAjaxFun(() => {
-                    this.enableOtaUpgrade(id, status, callback)
+                    this.updateDeviceInfo(id, payload, callback)
                 })
             }).send()
+    },
+    // 手动添加设备
+    manualAddDevice(params, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/manual-add`)
+            .method('POST')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('手动添加设备失败:', err);
+                RequestService.reAjaxFun(() => {
+                    this.manualAddDevice(params, callback);
+                });
+            }).send();
     },
 }

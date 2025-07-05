@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
@@ -16,7 +17,10 @@ import xiaozhi.common.redis.RedisKeys;
 import xiaozhi.common.redis.RedisUtils;
 import xiaozhi.common.utils.JsonUtils;
 import xiaozhi.modules.agent.entity.AgentEntity;
+import xiaozhi.modules.agent.entity.AgentPluginMapping;
 import xiaozhi.modules.agent.entity.AgentTemplateEntity;
+import xiaozhi.modules.agent.service.AgentMcpAccessPointService;
+import xiaozhi.modules.agent.service.AgentPluginMappingService;
 import xiaozhi.modules.agent.service.AgentService;
 import xiaozhi.modules.agent.service.AgentTemplateService;
 import xiaozhi.modules.config.service.ConfigService;
@@ -39,6 +43,8 @@ public class ConfigServiceImpl implements ConfigService {
     private final AgentTemplateService agentTemplateService;
     private final RedisUtils redisUtils;
     private final TimbreService timbreService;
+    private final AgentPluginMappingService agentPluginMappingService;
+    private final AgentMcpAccessPointService agentMcpAccessPointService;
 
     @Override
     public Object getConfig(Boolean isCache) {
@@ -62,6 +68,8 @@ public class ConfigServiceImpl implements ConfigService {
 
         // 构建模块配置
         buildModuleConfig(
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -102,9 +110,13 @@ public class ConfigServiceImpl implements ConfigService {
         }
         // 获取音色信息
         String voice = null;
+        String referenceAudio = null;
+        String referenceText = null;
         TimbreDetailsVO timbre = timbreService.get(agent.getTtsVoiceId());
         if (timbre != null) {
             voice = timbre.getTtsVoice();
+            referenceAudio = timbre.getReferenceAudio();
+            referenceText = timbre.getReferenceText();
         }
         // 构建返回数据
         Map<String, Object> result = new HashMap<>();
@@ -132,12 +144,33 @@ public class ConfigServiceImpl implements ConfigService {
             agent.setAsrModelId(null);
         }
 
+        // 添加函数调用参数信息
+        if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
+            String agentId = agent.getId();
+            List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agentId);
+            if (pluginMappings != null && !pluginMappings.isEmpty()) {
+                Map<String, Object> pluginParams = new HashMap<>();
+                for (AgentPluginMapping pluginMapping : pluginMappings) {
+                    pluginParams.put(pluginMapping.getProviderCode(), pluginMapping.getParamInfo());
+                }
+                result.put("plugins", pluginParams);
+            }
+        }
+        // 获取mcp接入点地址
+        String mcpEndpoint = agentMcpAccessPointService.getAgentMcpAccessAddress(agent.getId());
+        if (StringUtils.isNotBlank(mcpEndpoint) && mcpEndpoint.startsWith("ws")) {
+            mcpEndpoint = mcpEndpoint.replace("/mcp/", "/call/");
+            result.put("mcp_endpoint", mcpEndpoint);
+        }
+
         // 构建模块配置
         buildModuleConfig(
                 agent.getAgentName(),
                 agent.getSystemPrompt(),
                 agent.getSummaryMemory(),
                 voice,
+                referenceAudio,
+                referenceText,
                 agent.getVadModelId(),
                 agent.getAsrModelId(),
                 agent.getLlmModelId(),
@@ -154,7 +187,7 @@ public class ConfigServiceImpl implements ConfigService {
     /**
      * 构建配置信息
      * 
-     * @param paramsList 系统参数列表
+     * @param config 系统参数列表
      * @return 配置信息
      */
     private Object buildConfig(Map<String, Object> config) {
@@ -225,21 +258,25 @@ public class ConfigServiceImpl implements ConfigService {
     /**
      * 构建模块配置
      * 
-     * @param prompt        提示词
-     * @param voice         音色
-     * @param vadModelId    VAD模型ID
-     * @param asrModelId    ASR模型ID
-     * @param llmModelId    LLM模型ID
-     * @param ttsModelId    TTS模型ID
-     * @param memModelId    记忆模型ID
-     * @param intentModelId 意图模型ID
-     * @param result        结果Map
+     * @param prompt            提示词
+     * @param voice             音色
+     * @param referenceAudio    参考音频路径
+     * @param referenceText     参考文本
+     * @param vadModelId        VAD模型ID
+     * @param asrModelId        ASR模型ID
+     * @param llmModelId        LLM模型ID
+     * @param ttsModelId        TTS模型ID
+     * @param memModelId        记忆模型ID
+     * @param intentModelId     意图模型ID
+     * @param result            结果Map
      */
     private void buildModuleConfig(
             String assistantName,
             String prompt,
             String summaryMemory,
             String voice,
+            String referenceAudio,
+            String referenceText,
             String vadModelId,
             String asrModelId,
             String llmModelId,
@@ -265,8 +302,10 @@ public class ConfigServiceImpl implements ConfigService {
             if (model.getConfigJson() != null) {
                 typeConfig.put(model.getId(), model.getConfigJson());
                 // 如果是TTS类型，添加private_voice属性
-                if ("TTS".equals(modelTypes[i]) && voice != null) {
-                    ((Map<String, Object>) model.getConfigJson()).put("private_voice", voice);
+                if ("TTS".equals(modelTypes[i])){
+                    if (voice != null) ((Map<String, Object>) model.getConfigJson()).put("private_voice", voice);
+                    if (referenceAudio != null) ((Map<String, Object>) model.getConfigJson()).put("ref_audio", referenceAudio);
+                    if (referenceText != null) ((Map<String, Object>) model.getConfigJson()).put("ref_text", referenceText);
                 }
                 // 如果是Intent类型，且type=intent_llm，则给他添加附加模型
                 if ("Intent".equals(modelTypes[i])) {
@@ -284,6 +323,7 @@ public class ConfigServiceImpl implements ConfigService {
                             map.put("functions", functions);
                         }
                     }
+                    System.out.println("map: " + map);
                 }
                 if ("Memory".equals(modelTypes[i])) {
                     Map<String, Object> map = (Map<String, Object>) model.getConfigJson();

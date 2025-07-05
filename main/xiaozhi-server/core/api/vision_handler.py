@@ -8,6 +8,7 @@ from config.config_loader import get_private_config_from_api
 from core.utils.auth import AuthToken
 import base64
 from typing import Tuple, Optional
+from plugins_func.register import Action
 
 TAG = __name__
 
@@ -55,11 +56,7 @@ class VisionHandler:
             device_id = request.headers.get("Device-Id", "")
             client_id = request.headers.get("Client-Id", "")
             if device_id != token_device_id:
-                return web.Response(
-                    text=json.dumps(self._create_error_response("设备ID与token不匹配")),
-                    content_type="application/json",
-                    status=401,
-                )
+                raise ValueError("设备ID与token不匹配")
             # 解析multipart/form-data请求
             reader = await request.multipart()
 
@@ -126,7 +123,8 @@ class VisionHandler:
 
             return_json = {
                 "success": True,
-                "result": result,
+                "action": Action.RESPONSE.name,
+                "response": result,
             }
 
             response = web.Response(

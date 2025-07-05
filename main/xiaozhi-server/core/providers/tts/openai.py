@@ -25,7 +25,9 @@ class TTSProvider(TTSProviderBase):
         self.speed = float(speed) if speed else 1.0
 
         self.output_file = config.get("output_dir", "tmp/")
-        check_model_key("TTS", self.api_key)
+        model_key_msg = check_model_key("TTS", self.api_key)
+        if model_key_msg:
+            logger.bind(tag=TAG).error(model_key_msg)
 
     async def text_to_speak(self, text, output_file):
         headers = {

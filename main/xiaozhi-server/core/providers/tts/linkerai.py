@@ -166,7 +166,9 @@ class TTSProvider(TTSProviderBase):
                 ) as resp:
 
                     if resp.status != 200:
-                        logger.error(f"TTS请求失败: {resp.status}, {await resp.text()}")
+                        logger.bind(tag=TAG).error(
+                            f"TTS请求失败: {resp.status}, {await resp.text()}"
+                        )
                         self.tts_audio_queue.put((SentenceType.LAST, [], None))
                         return
 
@@ -229,7 +231,7 @@ class TTSProvider(TTSProviderBase):
                         self._process_before_stop_play_files()
 
         except Exception as e:
-            logger.error(f"TTS请求异常: {e}")
+            logger.bind(tag=TAG).error(f"TTS请求异常: {e}")
             self.tts_audio_queue.put((SentenceType.LAST, [], None))
 
     def to_tts(self, text: str) -> list:
@@ -263,7 +265,7 @@ class TTSProvider(TTSProviderBase):
                 self.api_url, params=params, headers=headers, timeout=5
             ) as response:
                 if response.status_code != 200:
-                    logger.error(
+                    logger.bind(tag=TAG).error(
                         f"TTS请求失败: {response.status_code}, {response.text}"
                     )
                     return []
@@ -299,5 +301,5 @@ class TTSProvider(TTSProviderBase):
                 return opus_datas
 
         except Exception as e:
-            logger.error(f"TTS请求异常: {e}")
+            logger.bind(tag=TAG).error(f"TTS请求异常: {e}")
             return []

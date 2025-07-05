@@ -1,11 +1,13 @@
 import json
+import asyncio
 import uuid
 from core.handle.sendAudioHandle import send_stt_message
 from core.handle.helloHandle import checkWakeupWords
 from core.utils.util import remove_punctuation_and_length
 from core.providers.tts.dto.dto import ContentType
 from core.utils.dialogue import Message
-from plugins_func.register import Action
+from core.providers.tools.device_mcp import call_mcp_tool
+from plugins_func.register import Action, ActionResponse
 from loguru import logger
 
 TAG = __name__
@@ -82,9 +84,11 @@ async def process_intent_result(conn, intent_result, original_text):
                 if not funcItem:
                     conn.func_handler.function_registry.register_function("play_music")
 
-            function_args = None
+            function_args = {}
             if "arguments" in intent_data["function_call"]:
                 function_args = intent_data["function_call"]["arguments"]
+                if function_args is None:
+                    function_args = {}
             # 确保参数是字符串格式的JSON
             if isinstance(function_args, dict):
                 function_args = json.dumps(function_args)
@@ -101,10 +105,20 @@ async def process_intent_result(conn, intent_result, original_text):
             # 使用executor执行函数调用和结果处理
             def process_function_call():
                 conn.dialogue.put(Message(role="user", content=original_text))
-                result = conn.func_handler.handle_llm_function_call(
-                    conn, function_call_data
-                )
-                logger.bind(tag=TAG).debug(f"检测到Action : {result.action}")
+
+                # 使用统一工具处理器处理所有工具调用
+                try:
+                    result = asyncio.run_coroutine_threadsafe(
+                        conn.func_handler.handle_llm_function_call(
+                            conn, function_call_data
+                        ),
+                        conn.loop,
+                    ).result()
+                except Exception as e:
+                    conn.logger.bind(tag=TAG).error(f"工具调用失败: {e}")
+                    result = ActionResponse(
+                        action=Action.ERROR, result=str(e), response=str(e)
+                    )
 
                 if result:
                     if result.action == Action.RESPONSE:  # 直接回复前端
