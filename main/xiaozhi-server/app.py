@@ -1,3 +1,4 @@
+import os
 import sys
 import uuid
 import signal
@@ -9,6 +10,7 @@ from core.utils.util import get_local_ip, validate_mcp_endpoint
 from core.http_server import SimpleHttpServer
 from core.websocket_server import WebSocketServer
 from core.utils.util import check_ffmpeg_installed
+from core.rag.rag_startup import initialize_rag_services, shutdown_rag_services, check_rag_status
 
 TAG = __name__
 logger = setup_logging()
@@ -43,15 +45,26 @@ async def main():
     check_ffmpeg_installed()
     config = load_config()
 
-    # Default to using manager-api's secret as auth_key
-    # If secret is empty, generate random key
-    # auth_key is used for jwt authentication, such as jwt authentication for vision analysis interface
+    # Use SERVER_SECRET from environment for API authentication
+    # If not set, use manager-api's secret or generate random key
+    server_secret = os.getenv("SERVER_SECRET", "")
     auth_key = config.get("manager-api", {}).get("secret", "")
-    if not auth_key or len(auth_key) == 0 or "你" in auth_key:
+    
+    if server_secret:
+        auth_key = server_secret
+        logger.bind(tag=TAG).info(f"Using SERVER_SECRET for authentication")
+    elif not auth_key or len(auth_key) == 0 or "你" in auth_key:
         auth_key = str(uuid.uuid4().hex)
-        config["server"]["auth_key"] = auth_key
         logger.bind(tag=TAG).info(f"Generated auth_key: {auth_key}")
+    
+    config["server"]["auth_key"] = auth_key
 
+    # Initialize RAG services
+    rag_enabled = await initialize_rag_services(auth_key)
+    if rag_enabled:
+        rag_status = check_rag_status()
+        logger.bind(tag=TAG).info(f"RAG Status: {rag_status}")
+    
     # Add stdin monitoring task
     stdin_task = asyncio.create_task(monitor_stdin())
 
@@ -120,6 +133,9 @@ async def main():
     except asyncio.CancelledError:
         print("Task was cancelled, cleaning up resources...")
     finally:
+        # Shutdown RAG services
+        await shutdown_rag_services()
+        
         # Cancel all tasks (critical fix point)
         stdin_task.cancel()
         ws_task.cancel()

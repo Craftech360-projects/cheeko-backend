@@ -3,6 +3,7 @@ from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.api.pdf_handler import PDFHandler
 
 TAG = __name__
 
@@ -13,6 +14,7 @@ class SimpleHttpServer:
         self.logger = setup_logging()
         self.ota_handler = OTAHandler(config)
         self.vision_handler = VisionHandler(config)
+        self.pdf_handler = PDFHandler(config)
 
     def _get_websocket_url(self, local_ip: str, port: int) -> str:
         """Get websocket address
@@ -67,6 +69,17 @@ class SimpleHttpServer:
                              self.vision_handler.handle_post),
                     web.options("/mcp/vision/explain",
                                 self.vision_handler.handle_post),
+                ])
+                
+                # Add PDF processing routes
+                self.logger.bind(tag=TAG).info("Adding PDF processing routes")
+                app.add_routes([
+                    web.post("/api/pdf/process",
+                             self.pdf_handler.handle_process_pdf),
+                    web.options("/api/pdf/process",
+                                self.pdf_handler.handle_process_pdf),
+                    web.get("/api/pdf/health",
+                            self.pdf_handler.handle_health_check),
                 ])
 
                 # Run service

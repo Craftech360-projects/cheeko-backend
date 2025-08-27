@@ -19,6 +19,7 @@ import jakarta.servlet.Filter;
 import xiaozhi.modules.security.oauth2.Oauth2Filter;
 import xiaozhi.modules.security.oauth2.Oauth2Realm;
 import xiaozhi.modules.security.secret.ServerSecretFilter;
+import xiaozhi.modules.security.dual.DualAuthFilter;
 import xiaozhi.modules.sys.service.SysParamsService;
 
 /**
@@ -61,6 +62,8 @@ public class ShiroConfig {
         filters.put("oauth2", new Oauth2Filter());
         // 服务密钥过滤
         filters.put("server", new ServerSecretFilter(sysParamsService));
+        // 双重认证过滤器（支持oauth2和server secret）
+        filters.put("dual", new DualAuthFilter(sysParamsService));
         shiroFilter.setFilters(filters);
 
         // 添加Shiro的内置过滤器
@@ -90,6 +93,13 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-history/report", "server");
         filterMap.put("/agent/saveMemory/**", "server");
         filterMap.put("/agent/play/**", "anon");
+        // Textbook RAG API endpoints for internal service communication only
+        filterMap.put("/api/textbooks/pending", "server");
+        filterMap.put("/api/textbooks/*/chunks/server", "dual"); // Allow both user and server auth
+        filterMap.put("/api/textbooks/*/status", "server");
+        filterMap.put("/api/textbooks/*/process", "server");
+        filterMap.put("/api/textbooks/chunks/status", "server");
+        // All other textbook endpoints use oauth2 for frontend access
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);
 

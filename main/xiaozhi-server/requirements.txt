@@ -39,3 +39,5 @@ ten-vad==0.2.0
 deepgram-sdk==4.8.1
 fuzzywuzzy
 Levenshtein
+httpx==0.27.2
+PyMuPDF==1.25.1

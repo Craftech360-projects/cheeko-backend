@@ -34,6 +34,11 @@
             :style="{ filter: $route.path === '/ota-management' ? 'brightness(0) invert(1)' : 'None' }" />
           OTA Management
         </div>
+        <div v-if="isSuperAdmin" class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/textbook-management' }" @click="goTextbookManagement">
+          <span style="font-size: 16px; margin-right: 5px;">📚</span>
+          Textbook RAG
+        </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
           :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' }"
           @visible-change="handleParamDropdownVisibleChange">
@@ -151,6 +156,9 @@ export default {
     },
     goServerSideManagement() {
       this.$router.push('/server-side-management')
+    },
+    goTextbookManagement() {
+      this.$router.push('/textbook-management')
     },
     // Get user information
     fetchUserInfo() {

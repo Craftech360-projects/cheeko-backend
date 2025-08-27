@@ -100,6 +100,17 @@ const routes = [
     }
   },
   {
+    path: '/textbook-management',
+    name: 'TextbookManagement',
+    component: function () {
+      return import('../views/TextbookManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Textbook RAG Management'
+    }
+  },
+  {
     path: '/ota-management',
     name: 'OtaManagement',
     component: function () {

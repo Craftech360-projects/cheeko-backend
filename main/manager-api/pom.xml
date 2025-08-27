@@ -232,6 +232,17 @@
             <artifactId>okio</artifactId>
             <version>${okio-version}</version>
         </dependency>
+        <!-- Apache PDFBox for PDF text extraction -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.1</version>
+        </dependency>
+        <!-- Spring Boot JPA for textbook entities -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
     </dependencies>
 
     <!-- 阿里云maven仓库 -->
