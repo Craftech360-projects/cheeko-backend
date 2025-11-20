@@ -90,6 +90,53 @@ class StoryService:
             # Fall back to random story on error
             return []
 
+    async def search_stories_by_name(self, story_name: str, category: Optional[str] = None, limit: int = 5) -> List[Dict]:
+        """
+        Search for stories by name with fuzzy matching support.
+        This method is optimized for specific content requests from mobile app.
+
+        Args:
+            story_name: Name of the story to search for
+            category: Optional category filter
+            limit: Maximum number of results to return (default: 5)
+
+        Returns:
+            List of matching stories with metadata (title, filename, category, url, score)
+        """
+        if not self.is_initialized:
+            logger.warning(f"[STORY-SEARCH] Story service not initialized - cannot search for '{story_name}'")
+            return []
+
+        try:
+            search_query = story_name.lower().strip()
+            logger.info(f"🔍 [STORY-SEARCH] Searching for story: '{story_name}', Category: {category or 'Any'}")
+
+            # Use the existing semantic search which already has fuzzy matching
+            search_results = await self.semantic_search.search_stories(search_query, category, limit=limit)
+
+            # Convert to expected format with additional metadata
+            results = []
+            for result in search_results:
+                story_data = {
+                    'title': result.title,
+                    'filename': result.filename,
+                    'category': result.language_or_category,
+                    'url': self.get_story_url(result.filename, result.language_or_category),
+                    'score': result.score
+                }
+                results.append(story_data)
+
+            if results:
+                logger.info(f"🔍 [STORY-SEARCH] Found {len(results)} matches for '{story_name}' - best: '{results[0]['title']}' (score: {results[0]['score']:.2f})")
+            else:
+                logger.warning(f"⚠️ [STORY-SEARCH] No stories found matching '{story_name}'")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ [STORY-SEARCH] Error searching for '{story_name}': {e}")
+            return []
+
     async def get_random_story(self, category: Optional[str] = None) -> Optional[Dict]:
         """Get a random story using semantic search or fallback"""
         if not self.is_initialized:
