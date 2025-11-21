@@ -1,9 +1,8 @@
 [cerebrium.deployment]
 name = "livekit-server-simple"
 python_version = "3.11"
-docker_base_image_url = "debian:bookworm-slim"
 disable_auth = false
-include = ['./*', 'room.py', 'media_api.py','cerebrium.toml', 'src/**/*', 'config/**/*']
+include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'src/**/*', 'config/**/*']
 exclude = ['.*', '__pycache__/**/*', 'transcripts/**/*', '*.pyc']
 
 [cerebrium.hardware]
