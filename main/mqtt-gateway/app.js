@@ -1112,7 +1112,7 @@ class LiveKitBridge extends Emitter {
     }
   }
 
-  async connect(audio_params, features, roomService) {
+  async connect(audio_params, features, roomService, roomMetadata = null) {
     const connectStartTime = Date.now();
     console.log(
       `🔍 [DEBUG] LiveKitBridge.connect() called - UUID: ${this.uuid}, MAC: ${this.macAddress}`
@@ -1130,17 +1130,34 @@ class LiveKitBridge extends Emitter {
       `🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`
     );
 
-    // Pre-create room with emptyTimeout setting
+    // Pre-create room with emptyTimeout setting AND metadata (if provided)
     if (roomService) {
       try {
-        await roomService.createRoom({
+        const roomOptions = {
           name: roomName,
           empty_timeout: 60, // Auto-close room if empty for 60 seconds (snake_case for LiveKit API)
           max_participants: 2,
-        });
-        console.log(
-          `✅ [ROOM] Pre-created room with 60-second empty_timeout: ${roomName}`
-        );
+        };
+
+        // Add metadata if provided (for conversation rooms - optimizes agent startup)
+        if (roomMetadata) {
+          roomOptions.metadata = JSON.stringify(roomMetadata);
+          console.log(
+            `📦 [ROOM-METADATA] Creating room with metadata (${JSON.stringify(roomMetadata).length} bytes)`
+          );
+        }
+
+        await roomService.createRoom(roomOptions);
+
+        if (roomMetadata) {
+          console.log(
+            `✅ [ROOM] Pre-created room with metadata and 60-second empty_timeout: ${roomName}`
+          );
+        } else {
+          console.log(
+            `✅ [ROOM] Pre-created room with 60-second empty_timeout: ${roomName}`
+          );
+        }
       } catch (error) {
         // Log the actual error for debugging
         console.error(`❌ [ROOM] Error pre-creating room: ${error.message}`);
@@ -3463,12 +3480,68 @@ class VirtualMQTTConnection {
     this.lastActivityTime = Date.now();
 
     try {
+      // OPTIMIZATION: Fetch metadata for conversation rooms (speeds up agent startup)
+      let roomMetadata = null;
+
+      if (this.roomType === "conversation") {
+        console.log(`📦 [METADATA] Fetching agent_id and child_profile for faster agent startup...`);
+        const metadataStart = Date.now();
+
+        try {
+          const axios = require("axios");
+          const macAddress = this.deviceId.replace(/:/g, "").toLowerCase();
+          const managerApiUrl = process.env.MANAGER_API_URL;
+
+          if (managerApiUrl) {
+            // Fetch agent_id and child_profile in parallel
+            const [agentIdResponse, childProfileResponse] = await Promise.all([
+              axios.get(`${managerApiUrl}/toy/agent/device/${macAddress}/agent-id`, {
+                timeout: 2000,
+              }).catch(err => {
+                console.warn(`⚠️ [METADATA] Failed to fetch agent_id: ${err.message}`);
+                return null;
+              }),
+              axios.get(`${managerApiUrl}/toy/agent/device/${macAddress}/child-profile`, {
+                timeout: 2000,
+              }).catch(err => {
+                console.warn(`⚠️ [METADATA] Failed to fetch child_profile: ${err.message}`);
+                return null;
+              })
+            ]);
+
+            const agentId = agentIdResponse?.data?.data || null;
+            const childProfile = childProfileResponse?.data?.data || null;
+
+            const metadataTime = Date.now() - metadataStart;
+            console.log(`⚡ [METADATA] Fetched in ${metadataTime}ms - agent_id: ${agentId ? 'found' : 'not found'}, child_profile: ${childProfile ? 'found' : 'not found'}`);
+
+            // Build metadata object
+            if (agentId || childProfile) {
+              roomMetadata = {
+                device_mac: this.deviceId,
+                created_at: new Date().toISOString(),
+                room_type: "conversation"
+              };
+
+              if (agentId) roomMetadata.agent_id = agentId;
+              if (childProfile) roomMetadata.child_profile = childProfile;
+
+              console.log(`✅ [METADATA] Room metadata prepared (${JSON.stringify(roomMetadata).length} bytes)`);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ [METADATA] Failed to fetch metadata: ${error.message}`);
+          // Continue without metadata - agent will fetch data itself
+        }
+      }
+
       // Connect to LiveKit room (gateway joins, but agent doesn't deploy yet)
       const roomCreationStart = Date.now();
       await this.bridge.connect(
         json.audio_params,
         json.features,
-        this.server?.roomService || this.gateway?.roomService
+        this.server?.roomService || this.gateway?.roomService,
+        roomMetadata  // Pass metadata to room creation
       );
       const roomCreationTime = Date.now() - roomCreationStart;
       console.log(
@@ -5560,11 +5633,11 @@ class MQTTGateway {
 
       if (characterName) {
         // Set specific character
-        apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/set-character`;
+        apiUrl = `${process.env.MANAGER_API_URL}/toy/agent/device/${macAddress}/set-character`;
         requestBody = { characterName: characterName };
       } else {
         // Cycle to next character
-        apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/cycle-character`;
+        apiUrl = `${process.env.MANAGER_API_URL}/toy/agent/device/${macAddress}/cycle-character`;
         requestBody = {};
       }
 
@@ -5609,18 +5682,77 @@ class MQTTGateway {
 
         console.log(`🎵 [CHARACTER-CHANGE] Streaming audio: ${pcmFileName}`);
 
-        // Stream audio via UDP and send goodbye after
+        // Get current room name for hot-swap
+        const deviceInfo = this.deviceConnections.get(deviceId);
+        if (!deviceInfo || !deviceInfo.currentRoomName) {
+          console.error(`❌ [CHARACTER-HOTSWAP] No active room for device ${deviceId}`);
+          return;
+        }
+
+        const currentRoomName = deviceInfo.currentRoomName;
+        console.log(`🔄 [CHARACTER-HOTSWAP] Keeping room alive: ${currentRoomName}`);
+
+        // Step 1: Remove old agent from room (DON'T destroy room!)
+        try {
+          await this.removeAgentFromRoom(currentRoomName);
+          console.log(`✅ [CHARACTER-HOTSWAP] Old agent removed, new agent will auto-spawn`);
+        } catch (error) {
+          console.error(`⚠️ [CHARACTER-HOTSWAP] Failed to remove agent: ${error.message}`);
+          // Continue anyway - agent might have already left
+        }
+
+        // Step 2: Stream audio via UDP WITHOUT sending goodbye (keep room alive!)
         await this.streamAudioViaUdp(
           deviceId,
           audioFilePath,
           newModeName,
-          true
+          false  // ✅ DON'T send goodbye - keep room alive for hot-swap!
         );
+
+        console.log(`✅ [CHARACTER-HOTSWAP] Complete - character switched seamlessly`);
       } else {
         console.error(`❌ [CHARACTER-CHANGE] API error:`, response.data);
       }
     } catch (error) {
       console.error(`❌ [CHARACTER-CHANGE] Error:`, error.message);
+      console.error(error.stack);
+    }
+  }
+
+  /**
+   * Remove agent participant from LiveKit room (for character hot-swap)
+   * @param {string} roomName - LiveKit room name
+   */
+  async removeAgentFromRoom(roomName) {
+    try {
+      const { RoomServiceClient } = require("livekit-server-sdk");
+
+      const roomService = new RoomServiceClient(
+        process.env.LIVEKIT_URL,
+        process.env.LIVEKIT_API_KEY,
+        process.env.LIVEKIT_API_SECRET
+      );
+
+      // List all participants in the room
+      const participants = await roomService.listParticipants(roomName);
+
+      // Find agent participant (identity usually contains 'agent' or kind is AGENT)
+      const agentParticipant = participants.find(p =>
+        p.identity.includes('agent') ||
+        p.identity.includes('assistant') ||
+        p.kind === 'AGENT'
+      );
+
+      if (agentParticipant) {
+        console.log(`🔄 [CHARACTER-HOTSWAP] Removing agent: ${agentParticipant.identity}`);
+        await roomService.removeParticipant(roomName, agentParticipant.identity);
+        console.log(`✅ [CHARACTER-HOTSWAP] Agent removed from room: ${roomName}`);
+      } else {
+        console.log(`ℹ️ [CHARACTER-HOTSWAP] No agent found in room (may have already left)`);
+      }
+    } catch (error) {
+      console.error(`❌ [CHARACTER-HOTSWAP] Failed to remove agent:`, error.message);
+      throw error;
     }
   }
 
