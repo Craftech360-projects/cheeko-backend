@@ -18,6 +18,7 @@ import aiohttp
 
 from src.services.music_service import MusicService
 from src.services.story_service import StoryService
+from src.services.analytics_service import AnalyticsService
 from src.utils.model_cache import model_cache
 
 # Configure logging
@@ -33,6 +34,10 @@ load_dotenv(".env")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL")
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
+
+# Manager API configuration (for analytics)
+MANAGER_API_URL = os.getenv("MANAGER_API_URL", "http://localhost:8002")
+MANAGER_API_SECRET = os.getenv("MANAGER_API_SECRET", "")
 
 app = FastAPI(title="Cheeko Media API")
 
@@ -598,7 +603,7 @@ class StreamingAudioIterator:
 class MusicBot(MediaBot):
     """Music streaming bot with skip control"""
 
-    def __init__(self, room_name: str, token: str, language: Optional[str] = None, playlist: Optional[List[dict]] = None):
+    def __init__(self, room_name: str, token: str, language: Optional[str] = None, playlist: Optional[List[dict]] = None, analytics_service: Optional[AnalyticsService] = None):
         super().__init__(room_name, token, "music")
         self.language = language
         self.playlist = playlist  # List of {filename, category/language, title, etc.}
@@ -616,6 +621,9 @@ class MusicBot(MediaBot):
 
         # Specific content playback support (for mobile app requests)
         self.specific_content_queue = None  # Queue for specific song requests
+
+        # Analytics service
+        self.analytics_service = analytics_service
 
     async def run(self):
         """Main entry point - connect and stream music with progressive streaming and skip support"""
@@ -643,6 +651,10 @@ class MusicBot(MediaBot):
                 logger.error("❌ Failed to connect to room after all retries")
                 return
 
+            # Start analytics session
+            if self.analytics_service:
+                await self.analytics_service.start_session(mode_type="Music")
+
             # Check if playlist is provided
             if self.playlist and len(self.playlist) > 0:
                 logger.info(f"🎵 Using playlist with {len(self.playlist)} songs (looping enabled)")
@@ -663,6 +675,10 @@ class MusicBot(MediaBot):
             import traceback
             traceback.print_exc()
         finally:
+            # End analytics session
+            if self.analytics_service:
+                await self.analytics_service.end_session(completion_status="completed")
+
             await self.disconnect()
             # Remove from active bots
             if self.room_name in active_bots:
@@ -699,12 +715,12 @@ class MusicBot(MediaBot):
                         # Loop the specific content until interrupted
                         logger.info(f"🎯 [MUSIC-SPECIFIC] Loop mode enabled for '{title}'")
                         while not self.should_stop and not self.skip_requested:
-                            await self._stream_song(song_url, title)
+                            await self._stream_song(song_url, title, media_id=filename, language=language)
                             if not self.should_stop and not self.skip_requested:
                                 await asyncio.sleep(1)  # Small gap between loops
                     else:
                         # Play once
-                        await self._stream_song(song_url, title)
+                        await self._stream_song(song_url, title, media_id=filename, language=language)
 
                     logger.info(f"🎯 [MUSIC-SPECIFIC] Finished streaming: '{title}'")
 
@@ -746,7 +762,7 @@ class MusicBot(MediaBot):
 
             # Stream this song (can be interrupted by skip)
             logger.info(f"🎵 About to start streaming: '{title}'")
-            await self._stream_song(song_url, title)
+            await self._stream_song(song_url, title, media_id=filename, language=category)
             logger.info(f"🎵 Finished streaming call for: '{title}'")
 
             if self.should_stop:
@@ -807,12 +823,12 @@ class MusicBot(MediaBot):
                         # Loop the specific content until interrupted
                         logger.info(f"🎯 [MUSIC-SPECIFIC] Loop mode enabled for '{title}'")
                         while not self.should_stop and not self.skip_requested:
-                            await self._stream_song(song_url, title)
+                            await self._stream_song(song_url, title, media_id=filename, language=language)
                             if not self.should_stop and not self.skip_requested:
                                 await asyncio.sleep(1)  # Small gap between loops
                     else:
                         # Play once
-                        await self._stream_song(song_url, title)
+                        await self._stream_song(song_url, title, media_id=filename, language=language)
 
                     logger.info(f"🎯 [MUSIC-SPECIFIC] Finished streaming: '{title}'")
 
@@ -911,8 +927,21 @@ class MusicBot(MediaBot):
             # No history
             return None
 
-    async def _stream_song(self, song_url: str, title: str):
+    async def _stream_song(self, song_url: str, title: str, media_id: str = None, language: str = None):
         """Stream a single song using progressive streaming - can be interrupted by skip"""
+        from datetime import datetime
+
+        # Track analytics - song started
+        started_at = datetime.now()
+        if self.analytics_service and media_id:
+            await self.analytics_service.record_media_playback(
+                media_type="music",
+                media_id=media_id,
+                media_title=title,
+                started_at=started_at,
+                metadata={'language': language} if language else None
+            )
+
         # Create streaming iterator for progressive download & conversion
         stream_iterator = StreamingAudioIterator(
             cdn_url=song_url,
@@ -1062,7 +1091,7 @@ class MusicBot(MediaBot):
 class StoryBot(MediaBot):
     """Story streaming bot with skip control"""
 
-    def __init__(self, room_name: str, token: str, age_group: Optional[str] = None, playlist: Optional[List[dict]] = None):
+    def __init__(self, room_name: str, token: str, age_group: Optional[str] = None, playlist: Optional[List[dict]] = None, analytics_service: Optional[AnalyticsService] = None):
         super().__init__(room_name, token, "story")
         self.age_group = age_group
         self.playlist = playlist  # List of {filename, category, title, etc.}
@@ -1080,6 +1109,9 @@ class StoryBot(MediaBot):
 
         # Specific content playback support (for mobile app requests)
         self.specific_content_queue = None  # Queue for specific story requests
+
+        # Analytics service
+        self.analytics_service = analytics_service
 
     async def run(self):
         """Main entry point - connect and stream story with progressive streaming and skip support"""
@@ -1107,6 +1139,10 @@ class StoryBot(MediaBot):
                 logger.error("❌ Failed to connect to room after all retries")
                 return
 
+            # Start analytics session
+            if self.analytics_service:
+                await self.analytics_service.start_session(mode_type="Story")
+
             # Check if playlist is provided
             if self.playlist and len(self.playlist) > 0:
                 logger.info(f"📖 Using playlist with {len(self.playlist)} stories (looping enabled)")
@@ -1126,6 +1162,10 @@ class StoryBot(MediaBot):
             import traceback
             traceback.print_exc()
         finally:
+            # End analytics session
+            if self.analytics_service:
+                await self.analytics_service.end_session(completion_status="completed")
+
             await self.disconnect()
             if self.room_name in active_bots:
                 del active_bots[self.room_name]
@@ -1161,12 +1201,12 @@ class StoryBot(MediaBot):
                         # Loop the specific content until interrupted
                         logger.info(f"🎯 [STORY-SPECIFIC] Loop mode enabled for '{title}'")
                         while not self.should_stop and not self.skip_requested:
-                            await self._stream_story(story_url, title)
+                            await self._stream_story(story_url, title, media_id=filename, category=category)
                             if not self.should_stop and not self.skip_requested:
                                 await asyncio.sleep(1)  # Small gap between loops
                     else:
                         # Play once
-                        await self._stream_story(story_url, title)
+                        await self._stream_story(story_url, title, media_id=filename, category=category)
 
                     logger.info(f"🎯 [STORY-SPECIFIC] Finished streaming: '{title}'")
 
@@ -1208,7 +1248,7 @@ class StoryBot(MediaBot):
 
             # Stream this story (can be interrupted by skip)
             logger.info(f"📖 About to start streaming: '{title}'")
-            await self._stream_story(story_url, title)
+            await self._stream_story(story_url, title, media_id=filename, category=category)
             logger.info(f"📖 Finished streaming call for: '{title}'")
 
             if self.should_stop:
@@ -1269,12 +1309,12 @@ class StoryBot(MediaBot):
                         # Loop the specific content until interrupted
                         logger.info(f"🎯 [STORY-SPECIFIC] Loop mode enabled for '{title}'")
                         while not self.should_stop and not self.skip_requested:
-                            await self._stream_story(story_url, title)
+                            await self._stream_story(story_url, title, media_id=filename, category=category)
                             if not self.should_stop and not self.skip_requested:
                                 await asyncio.sleep(1)  # Small gap between loops
                     else:
                         # Play once
-                        await self._stream_story(story_url, title)
+                        await self._stream_story(story_url, title, media_id=filename, category=category)
 
                     logger.info(f"🎯 [STORY-SPECIFIC] Finished streaming: '{title}'")
 
@@ -1314,7 +1354,7 @@ class StoryBot(MediaBot):
 
             # Stream this random story (can be interrupted by skip)
             logger.info(f"📖 About to start streaming random: '{story['title']}'")
-            await self._stream_story(story['url'], story['title'])
+            await self._stream_story(story['url'], story['title'], media_id=story.get('filename', story['title']), category=story.get('category'))
             logger.info(f"📖 Finished streaming random call for: '{story['title']}'")
 
             if self.should_stop:
@@ -1373,8 +1413,21 @@ class StoryBot(MediaBot):
             # No history
             return None
 
-    async def _stream_story(self, story_url: str, title: str):
+    async def _stream_story(self, story_url: str, title: str, media_id: str = None, category: str = None):
         """Stream a single story using progressive streaming - can be interrupted by skip"""
+        from datetime import datetime
+
+        # Track analytics - story started
+        started_at = datetime.now()
+        if self.analytics_service and media_id:
+            await self.analytics_service.record_media_playback(
+                media_type="story",
+                media_id=media_id,
+                media_title=title,
+                started_at=started_at,
+                metadata={'category': category} if category else None
+            )
+
         # Create streaming iterator for progressive download & conversion
         stream_iterator = StreamingAudioIterator(
             cdn_url=story_url,
@@ -1536,8 +1589,33 @@ async def start_music_bot(req: StartMusicBotRequest):
         # Create token for bot
         token = create_bot_token(req.room_name, "music-bot")
 
+        # Extract MAC address from room_name (format: uuid_mac_mode)
+        # Example: "75ba3756-3693-4486-adff-daac0d13ef1d_6825ddbbf3a0_music"
+        mac_address = None
+        try:
+            parts = req.room_name.split('_')
+            if len(parts) >= 2:
+                mac_address = parts[1]  # Get MAC part
+        except Exception as e:
+            logger.warning(f"Could not extract MAC from room_name: {req.room_name}, error: {e}")
+
+        # Create analytics service for this bot
+        analytics_service = None
+        if mac_address and MANAGER_API_SECRET:
+            try:
+                analytics_service = AnalyticsService(
+                    manager_api_url=MANAGER_API_URL,
+                    secret=MANAGER_API_SECRET,
+                    device_mac=mac_address,
+                    session_id=req.room_name,
+                    agent_id="music-bot"
+                )
+                logger.info(f"📊 Analytics service created for Music bot - MAC: {mac_address}")
+            except Exception as e:
+                logger.error(f"❌ Failed to create analytics service: {e}")
+
         # Create and start music bot with playlist
-        bot = MusicBot(req.room_name, token, req.language, req.playlist)
+        bot = MusicBot(req.room_name, token, req.language, req.playlist, analytics_service)
 
         # Store bot reference
         active_bots[req.room_name] = bot
@@ -1573,8 +1651,33 @@ async def start_story_bot(req: StartStoryBotRequest):
 
         token = create_bot_token(req.room_name, "story-bot")
 
+        # Extract MAC address from room_name (format: uuid_mac_mode)
+        # Example: "75ba3756-3693-4486-adff-daac0d13ef1d_6825ddbbf3a0_story"
+        mac_address = None
+        try:
+            parts = req.room_name.split('_')
+            if len(parts) >= 2:
+                mac_address = parts[1]  # Get MAC part
+        except Exception as e:
+            logger.warning(f"Could not extract MAC from room_name: {req.room_name}, error: {e}")
+
+        # Create analytics service for this bot
+        analytics_service = None
+        if mac_address and MANAGER_API_SECRET:
+            try:
+                analytics_service = AnalyticsService(
+                    manager_api_url=MANAGER_API_URL,
+                    secret=MANAGER_API_SECRET,
+                    device_mac=mac_address,
+                    session_id=req.room_name,
+                    agent_id="story-bot"
+                )
+                logger.info(f"📊 Analytics service created for Story bot - MAC: {mac_address}")
+            except Exception as e:
+                logger.error(f"❌ Failed to create analytics service: {e}")
+
         # Create and start story bot with playlist
-        bot = StoryBot(req.room_name, token, req.age_group, req.playlist)
+        bot = StoryBot(req.room_name, token, req.age_group, req.playlist, analytics_service)
         active_bots[req.room_name] = bot
 
         asyncio.create_task(bot.run())

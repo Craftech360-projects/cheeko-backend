@@ -189,12 +189,12 @@ class MathGameState:
 
     def is_game_complete(self) -> bool:
         """
-        Check if game is complete (3 correct in a row).
+        Check if game is complete (5 correct in a row).
 
         Returns:
-            bool: True if streak reached 3
+            bool: True if streak reached 5
         """
-        return self.streak >= 3
+        return self.streak >= 5
 
     def get_state(self) -> dict:
         """
@@ -349,12 +349,12 @@ class RiddleGameState:
 
     def is_game_complete(self) -> bool:
         """
-        Check if game is complete (3 correct in a row).
+        Check if game is complete (5 correct in a row).
 
         Returns:
-            bool: True if streak reached 3
+            bool: True if streak reached 5
         """
-        return self.streak >= 3
+        return self.streak >= 5
 
     def get_state(self) -> dict:
         """
@@ -547,6 +547,15 @@ class Assistant(FilteredAgent):
         self.riddle_game_state = RiddleGameState()
         logger.info(f"🤔 Riddle Solver initialized with RiddleGameState")
 
+        # Analytics: Streak tracking for all games
+        self.math_streak_number = 0
+        self.math_streak_start_time = None
+        self.riddle_streak_number = 0
+        self.riddle_streak_start_time = None
+        self.wordladder_streak_number = 0
+        self.wordladder_streak_start_time = None
+        logger.info(f"📊 Streak tracking initialized for analytics")
+
         # Store original instructions template for later re-formatting
         self._original_instructions = instructions
 
@@ -563,6 +572,7 @@ class Assistant(FilteredAgent):
         self.mcp_executor = None
         self.google_search_service = None
         self.praison_math_service = None
+        self.analytics_service = None
 
         # Room and device information
         self.room_name = None
@@ -698,8 +708,8 @@ class Assistant(FilteredAgent):
 
 
 
-    def set_services(self, music_service, story_service, audio_player, unified_audio_player=None, device_control_service=None, mcp_executor=None, google_search_service=None, question_generator_service=None, riddle_generator_service=None):
-        """Set the music, story, device control services, MCP executor, Google Search service, Question Generator service, and Riddle Generator service"""
+    def set_services(self, music_service, story_service, audio_player, unified_audio_player=None, device_control_service=None, mcp_executor=None, google_search_service=None, question_generator_service=None, riddle_generator_service=None, analytics_service=None):
+        """Set the music, story, device control services, MCP executor, Google Search service, Question Generator service, Riddle Generator service, and Analytics service"""
         self.music_service = music_service
         self.story_service = story_service
         self.audio_player = audio_player
@@ -709,6 +719,7 @@ class Assistant(FilteredAgent):
         self.google_search_service = google_search_service
         self.question_generator_service = question_generator_service
         self.riddle_generator_service = riddle_generator_service
+        self.analytics_service = analytics_service
 
     def set_room_info(self, room_name: str = None, device_mac: str = None):
         """Set room name and device MAC address"""
@@ -1418,9 +1429,12 @@ class Assistant(FilteredAgent):
         """
         Generate a bank of math questions for the game.
 
+        ⚠️ CRITICAL: ALWAYS call this FIRST when starting a math game session!
+        DO NOT call check_math_answer until after this returns successfully.
+
         Call this when:
-        - Starting a new math game session
-        - Running out of questions (question bank empty)
+        - Starting a new math game session (REQUIRED FIRST STEP)
+        - Running out of questions (when check_math_answer returns needs_new_bank: true)
 
         Args:
             count: Number of questions to generate (default 5)
@@ -1483,9 +1497,12 @@ class Assistant(FilteredAgent):
         """
         Generate a bank of riddles for the game.
 
+        ⚠️ CRITICAL: ALWAYS call this FIRST when starting a riddle game session!
+        DO NOT call check_riddle_answer until after this returns successfully.
+
         Call this when:
-        - Starting a new riddle game session
-        - Running out of riddles (riddle bank empty)
+        - Starting a new riddle game session (REQUIRED FIRST STEP)
+        - Running out of riddles (when check_riddle_answer returns needs_new_bank: true)
 
         Args:
             count: Number of riddles to generate (default 5)
@@ -1547,6 +1564,13 @@ class Assistant(FilteredAgent):
         """
         Validate math answer using pre-generated question bank with retry logic.
 
+        ⚠️ PREREQUISITE: You MUST call generate_question_bank() FIRST before using this function!
+        If you try to check an answer before generating questions, this will return needs_new_bank: true.
+
+        IMPORTANT: The goal is to get 5 CORRECT ANSWERS IN A ROW to win the game!
+        - Celebrate progress at streaks: 2, 3, 4
+        - VICTORY at streak 5 (not 3!)
+
         Flow:
         1. Parse user's answer (handles any format: "8", "eight", etc.)
         2. Compare with answer from question bank
@@ -1573,6 +1597,9 @@ class Assistant(FilteredAgent):
             }
         """
         try:
+            import time
+            start_time = time.time()
+
             logger.info(f"🧮 Validating answer: '{user_answer}'")
 
             # Check if we need to generate questions first
@@ -1583,7 +1610,7 @@ class Assistant(FilteredAgent):
                     'retry': False,
                     'move_next': False,
                     'needs_new_bank': True,
-                    'message': "No questions available. Please generate questions first."
+                    'message': "CANNOT validate answer - no questions in bank! You must call generate_question_bank() first, then ask the first question. DO NOT assume the user's answer was correct."
                 }
 
             # Get current question from bank
@@ -1614,9 +1641,27 @@ class Assistant(FilteredAgent):
             # Step 3: Check if game complete
             game_complete = self.math_game_state.is_game_complete()
 
-            # Step 3a: Handle game completion (streak of 3) - Clear context
+            # Step 3a: Handle game completion (streak of 5) - Clear context
             if game_complete:
-                logger.info(f"🏆 MATH STREAK COMPLETE! User achieved 3 correct answers in a row")
+                logger.info(f"🏆 MATH STREAK COMPLETE! User achieved 5 correct answers in a row")
+
+                # Record streak completion for analytics
+                if self.analytics_service and self.math_streak_start_time:
+                    try:
+                        self.math_streak_number += 1
+                        streak_end_time = datetime.now()
+                        await self.analytics_service.record_streak(
+                            game_type='math_tutor',
+                            streak_number=self.math_streak_number,
+                            questions_in_streak=5,  # Always 5 for math game
+                            started_at=self.math_streak_start_time,
+                            ended_at=streak_end_time
+                        )
+                        logger.info(f"📊✅ Math streak #{self.math_streak_number} recorded")
+                        self.math_streak_start_time = None  # Reset for next streak
+                    except Exception as e:
+                        logger.error(f"📊❌ Failed to record math streak: {e}")
+
                 await self._clear_chat_context("Math streak completed")
                 return await self._restart_math_game("Streak completed", is_victory=True)
 
@@ -1644,6 +1689,56 @@ class Assistant(FilteredAgent):
                 message = f"The answer is {correct_answer_display}. Let's try another!"
 
             logger.info(f"Result: correct={validation['correct']}, retry={validation['retry']}, attempts_left={validation['attempts_left']}, streak={self.math_game_state.streak}")
+
+            # Analytics tracking
+            if self.analytics_service:
+                try:
+                    end_time = time.time()
+                    response_time_ms = int((end_time - start_time) * 1000)
+
+                    # Extract question type from question text
+                    question_lower = current_q['question'].lower()
+                    if 'plus' in question_lower or '+' in question_lower:
+                        question_type = 'addition'
+                    elif 'minus' in question_lower or '-' in question_lower:
+                        question_type = 'subtraction'
+                    elif 'times' in question_lower or 'multiply' in question_lower or '×' in question_lower or '*' in question_lower:
+                        question_type = 'multiplication'
+                    elif 'divided' in question_lower or '÷' in question_lower or '/' in question_lower:
+                        question_type = 'division'
+                    else:
+                        question_type = 'arithmetic'
+
+                    # Determine difficulty based on answer size
+                    answer_val = abs(validation['correct_answer'])
+                    if answer_val <= 20:
+                        difficulty_level = 'easy'
+                    elif answer_val <= 100:
+                        difficulty_level = 'medium'
+                    else:
+                        difficulty_level = 'hard'
+
+                    current_attempts = self.math_game_state.current_attempts
+                    await self.analytics_service.record_game_attempt(
+                        game_type='math_tutor',
+                        is_correct=validation['correct'],
+                        attempt_number=current_attempts,
+                        response_time_ms=response_time_ms,
+                        question_type=question_type,
+                        difficulty_level=difficulty_level
+                    )
+                    logger.debug(f"📊 Math attempt recorded: {question_type}, correct={validation['correct']}, time={response_time_ms}ms")
+
+                    # Track streak start time for analytics
+                    if validation['correct'] and self.math_game_state.streak == 1:
+                        self.math_streak_start_time = datetime.now()
+                        logger.debug(f"📊 Math streak started at {self.math_streak_start_time}")
+                    elif not validation['correct']:
+                        # Reset streak tracking on wrong answer
+                        self.math_streak_start_time = None
+
+                except Exception as e:
+                    logger.error(f"📊❌ Failed to record math analytics: {e}")
 
             return {
                 'correct': validation['correct'],
@@ -1682,6 +1777,13 @@ class Assistant(FilteredAgent):
         """
         Validate riddle answer using pre-generated riddle bank with retry logic.
 
+        ⚠️ PREREQUISITE: You MUST call generate_riddle_bank() FIRST before using this function!
+        If you try to check an answer before generating riddles, this will return needs_new_bank: true.
+
+        IMPORTANT: The goal is to get 5 CORRECT ANSWERS IN A ROW to win the game!
+        - Celebrate progress at streaks: 2, 3, 4
+        - VICTORY at streak 5 (not 3!)
+
         Args:
             user_answer: User's answer to current riddle
 
@@ -1689,6 +1791,9 @@ class Assistant(FilteredAgent):
             dict: Validation result with retry/move_next flags
         """
         try:
+            import time
+            start_time = time.time()
+
             logger.info(f"🤔 Checking riddle answer: '{user_answer}'")
 
             # Check if we need to generate riddles first
@@ -1699,7 +1804,7 @@ class Assistant(FilteredAgent):
                     'retry': False,
                     'move_next': False,
                     'needs_new_bank': True,
-                    'message': "Please generate riddles first by calling generate_riddle_bank()."
+                    'message': "CANNOT validate answer - no riddles in bank! You must call generate_riddle_bank() first, then ask the first riddle. DO NOT assume the user's answer was correct."
                 }
 
             # Get current riddle
@@ -1721,9 +1826,27 @@ class Assistant(FilteredAgent):
             # Check if game complete
             game_complete = self.riddle_game_state.is_game_complete()
 
-            # Handle game completion (streak of 3) - Clear context
+            # Handle game completion (streak of 5) - Clear context
             if game_complete:
-                logger.info(f"🏆 RIDDLE STREAK COMPLETE! User achieved 3 correct answers in a row")
+                logger.info(f"🏆 RIDDLE STREAK COMPLETE! User achieved 5 correct answers in a row")
+
+                # Record streak completion for analytics
+                if self.analytics_service and self.riddle_streak_start_time:
+                    try:
+                        self.riddle_streak_number += 1
+                        streak_end_time = datetime.now()
+                        await self.analytics_service.record_streak(
+                            game_type='riddle_solver',
+                            streak_number=self.riddle_streak_number,
+                            questions_in_streak=5,  # Always 5 for riddle game
+                            started_at=self.riddle_streak_start_time,
+                            ended_at=streak_end_time
+                        )
+                        logger.info(f"📊✅ Riddle streak #{self.riddle_streak_number} recorded")
+                        self.riddle_streak_start_time = None  # Reset for next streak
+                    except Exception as e:
+                        logger.error(f"📊❌ Failed to record riddle streak: {e}")
+
                 await self._clear_chat_context("Riddle streak completed")
                 return await self._restart_riddle_game("Streak completed", is_victory=True)
 
@@ -1747,6 +1870,34 @@ class Assistant(FilteredAgent):
                 message = f"The answer is '{validation['correct_answer']}'. Let's try another!"
 
             logger.info(f"Result: correct={validation['correct']}, retry={validation['retry']}, attempts_left={validation['attempts_left']}, streak={self.riddle_game_state.streak}")
+
+            # Analytics tracking
+            if self.analytics_service:
+                try:
+                    end_time = time.time()
+                    response_time_ms = int((end_time - start_time) * 1000)
+
+                    current_attempts = self.riddle_game_state.current_attempts
+                    await self.analytics_service.record_game_attempt(
+                        game_type='riddle_solver',
+                        is_correct=validation['correct'],
+                        attempt_number=current_attempts,
+                        response_time_ms=response_time_ms,
+                        question_type='riddle',
+                        difficulty_level='medium'  # Can be enhanced based on riddle complexity
+                    )
+                    logger.debug(f"📊 Riddle attempt recorded: correct={validation['correct']}, time={response_time_ms}ms")
+
+                    # Track streak start time for analytics
+                    if validation['correct'] and self.riddle_game_state.streak == 1:
+                        self.riddle_streak_start_time = datetime.now()
+                        logger.debug(f"📊 Riddle streak started at {self.riddle_streak_start_time}")
+                    elif not validation['correct']:
+                        # Reset streak tracking on wrong answer
+                        self.riddle_streak_start_time = None
+
+                except Exception as e:
+                    logger.error(f"📊❌ Failed to record riddle analytics: {e}")
 
             return {
                 'correct': validation['correct'],
@@ -2420,6 +2571,8 @@ class Assistant(FilteredAgent):
         """
         try:
             import json
+            import time
+            start_time = time.time()
 
             # Normalize input
             user_word = user_word.lower().strip()
@@ -2433,6 +2586,24 @@ class Assistant(FilteredAgent):
             if not is_letter_match:
                 max_reached = self.word_ladder_state.increment_failure()
                 logger.warning(f"❌ Letter mismatch: {error_msg}")
+
+                # Analytics tracking for invalid move
+                if self.analytics_service:
+                    try:
+                        end_time = time.time()
+                        response_time_ms = int((end_time - start_time) * 1000)
+
+                        await self.analytics_service.record_game_attempt(
+                            game_type='word_ladder',
+                            is_correct=False,  # Invalid move
+                            attempt_number=1,
+                            response_time_ms=response_time_ms,
+                            question_type='word_transformation',
+                            difficulty_level='medium'
+                        )
+                        logger.debug(f"📊 Word ladder move recorded: invalid move, time={response_time_ms}ms")
+                    except Exception as e:
+                        logger.error(f"📊❌ Failed to record word ladder analytics: {e}")
 
                 if max_reached:
                     # Clear context before restarting due to max failures
@@ -2453,6 +2624,26 @@ class Assistant(FilteredAgent):
             if self.word_ladder_state.check_victory(user_word):
                 logger.info(f"🏆 VICTORY! User reached target: {self.word_ladder_state.target_word}")
                 self.word_ladder_state.add_valid_move(user_word)
+
+                # Record streak completion for analytics (victory = completed streak)
+                if self.analytics_service and self.wordladder_streak_start_time:
+                    try:
+                        self.wordladder_streak_number += 1
+                        streak_end_time = datetime.now()
+                        # Number of moves to reach target (excluding start word)
+                        questions_in_streak = len(self.word_ladder_state.word_history) - 1
+                        await self.analytics_service.record_streak(
+                            game_type='word_ladder',
+                            streak_number=self.wordladder_streak_number,
+                            questions_in_streak=questions_in_streak,
+                            started_at=self.wordladder_streak_start_time,
+                            ended_at=streak_end_time
+                        )
+                        logger.info(f"📊✅ Word ladder streak #{self.wordladder_streak_number} recorded ({questions_in_streak} moves)")
+                        self.wordladder_streak_start_time = None  # Reset for next game
+                    except Exception as e:
+                        logger.error(f"📊❌ Failed to record word ladder streak: {e}")
+
                 # Clear context before restarting due to victory
                 await self._clear_chat_context("Victory achieved")
                 return await self._restart_word_ladder_game("Victory!", is_victory=True)
@@ -2468,6 +2659,31 @@ class Assistant(FilteredAgent):
 
             # Update prompt with new state
             await self.update_prompt_with_game_state()
+
+            # Analytics tracking for valid move
+            if self.analytics_service:
+                try:
+                    end_time = time.time()
+                    response_time_ms = int((end_time - start_time) * 1000)
+
+                    await self.analytics_service.record_game_attempt(
+                        game_type='word_ladder',
+                        is_correct=True,  # Valid move
+                        attempt_number=1,
+                        response_time_ms=response_time_ms,
+                        question_type='word_transformation',
+                        difficulty_level='medium'
+                    )
+                    logger.debug(f"📊 Word ladder move recorded: valid move, time={response_time_ms}ms")
+
+                    # Track streak start time for analytics (first valid move after start)
+                    # word_history has [start_word, first_move] after first valid move, so length == 2
+                    if len(self.word_ladder_state.word_history) == 2 and not self.wordladder_streak_start_time:
+                        self.wordladder_streak_start_time = datetime.now()
+                        logger.debug(f"📊 Word ladder streak started at {self.wordladder_streak_start_time}")
+
+                except Exception as e:
+                    logger.error(f"📊❌ Failed to record word ladder analytics: {e}")
 
             state = self.word_ladder_state.get_state()
             result = {

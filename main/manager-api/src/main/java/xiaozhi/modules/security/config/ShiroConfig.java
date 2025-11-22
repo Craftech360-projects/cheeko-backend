@@ -92,6 +92,7 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-history/report", "server");
         filterMap.put("/agent/saveMemory/**", "server");
         filterMap.put("/agent/prompt/**", "server");
+        filterMap.put("/analytics/**", "server");
         filterMap.put("/agent/device/**/cycle-mode", "anon");  // Allow firmware direct access (legacy)
         filterMap.put("/agent/device/**/cycle-character", "anon");  // Allow firmware direct access (cycle)
         filterMap.put("/agent/device/**/set-character", "anon");  // Allow firmware direct access (set specific)

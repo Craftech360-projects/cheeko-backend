@@ -994,6 +994,13 @@ class LiveKitBridge extends Emitter {
     this.pendingMcpRequests = new Map();
     this.mcpRequestCounter = 1;
 
+    // Volume adjustment queue for request serialization
+    this.volumeAdjustmentQueue = [];
+    this.isAdjustingVolume = false;
+    this.lastKnownVolume = null; // Optimistic volume tracking
+    this.volumeDebounceTimer = null; // Debounce timer for volume changes
+    this.pendingVolumeAction = null; // Accumulator for debounced volume actions
+
     // Initialize audio resampler for 48kHz -> 24kHz conversion (outgoing: LiveKit -> ESP32)
     this.audioResampler = new AudioResampler(
       48000,
@@ -2227,7 +2234,7 @@ class LiveKitBridge extends Emitter {
         const action = functionCall.name === "self_volume_up" ? "up" : "down";
         const step = functionCall.arguments?.step || 10;
 
-        const newVolume = await this.adjustVolume(action, step);
+        const newVolume = await this.debouncedAdjustVolume(action, step, 300);
         console.log(`✅ [VOICE-MCP] Volume adjusted successfully to ${newVolume}`);
       } catch (error) {
         console.error(`❌ [VOICE-MCP] Failed to adjust volume:`, error);
@@ -2620,26 +2627,113 @@ class LiveKitBridge extends Emitter {
     });
   }
 
-  // Adjust volume by increment/decrement (uses get + set)
-  async adjustVolume(action, step = 10) {
-    try {
-      console.log(`🔊 [VOLUME-ADJUST] Getting current volume...`);
-
-      // Step 1: Get current device status
-      const statusResult = await this.sendMcpAndWait("self.get_device_status", {});
-
-      // Parse the result (it's a JSON string)
-      let deviceStatus;
-      if (typeof statusResult === "string") {
-        deviceStatus = JSON.parse(statusResult);
-      } else {
-        deviceStatus = statusResult;
+  // Debounced volume adjustment - accumulates rapid presses and executes after delay
+  debouncedAdjustVolume(action, step = 10, debounceMs = 300) {
+    return new Promise((resolve, reject) => {
+      // Clear existing debounce timer
+      if (this.volumeDebounceTimer) {
+        clearTimeout(this.volumeDebounceTimer);
+        console.log(`🔄 [VOLUME-DEBOUNCE] Cancelled previous timer, accumulating...`);
       }
 
-      const currentVolume = deviceStatus?.audio_speaker?.volume || 50;
-      console.log(`📊 [VOLUME-ADJUST] Current volume: ${currentVolume}`);
+      // Accumulate steps if same action
+      if (this.pendingVolumeAction && this.pendingVolumeAction.action === action) {
+        this.pendingVolumeAction.step += step;
+        this.pendingVolumeAction.resolvers.push(resolve);
+        console.log(
+          `📊 [VOLUME-DEBOUNCE] Accumulated ${action} (total step: ${this.pendingVolumeAction.step})`
+        );
+      } else {
+        // New action - reset accumulator
+        this.pendingVolumeAction = {
+          action,
+          step,
+          resolvers: [resolve],
+        };
+        console.log(`🆕 [VOLUME-DEBOUNCE] New action: ${action} (step: ${step})`);
+      }
 
-      // Step 2: Calculate new volume
+      // Set new debounce timer
+      this.volumeDebounceTimer = setTimeout(async () => {
+        const { action: finalAction, step: finalStep, resolvers } = this.pendingVolumeAction;
+        this.pendingVolumeAction = null;
+        this.volumeDebounceTimer = null;
+
+        console.log(
+          `⏰ [VOLUME-DEBOUNCE] Executing accumulated ${finalAction} (total step: ${finalStep})`
+        );
+
+        try {
+          const result = await this.adjustVolume(finalAction, finalStep);
+          resolvers.forEach((r) => r(result));
+        } catch (error) {
+          resolvers.forEach((r) => r(null));
+        }
+      }, debounceMs);
+    });
+  }
+
+  // Adjust volume by increment/decrement (uses get + set) - WITH QUEUE SERIALIZATION
+  async adjustVolume(action, step = 10) {
+    return new Promise((resolve, reject) => {
+      // Add request to queue
+      this.volumeAdjustmentQueue.push({ action, step, resolve, reject });
+      console.log(`📥 [VOLUME-QUEUE] Added request to queue (size: ${this.volumeAdjustmentQueue.length})`);
+
+      // Process queue if not already processing
+      this.processVolumeQueue();
+    });
+  }
+
+  // Process volume adjustment queue (one at a time)
+  async processVolumeQueue() {
+    // If already processing, return (serialization)
+    if (this.isAdjustingVolume) {
+      console.log(`⏳ [VOLUME-QUEUE] Already processing, waiting...`);
+      return;
+    }
+
+    // If queue is empty, nothing to do
+    if (this.volumeAdjustmentQueue.length === 0) {
+      return;
+    }
+
+    // Mark as processing
+    this.isAdjustingVolume = true;
+
+    // Get next request from queue
+    const request = this.volumeAdjustmentQueue.shift();
+    const { action, step, resolve, reject } = request;
+
+    console.log(
+      `🔄 [VOLUME-QUEUE] Processing request (${action}, step=${step}), ${this.volumeAdjustmentQueue.length} remaining`
+    );
+
+    try {
+      let currentVolume;
+
+      // Use optimistic volume tracking (avoid expensive get_device_status call)
+      if (this.lastKnownVolume !== null) {
+        currentVolume = this.lastKnownVolume;
+        console.log(`📊 [VOLUME-OPTIMISTIC] Using cached volume: ${currentVolume}`);
+      } else {
+        // First time or after error - query device
+        console.log(`🔊 [VOLUME-QUERY] Querying device for current volume...`);
+        const statusResult = await this.sendMcpAndWait("self.get_device_status", {}, 3000);
+
+        let deviceStatus;
+        if (typeof statusResult === "string") {
+          deviceStatus = JSON.parse(statusResult);
+        } else {
+          deviceStatus = statusResult;
+        }
+
+        currentVolume = deviceStatus?.audio_speaker?.volume || 50;
+        this.lastKnownVolume = currentVolume;
+        console.log(`📊 [VOLUME-QUERY] Device volume: ${currentVolume}`);
+      }
+
+      // Calculate new volume
       let newVolume;
       if (action === "up") {
         newVolume = Math.min(100, currentVolume + step);
@@ -2651,14 +2745,31 @@ class LiveKitBridge extends Emitter {
         `🔧 [VOLUME-ADJUST] Calculating new volume: ${currentVolume} ${action === "up" ? "+" : "-"} ${step} = ${newVolume}`
       );
 
-      // Step 3: Set new volume
-      await this.sendMcpAndWait("self.audio_speaker.set_volume", { volume: newVolume });
+      // Set new volume (reduced timeout for faster failure detection)
+      await this.sendMcpAndWait("self.audio_speaker.set_volume", { volume: newVolume }, 3000);
+
+      // Update cached volume
+      this.lastKnownVolume = newVolume;
 
       console.log(`✅ [VOLUME-ADJUST] Volume adjusted successfully: ${currentVolume} → ${newVolume}`);
-      return newVolume;
+      resolve(newVolume);
     } catch (error) {
-      console.error(`❌ [VOLUME-ADJUST] Error adjusting volume:`, error);
-      throw error;
+      console.warn(`⚠️ [VOLUME-ADJUST] Error adjusting volume (non-critical):`, error.message);
+
+      // Reset cached volume on error to force re-query next time
+      this.lastKnownVolume = null;
+
+      // Don't propagate error - graceful degradation
+      resolve(null);
+    } finally {
+      // Mark as not processing
+      this.isAdjustingVolume = false;
+
+      // Process next request in queue (if any)
+      if (this.volumeAdjustmentQueue.length > 0) {
+        console.log(`🔄 [VOLUME-QUEUE] Processing next request in queue...`);
+        setImmediate(() => this.processVolumeQueue());
+      }
     }
   }
 
@@ -3863,7 +3974,7 @@ async spawnStoryBot(roomName, playlist = null) {
             const action = functionName === "self_volume_up" ? "up" : "down";
             const step = json.function_call.arguments?.step || 10;
 
-            const newVolume = await this.bridge.adjustVolume(action, step);
+            const newVolume = await this.bridge.debouncedAdjustVolume(action, step, 300);
             console.log(`✅ [MOBILE-MCP] Volume adjusted successfully to ${newVolume}`);
           } catch (error) {
             console.error(`❌ [MOBILE-MCP] Failed to adjust volume:`, error);

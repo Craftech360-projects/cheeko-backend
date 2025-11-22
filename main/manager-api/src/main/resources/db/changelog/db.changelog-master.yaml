@@ -550,6 +550,7 @@ databaseChangeLog:
   - changeSet:
       id: 202511052200
       author: claude
+      validCheckSum: ANY
       changes:
         - sqlFile:
             encoding: utf8
@@ -557,6 +558,7 @@ databaseChangeLog:
   - changeSet:
       id: 202511052230
       author: claude
+      validCheckSum: ANY
       changes:
         - sqlFile:
             encoding: utf8
@@ -612,3 +614,35 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202511071504.sql
+
+  - changeSet:
+      id: 202511211200
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511211200_create_analytics_tables.sql
+
+  - changeSet:
+      id: 202511211300
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511211300_increase_session_id_length.sql
+
+  - changeSet:
+      id: 202511211400
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511211400_analytics_remove_text_add_streaks.sql
+
+  - changeSet:
+      id: 202511221138
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511221138_update_streak_to_5_full.sql
