@@ -49,6 +49,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def format_mac_address(mac: str) -> str:
+    """
+    Convert compact MAC address to colon-separated format.
+    Example: '28562f001058' -> '28:56:2f:00:10:58'
+    """
+    if ':' in mac or '-' in mac:
+        # Already formatted
+        return mac
+    
+    # Insert colons every 2 characters
+    return ':'.join([mac[i:i+2] for i in range(0, len(mac), 2)])
+
+
 # Initialize services on startup
 music_service: Optional[MusicService] = None
 story_service: Optional[StoryService] = None
@@ -104,6 +117,7 @@ def create_bot_token(room_name: str, bot_identity: str) -> str:
         can_publish=True,
         can_subscribe=True
     ))
+    logger.info(f"🎫 Created token for bot '{bot_identity}' to join room '{room_name}'")
     return at.to_jwt()
 
 
@@ -143,15 +157,16 @@ class MediaBot:
 
             # Create audio source (48kHz mono - LiveKit will handle to approom.js)
             self.audio_source = rtc.AudioSource(48000, 1)
+            track_name = f"{self.bot_type}-agent-audio"
             self.audio_track = rtc.LocalAudioTrack.create_audio_track(
-                f"{self.bot_type}-audio",
+                track_name,
                 self.audio_source
             )
 
             # Publish audio track
             options = rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
-            await self.room.local_participant.publish_track(self.audio_track, options)
-            logger.info(f"✅ {self.bot_type} audio track published")
+            publication = await self.room.local_participant.publish_track(self.audio_track, options)
+            logger.info(f"✅ {self.bot_type} audio track '{track_name}' published (sid: {publication.sid})")
 
             return True
         except Exception as e:
@@ -933,14 +948,11 @@ class MusicBot(MediaBot):
 
         # Track analytics - song started
         started_at = datetime.now()
-        if self.analytics_service and media_id:
-            await self.analytics_service.record_media_playback(
-                media_type="music",
-                media_id=media_id,
-                media_title=title,
-                started_at=started_at,
-                metadata={'language': language} if language else None
-            )
+        was_skipped = False
+        skip_action = None
+
+        # Log CDN URL for debugging
+        logger.info(f"🔗 [CDN] URL for '{title}': {song_url}")
 
         # Create streaming iterator for progressive download & conversion
         stream_iterator = StreamingAudioIterator(
@@ -960,6 +972,8 @@ class MusicBot(MediaBot):
                 if self.should_stop or self.skip_requested:
                     if self.skip_requested:
                         logger.info(f"⏭️ Skip requested, interrupting stream...")
+                        was_skipped = True
+                        skip_action = self.skip_direction if self.skip_direction else "next"
                     else:
                         logger.info(f"⏹️ Stop requested, interrupting stream...")
                     
@@ -987,6 +1001,31 @@ class MusicBot(MediaBot):
         finally:
             logger.info(f"🎵 _stream_song finally block for '{title}'")
             self.current_stream_iterator = None
+            
+            # Track analytics - song ended
+            if self.analytics_service and media_id:
+                try:
+                    ended_at = datetime.now()
+                    duration_played = int((ended_at - started_at).total_seconds())
+                    
+                    logger.info(f"📊 [MUSIC] Recording playback: {title}, duration={duration_played}s, skip={skip_action}")
+                    
+                    await self.analytics_service.record_media_playback(
+                        media_type="music",
+                        media_id=media_id,
+                        media_title=title,
+                        started_at=started_at,
+                        ended_at=ended_at,
+                        duration_played_seconds=duration_played,
+                        skip_action=skip_action,
+                        metadata={'language': language, 'was_skipped': was_skipped} if language else {'was_skipped': was_skipped}
+                    )
+                    
+                    logger.info(f"📊✅ [MUSIC] Playback recorded successfully")
+                except Exception as e:
+                    logger.error(f"📊❌ [MUSIC] Failed to record playback: {e}")
+                    import traceback
+                    logger.error(f"📊❌ [MUSIC] Traceback: {traceback.format_exc()}")
 
     async def skip_to_next(self):
         """Request skip to next song (works in both playlist and random mode)"""
@@ -1419,14 +1458,11 @@ class StoryBot(MediaBot):
 
         # Track analytics - story started
         started_at = datetime.now()
-        if self.analytics_service and media_id:
-            await self.analytics_service.record_media_playback(
-                media_type="story",
-                media_id=media_id,
-                media_title=title,
-                started_at=started_at,
-                metadata={'category': category} if category else None
-            )
+        was_skipped = False
+        skip_action = None
+
+        # Log CDN URL for debugging
+        logger.info(f"🔗 [CDN] URL for '{title}': {story_url}")
 
         # Create streaming iterator for progressive download & conversion
         stream_iterator = StreamingAudioIterator(
@@ -1446,6 +1482,8 @@ class StoryBot(MediaBot):
                 if self.should_stop or self.skip_requested:
                     if self.skip_requested:
                         logger.info(f"⏭️ Skip requested, interrupting stream...")
+                        was_skipped = True
+                        skip_action = self.skip_direction if self.skip_direction else "next"
                     else:
                         logger.info(f"⏹️ Stop requested, interrupting stream...")
                     
@@ -1473,6 +1511,31 @@ class StoryBot(MediaBot):
         finally:
             logger.info(f"📖 _stream_story finally block for '{title}'")
             self.current_stream_iterator = None
+            
+            # Track analytics - story ended
+            if self.analytics_service and media_id:
+                try:
+                    ended_at = datetime.now()
+                    duration_played = int((ended_at - started_at).total_seconds())
+                    
+                    logger.info(f"📊 [STORY] Recording playback: {title}, duration={duration_played}s, skip={skip_action}")
+                    
+                    await self.analytics_service.record_media_playback(
+                        media_type="story",
+                        media_id=media_id,
+                        media_title=title,
+                        started_at=started_at,
+                        ended_at=ended_at,
+                        duration_played_seconds=duration_played,
+                        skip_action=skip_action,
+                        metadata={'category': category, 'was_skipped': was_skipped} if category else {'was_skipped': was_skipped}
+                    )
+                    
+                    logger.info(f"📊✅ [STORY] Playback recorded successfully")
+                except Exception as e:
+                    logger.error(f"📊❌ [STORY] Failed to record playback: {e}")
+                    import traceback
+                    logger.error(f"📊❌ [STORY] Traceback: {traceback.format_exc()}")
 
     async def skip_to_next(self):
         """Request skip to next story (works in both playlist and random mode)"""
@@ -1586,8 +1649,8 @@ async def start_music_bot(req: StartMusicBotRequest):
             logger.warning(f"Bot already active for room: {req.room_name}")
             return {"status": "already_active", "room_name": req.room_name}
 
-        # Create token for bot
-        token = create_bot_token(req.room_name, "music-bot")
+        # Create token for bot (use "agent" in identity so gateway recognizes it)
+        token = create_bot_token(req.room_name, "music-agent-bot")
 
         # Extract MAC address from room_name (format: uuid_mac_mode)
         # Example: "75ba3756-3693-4486-adff-daac0d13ef1d_6825ddbbf3a0_music"
@@ -1606,9 +1669,9 @@ async def start_music_bot(req: StartMusicBotRequest):
                 analytics_service = AnalyticsService(
                     manager_api_url=MANAGER_API_URL,
                     secret=MANAGER_API_SECRET,
-                    device_mac=mac_address,
+                    device_mac=format_mac_address(mac_address),
                     session_id=req.room_name,
-                    agent_id="music-bot"
+                    agent_id="music-agent-bot"
                 )
                 logger.info(f"📊 Analytics service created for Music bot - MAC: {mac_address}")
             except Exception as e:
@@ -1649,7 +1712,8 @@ async def start_story_bot(req: StartStoryBotRequest):
             logger.warning(f"Bot already active for room: {req.room_name}")
             return {"status": "already_active", "room_name": req.room_name}
 
-        token = create_bot_token(req.room_name, "story-bot")
+        # Create token for bot (use "agent" in identity so gateway recognizes it)
+        token = create_bot_token(req.room_name, "story-agent-bot")
 
         # Extract MAC address from room_name (format: uuid_mac_mode)
         # Example: "75ba3756-3693-4486-adff-daac0d13ef1d_6825ddbbf3a0_story"
@@ -1668,9 +1732,9 @@ async def start_story_bot(req: StartStoryBotRequest):
                 analytics_service = AnalyticsService(
                     manager_api_url=MANAGER_API_URL,
                     secret=MANAGER_API_SECRET,
-                    device_mac=mac_address,
+                    device_mac=format_mac_address(mac_address),
                     session_id=req.room_name,
-                    agent_id="story-bot"
+                    agent_id="story-agent-bot"
                 )
                 logger.info(f"📊 Analytics service created for Story bot - MAC: {mac_address}")
             except Exception as e:

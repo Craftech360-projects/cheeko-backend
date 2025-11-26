@@ -92,7 +92,7 @@ public class AnalyticsController {
     @Operation(summary = "Record a completed streak")
     public Result<Void> recordStreak(@Valid @RequestBody AnalyticsStreakDTO streakDTO) {
         log.debug("Recording streak for session: {}, Game: {}, Streak #{}",
-                 streakDTO.getSessionId(), streakDTO.getGameType(), streakDTO.getStreakNumber());
+                streakDTO.getSessionId(), streakDTO.getGameType(), streakDTO.getStreakNumber());
 
         analyticsService.recordStreak(streakDTO);
 
@@ -183,8 +183,7 @@ public class AnalyticsController {
     @Operation(summary = "Get daily usage statistics")
     public Result<AnalyticsDailyUsageDTO> getDailyUsage(
             @Parameter(description = "Device MAC Address") @PathVariable String macAddress,
-            @Parameter(description = "Date (YYYY-MM-DD), defaults to today")
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            @Parameter(description = "Date (YYYY-MM-DD), defaults to today") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         log.info("Getting daily usage for MAC: {}, Date: {}", macAddress, date);
 
         AnalyticsDailyUsageDTO usage = analyticsService.getDailyUsage(macAddress, date);
@@ -205,7 +204,7 @@ public class AnalyticsController {
 
     // ==================== GET APIs ====================
 
-    @GetMapping("/sessions/{id}")
+    @GetMapping("/session-by-id/{id}")
     @Operation(summary = "Get session by ID")
     public Result<AnalyticsGameSessionDTO> getSessionById(
             @Parameter(description = "Session ID") @PathVariable Long id) {
@@ -339,5 +338,17 @@ public class AnalyticsController {
         List<AnalyticsUserProgressEntity> progressList = analyticsService.getAllUserProgress(macAddress);
 
         return new Result<List<AnalyticsUserProgressEntity>>().ok(progressList);
+    }
+
+    @GetMapping("/attempts/stats/{macAddress}")
+    @Operation(summary = "Get game attempt statistics with breakdown by question type")
+    public Result<Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO>> getGameAttemptStats(
+            @Parameter(description = "Device MAC Address") @PathVariable String macAddress) {
+        log.info("Getting game attempt statistics for MAC: {}", macAddress);
+
+        Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO> stats = analyticsService
+                .getGameAttemptStats(macAddress);
+
+        return new Result<Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO>>().ok(stats);
     }
 }

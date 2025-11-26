@@ -2596,7 +2596,7 @@ class Assistant(FilteredAgent):
                         await self.analytics_service.record_game_attempt(
                             game_type='word_ladder',
                             is_correct=False,  # Invalid move
-                            attempt_number=1,
+                            attempt_number=0,  # FIX: First try should be 0, not 1
                             response_time_ms=response_time_ms,
                             question_type='word_transformation',
                             difficulty_level='medium'
@@ -2669,7 +2669,7 @@ class Assistant(FilteredAgent):
                     await self.analytics_service.record_game_attempt(
                         game_type='word_ladder',
                         is_correct=True,  # Valid move
-                        attempt_number=1,
+                        attempt_number=0,  # FIX: First try should be 0, not 1
                         response_time_ms=response_time_ms,
                         question_type='word_transformation',
                         difficulty_level='medium'

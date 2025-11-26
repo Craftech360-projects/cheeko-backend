@@ -48,7 +48,8 @@ class StoryService:
     def get_story_url(self, filename: str, category: str = "Adventure") -> str:
         """Generate URL for story file"""
         audio_path = f"stories/{category}/{filename}"
-        encoded_path = urllib.parse.quote(audio_path)
+        # Ensure we don't encode the slashes in the path
+        encoded_path = urllib.parse.quote(audio_path, safe='/')
 
         if self.use_cdn and self.cloudfront_domain:
             return f"https://{self.cloudfront_domain}/{encoded_path}"

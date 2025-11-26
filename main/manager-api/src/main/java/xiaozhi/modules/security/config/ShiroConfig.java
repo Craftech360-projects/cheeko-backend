@@ -16,6 +16,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import jakarta.servlet.Filter;
+import xiaozhi.modules.security.dual.DualAuthFilter;
 import xiaozhi.modules.security.oauth2.Oauth2Filter;
 import xiaozhi.modules.security.oauth2.Oauth2Realm;
 import xiaozhi.modules.security.secret.ServerSecretFilter;
@@ -61,6 +62,8 @@ public class ShiroConfig {
         filters.put("oauth2", new Oauth2Filter());
         // 服务密钥过滤
         filters.put("server", new ServerSecretFilter(sysParamsService));
+        // 双重认证过滤（支持服务密钥和OAuth2）
+        filters.put("dual", new DualAuthFilter(sysParamsService));
         shiroFilter.setFilters(filters);
 
         // 添加Shiro的内置过滤器
@@ -92,18 +95,19 @@ public class ShiroConfig {
         filterMap.put("/agent/chat-history/report", "server");
         filterMap.put("/agent/saveMemory/**", "server");
         filterMap.put("/agent/prompt/**", "server");
-        filterMap.put("/analytics/**", "server");
-        filterMap.put("/agent/device/**/cycle-mode", "anon");  // Allow firmware direct access (legacy)
-        filterMap.put("/agent/device/**/cycle-character", "anon");  // Allow firmware direct access (cycle)
-        filterMap.put("/agent/device/**/set-character", "anon");  // Allow firmware direct access (set specific)
-        filterMap.put("/agent/device/**/current-character", "anon");  // Allow firmware direct access (get current)
-        filterMap.put("/device/**/cycle-mode", "anon");  // Allow firmware direct access (device mode cycle)
-        filterMap.put("/device/**/mode", "anon");  // Allow anonymous access to query device mode
+        // Analytics endpoints use dual auth (server secret OR OAuth2)
+        filterMap.put("/analytics/**", "dual");
+        filterMap.put("/agent/device/**/cycle-mode", "anon"); // Allow firmware direct access (legacy)
+        filterMap.put("/agent/device/**/cycle-character", "anon"); // Allow firmware direct access (cycle)
+        filterMap.put("/agent/device/**/set-character", "anon"); // Allow firmware direct access (set specific)
+        filterMap.put("/agent/device/**/current-character", "anon"); // Allow firmware direct access (get current)
+        filterMap.put("/device/**/cycle-mode", "anon"); // Allow firmware direct access (device mode cycle)
+        filterMap.put("/device/**/mode", "anon"); // Allow anonymous access to query device mode
         filterMap.put("/agent/device/*/agent-id", "server");
         filterMap.put("/agent/update-mode", "server");
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/content/items/**", "anon");
-        filterMap.put("/device/**/playlist/**", "anon");  // Allow anonymous access to playlist APIs
+        filterMap.put("/device/**/playlist/**", "anon"); // Allow anonymous access to playlist APIs
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);
 

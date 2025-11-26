@@ -7,6 +7,43 @@ import asyncio
 
 logger = logging.getLogger("analytics")
 
+# Mode type normalization map - ensures consistent snake_case values
+MODE_TYPE_MAP = {
+    'cheeko': 'conversation',
+    'math tutor': 'math_tutor',
+    'riddle solver': 'riddle_solver',
+    'word ladder': 'word_ladder',
+    'music': 'music',
+    'story': 'story',
+    'conversation': 'conversation',
+    'math_tutor': 'math_tutor',
+    'riddle_solver': 'riddle_solver',
+    'word_ladder': 'word_ladder'
+}
+
+def normalize_mode_type(mode_name: str) -> str:
+    """
+    Normalize mode type to consistent snake_case format
+    
+    Args:
+        mode_name: Input mode name (any format)
+        
+    Returns:
+        Normalized mode type in snake_case
+    """
+    if not mode_name:
+        return 'conversation'
+    
+    # Convert to lowercase and try direct mapping first
+    mode_lower = mode_name.lower()
+    if mode_lower in MODE_TYPE_MAP:
+        return MODE_TYPE_MAP[mode_lower]
+    
+    # Fall back to converting spaces to underscores
+    normalized = mode_lower.replace(' ', '_')
+    logger.warning(f"📊⚠️ Unknown mode type '{mode_name}', normalized to: {normalized}")
+    return normalized
+
 class AnalyticsService:
     """Service for capturing and sending analytics data to Manager API"""
 
@@ -43,7 +80,10 @@ class AnalyticsService:
             metadata: Additional session metadata
         """
         try:
-            self.current_mode = mode_type
+            # FIX: Normalize mode type to consistent snake_case format
+            normalized_mode = normalize_mode_type(mode_type)
+            
+            self.current_mode = normalized_mode
             self.session_start_time = datetime.now()
             self.session_started = True
 
@@ -51,18 +91,18 @@ class AnalyticsService:
                 "sessionId": self.session_id,
                 "macAddress": self.device_mac,
                 "agentId": self.agent_id,
-                "modeType": mode_type,
+                "modeType": normalized_mode,  # Use normalized value
                 "startedAt": self.session_start_time.isoformat(),
                 "metadata": json.dumps(metadata) if metadata else None
             }
 
             url = f"{self.manager_api_url}/analytics/session/start"
-            headers = {"secret": self.secret, "Content-Type": "application/json"}
+            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                     if response.status == 200:
-                        logger.info(f"📊✅ Session started - Mode: {mode_type}, Session: {self.session_id}")
+                        logger.info(f"📊✅ Session started - Mode: {normalized_mode}, Session: {self.session_id}")
                     else:
                         logger.warning(f"📊⚠️ Failed to start session - Status: {response.status}")
 
@@ -86,7 +126,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/session/end"
-            headers = {"secret": self.secret}
+            headers = {"Authorization": f"Bearer {self.secret}"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -143,7 +183,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/game-attempt"
-            headers = {"secret": self.secret, "Content-Type": "application/json"}
+            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -198,14 +238,15 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/media-event"
-            headers = {"secret": self.secret, "Content-Type": "application/json"}
+            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                     if response.status == 200:
-                        logger.debug(f"📊✅ Media playback recorded - Type: {media_type}, Title: {media_title}")
+                        logger.info(f"📊✅ Media playback recorded - Type: {media_type}, Title: {media_title}")
                     else:
-                        logger.warning(f"📊⚠️ Failed to record media playback - HTTP {response.status}")
+                        response_text = await response.text()
+                        logger.error(f"📊❌ Failed to record media playback - HTTP {response.status}, Response: {response_text}")
 
         except Exception as e:
             logger.error(f"📊❌ Error recording media playback: {e}")
@@ -248,7 +289,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/streak"
-            headers = {"secret": self.secret, "Content-Type": "application/json"}
+            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -269,7 +310,7 @@ class AnalyticsService:
         """
         try:
             url = f"{self.manager_api_url}/analytics/user/{self.device_mac}/overall"
-            headers = {"secret": self.secret}
+            headers = {"Authorization": f"Bearer {self.secret}"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -296,7 +337,7 @@ class AnalyticsService:
         """
         try:
             url = f"{self.manager_api_url}/analytics/user/{self.device_mac}/{game_type}"
-            headers = {"secret": self.secret}
+            headers = {"Authorization": f"Bearer {self.secret}"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:

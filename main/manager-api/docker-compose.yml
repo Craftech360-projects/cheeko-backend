@@ -1,4 +1,4 @@
-version: '3.8'
+# version omitted (Docker Compose V2)  # removed obsolete version key
 
 services:
   # MySQL Database
@@ -50,6 +50,7 @@ services:
   # Redis Commander (Optional - Web UI for Redis)
   redis-commander:
     image: rediscommander/redis-commander:latest
+    platform: linux/amd64
     container_name: manager-api-redis-commander
     restart: unless-stopped
     environment:
@@ -64,6 +65,7 @@ services:
   # phpMyAdmin (Optional - Web UI for MySQL)
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
+    platform: linux/amd64
     container_name: manager-api-phpmyadmin
     restart: unless-stopped
     environment:

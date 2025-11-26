@@ -116,7 +116,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     @Transactional
     public void recordGameAttempt(AnalyticsGameAttemptDTO attemptDTO) {
         log.debug("Recording game attempt for session: {}, Type: {}",
-                 attemptDTO.getSessionId(), attemptDTO.getGameType());
+                attemptDTO.getSessionId(), attemptDTO.getGameType());
 
         AnalyticsGameAttemptEntity entity = new AnalyticsGameAttemptEntity();
         BeanUtils.copyProperties(attemptDTO, entity);
@@ -126,13 +126,25 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         // Update session interaction count
         updateSessionInteractionCount(attemptDTO.getSessionId());
+
+        // FIX: Update user progress immediately after game attempt
+        // This ensures success rate and skill level are always current
+        // even if the session never explicitly ends
+        if (attemptDTO.getMacAddress() != null && attemptDTO.getGameType() != null) {
+            try {
+                updateUserProgress(attemptDTO.getMacAddress(), attemptDTO.getGameType());
+                log.debug("✅ Updated user progress for {} after game attempt", attemptDTO.getGameType());
+            } catch (Exception e) {
+                log.error("❌ Failed to update user progress after game attempt: {}", e.getMessage());
+            }
+        }
     }
 
     @Override
     @Transactional
     public void recordMediaPlayback(AnalyticsMediaPlaybackDTO playbackDTO) {
         log.debug("Recording media playback for session: {}, Type: {}, Title: {}",
-                 playbackDTO.getSessionId(), playbackDTO.getMediaType(), playbackDTO.getMediaTitle());
+                playbackDTO.getSessionId(), playbackDTO.getMediaType(), playbackDTO.getMediaTitle());
 
         AnalyticsMediaPlaybackEntity entity = new AnalyticsMediaPlaybackEntity();
         BeanUtils.copyProperties(playbackDTO, entity);
@@ -140,8 +152,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         // Calculate completion percentage if both durations are provided
         if (playbackDTO.getDurationPlayedSeconds() != null &&
-            playbackDTO.getTotalDurationSeconds() != null &&
-            playbackDTO.getTotalDurationSeconds() > 0) {
+                playbackDTO.getTotalDurationSeconds() != null &&
+                playbackDTO.getTotalDurationSeconds() > 0) {
             BigDecimal percentage = new BigDecimal(playbackDTO.getDurationPlayedSeconds())
                     .multiply(new BigDecimal(100))
                     .divide(new BigDecimal(playbackDTO.getTotalDurationSeconds()), 2, RoundingMode.HALF_UP);
@@ -158,8 +170,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     @Transactional
     public void recordStreak(AnalyticsStreakDTO streakDTO) {
         log.info("Recording streak for session: {}, Game: {}, Streak #{}, Questions: {}",
-                 streakDTO.getSessionId(), streakDTO.getGameType(),
-                 streakDTO.getStreakNumber(), streakDTO.getQuestionsInStreak());
+                streakDTO.getSessionId(), streakDTO.getGameType(),
+                streakDTO.getStreakNumber(), streakDTO.getQuestionsInStreak());
 
         AnalyticsStreakEntity entity = new AnalyticsStreakEntity();
         BeanUtils.copyProperties(streakDTO, entity);
@@ -167,8 +179,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         // Calculate duration if not provided
         if (entity.getDurationSeconds() == null &&
-            streakDTO.getStartedAt() != null &&
-            streakDTO.getEndedAt() != null) {
+                streakDTO.getStartedAt() != null &&
+                streakDTO.getEndedAt() != null) {
             long durationMs = streakDTO.getEndedAt().getTime() - streakDTO.getStartedAt().getTime();
             entity.setDurationSeconds((int) (durationMs / 1000));
         }
@@ -177,7 +189,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         // Update user progress with streak stats
         updateUserProgressWithStreak(streakDTO.getMacAddress(), streakDTO.getGameType(),
-                                     streakDTO.getQuestionsInStreak(), entity.getDurationSeconds());
+                streakDTO.getQuestionsInStreak(), entity.getDurationSeconds());
     }
 
     @Override
@@ -213,8 +225,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .filter(s -> s.getModeType() != null)
                 .collect(Collectors.groupingBy(
                         AnalyticsGameSessionEntity::getModeType,
-                        Collectors.counting()
-                ));
+                        Collectors.counting()));
         stats.put("modeDistribution", modeDistribution);
 
         // Find most used mode
@@ -238,7 +249,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Get all attempts for this game type
         QueryWrapper<AnalyticsGameAttemptEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", macAddress)
-               .eq("game_type", gameType);
+                .eq("game_type", gameType);
         List<AnalyticsGameAttemptEntity> attempts = gameAttemptDao.selectList(wrapper);
 
         stats.setTotalInteractions(attempts.size());
@@ -273,7 +284,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Get user progress for this game type
         QueryWrapper<AnalyticsUserProgressEntity> progressWrapper = new QueryWrapper<>();
         progressWrapper.eq("mac_address", macAddress)
-                      .eq("mode_type", gameType);
+                .eq("mode_type", gameType);
         AnalyticsUserProgressEntity progress = userProgressDao.selectOne(progressWrapper);
 
         if (progress != null) {
@@ -295,7 +306,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Get all playback events for this media type
         QueryWrapper<AnalyticsMediaPlaybackEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", macAddress)
-               .eq("media_type", mediaType);
+                .eq("media_type", mediaType);
         List<AnalyticsMediaPlaybackEntity> playbacks = mediaPlaybackDao.selectList(wrapper);
 
         stats.put("totalPlayed", playbacks.size());
@@ -313,8 +324,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
                 .filter(p -> p.getMediaTitle() != null)
                 .collect(Collectors.groupingBy(
                         AnalyticsMediaPlaybackEntity::getMediaTitle,
-                        Collectors.counting()
-                ));
+                        Collectors.counting()));
         stats.put("mediaFrequency", mediaFrequency);
 
         List<Map.Entry<String, Long>> topMedia = mediaFrequency.entrySet().stream()
@@ -326,7 +336,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Calculate completion rate
         long completedCount = playbacks.stream()
                 .filter(p -> p.getCompletionPercentage() != null &&
-                           p.getCompletionPercentage().compareTo(new BigDecimal(80)) >= 0)
+                        p.getCompletionPercentage().compareTo(new BigDecimal(80)) >= 0)
                 .count();
         if (playbacks.size() > 0) {
             BigDecimal completionRate = new BigDecimal(completedCount)
@@ -350,8 +360,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
         QueryWrapper<AnalyticsGameSessionEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", macAddress)
-               .orderByDesc("started_at")
-               .last("LIMIT " + (limit != null ? limit : 30));
+                .orderByDesc("started_at")
+                .last("LIMIT " + (limit != null ? limit : 30));
 
         List<AnalyticsGameSessionEntity> entities = gameSessionDao.selectList(wrapper);
 
@@ -368,7 +378,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Get or create progress entity
         QueryWrapper<AnalyticsUserProgressEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", macAddress)
-               .eq("mode_type", modeType);
+                .eq("mode_type", modeType);
         AnalyticsUserProgressEntity progress = userProgressDao.selectOne(wrapper);
 
         if (progress == null) {
@@ -385,7 +395,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Aggregate session data
         QueryWrapper<AnalyticsGameSessionEntity> sessionWrapper = new QueryWrapper<>();
         sessionWrapper.eq("mac_address", macAddress)
-                     .eq("mode_type", modeType);
+                .eq("mode_type", modeType);
         List<AnalyticsGameSessionEntity> sessions = gameSessionDao.selectList(sessionWrapper);
 
         progress.setTotalSessions(sessions.size());
@@ -403,19 +413,21 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         progress.setTotalInteractions(totalInteractions);
 
         // For game modes, calculate success rate from attempts
-        if (modeType.contains("math") || modeType.contains("riddle") || modeType.contains("word")) {
+        // FIX: Use proper snake_case mode type values
+        if ("math_tutor".equals(modeType) || "riddle_solver".equals(modeType) || "word_ladder".equals(modeType)) {
             QueryWrapper<AnalyticsGameAttemptEntity> attemptWrapper = new QueryWrapper<>();
             attemptWrapper.eq("mac_address", macAddress)
-                         .eq("game_type", modeType);
-            List<AnalyticsGameAttemptEntity> attempts = gameAttemptDao.selectList(attemptWrapper);
+                    .eq("game_type", modeType)
+                    .eq("attempt_number", 0); // FIX: Only count first attempts for success rate
+            List<AnalyticsGameAttemptEntity> firstAttempts = gameAttemptDao.selectList(attemptWrapper);
 
-            if (!attempts.isEmpty()) {
-                long correctCount = attempts.stream()
+            if (!firstAttempts.isEmpty()) {
+                long correctCount = firstAttempts.stream()
                         .filter(a -> a.getIsCorrect() != null && a.getIsCorrect())
                         .count();
                 BigDecimal successRate = new BigDecimal(correctCount)
                         .multiply(new BigDecimal(100))
-                        .divide(new BigDecimal(attempts.size()), 2, RoundingMode.HALF_UP);
+                        .divide(new BigDecimal(firstAttempts.size()), 2, RoundingMode.HALF_UP);
                 progress.setSuccessRatePercentage(successRate);
 
                 // Determine skill level based on success rate
@@ -459,10 +471,11 @@ public class AnalyticsServiceImpl implements AnalyticsService {
     /**
      * Update user progress with streak data
      */
-    private void updateUserProgressWithStreak(String macAddress, String gameType, int streakLength, int durationSeconds) {
+    private void updateUserProgressWithStreak(String macAddress, String gameType, int streakLength,
+            int durationSeconds) {
         QueryWrapper<AnalyticsUserProgressEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", macAddress)
-               .eq("mode_type", gameType);
+                .eq("mode_type", gameType);
 
         AnalyticsUserProgressEntity progress = userProgressDao.selectOne(wrapper);
 
@@ -491,8 +504,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
             userProgressDao.updateById(progress);
 
             log.debug("Updated streak stats for MAC: {}, Game: {}, Longest: {}, Total: {}, Avg Time: {}s",
-                     macAddress, gameType, progress.getLongestStreak(),
-                     progress.getTotalStreaksCompleted(), progress.getAverageStreakTimeSeconds());
+                    macAddress, gameType, progress.getLongestStreak(),
+                    progress.getTotalStreaksCompleted(), progress.getAverageStreakTimeSeconds());
         }
     }
 
@@ -590,8 +603,8 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public PageData<AnalyticsGameSessionDTO> getSessionsList(String macAddress, String modeType,
-                                                              LocalDate startDate, LocalDate endDate,
-                                                              Integer page, Integer limit) {
+            LocalDate startDate, LocalDate endDate,
+            Integer page, Integer limit) {
         log.info("Getting sessions list - MAC: {}, Mode: {}, StartDate: {}, EndDate: {}, Page: {}, Limit: {}",
                 macAddress, modeType, startDate, endDate, page, limit);
 
@@ -620,8 +633,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Convert to DTO
         return new PageData<>(
                 ConvertUtils.sourceToTarget(pageData.getRecords(), AnalyticsGameSessionDTO.class),
-                pageData.getTotal()
-        );
+                pageData.getTotal());
     }
 
     @Override
@@ -640,7 +652,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public PageData<AnalyticsGameAttemptDTO> getAttemptsList(String macAddress, String sessionId,
-                                                              String gameType, Integer page, Integer limit) {
+            String gameType, Integer page, Integer limit) {
         log.info("Getting attempts list - MAC: {}, Session: {}, GameType: {}, Page: {}, Limit: {}",
                 macAddress, sessionId, gameType, page, limit);
 
@@ -666,8 +678,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Convert to DTO
         return new PageData<>(
                 ConvertUtils.sourceToTarget(pageData.getRecords(), AnalyticsGameAttemptDTO.class),
-                pageData.getTotal()
-        );
+                pageData.getTotal());
     }
 
     @Override
@@ -686,7 +697,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public PageData<AnalyticsMediaPlaybackDTO> getMediaPlaybackList(String macAddress, String sessionId,
-                                                                     String mediaType, Integer page, Integer limit) {
+            String mediaType, Integer page, Integer limit) {
         log.info("Getting media playback list - MAC: {}, Session: {}, MediaType: {}, Page: {}, Limit: {}",
                 macAddress, sessionId, mediaType, page, limit);
 
@@ -712,8 +723,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Convert to DTO
         return new PageData<>(
                 ConvertUtils.sourceToTarget(pageData.getRecords(), AnalyticsMediaPlaybackDTO.class),
-                pageData.getTotal()
-        );
+                pageData.getTotal());
     }
 
     @Override
@@ -732,7 +742,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public PageData<AnalyticsStreakDTO> getStreaksList(String macAddress, String sessionId,
-                                                        String gameType, Integer page, Integer limit) {
+            String gameType, Integer page, Integer limit) {
         log.info("Getting streaks list - MAC: {}, Session: {}, GameType: {}, Page: {}, Limit: {}",
                 macAddress, sessionId, gameType, page, limit);
 
@@ -758,8 +768,7 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         // Convert to DTO
         return new PageData<>(
                 ConvertUtils.sourceToTarget(pageData.getRecords(), AnalyticsStreakDTO.class),
-                pageData.getTotal()
-        );
+                pageData.getTotal());
     }
 
     @Override
@@ -782,5 +791,101 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         wrapper.orderByDesc("last_played_at");
 
         return userProgressDao.selectList(wrapper);
+    }
+
+    @Override
+    public Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO> getGameAttemptStats(String macAddress) {
+        log.info("Getting game attempt statistics for MAC: {}", macAddress);
+
+        Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO> stats = new HashMap<>();
+        String[] gameTypes = { "math_tutor", "riddle_solver", "word_ladder" };
+
+        for (String gameType : gameTypes) {
+            // Get all attempts for this game type
+            QueryWrapper<AnalyticsGameAttemptEntity> wrapper = new QueryWrapper<>();
+            wrapper.eq("mac_address", macAddress)
+                    .eq("game_type", gameType);
+            List<AnalyticsGameAttemptEntity> allAttempts = gameAttemptDao.selectList(wrapper);
+
+            if (allAttempts.isEmpty()) {
+                continue; // Skip games with no attempts
+            }
+
+            // Filter first attempts
+            List<AnalyticsGameAttemptEntity> firstAttempts = allAttempts.stream()
+                    .filter(a -> a.getAttemptNumber() != null && a.getAttemptNumber() == 0)
+                    .collect(Collectors.toList());
+
+            // Calculate correct/incorrect counts
+            int correctFirstTry = (int) firstAttempts.stream()
+                    .filter(a -> a.getIsCorrect() != null && a.getIsCorrect())
+                    .count();
+            int incorrectFirstTry = firstAttempts.size() - correctFirstTry;
+
+            // Calculate second try correct
+            int correctSecondTry = (int) allAttempts.stream()
+                    .filter(a -> a.getAttemptNumber() != null && a.getAttemptNumber() == 1)
+                    .filter(a -> a.getIsCorrect() != null && a.getIsCorrect())
+                    .count();
+
+            // Calculate success rate
+            BigDecimal successRate = BigDecimal.ZERO;
+            if (!firstAttempts.isEmpty()) {
+                successRate = new BigDecimal(correctFirstTry)
+                        .multiply(new BigDecimal(100))
+                        .divide(new BigDecimal(firstAttempts.size()), 2, RoundingMode.HALF_UP);
+            }
+
+            // Build breakdown by question type
+            Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO.QuestionTypeStatsDTO> breakdown = new HashMap<>();
+
+            // Group attempts by question type
+            Map<String, List<AnalyticsGameAttemptEntity>> byType = firstAttempts.stream()
+                    .filter(a -> a.getQuestionType() != null)
+                    .collect(Collectors.groupingBy(AnalyticsGameAttemptEntity::getQuestionType));
+
+            for (Map.Entry<String, List<AnalyticsGameAttemptEntity>> entry : byType.entrySet()) {
+                String questionType = entry.getKey();
+                List<AnalyticsGameAttemptEntity> typeAttempts = entry.getValue();
+
+                int correct = (int) typeAttempts.stream()
+                        .filter(a -> a.getIsCorrect() != null && a.getIsCorrect())
+                        .count();
+                int incorrect = typeAttempts.size() - correct;
+
+                BigDecimal accuracy = BigDecimal.ZERO;
+                if (!typeAttempts.isEmpty()) {
+                    accuracy = new BigDecimal(correct)
+                            .multiply(new BigDecimal(100))
+                            .divide(new BigDecimal(typeAttempts.size()), 2, RoundingMode.HALF_UP);
+                }
+
+                xiaozhi.modules.agent.dto.GameAttemptStatsDTO.QuestionTypeStatsDTO typeStats = xiaozhi.modules.agent.dto.GameAttemptStatsDTO.QuestionTypeStatsDTO
+                        .builder()
+                        .questionType(questionType)
+                        .correct(correct)
+                        .incorrect(incorrect)
+                        .accuracy(accuracy)
+                        .build();
+
+                breakdown.put(questionType, typeStats);
+            }
+
+            // Build game stats DTO
+            xiaozhi.modules.agent.dto.GameAttemptStatsDTO gameStats = xiaozhi.modules.agent.dto.GameAttemptStatsDTO
+                    .builder()
+                    .gameType(gameType)
+                    .totalAttempts(firstAttempts.size())
+                    .correctFirstTry(correctFirstTry)
+                    .incorrectFirstTry(incorrectFirstTry)
+                    .correctSecondTry(correctSecondTry)
+                    .successRate(successRate)
+                    .breakdownByType(breakdown)
+                    .build();
+
+            stats.put(gameType, gameStats);
+        }
+
+        return stats;
     }
 }
