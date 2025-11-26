@@ -320,4 +320,34 @@ export default {
                 });
             }).send();
     },
+    // Get today's device interaction count
+    getTodayDeviceCount(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/today/device-count`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getTodayDeviceCount(callback);
+                });
+            }).send();
+    },
+    // Get this month's device interaction count
+    getMonthDeviceCount(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/month/device-count`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getMonthDeviceCount(callback);
+                });
+            }).send();
+    },
 }

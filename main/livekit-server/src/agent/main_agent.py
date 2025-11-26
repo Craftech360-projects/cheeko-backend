@@ -410,6 +410,7 @@ class WordLadderGameState:
     def validate_letter_match(self, user_word: str) -> tuple:
         """
         Check if user's word starts with last letter of current word
+        and hasn't been used before.
 
         Args:
             user_word: The word provided by user
@@ -419,6 +420,10 @@ class WordLadderGameState:
         """
         if not user_word or len(user_word) < 2:
             return False, "Word too short or empty"
+
+        # Check for duplicate words (case-insensitive)
+        if user_word.lower() in [w.lower() for w in self.word_history]:
+            return False, f"'{user_word}' was already used! Try a different word."
 
         last_letter = self.current_word[-1].lower()
         first_letter = user_word[0].lower()
@@ -812,46 +817,14 @@ class Assistant(FilteredAgent):
                         result = await response.json()
                         logger.info(f"✅ Agent mode updated in database to '{normalized_mode}' for agent: {agent_id}")
 
-                        # 5. Initialize PromptService and use template system
-                        prompt_service = PromptService()
-                        await prompt_service.initialize_template_system()
-
-                        # Check if template system is enabled
-                        if prompt_service.is_template_system_enabled():
-                            logger.info("🎨 Using template-based prompt system for mode switch")
-
-                            # 6. Get enhanced prompt using template system
-                            try:
-                                # Clear cache to force fresh fetch
-                                prompt_service.clear_enhanced_cache(self.device_mac)
-
-                                # Get new enhanced prompt with updated template_id
-                                new_prompt = await prompt_service.get_enhanced_prompt(
-                                    room_name=self.room_name,
-                                    device_mac=self.device_mac
-                                )
-
-                                logger.info(f"🎨✅ Retrieved enhanced prompt for mode '{normalized_mode}' (length: {len(new_prompt)} chars)")
-
-                            except Exception as e:
-                                logger.error(f"Failed to get enhanced prompt: {e}")
-                                # Fallback to legacy method
-                                if result.get('code') == 0 and result.get('data'):
-                                    new_prompt = result.get('data')
-                                    logger.info("📄 Fallback to prompt from API response")
-                                else:
-                                    logger.error("No prompt available, mode switch incomplete")
-                                    return f"Mode updated to '{normalized_mode}' in database. Please reconnect to apply changes."
-
+                        # 5. Get prompt directly from API response
+                        logger.info("📄 Fetching prompt from API for mode switch")
+                        if result.get('code') == 0 and result.get('data'):
+                            new_prompt = result.get('data')
+                            logger.info(f"📄 Retrieved prompt from API (length: {len(new_prompt)} chars)")
                         else:
-                            # Legacy system - get prompt from API response
-                            logger.info("📄 Using legacy prompt system for mode switch")
-                            if result.get('code') == 0 and result.get('data'):
-                                new_prompt = result.get('data')
-                                logger.info(f"📄 Retrieved prompt from API (length: {len(new_prompt)} chars)")
-                            else:
-                                logger.warning(f"⚠️ No prompt data in response")
-                                return f"Mode updated to '{normalized_mode}' in database. Please reconnect to apply changes."
+                            logger.warning(f"⚠️ No prompt data in response")
+                            return f"Mode updated to '{normalized_mode}' in database. Please reconnect to apply changes."
 
                         # 7. Inject memory into new prompt (if available)
                         try:
@@ -2554,25 +2527,50 @@ class Assistant(FilteredAgent):
     @function_tool
     async def validate_word_ladder_move(self, context: RunContext, user_word: str) -> str:
         """
-        Validate user's word in the Word Ladder game.
+        Validate the CHILD's word in the Word Ladder game.
 
-        Uses WordLadderGameState class for clean state management.
+        CRITICAL RULES - YOU MUST FOLLOW THESE:
+        1. ONLY call this tool when the CHILD/USER says a word
+        2. NEVER suggest or provide words yourself - wait for the child to say one
+        3. NEVER call this tool with words YOU generated or thought of
+        4. If the child hasn't said a word yet, DO NOT call this tool - ask them to say a word
+        5. Words already used in the game CANNOT be repeated
+        6. You are the GAME HOST, not a player - do not play for the child
 
-        Flow:
-        1. Check letter matching (WordLadderGameState)
-        2. Check victory condition
-        3. Update state and return JSON result
+        The game works like this:
+        - Child says a word that starts with the last letter of the current word
+        - You validate it using this tool
+        - If valid, the child's word becomes the new current word
+        - Goal: reach the target word
 
         Args:
-            user_word: The word the user just said
+            user_word: The EXACT word the CHILD just said (not your suggestion, not your idea)
 
         Returns:
-            JSON string with validation result
+            JSON string with validation result including word_history (already used words)
         """
         try:
             import json
             import time
             start_time = time.time()
+
+            # Rate limiting: Prevent multiple tool calls within same turn (2 second cooldown)
+            current_time = time.time()
+            if hasattr(self, '_last_word_ladder_call_time'):
+                time_since_last_call = current_time - self._last_word_ladder_call_time
+                if time_since_last_call < 2.0:  # 2 second cooldown
+                    logger.warning(f"⚠️ BLOCKED: Multiple tool calls detected! Only {time_since_last_call:.2f}s since last call. Ignoring '{user_word}'")
+                    state = self.word_ladder_state.get_state()
+                    # Return a "silent success" to prevent LLM from apologizing
+                    return json.dumps({
+                        "success": True,
+                        "game_status": "waiting_for_child",
+                        **state,
+                        "message": "Waiting for child to speak. Do NOT say anything - just wait silently for their word.",
+                        "silent": True,
+                        "instruction": "Do not generate any response. Stay silent and wait."
+                    })
+            self._last_word_ladder_call_time = current_time
 
             # Normalize input
             user_word = user_word.lower().strip()
@@ -2585,7 +2583,14 @@ class Assistant(FilteredAgent):
 
             if not is_letter_match:
                 max_reached = self.word_ladder_state.increment_failure()
-                logger.warning(f"❌ Letter mismatch: {error_msg}")
+
+                # Determine error type based on error message
+                if "already used" in error_msg:
+                    error_type = "duplicate_word"
+                    logger.warning(f"❌ Duplicate word: {error_msg}")
+                else:
+                    error_type = "wrong_letter"
+                    logger.warning(f"❌ Letter mismatch: {error_msg}")
 
                 # Analytics tracking for invalid move
                 if self.analytics_service:
@@ -2601,7 +2606,7 @@ class Assistant(FilteredAgent):
                             question_type='word_transformation',
                             difficulty_level='medium'
                         )
-                        logger.debug(f"📊 Word ladder move recorded: invalid move, time={response_time_ms}ms")
+                        logger.debug(f"📊 Word ladder move recorded: invalid move ({error_type}), time={response_time_ms}ms")
                     except Exception as e:
                         logger.error(f"📊❌ Failed to record word ladder analytics: {e}")
 
@@ -2616,7 +2621,7 @@ class Assistant(FilteredAgent):
                     "game_status": "in_progress",
                     **state,
                     "message": error_msg,
-                    "error_type": "wrong_letter"
+                    "error_type": error_type
                 }
                 return json.dumps(result)
 

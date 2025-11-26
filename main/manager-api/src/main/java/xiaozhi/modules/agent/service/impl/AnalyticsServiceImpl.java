@@ -23,6 +23,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
 import xiaozhi.common.page.PageData;
 import xiaozhi.common.utils.ConvertUtils;
+import xiaozhi.modules.agent.dao.AiAgentChatHistoryDao;
 import xiaozhi.modules.agent.dao.AnalyticsGameAttemptDao;
 import xiaozhi.modules.agent.dao.AnalyticsGameSessionDao;
 import xiaozhi.modules.agent.dao.AnalyticsMediaPlaybackDao;
@@ -66,6 +67,9 @@ public class AnalyticsServiceImpl implements AnalyticsService {
 
     @Autowired
     private AnalyticsStreakDao streakDao;
+
+    @Autowired
+    private AiAgentChatHistoryDao chatHistoryDao;
 
     @Override
     @Transactional
@@ -887,5 +891,19 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         }
 
         return stats;
+    }
+
+    @Override
+    public Integer getTodayDeviceCount() {
+        log.info("Getting today's device interaction count");
+        Integer count = chatHistoryDao.getTodayDeviceCount();
+        return count != null ? count : 0;
+    }
+
+    @Override
+    public Integer getMonthDeviceCount() {
+        log.info("Getting this month's device interaction count");
+        Integer count = chatHistoryDao.getMonthDeviceCount();
+        return count != null ? count : 0;
     }
 }

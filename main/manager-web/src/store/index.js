@@ -13,7 +13,7 @@ export default new Vuex.Store({
     isSuperAdmin: false, // 添加superAdmin状态
     pubConfig: { // 添加公共配置存储
       version: '0.7.5',
-      name: 'cheeko-server',
+      name: 'cheeko-esp32-server',
       year: '©2025',
       beianIcpNum: 'null',
       beianGaNum: 'null',
@@ -54,7 +54,7 @@ export default new Vuex.Store({
     setPubConfig(state, config) {
       state.pubConfig = {
         version: config.version || '0.7.5',
-        name: config.name || 'cheeko-server',
+        name: 'cheeko-esp32-server', // Always use cheeko
         year: config.year || '©2025',
         beianIcpNum: config.beianIcpNum || 'null',
         beianGaNum: config.beianGaNum || 'null',

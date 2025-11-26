@@ -4755,7 +4755,26 @@ class MQTTGateway {
                 return; // Don't dispatch agent for music/story rooms
               }
 
-              // Check if agent already exists or is being deployed
+              // FIRST: Check LiveKit API for actual agent presence (most reliable)
+              const agentCheck = await this.checkAgentInRoom(roomName);
+
+              if (agentCheck.exists) {
+                console.log(
+                  `✅ [START-GREETING] Agent already in room (verified via LiveKit API): ${agentCheck.identity}`
+                );
+                // Sync local flags with actual state
+                bridge.agentJoined = true;
+                bridge.agentDeployed = true;
+              } else if (bridge.agentJoined) {
+                // Local flag says joined but API says not - trust API, reset flags
+                console.log(
+                  `⚠️ [START-GREETING] Local flag says agent joined, but not found in room - resetting flags`
+                );
+                bridge.agentJoined = false;
+                bridge.agentDeployed = false;
+              }
+
+              // Now check flags and dispatch if needed
               if (bridge.agentJoined) {
                 console.log(
                   `✅ [START-GREETING] Agent already joined, skipping dispatch`
@@ -4981,6 +5000,47 @@ class MQTTGateway {
     } catch (error) {
       console.error("❌ [MQTT IN] Error processing MQTT message:", error);
       console.log(`📨 [MQTT IN] Raw message:`, message.toString());
+    }
+  }
+
+  /**
+   * Check if an agent is already present in a LiveKit room
+   * Uses LiveKit Server API to get actual participants (more reliable than local flags)
+   * @param {string} roomName - The LiveKit room name to check
+   * @returns {Promise<{exists: boolean, identity: string|null}>} - Whether agent exists and its identity
+   */
+  async checkAgentInRoom(roomName) {
+    try {
+      if (!this.roomService) {
+        console.warn(`⚠️ [AGENT-CHECK] RoomService not available, cannot check participants`);
+        return { exists: false, identity: null };
+      }
+
+      console.log(`🔍 [AGENT-CHECK] Checking for existing agent in room: ${roomName}`);
+
+      const participants = await this.roomService.listParticipants(roomName);
+
+      console.log(`👥 [AGENT-CHECK] Found ${participants.length} participants in room`);
+
+      for (const participant of participants) {
+        console.log(`   - Participant: ${participant.identity} (state: ${participant.state})`);
+
+        // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-agent')
+        if (participant.identity &&
+            (participant.identity.toLowerCase().includes('agent') ||
+             participant.identity === 'cheeko-agent')) {
+          console.log(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
+          return { exists: true, identity: participant.identity };
+        }
+      }
+
+      console.log(`ℹ️ [AGENT-CHECK] No agent found in room`);
+      return { exists: false, identity: null };
+
+    } catch (error) {
+      console.error(`❌ [AGENT-CHECK] Error checking room participants:`, error.message);
+      // On error, return false to allow dispatch attempt (fail-safe)
+      return { exists: false, identity: null };
     }
   }
 

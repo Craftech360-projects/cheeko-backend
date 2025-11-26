@@ -1,6 +1,7 @@
 package xiaozhi.modules.agent.controller;
 
 import java.time.LocalDate;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -350,5 +351,37 @@ public class AnalyticsController {
                 .getGameAttemptStats(macAddress);
 
         return new Result<Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO>>().ok(stats);
+    }
+
+    @GetMapping("/today/device-count")
+    @Operation(summary = "Get count of unique devices that interacted today")
+    public Result<Map<String, Object>> getTodayDeviceCount() {
+        log.info("Getting today's device interaction count");
+
+        Integer count = analyticsService.getTodayDeviceCount();
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("count", count);
+        result.put("date", LocalDate.now().toString());
+
+        return new Result<Map<String, Object>>().ok(result);
+    }
+
+    @GetMapping("/month/device-count")
+    @Operation(summary = "Get count of unique devices that interacted this month")
+    public Result<Map<String, Object>> getMonthDeviceCount() {
+        log.info("Getting this month's device interaction count");
+
+        Integer count = analyticsService.getMonthDeviceCount();
+
+        LocalDate now = LocalDate.now();
+        Map<String, Object> result = new HashMap<>();
+        result.put("count", count);
+        result.put("month", now.getMonth().toString());
+        result.put("year", now.getYear());
+        result.put("startDate", now.withDayOfMonth(1).toString());
+        result.put("endDate", now.withDayOfMonth(now.lengthOfMonth()).toString());
+
+        return new Result<Map<String, Object>>().ok(result);
     }
 }

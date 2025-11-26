@@ -15,6 +15,21 @@ import xiaozhi.modules.agent.entity.AgentChatHistoryEntity;
  */
 @Mapper
 public interface AiAgentChatHistoryDao extends BaseMapper<AgentChatHistoryEntity> {
+
+    /**
+     * Get count of unique devices that interacted today
+     *
+     * @return Count of unique devices
+     */
+    Integer getTodayDeviceCount();
+
+    /**
+     * Get count of unique devices that interacted this month
+     *
+     * @return Count of unique devices
+     */
+    Integer getMonthDeviceCount();
+
     /**
      * 根据智能体ID删除音频
      *

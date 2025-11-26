@@ -96,6 +96,7 @@ public class ShiroConfig {
         filterMap.put("/agent/saveMemory/**", "server");
         filterMap.put("/agent/prompt/**", "server");
         // Analytics endpoints use dual auth (server secret OR OAuth2)
+        // This allows both backend services and frontend users to access
         filterMap.put("/analytics/**", "dual");
         filterMap.put("/agent/device/**/cycle-mode", "anon"); // Allow firmware direct access (legacy)
         filterMap.put("/agent/device/**/cycle-character", "anon"); // Allow firmware direct access (cycle)

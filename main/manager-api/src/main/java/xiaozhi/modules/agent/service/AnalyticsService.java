@@ -233,4 +233,18 @@ public interface AnalyticsService {
      * @return Map of game type to attempt statistics
      */
     Map<String, xiaozhi.modules.agent.dto.GameAttemptStatsDTO> getGameAttemptStats(String macAddress);
+
+    /**
+     * Get count of unique devices that interacted today
+     *
+     * @return Count of unique devices
+     */
+    Integer getTodayDeviceCount();
+
+    /**
+     * Get count of unique devices that interacted this month
+     *
+     * @return Count of unique devices
+     */
+    Integer getMonthDeviceCount();
 }
