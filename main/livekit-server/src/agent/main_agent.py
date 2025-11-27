@@ -698,8 +698,8 @@ class Assistant(FilteredAgent):
 
 
 
-    def set_services(self, music_service, story_service, audio_player, unified_audio_player=None, device_control_service=None, mcp_executor=None, google_search_service=None, question_generator_service=None, riddle_generator_service=None):
-        """Set the music, story, device control services, MCP executor, Google Search service, Question Generator service, and Riddle Generator service"""
+    def set_services(self, music_service, story_service, audio_player, unified_audio_player=None, device_control_service=None, mcp_executor=None, google_search_service=None, question_generator_service=None, riddle_generator_service=None, analytics_service=None):
+        """Set the music, story, device control services, MCP executor, Google Search service, Question Generator service, Riddle Generator service, and Analytics service"""
         self.music_service = music_service
         self.story_service = story_service
         self.audio_player = audio_player
@@ -709,6 +709,7 @@ class Assistant(FilteredAgent):
         self.google_search_service = google_search_service
         self.question_generator_service = question_generator_service
         self.riddle_generator_service = riddle_generator_service
+        self.analytics_service = analytics_service
 
     def set_room_info(self, room_name: str = None, device_mac: str = None):
         """Set room name and device MAC address"""
