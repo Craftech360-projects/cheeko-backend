@@ -408,6 +408,8 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .welcome {
     min-width: 900px;
     min-height: 506px;
@@ -416,7 +418,7 @@ export default {
     position: relative;
     flex-direction: column;
     background-size: cover;
-    background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd) center;
+    background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
     -webkit-background-size: cover;
     -o-background-size: cover;
     overflow: hidden;
@@ -803,7 +805,7 @@ export default {
 }
 
 :deep(.dict-type-table .el-table__row.current-row) {
-    background-color: #5778ff !important;
+    background-color: $primary !important;
     color: white;
 }
 
@@ -816,7 +818,7 @@ export default {
 }
 
 :deep(.dict-type-table .el-table__row.current-row:hover) {
-    background-color: #5778ff !important;
+    background-color: $primary !important;
 }
 
 :deep(.dict-type-table .el-table__row td) {

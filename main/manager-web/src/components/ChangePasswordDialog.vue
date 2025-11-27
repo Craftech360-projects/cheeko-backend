@@ -4,7 +4,7 @@
       <div
         style="margin: 0 10px 10px;display: flex;align-items: center;gap: 10px;font-weight: 700;font-size: 20px;text-align: left;color: #3d4566;">
         <div
-          style="width: 40px;height: 40px;border-radius: 50%;background: #5778ff;display: flex;align-items: center;justify-content: center;">
+          style="width: 40px;height: 40px;border-radius: 50%;background: var(--primary);display: flex;align-items: center;justify-content: center;">
           <img loading="lazy" src="@/assets/login/shield.png" alt=""
             style="width: 19px;height: 23px; filter: brightness(0) invert(1);" />
         </div>
@@ -38,7 +38,7 @@
         <div class="dialog-btn" @click="confirm">
           Confirm
         </div>
-        <div class="dialog-btn" style="background: #e6ebff;border: 1px solid #adbdff;color: #5778ff;" @click="cancel">
+        <div class="dialog-btn cancel-btn" @click="cancel">
           Cancel
         </div>
       </div>
@@ -122,7 +122,9 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .input-46 {
   background: #f6f8fb;
   border-radius: 15px;
@@ -132,13 +134,19 @@ export default {
   cursor: pointer;
   flex: 1;
   border-radius: 23px;
-  background: #5778ff;
+  background: $primary;
   height: 40px;
   font-weight: 500;
   font-size: 12px;
   color: #fff;
   line-height: 40px;
   text-align: center;
+}
+
+.dialog-btn.cancel-btn {
+  background: rgba($primary, 0.15);
+  border: 1px solid rgba($primary, 0.4);
+  color: $primary;
 }
 
 ::v-deep .el-dialog {

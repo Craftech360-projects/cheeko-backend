@@ -24,29 +24,10 @@
                         </div>
                         <div class="device-stats">
                             <el-row :gutter="20">
-                                <el-col :span="6">
+                                <el-col :span="24">
                                     <div class="stat-item">
                                         <div class="stat-value">{{ connectedDevices.total || 0 }}</div>
                                         <div class="stat-label">Total Devices</div>
-                                    </div>
-                                </el-col>
-                                <el-col :span="6">
-                                    <div class="stat-item">
-                                        <div class="stat-value">{{ connectedDevices.activeToday || 0 }}</div>
-                                        <div class="stat-label">Active Today</div>
-                                    </div>
-                                </el-col>
-                                <el-col :span="12">
-                                    <div class="stat-item">
-                                        <div class="stat-label">Firmware Versions in Use:</div>
-                                        <div class="version-list">
-                                            <el-tag v-for="(count, version) in connectedDevices.versionDistribution" 
-                                                    :key="version" 
-                                                    size="small" 
-                                                    style="margin: 2px;">
-                                                {{ version }} ({{ count }} devices)
-                                            </el-tag>
-                                        </div>
                                     </div>
                                 </el-col>
                             </el-row>
@@ -567,7 +548,7 @@ export default {
     position: relative;
     flex-direction: column;
     background-size: cover;
-    background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd) center;
+    background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
     -webkit-background-size: cover;
     -o-background-size: cover;
     overflow: hidden;

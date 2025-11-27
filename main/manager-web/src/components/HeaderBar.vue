@@ -223,8 +223,10 @@ export default {
 </script>
 
 <style lang="scss" scoped>
+@import '@/styles/theme.scss';
+
 .header {
-  background: #f6fcfe66;
+  background: rgba(255, 247, 240, 0.4);
   border: 1px solid #fff;
   height: 63px !important;
   min-width: 900px;
@@ -276,13 +278,13 @@ export default {
 .equipment-management {
   height: 30px;
   border-radius: 15px;
-  background: #deeafe;
+  background: rgba($primary, 0.15);
   display: flex;
   justify-content: center;
   font-size: 14px;
   font-weight: 500;
   gap: 7px;
-  color: #3d4566;
+  color: $text-dark;
   margin-left: 1px;
   align-items: center;
   transition: all 0.3s ease;
@@ -294,7 +296,7 @@ export default {
 }
 
 .equipment-management.active-tab {
-  background: #5778ff !important;
+  background: $primary !important;
   color: #fff !important;
 }
 
@@ -393,5 +395,11 @@ export default {
   font-size: 14px;
   color: #606266;
   white-space: nowrap;
+}
+
+.el-dropdown-menu__item:hover,
+.el-dropdown-menu__item:focus {
+  background-color: rgba($primary, 0.1) !important;
+  color: $primary !important;
 }
 </style>

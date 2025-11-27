@@ -91,7 +91,7 @@
               </div>
 
               <!-- Bottom link -->
-              <div style="font-weight: 400;font-size: 14px;text-align: left;color: #5778ff;margin-top: 20px;">
+              <div style="font-weight: 400;font-size: 14px;text-align: left;color: var(--primary);margin-top: 20px;">
                 <div style="cursor: pointer;" @click="goToLogin">Already have an account? Login now</div>
               </div>
             </form>
@@ -103,9 +103,9 @@
           <!-- Agreement declaration -->
           <div style="font-size: 14px;color: #979db1;">
             By registering, you agree to the
-            <div style="display: inline-block;color: #5778FF;cursor: pointer;">Terms of Service</div>
+            <div style="display: inline-block;color: var(--primary);cursor: pointer;">Terms of Service</div>
             and
-            <div style="display: inline-block;color: #5778FF;cursor: pointer;">Privacy Policy</div>
+            <div style="display: inline-block;color: var(--primary);cursor: pointer;">Privacy Policy</div>
           </div>
         </div>
       </el-main>
@@ -305,9 +305,13 @@ export default {
   line-height: 40px;
   border-radius: 4px;
   font-size: 14px;
-  background: rgb(87, 120, 255);
+  background: $primary;
   border: none;
   padding: 0px;
+
+  &:hover {
+    background: $primary-dark;
+  }
 
   &:disabled {
     background: #c0c4cc;
