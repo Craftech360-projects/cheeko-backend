@@ -119,7 +119,9 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .dialog-content {
   padding: 0 20px;
 }
@@ -128,7 +130,7 @@ export default {
   cursor: pointer;
   flex: 1;
   border-radius: 23px;
-  background: #5778ff;
+  background: $primary;
   height: 40px;
   font-weight: 500;
   font-size: 12px;
@@ -138,9 +140,9 @@ export default {
 }
 
 .cancel-btn {
-  background: #e6ebff;
-  border: 1px solid #adbdff;
-  color: #5778ff;
+  background: rgba($primary, 0.15);
+  border: 1px solid rgba($primary, 0.4);
+  color: $primary;
 }
 
 ::v-deep .el-dialog {

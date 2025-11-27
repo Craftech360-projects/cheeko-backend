@@ -1,3 +1,6 @@
+// Import Cheeko theme
+@import './theme.scss';
+
 // 覆盖 autofill 样式
 input:-webkit-autofill,
 input:-webkit-autofill:hover,
@@ -11,4 +14,101 @@ select:-webkit-autofill:focus {
   -webkit-box-shadow: 0 0 0px 1000px transparent inset;
   transition: background-color 5000s ease-in-out 0s;
   background-color: transparent;
+}
+
+// Global body styles
+body {
+  background-color: $background-soft;
+  color: $text-dark;
+}
+
+// Element UI overrides for Cheeko theme
+.el-button--primary {
+  background-color: $primary !important;
+  border-color: $primary !important;
+
+  &:hover,
+  &:focus {
+    background-color: $primary-dark !important;
+    border-color: $primary-dark !important;
+  }
+}
+
+.el-link--primary {
+  color: $primary !important;
+
+  &:hover {
+    color: $primary-dark !important;
+  }
+}
+
+.el-tag--primary {
+  background-color: rgba($primary, 0.1);
+  border-color: rgba($primary, 0.2);
+  color: $primary;
+}
+
+.el-input__inner:focus {
+  border-color: $primary !important;
+}
+
+.el-checkbox__input.is-checked .el-checkbox__inner {
+  background-color: $primary !important;
+  border-color: $primary !important;
+}
+
+.el-radio__input.is-checked .el-radio__inner {
+  background-color: $primary !important;
+  border-color: $primary !important;
+}
+
+.el-switch.is-checked .el-switch__core {
+  background-color: $primary !important;
+  border-color: $primary !important;
+}
+
+.el-switch__core:hover {
+  border-color: $primary !important;
+}
+
+.el-switch.is-checked:focus .el-switch__core {
+  border-color: $primary !important;
+}
+
+.el-tabs__item.is-active {
+  color: $primary !important;
+}
+
+.el-tabs__active-bar {
+  background-color: $primary !important;
+}
+
+.el-pagination.is-background .el-pager li:not(.disabled).active {
+  background-color: $primary !important;
+}
+
+.el-menu-item.is-active {
+  color: $primary !important;
+}
+
+// Selection color
+::selection {
+  background-color: rgba($primary, 0.3);
+  color: $text-dark;
+}
+
+// Table row hover color
+.el-table__body tr:hover > td {
+  background-color: rgba($primary, 0.08) !important;
+}
+
+.el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell {
+  background-color: rgba($primary, 0.08) !important;
+}
+
+// Dropdown menu hover color
+.el-dropdown-menu__item:hover,
+.el-dropdown-menu__item:focus {
+  background-color: rgba($primary, 0.1) !important;
+  color: $primary !important;
 }

@@ -1,3 +1,5 @@
+@import '@/styles/theme.scss';
+
 .welcome {
   min-width: 1200px;
   min-height: 675px;
@@ -5,7 +7,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(145deg, #f5f8fd, #6baaff, #9ebbfc, #f5f8fd);
+  background: linear-gradient(145deg, #fff7f0, #ffb347, #ff9100, #fff7f0);
   background-size: cover;
   /* 确保背景图像覆盖整个元素 */
   background-position: center;
@@ -59,7 +61,7 @@
 
 .login-btn {
   height: 35px;
-  background: #5778ff;
+  background: $primary;
   border-radius: 10px;
   font-weight: 400;
   font-size: 14px;
@@ -67,6 +69,10 @@
   color: #fff;
   line-height: 35px;
   margin: 15px 30px 15px 30px;
+
+  &:hover {
+    background: $primary-dark;
+  }
 }
 
 .input-box {
@@ -105,7 +111,7 @@
   }
 
   .el-tabs__item.is-active {
-    color: #5778ff;
+    color: $primary;
   }
 
   .el-tabs__nav-scroll {

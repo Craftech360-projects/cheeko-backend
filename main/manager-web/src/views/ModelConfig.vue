@@ -448,13 +448,23 @@ export default {
 };
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .el-switch {
   height: 23px;
 }
 
 ::v-deep .el-table tr {
   background: transparent;
+}
+
+::v-deep .el-table__body tr:hover > td {
+  background-color: rgba($primary, 0.1) !important;
+}
+
+::v-deep .el-table--enable-row-hover .el-table__body tr:hover > td.el-table__cell {
+  background-color: rgba($primary, 0.1) !important;
 }
 
 .welcome {
@@ -465,7 +475,7 @@ export default {
   position: relative;
   flex-direction: column;
   background-size: cover;
-  background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd) center;
+  background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
   -webkit-background-size: cover;
   -o-background-size: cover;
 }
@@ -508,10 +518,10 @@ export default {
   height: 100%;
   border-right: 1px solid #ebeef5;
   background:
-    linear-gradient(120deg,
-      rgba(107, 140, 255, 0.3) 0%,
-      rgba(169, 102, 255, 0.3) 25%,
-      transparent 60%),
+    linear-gradient(180deg,
+      rgba(230, 240, 255, 0.7) 0%,
+      rgba(220, 230, 255, 0.5) 40%,
+      transparent 70%),
     url("../assets/model/model.png") no-repeat center / cover;
   padding: 16px 0;
   flex-shrink: 0;
@@ -534,7 +544,7 @@ export default {
 }
 
 .nav-panel .el-menu-item.is-active {
-  background: #5778ff;
+  background: $primary;
   position: relative;
   padding-left: 40px !important;
 }
@@ -549,7 +559,7 @@ export default {
   height: 13px;
   background: #fff;
   border-radius: 50%;
-  box-shadow: 0 0 4px rgba(64, 158, 255, 0.5);
+  box-shadow: 0 0 4px rgba($primary, 0.5);
 }
 
 .menu-text {
@@ -587,7 +597,7 @@ export default {
 }
 
 .btn-search {
-  background: linear-gradient(135deg, #6b8cff, #a966ff);
+  background: linear-gradient(135deg, $primary, $secondary-pink);
   border: none;
   color: white;
 }
@@ -614,7 +624,7 @@ export default {
   line-height: 32px;
   border-radius: 4px;
   border: 1px solid #e4e7ed;
-  background: #dee7ff;
+  background: rgba($primary, 0.15);
   color: #606266;
   font-size: 14px;
 }
@@ -649,7 +659,7 @@ export default {
 }
 
 ::v-deep .search-input .el-input__inner:focus {
-  border-color: #6b8cff;
+  border-color: $primary;
   outline: none;
 }
 
@@ -659,7 +669,7 @@ export default {
   background-color: transparent !important;
 }
 
-.data-table /deep/ .el-table__row {
+::v-deep .data-table .el-table__row {
   background-color: transparent !important;
 }
 
@@ -704,7 +714,7 @@ export default {
 }
 
 .batch-actions .el-button--primary {
-  background: #5f70f3 !important;
+  background: $primary !important;
   color: white;
 }
 
@@ -719,16 +729,16 @@ export default {
 }
 
 .batch-actions .el-button:first-child {
-  background: linear-gradient(135deg, #409EFF, #6B8CFF);
+  background: linear-gradient(135deg, $primary, $primary-dark);
   border: none;
   color: white;
 }
 
 .batch-actions .el-button:first-child:hover {
-  background: linear-gradient(135deg, #3A8EE6, #5A7CFF);
+  background: linear-gradient(135deg, $primary-dark, darken($primary-dark, 5%));
 }
 
-.el-table th /deep/ .el-table__cell {
+::v-deep .el-table th .el-table__cell {
   overflow: hidden;
   -webkit-user-select: none;
   -moz-user-select: none;
@@ -792,12 +802,12 @@ export default {
 }
 
 ::v-deep .el-checkbox__input.is-checked .el-checkbox__inner {
-  background-color: #5f70f3;
-  border-color: #5f70f3;
+  background-color: $primary;
+  border-color: $primary;
 }
 
 .voice-management-btn {
-  background: #9db3ea;
+  background: rgba($primary, 0.6);
   color: white;
   min-width: 68px;
   line-height: 14px;
@@ -807,9 +817,19 @@ export default {
 }
 
 .voice-management-btn:hover {
-  background: #8aa2e0;
+  background: $primary;
   /* Darken color on hover */
   transform: scale(1.05);
+}
+
+/* Custom switch styling */
+::v-deep .el-switch.is-checked .el-switch__core {
+  background-color: $primary !important;
+  border-color: $primary !important;
+}
+
+::v-deep .el-switch .el-switch__core:hover {
+  border-color: $primary !important;
 }
 
 ::v-deep .el-table .el-table-column--selection .cell {
@@ -882,12 +902,12 @@ export default {
   }
 
   .pagination-btn.active {
-    background: #5f70f3 !important;
+    background: $primary !important;
     color: #ffffff !important;
-    border-color: #5f70f3 !important;
+    border-color: $primary !important;
 
     &:hover {
-      background: #6d7cf5 !important;
+      background: $primary-dark !important;
     }
   }
 
@@ -937,11 +957,11 @@ export default {
 }
 
 ::v-deep .el-loading-spinner .path {
-  stroke: #6b8cff;
+  stroke: $primary;
 }
 
 ::v-deep .el-loading-text {
-  color: #6b8cff !important;
+  color: $primary !important;
   font-size: 14px;
   margin-top: 8px;
 }

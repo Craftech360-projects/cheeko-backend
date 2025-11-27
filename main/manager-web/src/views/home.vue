@@ -12,7 +12,7 @@
             </div>
             <div class="hellow-text">
               Let's have a
-              <div style="display: inline-block;color: #5778FF;">
+              <div style="display: inline-block;color: var(--primary);">
                 wonderful day!
               </div>
             </div>
@@ -23,7 +23,7 @@
               <div class="left-add" @click="showAddDialog">
                 Add Agent
               </div>
-              <div style="width: 23px;height: 13px;background: #5778ff;margin-left: -10px;" />
+              <div style="width: 23px;height: 13px;background: var(--primary);margin-left: -10px;" />
               <div class="right-add">
                 <i class="el-icon-right" @click="showAddDialog" style="font-size: 20px;color: #fff;" />
               </div>
@@ -588,14 +588,16 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .welcome {
   min-width: 900px;
   min-height: 506px;
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(145deg, #e6eeff, #eff0ff);
+  background: linear-gradient(145deg, #fff5eb, #fff7f0);
   background-size: cover;
   /* 确保背景图像覆盖整个元素 */
   background-position: center;
@@ -612,9 +614,9 @@ export default {
   position: relative;
   overflow: hidden;
   background: linear-gradient(269.62deg,
-      #e0e6fd 0%,
-      #cce7ff 49.69%,
-      #d3d3fe 100%);
+      rgba($primary, 0.15) 0%,
+      rgba($secondary-pink, 0.1) 49.69%,
+      rgba($secondary-blue, 0.15) 100%);
 }
 
 .add-device-bg {
@@ -662,7 +664,7 @@ export default {
     width: 105px;
     height: 34px;
     border-radius: 17px;
-    background: #5778ff;
+    background: $primary;
     color: #fff;
     font-size: 14px;
     font-weight: 500;
@@ -674,7 +676,7 @@ export default {
     width: 34px;
     height: 34px;
     border-radius: 50%;
-    background: #5778ff;
+    background: $primary;
     margin-left: -6px;
     display: flex;
     justify-content: center;
@@ -697,17 +699,17 @@ export default {
   background: rgba(255, 255, 255, 0.95);
   border-radius: 16px;
   padding: 18px 30px;
-  box-shadow: 0 4px 20px rgba(87, 120, 255, 0.25);
+  box-shadow: 0 4px 20px rgba($primary, 0.25);
   text-align: center;
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(87, 120, 255, 0.15);
+  border: 1px solid rgba($primary, 0.15);
   min-width: 120px;
 }
 
 .stats-count {
   font-size: 42px;
   font-weight: 700;
-  color: #5778ff;
+  color: $primary;
   line-height: 1;
   margin-bottom: 6px;
 }
@@ -826,7 +828,7 @@ export default {
 }
 
 ::v-deep .agent-table .el-table__body tr:hover > td {
-  background: #f0f5ff !important;
+  background: rgba($primary, 0.08) !important;
 }
 
 /* Agent Name Cell */
@@ -843,13 +845,13 @@ export default {
 }
 
 .info-icon {
-  color: #5778ff;
+  color: $primary;
   cursor: pointer;
   font-size: 14px;
 }
 
 .info-icon:hover {
-  color: #3d5afe;
+  color: $primary-dark;
 }
 
 /* Device Count Tag */
@@ -882,13 +884,13 @@ export default {
 }
 
 .action-buttons .el-button--text {
-  color: #5778ff;
+  color: $primary;
   padding: 4px 8px;
   font-size: 12px;
 }
 
 .action-buttons .el-button--text:hover {
-  color: #3d5afe;
+  color: $primary-dark;
 }
 
 .action-buttons .delete-btn {
@@ -986,8 +988,8 @@ export default {
 }
 
 .pagination-btn:hover:not(:disabled) {
-  border-color: #5778ff;
-  color: #5778ff;
+  border-color: $primary;
+  color: $primary;
 }
 
 .pagination-btn:disabled {
@@ -1001,14 +1003,14 @@ export default {
 }
 
 .pagination-btn.active {
-  background: #5778ff;
-  border-color: #5778ff;
+  background: $primary;
+  border-color: $primary;
   color: #fff;
 }
 
 .pagination-btn.active:hover {
-  background: #3d5afe;
-  border-color: #3d5afe;
+  background: $primary-dark;
+  border-color: $primary-dark;
   color: #fff;
 }
 </style>

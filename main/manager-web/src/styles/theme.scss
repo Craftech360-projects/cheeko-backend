@@ -1,0 +1,90 @@
+// ============================================
+// Cheeko Dashboard Theme
+// Logo-matched color palette
+// ============================================
+
+// Primary Brand Colors (Orange from Cheeko logo)
+$primary: #FF9100;
+$primary-dark: #D47800;
+$primary-light: #FFD7A3;
+
+// Secondary Accent Colors
+$secondary-blue: #4AA9FF;
+$secondary-deep-blue: #0066CC;
+$secondary-pink: #FF5BA5;
+$secondary-purple: #8A57FF;
+
+// Neutrals
+$text-dark: #1E1E1E;
+$text-gray: #6F6F6F;
+$text-light: #9E9E9E;
+$white: #FFFFFF;
+$background-soft: #F7F9FC;
+$border-color: #E3E6EF;
+$divider-color: #E3E6EF;
+
+// Status Colors
+$success: #67C23A;
+$warning: #E6A23C;
+$danger: #F56C6C;
+$info: #4AA9FF;
+
+// Gradients
+$gradient-header: linear-gradient(90deg, #FF9100 0%, #FF5BA5 50%, #4AA9FF 100%);
+$gradient-hero: linear-gradient(135deg, #FF9100, #FF5BA5, #4AA9FF);
+$gradient-subtle: linear-gradient(135deg, #FFD7A3, #F7F0FF);
+$gradient-orange: linear-gradient(135deg, #FF9100, #D47800);
+
+// Shadows
+$shadow-sm: 0 2px 8px rgba(255, 145, 0, 0.1);
+$shadow-md: 0 4px 16px rgba(255, 145, 0, 0.15);
+$shadow-lg: 0 8px 24px rgba(255, 145, 0, 0.2);
+$shadow-card: 0 2px 12px rgba(0, 0, 0, 0.08);
+
+// Border Radius
+$radius-sm: 4px;
+$radius-md: 8px;
+$radius-lg: 16px;
+$radius-xl: 24px;
+$radius-round: 50%;
+
+// CSS Custom Properties (for use in components without SCSS)
+:root {
+  // Primary
+  --primary: #{$primary};
+  --primary-dark: #{$primary-dark};
+  --primary-light: #{$primary-light};
+
+  // Secondary
+  --secondary-blue: #{$secondary-blue};
+  --secondary-deep-blue: #{$secondary-deep-blue};
+  --secondary-pink: #{$secondary-pink};
+  --secondary-purple: #{$secondary-purple};
+
+  // Neutrals
+  --text-dark: #{$text-dark};
+  --text-gray: #{$text-gray};
+  --text-light: #{$text-light};
+  --white: #{$white};
+  --background-soft: #{$background-soft};
+  --border-color: #{$border-color};
+  --divider-color: #{$divider-color};
+
+  // Status
+  --success: #{$success};
+  --warning: #{$warning};
+  --danger: #{$danger};
+  --info: #{$info};
+
+  // Gradients
+  --gradient-header: #{$gradient-header};
+  --gradient-hero: #{$gradient-hero};
+  --gradient-subtle: #{$gradient-subtle};
+  --gradient-orange: #{$gradient-orange};
+
+  // Shadows
+  --shadow-sm: #{$shadow-sm};
+  --shadow-md: #{$shadow-md};
+  --shadow-lg: #{$shadow-lg};
+  --shadow-card: #{$shadow-card};
+}
