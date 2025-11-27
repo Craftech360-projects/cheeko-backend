@@ -3,7 +3,7 @@
     <div
       style="margin: 0 10px 10px;display: flex;align-items: center;gap: 10px;font-weight: 700;font-size: 20px;text-align: left;color: #3d4566;">
       <div
-        style="width: 40px;height: 40px;border-radius: 50%;background: #5778ff;display: flex;align-items: center;justify-content: center;">
+        style="width: 40px;height: 40px;border-radius: 50%;background: var(--primary);display: flex;align-items: center;justify-content: center;">
         <img src="@/assets/login/shield.png" alt=""
           style="width: 19px;height: 23px; filter: brightness(0) invert(1);" />
       </div>
@@ -20,11 +20,10 @@
       </div>
     </div>
     <div style="display: flex;margin: 15px 15px;gap: 7px;">
-      <div class="dialog-btn" style="background: #e6ebff;border: 1px solid #adbdff;color: #5778ff;"
-        @click="closeDialog">
+      <div class="dialog-btn cancel-btn" @click="closeDialog">
         Close
       </div>
-      <div class="dialog-btn" style="background: #5778ff;color: white;" @click="copyPassword">
+      <div class="dialog-btn primary-btn" @click="copyPassword">
         Copy Password
       </div>
     </div>
@@ -53,7 +52,9 @@ export default {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .input-46 {
   border: 1px solid #e4e6ef;
   background: #f6f8fb;
@@ -69,6 +70,17 @@ export default {
   font-size: 12px;
   line-height: 40px;
   text-align: center;
+}
+
+.dialog-btn.cancel-btn {
+  background: rgba($primary, 0.15);
+  border: 1px solid rgba($primary, 0.4);
+  color: $primary;
+}
+
+.dialog-btn.primary-btn {
+  background: $primary;
+  color: white;
 }
 
 ::v-deep .el-dialog {

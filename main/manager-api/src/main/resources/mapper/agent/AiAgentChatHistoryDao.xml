@@ -38,7 +38,20 @@
   </update>
 
   <delete id="deleteHistoryByAgentId">
-    DELETE FROM ai_agent_chat_history 
+    DELETE FROM ai_agent_chat_history
     WHERE agent_id = #{agentId}
   </delete>
+
+  <select id="getTodayDeviceCount" resultType="java.lang.Integer">
+    SELECT COUNT(DISTINCT mac_address)
+    FROM ai_agent_chat_history
+    WHERE DATE(created_at) = CURDATE()
+  </select>
+
+  <select id="getMonthDeviceCount" resultType="java.lang.Integer">
+    SELECT COUNT(DISTINCT mac_address)
+    FROM ai_agent_chat_history
+    WHERE YEAR(created_at) = YEAR(CURDATE())
+      AND MONTH(created_at) = MONTH(CURDATE())
+  </select>
 </mapper>

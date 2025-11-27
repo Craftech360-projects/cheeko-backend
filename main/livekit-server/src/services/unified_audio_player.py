@@ -36,6 +36,7 @@ class UnifiedAudioPlayer:
         self.is_playing = False
         self.stop_event = asyncio.Event()
         self.session_say_task = None
+        self._playback_lock = asyncio.Lock()  # Prevent race conditions on rapid requests
 
     def set_session(self, session):
         """Set the LiveKit agent session"""
@@ -48,52 +49,102 @@ class UnifiedAudioPlayer:
         logger.info("Unified audio player integrated with context")
 
     async def stop(self):
-        """Stop current playback and interrupt session.say() IMMEDIATELY"""
+        """Stop current playback and interrupt session.say() IMMEDIATELY with FULL cancellation"""
         logger.info("🛑 UNIFIED: IMMEDIATE STOP requested")
-        
+
         # Set stop event FIRST - this stops audio frame iteration immediately
         self.stop_event.set()
-        
-        # Interrupt session.say() IMMEDIATELY if running
+
+        # ROBUSTLY cancel and wait for session.say() task to fully terminate
         if self.session_say_task:
             try:
-                if hasattr(self.session_say_task, 'interrupt'):
-                    self.session_say_task.interrupt()
-                    logger.info("🛑 UNIFIED: IMMEDIATELY interrupted speech handle")
-                else:
-                    logger.warning("🛑 UNIFIED: Speech handle doesn't support interruption")
-            except Exception as e:
-                logger.warning(f"Error interrupting speech: {e}")
+                logger.info("🛑 UNIFIED: Cancelling active speech handle...")
 
-        # Cancel background task aggressively
+                # Method 1: Try cancel() if available
+                if hasattr(self.session_say_task, 'cancel'):
+                    self.session_say_task.cancel()
+                    logger.info("🛑 UNIFIED: Called cancel() on speech handle")
+
+                    # Wait for cancellation to complete with timeout
+                    try:
+                        await asyncio.wait_for(self.session_say_task, timeout=0.5)
+                        logger.info("🛑 UNIFIED: Speech handle fully cancelled")
+                    except asyncio.CancelledError:
+                        logger.info("🛑 UNIFIED: Speech handle cancellation confirmed")
+                    except asyncio.TimeoutError:
+                        logger.warning("🛑 UNIFIED: Speech handle cancellation timeout (will force continue)")
+                    except Exception as e:
+                        logger.warning(f"🛑 UNIFIED: Speech handle await error (continuing anyway): {e}")
+
+                # Method 2: Try interrupt() as fallback
+                elif hasattr(self.session_say_task, 'interrupt'):
+                    self.session_say_task.interrupt()
+                    logger.info("🛑 UNIFIED: Called interrupt() on speech handle")
+
+                    # Give it a moment to process the interrupt
+                    await asyncio.sleep(0.1)
+                else:
+                    logger.warning("🛑 UNIFIED: Speech handle has no cancel() or interrupt() method")
+
+                # Clear the reference
+                self.session_say_task = None
+
+            except Exception as e:
+                logger.warning(f"🛑 UNIFIED: Error cancelling speech: {e}")
+                # Force clear the reference anyway
+                self.session_say_task = None
+
+        # Cancel background task aggressively and WAIT for it
         if self.current_task and not self.current_task.done():
+            logger.info("🛑 UNIFIED: Cancelling background playback task...")
             self.current_task.cancel()
-            logger.info("🛑 UNIFIED: Cancelled background task")
-            # Don't wait for cancellation - be immediate
-            
+
+            try:
+                # Wait for background task to fully cancel with timeout
+                await asyncio.wait_for(self.current_task, timeout=0.5)
+                logger.info("🛑 UNIFIED: Background task fully cancelled")
+            except asyncio.CancelledError:
+                logger.info("🛑 UNIFIED: Background task cancellation confirmed")
+            except asyncio.TimeoutError:
+                logger.warning("🛑 UNIFIED: Background task cancellation timeout")
+            except Exception as e:
+                logger.warning(f"🛑 UNIFIED: Background task cancellation error: {e}")
+
+            # Clear the reference
+            self.current_task = None
+
         # Force clear all states immediately
         self.is_playing = False
         audio_state_manager.force_stop_music()
-        logger.info("🛑 UNIFIED: IMMEDIATE stop completed")
+        logger.info("🛑 UNIFIED: IMMEDIATE stop completed - ready for new playback")
 
     async def play_from_url(self, url: str, title: str = "Audio"):
         """Play audio from URL through agent's TTS channel using session.say()"""
-        await self.stop()  # Stop any current playback
+        # Use lock to prevent race conditions when multiple rapid requests arrive
+        async with self._playback_lock:
+            logger.info(f"🎵 UNIFIED: Acquired playback lock for: {title}")
 
-        logger.info(f"🎵 UNIFIED: Starting playback: {title}")
-        self.is_playing = True
-        self.stop_event.clear()
+            await self.stop()  # Stop any current playback and wait for full cancellation
 
-        # Set global music state
-        audio_state_manager.set_music_playing(True, title)
+            # CRITICAL: Small delay to ensure LiveKit session clears its internal audio buffer
+            # Without this, old audio frames may still be in the pipeline
+            await asyncio.sleep(0.2)
+            logger.info(f"🎵 UNIFIED: Audio pipeline cleared, starting playback: {title}")
 
-        # Start playback task (non-blocking)
-        self.current_task = asyncio.create_task(self._play_via_session_say(url, title))
+            logger.info(f"🎵 UNIFIED: Starting playback: {title}")
+            self.is_playing = True
+            self.stop_event.clear()
 
-        # Return immediately - don't wait for completion to avoid blocking the agent
-        # The agent function should return empty string to avoid TTS interference
-        logger.info(f"🎵 UNIFIED: Started playback task for: {title}")
-        return f"Started playing {title}"
+            # Set global music state
+            audio_state_manager.set_music_playing(True, title)
+
+            # Start playback task (non-blocking)
+            self.current_task = asyncio.create_task(self._play_via_session_say(url, title))
+
+            # Return immediately - don't wait for completion to avoid blocking the agent
+            # The agent function should return empty string to avoid TTS interference
+            logger.info(f"🎵 UNIFIED: Started playback task for: {title}")
+            return f"Started playing {title}"
 
     async def _play_via_session_say(self, url: str, title: str):
         """Play audio through session.say() with audio frames"""
@@ -113,25 +164,36 @@ class UnifiedAudioPlayer:
             if audio_frames is not None:
                 logger.info(f"🎵 UNIFIED: Injecting {title} into TTS queue via session.say()")
 
-                # Use session.say() with audio frames - NO TEXT to avoid TTS before music!
-                speech_handle = self.session.say(
-                    text="",  # EMPTY TEXT - no TTS before music!
-                    audio=audio_frames,  # Pre-recorded audio to play
-                    allow_interruptions=True,  # Allow user to interrupt
-                    add_to_chat_ctx=False  # Don't add music to chat context
-                )
+                try:
+                    # Use session.say() with audio frames - NO TEXT to avoid TTS before music!
+                    speech_handle = self.session.say(
+                        text="",  # EMPTY TEXT - no TTS before music!
+                        audio=audio_frames,  # Pre-recorded audio to play
+                        allow_interruptions=True,  # Allow user to interrupt
+                        add_to_chat_ctx=False  # Don't add music to chat context
+                    )
 
-                # Store the speech handle for potential interruption
-                self.session_say_task = speech_handle
+                    # Store the speech handle for potential interruption
+                    self.session_say_task = speech_handle
 
-                # Wait for the speech to complete (only if we got a valid handle)
-                if speech_handle is not None:
-                    await speech_handle
-                else:
-                    logger.error("🎵 UNIFIED: session.say() returned None - cannot await")
-                    return
+                    # Wait for the speech to complete (only if we got a valid handle)
+                    if speech_handle is not None:
+                        logger.info(f"🎵 UNIFIED: Waiting for {title} to complete playback...")
+                        await speech_handle
+                        logger.info(f"🎵 UNIFIED: {title} playback completed normally")
+                    else:
+                        logger.error("🎵 UNIFIED: session.say() returned None - cannot await")
+                        return
 
-                logger.info(f"🎵 UNIFIED: Successfully queued {title} in TTS pipeline")
+                    logger.info(f"🎵 UNIFIED: Successfully completed {title} playback")
+
+                except asyncio.CancelledError:
+                    logger.info(f"🎵 UNIFIED: Playback of {title} was cancelled (interrupted by new request)")
+                    # Re-raise to propagate cancellation
+                    raise
+                except Exception as e:
+                    logger.error(f"🎵 UNIFIED: Error during playback of {title}: {e}")
+                    raise
             else:
                 logger.error(f"🎵 UNIFIED: No audio frames available for {title} - cannot play")
                 return

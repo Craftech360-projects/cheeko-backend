@@ -407,7 +407,7 @@ export default {
   display: flex;
   position: relative;
   flex-direction: column;
-  background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd);
+  background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6);
   background-size: cover;
   -webkit-background-size: cover;
   -o-background-size: cover;

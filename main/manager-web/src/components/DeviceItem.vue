@@ -104,7 +104,9 @@ export default {
   }
 }
 </script>
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .device-item {
   width: 342px;
   border-radius: 20px;
@@ -124,7 +126,7 @@ export default {
 .owner-info {
   font-weight: 400;
   font-size: 12px;
-  color: #5778ff;
+  color: $primary;
   text-align: left;
   margin-top: 5px;
 }
@@ -132,8 +134,8 @@ export default {
 .settings-btn {
   font-weight: 500;
   font-size: 11px;
-  color: #5778ff;
-  background: #e6ebff;
+  color: $primary;
+  background: rgba($primary, 0.15);
   width: auto;
   padding: 0 10px;
   height: 22px;
@@ -171,7 +173,7 @@ export default {
 
 .action-icon:hover {
   transform: scale(1.2);
-  background-color: rgba(87, 120, 255, 0.1);
+  background-color: rgba($primary, 0.1);
 }
 
 .delete-icon:hover {

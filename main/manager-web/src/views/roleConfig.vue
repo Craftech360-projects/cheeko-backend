@@ -870,14 +870,16 @@ export default {
 };
 </script>
 
-<style scoped>
+<style scoped lang="scss">
+@import '@/styles/theme.scss';
+
 .welcome {
   min-width: 900px;
   height: 100vh;
   display: flex;
   position: relative;
   flex-direction: column;
-  background: linear-gradient(to bottom right, #dce8ff, #e4eeff, #e6cbfd);
+  background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6);
   background-size: cover;
   -webkit-background-size: cover;
   -o-background-size: cover;
@@ -952,7 +954,7 @@ export default {
 .header-icon {
   width: 37px;
   height: 37px;
-  background: #5778ff;
+  background: $primary;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -1007,12 +1009,12 @@ export default {
   height: 4vh;
   width: auto;
   border-radius: 8px;
-  background: hsl(228, 100%, 95%);
+  background: rgba($primary, 0.15);
   line-height: 4vh;
   font-weight: 400;
   font-size: 14px;
   text-align: center;
-  color: #5778ff;
+  color: $primary;
   cursor: pointer;
   transition: background-color 0.3s ease;
   padding-left: 10px;
@@ -1020,7 +1022,7 @@ export default {
 }
 
 .template-item:hover {
-  background-color: #d0d8ff;
+  background-color: rgba($primary, 0.25);
 }
 
 .model-select-wrapper {
@@ -1113,16 +1115,16 @@ export default {
 }
 
 .edit-function-btn {
-  background: #e6ebff;
-  color: #5778ff;
-  border: 1px solid #adbdff;
+  background: rgba($primary, 0.15);
+  color: $primary;
+  border: 1px solid rgba($primary, 0.4);
   border-radius: 18px;
   padding: 10px 20px;
   transition: all 0.3s;
 }
 
 .edit-function-btn.active-btn {
-  background: #5778ff;
+  background: $primary;
   color: white;
 }
 
@@ -1155,7 +1157,7 @@ export default {
 }
 
 .header-actions .save-btn {
-  background: #5778ff;
+  background: $primary;
   color: white;
   border: none;
   border-radius: 18px;
@@ -1165,9 +1167,9 @@ export default {
 }
 
 .header-actions .reset-btn {
-  background: #e6ebff;
-  color: #5778ff;
-  border: 1px solid #adbdff;
+  background: rgba($primary, 0.15);
+  color: $primary;
+  border: 1px solid rgba($primary, 0.4);
   border-radius: 18px;
   padding: 8px 16px;
   height: 32px;

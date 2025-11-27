@@ -53,6 +53,7 @@ from src.utils.model_preloader import model_preloader
 from src.utils.model_cache import model_cache
 from src.utils.database_helper import DatabaseHelper
 from src.services.chat_history_service import ChatHistoryService
+from src.services.analytics_service import AnalyticsService
 from src.services.prompt_service import PromptService
 from src.services.unified_audio_player import UnifiedAudioPlayer
 from src.services.foreground_audio_player import ForegroundAudioPlayer
@@ -380,6 +381,7 @@ async def entrypoint(ctx: JobContext):
     # OPTIMIZATION PHASE 1 + 1.5: Parallel API Calls + Mem0 Query
     # Fetch all API data and Mem0 memories in parallel to maximize concurrency
     chat_history_service = None
+    analytics_service = None
     tts_config_from_api = None
     child_profile = None
     agent_prompt = None
@@ -387,6 +389,7 @@ async def entrypoint(ctx: JobContext):
     agent_id = None
     mem0_provider = None
     memories = None
+    current_character = "Conversation"  # Default mode
 
     if device_mac:
         try:
@@ -413,6 +416,7 @@ async def entrypoint(ctx: JobContext):
                 prompt_service.get_prompt_and_config(room_name, device_mac), # ~500ms (gets prompt + TTS config)
                 db_helper.get_child_profile_by_mac(device_mac),             # ~500ms
                 query_mem0_memories(device_mac),                             # ~1700ms (PARALLEL!)
+                db_helper.get_current_character(device_mac),                 # ~200ms
                 return_exceptions=True  # Don't fail all if one fails
             )
 
@@ -420,7 +424,7 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"⚡✅ Parallel API calls + Mem0 completed in {elapsed_time:.0f}ms")
 
             # Unpack results from API calls
-            agent_id_result, prompt_config_result, child_profile_result, mem0_result = results
+            agent_id_result, prompt_config_result, child_profile_result, mem0_result, character_result = results
 
             # Process agent_id result
             if isinstance(agent_id_result, Exception):
@@ -485,6 +489,14 @@ async def entrypoint(ctx: JobContext):
             else:
                 mem0_provider, memories = mem0_result
 
+            # Process character result
+            if isinstance(character_result, Exception):
+                logger.error(f"📝❌ Failed to get character: {character_result}")
+                current_character = "Conversation"  # Default
+            else:
+                current_character = character_result if character_result else "Conversation"
+                logger.info(f"📝 Current character/mode: {current_character}")
+
             # Create chat history service if we have agent_id
             if agent_id:
                 chat_history_service = ChatHistoryService(
@@ -498,12 +510,23 @@ async def entrypoint(ctx: JobContext):
                 logger.info(f"📝✅ Chat history service initialized for MAC: {device_mac}, Agent ID: {agent_id}")
                 logger.info(f"📝📊 Service config: batch_size={chat_history_service.batch_size}, interval={chat_history_service.send_interval}s")
 
+                # Create analytics service
+                analytics_service = AnalyticsService(
+                    manager_api_url=manager_api_url,
+                    secret=manager_api_secret,
+                    device_mac=device_mac,
+                    session_id=room_name,
+                    agent_id=agent_id
+                )
+                logger.info(f"📊✅ Analytics service initialized for MAC: {device_mac}, Session: {room_name}")
+
         except Exception as e:
             logger.error(f"❌ Error in parallel API calls: {e}")
             agent_prompt = ConfigLoader.get_default_prompt()
             tts_config_from_api = None
             child_profile = None
             chat_history_service = None
+            analytics_service = None
     else:
         # No device MAC - use defaults
         agent_prompt = ConfigLoader.get_default_prompt()
@@ -628,7 +651,7 @@ async def entrypoint(ctx: JobContext):
     assistant = Assistant(instructions=agent_prompt, tts_provider=tts)
     assistant.set_services(music_service, story_service,
                            audio_player, unified_audio_player, device_control_service, mcp_executor,
-                           google_search_service,question_generator_service, riddle_generator_service)
+                           google_search_service, question_generator_service, riddle_generator_service, analytics_service)
     # Pass room name and device MAC to assistant
     assistant.set_room_info(room_name=room_name, device_mac=device_mac)
     # Log session info (responses will be captured via conversation_item_added event)
@@ -875,6 +898,15 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.warning(f"📝❌ Chat history cleanup error: {e}")
 
+            # 3.5. End analytics session
+            try:
+                if analytics_service:
+                    logger.info("📊 Ending analytics session")
+                    await analytics_service.end_session(completion_status="completed")
+                    logger.info("📊✅ Analytics session ended")
+            except Exception as e:
+                logger.warning(f"📊❌ Analytics session end error: {e}")
+
             # 4. End the agent session (use aclose() method)
             try:
                 if session and hasattr(session, 'aclose'):
@@ -966,6 +998,16 @@ async def entrypoint(ctx: JobContext):
         room=ctx.room,
         room_input_options=room_options,
     )
+
+    # Start analytics session tracking
+    if analytics_service:
+        try:
+            # Use current character/mode from database
+            mode_type = current_character
+            await analytics_service.start_session(mode_type)
+            logger.info(f"📊✅ Analytics session started for mode: {mode_type}")
+        except Exception as e:
+            logger.error(f"📊❌ Failed to start analytics session: {e}")
 
     # PERFORMANCE: Log total initialization time
     init_elapsed_time = (asyncio.get_event_loop().time() - init_start_time) * 1000

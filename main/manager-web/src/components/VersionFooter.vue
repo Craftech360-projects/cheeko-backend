@@ -44,7 +44,7 @@ export default {
 
 <style scoped>
 .copyright {
-  padding: 10px 0;
+  padding: 5px 0;
 }
 
 .footer-content {
