@@ -23,8 +23,15 @@ class ConfigLoader:
             'tts_model': os.getenv('TTS_MODEL', 'playai-tts'),
             'tts_voice': os.getenv('TTS_VOICE', 'Aaliyah-PlayAI'),
             'stt_language': os.getenv('STT_LANGUAGE', 'en'),
-            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq or deepgram
+            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq, deepgram, or funasr
             'deepgram_model': os.getenv('DEEPGRAM_MODEL', 'nova-3'),
+            # FunASR WebSocket STT configuration
+            'funasr_host': os.getenv('FUNASR_HOST', '127.0.0.1'),
+            'funasr_port': int(os.getenv('FUNASR_PORT', '10096')),
+            'funasr_use_ssl': os.getenv('FUNASR_USE_SSL', 'false').lower() == 'true',
+            'funasr_mode': os.getenv('FUNASR_MODE', '2pass'),  # offline, online, 2pass
+            'funasr_use_itn': os.getenv('FUNASR_USE_ITN', 'true').lower() == 'true',
+            'funasr_hotwords': os.getenv('FUNASR_HOTWORDS', ''),
             # Fallback configuration
             'fallback_enabled': os.getenv('FALLBACK_ENABLED', 'false').lower() == 'true',
             'fallback_llm_model': os.getenv('FALLBACK_LLM_MODEL', 'llama-3.1-8b-instant'),
