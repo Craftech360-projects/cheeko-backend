@@ -42,7 +42,8 @@ class MusicService:
     def get_song_url(self, filename: str, language: str = "English") -> str:
         """Generate URL for song file"""
         audio_path = f"music/{language}/{filename}"
-        encoded_path = urllib.parse.quote(audio_path)
+        # Ensure we don't encode the slashes in the path
+        encoded_path = urllib.parse.quote(audio_path, safe='/')
 
         if self.use_cdn and self.cloudfront_domain:
             return f"https://{self.cloudfront_domain}/{encoded_path}"
@@ -79,6 +80,53 @@ class MusicService:
             
         except Exception as e:
             logger.error(f"Error searching songs for '{query}': {e}")
+            return []
+
+    async def search_songs_by_name(self, song_name: str, language: Optional[str] = None, limit: int = 5) -> List[Dict]:
+        """
+        Search for songs by name with fuzzy matching support.
+        This method is optimized for specific content requests from mobile app.
+
+        Args:
+            song_name: Name of the song to search for
+            language: Optional language filter
+            limit: Maximum number of results to return (default: 5)
+
+        Returns:
+            List of matching songs with metadata (title, filename, language, url, score)
+        """
+        if not self.is_initialized:
+            logger.warning(f"[MUSIC-SEARCH] Music service not initialized - cannot search for '{song_name}'")
+            return []
+
+        try:
+            search_query = song_name.lower().strip()
+            logger.info(f"🔍 [MUSIC-SEARCH] Searching for song: '{song_name}', Language: {language or 'Any'}")
+
+            # Use the existing semantic search which already has fuzzy matching
+            search_results = await self.semantic_search.search_music(search_query, language, limit=limit)
+
+            # Convert to expected format with additional metadata
+            results = []
+            for result in search_results:
+                song_data = {
+                    'title': result.title,
+                    'filename': result.filename,
+                    'language': result.language_or_category,
+                    'url': self.get_song_url(result.filename, result.language_or_category),
+                    'score': result.score
+                }
+                results.append(song_data)
+
+            if results:
+                logger.info(f"🔍 [MUSIC-SEARCH] Found {len(results)} matches for '{song_name}' - best: '{results[0]['title']}' (score: {results[0]['score']:.2f})")
+            else:
+                logger.warning(f"⚠️ [MUSIC-SEARCH] No songs found matching '{song_name}'")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"❌ [MUSIC-SEARCH] Error searching for '{song_name}': {e}")
             return []
 
     async def get_random_song(self, language: Optional[str] = None) -> Optional[Dict]:

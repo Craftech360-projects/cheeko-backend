@@ -9,6 +9,7 @@ services:
     environment:
       LIVEKIT_KEYS: "devkey: secret"
       REDIS_URL: "redis://:redispassword@manager-api-redis:6379"
+      RTC_NODE_IP: "192.168.1.61"
     networks:
       - manager-api_manager-api-network
 

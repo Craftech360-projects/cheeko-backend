@@ -28,7 +28,7 @@ public interface AgentDao extends BaseDao<AgentEntity> {
      */
     @Select(" SELECT a.* FROM ai_device d " +
             " LEFT JOIN ai_agent a ON d.agent_id = a.id " +
-            " WHERE d.mac_address = #{macAddress} " +
+            " WHERE REPLACE(REPLACE(LOWER(d.mac_address), ':', ''), '-', '') = REPLACE(REPLACE(LOWER(#{macAddress}), ':', ''), '-', '') " +
             " ORDER BY d.id DESC LIMIT 1")
     AgentEntity getDefaultAgentByMacAddress(@Param("macAddress") String macAddress);
 

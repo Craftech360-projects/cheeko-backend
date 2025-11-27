@@ -92,11 +92,19 @@ public class ServerSecretFilter extends AuthenticatingFilter {
      */
     private String getRequestToken(HttpServletRequest httpRequest) {
         String token = null;
-        // 从header中获取token
+
+        // First try to get from "secret" header (for LiveKit server)
+        token = httpRequest.getHeader("secret");
+        if (StringUtils.isNotBlank(token)) {
+            return token;
+        }
+
+        // Fallback to "Authorization: Bearer" header
         String authorization = httpRequest.getHeader("Authorization");
         if (StringUtils.isNotBlank(authorization) && authorization.startsWith("Bearer ")) {
             token = authorization.replace("Bearer ", "");
         }
+
         return token;
     }
 

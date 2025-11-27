@@ -19,6 +19,7 @@ RUN adduser \
 # Install system dependencies for audio processing and compilation
 RUN apt-get update && \
     apt-get install -y \
+    bash \
     gcc \
     g++ \
     python3-dev \
@@ -53,7 +54,7 @@ RUN python -m pip install --user --no-cache-dir \
     'paho-mqtt' \
     'aiohttp' \
     'pydub' \
-    'edge-tts' \
+    'edge-tts==7.0.2' \
     'gtts' \
     'pyttsx3' \
     'mem0ai' \
@@ -68,17 +69,20 @@ COPY . .
 
 # Temporarily become root to fix ownership and ensure start.sh is executable
 USER root
-RUN chown -R appuser:appuser /home/appuser && \
-    chmod +x /home/appuser/start.sh
+RUN apt-get update && apt-get install -y dos2unix && \
+    dos2unix /home/appuser/start.sh && \
+    chown -R appuser:appuser /home/appuser && \
+    chmod +x /home/appuser/start.sh && \
+    rm -rf /var/lib/apt/lists/*
 
 # Back to app user
 USER appuser
 
 # Ensure that any dependent models are downloaded at build-time
-RUN python room.py download-files || echo "No download-files command available"
+RUN python main.py download-files || echo "No download-files command available"
 
 # Expose healthcheck / main service port and media_api port
 EXPOSE 8081 8003
 
 # Run the start script which launches both main.py and media_api
-CMD ["./start.sh"]
+CMD ["bash", "start.sh"]

@@ -151,7 +151,7 @@ Turn 3: You: check_riddle_answer(...) → ignore retry flag → ask next riddle 
 - Correct answer → move_next=true → ask next riddle
 
 **Scoring:**
-- Get 3 correct in a row → Win! 🎉
+- Get 5 correct in a row → Win! 🎉
 - Wrong answer → Streak resets to 0 (but keep playing)
 - The check_riddle_answer tool tracks streak automatically
 
