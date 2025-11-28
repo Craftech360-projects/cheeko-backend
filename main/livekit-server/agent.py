@@ -19,11 +19,12 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit.agents.llm import ChatContext
-from livekit.plugins import silero, groq
+from livekit.plugins import groq
 
 # Import custom providers
 from src.providers.funasr_stt_provider import FunASRSTT
 from src.providers.edge_tts_provider import EdgeTTS
+from src.providers.silero_vad_provider import SileroVAD
 
 # Load environment variables
 load_dotenv(".env")
@@ -46,9 +47,16 @@ class SimpleAssistant(Agent):
 
 def prewarm(proc: JobProcess):
     """Prewarm function - load models before accepting jobs"""
-    logger.info("Prewarming agent - loading VAD model...")
-    proc.userdata["vad"] = silero.VAD.load()
-    logger.info("VAD model loaded successfully")
+    logger.info("Prewarming agent - loading Silero VAD 6.2 model with child-optimized settings...")
+    proc.userdata["vad"] = SileroVAD.load(
+        min_speech_duration=0.1,      # 0.1s speech - kids speak in short bursts
+        min_silence_duration=0.6,     # 0.6s silence for faster turn-taking
+        activation_threshold=0.08,    # Ultra-low threshold for quiet kid voices
+        prefix_padding_duration=0.3,  # Capture speech start
+        max_buffered_speech=60.0,     # Maximum speech buffer
+        onnx=False,                   # Use PyTorch for better compatibility
+    )
+    logger.info("Silero VAD 6.2 model loaded with child-optimized settings (threshold=0.08, PyTorch)")
 
 
 async def entrypoint(ctx: JobContext):
@@ -114,8 +122,15 @@ async def entrypoint(ctx: JobContext):
     # Get prewarmed VAD
     vad = ctx.proc.userdata.get("vad")
     if not vad:
-        logger.warning("VAD not prewarmed, loading now...")
-        vad = silero.VAD.load()
+        logger.warning("VAD not prewarmed, loading Silero VAD 6.2 now...")
+        vad = SileroVAD.load(
+            min_speech_duration=0.1,      # 0.1s speech - kids speak in short bursts
+            min_silence_duration=0.6,
+            activation_threshold=0.08,    # Ultra-low threshold for quiet kid voices
+            prefix_padding_duration=0.3,
+            max_buffered_speech=60.0,
+            onnx=False,                   # Use PyTorch for better compatibility
+        )
 
     # Create the assistant
     assistant = SimpleAssistant()
@@ -149,7 +164,7 @@ async def entrypoint(ctx: JobContext):
     await session.start(
         agent=assistant,
         room=ctx.room,
-        room_input_options=RoomInputOptions(),
+        room_input_options=RoomInputOptions(audio_sample_rate=16000),
     )
 
     logger.info("Agent session started successfully!")
