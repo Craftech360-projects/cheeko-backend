@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
+
 from livekit import rtc
 from livekit.agents import stt, utils
 from livekit.agents.types import (
@@ -20,6 +22,45 @@ from livekit.agents.types import (
 from .funasr_ws_client import FunASRConfig, FunASRWebSocketClient, FunASRResponse
 
 logger = logging.getLogger(__name__)
+
+
+def resample_audio(audio_data: bytes, from_rate: int, to_rate: int) -> bytes:
+    """
+    Resample audio from one sample rate to another.
+
+    Args:
+        audio_data: Raw PCM audio bytes (16-bit signed, mono)
+        from_rate: Source sample rate (e.g., 48000)
+        to_rate: Target sample rate (e.g., 16000)
+
+    Returns:
+        Resampled PCM audio bytes
+    """
+    if from_rate == to_rate:
+        return audio_data
+
+    # Convert bytes to numpy array (16-bit signed integers)
+    audio_array = np.frombuffer(audio_data, dtype=np.int16)
+
+    # Calculate the resampling ratio and new length
+    ratio = to_rate / from_rate
+    new_length = int(len(audio_array) * ratio)
+
+    if new_length == 0:
+        return b''
+
+    try:
+        # Try scipy for high-quality resampling
+        from scipy import signal
+        resampled = signal.resample(audio_array, new_length).astype(np.int16)
+        logger.debug(f"Resampled audio from {from_rate}Hz to {to_rate}Hz using scipy ({len(audio_array)} -> {len(resampled)} samples)")
+    except ImportError:
+        # Fallback to linear interpolation
+        indices = np.linspace(0, len(audio_array) - 1, new_length)
+        resampled = np.interp(indices, np.arange(len(audio_array)), audio_array).astype(np.int16)
+        logger.debug(f"Resampled audio from {from_rate}Hz to {to_rate}Hz using linear interp ({len(audio_array)} -> {len(resampled)} samples)")
+
+    return resampled.tobytes()
 
 # Pattern to match SenseVoice special tokens like <|en|>, <|nospeech|>, <|EMO_UNKNOWN|>, etc.
 SENSEVOICE_TOKEN_PATTERN = re.compile(r'<\|[^|]+\|>')
@@ -161,13 +202,41 @@ class FunASRSTT(stt.STT):
 
             # Convert AudioBuffer to bytes
             audio_data = self._audio_buffer_to_bytes(buffer)
+            
+            # Save audio as WAV file for debugging
+            try:
+                import wave
+                import os
+                from datetime import datetime
+                
+                # Create debug directory if it doesn't exist
+                debug_dir = "debug_audio"
+                if not os.path.exists(debug_dir):
+                    os.makedirs(debug_dir)
+                
+                # Generate filename with timestamp
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                wav_filename = os.path.join(debug_dir, f"funasr_audio_{timestamp}.wav")
+                
+                # Save as WAV file (16kHz, 16-bit, mono)
+                with wave.open(wav_filename, 'wb') as wav_file:
+                    wav_file.setnchannels(1)  # Mono
+                    wav_file.setsampwidth(2)  # 16-bit = 2 bytes
+                    wav_file.setframerate(16000)  # 16kHz
+                    wav_file.writeframes(audio_data)
+                
+                logger.info(f"Saved audio to: {wav_filename} ({len(audio_data)} bytes)")
+            except Exception as e:
+                logger.warning(f"Failed to save audio file: {e}")
+            
+            logger.info(f"Sending complete audio buffer to FunASR: {len(audio_data)} bytes")
 
-            # Send audio in chunks (100ms at 16kHz, 16-bit = 3200 bytes)
-            chunk_size = 3200
-            for i in range(0, len(audio_data), chunk_size):
-                chunk = audio_data[i:i + chunk_size]
-                await client.send_audio(chunk)
-                await asyncio.sleep(0.01)  # Small delay between chunks
+            # For offline mode, send entire audio at once for best accuracy
+            # This matches how FunASR processes WAV files
+            await client.send_audio(audio_data)
+            
+            # Small delay to ensure data is sent
+            await asyncio.sleep(0.001)
 
             # Signal end of stream
             await client.end_stream()
@@ -182,6 +251,9 @@ class FunASRSTT(stt.STT):
                 response = await client.get_response(timeout=0.5)
                 if response:
                     cleaned = clean_sensevoice_text(response.text, target_lang)
+                    if not cleaned and response.text:
+                        logger.debug(f"Filtered out non-English/hallucinated text: {response.text}")
+
                     if response.is_final or response.mode == "offline":
                         final_text = cleaned
                         break
@@ -221,46 +293,47 @@ class FunASRSTT(stt.STT):
         )
 
     def _audio_buffer_to_bytes(self, buffer: utils.AudioBuffer) -> bytes:
-        """Convert LiveKit AudioBuffer to raw PCM bytes"""
+        """Convert LiveKit AudioBuffer to raw PCM bytes, resampling if needed"""
+        target_sample_rate = self._opts.sample_rate  # FunASR expects 16kHz
+        audio_bytes = b''
+        source_sample_rate = None
+
         if hasattr(buffer, 'data'):
-            return bytes(buffer.data)
+            # Single frame with data attribute
+            audio_bytes = bytes(buffer.data)
+            source_sample_rate = getattr(buffer, 'sample_rate', target_sample_rate)
         elif isinstance(buffer, (bytes, bytearray)):
-            return bytes(buffer)
+            # Raw bytes - assume target sample rate
+            audio_bytes = bytes(buffer)
+            source_sample_rate = target_sample_rate
         elif hasattr(buffer, '__iter__'):
             # List of frames - merge them
             try:
                 merged = utils.merge_frames(buffer)
-                return bytes(merged.data)
+                audio_bytes = bytes(merged.data)
+                source_sample_rate = getattr(merged, 'sample_rate', target_sample_rate)
             except Exception:
                 # Fallback: concatenate frame data
                 result = b''
                 for frame in buffer:
                     if hasattr(frame, 'data'):
-<<<<<<< HEAD
-                        result += bytes(frame.data)
-=======
                         frame_bytes = bytes(frame.data)
-                        # COMMENTED OUT FOR TESTING
-                        # frame_rate = getattr(frame, 'sample_rate', target_sample_rate)
-                        # if frame_rate != target_sample_rate:
-                        #     frame_bytes = resample_audio(frame_bytes, frame_rate, target_sample_rate)
+                        frame_rate = getattr(frame, 'sample_rate', target_sample_rate)
+                        # Resample individual frames if needed
+                        if frame_rate != target_sample_rate:
+                            frame_bytes = resample_audio(frame_bytes, frame_rate, target_sample_rate)
                         result += frame_bytes
->>>>>>> 028992c3 (fixed and adde roominput option to set inout audio sample rate to 16000)
                 return result
         else:
             raise ValueError(f"Unsupported buffer type: {type(buffer)}")
 
-<<<<<<< HEAD
-=======
-        # COMMENTED OUT FOR TESTING - RoomInputOptions should handle sample rate
-        # Log if there's a mismatch (for debugging)
+        # Resample if source sample rate differs from target
         if source_sample_rate and source_sample_rate != target_sample_rate:
-            logger.warning(f"Sample rate mismatch: buffer={source_sample_rate}Hz, expected={target_sample_rate}Hz (resampling disabled for testing)")
-        #     audio_bytes = resample_audio(audio_bytes, source_sample_rate, target_sample_rate)
+            logger.info(f"Resampling audio buffer from {source_sample_rate}Hz to {target_sample_rate}Hz")
+            audio_bytes = resample_audio(audio_bytes, source_sample_rate, target_sample_rate)
 
         return audio_bytes
 
->>>>>>> 028992c3 (fixed and adde roominput option to set inout audio sample rate to 16000)
 
 class FunASRRecognizeStream(stt.RecognizeStream):
     """
@@ -331,14 +404,15 @@ class FunASRRecognizeStream(stt.RecognizeStream):
 
     async def _process_input(self) -> None:
         """Process incoming audio frames and send to FunASR with proper chunking"""
+        target_sample_rate = self._config.sample_rate  # FunASR expects 16kHz
+        frame_count = 0
+
         try:
             async for frame in self._input_ch:
                 if self._closed:
                     break
 
                 if isinstance(frame, rtc.AudioFrame):
-<<<<<<< HEAD
-=======
                     # Get audio bytes from frame
                     audio_bytes = bytes(frame.data)
                     frame_sample_rate = frame.sample_rate
@@ -348,14 +422,11 @@ class FunASRRecognizeStream(stt.RecognizeStream):
                     if frame_count == 1:
                         logger.info(f"FunASR receiving audio: frame_rate={frame_sample_rate}Hz, target_rate={target_sample_rate}Hz, channels={frame.num_channels}")
 
-                    # COMMENTED OUT FOR TESTING - RoomInputOptions should handle sample rate
                     # Resample if frame sample rate doesn't match FunASR's expected rate
-                    # if frame_sample_rate != target_sample_rate:
-                    #     audio_bytes = resample_audio(audio_bytes, frame_sample_rate, target_sample_rate)
+                    if frame_sample_rate != target_sample_rate:
+                        audio_bytes = resample_audio(audio_bytes, frame_sample_rate, target_sample_rate)
 
->>>>>>> 028992c3 (fixed and adde roominput option to set inout audio sample rate to 16000)
                     # Buffer audio frames
-                    audio_bytes = bytes(frame.data)
                     self._audio_buffer.extend(audio_bytes)
 
                     # Send chunks when buffer has enough data
@@ -407,6 +478,9 @@ class FunASRRecognizeStream(stt.RecognizeStream):
         """Handle a single response from FunASR"""
         # Clean the text (remove SenseVoice special tokens and non-target language chars)
         cleaned_text = clean_sensevoice_text(response.text, self._language)
+
+        if not cleaned_text and response.text:
+            logger.debug(f"Filtered out non-English/hallucinated text: {response.text}")
 
         # Skip if no actual speech content after cleaning
         if not cleaned_text:
