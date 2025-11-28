@@ -31,6 +31,8 @@ services:
       - ./audio:/app/audio:ro
       # Logs directory (read-write)
       - ./logs:/app/logs
+      # Mount app.js for development
+      - ./app.js:/app/app.js
 
     # Connect to the same network as livekit-server
     networks:

@@ -3946,6 +3946,47 @@ class VirtualMQTTConnection {
 
         const functionName = json.function_call?.name;
 
+        // Handle battery status request from mobile app
+        if (functionName === "self_get_battery_status") {
+          console.log(
+            `🔋 [MOBILE-BATTERY] Battery status request from mobile app`
+          );
+
+          if (!this.bridge || !this.bridge.room || !this.bridge.room.localParticipant) {
+            console.error(`❌ [MOBILE-BATTERY] No bridge/room available`);
+            return;
+          }
+
+          try {
+            // Store the request ID so we can match the response
+            const requestId = json.request_id || `battery_req_${Date.now()}`;
+            console.log(`🔋 [MOBILE-BATTERY] Request ID: ${requestId}`);
+
+            // Forward to LiveKit agent to execute check_battery_level
+            const messageString = JSON.stringify({
+              type: "function_call",
+              function_call: {
+                name: "check_battery_level",
+                arguments: {}
+              },
+              source: "mobile_app_battery",
+              timestamp: Date.now(),
+              request_id: requestId,
+            });
+            const messageData = new Uint8Array(Buffer.from(messageString, "utf8"));
+
+            await this.bridge.room.localParticipant.publishData(messageData, {
+              reliable: true,
+            });
+
+            console.log(`✅ [MOBILE-BATTERY] Battery check request sent to agent`);
+          } catch (error) {
+            console.error(`❌ [MOBILE-BATTERY] Failed to request battery status:`, error);
+          }
+
+          return;
+        }
+
         // Handle volume controls directly via MCP (bypass agent for faster response)
         if (functionName === "self_volume_up" || functionName === "self_volume_down") {
           console.log(
@@ -4649,6 +4690,39 @@ class MQTTGateway {
                 bridge.pendingMcpRequests.delete(mcpRequestId);
                 return; // Don't forward to agent, this was handled by gateway logic
               }
+            }
+
+            // Forward to mobile app if it's a battery status response
+            // We can check the result structure or just forward all MCP responses
+            // For now, let's forward all MCP responses to the mobile app so it can filter
+            const appTopic = `app/p2p/${deviceId}`;
+            const result = originalPayload.payload.result;
+            let actualResult = result;
+
+            // If result has content array with text field, extract it
+            if (result && result.content && Array.isArray(result.content) && result.content.length > 0) {
+              const contentItem = result.content[0];
+              if (contentItem.type === "text" && contentItem.text) {
+                actualResult = contentItem.text;
+              }
+            }
+
+            const appMessage = {
+              type: 'mcp_response',
+              requestId: mcpRequestId,
+              result: actualResult,
+              error: originalPayload.payload.error,
+              timestamp: Date.now()
+            };
+
+            if (this.mqttClient && this.mqttClient.connected) {
+              this.mqttClient.publish(appTopic, JSON.stringify(appMessage), (err) => {
+                if (err) {
+                  console.error(`❌ [MCP-RESPONSE] Failed to forward to mobile app:`, err);
+                } else {
+                  console.log(`✅ [MCP-RESPONSE] Forwarded to mobile app: ${appTopic}`);
+                }
+              });
             }
 
             // If no pending promise, forward to LiveKit agent (normal flow)
