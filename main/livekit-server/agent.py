@@ -50,13 +50,13 @@ def prewarm(proc: JobProcess):
     logger.info("Prewarming agent - loading Silero VAD 6.2 model with child-optimized settings...")
     proc.userdata["vad"] = SileroVAD.load(
         min_speech_duration=0.1,      # 0.1s speech - kids speak in short bursts
-        min_silence_duration=0.6,     # 0.6s silence for faster turn-taking
+        min_silence_duration=1.2,     # 1.2s silence - kids pause while thinking
         activation_threshold=0.08,    # Ultra-low threshold for quiet kid voices
         prefix_padding_duration=0.3,  # Capture speech start
         max_buffered_speech=60.0,     # Maximum speech buffer
         onnx=False,                   # Use PyTorch for better compatibility
     )
-    logger.info("Silero VAD 6.2 model loaded with child-optimized settings (threshold=0.08, PyTorch)")
+    logger.info("Silero VAD 6.2 model loaded with child-optimized settings (threshold=0.08, silence=1.2s)")
 
 
 async def entrypoint(ctx: JobContext):
@@ -125,7 +125,7 @@ async def entrypoint(ctx: JobContext):
         logger.warning("VAD not prewarmed, loading Silero VAD 6.2 now...")
         vad = SileroVAD.load(
             min_speech_duration=0.1,      # 0.1s speech - kids speak in short bursts
-            min_silence_duration=0.6,
+            min_silence_duration=1.2,     # 1.2s silence - kids pause while thinking
             activation_threshold=0.08,    # Ultra-low threshold for quiet kid voices
             prefix_padding_duration=0.3,
             max_buffered_speech=60.0,

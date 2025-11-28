@@ -127,8 +127,8 @@ class ConfigLoader:
         return {
             'provider': os.getenv('VAD_PROVIDER', 'silero').lower(),  # silero or ten
             'min_speech_duration': float(os.getenv('VAD_MIN_SPEECH_DURATION', '0.1')),
-            'min_silence_duration': float(os.getenv('VAD_MIN_SILENCE_DURATION', '0.5')),
-            'activation_threshold': float(os.getenv('VAD_ACTIVATION_THRESHOLD', '0.2')),
+            'min_silence_duration': float(os.getenv('VAD_MIN_SILENCE_DURATION', '1.2')),
+            'activation_threshold': float(os.getenv('VAD_ACTIVATION_THRESHOLD', '0.08')),
             'prefix_padding_duration': float(os.getenv('VAD_PREFIX_PADDING_DURATION', '0.3')),
             'max_buffered_speech': float(os.getenv('VAD_MAX_BUFFERED_SPEECH', '60.0')),
             'sample_rate': int(os.getenv('VAD_SAMPLE_RATE', '16000')),
