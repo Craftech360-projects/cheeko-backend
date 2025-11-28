@@ -3475,6 +3475,13 @@ class VirtualMQTTConnection {
       this.roomType = "conversation";
     }
 
+    // Fetch current character for conversation mode
+    this.currentCharacter = null;
+    if (this.roomType === "conversation") {
+      this.currentCharacter = await this.fetchCurrentCharacter(this.deviceId);
+      console.log(`🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`);
+    }
+
     this.udp = {
       ...this.udp,
       key: crypto.randomBytes(16),
@@ -3574,15 +3581,15 @@ class VirtualMQTTConnection {
 
       // Send mode_update to device firmware
       console.log(`📤 [HELLO] Sending mode_update to device...`);
-      this.sendMqttMessage(
-        JSON.stringify({
-          type: "mode_update",
-          mode: this.roomType,
-          session_id: futureSessionId,
-          timestamp: Date.now(),
-        })
-      );
-      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}) to device`);
+      const modeUpdateMsg = {
+        type: "mode_update",
+        mode: this.roomType,
+        ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
+        session_id: futureSessionId,
+        timestamp: Date.now(),
+      };
+      this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
 
       // ADD: Room type-specific initialization
       if (this.roomType === "conversation") {
@@ -3607,31 +3614,31 @@ class VirtualMQTTConnection {
       //   session_id: futureSessionId,
       //   timestamp: Date.now()
       // }));
-      this.sendMqttMessage(
-        JSON.stringify({
-          type: "hello",
-          version: json.version,
-          mode: this.roomType,
-          session_id: this.udp.session_id,
-          timestamp: Date.now(),
-          transport: "udp",
-          udp: {
-            server: this.gateway.publicIp,
-            port: this.gateway.udpPort,
-            encryption: this.udp.encryption,
-            key: this.udp.key.toString("hex"),
-            nonce: this.udp.nonce.toString("hex"),
-            connection_id: this.connectionId,
-            cookie: this.connectionId,
-          },
-          audio_params: {
-            sample_rate: 24000,
-            channels: 1,
-            frame_duration: 60,
-            format: "opus",
-          },
-        })
-      );
+      const helloResponseMsg = {
+        type: "hello",
+        version: json.version,
+        mode: this.roomType,
+        ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
+        session_id: this.udp.session_id,
+        timestamp: Date.now(),
+        transport: "udp",
+        udp: {
+          server: this.gateway.publicIp,
+          port: this.gateway.udpPort,
+          encryption: this.udp.encryption,
+          key: this.udp.key.toString("hex"),
+          nonce: this.udp.nonce.toString("hex"),
+          connection_id: this.connectionId,
+          cookie: this.connectionId,
+        },
+        audio_params: {
+          sample_rate: 24000,
+          channels: 1,
+          frame_duration: 60,
+          format: "opus",
+        },
+      };
+      this.sendMqttMessage(JSON.stringify(helloResponseMsg));
 
       // Send ready_for_greeting (room created, waiting for agent deployment)
       this.sendMqttMessage(
@@ -3680,6 +3687,29 @@ class VirtualMQTTConnection {
         `❌ [PLAYLIST] Failed to fetch ${mode} playlist: ${error.message}`
       );
       return []; // Return empty playlist on error
+    }
+  }
+
+  async fetchCurrentCharacter(macAddress) {
+    try {
+      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
+      const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
+      const apiUrl = `${baseUrl}/agent/device/${cleanMac}/current-character`;
+
+      console.log(`🎭 [CHARACTER] Fetching current character from: ${apiUrl}`);
+      const response = await axios.get(apiUrl, { timeout: 5000 });
+
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const character = response.data.data;
+        console.log(`✅ [CHARACTER] Current character for ${cleanMac}: ${character}`);
+        return character;
+      } else {
+        console.log(`ℹ️ [CHARACTER] No character found, using default: Cheeko`);
+        return "Cheeko";
+      }
+    } catch (error) {
+      console.error(`❌ [CHARACTER] Failed to fetch character: ${error.message}`);
+      return "Cheeko"; // Default fallback
     }
   }
 
@@ -4579,6 +4609,15 @@ class MQTTGateway {
           );
           await this.handlePreviousControl(topic, clientId);
           return;
+        } else if (
+          originalPayload.type === "playback_control" &&
+          originalPayload.action === "start_agent"
+        ) {
+          console.log(
+            `▶️ [PLAYBACK-CONTROL] Start agent action received from topic: ${topic}`
+          );
+          await this.handleStartAgentControl(deviceId, originalPayload, clientId);
+          return;
         }
 
         // Handle specific content playback requests (play_music / play_story)
@@ -5419,6 +5458,96 @@ class MQTTGateway {
     }
   }
 
+  async handleStartAgentControl(deviceId, payload, clientId = null) {
+    try {
+      // Extract session_id which contains room info: uuid_mac_mode
+      const sessionId = payload.session_id;
+      if (!sessionId) {
+        console.warn(`⚠️ [START-AGENT] No session_id in payload`);
+        return;
+      }
+
+      // Parse session_id to get room type (format: uuid_mac_mode)
+      const parts = sessionId.split('_');
+      if (parts.length < 3) {
+        console.warn(`⚠️ [START-AGENT] Invalid session_id format: ${sessionId}`);
+        return;
+      }
+
+      const roomType = parts[parts.length - 1]; // Last part is the mode (music/story/conversation)
+      const roomName = sessionId; // The full session_id is the room name
+
+      console.log(`▶️ [START-AGENT] Processing start_agent for mode: ${roomType}, room: ${roomName}`);
+
+      // Find device info
+      const deviceInfo = this.deviceConnections.get(deviceId);
+      if (!deviceInfo) {
+        console.warn(`⚠️ [START-AGENT] Device not found: ${deviceId}`);
+        return;
+      }
+
+      if (roomType === "music") {
+        // Call Media API to start music playback
+        const apiUrl = `${MEDIA_API_BASE}/music-bot/${roomName}/start`;
+        console.log(`🎵 [START-AGENT] Starting music bot playback: ${apiUrl}`);
+
+        try {
+          const response = await axios.post(apiUrl, {}, mediaAxiosConfig({ timeout: 5000 }));
+          console.log(`✅ [START-AGENT] Music bot started:`, response.data);
+        } catch (error) {
+          console.error(`❌ [START-AGENT] Failed to start music bot:`, error.message);
+          if (error.response) {
+            console.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
+          }
+        }
+
+      } else if (roomType === "story") {
+        // Call Media API to start story playback
+        const apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/start`;
+        console.log(`📖 [START-AGENT] Starting story bot playback: ${apiUrl}`);
+
+        try {
+          const response = await axios.post(apiUrl, {}, mediaAxiosConfig({ timeout: 5000 }));
+          console.log(`✅ [START-AGENT] Story bot started:`, response.data);
+        } catch (error) {
+          console.error(`❌ [START-AGENT] Failed to start story bot:`, error.message);
+          if (error.response) {
+            console.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
+          }
+        }
+
+      } else if (roomType === "conversation") {
+        // Send data channel message to LiveKit agent to trigger greeting
+        console.log(`💬 [START-AGENT] Triggering agent greeting for conversation mode`);
+
+        const connection = deviceInfo.connection;
+        if (connection && connection.bridge && connection.bridge.room && connection.bridge.room.localParticipant) {
+          const greetingMessage = {
+            type: "start_greeting",
+            session_id: sessionId,
+            timestamp: Date.now()
+          };
+          const messageString = JSON.stringify(greetingMessage);
+          const messageData = new TextEncoder().encode(messageString);
+
+          await connection.bridge.room.localParticipant.publishData(messageData, {
+            reliable: true
+          });
+
+          console.log(`✅ [START-AGENT] Greeting trigger sent to LiveKit agent`);
+        } else {
+          console.error(`❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`);
+        }
+
+      } else {
+        console.warn(`⚠️ [START-AGENT] Unknown room type: ${roomType}`);
+      }
+
+    } catch (error) {
+      console.error(`❌ [START-AGENT] Error:`, error.message);
+    }
+  }
+
   async handleSpecificMusicRequest(deviceId, payload, clientId = null) {
     try {
       const macAddress = payload.session_id;
@@ -6214,31 +6343,39 @@ class MQTTGateway {
           `✅ [MODE-CHANGE] New room created and gateway connected: ${newRoomName}`
         );
 
+        // Fetch character for conversation mode
+        let currentCharacter = null;
+        if (newMode === "conversation") {
+          currentCharacter = await connection.fetchCurrentCharacter(macAddress);
+          connection.currentCharacter = currentCharacter;
+          console.log(`🎭 [MODE-CHANGE] Fetched character for conversation: ${currentCharacter}`);
+        }
+
         // Send mode_update to device firmware
         console.log(`📤 [MODE-CHANGE] Sending mode_update to device...`);
-        connection.sendMqttMessage(
-          JSON.stringify({
-            type: "mode_update",
-            mode: newMode,
-            session_id: newRoomName,
-            timestamp: Date.now(),
-            transport: "udp",
-            udp: {
-              server: this.publicIp,
-              port: this.udpPort,
-              encryption: connection.udp.encryption,
-              key: connection.udp.key.toString("hex"),
-              nonce: connection.udp.nonce.toString("hex"),
-            },
-            audio_params: {
-              sample_rate: 24000,
-              channels: 1,
-              frame_duration: 60,
-              format: "opus",
-            },
-          })
-        );
-        console.log(`✅ [MODE-CHANGE] Sent mode_update (${newMode}) to device with UDP details`);
+        const modeUpdateMsg = {
+          type: "mode_update",
+          mode: newMode,
+          ...(newMode === "conversation" && currentCharacter ? { character: currentCharacter } : {}),
+          session_id: newRoomName,
+          timestamp: Date.now(),
+          transport: "udp",
+          udp: {
+            server: this.publicIp,
+            port: this.udpPort,
+            encryption: connection.udp.encryption,
+            key: connection.udp.key.toString("hex"),
+            nonce: connection.udp.nonce.toString("hex"),
+          },
+          audio_params: {
+            sample_rate: 24000,
+            channels: 1,
+            frame_duration: 60,
+            format: "opus",
+          },
+        };
+        connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+        console.log(`✅ [MODE-CHANGE] Sent mode_update (${newMode}${currentCharacter ? ', character: ' + currentCharacter : ''}) to device with UDP details`);
 
         // STEP 4: Handle mode-specific startup
         console.log(`🎬 [MODE-CHANGE] Step 4: Starting ${newMode} flow...`);

@@ -652,6 +652,10 @@ class MusicBot(MediaBot):
         # Analytics service
         self.analytics_service = analytics_service
 
+        # Paused state - bot waits for start_agent signal before streaming
+        self.is_paused = True  # Start in paused state
+        self.start_event = asyncio.Event()  # Event to signal start
+
     async def run(self):
         """Main entry point - connect and stream music with progressive streaming and skip support"""
         connection_retries = 3
@@ -677,6 +681,13 @@ class MusicBot(MediaBot):
             if not connected:
                 logger.error("❌ Failed to connect to room after all retries")
                 return
+
+            # Wait for start signal before streaming (paused state)
+            if self.is_paused:
+                logger.info("⏸️ [MUSIC] Bot connected, waiting for start_agent signal...")
+                await self.start_event.wait()
+                logger.info("▶️ [MUSIC] Start signal received, beginning playback")
+                self.is_paused = False
 
             # Start analytics session
             if self.analytics_service:
@@ -1098,6 +1109,16 @@ class MusicBot(MediaBot):
             self.skip_requested = True
             self.skip_direction = 'previous'
 
+    async def start_playback(self):
+        """Start playback - called when start_agent signal is received"""
+        if self.is_paused:
+            logger.info("▶️ [MUSIC] Start playback requested")
+            self.start_event.set()
+            return {"status": "started", "message": "Music playback started"}
+        else:
+            logger.info("▶️ [MUSIC] Already playing")
+            return {"status": "already_playing", "message": "Music is already playing"}
+
     async def play_specific_content(self, content_info: Dict, loop_enabled: bool = False):
         """
         Play specific content immediately, interrupting current playback.
@@ -1204,6 +1225,10 @@ class StoryBot(MediaBot):
         # Analytics service
         self.analytics_service = analytics_service
 
+        # Paused state - bot waits for start_agent signal before streaming
+        self.is_paused = True  # Start in paused state
+        self.start_event = asyncio.Event()  # Event to signal start
+
     async def run(self):
         """Main entry point - connect and stream story with progressive streaming and skip support"""
         connection_retries = 3
@@ -1229,6 +1254,13 @@ class StoryBot(MediaBot):
             if not connected:
                 logger.error("❌ Failed to connect to room after all retries")
                 return
+
+            # Wait for start signal before streaming (paused state)
+            if self.is_paused:
+                logger.info("⏸️ [STORY] Bot connected, waiting for start_agent signal...")
+                await self.start_event.wait()
+                logger.info("▶️ [STORY] Start signal received, beginning playback")
+                self.is_paused = False
 
             # Start analytics session
             if self.analytics_service:
@@ -1648,6 +1680,16 @@ class StoryBot(MediaBot):
             self.skip_requested = True
             self.skip_direction = 'previous'
 
+    async def start_playback(self):
+        """Start playback - called when start_agent signal is received"""
+        if self.is_paused:
+            logger.info("▶️ [STORY] Start playback requested")
+            self.start_event.set()
+            return {"status": "started", "message": "Story playback started"}
+        else:
+            logger.info("▶️ [STORY] Already playing")
+            return {"status": "already_playing", "message": "Story is already playing"}
+
     async def play_specific_content(self, content_info: Dict, loop_enabled: bool = False):
         """
         Play specific content immediately, interrupting current playback.
@@ -1936,6 +1978,64 @@ async def music_bot_skip_previous(room_name: str):
         raise
     except Exception as e:
         logger.error(f"❌ Error skipping to previous song: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/music-bot/{room_name}/start")
+async def music_bot_start(room_name: str):
+    """Start music playback - triggers the bot to begin streaming after start_agent signal"""
+    try:
+        logger.info(f"▶️ [API] Start music bot request for room: {room_name}")
+
+        if room_name not in active_bots:
+            raise HTTPException(status_code=404, detail=f"Music bot not found in room: {room_name}")
+
+        bot = active_bots[room_name]
+
+        if not isinstance(bot, MusicBot):
+            raise HTTPException(status_code=400, detail=f"Bot in room {room_name} is not a music bot")
+
+        result = await bot.start_playback()
+
+        return {
+            "status": result["status"],
+            "message": result["message"],
+            "room_name": room_name
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error starting music bot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/story-bot/{room_name}/start")
+async def story_bot_start(room_name: str):
+    """Start story playback - triggers the bot to begin streaming after start_agent signal"""
+    try:
+        logger.info(f"▶️ [API] Start story bot request for room: {room_name}")
+
+        if room_name not in active_bots:
+            raise HTTPException(status_code=404, detail=f"Story bot not found in room: {room_name}")
+
+        bot = active_bots[room_name]
+
+        if not isinstance(bot, StoryBot):
+            raise HTTPException(status_code=400, detail=f"Bot in room {room_name} is not a story bot")
+
+        result = await bot.start_playback()
+
+        return {
+            "status": result["status"],
+            "message": result["message"],
+            "room_name": room_name
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error starting story bot: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

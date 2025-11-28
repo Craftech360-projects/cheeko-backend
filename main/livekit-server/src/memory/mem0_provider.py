@@ -82,7 +82,7 @@ class Mem0MemoryProvider:
             logger.info(f"💭 Querying mem0 - user_id: {self.role_id}, query: '{query[:50]}...'")
             results = self.client.search(
                 query,
-                user_id=self.role_id,
+                filters={"user_id": self.role_id},
                 output_format="v1.1"
             )
 
