@@ -100,6 +100,72 @@ class DatabaseHelper:
         logger.error(f"Failed to get agent_id after {self.retry_attempts} attempts for MAC: {device_mac} (normalized: {normalized_mac})")
         return None
 
+    async def get_current_character(self, device_mac: str) -> Optional[str]:
+        """
+        Get current character/mode name from database using device MAC address
+
+        Args:
+            device_mac: Device MAC address
+
+        Returns:
+            str: Character name (e.g., "Cheeko", "Math", "Story", etc.) if found, "Conversation" as default
+        """
+        # Normalize MAC address
+        normalized_mac = self._normalize_mac_address(device_mac)
+        logger.info(f"🔍 [DB HELPER] get_current_character - MAC: {device_mac} -> normalized: {normalized_mac}")
+
+        url = f"{self.manager_api_url}/agent/device/{normalized_mac}/current-character"
+        headers = {
+            "Authorization": f"Bearer {self.secret}",
+            "Content-Type": "application/json"
+        }
+
+        for attempt in range(self.retry_attempts):
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            # Check for Result<String> format: {code: 0, data: "character_name"}
+                            if isinstance(data, dict) and data.get('code') == 0:
+                                character_name = data.get('data')
+                                if character_name:
+                                    logger.info(f"✅ [DB HELPER] Current character: {character_name}")
+                                    return character_name
+                                else:
+                                    logger.warning(f"⚠️ [DB HELPER] API returned success but no character name")
+                                    return "Conversation"  # Default
+                            else:
+                                logger.warning(f"⚠️ [DB HELPER] Unexpected API response format: {data}")
+                                return "Conversation"  # Default
+                        elif response.status == 404:
+                            logger.warning(f"No agent found for MAC: {device_mac}, using default Conversation mode")
+                            return "Conversation"
+                        else:
+                            error_text = await response.text()
+                            logger.warning(f"API request failed: {response.status} - {error_text}")
+
+                            # Don't retry client errors (4xx)
+                            if 400 <= response.status < 500:
+                                logger.error(f"Client error, not retrying: {response.status}")
+                                return "Conversation"  # Default
+
+            except asyncio.TimeoutError:
+                logger.warning(f"API request timeout (attempt {attempt + 1}/{self.retry_attempts})")
+            except aiohttp.ClientError as e:
+                logger.warning(f"API client error (attempt {attempt + 1}/{self.retry_attempts}): {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error getting character (attempt {attempt + 1}/{self.retry_attempts}): {e}")
+
+            # Wait before retry with exponential backoff
+            if attempt < self.retry_attempts - 1:
+                wait_time = 2 ** attempt  # 1s, 2s, 4s
+                await asyncio.sleep(wait_time)
+
+        logger.error(f"Failed to get character after {self.retry_attempts} attempts, using default Conversation")
+        return "Conversation"  # Default fallback
+
     async def get_child_profile_by_mac(self, device_mac: str) -> Optional[dict]:
         """
         Get child profile assigned to device by MAC address

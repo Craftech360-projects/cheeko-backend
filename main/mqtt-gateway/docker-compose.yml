@@ -1,0 +1,51 @@
+services:
+  mqtt-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mqtt-gateway
+    restart: unless-stopped
+
+    # Use host network mode for UDP compatibility
+    # This allows the container to use the host's network stack directly
+    # network_mode: host
+
+    ports:
+      - "8884:8884/udp"
+
+    # Environment variables from .env file
+    env_file:
+      - .env
+
+    # Additional environment variables
+    environment:
+      NODE_ENV: production
+      # Override LiveKit URL to use container name
+      LIVEKIT_URL: ws://livekit-server:7880
+
+    # Mount volumes
+    volumes:
+      # Configuration files (read-only)
+      - ./config:/app/config:ro
+      # Audio files for mode changes (read-only)
+      - ./audio:/app/audio:ro
+      # Logs directory (read-write)
+      - ./logs:/app/logs
+
+    # Connect to the same network as livekit-server
+    networks:
+      - manager-api_manager-api-network
+
+    # Resource limits (optional, adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+networks:
+  manager-api_manager-api-network:
+    external: true

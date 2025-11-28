@@ -54,7 +54,7 @@
                 style="width: 150px; height: 40px; cursor: pointer;" @click="fetchCaptcha" />
             </div>
             <div
-              style="font-weight: 400;font-size: 14px;text-align: left;color: #5778ff;display: flex;justify-content: space-between;margin-top: 20px;">
+              style="font-weight: 400;font-size: 14px;text-align: left;color: var(--primary);display: flex;justify-content: space-between;margin-top: 20px;">
               <div v-if="allowUserRegister" style="cursor: pointer;" @click="goToRegister">New User Registration</div>
               <div style="cursor: pointer;" @click="goToForgetPassword" v-if="enableMobileRegister">Forgot Password?</div>
             </div>
@@ -75,9 +75,9 @@
 
           <div style="font-size: 14px;color: #979db1;">
             By logging in, you agree to
-            <div style="display: inline-block;color: #5778FF;cursor: pointer;">User Agreement</div>
+            <div style="display: inline-block;color: var(--primary);cursor: pointer;">User Agreement</div>
             and
-            <div style="display: inline-block;color: #5778FF;cursor: pointer;">Privacy Policy</div>
+            <div style="display: inline-block;color: var(--primary);cursor: pointer;">Privacy Policy</div>
           </div>
         </div>
       </el-main>
@@ -229,18 +229,18 @@ export default {
 }
 
 :deep(.el-button--primary) {
-  background-color: #5778ff;
-  border-color: #5778ff;
+  background-color: $primary;
+  border-color: $primary;
 
   &:hover,
   &:focus {
-    background-color: #4a6ae8;
-    border-color: #4a6ae8;
+    background-color: $primary-dark;
+    border-color: $primary-dark;
   }
 
   &:active {
-    background-color: #3d5cd6;
-    border-color: #3d5cd6;
+    background-color: darken($primary-dark, 5%);
+    border-color: darken($primary-dark, 5%);
   }
 }
 </style>

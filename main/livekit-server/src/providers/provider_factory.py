@@ -1,7 +1,7 @@
 import livekit.plugins.groq as groq
 import livekit.plugins.elevenlabs as elevenlabs
 import livekit.plugins.deepgram as deepgram
-from livekit.plugins import openai, silero
+from livekit.plugins import openai, silero, inworld
 from livekit.agents import stt, llm, tts
 
 # Import our custom providers
@@ -119,6 +119,13 @@ class ProviderFactory:
                     voice_id=tts_config['elevenlabs_voice_id'],
                     model=tts_config['elevenlabs_model']
                 ))
+            elif primary_provider == 'inworld':
+                import os
+                providers.append(inworld.TTS(
+                    model=tts_config.get('inworld_model', 'inworld-tts-1-max'),
+                    voice=tts_config.get('inworld_voice', 'default-1ynela7pez7baf70bwa69q__cheekotest'),
+                    api_key=os.getenv("INWORLD_API_KEY")
+                ))
             else:
                 # Primary Groq TTS - use tts_config if available
                 model = tts_config.get('model', groq_config['tts_model'])
@@ -163,6 +170,13 @@ class ProviderFactory:
                     pitch=tts_config.get('edge_pitch', '+0Hz'),
                     sample_rate=tts_config.get('edge_sample_rate', 24000),
                     channels=tts_config.get('edge_channels', 1)
+                )
+            elif provider == 'inworld':
+                import os
+                return inworld.TTS(
+                    model=tts_config.get('inworld_model', 'inworld-tts-1-max'),
+                    voice=tts_config.get('inworld_voice', 'default-1ynela7pez7baf70bwa69q__cheekotest'),
+                    api_key=os.getenv("INWORLD_API_KEY")
                 )
             else:
                 # Default to Groq - use tts_config if available, otherwise fall back to groq_config

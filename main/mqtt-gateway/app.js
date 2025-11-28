@@ -403,7 +403,7 @@ class PerformanceMonitor {
       currentCpuUsage:
         this.metrics.cpuUsage.length > 0
           ? this.metrics.cpuUsage[this.metrics.cpuUsage.length - 1].toFixed(2) +
-            "%"
+          "%"
           : "0%",
 
       // Memory metrics
@@ -470,7 +470,7 @@ class PerformanceMonitor {
 // ========================================
 const { Worker } = require("worker_threads");
 const path = require("path");
-const { Session } = require("inspector/promises");
+// const { Session } = require("inspector/promises");
 
 /**
  * Worker Pool Manager for parallel audio processing
@@ -924,8 +924,7 @@ class WorkerPoolManager {
       );
 
       console.log(
-        `✅ [AUTO-SCALE] New workers initialized (${startIndex}-${
-          endIndex - 1
+        `✅ [AUTO-SCALE] New workers initialized (${startIndex}-${endIndex - 1
         })`
       );
     } catch (error) {
@@ -993,6 +992,13 @@ class LiveKitBridge extends Emitter {
     // MCP request tracking for async responses
     this.pendingMcpRequests = new Map();
     this.mcpRequestCounter = 1;
+
+    // Volume adjustment queue for request serialization
+    this.volumeAdjustmentQueue = [];
+    this.isAdjustingVolume = false;
+    this.lastKnownVolume = null; // Optimistic volume tracking
+    this.volumeDebounceTimer = null; // Debounce timer for volume changes
+    this.pendingVolumeAction = null; // Accumulator for debounced volume actions
 
     // Initialize audio resampler for 48kHz -> 24kHz conversion (outgoing: LiveKit -> ESP32)
     this.audioResampler = new AudioResampler(
@@ -1360,8 +1366,7 @@ class LiveKitBridge extends Emitter {
         const roomConnectedTime = Date.now();
         console.log(`✅ [ROOM] Connected to LiveKit room: ${roomName}`);
         console.log(
-          `⏱️ [TIMING-ROOM] Room connection took ${
-            roomConnectedTime - connectStartTime
+          `⏱️ [TIMING-ROOM] Room connection took ${roomConnectedTime - connectStartTime
           }ms`
         );
         console.log(`🔗 [CONNECTION] State: ${this.room.connectionState}`);
@@ -1476,8 +1481,7 @@ class LiveKitBridge extends Emitter {
                       // Notify connection that audio stream has ended
                       if (this.connection && this.connection.isEnding) {
                         console.log(
-                          `✅ [END-COMPLETE] Audio stream completed, closing connection: ${
-                            this.connection.clientId || this.connection.deviceId
+                          `✅ [END-COMPLETE] Audio stream completed, closing connection: ${this.connection.clientId || this.connection.deviceId
                           }`
                         );
                         // Use setTimeout to allow TTS stop message to be sent first
@@ -1524,16 +1528,16 @@ class LiveKitBridge extends Emitter {
                           continue;
                         }
 
-                      // Append to frame buffer
-                      this.frameBuffer = Buffer.concat([
-                        this.frameBuffer,
-                        resampledBuffer,
-                      ]);
-                      totalBytes += resampledBuffer.length;
-                    }
+                        // Append to frame buffer
+                        this.frameBuffer = Buffer.concat([
+                          this.frameBuffer,
+                          resampledBuffer,
+                        ]);
+                        totalBytes += resampledBuffer.length;
+                      }
 
-                    const timestamp =
-                      (Date.now() - this.connection.udp.startTime) & 0xffffffff;
+                      const timestamp =
+                        (Date.now() - this.connection.udp.startTime) & 0xffffffff;
 
                       // Process any complete frames from the buffer
                       this.processBufferedFrames(timestamp, frameCount, participant.identity);
@@ -1569,8 +1573,7 @@ class LiveKitBridge extends Emitter {
               readStream();
             } else {
               console.log(
-                `⚠️ [TRACK] Non-audio track subscribed: ${
-                  track.kind
+                `⚠️ [TRACK] Non-audio track subscribed: ${track.kind
                 } (type: ${typeof track.kind}) from ${participant.identity}`
               );
             }
@@ -1645,13 +1648,11 @@ class LiveKitBridge extends Emitter {
         );
         const trackPublishedTime = Date.now();
         console.log(
-          `🎤 [PUBLISH] Published local audio track: ${
-            publication.trackSid || publication.sid
+          `🎤 [PUBLISH] Published local audio track: ${publication.trackSid || publication.sid
           }`
         );
         console.log(
-          `⏱️ [TIMING-TRACK] Track publish took ${
-            trackPublishedTime - roomConnectedTime
+          `⏱️ [TIMING-TRACK] Track publish took ${trackPublishedTime - roomConnectedTime
           }ms`
         );
 
@@ -1818,8 +1819,7 @@ class LiveKitBridge extends Emitter {
       `   🎼 Opus signature: ${isOpus ? "✅ DETECTED" : "❌ NOT FOUND"}`
     );
     console.log(
-      `   🎤 PCM characteristics: ${
-        isPCM ? "✅ LIKELY PCM" : "❌ UNLIKELY PCM"
+      `   🎤 PCM characteristics: ${isPCM ? "✅ LIKELY PCM" : "❌ UNLIKELY PCM"
       }`
     );
 
@@ -2227,7 +2227,7 @@ class LiveKitBridge extends Emitter {
         const action = functionCall.name === "self_volume_up" ? "up" : "down";
         const step = functionCall.arguments?.step || 10;
 
-        const newVolume = await this.adjustVolume(action, step);
+        const newVolume = await this.debouncedAdjustVolume(action, step, 300);
         console.log(`✅ [VOICE-MCP] Volume adjusted successfully to ${newVolume}`);
       } catch (error) {
         console.error(`❌ [VOICE-MCP] Failed to adjust volume:`, error);
@@ -2279,8 +2279,7 @@ class LiveKitBridge extends Emitter {
     };
 
     console.log(
-      `🔧 [MCP] Sending to device: ${
-        this.macAddress
+      `🔧 [MCP] Sending to device: ${this.macAddress
       } - Tool: ${mcpToolName}, Args: ${JSON.stringify(functionCall.arguments)}`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2397,8 +2396,7 @@ class LiveKitBridge extends Emitter {
     };
 
     console.log(
-      `📤 [MCP] Sending MCP tool call to device: ${
-        this.macAddress
+      `📤 [MCP] Sending MCP tool call to device: ${this.macAddress
       } - Tool: ${toolName}, Args: ${JSON.stringify(toolArgs)}`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2518,8 +2516,7 @@ class LiveKitBridge extends Emitter {
       this.room.localParticipant.publishData(messageData, { reliable: true });
 
       console.log(
-        `🔧 [FUNCTION RESPONSE] Simulated response: Function ${
-          functionCall.name
+        `🔧 [FUNCTION RESPONSE] Simulated response: Function ${functionCall.name
         }, Success: ${success}, Result: ${JSON.stringify(result)}`
       );
     } catch (error) {
@@ -2620,26 +2617,113 @@ class LiveKitBridge extends Emitter {
     });
   }
 
-  // Adjust volume by increment/decrement (uses get + set)
-  async adjustVolume(action, step = 10) {
-    try {
-      console.log(`🔊 [VOLUME-ADJUST] Getting current volume...`);
-
-      // Step 1: Get current device status
-      const statusResult = await this.sendMcpAndWait("self.get_device_status", {});
-
-      // Parse the result (it's a JSON string)
-      let deviceStatus;
-      if (typeof statusResult === "string") {
-        deviceStatus = JSON.parse(statusResult);
-      } else {
-        deviceStatus = statusResult;
+  // Debounced volume adjustment - accumulates rapid presses and executes after delay
+  debouncedAdjustVolume(action, step = 10, debounceMs = 300) {
+    return new Promise((resolve, reject) => {
+      // Clear existing debounce timer
+      if (this.volumeDebounceTimer) {
+        clearTimeout(this.volumeDebounceTimer);
+        console.log(`🔄 [VOLUME-DEBOUNCE] Cancelled previous timer, accumulating...`);
       }
 
-      const currentVolume = deviceStatus?.audio_speaker?.volume || 50;
-      console.log(`📊 [VOLUME-ADJUST] Current volume: ${currentVolume}`);
+      // Accumulate steps if same action
+      if (this.pendingVolumeAction && this.pendingVolumeAction.action === action) {
+        this.pendingVolumeAction.step += step;
+        this.pendingVolumeAction.resolvers.push(resolve);
+        console.log(
+          `📊 [VOLUME-DEBOUNCE] Accumulated ${action} (total step: ${this.pendingVolumeAction.step})`
+        );
+      } else {
+        // New action - reset accumulator
+        this.pendingVolumeAction = {
+          action,
+          step,
+          resolvers: [resolve],
+        };
+        console.log(`🆕 [VOLUME-DEBOUNCE] New action: ${action} (step: ${step})`);
+      }
 
-      // Step 2: Calculate new volume
+      // Set new debounce timer
+      this.volumeDebounceTimer = setTimeout(async () => {
+        const { action: finalAction, step: finalStep, resolvers } = this.pendingVolumeAction;
+        this.pendingVolumeAction = null;
+        this.volumeDebounceTimer = null;
+
+        console.log(
+          `⏰ [VOLUME-DEBOUNCE] Executing accumulated ${finalAction} (total step: ${finalStep})`
+        );
+
+        try {
+          const result = await this.adjustVolume(finalAction, finalStep);
+          resolvers.forEach((r) => r(result));
+        } catch (error) {
+          resolvers.forEach((r) => r(null));
+        }
+      }, debounceMs);
+    });
+  }
+
+  // Adjust volume by increment/decrement (uses get + set) - WITH QUEUE SERIALIZATION
+  async adjustVolume(action, step = 10) {
+    return new Promise((resolve, reject) => {
+      // Add request to queue
+      this.volumeAdjustmentQueue.push({ action, step, resolve, reject });
+      console.log(`📥 [VOLUME-QUEUE] Added request to queue (size: ${this.volumeAdjustmentQueue.length})`);
+
+      // Process queue if not already processing
+      this.processVolumeQueue();
+    });
+  }
+
+  // Process volume adjustment queue (one at a time)
+  async processVolumeQueue() {
+    // If already processing, return (serialization)
+    if (this.isAdjustingVolume) {
+      console.log(`⏳ [VOLUME-QUEUE] Already processing, waiting...`);
+      return;
+    }
+
+    // If queue is empty, nothing to do
+    if (this.volumeAdjustmentQueue.length === 0) {
+      return;
+    }
+
+    // Mark as processing
+    this.isAdjustingVolume = true;
+
+    // Get next request from queue
+    const request = this.volumeAdjustmentQueue.shift();
+    const { action, step, resolve, reject } = request;
+
+    console.log(
+      `🔄 [VOLUME-QUEUE] Processing request (${action}, step=${step}), ${this.volumeAdjustmentQueue.length} remaining`
+    );
+
+    try {
+      let currentVolume;
+
+      // Use optimistic volume tracking (avoid expensive get_device_status call)
+      if (this.lastKnownVolume !== null) {
+        currentVolume = this.lastKnownVolume;
+        console.log(`📊 [VOLUME-OPTIMISTIC] Using cached volume: ${currentVolume}`);
+      } else {
+        // First time or after error - query device
+        console.log(`🔊 [VOLUME-QUERY] Querying device for current volume...`);
+        const statusResult = await this.sendMcpAndWait("self.get_device_status", {}, 3000);
+
+        let deviceStatus;
+        if (typeof statusResult === "string") {
+          deviceStatus = JSON.parse(statusResult);
+        } else {
+          deviceStatus = statusResult;
+        }
+
+        currentVolume = deviceStatus?.audio_speaker?.volume || 50;
+        this.lastKnownVolume = currentVolume;
+        console.log(`📊 [VOLUME-QUERY] Device volume: ${currentVolume}`);
+      }
+
+      // Calculate new volume
       let newVolume;
       if (action === "up") {
         newVolume = Math.min(100, currentVolume + step);
@@ -2651,14 +2735,31 @@ class LiveKitBridge extends Emitter {
         `🔧 [VOLUME-ADJUST] Calculating new volume: ${currentVolume} ${action === "up" ? "+" : "-"} ${step} = ${newVolume}`
       );
 
-      // Step 3: Set new volume
-      await this.sendMcpAndWait("self.audio_speaker.set_volume", { volume: newVolume });
+      // Set new volume (reduced timeout for faster failure detection)
+      await this.sendMcpAndWait("self.audio_speaker.set_volume", { volume: newVolume }, 3000);
+
+      // Update cached volume
+      this.lastKnownVolume = newVolume;
 
       console.log(`✅ [VOLUME-ADJUST] Volume adjusted successfully: ${currentVolume} → ${newVolume}`);
-      return newVolume;
+      resolve(newVolume);
     } catch (error) {
-      console.error(`❌ [VOLUME-ADJUST] Error adjusting volume:`, error);
-      throw error;
+      console.warn(`⚠️ [VOLUME-ADJUST] Error adjusting volume (non-critical):`, error.message);
+
+      // Reset cached volume on error to force re-query next time
+      this.lastKnownVolume = null;
+
+      // Don't propagate error - graceful degradation
+      resolve(null);
+    } finally {
+      // Mark as not processing
+      this.isAdjustingVolume = false;
+
+      // Process next request in queue (if any)
+      if (this.volumeAdjustmentQueue.length > 0) {
+        console.log(`🔄 [VOLUME-QUEUE] Processing next request in queue...`);
+        setImmediate(() => this.processVolumeQueue());
+      }
     }
   }
 
@@ -3001,8 +3102,7 @@ class LiveKitBridge extends Emitter {
           const roomCreationTime = Number(room.creationTime);
           const roomAge = now - roomCreationTime;
           console.log(
-            `   - Deleting room: ${room.name} (${
-              room.numParticipants
+            `   - Deleting room: ${room.name} (${room.numParticipants
             } participants, age: ${roomAge.toFixed(0)}s)`
           );
           try {
@@ -3138,7 +3238,7 @@ class VirtualMQTTConnection {
 
     // Allow timer reset for certain message types even during ending
     const allowedDuringEnding = ['playback_control', 'playing', 'status'];
-    
+
     if (this.isEnding && (!messageType || !allowedDuringEnding.includes(messageType))) {
       console.log(
         `� [[ENDING-IGNORE] Activity during goodbye sequence ignored for virtual device: ${this.deviceId}`
@@ -3166,7 +3266,7 @@ class VirtualMQTTConnection {
     console.log(
       `📨 [ACTIVITY] MQTT message received from virtual device ${this.deviceId}, resetting inactivity timer`
     );
-    
+
     // Parse message to get type before updating activity
     let messageType = null;
     try {
@@ -3175,7 +3275,7 @@ class VirtualMQTTConnection {
     } catch (error) {
       console.log(`⚠️ [PARSE] Could not parse message type for timer reset: ${error.message}`);
     }
-    
+
     this.updateActivityTime(messageType);
 
     try {
@@ -3281,7 +3381,7 @@ class VirtualMQTTConnection {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
       console.log(
-        `⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`
+        //`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`
       );
       return;
     }
@@ -3319,10 +3419,9 @@ class VirtualMQTTConnection {
       `🔍 [PARSE-HELLO] Starting parseHelloMessage for ${this.deviceId}`
     );
     console.log(
-      `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${
-        this.udp.remoteAddress
-          ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-          : "null"
+      `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${this.udp.remoteAddress
+        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
+        : "null"
       }`
     );
     console.log(
@@ -3364,8 +3463,7 @@ class VirtualMQTTConnection {
     // Extract language from hello message
     this.language = json.language || null;
     console.log(
-      `📱 [ROOM-TYPE] Final room type: ${this.roomType}, language: ${
-        this.language || "N/A"
+      `📱 [ROOM-TYPE] Final room type: ${this.roomType}, language: ${this.language || "N/A"
       }`
     );
 
@@ -3387,10 +3485,9 @@ class VirtualMQTTConnection {
       startTime: Date.now(),
     };
     console.log(
-      `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${
-        this.udp.remoteAddress
-          ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-          : "null"
+      `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${this.udp.remoteAddress
+        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
+        : "null"
       }`
     );
 
@@ -3524,6 +3621,8 @@ class VirtualMQTTConnection {
             encryption: this.udp.encryption,
             key: this.udp.key.toString("hex"),
             nonce: this.udp.nonce.toString("hex"),
+            connection_id: this.connectionId,
+            cookie: this.connectionId,
           },
           audio_params: {
             sample_rate: 24000,
@@ -3627,129 +3726,128 @@ class VirtualMQTTConnection {
   //   }
   // }
   async spawnMusicBot(roomName, playlist = null) {
-  try {
-    console.log(
-      `🎵 [MUSIC-BOT] Calling Python API to spawn music bot for room: ${roomName}`
-    );
-
-    // If no playlist provided, fetch it
-    if (!playlist) {
-      playlist = await this.fetchPlaylist("music");
-    }
-
-    const url = `${MEDIA_API_BASE}/start-music-bot`;
-
-    const response = await axios.post(
-      url,
-      {
-        room_name: roomName,
-        device_mac: this.macAddress,
-        language: this.language,
-        playlist: playlist, // Pass playlist to bot
-      },
-      mediaAxiosConfig()
-    );
-
-    if (response.data && response.data.status === "started") {
+    try {
       console.log(
-        `✅ [MUSIC-BOT] Music bot spawned successfully for room: ${roomName}`
-      );
-      console.log(
-        `🎵 [MUSIC-BOT] Language: ${
-          response.data.language
-        }, Playlist items: ${playlist?.length || 0}`
+        `🎵 [MUSIC-BOT] Calling Python API to spawn music bot for room: ${roomName}`
       );
 
-      // Store room info for control messages
-      const deviceInfo = this.gateway.deviceConnections.get(this.macAddress);
-      if (deviceInfo) {
-        deviceInfo.currentRoomName = roomName;
-        deviceInfo.currentMode = "music";
+      // If no playlist provided, fetch it
+      if (!playlist) {
+        playlist = await this.fetchPlaylist("music");
+      }
+
+      const url = `${MEDIA_API_BASE}/start-music-bot`;
+
+      const response = await axios.post(
+        url,
+        {
+          room_name: roomName,
+          device_mac: this.macAddress,
+          language: this.language,
+          playlist: playlist, // Pass playlist to bot
+        },
+        mediaAxiosConfig()
+      );
+
+      if (response.data && response.data.status === "started") {
         console.log(
-          `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
+          `✅ [MUSIC-BOT] Music bot spawned successfully for room: ${roomName}`
+        );
+        console.log(
+          `🎵 [MUSIC-BOT] Language: ${response.data.language
+          }, Playlist items: ${playlist?.length || 0}`
+        );
+
+        // Store room info for control messages
+        const deviceInfo = this.gateway.deviceConnections.get(this.macAddress);
+        if (deviceInfo) {
+          deviceInfo.currentRoomName = roomName;
+          deviceInfo.currentMode = "music";
+          console.log(
+            `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
+          );
+        }
+      } else if (response.data && response.data.status === "already_active") {
+        console.log(
+          `ℹ️ [MUSIC-BOT] Music bot already active for room: ${roomName}`
+        );
+      } else {
+        console.log(
+          `⚠️ [MUSIC-BOT] Unexpected response from Media API:`,
+          response.data
         );
       }
-    } else if (response.data && response.data.status === "already_active") {
-      console.log(
-        `ℹ️ [MUSIC-BOT] Music bot already active for room: ${roomName}`
+    } catch (error) {
+      console.error(
+        `❌ [MUSIC-BOT] Failed to spawn music bot: ${error.message}`
       );
-    } else {
-      console.log(
-        `⚠️ [MUSIC-BOT] Unexpected response from Media API:`,
-        response.data
-      );
+      if (error.response) {
+        console.error(`❌ [MUSIC-BOT] API response:`, error.response.data);
+      }
+      // Don't throw - let the connection continue even if bot spawn fails
     }
-  } catch (error) {
-    console.error(
-      `❌ [MUSIC-BOT] Failed to spawn music bot: ${error.message}`
-    );
-    if (error.response) {
-      console.error(`❌ [MUSIC-BOT] API response:`, error.response.data);
-    }
-    // Don't throw - let the connection continue even if bot spawn fails
   }
-}
 
-async spawnStoryBot(roomName, playlist = null) {
-  try {
-    console.log(
-      `📖 [STORY-BOT] Calling Python API to spawn story bot for room: ${roomName}`
-    );
-
-    // If no playlist provided, fetch it
-    if (!playlist) {
-      playlist = await this.fetchPlaylist("story");
-    }
-
-    const url = `${MEDIA_API_BASE}/start-story-bot`;
-
-    const response = await axios.post(
-      url,
-      {
-        room_name: roomName,
-        device_mac: this.macAddress,
-        age_group: this.userData?.ageGroup || null,
-        playlist: playlist,
-      },
-      mediaAxiosConfig()
-    );
-
-    if (response.data && response.data.status === "started") {
+  async spawnStoryBot(roomName, playlist = null) {
+    try {
       console.log(
-        `✅ [STORY-BOT] Story bot spawned successfully for room: ${roomName}`
-      );
-      console.log(
-        `📖 [STORY-BOT] Playlist items: ${playlist?.length || 0}`
+        `📖 [STORY-BOT] Calling Python API to spawn story bot for room: ${roomName}`
       );
 
-      const deviceInfo = this.gateway.deviceConnections.get(this.macAddress);
-      if (deviceInfo) {
-        deviceInfo.currentRoomName = roomName;
-        deviceInfo.currentMode = "story";
+      // If no playlist provided, fetch it
+      if (!playlist) {
+        playlist = await this.fetchPlaylist("story");
+      }
+
+      const url = `${MEDIA_API_BASE}/start-story-bot`;
+
+      const response = await axios.post(
+        url,
+        {
+          room_name: roomName,
+          device_mac: this.macAddress,
+          age_group: this.userData?.ageGroup || null,
+          playlist: playlist,
+        },
+        mediaAxiosConfig()
+      );
+
+      if (response.data && response.data.status === "started") {
         console.log(
-          `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: story`
+          `✅ [STORY-BOT] Story bot spawned successfully for room: ${roomName}`
+        );
+        console.log(
+          `📖 [STORY-BOT] Playlist items: ${playlist?.length || 0}`
+        );
+
+        const deviceInfo = this.gateway.deviceConnections.get(this.macAddress);
+        if (deviceInfo) {
+          deviceInfo.currentRoomName = roomName;
+          deviceInfo.currentMode = "story";
+          console.log(
+            `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: story`
+          );
+        }
+      } else if (response.data && response.data.status === "already_active") {
+        console.log(
+          `ℹ️ [STORY-BOT] Story bot already active for room: ${roomName}`
+        );
+      } else {
+        console.log(
+          `⚠️ [STORY-BOT] Unexpected response from Media API:`,
+          response.data
         );
       }
-    } else if (response.data && response.data.status === "already_active") {
-      console.log(
-        `ℹ️ [STORY-BOT] Story bot already active for room: ${roomName}`
+    } catch (error) {
+      console.error(
+        `❌ [STORY-BOT] Failed to spawn story bot: ${error.message}`
       );
-    } else {
-      console.log(
-        `⚠️ [STORY-BOT] Unexpected response from Media API:`,
-        response.data
-      );
+      if (error.response) {
+        console.error(`❌ [STORY-BOT] API response:`, error.response.data);
+      }
+      // Don't throw - let the connection continue even if bot spawn fails
     }
-  } catch (error) {
-    console.error(
-      `❌ [STORY-BOT] Failed to spawn story bot: ${error.message}`
-    );
-    if (error.response) {
-      console.error(`❌ [STORY-BOT] API response:`, error.response.data);
-    }
-    // Don't throw - let the connection continue even if bot spawn fails
   }
-}
 
 
   async parseOtherMessage(json) {
@@ -3863,7 +3961,7 @@ async spawnStoryBot(roomName, playlist = null) {
             const action = functionName === "self_volume_up" ? "up" : "down";
             const step = json.function_call.arguments?.step || 10;
 
-            const newVolume = await this.bridge.adjustVolume(action, step);
+            const newVolume = await this.bridge.debouncedAdjustVolume(action, step, 300);
             console.log(`✅ [MOBILE-MCP] Volume adjusted successfully to ${newVolume}`);
           } catch (error) {
             console.error(`❌ [MOBILE-MCP] Failed to adjust volume:`, error);
@@ -4055,8 +4153,7 @@ async spawnStoryBot(roomName, playlist = null) {
 
       if (timeSinceEndPrompt > maxEndWaitTime) {
         console.log(
-          `🕒 [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${
-            this.deviceId
+          `🕒 [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${this.deviceId
           } (waited ${Math.round(timeSinceEndPrompt / 1000)}s)`
         );
 
@@ -4112,8 +4209,7 @@ async spawnStoryBot(roomName, playlist = null) {
         this.isEnding = true;
         this.endPromptSentTime = now;
         console.log(
-          `👋 [END-PROMPT] Sending goodbye message before timeout: ${
-            this.deviceId
+          `👋 [END-PROMPT] Sending goodbye message before timeout: ${this.deviceId
           } (inactive for ${Math.round(
             timeSinceLastActivity / 1000
           )}s) - Last activity: ${new Date(
@@ -4138,8 +4234,7 @@ async spawnStoryBot(roomName, playlist = null) {
       } else {
         // No bridge available, send goodbye message and close immediately
         console.log(
-          `🕒 [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${
-            this.deviceId
+          `🕒 [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${this.deviceId
           } (inactive for ${Math.round(timeSinceLastActivity / 1000)}s)`
         );
 
@@ -4223,11 +4318,11 @@ async spawnStoryBot(roomName, playlist = null) {
       this.bridge.close();
       this.bridge = null;
     }
-    
+
     // Remove from connections map immediately
     this.gateway.connections.delete(this.connectionId);
     console.log(`🗑️ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`);
-    
+
     // CRITICAL FIX: Keep connection in deviceConnections map longer during cleanup
     // This prevents "No connection found" errors when messages arrive during cleanup
     setTimeout(() => {
@@ -4660,7 +4755,26 @@ class MQTTGateway {
                 return; // Don't dispatch agent for music/story rooms
               }
 
-              // Check if agent already exists or is being deployed
+              // FIRST: Check LiveKit API for actual agent presence (most reliable)
+              const agentCheck = await this.checkAgentInRoom(roomName);
+
+              if (agentCheck.exists) {
+                console.log(
+                  `✅ [START-GREETING] Agent already in room (verified via LiveKit API): ${agentCheck.identity}`
+                );
+                // Sync local flags with actual state
+                bridge.agentJoined = true;
+                bridge.agentDeployed = true;
+              } else if (bridge.agentJoined) {
+                // Local flag says joined but API says not - trust API, reset flags
+                console.log(
+                  `⚠️ [START-GREETING] Local flag says agent joined, but not found in room - resetting flags`
+                );
+                bridge.agentJoined = false;
+                bridge.agentDeployed = false;
+              }
+
+              // Now check flags and dispatch if needed
               if (bridge.agentJoined) {
                 console.log(
                   `✅ [START-GREETING] Agent already joined, skipping dispatch`
@@ -4889,6 +5003,47 @@ class MQTTGateway {
     }
   }
 
+  /**
+   * Check if an agent is already present in a LiveKit room
+   * Uses LiveKit Server API to get actual participants (more reliable than local flags)
+   * @param {string} roomName - The LiveKit room name to check
+   * @returns {Promise<{exists: boolean, identity: string|null}>} - Whether agent exists and its identity
+   */
+  async checkAgentInRoom(roomName) {
+    try {
+      if (!this.roomService) {
+        console.warn(`⚠️ [AGENT-CHECK] RoomService not available, cannot check participants`);
+        return { exists: false, identity: null };
+      }
+
+      console.log(`🔍 [AGENT-CHECK] Checking for existing agent in room: ${roomName}`);
+
+      const participants = await this.roomService.listParticipants(roomName);
+
+      console.log(`👥 [AGENT-CHECK] Found ${participants.length} participants in room`);
+
+      for (const participant of participants) {
+        console.log(`   - Participant: ${participant.identity} (state: ${participant.state})`);
+
+        // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-agent')
+        if (participant.identity &&
+            (participant.identity.toLowerCase().includes('agent') ||
+             participant.identity === 'cheeko-agent')) {
+          console.log(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
+          return { exists: true, identity: participant.identity };
+        }
+      }
+
+      console.log(`ℹ️ [AGENT-CHECK] No agent found in room`);
+      return { exists: false, identity: null };
+
+    } catch (error) {
+      console.error(`❌ [AGENT-CHECK] Error checking room participants:`, error.message);
+      // On error, return false to allow dispatch attempt (fail-safe)
+      return { exists: false, identity: null };
+    }
+  }
+
   setupControlTopics(macAddress) {
     // Subscribe to control topics for next/previous
     const nextTopic = `cheeko/${macAddress}/playback_control/next`;
@@ -5008,7 +5163,7 @@ class MQTTGateway {
 
       console.log(`✅ [CONTROL] Next skip successful:`, response.data);
       console.log(`✅ [CONTROL] Response status:`, response.status);
-      
+
       // Log current status for debugging
       if (response.data && response.data.current_status) {
         const status = response.data.current_status;
@@ -5056,7 +5211,7 @@ class MQTTGateway {
       }
     } catch (error) {
       console.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
-      
+
       // Log additional error details for debugging
       if (error.response) {
         console.error(`❌ [CONTROL] API Response Error:`, {
@@ -5069,7 +5224,7 @@ class MQTTGateway {
       } else {
         console.error(`❌ [CONTROL] Request Setup Error:`, error.message);
       }
-      
+
       // Send error notification to device if possible
       if (clientId) {
         const errorTopic = `devices/p2p/${clientId}`;
@@ -5079,7 +5234,7 @@ class MQTTGateway {
           text: "Skip failed, please try again",
           session_id: deviceInfo.connection?.udp?.session_id || null,
         };
-        
+
         this.mqttClient.publish(errorTopic, JSON.stringify(errorMsg), (err) => {
           if (!err) {
             console.log(`📤 [CONTROL] Error notification sent to ${macAddress}`);
@@ -5179,11 +5334,11 @@ class MQTTGateway {
       }
 
       console.log(`⏮️ [CONTROL] Sending previous skip request to: ${apiUrl}`);
-      const response = await axios.post(apiUrl, {},  mediaAxiosConfig());
+      const response = await axios.post(apiUrl, {}, mediaAxiosConfig());
 
       console.log(`✅ [CONTROL] Previous skip successful:`, response.data);
       console.log(`✅ [CONTROL] Response status:`, response.status);
-      
+
       // Log current status for debugging
       if (response.data && response.data.current_status) {
         const status = response.data.current_status;
@@ -5231,7 +5386,7 @@ class MQTTGateway {
       }
     } catch (error) {
       console.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);
-      
+
       // Log additional error details for debugging
       if (error.response) {
         console.error(`❌ [CONTROL] API Response Error:`, {
@@ -5244,7 +5399,7 @@ class MQTTGateway {
       } else {
         console.error(`❌ [CONTROL] Request Setup Error:`, error.message);
       }
-      
+
       // Send error notification to device if possible
       if (clientId) {
         const errorTopic = `devices/p2p/${clientId}`;
@@ -5254,7 +5409,7 @@ class MQTTGateway {
           text: "Previous skip failed, please try again",
           session_id: deviceInfo.connection?.udp?.session_id || null,
         };
-        
+
         this.mqttClient.publish(errorTopic, JSON.stringify(errorMsg), (err) => {
           if (!err) {
             console.log(`📤 [CONTROL] Error notification sent to ${macAddress}`);
@@ -5512,25 +5667,25 @@ class MQTTGateway {
 
   handleDeviceData(deviceId, payload) {
     console.log(`🔍 [DEBUG] Looking up connection for device: ${deviceId}`);
-    
+
     const deviceInfo = this.deviceConnections.get(deviceId);
-    
+
     if (deviceInfo && deviceInfo.connection) {
       console.log(`✅ [DEBUG] Connection found for ${deviceId}, state: ending=${deviceInfo.connection.isEnding}, closing=${deviceInfo.connection.closing}`);
       deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
     } else {
       console.log(`❌ [DEBUG] No connection found for device: ${deviceId}`);
       console.log(`🔍 [DEBUG] Available devices in map: [${Array.from(this.deviceConnections.keys()).join(', ')}]`);
-      
+
       // Try to find similar device IDs (in case of format mismatch)
-      const similarDevices = Array.from(this.deviceConnections.keys()).filter(key => 
+      const similarDevices = Array.from(this.deviceConnections.keys()).filter(key =>
         key.replace(/[_:]/g, '') === deviceId.replace(/[_:]/g, '')
       );
-      
+
       if (similarDevices.length > 0) {
         console.log(`🔍 [DEBUG] Found similar device IDs: [${similarDevices.join(', ')}] - possible format mismatch`);
       }
-      
+
       console.warn(`📱 Received data from unknown device: ${deviceId}`);
     }
   }
@@ -5867,12 +6022,12 @@ class MQTTGateway {
           try {
             const axios = require("axios");
             const stopResponse = await axios.post(
-  `${MEDIA_API_BASE}/stop-bot`,
-  {
-    room_name: oldRoomName,
-  },
-  mediaAxiosConfig()
-);
+              `${MEDIA_API_BASE}/stop-bot`,
+              {
+                room_name: oldRoomName,
+              },
+              mediaAxiosConfig()
+            );
 
 
             if (stopResponse.data && stopResponse.data.status === "stopped") {
@@ -6203,8 +6358,7 @@ class MQTTGateway {
         "❌ [MQTT OUT] MQTT client not connected, cannot publish message"
       );
       console.log(
-        `📊 [MQTT OUT] Client connected: ${
-          this.mqttClient ? this.mqttClient.connected : "null"
+        `📊 [MQTT OUT] Client connected: ${this.mqttClient ? this.mqttClient.connected : "null"
         }`
       );
     }
@@ -6279,33 +6433,33 @@ class MQTTGateway {
   onUdpMessage(message, rinfo) {
     // message format: [type: 1u, flag: 1u, payloadLength: 2u, cookie: 4u, timestamp: 4u, sequence: 4u, payload: n]
     if (message.length < 16) {
-      //console.warn(
-      //`📡 [UDP SERVER] Received incomplete UDP header from ${rinfo.address}:${rinfo.port}, length=${message.length}`
-      // );
+      console.warn(
+        `📡 [UDP SERVER] Received incomplete UDP header from ${rinfo.address}:${rinfo.port}, length=${message.length}`
+      );
       return;
     }
 
     try {
       const type = message.readUInt8(0);
       if (type !== 1) {
-        // console.warn(
-        //   `📡 [UDP SERVER] Invalid packet type: ${type} from ${rinfo.address}:${rinfo.port}`
-        // );
+        console.warn(
+          `📡 [UDP SERVER] Invalid packet type: ${type} from ${rinfo.address}:${rinfo.port}`
+        );
         return;
       }
 
       const payloadLength = message.readUInt16BE(2);
       if (message.length < 16 + payloadLength) {
-        // console.warn(
-        //   `📡 [UDP SERVER] Incomplete message from ${rinfo.address}:${rinfo.port}, expected=${16 + payloadLength}, got=${message.length}`
-        // );
+        console.warn(
+          `📡 [UDP SERVER] Incomplete message from ${rinfo.address}:${rinfo.port}, expected=${16 + payloadLength}, got=${message.length}`
+        );
         return;
       }
 
       const connectionId = message.readUInt32BE(4);
       const connection = this.connections.get(connectionId);
       if (!connection) {
-        // console.warn(`📡 [UDP SERVER] No connection found for ID: ${connectionId} from ${rinfo.address}:${rinfo.port}`);
+        console.warn(`📡 [UDP SERVER] No connection found for ID: ${connectionId} from ${rinfo.address}:${rinfo.port}`);
         return;
       }
 
@@ -6323,10 +6477,10 @@ class MQTTGateway {
         sequence
       );
     } catch (error) {
-      // console.error(
-      //   `📡 [UDP SERVER] Message processing error from ${rinfo.address}:${rinfo.port}:`,
-      //   error
-      // );
+      console.error(
+        `📡 [UDP SERVER] Message processing error from ${rinfo.address}:${rinfo.port}:`,
+        error
+      );
     }
   }
 

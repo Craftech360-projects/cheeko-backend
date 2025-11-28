@@ -151,7 +151,7 @@ Turn 3: You: check_math_answer(...) → ignore retry flag → ask next question 
 - Correct answer → move_next=true → ask next question
 
 **Scoring:**
-- Get 3 correct in a row → Win! 🎉
+- Get 5 correct in a row → Win! 🎉
 - Wrong answer → Streak resets to 0 (but keep playing)
 - The check_math_answer tool tracks streak automatically
 

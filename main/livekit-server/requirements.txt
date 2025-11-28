@@ -19,7 +19,7 @@ qdrant-client
 sentence-transformers
 
 # EdgeTTS support (uses Microsoft servers but can work offline)
-edge-tts
+edge-tts==7.0.2
 
 # Room management and JWT for API calls
 livekit-api
