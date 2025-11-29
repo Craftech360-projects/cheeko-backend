@@ -809,7 +809,9 @@ async def entrypoint(ctx: JobContext):
     if agent_config['noise_cancellation']:
         try:
             room_options = RoomInputOptions(
-                noise_cancellation=noise_cancellation.BVC()
+                audio_sample_rate=16000,
+                audio_num_channels=1,
+                # noise_cancellation=noise_cancellation.BVC()
             )
             logger.info("Noise cancellation enabled (requires LiveKit Cloud)")
         except Exception as e:
