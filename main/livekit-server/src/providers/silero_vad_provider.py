@@ -3,10 +3,24 @@ Silero VAD 6.2.0 Provider for LiveKit
 Wraps standalone silero-vad package to be compatible with LiveKit's VAD interface
 """
 
+import os
+os.environ["NNPACK_DISABLE"] = "1"
+
 import asyncio
 import logging
 import time
 from typing import Literal
+
+# Suppress NNPACK C++ warnings during torch import
+import sys
+import io
+_stderr = sys.stderr
+sys.stderr = io.StringIO()
+try:
+    import torch
+finally:
+    sys.stderr = _stderr
+
 import numpy as np
 
 from livekit import rtc
@@ -244,7 +258,6 @@ class SileroVADStream(vad.VADStream):
 
                     # Run Silero VAD inference
                     try:
-                        import torch
                         chunk_tensor = torch.from_numpy(chunk)
                         probability = self._model(chunk_tensor, self._sample_rate).item()
                     except Exception as e:

@@ -5,9 +5,9 @@ Full-featured implementation with all production capabilities
 Includes music, stories, memory, database integration, and advanced services
 """
 
+import os
 import logging
 import asyncio
-import os
 import json
 import time
 import threading
@@ -363,8 +363,8 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"💭 Initializing Mem0MemoryProvider for MAC: {mac}")
             provider = Mem0MemoryProvider(api_key=mem0_api_key, role_id=mac)
 
-            logger.info("💭 Querying mem0 for existing memories...")
-            memories = await provider.query_memory("conversation history and user preferences")
+            logger.info("💭 Getting all memories from mem0...")
+            memories = await provider.get_all_memories()
 
             if memories:
                 logger.info(f"💭✅ Loaded memories from mem0 ({len(memories)} chars)")
@@ -560,8 +560,18 @@ async def entrypoint(ctx: JobContext):
 
     # Inject Mem0 memories into prompt (already fetched in parallel)
     if memories:
-        agent_prompt = agent_prompt.replace("<memory>", f"<memory>\n{memories}")
+        # Use enhanced format for better personalization
+        memory_injection = f"""<user_profile>
+Here is what I know about the child:
+{memories}
+</user_profile>
+IMPORTANT: Use these facts to personalize the conversation. Ask about their specific interests, pets, or friends mentioned in the profile."""
+        agent_prompt = agent_prompt.replace("<memory>", memory_injection)
         logger.info(f"💭 Injected memories into prompt ({len(memories)} chars)")
+        logger.debug(f"💭 Memory content:\n{memories}")
+
+    # Log the full prompt after memory injection
+    logger.info(f"📝 Full prompt after memory injection:\n{'-'*50}\n{agent_prompt}\n{'-'*50}")
 
     # Get VAD first as it's needed for STT
     vad = ctx.proc.userdata["vad"]
@@ -804,23 +814,12 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.warning(f"[FAST] Error checking cached services: {e}")
 
-    # Create room input options with optional noise cancellation
-    room_options = None
-    if agent_config['noise_cancellation']:
-        try:
-            room_options = RoomInputOptions(
-                audio_sample_rate=16000,
-                audio_num_channels=1,
-                # noise_cancellation=noise_cancellation.BVC()
-            )
-            logger.info("Noise cancellation enabled (requires LiveKit Cloud)")
-        except Exception as e:
-            logger.warning(f"Could not enable noise cancellation: {e}")
-            logger.info(
-                "Continuing without noise cancellation (local server mode)")
-            room_options = None
-    else:
-        logger.info("Noise cancellation disabled by configuration")
+    # Create room input options with audio settings
+    room_options = RoomInputOptions(
+        audio_sample_rate=16000,
+        audio_num_channels=1,
+    )
+    logger.info("Room input options set: 16kHz mono audio")
 
     # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)

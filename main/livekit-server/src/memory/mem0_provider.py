@@ -77,8 +77,7 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
         result = self.client.add(
             formatted_messages,  # Pass list of messages instead of string
             user_id=self.role_id,
-            metadata=metadata if metadata else None,
-            output_format="v1.1"
+            metadata=metadata if metadata else None
         )
         logger.info(f"💭✅ Saved to mem0: {len(messages)} messages (child: {child_name or 'unknown'})")
         logger.debug(f"💭 Save result: {result}")
@@ -97,8 +96,7 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
             logger.info(f"💭 Querying mem0 - user_id: {self.role_id}, query: '{query[:50]}...'")
             results = self.client.search(
                 query,
-                user_id=self.role_id,
-                output_format="v1.1"
+                user_id=self.role_id
             )
 
             # logger.debug(f"💭 Raw mem0 results: {results}")
@@ -131,24 +129,32 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
 
     async def get_all_memories(self) -> str:
         """Get all memories for the user (for session startup)
-        
+
         Returns:
             Formatted memory string with all known facts about the user
         """
         try:
             logger.info(f"💭 Getting all memories for user: {self.role_id}")
+            # Mem0 API v2 requires filters parameter with user_id
             results = self.client.get_all(
-                user_id=self.role_id,
-                output_format="v1.1"
+                filters={"user_id": self.role_id}
             )
-            
-            if not results or "results" not in results:
+
+            # Handle both list response and dict with "results" key
+            if isinstance(results, list):
+                results_list = results
+            elif isinstance(results, dict) and "results" in results:
+                results_list = results["results"]
+            else:
+                logger.info(f"💭 No memories found for user (unexpected format: {type(results)})")
+                return ""
+
+            if not results_list:
                 logger.info(f"💭 No memories found for user")
                 return ""
-            
-            results_list = results["results"]
+
             logger.info(f"💭 Retrieved {len(results_list)} memories")
-            
+
             # Format memories
             memories = []
             for i, entry in enumerate(results_list):
@@ -156,7 +162,7 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
                 if memory:
                     memories.append(memory)
                     logger.debug(f"💭 Memory {i}: {memory[:50]}...")
-            
+
             logger.info(f"💭 Formatted {len(memories)} memories for injection")
             return "\n".join(f"- {m}" for m in memories)
         except Exception as e:

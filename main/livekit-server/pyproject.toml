@@ -14,6 +14,7 @@ dependencies = [
     "livekit-plugins-groq",
     "livekit.plugins.deepgram",
     "livekit-plugins-elevenlabs",
+    "livekit-plugins-inworld",
     "python-dotenv",
     "paho-mqtt",
     "aiohttp",
@@ -21,12 +22,14 @@ dependencies = [
     "edge-tts",
     "gtts",
     "pyttsx3",
-    "mem0ai",
+    "mem0ai>=1.0.1",
     "jinja2",
     "pytz",
     "qdrant-client>=1.7.0",
     "sentence-transformers>=2.2.0",
-    "websockets>=11.0"
+    "websockets>=11.0",
+    "torchaudio>=2.8.0",
+    "silero-vad==6.2.0",
 ]
 
 [dependency-groups]

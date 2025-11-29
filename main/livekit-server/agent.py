@@ -19,12 +19,11 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit.agents.llm import ChatContext
-from livekit.plugins import groq
+from livekit.plugins import groq, silero
 
 # Import custom providers
 from src.providers.funasr_stt_provider import FunASRSTT
 from src.providers.edge_tts_provider import EdgeTTS
-from src.providers.silero_vad_provider import SileroVAD
 
 # Load environment variables
 load_dotenv(".env")
@@ -47,16 +46,15 @@ class SimpleAssistant(Agent):
 
 def prewarm(proc: JobProcess):
     """Prewarm function - load models before accepting jobs"""
-    logger.info("Prewarming agent - loading Silero VAD 6.2 model with child-optimized settings...")
-    proc.userdata["vad"] = SileroVAD.load(
+    logger.info("Prewarming agent - loading Silero VAD model with child-optimized settings...")
+    proc.userdata["vad"] = silero.VAD.load(
         min_speech_duration=0.1,      # 0.1s speech - kids speak in short bursts
         min_silence_duration=1.2,     # 1.2s silence - kids pause while thinking
         activation_threshold=0.08,    # Ultra-low threshold for quiet kid voices
         prefix_padding_duration=0.3,  # Capture speech start
         max_buffered_speech=60.0,     # Maximum speech buffer
-        onnx=False,                   # Use PyTorch for better compatibility
     )
-    logger.info("Silero VAD 6.2 model loaded with child-optimized settings (threshold=0.08, silence=1.2s)")
+    logger.info("Silero VAD model loaded with child-optimized settings (threshold=0.08, silence=1.2s)")
 
 
 async def entrypoint(ctx: JobContext):
@@ -122,14 +120,13 @@ async def entrypoint(ctx: JobContext):
     # Get prewarmed VAD
     vad = ctx.proc.userdata.get("vad")
     if not vad:
-        logger.warning("VAD not prewarmed, loading Silero VAD 6.2 now...")
-        vad = SileroVAD.load(
+        logger.warning("VAD not prewarmed, loading Silero VAD now...")
+        vad = silero.VAD.load(
             min_speech_duration=0.1,      # 0.1s speech - kids speak in short bursts
             min_silence_duration=1.2,     # 1.2s silence - kids pause while thinking
             activation_threshold=0.08,    # Ultra-low threshold for quiet kid voices
             prefix_padding_duration=0.3,
             max_buffered_speech=60.0,
-            onnx=False,                   # Use PyTorch for better compatibility
         )
 
     # Create the assistant

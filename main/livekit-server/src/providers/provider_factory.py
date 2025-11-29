@@ -1,13 +1,12 @@
 import livekit.plugins.groq as groq
 import livekit.plugins.elevenlabs as elevenlabs
 import livekit.plugins.deepgram as deepgram
-from livekit.plugins import openai, inworld
+from livekit.plugins import openai, inworld, silero
 from livekit.agents import stt, llm, tts
 
 # Import our custom providers
 from .edge_tts_provider import EdgeTTS
 from .funasr_stt_provider import FunASRSTT
-from .silero_vad_provider import SileroVAD
 
 
 class ProviderFactory:
@@ -270,14 +269,12 @@ class ProviderFactory:
                    f"min_speech={vad_config['min_speech_duration']}s, "
                    f"min_silence={vad_config['min_silence_duration']}s")
 
-        return SileroVAD.load(
+        return silero.VAD.load(
             min_speech_duration=vad_config['min_speech_duration'],
             min_silence_duration=vad_config['min_silence_duration'],
             activation_threshold=vad_config['activation_threshold'],
             prefix_padding_duration=vad_config['prefix_padding_duration'],
             max_buffered_speech=vad_config['max_buffered_speech'],
-            sample_rate=vad_config['sample_rate'],
-            onnx=False,  # Use PyTorch for better kid voice detection
         )
 
     @staticmethod
