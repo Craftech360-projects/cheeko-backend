@@ -34,7 +34,7 @@ spring:
     druid:
       # Local Docker MySQL database
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://192.168.1.6:3307/manager_api?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://10.92.50.132:3307/manager_api?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
       username: manager
       password: managerpassword
 
@@ -63,7 +63,7 @@ spring:
   data:
     redis:
       # Local Docker Redis
-      host: 192.168.1.6
+      host: 10.92.50.132
       port: 6380
       password: redispassword
       database: 0

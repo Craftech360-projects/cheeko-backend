@@ -654,3 +654,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202511261230_word_ladder_initial_greeting_fix.sql
+
+  - changeSet:
+      id: 202511291430
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511291430_update_all_prompts.sql

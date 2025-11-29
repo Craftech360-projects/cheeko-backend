@@ -33,7 +33,7 @@ from livekit.agents import (
     function_tool,
     Agent,
     RunContext,
-    RoomInputOptions,
+    room_io,
 )
 from livekit.agents.llm import ChatContext
 from livekit import rtc
@@ -804,20 +804,20 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.warning(f"[FAST] Error checking cached services: {e}")
 
-    # Create room input options with 16kHz sample rate to match MQTT gateway
+    # Create room options with 16kHz sample rate to match MQTT gateway
     # This ensures audio from ESP32 devices (16kHz) is not resampled unnecessarily
-    room_options = RoomInputOptions(
-        audio_sample_rate=16000,  # Match MQTT gateway's 16kHz audio
-        audio_num_channels=1,     # Mono audio from ESP32
+    audio_input_options = room_io.AudioInputOptions(
+        sample_rate=16000,  # Match MQTT gateway's 16kHz audio
+        num_channels=1,     # Mono audio from ESP32
     )
     logger.info("Room input configured: 16kHz mono audio to match MQTT gateway")
 
     # Add noise cancellation if enabled
     if agent_config['noise_cancellation']:
         try:
-            room_options = RoomInputOptions(
-                audio_sample_rate=16000,
-                audio_num_channels=1,
+            audio_input_options = room_io.AudioInputOptions(
+                sample_rate=16000,
+                num_channels=1,
                 # noise_cancellation=noise_cancellation.BVC()
             )
             logger.info("Noise cancellation enabled (requires LiveKit Cloud)")
@@ -826,6 +826,10 @@ async def entrypoint(ctx: JobContext):
             logger.info("Continuing without noise cancellation (local server mode)")
     else:
         logger.info("Noise cancellation disabled by configuration")
+
+    room_options = room_io.RoomOptions(
+        audio_input=audio_input_options,
+    )
 
     # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)
@@ -997,7 +1001,15 @@ async def entrypoint(ctx: JobContext):
         logger.info("🔴 Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
 
-    # Handle data channel messages (for start_greeting signal)
+    # # Handle data channel messages (for start_greeting signal)
+    # @ctx.room.on("data_received")
+    # def on_data_received(data_packet: rtc.DataPacket):
+    #     try:
+    #         data_bytes = bytes(data_packet.data)
+
+    # # Add cleanup to shutdown callback
+    # ctx.add_shutdown_callback(cleanup_room_and_session)
+
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):
         try:
@@ -1008,14 +1020,26 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"📡 [DATA-CHANNEL] Received: {data_json.get('type', 'unknown')}")
 
             # Handle start_greeting message for conversation mode
+            # Fresh boot: sent after user presses button → greet
+            # Mode switch: sent automatically after switching to conversation → greet
             if data_json.get('type') == 'start_greeting' and room_type == "conversation":
-                logger.info("▶️ [START-GREETING] Received start_greeting signal, sending greeting")
+                is_mode_switch = data_json.get('is_mode_switch', False)
+                logger.info(f"▶️ [START-GREETING] Received start_greeting signal (is_mode_switch: {is_mode_switch})")
 
                 async def send_greeting():
                     try:
                         await asyncio.sleep(0.3)  # Small delay for stability
-                        await session.say("Hello! How can I help you today?", allow_interruptions=True)
-                        logger.info("✅ [START-GREETING] Greeting sent successfully")
+
+                        if is_mode_switch:
+                            # Mode switch - user just switched from music/story to conversation
+                            logger.info("▶️ [START-GREETING] Mode switch detected - sending greeting")
+                            await session.say("Hello! How can I help you today?", allow_interruptions=True)
+                            logger.info("✅ [START-GREETING] Greeting sent successfully (mode switch)")
+                        else:
+                            # Fresh boot - user pressed button to start conversation
+                            logger.info("▶️ [START-GREETING] Fresh boot + button press - sending greeting")
+                            await session.say("Hi there! I'm ready to chat. What would you like to talk about?", allow_interruptions=True)
+                            logger.info("✅ [START-GREETING] Greeting sent successfully (fresh boot)")
                     except Exception as e:
                         logger.error(f"❌ [START-GREETING] Failed to send greeting: {e}")
 
@@ -1028,11 +1052,13 @@ async def entrypoint(ctx: JobContext):
 
     # Add cleanup to shutdown callback
     ctx.add_shutdown_callback(cleanup_room_and_session)
+
+
     # Start agent session
     await session.start(
         agent=assistant,
         room=ctx.room,
-        room_input_options=room_options,
+        room_options=room_options,
     )
 
     # Start analytics session tracking
