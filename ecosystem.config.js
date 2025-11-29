@@ -16,14 +16,14 @@ module.exports = {
     },
     {
       name: "mqtt-gateway",
-      script: "approom.js",
+      script: "app.js",
       cwd: "/root/xiaozhi-esp32-server/main/mqtt-gateway",
       interpreter: "node",
       watch: false
     },
     {
       name: "livekit-server",
-      script: "room.py",
+      script: "main.py",
       args: "dev",
       cwd: "/root/xiaozhi-esp32-server/main/livekit-server",
       interpreter: "python3"

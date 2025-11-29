@@ -3381,7 +3381,7 @@ class VirtualMQTTConnection {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
       console.log(
-        `⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`
+        //`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`
       );
       return;
     }

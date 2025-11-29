@@ -1,11 +1,13 @@
 import livekit.plugins.groq as groq
 import livekit.plugins.elevenlabs as elevenlabs
 import livekit.plugins.deepgram as deepgram
-from livekit.plugins import openai, silero
+from livekit.plugins import openai, inworld
 from livekit.agents import stt, llm, tts
 
 # Import our custom providers
 from .edge_tts_provider import EdgeTTS
+from .funasr_stt_provider import FunASRSTT
+from .silero_vad_provider import SileroVAD
 
 
 class ProviderFactory:
@@ -37,7 +39,21 @@ class ProviderFactory:
             # Create primary and fallback STT providers with StreamAdapter
             providers = []
 
-            if provider == 'deepgram':
+            if provider == 'funasr':
+                # FunASR WebSocket STT (local server)
+                providers.append(stt.StreamAdapter(
+                    stt=FunASRSTT(
+                        host=config.get('funasr_host', '127.0.0.1'),
+                        port=config.get('funasr_port', 10096),
+                        use_ssl=config.get('funasr_use_ssl', False),
+                        mode=config.get('funasr_mode', '2pass'),
+                        language=config.get('stt_language', 'en'),
+                        use_itn=config.get('funasr_use_itn', True),
+                        hotwords=config.get('funasr_hotwords', ''),
+                    ),
+                    vad=vad
+                ))
+            elif provider == 'deepgram':
                 import os
                 api_key = os.getenv('DEEPGRAM_API_KEY')
                 if not api_key:
@@ -71,7 +87,26 @@ class ProviderFactory:
             return stt.FallbackAdapter(providers)
         else:
             # Single provider with StreamAdapter and VAD
-            if provider == 'deepgram':
+            if provider == 'funasr':
+                # FunASR WebSocket STT (local server)
+                # FunASR WebSocket STT (local server)
+                funasr_mode = config.get('funasr_mode', '2pass')
+                funasr_stt = FunASRSTT(
+                    host=config.get('funasr_host', '127.0.0.1'),
+                    port=config.get('funasr_port', 10096),
+                    use_ssl=config.get('funasr_use_ssl', False),
+                    mode=funasr_mode,
+                    language=config.get('stt_language', 'en'),
+                    use_itn=config.get('funasr_use_itn', True),
+                    hotwords=config.get('funasr_hotwords', ''),
+                )
+                
+                # Only wrap in StreamAdapter if using offline mode (non-streaming)
+                if funasr_mode == 'offline':
+                    return stt.StreamAdapter(stt=funasr_stt, vad=vad)
+                else:
+                    return funasr_stt
+            elif provider == 'deepgram':
                 import os
                 api_key = os.getenv('DEEPGRAM_API_KEY')
                 if not api_key:
@@ -119,6 +154,13 @@ class ProviderFactory:
                     voice_id=tts_config['elevenlabs_voice_id'],
                     model=tts_config['elevenlabs_model']
                 ))
+            elif primary_provider == 'inworld':
+                import os
+                providers.append(inworld.TTS(
+                    model=tts_config.get('inworld_model', 'inworld-tts-1-max'),
+                    voice=tts_config.get('inworld_voice', 'default-1ynela7pez7baf70bwa69q__cheekotest'),
+                    api_key=os.getenv("INWORLD_API_KEY")
+                ))
             else:
                 # Primary Groq TTS - use tts_config if available
                 model = tts_config.get('model', groq_config['tts_model'])
@@ -163,6 +205,13 @@ class ProviderFactory:
                     pitch=tts_config.get('edge_pitch', '+0Hz'),
                     sample_rate=tts_config.get('edge_sample_rate', 24000),
                     channels=tts_config.get('edge_channels', 1)
+                )
+            elif provider == 'inworld':
+                import os
+                return inworld.TTS(
+                    model=tts_config.get('inworld_model', 'inworld-tts-1-max'),
+                    voice=tts_config.get('inworld_voice', 'default-1ynela7pez7baf70bwa69q__cheekotest'),
+                    api_key=os.getenv("INWORLD_API_KEY")
                 )
             else:
                 # Default to Groq - use tts_config if available, otherwise fall back to groq_config
@@ -221,13 +270,14 @@ class ProviderFactory:
                    f"min_speech={vad_config['min_speech_duration']}s, "
                    f"min_silence={vad_config['min_silence_duration']}s")
 
-        return silero.VAD.load(
+        return SileroVAD.load(
             min_speech_duration=vad_config['min_speech_duration'],
             min_silence_duration=vad_config['min_silence_duration'],
             activation_threshold=vad_config['activation_threshold'],
             prefix_padding_duration=vad_config['prefix_padding_duration'],
             max_buffered_speech=vad_config['max_buffered_speech'],
             sample_rate=vad_config['sample_rate'],
+            onnx=False,  # Use PyTorch for better kid voice detection
         )
 
     @staticmethod
