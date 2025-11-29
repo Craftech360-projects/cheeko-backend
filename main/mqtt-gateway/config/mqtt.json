@@ -11,7 +11,7 @@
   },
   "livekit": {
     "url": "ws://localhost:7880",
-    "api_key": "key1",
-    "api_secret": "secret1"
+    "api_key": "devkey",
+    "api_secret": "secret"
   }
 }

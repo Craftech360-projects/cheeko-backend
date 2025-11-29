@@ -15,18 +15,46 @@ class ProviderFactory:
     @staticmethod
     def create_llm(config):
         """Create LLM provider with fallback based on configuration"""
+        import os
+        import logging
+        logger = logging.getLogger("provider_factory")
+
         fallback_enabled = config.get('fallback_enabled', False)
+        llm_provider = config.get('llm_provider', 'groq').lower()
+
+        logger.info(f"[LLM] Creating LLM provider: {llm_provider}, model: {config['llm_model']}")
 
         if fallback_enabled:
-            # Create primary and fallback LLM providers (both Groq)
-            providers = [
-                groq.LLM(model=config['llm_model']),
-                groq.LLM(model=config.get('fallback_llm_model', 'llama-3.1-8b-instant'))
-            ]
+            # Create primary and fallback LLM providers
+            providers = []
+
+            # Primary provider
+            if llm_provider == 'openai':
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("OPENAI_API_KEY environment variable is not set")
+                providers.append(openai.LLM(model=config['llm_model'], api_key=api_key))
+                logger.info(f"[LLM] Primary: OpenAI with model {config['llm_model']}")
+            else:
+                providers.append(groq.LLM(model=config['llm_model']))
+                logger.info(f"[LLM] Primary: Groq with model {config['llm_model']}")
+
+            # Fallback provider (always Groq for reliability)
+            providers.append(groq.LLM(model=config.get('fallback_llm_model', 'llama-3.1-8b-instant')))
+            logger.info(f"[LLM] Fallback: Groq with model {config.get('fallback_llm_model', 'llama-3.1-8b-instant')}")
+
             return llm.FallbackAdapter(providers)
         else:
-            # Single Groq provider
-            return groq.LLM(model=config['llm_model'])
+            # Single provider
+            if llm_provider == 'openai':
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("OPENAI_API_KEY environment variable is not set")
+                logger.info(f"[LLM] Using OpenAI with model {config['llm_model']}")
+                return openai.LLM(model=config['llm_model'], api_key=api_key)
+            else:
+                logger.info(f"[LLM] Using Groq with model {config['llm_model']}")
+                return groq.LLM(model=config['llm_model'])
 
     @staticmethod
     def create_stt(config, vad=None):

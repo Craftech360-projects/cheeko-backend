@@ -33,7 +33,7 @@ from livekit.agents import (
     function_tool,
     Agent,
     RunContext,
-    RoomInputOptions,
+    room_io,
 )
 from livekit.agents.llm import ChatContext
 from livekit import rtc
@@ -814,12 +814,32 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         except Exception as e:
             logger.warning(f"[FAST] Error checking cached services: {e}")
 
-    # Create room input options with audio settings
-    room_options = RoomInputOptions(
-        audio_sample_rate=16000,
-        audio_num_channels=1,
+    # Create room options with 16kHz sample rate to match MQTT gateway
+    # This ensures audio from ESP32 devices (16kHz) is not resampled unnecessarily
+    audio_input_options = room_io.AudioInputOptions(
+        sample_rate=16000,  # Match MQTT gateway's 16kHz audio
+        num_channels=1,     # Mono audio from ESP32
     )
-    logger.info("Room input options set: 16kHz mono audio")
+    logger.info("Room input configured: 16kHz mono audio to match MQTT gateway")
+
+    # Add noise cancellation if enabled
+    if agent_config['noise_cancellation']:
+        try:
+            audio_input_options = room_io.AudioInputOptions(
+                sample_rate=16000,
+                num_channels=1,
+                # noise_cancellation=noise_cancellation.BVC()
+            )
+            logger.info("Noise cancellation enabled (requires LiveKit Cloud)")
+        except Exception as e:
+            logger.warning(f"Could not enable noise cancellation: {e}")
+            logger.info("Continuing without noise cancellation (local server mode)")
+    else:
+        logger.info("Noise cancellation disabled by configuration")
+
+    room_options = room_io.RoomOptions(
+        audio_input=audio_input_options,
+    )
 
     # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)
@@ -991,13 +1011,64 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         logger.info("🔴 Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
 
+    # # Handle data channel messages (for start_greeting signal)
+    # @ctx.room.on("data_received")
+    # def on_data_received(data_packet: rtc.DataPacket):
+    #     try:
+    #         data_bytes = bytes(data_packet.data)
+
+    # # Add cleanup to shutdown callback
+    # ctx.add_shutdown_callback(cleanup_room_and_session)
+
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        try:
+            data_bytes = bytes(data_packet.data)
+            data_str = data_bytes.decode('utf-8')
+            data_json = json.loads(data_str)
+
+            logger.info(f"📡 [DATA-CHANNEL] Received: {data_json.get('type', 'unknown')}")
+
+            # Handle start_greeting message for conversation mode
+            # Fresh boot: sent after user presses button → greet
+            # Mode switch: sent automatically after switching to conversation → greet
+            if data_json.get('type') == 'start_greeting' and room_type == "conversation":
+                is_mode_switch = data_json.get('is_mode_switch', False)
+                logger.info(f"▶️ [START-GREETING] Received start_greeting signal (is_mode_switch: {is_mode_switch})")
+
+                async def send_greeting():
+                    try:
+                        await asyncio.sleep(0.3)  # Small delay for stability
+
+                        if is_mode_switch:
+                            # Mode switch - user just switched from music/story to conversation
+                            logger.info("▶️ [START-GREETING] Mode switch detected - sending greeting")
+                            await session.say("Hello! How can I help you today?", allow_interruptions=True)
+                            logger.info("✅ [START-GREETING] Greeting sent successfully (mode switch)")
+                        else:
+                            # Fresh boot - user pressed button to start conversation
+                            logger.info("▶️ [START-GREETING] Fresh boot + button press - sending greeting")
+                            await session.say("Hi there! I'm ready to chat. What would you like to talk about?", allow_interruptions=True)
+                            logger.info("✅ [START-GREETING] Greeting sent successfully (fresh boot)")
+                    except Exception as e:
+                        logger.error(f"❌ [START-GREETING] Failed to send greeting: {e}")
+
+                asyncio.create_task(send_greeting())
+
+        except json.JSONDecodeError as e:
+            logger.debug(f"📡 [DATA-CHANNEL] Non-JSON data received: {e}")
+        except Exception as e:
+            logger.error(f"❌ [DATA-CHANNEL] Error processing data: {e}")
+
     # Add cleanup to shutdown callback
     ctx.add_shutdown_callback(cleanup_room_and_session)
+
+
     # Start agent session
     await session.start(
         agent=assistant,
         room=ctx.room,
-        room_input_options=room_options,
+        room_options=room_options,
     )
 
     # Start analytics session tracking
@@ -1040,25 +1111,11 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
     logger.info("✅ Enhanced agent started successfully")
 
-    # AUTO-GREET: Automatically trigger greeting when agent is ready
+    # GREETING: Agent waits for start_greeting signal from MQTT gateway (via data channel)
+    # This is triggered when ESP32 sends action: "start_agent" in playback_control message
+    # The data_received handler above listens for this signal and triggers session.say()
     if room_type == "conversation":
-        logger.info("👋 Auto-greeting: Triggering agent to greet user")
-
-        # Schedule greeting to run after a short delay to ensure everything is ready
-        async def send_auto_greeting():
-            await asyncio.sleep(0.5)  # Small delay to ensure connection is stable
-            try:
-                # Use session.say() to generate a personalized greeting
-                # The agent will use its prompt and context to generate appropriate greeting
-                await session.say("Hello! How can I help you today?", allow_interruptions=True)
-                logger.info("✅ Auto-greeting sent successfully")
-            except Exception as e:
-                logger.error(f"❌ Failed to send auto-greeting: {e}")
-
-        # Run greeting in background task
-        asyncio.create_task(send_auto_greeting())
-
-    # Note: removed duplicate ctx.connect() call
+        logger.info("⏸️ [GREETING] Conversation agent ready, waiting for start_agent signal to greet")
     
 
 if __name__ == "__main__":

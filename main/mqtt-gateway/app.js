@@ -977,6 +977,7 @@ class LiveKitBridge extends Emitter {
     this.audioSource = new AudioSource(16000, 1);
     this.protocolVersion = protocolVersion;
     this.isAudioPlaying = false; // Track if audio is actively playing
+    this.stopAudioForwarding = false; // Flag to stop audio forwarding during mode switch
 
     // Add agent join tracking
     this.agentJoined = false;
@@ -1057,10 +1058,56 @@ class LiveKitBridge extends Emitter {
     this.livekitConfig = livekitConfig;
   }
 
+  /**
+   * Clear all audio buffers and pending requests to prevent audio from old session
+   * bleeding into new session during mode change
+   */
+  clearAudioBuffers() {
+    console.log(`🧹 [AUDIO-CLEAR] Clearing audio buffers for ${this.macAddress}...`);
+
+    // 1. Clear frame buffer (accumulated PCM data waiting to be encoded)
+    const oldFrameBufferSize = this.frameBuffer.length;
+    this.frameBuffer = Buffer.alloc(0);
+    console.log(`🧹 [AUDIO-CLEAR] Cleared frame buffer (was ${oldFrameBufferSize} bytes)`);
+
+    // 2. Clear worker pool pending requests
+    if (this.workerPool && this.workerPool.pendingRequests) {
+      const pendingCount = this.workerPool.pendingRequests.size;
+      // Reject all pending requests to prevent callbacks from firing
+      for (const [requestId, request] of this.workerPool.pendingRequests) {
+        if (request && request.reject) {
+          request.reject(new Error('Audio buffer cleared due to mode change'));
+        }
+        // Clear timeout if any
+        if (request && request.timeout) {
+          clearTimeout(request.timeout);
+        }
+      }
+      this.workerPool.pendingRequests.clear();
+      // Reset pending counts per worker
+      this.workerPool.workerPendingCount = this.workerPool.workerPendingCount.map(() => 0);
+      console.log(`🧹 [AUDIO-CLEAR] Cleared ${pendingCount} pending worker requests`);
+    }
+
+    // 3. Reset audio playing state
+    this.isAudioPlaying = false;
+
+    // 4. Set flag to stop any ongoing audio forwarding
+    this.stopAudioForwarding = true;
+
+    console.log(`✅ [AUDIO-CLEAR] Audio buffers cleared for ${this.macAddress}`);
+  }
+
   // PHASE 2: Process buffered audio frames and encode to Opus using worker threads
   async processBufferedFrames(timestamp, frameCount) {
     if (!this.connection) {
       console.error(`❌ [PROCESS] No connection available, cannot send audio`);
+      return;
+    }
+
+    // Check if audio forwarding has been stopped (during mode change)
+    if (this.stopAudioForwarding) {
+      // Silently discard audio during mode change
       return;
     }
 
@@ -1500,6 +1547,12 @@ class LiveKitBridge extends Emitter {
                     // value is an AudioFrame from LiveKit (48kHz)
                     // Add safety checks for AudioFrame processing
                     try {
+                      // Check if audio forwarding is stopped (e.g., during mode switch)
+                      if (this.stopAudioForwarding) {
+                        // Skip processing audio frames when mode switch is in progress
+                        continue;
+                      }
+
                       if (!value || !value.data) {
                         console.warn(`⚠️ [AUDIO] Invalid AudioFrame received, skipping`);
                         continue;
@@ -3475,6 +3528,13 @@ class VirtualMQTTConnection {
       this.roomType = "conversation";
     }
 
+    // Fetch current character for conversation mode
+    this.currentCharacter = null;
+    if (this.roomType === "conversation") {
+      this.currentCharacter = await this.fetchCurrentCharacter(this.deviceId);
+      console.log(`🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`);
+    }
+
     this.udp = {
       ...this.udp,
       key: crypto.randomBytes(16),
@@ -3574,15 +3634,15 @@ class VirtualMQTTConnection {
 
       // Send mode_update to device firmware
       console.log(`📤 [HELLO] Sending mode_update to device...`);
-      this.sendMqttMessage(
-        JSON.stringify({
-          type: "mode_update",
-          mode: this.roomType,
-          session_id: futureSessionId,
-          timestamp: Date.now(),
-        })
-      );
-      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}) to device`);
+      const modeUpdateMsg = {
+        type: "mode_update",
+        mode: this.roomType,
+        ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
+        session_id: futureSessionId,
+        timestamp: Date.now(),
+      };
+      this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
 
       // ADD: Room type-specific initialization
       if (this.roomType === "conversation") {
@@ -3607,31 +3667,31 @@ class VirtualMQTTConnection {
       //   session_id: futureSessionId,
       //   timestamp: Date.now()
       // }));
-      this.sendMqttMessage(
-        JSON.stringify({
-          type: "hello",
-          version: json.version,
-          mode: this.roomType,
-          session_id: this.udp.session_id,
-          timestamp: Date.now(),
-          transport: "udp",
-          udp: {
-            server: this.gateway.publicIp,
-            port: this.gateway.udpPort,
-            encryption: this.udp.encryption,
-            key: this.udp.key.toString("hex"),
-            nonce: this.udp.nonce.toString("hex"),
-            connection_id: this.connectionId,
-            cookie: this.connectionId,
-          },
-          audio_params: {
-            sample_rate: 24000,
-            channels: 1,
-            frame_duration: 60,
-            format: "opus",
-          },
-        })
-      );
+      const helloResponseMsg = {
+        type: "hello",
+        version: json.version,
+        mode: this.roomType,
+        ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
+        session_id: this.udp.session_id,
+        timestamp: Date.now(),
+        transport: "udp",
+        udp: {
+          server: this.gateway.publicIp,
+          port: this.gateway.udpPort,
+          encryption: this.udp.encryption,
+          key: this.udp.key.toString("hex"),
+          nonce: this.udp.nonce.toString("hex"),
+          connection_id: this.connectionId,
+          cookie: this.connectionId,
+        },
+        audio_params: {
+          sample_rate: 24000,
+          channels: 1,
+          frame_duration: 60,
+          format: "opus",
+        },
+      };
+      this.sendMqttMessage(JSON.stringify(helloResponseMsg));
 
       // Send ready_for_greeting (room created, waiting for agent deployment)
       this.sendMqttMessage(
@@ -3680,6 +3740,30 @@ class VirtualMQTTConnection {
         `❌ [PLAYLIST] Failed to fetch ${mode} playlist: ${error.message}`
       );
       return []; // Return empty playlist on error
+    }
+  }
+
+  async fetchCurrentCharacter(macAddress) {
+    try {
+      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
+      const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
+      const apiUrl = `${baseUrl}/toy/agent/device/${cleanMac}/current-character`;
+
+      console.log(`🎭 [CHARACTER] Fetching current character from: ${apiUrl}`);
+
+      const response = await axios.get(apiUrl, { timeout: 5000 });
+
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const character = response.data.data;
+        console.log(`✅ [CHARACTER] Current character for ${cleanMac}: ${character}`);
+        return character;
+      } else {
+        console.log(`ℹ️ [CHARACTER] No character found in response, using default: Cheeko`);
+        return "Cheeko";
+      }
+    } catch (error) {
+      console.error(`❌ [CHARACTER] Failed to fetch character: ${error.message}`);
+      return "Cheeko"; // Default fallback
     }
   }
 
@@ -4579,6 +4663,15 @@ class MQTTGateway {
           );
           await this.handlePreviousControl(topic, clientId);
           return;
+        } else if (
+          originalPayload.type === "playback_control" &&
+          originalPayload.action === "start_agent"
+        ) {
+          console.log(
+            `▶️ [PLAYBACK-CONTROL] Start agent action received from topic: ${topic}`
+          );
+          await this.handleStartAgentControl(deviceId, originalPayload, clientId);
+          return;
         }
 
         // Handle specific content playback requests (play_music / play_story)
@@ -4754,6 +4847,13 @@ class MQTTGateway {
                 );
                 return; // Don't dispatch agent for music/story rooms
               }
+
+              // For conversation mode, skip sending greeting here
+              // The start_agent handler already sends it with the correct is_mode_switch flag
+              console.log(
+                `ℹ️ [START-GREETING] Skipping duplicate greeting for conversation mode (handled by start_agent)`
+              );
+              return;
 
               // FIRST: Check LiveKit API for actual agent presence (most reliable)
               const agentCheck = await this.checkAgentInRoom(roomName);
@@ -5027,8 +5127,8 @@ class MQTTGateway {
 
         // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-agent')
         if (participant.identity &&
-            (participant.identity.toLowerCase().includes('agent') ||
-             participant.identity === 'cheeko-agent')) {
+          (participant.identity.toLowerCase().includes('agent') ||
+            participant.identity === 'cheeko-agent')) {
           console.log(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
           return { exists: true, identity: participant.identity };
         }
@@ -5416,6 +5516,234 @@ class MQTTGateway {
           }
         });
       }
+    }
+  }
+
+  async handleStartAgentControl(deviceId, payload, clientId = null) {
+    try {
+      // Extract session_id which contains room info: uuid_mac_mode
+      const sessionId = payload.session_id;
+      if (!sessionId) {
+        console.warn(`⚠️ [START-AGENT] No session_id in payload`);
+        return;
+      }
+
+      // Parse session_id to get room type (format: uuid_mac_mode)
+      const parts = sessionId.split('_');
+      if (parts.length < 3) {
+        console.warn(`⚠️ [START-AGENT] Invalid session_id format: ${sessionId}`);
+        return;
+      }
+
+      const roomType = parts[parts.length - 1]; // Last part is the mode (music/story/conversation)
+      const roomName = sessionId; // The full session_id is the room name
+
+      console.log(`▶️ [START-AGENT] Processing start_agent for mode: ${roomType}, room: ${roomName}`);
+
+      // Find device info
+      const deviceInfo = this.deviceConnections.get(deviceId);
+      if (!deviceInfo) {
+        console.warn(`⚠️ [START-AGENT] Device not found: ${deviceId}`);
+        return;
+      }
+
+      // Detect if this is a mode switch or fresh boot
+      // Use previousMode if available (set during mode change), otherwise use currentMode
+      const previousMode = deviceInfo.previousMode || deviceInfo.currentMode || null;
+      const isModeSwitch = previousMode !== null && previousMode !== roomType;
+
+      console.log(`🔍 [START-AGENT] Previous mode: ${previousMode}, Current mode: ${roomType}, Is mode switch: ${isModeSwitch}`);
+
+      // Clear previousMode after detection to avoid false positives
+      if (deviceInfo.previousMode) {
+        delete deviceInfo.previousMode;
+      }
+
+
+      if (roomType === "music") {
+        // Call Media API to start music playback
+        const apiUrl = `${MEDIA_API_BASE}/music-bot/${roomName}/start`;
+        console.log(`🎵 [START-AGENT] Starting music bot playback: ${apiUrl}`);
+
+        try {
+          const response = await axios.post(
+            apiUrl,
+            { is_mode_switch: isModeSwitch },  // Pass mode switch flag
+            mediaAxiosConfig({ timeout: 5000 })
+          );
+          console.log(`✅ [START-AGENT] Music bot started:`, response.data);
+
+          // Only send TTS start when bot actually starts playing (mode switch)
+          // On fresh boot, bot returns "ready" and waits for next/previous button press
+          if (response.data && response.data.status === "started") {
+            console.log(`📤 [START-AGENT] Bot started playing, sending TTS start to firmware...`);
+            const connection = deviceInfo.connection;
+            if (connection) {
+              connection.sendMqttMessage(
+                JSON.stringify({
+                  type: "tts",
+                  state: "start",
+                  session_id: roomName,
+                })
+              );
+              console.log(`✅ [START-AGENT] TTS start sent to firmware`);
+            } else {
+              console.error(`❌ [START-AGENT] No connection found to send TTS start`);
+            }
+          } else {
+            console.log(`ℹ️ [START-AGENT] Bot is ready but not playing yet (fresh boot - waiting for user interaction)`);
+          }
+        } catch (error) {
+          console.error(`❌ [START-AGENT] Failed to start music bot:`, error.message);
+          if (error.response) {
+            console.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
+          }
+        }
+
+      } else if (roomType === "story") {
+        // Call Media API to start story playback
+        const apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/start`;
+        console.log(`📖 [START-AGENT] Starting story bot playback: ${apiUrl}`);
+
+        try {
+          const response = await axios.post(
+            apiUrl,
+            { is_mode_switch: isModeSwitch },  // Pass mode switch flag
+            mediaAxiosConfig({ timeout: 5000 })
+          );
+          console.log(`✅ [START-AGENT] Story bot started:`, response.data);
+
+          // Only send TTS start when bot actually starts playing (mode switch)
+          // On fresh boot, bot returns "ready" and waits for next/previous button press
+          if (response.data && response.data.status === "started") {
+            console.log(`📤 [START-AGENT] Bot started playing, sending TTS start to firmware...`);
+            const connection = deviceInfo.connection;
+            if (connection) {
+              connection.sendMqttMessage(
+                JSON.stringify({
+                  type: "tts",
+                  state: "start",
+                  session_id: roomName,
+                })
+              );
+              console.log(`✅ [START-AGENT] TTS start sent to firmware`);
+            } else {
+              console.error(`❌ [START-AGENT] No connection found to send TTS start`);
+            }
+          } else {
+            console.log(`ℹ️ [START-AGENT] Bot is ready but not playing yet (fresh boot - waiting for user interaction)`);
+          }
+        } catch (error) {
+          console.error(`❌ [START-AGENT] Failed to start story bot:`, error.message);
+          if (error.response) {
+            console.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
+          }
+        }
+
+      } else if (roomType === "conversation") {
+        // Handle conversation mode - dispatch agent if needed, then trigger greeting
+        console.log(`💬 [START-AGENT] Triggering agent greeting for conversation mode`);
+
+        const connection = deviceInfo.connection;
+        if (connection && connection.bridge && connection.bridge.room && connection.bridge.room.localParticipant) {
+
+          // Step 1: Check if agent is already in the room
+          console.log(`🔍 [START-AGENT] Checking if agent is already in room...`);
+          const agentCheck = await this.checkAgentInRoom(roomName);
+
+          if (!agentCheck.exists) {
+            // Agent not in room yet
+            if (isModeSwitch) {
+              // Mode switch: agent was already dispatched by handleDeviceModeChange()
+              // Just wait for it to join, don't dispatch again
+              console.log(`⏳ [START-AGENT] Mode switch - agent already dispatched, waiting for it to join...`);
+            } else {
+              // Fresh boot: need to dispatch agent now
+              console.log(`🚀 [START-AGENT] Fresh boot - dispatching agent now...`);
+
+              if (this.agentDispatchClient) {
+                try {
+                  const dispatch = await this.agentDispatchClient.createDispatch(
+                    roomName,
+                    "cheeko-agent",
+                    {
+                      metadata: JSON.stringify({
+                        device_mac: connection.macAddress,
+                        device_uuid: deviceId,
+                        timestamp: Date.now(),
+                      }),
+                    }
+                  );
+                  console.log(`✅ [START-AGENT] Agent dispatched successfully: ${dispatch.id}`);
+
+                  // Mark bridge as having agent deployed
+                  connection.bridge.agentDeployed = true;
+
+                } catch (dispatchError) {
+                  console.error(`❌ [START-AGENT] Failed to dispatch agent:`, dispatchError.message);
+                  // Send error to device
+                  connection.sendMqttMessage(JSON.stringify({
+                    type: "error",
+                    code: "AGENT_DISPATCH_FAILED",
+                    message: "Failed to start conversation agent",
+                    timestamp: Date.now()
+                  }));
+                  return;
+                }
+              } else {
+                console.error(`❌ [START-AGENT] AgentDispatchClient not initialized`);
+                return;
+              }
+            }
+          } else {
+            console.log(`✅ [START-AGENT] Agent already in room: ${agentCheck.identity}`);
+            connection.bridge.agentJoined = true;
+            connection.bridge.agentDeployed = true;
+          }
+
+          // Step 3: Wait for agent to join the room (if just dispatched, wait for it to connect)
+          console.log(`⏳ [START-AGENT] Waiting for agent to be ready...`);
+
+          // Wait for agent join with timeout
+          const maxWaitTime = 10000; // 10 seconds max
+          const startTime = Date.now();
+
+          while (Date.now() - startTime < maxWaitTime) {
+            const check = await this.checkAgentInRoom(roomName);
+            if (check.exists) {
+              console.log(`✅ [START-AGENT] Agent is ready in room`);
+              break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 500)); // Check every 500ms
+          }
+
+          // Step 4: Send greeting trigger to agent
+          console.log(`✅ [START-AGENT] Sending greeting message to agent`);
+
+          const greetingMessage = {
+            type: "start_greeting",
+            session_id: sessionId,
+            is_mode_switch: isModeSwitch,  // Pass mode switch flag to agent
+            timestamp: Date.now()
+          };
+          const messageString = JSON.stringify(greetingMessage);
+          const messageData = new TextEncoder().encode(messageString);
+
+          await connection.bridge.room.localParticipant.publishData(messageData, {
+            reliable: true
+          });
+
+          console.log(`✅ [START-AGENT] Greeting trigger sent to LiveKit agent (is_mode_switch: ${isModeSwitch})`);
+        } else {
+          console.error(`❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`);
+        }
+
+      } else {
+        console.warn(`⚠️ [START-AGENT] Unknown room type: ${roomType}`);
+      }
+
+    } catch (error) {
+      console.error(`❌ [START-AGENT] Error:`, error.message);
     }
   }
 
@@ -6002,8 +6330,15 @@ class MQTTGateway {
         existingConnection = deviceInfo.connection;
       }
 
-      // STEP 0: Stop old bot (if music/story mode)
-      console.log(`🛑 [MODE-CHANGE] Step 0: Checking for old bot to stop...`);
+      // STEP 0a: Clear audio buffers IMMEDIATELY to prevent old audio from playing
+      console.log(`🧹 [MODE-CHANGE] Step 0a: Clearing audio buffers...`);
+      if (existingConnection && existingConnection.bridge) {
+        existingConnection.bridge.clearAudioBuffers();
+        console.log(`✅ [MODE-CHANGE] Audio buffers cleared`);
+      }
+
+      // STEP 0b: Stop old bot (if music/story mode)
+      console.log(`🛑 [MODE-CHANGE] Step 0b: Checking for old bot to stop...`);
       if (
         existingConnection &&
         existingConnection.roomType &&
@@ -6085,6 +6420,10 @@ class MQTTGateway {
 
         // Disconnect old bridge without closing the connection (we're reusing it)
         if (oldBridge) {
+          // CRITICAL: Stop audio forwarding immediately to prevent ghost audio
+          oldBridge.stopAudioForwarding = true;
+          console.log(`🛑 [MODE-CHANGE] Stopped audio forwarding on old bridge`);
+
           // Disconnect from LiveKit room without triggering connection cleanup
           if (oldBridge.room) {
             try {
@@ -6115,6 +6454,11 @@ class MQTTGateway {
         console.log(
           `✅ [MODE-CHANGE] Mode updated in DB: ${oldMode} → ${newMode}`
         );
+
+        // Store previousMode for mode switch detection in start_agent
+        if (deviceInfo) {
+          deviceInfo.previousMode = oldMode;
+        }
 
         // STEP 3: Handle mode-specific flow
         console.log(
@@ -6214,31 +6558,39 @@ class MQTTGateway {
           `✅ [MODE-CHANGE] New room created and gateway connected: ${newRoomName}`
         );
 
+        // Fetch character for conversation mode
+        let currentCharacter = null;
+        if (newMode === "conversation") {
+          currentCharacter = await connection.fetchCurrentCharacter(macAddress);
+          connection.currentCharacter = currentCharacter;
+          console.log(`🎭 [MODE-CHANGE] Fetched character for conversation: ${currentCharacter}`);
+        }
+
         // Send mode_update to device firmware
         console.log(`📤 [MODE-CHANGE] Sending mode_update to device...`);
-        connection.sendMqttMessage(
-          JSON.stringify({
-            type: "mode_update",
-            mode: newMode,
-            session_id: newRoomName,
-            timestamp: Date.now(),
-            transport: "udp",
-            udp: {
-              server: this.publicIp,
-              port: this.udpPort,
-              encryption: connection.udp.encryption,
-              key: connection.udp.key.toString("hex"),
-              nonce: connection.udp.nonce.toString("hex"),
-            },
-            audio_params: {
-              sample_rate: 24000,
-              channels: 1,
-              frame_duration: 60,
-              format: "opus",
-            },
-          })
-        );
-        console.log(`✅ [MODE-CHANGE] Sent mode_update (${newMode}) to device with UDP details`);
+        const modeUpdateMsg = {
+          type: "mode_update",
+          mode: newMode,
+          ...(newMode === "conversation" && currentCharacter ? { character: currentCharacter } : {}),
+          session_id: newRoomName,
+          timestamp: Date.now(),
+          transport: "udp",
+          udp: {
+            server: this.publicIp,
+            port: this.udpPort,
+            encryption: connection.udp.encryption,
+            key: connection.udp.key.toString("hex"),
+            nonce: connection.udp.nonce.toString("hex"),
+          },
+          audio_params: {
+            sample_rate: 24000,
+            channels: 1,
+            frame_duration: 60,
+            format: "opus",
+          },
+        };
+        connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+        console.log(`✅ [MODE-CHANGE] Sent mode_update (${newMode}${currentCharacter ? ', character: ' + currentCharacter : ''}) to device with UDP details`);
 
         // STEP 4: Handle mode-specific startup
         console.log(`🎬 [MODE-CHANGE] Step 4: Starting ${newMode} flow...`);
@@ -6247,30 +6599,12 @@ class MQTTGateway {
           console.log(`🎵 [MODE-CHANGE] Spawning music bot...`);
           await connection.spawnMusicBot(newRoomName);
           console.log(`✅ [MODE-CHANGE] Music bot spawned`);
-
-          // Send TTS start for music mode
-          console.log(`📤 [MODE-CHANGE] Sending TTS start message...`);
-          connection.sendMqttMessage(
-            JSON.stringify({
-              type: "tts",
-              state: "start",
-              session_id: newRoomName,
-            })
-          );
+          console.log(`ℹ️ [MODE-CHANGE] TTS start will be sent after firmware sends start_agent signal`);
         } else if (newMode === "story") {
           console.log(`📖 [MODE-CHANGE] Spawning story bot...`);
           await connection.spawnStoryBot(newRoomName);
           console.log(`✅ [MODE-CHANGE] Story bot spawned`);
-
-          // Send TTS start for story mode
-          console.log(`📤 [MODE-CHANGE] Sending TTS start message...`);
-          connection.sendMqttMessage(
-            JSON.stringify({
-              type: "tts",
-              state: "start",
-              session_id: newRoomName,
-            })
-          );
+          console.log(`ℹ️ [MODE-CHANGE] TTS start will be sent after firmware sends start_agent signal`);
         } else if (newMode === "conversation") {
           console.log(
             `🗣️ [MODE-CHANGE] Conversation mode - auto-dispatching agent...`

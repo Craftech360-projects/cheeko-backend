@@ -2,7 +2,7 @@
 Media API Server - Spawns music/story bots that join LiveKit rooms
 Similar to livekit-media/server.py but integrated with existing services
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List
@@ -644,6 +644,7 @@ class MusicBot(MediaBot):
         self.current_random_song = None  # Current random song info
         self.song_history = []  # Keep track of last 10 random songs for previous functionality
         self.max_history = 10  # Maximum songs to remember
+        self.history_index = -1  # Current position in history (-1 means at the end/latest)
         self.pending_previous_song = None  # Song to play on next iteration (for "previous" in random mode)
 
         # Specific content playback support (for mobile app requests)
@@ -651,6 +652,14 @@ class MusicBot(MediaBot):
 
         # Analytics service
         self.analytics_service = analytics_service
+
+        # Paused state - bot waits for start_agent signal before streaming
+        self.is_paused = True  # Start in paused state
+        self.start_event = asyncio.Event()  # Event to signal start
+
+        # First interaction tracking - bot waits for first button press to actually start playback
+        self.is_first_interaction = True  # Track if this is the first button press
+        self.waiting_for_first_interaction = True  # Bot is waiting for user to press button
 
     async def run(self):
         """Main entry point - connect and stream music with progressive streaming and skip support"""
@@ -677,6 +686,13 @@ class MusicBot(MediaBot):
             if not connected:
                 logger.error("❌ Failed to connect to room after all retries")
                 return
+
+            # Wait for start signal before streaming (paused state)
+            if self.is_paused:
+                logger.info("⏸️ [MUSIC] Bot connected, waiting for start_agent signal...")
+                await self.start_event.wait()
+                logger.info("▶️ [MUSIC] Start signal received, beginning playback")
+                self.is_paused = False
 
             # Start analytics session
             if self.analytics_service:
@@ -899,6 +915,10 @@ class MusicBot(MediaBot):
             if not is_from_history:
                 logger.info(f"🎵 [RANDOM] Playing: '{self.current_random_song['title']}' ({self.current_random_song['language']})")
 
+            # Add to history BEFORE streaming so "previous" works correctly during playback
+            if not is_from_history:
+                self._add_to_history(self.current_random_song)
+
             # Reset skip flag before streaming
             async with self.skip_lock:
                 self.skip_requested = False
@@ -912,10 +932,6 @@ class MusicBot(MediaBot):
             if self.should_stop:
                 logger.info(f"🎵 should_stop is True, breaking random loop")
                 break
-
-            # Add to history for previous functionality (only if not already from history)
-            if not is_from_history:
-                self._add_to_history(self.current_random_song)
 
             # Check if skip was requested during streaming
             was_skipped = False
@@ -948,25 +964,42 @@ class MusicBot(MediaBot):
 
     def _add_to_history(self, song_info):
         """Add song to history for previous functionality"""
+        # If we're navigating back in history and a new song is added, truncate future history
+        if self.history_index >= 0 and self.history_index < len(self.song_history) - 1:
+            # We were in the middle of history, truncate everything after current position
+            self.song_history = self.song_history[:self.history_index + 1]
+
         self.song_history.append(song_info)
         # Keep only last N songs
         if len(self.song_history) > self.max_history:
             self.song_history.pop(0)
-        logger.info(f"🎵 [HISTORY] Added to history: '{song_info['title']}' (history size: {len(self.song_history)})")
+
+        # Reset history index to point to the latest song
+        self.history_index = len(self.song_history) - 1
+        logger.info(f"🎵 [HISTORY] Added to history: '{song_info['title']}' (history size: {len(self.song_history)}, index: {self.history_index})")
 
     def _get_previous_from_history(self):
-        """Get previous song from history"""
-        if len(self.song_history) >= 2:
-            # Remove current song and get the one before it
-            self.song_history.pop()  # Remove current
-            previous = self.song_history.pop()  # Get previous
-            return previous
-        elif len(self.song_history) == 1:
-            # Only one song in history, return it
-            return self.song_history.pop()
-        else:
-            # No history
+        """Get previous song from history using index-based navigation (non-destructive)"""
+        if len(self.song_history) == 0:
+            logger.info("🎵 [HISTORY] No songs in history")
             return None
+
+        # Calculate the target index (one step back)
+        if self.history_index < 0:
+            # history_index is -1, meaning we're at the end
+            target_index = len(self.song_history) - 2  # Go to second-to-last
+        else:
+            target_index = self.history_index - 1  # Go one step back
+
+        if target_index < 0:
+            logger.info(f"🎵 [HISTORY] Already at the beginning of history (index: {self.history_index}, size: {len(self.song_history)})")
+            return None
+
+        # Update index and return the song at that position
+        self.history_index = target_index
+        previous_song = self.song_history[target_index]
+        logger.info(f"🎵 [HISTORY] Moving to index {target_index}: '{previous_song['title']}' (history size: {len(self.song_history)})")
+        return previous_song
 
     async def _stream_song(self, song_url: str, title: str, media_id: str = None, language: str = None):
         """Stream a single song using progressive streaming - can be interrupted by skip"""
@@ -1081,6 +1114,16 @@ class MusicBot(MediaBot):
     async def skip_to_next(self):
         """Request skip to next song (works in both playlist and random mode)"""
         async with self.skip_lock:
+            # Check if this is the first interaction
+            if self.is_first_interaction and self.waiting_for_first_interaction:
+                logger.info("▶️ [FIRST-INTERACTION] First button press detected - starting playback from song 1")
+                self.is_first_interaction = False
+                self.waiting_for_first_interaction = False
+                self.start_event.set()  # NOW trigger playback to start
+                # Don't set skip_requested - let it play song 1 from beginning
+                return
+            
+            # Normal skip behavior
             if self.random_mode:
                 logger.info("⏭️ [CONTROL] Next random song requested")
             else:
@@ -1091,12 +1134,44 @@ class MusicBot(MediaBot):
     async def skip_to_previous(self):
         """Request skip to previous song (works in both playlist and random mode)"""
         async with self.skip_lock:
+            # Check if this is the first interaction
+            if self.is_first_interaction and self.waiting_for_first_interaction:
+                logger.info("▶️ [FIRST-INTERACTION] First button press detected - starting playback from song 1")
+                self.is_first_interaction = False
+                self.waiting_for_first_interaction = False
+                self.start_event.set()  # NOW trigger playback to start
+                # Don't set skip_requested - let it play song 1 from beginning
+                return
+            
+            # Normal skip behavior
             if self.random_mode:
                 logger.info("⏮️ [CONTROL] Previous song from history requested")
             else:
                 logger.info("⏮️ [CONTROL] Previous song requested")
             self.skip_requested = True
             self.skip_direction = 'previous'
+
+    async def start_playback(self, is_mode_switch: bool = False):
+        """Start playback - called when start_agent signal is received"""
+        if self.is_paused:
+            if is_mode_switch:
+                # Mode switch - start immediately without waiting for button press
+                logger.info("▶️ [MUSIC] Mode switch detected - starting playback immediately")
+                self.start_event.set()
+                self.is_first_interaction = False  # Skip first interaction logic
+                self.waiting_for_first_interaction = False
+                self.is_paused = False
+                return {"status": "started", "message": "Music playback started (mode switch)"}
+            else:
+                # Fresh boot - wait for first button press
+                logger.info("▶️ [MUSIC] Fresh boot detected - waiting for first button press...")
+                # DON'T set start_event yet - wait for first button press
+                self.waiting_for_first_interaction = True
+                self.is_paused = False  # Mark as "ready" but not playing
+                return {"status": "ready", "message": "Bot ready, waiting for user interaction"}
+        else:
+            logger.info("▶️ [MUSIC] Already ready/playing")
+            return {"status": "already_ready", "message": "Bot is already ready"}
 
     async def play_specific_content(self, content_info: Dict, loop_enabled: bool = False):
         """
@@ -1196,6 +1271,7 @@ class StoryBot(MediaBot):
         self.current_random_story = None  # Current random story info
         self.story_history = []  # Keep track of last 10 random stories for previous functionality
         self.max_history = 10  # Maximum stories to remember
+        self.history_index = -1  # Current position in history (-1 means at the end/latest)
         self.pending_previous_story = None  # Story to play on next iteration (for "previous" in random mode)
 
         # Specific content playback support (for mobile app requests)
@@ -1203,6 +1279,14 @@ class StoryBot(MediaBot):
 
         # Analytics service
         self.analytics_service = analytics_service
+
+        # Paused state - bot waits for start_agent signal before streaming
+        self.is_paused = True  # Start in paused state
+        self.start_event = asyncio.Event()  # Event to signal start
+
+        # First interaction tracking - bot waits for first button press to actually start playback
+        self.is_first_interaction = True  # Track if this is the first button press
+        self.waiting_for_first_interaction = True  # Bot is waiting for user to press button
 
     async def run(self):
         """Main entry point - connect and stream story with progressive streaming and skip support"""
@@ -1229,6 +1313,13 @@ class StoryBot(MediaBot):
             if not connected:
                 logger.error("❌ Failed to connect to room after all retries")
                 return
+
+            # Wait for start signal before streaming (paused state)
+            if self.is_paused:
+                logger.info("⏸️ [STORY] Bot connected, waiting for start_agent signal...")
+                await self.start_event.wait()
+                logger.info("▶️ [STORY] Start signal received, beginning playback")
+                self.is_paused = False
 
             # Start analytics session
             if self.analytics_service:
@@ -1449,6 +1540,10 @@ class StoryBot(MediaBot):
             if not is_from_history:
                 logger.info(f"📖 [RANDOM] Playing: '{self.current_random_story['title']}' ({self.current_random_story['category']})")
 
+            # Add to history BEFORE streaming so "previous" works correctly during playback
+            if not is_from_history:
+                self._add_to_history(self.current_random_story)
+
             # Reset skip flag before streaming
             async with self.skip_lock:
                 self.skip_requested = False
@@ -1462,10 +1557,6 @@ class StoryBot(MediaBot):
             if self.should_stop:
                 logger.info(f"📖 should_stop is True, breaking random loop")
                 break
-
-            # Add to history for previous functionality (only if not already from history)
-            if not is_from_history:
-                self._add_to_history(self.current_random_story)
 
             # Check if skip was requested during streaming
             was_skipped = False
@@ -1498,25 +1589,42 @@ class StoryBot(MediaBot):
 
     def _add_to_history(self, story_info):
         """Add story to history for previous functionality"""
+        # If we're navigating back in history and a new story is added, truncate future history
+        if self.history_index >= 0 and self.history_index < len(self.story_history) - 1:
+            # We were in the middle of history, truncate everything after current position
+            self.story_history = self.story_history[:self.history_index + 1]
+
         self.story_history.append(story_info)
         # Keep only last N stories
         if len(self.story_history) > self.max_history:
             self.story_history.pop(0)
-        logger.info(f"📖 [HISTORY] Added to history: '{story_info['title']}' (history size: {len(self.story_history)})")
+
+        # Reset history index to point to the latest story
+        self.history_index = len(self.story_history) - 1
+        logger.info(f"📖 [HISTORY] Added to history: '{story_info['title']}' (history size: {len(self.story_history)}, index: {self.history_index})")
 
     def _get_previous_from_history(self):
-        """Get previous story from history"""
-        if len(self.story_history) >= 2:
-            # Remove current story and get the one before it
-            self.story_history.pop()  # Remove current
-            previous = self.story_history.pop()  # Get previous
-            return previous
-        elif len(self.story_history) == 1:
-            # Only one story in history, return it
-            return self.story_history.pop()
-        else:
-            # No history
+        """Get previous story from history using index-based navigation (non-destructive)"""
+        if len(self.story_history) == 0:
+            logger.info("📖 [HISTORY] No stories in history")
             return None
+
+        # Calculate the target index (one step back)
+        if self.history_index < 0:
+            # history_index is -1, meaning we're at the end
+            target_index = len(self.story_history) - 2  # Go to second-to-last
+        else:
+            target_index = self.history_index - 1  # Go one step back
+
+        if target_index < 0:
+            logger.info(f"📖 [HISTORY] Already at the beginning of history (index: {self.history_index}, size: {len(self.story_history)})")
+            return None
+
+        # Update index and return the story at that position
+        self.history_index = target_index
+        previous_story = self.story_history[target_index]
+        logger.info(f"📖 [HISTORY] Moving to index {target_index}: '{previous_story['title']}' (history size: {len(self.story_history)})")
+        return previous_story
 
     async def _stream_story(self, story_url: str, title: str, media_id: str = None, category: str = None):
         """Stream a single story using progressive streaming - can be interrupted by skip"""
@@ -1631,6 +1739,16 @@ class StoryBot(MediaBot):
     async def skip_to_next(self):
         """Request skip to next story (works in both playlist and random mode)"""
         async with self.skip_lock:
+            # Check if this is the first interaction
+            if self.is_first_interaction and self.waiting_for_first_interaction:
+                logger.info("▶️ [FIRST-INTERACTION] First button press detected - starting playback from story 1")
+                self.is_first_interaction = False
+                self.waiting_for_first_interaction = False
+                self.start_event.set()  # NOW trigger playback to start
+                # Don't set skip_requested - let it play story 1 from beginning
+                return
+            
+            # Normal skip behavior
             if self.random_mode:
                 logger.info("⏭️ [CONTROL] Next random story requested")
             else:
@@ -1641,12 +1759,44 @@ class StoryBot(MediaBot):
     async def skip_to_previous(self):
         """Request skip to previous story (works in both playlist and random mode)"""
         async with self.skip_lock:
+            # Check if this is the first interaction
+            if self.is_first_interaction and self.waiting_for_first_interaction:
+                logger.info("▶️ [FIRST-INTERACTION] First button press detected - starting playback from story 1")
+                self.is_first_interaction = False
+                self.waiting_for_first_interaction = False
+                self.start_event.set()  # NOW trigger playback to start
+                # Don't set skip_requested - let it play story 1 from beginning
+                return
+            
+            # Normal skip behavior
             if self.random_mode:
                 logger.info("⏮️ [CONTROL] Previous story from history requested")
             else:
                 logger.info("⏮️ [CONTROL] Previous story requested")
             self.skip_requested = True
             self.skip_direction = 'previous'
+
+    async def start_playback(self, is_mode_switch: bool = False):
+        """Start playback - called when start_agent signal is received"""
+        if self.is_paused:
+            if is_mode_switch:
+                # Mode switch - start immediately without waiting for button press
+                logger.info("▶️ [STORY] Mode switch detected - starting playback immediately")
+                self.start_event.set()
+                self.is_first_interaction = False  # Skip first interaction logic
+                self.waiting_for_first_interaction = False
+                self.is_paused = False
+                return {"status": "started", "message": "Story playback started (mode switch)"}
+            else:
+                # Fresh boot - wait for first button press (same as music)
+                logger.info("▶️ [STORY] Fresh boot detected - waiting for first button press...")
+                # DON'T set start_event yet - wait for first button press
+                self.waiting_for_first_interaction = True
+                self.is_paused = False  # Mark as "ready" but not playing
+                return {"status": "ready", "message": "Bot ready, waiting for user interaction"}
+        else:
+            logger.info("▶️ [STORY] Already playing")
+            return {"status": "already_playing", "message": "Story is already playing"}
 
     async def play_specific_content(self, content_info: Dict, loop_enabled: bool = False):
         """
@@ -1936,6 +2086,66 @@ async def music_bot_skip_previous(room_name: str):
         raise
     except Exception as e:
         logger.error(f"❌ Error skipping to previous song: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/music-bot/{room_name}/start")
+async def music_bot_start(room_name: str, request: dict = Body(...)):
+    """Start music playback - triggers the bot to begin streaming after start_agent signal"""
+    try:
+        is_mode_switch = request.get("is_mode_switch", False)
+        logger.info(f"▶️ [API] Start music bot request for room: {room_name}, is_mode_switch: {is_mode_switch}")
+
+        if room_name not in active_bots:
+            raise HTTPException(status_code=404, detail=f"Music bot not found in room: {room_name}")
+
+        bot = active_bots[room_name]
+
+        if not isinstance(bot, MusicBot):
+            raise HTTPException(status_code=400, detail=f"Bot in room {room_name} is not a music bot")
+
+        result = await bot.start_playback(is_mode_switch=is_mode_switch)
+
+        return {
+            "status": result["status"],
+            "message": result["message"],
+            "room_name": room_name
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error starting music bot: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/story-bot/{room_name}/start")
+async def story_bot_start(room_name: str, request: dict = Body(...)):
+    """Start story playback - triggers the bot to begin streaming after start_agent signal"""
+    try:
+        is_mode_switch = request.get("is_mode_switch", False)
+        logger.info(f"▶️ [API] Start story bot request for room: {room_name}, is_mode_switch: {is_mode_switch}")
+
+        if room_name not in active_bots:
+            raise HTTPException(status_code=404, detail=f"Story bot not found in room: {room_name}")
+
+        bot = active_bots[room_name]
+
+        if not isinstance(bot, StoryBot):
+            raise HTTPException(status_code=400, detail=f"Bot in room {room_name} is not a story bot")
+
+        result = await bot.start_playback(is_mode_switch=is_mode_switch)
+
+        return {
+            "status": result["status"],
+            "message": result["message"],
+            "room_name": room_name
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error starting story bot: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
