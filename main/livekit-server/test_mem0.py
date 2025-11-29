@@ -5,7 +5,7 @@ async def test():
     # 1. Clear existing memories
     provider = Mem0MemoryProvider(
         api_key="m0-tNiOs5lPRZMUGeNglTt9np3GBHt7EOIBZr3FbUtC",
-        role_id="test_mac_address"
+        role_id="68:25:dd:bb:f3:a0"
     )
     await provider.delete_all_memories()
     
