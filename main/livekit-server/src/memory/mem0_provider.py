@@ -32,18 +32,33 @@ class Mem0MemoryProvider:
         # Build messages list in the format mem0 expects
         formatted_messages = []
 
-        # Add context message if child name is available
+        # Add context message with explicit instructions to prevent agent character leakage
         if child_name:
             formatted_messages.append({
                 "role": "system",
-                "content": f"The user's name is {child_name}, and Cheeko is the AI assistant"
+                "content": f"""The user's name is {child_name}. Cheeko is the AI assistant.
+IMPORTANT: Extract facts and preferences ONLY from messages with role='user' (the child's messages).
+Do NOT extract facts from messages with role='assistant' (those are Cheeko's responses, not the child's preferences).
+Focus on: favorite things, hobbies, pets, family members, friends, interests, and personal preferences."""
             })
 
+        # Filter and format messages
+        junk_phrases = {'ok', 'yes', 'no', 'um', 'ah', 'uh', 'hmm', 'yeah', 'yep', 'nope'}
+        
         for msg in messages:
             if msg.get('role') != 'system':
                 content = msg.get('content', '')
                 if isinstance(content, list):
                     content = ' '.join(str(item) for item in content)
+                
+                # Skip junk data: very short messages or common filler words
+                content_lower = content.lower().strip()
+                word_count = len(content.split())
+                
+                # Skip if too short or is a junk phrase
+                if word_count < 3 or content_lower in junk_phrases:
+                    logger.debug(f"💭 Filtered junk message: '{content[:30]}...'")
+                    continue
 
                 # Map role to standard format
                 role = 'user' if msg.get('role') == 'user' else 'assistant'
@@ -62,8 +77,7 @@ class Mem0MemoryProvider:
         result = self.client.add(
             formatted_messages,  # Pass list of messages instead of string
             user_id=self.role_id,
-            metadata=metadata if metadata else None,
-            output_format="v1.1"
+            metadata=metadata if metadata else None
         )
         logger.info(f"💭✅ Saved to mem0: {len(messages)} messages (child: {child_name or 'unknown'})")
         logger.debug(f"💭 Save result: {result}")
@@ -113,3 +127,66 @@ class Mem0MemoryProvider:
             import traceback
             logger.error(f"💭 Traceback: {traceback.format_exc()}")
             return ""
+
+    async def get_all_memories(self) -> str:
+        """Get all memories for the user (for session startup)
+
+        Returns:
+            Formatted memory string with all known facts about the user
+        """
+        try:
+            logger.info(f"💭 Getting all memories for user: {self.role_id}")
+            # Mem0 API v2 requires filters parameter with user_id
+            results = self.client.get_all(
+                filters={"user_id": self.role_id}
+            )
+
+            # Handle both list response and dict with "results" key
+            if isinstance(results, list):
+                results_list = results
+            elif isinstance(results, dict) and "results" in results:
+                results_list = results["results"]
+            else:
+                logger.info(f"💭 No memories found for user (unexpected format: {type(results)})")
+                return ""
+
+            if not results_list:
+                logger.info(f"💭 No memories found for user")
+                return ""
+
+            logger.info(f"💭 Retrieved {len(results_list)} memories")
+
+            # Format memories
+            memories = []
+            for i, entry in enumerate(results_list):
+                memory = entry.get("memory", "")
+                if memory:
+                    memories.append(memory)
+                    logger.debug(f"💭 Memory {i}: {memory[:50]}...")
+
+            logger.info(f"💭 Formatted {len(memories)} memories for injection")
+            return "\n".join(f"- {m}" for m in memories)
+        except Exception as e:
+            logger.error(f"💭 Error getting all memories: {e}")
+            import traceback
+            logger.error(f"💭 Traceback: {traceback.format_exc()}")
+            return ""
+    
+    async def delete_all_memories(self) -> bool:
+        """Delete all memories for the user (for testing/cleanup)
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            logger.info(f"💭 Deleting all memories for user: {self.role_id}")
+            self.client.delete_all(
+                user_id=self.role_id
+            )
+            logger.info(f"💭✅ All memories deleted for user: {self.role_id}")
+            return True
+        except Exception as e:
+            logger.error(f"💭❌ Error deleting memories: {e}")
+            import traceback
+            logger.error(f"💭 Traceback: {traceback.format_exc()}")
+            return False

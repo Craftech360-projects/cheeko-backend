@@ -26,12 +26,13 @@ livekit-api
 PyJWT
 
 # Memory provider (optional - comment out if using local memory)
-mem0ai
+mem0ai>=1.0.1
 
 jinja2
 gtts
 pyttsx3
 
+silero-vad==6.2.0
 # Datadog monitoring and logging
 datadog-api-client
 ddtrace

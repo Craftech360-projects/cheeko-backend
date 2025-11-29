@@ -1,7 +1,7 @@
 {
   "debug": false,
   "mqtt_broker": {
-    "host": "192.168.1.166",
+    "host": "64.227.170.31",
     "port": 1883,
     "protocol": "mqtt",
     "keepalive": 60,

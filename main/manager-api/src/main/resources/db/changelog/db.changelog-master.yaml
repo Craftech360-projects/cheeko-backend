@@ -657,8 +657,10 @@ databaseChangeLog:
 
   - changeSet:
       id: 202511291430
+      id: 202511271500
       author: claude
       changes:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202511291430_update_all_prompts.sql
+            path: classpath:db/changelog/202511271500_add_funasr_websocket_stt.sql

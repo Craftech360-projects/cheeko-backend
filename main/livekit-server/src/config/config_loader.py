@@ -24,8 +24,15 @@ class ConfigLoader:
             'tts_model': os.getenv('TTS_MODEL', 'playai-tts'),
             'tts_voice': os.getenv('TTS_VOICE', 'Aaliyah-PlayAI'),
             'stt_language': os.getenv('STT_LANGUAGE', 'en'),
-            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq or deepgram
+            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq, deepgram, or funasr
             'deepgram_model': os.getenv('DEEPGRAM_MODEL', 'nova-3'),
+            # FunASR WebSocket STT configuration
+            'funasr_host': os.getenv('FUNASR_HOST', '127.0.0.1'),
+            'funasr_port': int(os.getenv('FUNASR_PORT', '10096')),
+            'funasr_use_ssl': os.getenv('FUNASR_USE_SSL', 'false').lower() == 'true',
+            'funasr_mode': os.getenv('FUNASR_MODE', '2pass'),  # offline, online, 2pass
+            'funasr_use_itn': os.getenv('FUNASR_USE_ITN', 'true').lower() == 'true',
+            'funasr_hotwords': os.getenv('FUNASR_HOTWORDS', ''),
             # Fallback configuration
             'fallback_enabled': os.getenv('FALLBACK_ENABLED', 'false').lower() == 'true',
             'fallback_llm_model': os.getenv('FALLBACK_LLM_MODEL', 'llama-3.1-8b-instant'),
@@ -121,8 +128,8 @@ class ConfigLoader:
         return {
             'provider': os.getenv('VAD_PROVIDER', 'silero').lower(),  # silero or ten
             'min_speech_duration': float(os.getenv('VAD_MIN_SPEECH_DURATION', '0.1')),
-            'min_silence_duration': float(os.getenv('VAD_MIN_SILENCE_DURATION', '0.5')),
-            'activation_threshold': float(os.getenv('VAD_ACTIVATION_THRESHOLD', '0.2')),
+            'min_silence_duration': float(os.getenv('VAD_MIN_SILENCE_DURATION', '1.2')),
+            'activation_threshold': float(os.getenv('VAD_ACTIVATION_THRESHOLD', '0.08')),
             'prefix_padding_duration': float(os.getenv('VAD_PREFIX_PADDING_DURATION', '0.3')),
             'max_buffered_speech': float(os.getenv('VAD_MAX_BUFFERED_SPEECH', '60.0')),
             'sample_rate': int(os.getenv('VAD_SAMPLE_RATE', '16000')),
