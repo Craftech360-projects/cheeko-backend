@@ -50,6 +50,7 @@ RUN python -m pip install --user --no-cache-dir \
     'livekit-plugins-groq' \
     'livekit.plugins.deepgram' \
     'livekit-plugins-elevenlabs' \
+    'livekit-plugins-inworld' \
     'python-dotenv' \
     'paho-mqtt' \
     'aiohttp' \
@@ -57,7 +58,7 @@ RUN python -m pip install --user --no-cache-dir \
     'edge-tts==7.0.2' \
     'gtts' \
     'pyttsx3' \
-    'mem0ai' \
+    'mem0ai==1.0.0' \
     'jinja2' \
     'pytz' \
     'qdrant-client>=1.7.0' \

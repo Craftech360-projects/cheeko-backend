@@ -19,7 +19,7 @@ class ConfigLoader:
         """Get Groq configuration from environment variables"""
         return {
             'llm_provider': os.getenv('LLM_PROVIDER', 'groq'),  # groq or openai
-            'llm_model': os.getenv('LLM_MODEL', 'openai/gpt-oss-20b'),
+            'llm_model': os.getenv('LLM_MODEL', 'openai/gpt-oss-120b'),
             'stt_model': os.getenv('STT_MODEL', 'whisper-large-v3-turbo'),
             'tts_model': os.getenv('TTS_MODEL', 'playai-tts'),
             'tts_voice': os.getenv('TTS_VOICE', 'Aaliyah-PlayAI'),

@@ -1,6 +1,7 @@
 livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
+livekit-plugins-inworld
 python-dotenv
 pydub
 aiohttp
@@ -26,7 +27,7 @@ livekit-api
 PyJWT
 
 # Memory provider (optional - comment out if using local memory)
-mem0ai>=1.0.1
+mem0ai==1.0.0
 
 jinja2
 gtts

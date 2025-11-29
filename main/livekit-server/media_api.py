@@ -1267,7 +1267,7 @@ class StoryBot(MediaBot):
         self.current_stream_iterator = None  # Track current streaming iterator
 
         # Random mode support
-        self.random_mode = False  # True when playlist is empty
+        self.random_mode = not playlist or len(playlist) == 0  # True when playlist is empty
         self.current_random_story = None  # Current random story info
         self.story_history = []  # Keep track of last 10 random stories for previous functionality
         self.max_history = 10  # Maximum stories to remember
@@ -1332,7 +1332,6 @@ class StoryBot(MediaBot):
             else:
                 # No playlist - enter continuous random mode
                 logger.info("📖 No playlist provided, entering continuous random mode")
-                self.random_mode = True
                 await self._run_random_mode()
 
             await asyncio.sleep(2)
