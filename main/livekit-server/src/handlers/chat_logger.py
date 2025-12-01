@@ -289,6 +289,15 @@ class ChatEventHandler:
         def _on_agent_state_changed(ev: AgentStateChangedEvent):
             logger.info(f"Agent state changed: {ev}")
 
+            # Mute STT when agent starts thinking to prevent overlapping transcripts
+            # This is critical for streaming STT providers (Chirp, OpenAI) that don't use VAD
+            if ev.new_state == "thinking" and ChatEventHandler._stt_wrapper:
+                try:
+                    ChatEventHandler._stt_wrapper.mute()
+                    logger.info("🔇 STT muted - agent is thinking (prevents race conditions)")
+                except Exception as e:
+                    logger.warning(f"Failed to mute STT: {e}")
+
             # Unmute STT when agent goes back to listening
             if ev.new_state == "listening" and ChatEventHandler._stt_wrapper:
                 try:
