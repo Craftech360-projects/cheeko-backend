@@ -679,3 +679,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202512011200_add_google_chirp_stt.sql
+
+  - changeSet:
+      id: 202512011230
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512011230_add_openai_stt.sql

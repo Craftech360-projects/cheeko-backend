@@ -598,7 +598,7 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     session_vad = vad if use_vad else None
     logger.info(f"🎤 VAD config: stt_use_vad={stt_use_vad_config}, use_vad={use_vad}")
 
-    # STT Provider via ProviderFactory (supports chirp, groq, etc.)
+    # STT Provider via ProviderFactory (supports chirp, groq, deepgram, openai, etc.)
     stt = ProviderFactory.create_stt(groq_config, session_vad)
     logger.info(f"🎤 Final STT Provider: {stt_provider_name}")
 

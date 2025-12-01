@@ -112,6 +112,16 @@ class ProviderFactory:
                     ),
                     vad=vad
                 ))
+            elif provider == 'openai':
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("OPENAI_API_KEY environment variable is not set")
+                providers.append(stt.StreamAdapter(
+                    stt=openai.STT(
+                        model=config.get('openai_stt_model', 'gpt-4o-transcribe')
+                    ),
+                    vad=vad
+                ))
             else:
                 providers.append(stt.StreamAdapter(
                     stt=groq.STT(
@@ -173,6 +183,17 @@ class ProviderFactory:
                         api_key=api_key,
                         model=config.get('deepgram_model', 'nova-3'),
                         language=config['stt_language']
+                    ),
+                    vad=vad
+                )
+            elif provider == 'openai':
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("OPENAI_API_KEY environment variable is not set")
+                logger.info(f"[STT] Creating OpenAI STT with model: {config.get('openai_stt_model', 'gpt-4o-transcribe')}")
+                return stt.StreamAdapter(
+                    stt=openai.STT(
+                        model=config.get('openai_stt_model', 'gpt-4o-transcribe')
                     ),
                     vad=vad
                 )

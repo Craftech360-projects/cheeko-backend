@@ -24,9 +24,11 @@ class ConfigLoader:
             'tts_model': os.getenv('TTS_MODEL', 'playai-tts'),
             'tts_voice': os.getenv('TTS_VOICE', 'Aaliyah-PlayAI'),
             'stt_language': os.getenv('STT_LANGUAGE', 'en'),
-            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq, deepgram, funasr, or chirp
+            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq, deepgram, funasr, chirp, or openai
             'stt_use_vad': os.getenv('STT_USE_VAD', 'auto').lower(),  # true, false, or auto (auto=false for chirp/google)
             'deepgram_model': os.getenv('DEEPGRAM_MODEL', 'nova-3'),
+            # OpenAI STT configuration
+            'openai_stt_model': os.getenv('OPENAI_STT_MODEL', 'gpt-4o-transcribe'),
             # Google Chirp STT configuration
             'google_stt_location': os.getenv('GOOGLE_STT_LOCATION', 'asia-southeast1'),  # us-central1, europe-west4, asia-southeast1
             # FunASR WebSocket STT configuration
