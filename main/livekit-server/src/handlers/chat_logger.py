@@ -41,10 +41,28 @@ class ChatEventHandler:
     # Store chat history service reference
     _chat_history_service = None
 
+    # Store STT provider name for logging
+    _stt_provider = None
+
+    # Store STT wrapper reference for mute control
+    _stt_wrapper = None
+
     @staticmethod
     def set_assistant(assistant):
         """Set the assistant instance for abort handling"""
         ChatEventHandler._assistant_instance = assistant
+
+    @staticmethod
+    def set_stt_provider(provider_name):
+        """Set the STT provider name for logging"""
+        ChatEventHandler._stt_provider = provider_name
+        logger.info(f"🎤 STT provider set to: {provider_name}")
+
+    @staticmethod
+    def set_stt_wrapper(stt_wrapper):
+        """Set the STT wrapper reference for mute control"""
+        ChatEventHandler._stt_wrapper = stt_wrapper
+        logger.info(f"🎤 STT wrapper set for mute control")
 
     @staticmethod
     def set_chat_history_service(chat_history_service):
@@ -271,6 +289,14 @@ class ChatEventHandler:
         def _on_agent_state_changed(ev: AgentStateChangedEvent):
             logger.info(f"Agent state changed: {ev}")
 
+            # Unmute STT when agent goes back to listening
+            if ev.new_state == "listening" and ChatEventHandler._stt_wrapper:
+                try:
+                    ChatEventHandler._stt_wrapper.unmute()
+                    logger.info("🔊 STT unmuted - agent is listening again")
+                except Exception as e:
+                    logger.warning(f"Failed to unmute STT: {e}")
+
             # Check if this state change should be suppressed due to music playback
             should_suppress = audio_state_manager.should_suppress_agent_state_change(
                 ev.old_state, ev.new_state
@@ -291,7 +317,8 @@ class ChatEventHandler:
 
         @session.on("user_input_transcribed")
         def _on_user_input_transcribed(ev: UserInputTranscribedEvent):
-            logger.info(f"👤 User said: {ev}")
+            stt_provider = ChatEventHandler._stt_provider or "unknown"
+            logger.info(f"👤 User said (STT: {stt_provider}): {ev}")
 
             # Try to extract transcript text from different possible attributes
             user_text = None
@@ -317,6 +344,12 @@ class ChatEventHandler:
                             break
             except Exception as e:
                 logger.error(f"👤 Error extracting user text: {e}")
+
+            # [LOGGING-INVESTIGATION] Explicitly log the transcript status
+            if user_text:
+                logger.info(f"🔍 [INVESTIGATION] Valid transcript received: '{user_text}'")
+            else:
+                logger.warning(f"🔍 [INVESTIGATION] Empty transcript received (ev type: {type(ev)})")
 
             # Capture user message for chat history - DISABLED to avoid duplication
             # This is now handled by the 'conversation_item_added' event
@@ -484,6 +517,12 @@ class ChatEventHandler:
                             except Exception as e:
                                 logger.debug(
                                     f"🤖 Error accessing attribute '{attr}': {e}")
+
+                    # [LOGGING-INVESTIGATION] Explicitly log the agent response status
+                    if text_content:
+                        logger.info(f"🔍 [INVESTIGATION] Agent speech created: '{text_content}'")
+                    else:
+                        logger.warning(f"🔍 [INVESTIGATION] Agent speech event with NO content (ev type: {type(ev)})")
 
                     # Capture agent response for chat history
                     if ChatEventHandler._chat_history_service and text_content:

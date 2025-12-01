@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Simple LiveKit Agent with FunASR STT
-A minimal agent that uses FunASR WebSocket server for speech-to-text,
+Simple LiveKit Agent with Google Chirp STT
+A minimal agent that uses Google Chirp for speech-to-text,
 Groq LLM, and Edge TTS
 """
 
@@ -19,10 +19,9 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit.agents.llm import ChatContext
-from livekit.plugins import groq, silero
+from livekit.plugins import groq, silero, google
 
 # Import custom providers
-from src.providers.funasr_stt_provider import FunASRSTT
 from src.providers.edge_tts_provider import EdgeTTS
 
 # Load environment variables
@@ -30,11 +29,11 @@ load_dotenv(".env")
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("funasr-agent")
+logger = logging.getLogger("chirp-agent")
 
 
 class SimpleAssistant(Agent):
-    """Simple voice assistant using FunASR for STT"""
+    """Simple voice assistant using Google Chirp for STT"""
 
     def __init__(self) -> None:
         super().__init__(
@@ -65,45 +64,15 @@ async def entrypoint(ctx: JobContext):
     await ctx.connect()
     logger.info("Connected to room, waiting for participant...")
 
-    # Get FunASR configuration from environment
-    funasr_host = os.getenv("FUNASR_HOST", "64.227.121.147")
-    funasr_port = int(os.getenv("FUNASR_PORT", "10096"))
-    funasr_mode = os.getenv("FUNASR_MODE", "2pass")
-    stt_language = os.getenv("STT_LANGUAGE", "en")
-
-    logger.info(f"FunASR Config: host={funasr_host}, port={funasr_port}, mode={funasr_mode}")
-
-    # Test FunASR connection before using it
-    stt_provider = None
-    try:
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)  # 3 second timeout
-        result = sock.connect_ex((funasr_host, funasr_port))
-        sock.close()
-
-        if result == 0:
-            logger.info(f"FunASR server reachable at {funasr_host}:{funasr_port}")
-            stt_provider = FunASRSTT(
-                host=funasr_host,
-                port=funasr_port,
-                use_ssl=False,
-                mode=funasr_mode,
-                language=stt_language,
-                use_itn=True,
-            )
-        else:
-            logger.warning(f"FunASR not reachable at {funasr_host}:{funasr_port}")
-    except Exception as e:
-        logger.warning(f"Error checking FunASR: {e}")
-
-    # Fallback to Groq STT if FunASR not available
-    if stt_provider is None:
-        logger.info("Using Groq STT as fallback")
-        stt_provider = groq.STT(
-            model=os.getenv("STT_MODEL", "whisper-large-v3-turbo"),
-            language=stt_language,
-        )
+    # Create Google Chirp STT provider
+    # Chirp model requires a specific location (not available in "global")
+    logger.info("Using Google Chirp STT")
+    stt_provider = google.STT(
+        model="chirp",
+        location="asia-southeast1",  # Chirp is available in us-central1, europe-west4, asia-southeast1
+        spoken_punctuation=False,
+        
+    )
 
     # Create LLM (using Groq)
     llm = groq.LLM(model=os.getenv("LLM_MODEL", "llama-3.1-8b-instant"))
@@ -132,17 +101,19 @@ async def entrypoint(ctx: JobContext):
     # Create the assistant
     assistant = SimpleAssistant()
 
-    # Create agent session with STT provider (FunASR or Groq fallback)
+    # Create agent session with Google Chirp STT
     session = AgentSession(
         llm=llm,
         stt=stt_provider,
         tts=tts,
         vad=vad,
+        allow_interruptions=False,
+        
     )
 
     # Setup event handlers
     @session.on("user_input_transcribed")
-    def on_user_input(event):
+    def on_user_input(event): 
         """Handle transcribed user input"""
         transcript = getattr(event, 'transcript', None) or getattr(event, 'text', '')
         if transcript:
@@ -156,8 +127,7 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"Agent said: {text[:100]}...")
 
     # Start the session
-    stt_name = "FunASR" if isinstance(stt_provider, FunASRSTT) else "Groq"
-    logger.info(f"Starting agent session with {stt_name} STT...")
+    logger.info("Starting agent session with Google Chirp STT...")
     await session.start(
         agent=assistant,
         room=ctx.room,
@@ -168,9 +138,7 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    logger.info("Starting FunASR Agent...")
-    logger.info(f"FunASR Host: {os.getenv('FUNASR_HOST', '64.227.121.147')}")
-    logger.info(f"FunASR Port: {os.getenv('FUNASR_PORT', '10096')}")
+    logger.info("Starting Google Chirp Agent...")
 
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,

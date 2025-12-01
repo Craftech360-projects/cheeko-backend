@@ -186,8 +186,17 @@ class DatadogConfig:
         Returns:
             bool: True if Datadog logging was successfully configured
         """
+        # Always set up basic console logging first
+        # This ensures logs are visible even when Datadog is disabled
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
         if not DatadogConfig.is_enabled():
             print("ℹ️ Datadog logging is disabled (set DATADOG_ENABLED=true to enable)")
+            print("ℹ️ Console logging enabled at INFO level")
             return False
 
         config = DatadogConfig.get_config()

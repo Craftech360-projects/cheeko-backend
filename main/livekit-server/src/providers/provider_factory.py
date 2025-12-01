@@ -1,12 +1,13 @@
 import livekit.plugins.groq as groq
 import livekit.plugins.elevenlabs as elevenlabs
 import livekit.plugins.deepgram as deepgram
-from livekit.plugins import openai, inworld, silero
+from livekit.plugins import openai, inworld, silero, google
 from livekit.agents import stt, llm, tts
 
 # Import our custom providers
 from .edge_tts_provider import EdgeTTS
 from .funasr_stt_provider import FunASRSTT
+from .google_chirp_stt_wrapper import GoogleChirpSTTWrapper
 
 
 class ProviderFactory:
@@ -59,14 +60,33 @@ class ProviderFactory:
     @staticmethod
     def create_stt(config, vad=None):
         """Create Speech-to-Text provider with fallback based on configuration"""
+        import os
+        import logging
+        logger = logging.getLogger("provider_factory")
+
         fallback_enabled = config.get('fallback_enabled', False)
         provider = config.get('stt_provider', 'groq').lower()
+
+        logger.info(f"[STT] Creating STT provider: {provider} (fallback_enabled: {fallback_enabled})")
 
         if fallback_enabled:
             # Create primary and fallback STT providers with StreamAdapter
             providers = []
 
-            if provider == 'funasr':
+            if provider in ('chirp', 'google'):
+                # Google Chirp STT with audio recording
+                location = config.get('google_stt_location', os.getenv('GOOGLE_STT_LOCATION', 'asia-southeast1'))
+                record_audio = os.getenv('STT_RECORD_AUDIO', 'false').lower() == 'true'
+                logger.info(f"[STT] Creating Google Chirp wrapper: location={location}, record_audio={record_audio}")
+                chirp_wrapper = GoogleChirpSTTWrapper(
+                    model="chirp",
+                    location=location,
+                    spoken_punctuation=False,
+                    record_audio=record_audio,
+                )
+                providers.append(chirp_wrapper)
+                logger.info(f"[STT] ✅ Google Chirp wrapper added to fallback providers")
+            elif provider == 'funasr':
                 # FunASR WebSocket STT (local server)
                 providers.append(stt.StreamAdapter(
                     stt=FunASRSTT(
@@ -81,7 +101,6 @@ class ProviderFactory:
                     vad=vad
                 ))
             elif provider == 'deepgram':
-                import os
                 api_key = os.getenv('DEEPGRAM_API_KEY')
                 if not api_key:
                     raise ValueError("DEEPGRAM_API_KEY environment variable is not set")
@@ -114,8 +133,20 @@ class ProviderFactory:
             return stt.FallbackAdapter(providers)
         else:
             # Single provider with StreamAdapter and VAD
-            if provider == 'funasr':
-                # FunASR WebSocket STT (local server)
+            if provider in ('chirp', 'google'):
+                # Google Chirp STT with audio recording
+                location = config.get('google_stt_location', os.getenv('GOOGLE_STT_LOCATION', 'asia-southeast1'))
+                record_audio = os.getenv('STT_RECORD_AUDIO', 'false').lower() == 'true'
+                logger.info(f"[STT] Creating Google Chirp wrapper (single provider): location={location}, record_audio={record_audio}")
+                chirp_wrapper = GoogleChirpSTTWrapper(
+                    model="chirp",
+                    location=location,
+                    spoken_punctuation=False,
+                    record_audio=record_audio,
+                )
+                logger.info(f"[STT] ✅ Returning Google Chirp wrapper as single provider")
+                return chirp_wrapper
+            elif provider == 'funasr':
                 # FunASR WebSocket STT (local server)
                 funasr_mode = config.get('funasr_mode', '2pass')
                 funasr_stt = FunASRSTT(
@@ -134,7 +165,6 @@ class ProviderFactory:
                 else:
                     return funasr_stt
             elif provider == 'deepgram':
-                import os
                 api_key = os.getenv('DEEPGRAM_API_KEY')
                 if not api_key:
                     raise ValueError("DEEPGRAM_API_KEY environment variable is not set")

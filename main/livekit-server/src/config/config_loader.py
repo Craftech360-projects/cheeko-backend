@@ -24,8 +24,11 @@ class ConfigLoader:
             'tts_model': os.getenv('TTS_MODEL', 'playai-tts'),
             'tts_voice': os.getenv('TTS_VOICE', 'Aaliyah-PlayAI'),
             'stt_language': os.getenv('STT_LANGUAGE', 'en'),
-            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq, deepgram, or funasr
+            'stt_provider': os.getenv('STT_PROVIDER', 'groq'),  # groq, deepgram, funasr, or chirp
+            'stt_use_vad': os.getenv('STT_USE_VAD', 'auto').lower(),  # true, false, or auto (auto=false for chirp/google)
             'deepgram_model': os.getenv('DEEPGRAM_MODEL', 'nova-3'),
+            # Google Chirp STT configuration
+            'google_stt_location': os.getenv('GOOGLE_STT_LOCATION', 'asia-southeast1'),  # us-central1, europe-west4, asia-southeast1
             # FunASR WebSocket STT configuration
             'funasr_host': os.getenv('FUNASR_HOST', '127.0.0.1'),
             'funasr_port': int(os.getenv('FUNASR_PORT', '10096')),
@@ -128,7 +131,7 @@ class ConfigLoader:
         return {
             'provider': os.getenv('VAD_PROVIDER', 'silero').lower(),  # silero or ten
             'min_speech_duration': float(os.getenv('VAD_MIN_SPEECH_DURATION', '0.1')),
-            'min_silence_duration': float(os.getenv('VAD_MIN_SILENCE_DURATION', '1.2')),
+            'min_silence_duration': float(os.getenv('VAD_MIN_SILENCE_DURATION', '.8')),
             'activation_threshold': float(os.getenv('VAD_ACTIVATION_THRESHOLD', '0.08')),
             'prefix_padding_duration': float(os.getenv('VAD_PREFIX_PADDING_DURATION', '0.3')),
             'max_buffered_speech': float(os.getenv('VAD_MAX_BUFFERED_SPEECH', '60.0')),

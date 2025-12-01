@@ -10,8 +10,9 @@
     "connectTimeout": 30000
   },
   "livekit": {
-    "url": "ws://localhost:7880",
-    "api_key": "devkey",
-    "api_secret": "secret"
+    "url": "wss://cheek0-u03ee1np.livekit.cloud",
+    "api_key": "APIQEnUh9Htfegz",
+    "api_secret": "mEaJRbCX1e52daWBK1MbH1nyGyMpgqMflUnVvrsoqdd"
   }
 }
+

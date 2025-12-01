@@ -102,9 +102,13 @@ class FilteredAgent(Agent):
 
             try:
                 # Process LLM stream with timeout detection
+                logger.info("🔍 [INVESTIGATION] Starting to process LLM stream in TTS node")
                 async for text_chunk in text:
                     if not text_chunk:
                         continue
+                    
+                    # [LOGGING-INVESTIGATION] Log every chunk
+                    logger.debug(f"🔍 [INVESTIGATION] LLM Chunk: '{text_chunk}'")
 
                     chunk_count += 1
                     total_chars_received += len(text_chunk)
@@ -189,13 +193,17 @@ class FilteredAgent(Agent):
                 yield fallback
             elif total_chars_received == 0:
                 # Empty response is often normal (tool calls, etc.) - just log it
-                logger.info("📝 Empty LLM response detected - likely normal (tool execution or silent response)")
+                logger.warning("🔍 [INVESTIGATION] Empty LLM response detected (0 chars received) - likely normal (tool execution or silent response)")
                 # Yield empty string to signal completion and allow state transition
                 yield ""
 
         # Use parent's TTS node with buffered and filtered text stream
+        frame_count = 0
         async for frame in super().tts_node(buffered_filtered_text_stream(), model_settings):
+            frame_count += 1
             yield frame
+        
+        logger.info(f"🔊 [INVESTIGATION] TTS node yielded {frame_count} audio frames")
 
     def enable_filtering(self, enabled: bool = True):
         """Enable or disable text filtering."""

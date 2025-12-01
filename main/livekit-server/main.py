@@ -33,7 +33,8 @@ from livekit.agents import (
     function_tool,
     Agent,
     RunContext,
-    room_io,
+    RoomInputOptions,
+    RoomOutputOptions,
 )
 from livekit.agents.llm import ChatContext
 from livekit import rtc
@@ -584,8 +585,38 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         logger.debug(
             f"🧠 Using LLM type: {type(llm)} (will capture responses via conversation_item_added event)")
 
-    stt = ProviderFactory.create_stt(
-        groq_config, vad)  # Pass VAD to STT factory
+    # Determine if VAD should be used based on config
+    stt_provider_name = groq_config.get('stt_provider', 'groq')
+    stt_use_vad_config = groq_config.get('stt_use_vad', 'auto')
+
+    # Auto mode: disable VAD for streaming STT providers (chirp, google)
+    if stt_use_vad_config == 'auto':
+        use_vad = stt_provider_name not in ('chirp', 'google')
+    else:
+        use_vad = stt_use_vad_config == 'true'
+
+    session_vad = vad if use_vad else None
+    logger.info(f"🎤 VAD config: stt_use_vad={stt_use_vad_config}, use_vad={use_vad}")
+
+    # STT Provider via ProviderFactory (supports chirp, groq, etc.)
+    stt = ProviderFactory.create_stt(groq_config, session_vad)
+    logger.info(f"🎤 Final STT Provider: {stt_provider_name}")
+
+    # Get STT wrapper reference for mute control (only for chirp/google)
+    stt_wrapper = None
+    if stt_provider_name in ('chirp', 'google'):
+        # Try to get the wrapper from FallbackAdapter or direct reference
+        from src.providers.google_chirp_stt_wrapper import GoogleChirpSTTWrapper
+        if isinstance(stt, GoogleChirpSTTWrapper):
+            stt_wrapper = stt
+        elif hasattr(stt, '_adapters'):
+            # FallbackAdapter - get first adapter which should be our wrapper
+            for adapter in stt._adapters:
+                if isinstance(adapter, GoogleChirpSTTWrapper):
+                    stt_wrapper = adapter
+                    break
+        if stt_wrapper:
+            logger.info("🎤 STT wrapper reference obtained for mute control")
 
     # Get TTS config, with API override if available
     tts_config = ConfigLoader.get_tts_config(api_config=tts_config_from_api)
@@ -596,16 +627,25 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     # Disable turn detection to avoid timeout issues
     turn_detection = ProviderFactory.create_turn_detection()
 
-    # Set up voice AI pipeline
+    # Set up voice AI pipeline with interruption handling
     session = AgentSession(
         llm=llm,
         stt=stt,
         tts=tts,
         turn_detection=turn_detection,  # Disabled to avoid timeout
-        vad=vad,
+        vad=session_vad,
         preemptive_generation=agent_config['preemptive_generation'],
-        min_endpointing_delay=0.8,      # Reduced from 1.2s for faster response with children
-        min_interruption_duration=0.6,   # Reduced from 1.0s to allow children to interrupt
+        # Interruption settings
+        allow_interruptions=False,  # Don't allow user to interrupt agent mid-turn
+        discard_audio_if_uninterruptible=False,  # Keep False to allow audio recording for debugging
+        min_interruption_duration=0.8,  # Minimum speech duration (0.8s) before triggering interruption
+        min_interruption_words=2,  # Require at least 2 words to consider an interruption
+        # Endpointing settings (turn completion)
+        min_endpointing_delay=0.8,  # Wait 0.8s of silence before considering turn complete
+        max_endpointing_delay=6.0,  # Max wait for user to continue speaking
+        # False interruption handling
+        false_interruption_timeout=2.0,  # Wait 2s before signaling false interruption
+        resume_false_interruption=True,  # Resume agent speech after false interruption
     )
 
     # Add comprehensive error handling using our error handler module
@@ -671,6 +711,10 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
     # Setup event handlers and pass assistant reference for abort handling
     ChatEventHandler.set_assistant(assistant)
+    ChatEventHandler.set_stt_provider(stt_provider_name)
+    if stt_wrapper:
+        ChatEventHandler.set_stt_wrapper(stt_wrapper)
+        logger.info("🎤 STT wrapper connected for mute control")
     if chat_history_service:
         ChatEventHandler.set_chat_history_service(chat_history_service)
         logger.info(f"📝🔗 Chat history service connected to event handlers")
@@ -814,20 +858,28 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         except Exception as e:
             logger.warning(f"[FAST] Error checking cached services: {e}")
 
-    # Create room options with 16kHz sample rate to match MQTT gateway
+    # Create room input options with 16kHz sample rate to match MQTT gateway
     # This ensures audio from ESP32 devices (16kHz) is not resampled unnecessarily
-    audio_input_options = room_io.AudioInputOptions(
-        sample_rate=16000,  # Match MQTT gateway's 16kHz audio
-        num_channels=1,     # Mono audio from ESP32
+    room_input_options = RoomInputOptions(
+        audio_sample_rate=16000,  # Match MQTT gateway's 16kHz audio
+        audio_num_channels=1,     # Mono audio from ESP32
     )
     logger.info("Room input configured: 16kHz mono audio to match MQTT gateway")
+
+    # Create room output options - CRITICAL: audio_enabled must be True to publish TTS audio
+    room_output_options = RoomOutputOptions(
+        audio_enabled=True,       # Enable audio output (TTS to room)
+        audio_sample_rate=24000,  # Match EdgeTTS output sample rate
+        audio_num_channels=1,     # Mono audio output
+    )
+    logger.info("Room output configured: 24kHz mono audio output enabled")
 
     # Add noise cancellation if enabled
     if agent_config['noise_cancellation']:
         try:
-            audio_input_options = room_io.AudioInputOptions(
-                sample_rate=16000,
-                num_channels=1,
+            room_input_options = RoomInputOptions(
+                audio_sample_rate=16000,
+                audio_num_channels=1,
                 # noise_cancellation=noise_cancellation.BVC()
             )
             logger.info("Noise cancellation enabled (requires LiveKit Cloud)")
@@ -836,10 +888,6 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
             logger.info("Continuing without noise cancellation (local server mode)")
     else:
         logger.info("Noise cancellation disabled by configuration")
-
-    room_options = room_io.RoomOptions(
-        audio_input=audio_input_options,
-    )
 
     # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)
@@ -1068,7 +1116,8 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     await session.start(
         agent=assistant,
         room=ctx.room,
-        room_options=room_options,
+        room_input_options=room_input_options,
+        room_output_options=room_output_options,  # CRITICAL: Enable audio output to room
     )
 
     # Start analytics session tracking
