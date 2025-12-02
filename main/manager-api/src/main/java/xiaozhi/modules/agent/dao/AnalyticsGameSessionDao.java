@@ -24,6 +24,7 @@ public interface AnalyticsGameSessionDao extends BaseMapper<AnalyticsGameSession
 
     /**
      * Get daily usage statistics by MAC address and date
+     * FIX: Calculate duration in real-time for ongoing sessions (ended_at IS NULL)
      *
      * @param macAddress Device MAC address
      * @param date Target date
@@ -31,7 +32,10 @@ public interface AnalyticsGameSessionDao extends BaseMapper<AnalyticsGameSession
      */
     @Select("SELECT " +
             "    mode_type, " +
-            "    SUM(COALESCE(duration_seconds, 0)) AS total_seconds, " +
+            "    SUM(CASE " +
+            "        WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, NOW()) " +
+            "        ELSE COALESCE(duration_seconds, 0) " +
+            "    END) AS total_seconds, " +
             "    COUNT(*) AS session_count " +
             "FROM analytics_game_sessions " +
             "WHERE mac_address = #{macAddress} " +
@@ -42,6 +46,7 @@ public interface AnalyticsGameSessionDao extends BaseMapper<AnalyticsGameSession
 
     /**
      * Get weekly usage statistics (last 7 days)
+     * FIX: Calculate duration in real-time for ongoing sessions (ended_at IS NULL)
      *
      * @param macAddress Device MAC address
      * @param startDate Start date (7 days ago)
@@ -50,7 +55,10 @@ public interface AnalyticsGameSessionDao extends BaseMapper<AnalyticsGameSession
      */
     @Select("SELECT " +
             "    DATE(started_at) AS usage_date, " +
-            "    SUM(COALESCE(duration_seconds, 0)) AS total_seconds, " +
+            "    SUM(CASE " +
+            "        WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, NOW()) " +
+            "        ELSE COALESCE(duration_seconds, 0) " +
+            "    END) AS total_seconds, " +
             "    COUNT(*) AS session_count " +
             "FROM analytics_game_sessions " +
             "WHERE mac_address = #{macAddress} " +
@@ -63,13 +71,17 @@ public interface AnalyticsGameSessionDao extends BaseMapper<AnalyticsGameSession
 
     /**
      * Get total usage for a specific date (all modes combined)
+     * FIX: Calculate duration in real-time for ongoing sessions (ended_at IS NULL)
      *
      * @param macAddress Device MAC address
      * @param date Target date
      * @return Map containing total_seconds and session_count
      */
     @Select("SELECT " +
-            "    SUM(COALESCE(duration_seconds, 0)) AS total_seconds, " +
+            "    SUM(CASE " +
+            "        WHEN ended_at IS NULL THEN TIMESTAMPDIFF(SECOND, started_at, NOW()) " +
+            "        ELSE COALESCE(duration_seconds, 0) " +
+            "    END) AS total_seconds, " +
             "    COUNT(*) AS session_count " +
             "FROM analytics_game_sessions " +
             "WHERE mac_address = #{macAddress} " +

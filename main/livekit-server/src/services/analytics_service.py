@@ -44,6 +44,10 @@ def normalize_mode_type(mode_name: str) -> str:
     logger.warning(f"📊⚠️ Unknown mode type '{mode_name}', normalized to: {normalized}")
     return normalized
 
+# Retry configuration
+MAX_RETRIES = 3
+RETRY_DELAYS = [0.5, 1.0, 2.0]  # Exponential backoff in seconds
+
 class AnalyticsService:
     """Service for capturing and sending analytics data to Manager API"""
 
@@ -70,6 +74,43 @@ class AnalyticsService:
         self.session_start_time = None
 
         logger.info(f"📊✅ Analytics service initialized - MAC: {device_mac}, Session: {session_id}")
+
+    async def _retry_api_call(self, operation_name: str, api_call_func, *args, **kwargs):
+        """
+        Retry wrapper for API calls with exponential backoff
+
+        Args:
+            operation_name: Name of operation for logging
+            api_call_func: Async function to call
+            *args, **kwargs: Arguments to pass to function
+
+        Returns:
+            Result from successful API call or None on complete failure
+        """
+        for attempt in range(MAX_RETRIES):
+            try:
+                return await api_call_func(*args, **kwargs)
+            except asyncio.TimeoutError as e:
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.warning(f"📊⚠️ {operation_name} timeout (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"📊❌ {operation_name} failed after {MAX_RETRIES} attempts (timeout)")
+                    return None
+            except aiohttp.ClientError as e:
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAYS[attempt]
+                    logger.warning(f"📊⚠️ {operation_name} network error (attempt {attempt + 1}/{MAX_RETRIES}): {e}, retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"📊❌ {operation_name} failed after {MAX_RETRIES} attempts: {e}")
+                    return None
+            except Exception as e:
+                logger.error(f"📊❌ {operation_name} unexpected error: {e}")
+                return None
+
+        return None
 
     async def start_session(self, mode_type: str, metadata: Optional[Dict[str, Any]] = None):
         """
@@ -152,7 +193,7 @@ class AnalyticsService:
         difficulty_level: Optional[str] = None
     ):
         """
-        Record a game attempt (question/answer/move)
+        Record a game attempt (question/answer/move) with retry logic
 
         Args:
             game_type: Game type (math_tutor, riddle_solver, word_ladder)
@@ -182,15 +223,21 @@ class AnalyticsService:
                 "metadata": None  # Deprecated - not saved anymore
             }
 
-            url = f"{self.manager_api_url}/analytics/game-attempt"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            async def _make_request():
+                url = f"{self.manager_api_url}/analytics/game-attempt"
+                headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    if response.status == 200:
-                        logger.debug(f"📊✅ Game attempt recorded - Game: {game_type}, Correct: {is_correct}")
-                    else:
-                        logger.warning(f"📊⚠️ Failed to record attempt - HTTP {response.status}")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            logger.debug(f"📊✅ Game attempt recorded - Game: {game_type}, Correct: {is_correct}")
+                            return True
+                        else:
+                            logger.warning(f"📊⚠️ Failed to record attempt - HTTP {response.status}")
+                            return False
+
+            # Use retry wrapper
+            await self._retry_api_call("record_game_attempt", _make_request)
 
         except Exception as e:
             logger.error(f"📊❌ Error recording game attempt: {e}")
@@ -208,7 +255,7 @@ class AnalyticsService:
         metadata: Optional[Dict[str, Any]] = None
     ):
         """
-        Record media playback event (music/story)
+        Record media playback event (music/story) with retry logic
 
         Args:
             media_type: Media type (music or story)
@@ -237,16 +284,22 @@ class AnalyticsService:
                 "metadata": json.dumps(metadata) if metadata else None
             }
 
-            url = f"{self.manager_api_url}/analytics/media-event"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            async def _make_request():
+                url = f"{self.manager_api_url}/analytics/media-event"
+                headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    if response.status == 200:
-                        logger.info(f"📊✅ Media playback recorded - Type: {media_type}, Title: {media_title}")
-                    else:
-                        response_text = await response.text()
-                        logger.error(f"📊❌ Failed to record media playback - HTTP {response.status}, Response: {response_text}")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            logger.info(f"📊✅ Media playback recorded - Type: {media_type}, Title: {media_title}")
+                            return True
+                        else:
+                            response_text = await response.text()
+                            logger.error(f"📊❌ Failed to record media playback - HTTP {response.status}, Response: {response_text}")
+                            return False
+
+            # Use retry wrapper
+            await self._retry_api_call("record_media_playback", _make_request)
 
         except Exception as e:
             logger.error(f"📊❌ Error recording media playback: {e}")
@@ -261,7 +314,7 @@ class AnalyticsService:
         duration_seconds: Optional[int] = None
     ):
         """
-        Record a completed streak
+        Record a completed streak with retry logic
 
         Args:
             game_type: Game type (math_tutor, riddle_solver, word_ladder)
@@ -288,15 +341,21 @@ class AnalyticsService:
                 "durationSeconds": duration_seconds
             }
 
-            url = f"{self.manager_api_url}/analytics/streak"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            async def _make_request():
+                url = f"{self.manager_api_url}/analytics/streak"
+                headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                    if response.status == 200:
-                        logger.info(f"📊✅ Streak recorded - Game: {game_type}, Streak #{streak_number}, Questions: {questions_in_streak}, Time: {duration_seconds}s")
-                    else:
-                        logger.warning(f"📊⚠️ Failed to record streak - HTTP {response.status}")
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            logger.info(f"📊✅ Streak recorded - Game: {game_type}, Streak #{streak_number}, Questions: {questions_in_streak}, Time: {duration_seconds}s")
+                            return True
+                        else:
+                            logger.warning(f"📊⚠️ Failed to record streak - HTTP {response.status}")
+                            return False
+
+            # Use retry wrapper
+            await self._retry_api_call("record_streak", _make_request)
 
         except Exception as e:
             logger.error(f"📊❌ Error recording streak: {e}")

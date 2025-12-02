@@ -2,6 +2,8 @@ livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
+livekit-plugins-silero
+livekit-plugins-noise-cancellation
 python-dotenv
 pydub
 aiohttp

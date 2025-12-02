@@ -12,7 +12,7 @@ knife4j:
 server:
   port: ${SERVER_PORT:8002}
   address: 0.0.0.0
-  secret: b14a6715-2139-47b0-bc2b-327314005320
+  secret: da11d988-f105-4e71-b095-da62ada82189
 
 # Management endpoints for health checks
 management:
@@ -29,7 +29,7 @@ spring:
     druid:
       # Local Azure database (same as Azure VM configuration)
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/manager_api?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://localhost:3307/manager_api?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
       username: manager
       password: managerpassword
 

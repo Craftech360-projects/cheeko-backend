@@ -21,16 +21,18 @@ services:
     environment:
       NODE_ENV: production
       # Override LiveKit URL to use container name
-      LIVEKIT_URL: ws://livekit-server:7880
+      LIVEKIT_URL: ws://host.docker.internal:7880
 
     # Mount volumes
     volumes:
-      # Configuration files (read-only)
-      - ./config:/app/config:ro
+      # Configuration files (read-write to allow updates)
+      - ./config:/app/config
       # Audio files for mode changes (read-only)
       - ./audio:/app/audio:ro
       # Logs directory (read-write)
       - ./logs:/app/logs
+      # Mount app.js for development
+      - ./app.js:/app/app.js
 
     # Connect to the same network as livekit-server
     networks:
