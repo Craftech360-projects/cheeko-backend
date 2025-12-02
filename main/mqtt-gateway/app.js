@@ -1278,7 +1278,14 @@ class LiveKitBridge extends Emitter {
           }
           switch (data.type) {
             case "agent_state_changed":
-              // console.log(`Agent state changed: ${JSON.stringify(data.data)}`);
+              // Log every agent state change with clear formatting
+              console.log(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔄 [AGENT STATE CHANGE] Device: ${this.macAddress}
+   LiveKit Agent: ${data.data.old_state} → ${data.data.new_state}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+              `);
+
               if (
                 data.data.old_state === "speaking" &&
                 data.data.new_state === "listening"
@@ -1288,6 +1295,9 @@ class LiveKitBridge extends Emitter {
                 console.log(
                   `🎵 [AUDIO-STOP] TTS stopped for device: ${this.macAddress}`
                 );
+                console.log(`📤 [MQTT TRIGGER] LiveKit: speaking → listening`);
+                console.log(`📤 [MQTT SENDING] Type: tts, State: stop`);
+
                 // Send TTS stop message to device
                 this.sendTtsStopMessage();
 
@@ -1326,16 +1336,48 @@ class LiveKitBridge extends Emitter {
                 data.data.old_state === "listening" &&
                 data.data.new_state === "thinking"
               ) {
-                this.sendLLMThinkMessage();
+                // Don't send "thinking" message if we're in goodbye/ending phase
+                // This prevents ESP32 from getting stuck in thinking mode during goodbye
+                if (this.connection && this.connection.isEnding) {
+                  console.log(`📤 [MQTT SKIP] Not sending 'llm think' - in goodbye sequence`);
+                  console.log(`ℹ️ [MQTT INFO] ESP32 will stay in current state until goodbye completes`);
+                } else {
+                  console.log(`📤 [MQTT TRIGGER] LiveKit: listening → thinking`);
+                  console.log(`📤 [MQTT SENDING] Type: llm, State: think`);
+                  this.sendLLMThinkMessage();
+                }
+              } else if (
+                data.data.old_state === "thinking" &&
+                data.data.new_state === "speaking"
+              ) {
+                console.log(`📤 [MQTT TRIGGER] LiveKit: thinking → speaking`);
+                console.log(`📤 [MQTT INFO] Will send tts_start when speech_created event arrives`);
+              } else {
+                // Log any other state transitions
+                console.log(`ℹ️ [MQTT INFO] No MQTT message for this state transition`);
               }
               break;
             case "user_input_transcribed":
-              // console.log(`Transcription: ${JSON.stringify(data.data)}`);
+              const userText = data.data.text || data.data.transcript || '';
+              console.log(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👤 [USER TRANSCRIPT] Device: ${this.macAddress}
+   User Said: "${userText.substring(0, 50)}..."
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+              `);
+              console.log(`📤 [MQTT TRIGGER] LiveKit: user_input_transcribed event`);
+              console.log(`📤 [MQTT SENDING] Type: stt, Text: "${userText.substring(0, 30)}..."`);
+
               // Send STT result back to device
-              this.sendSttMessage(data.data.text || data.data.transcript);
+              this.sendSttMessage(userText);
               break;
             case "speech_created":
-              // console.log(`Speech created: ${JSON.stringify(data.data)}`);
+              console.log(`
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎤 [SPEECH CREATED] Device: ${this.macAddress}
+   Agent Response: "${(data.data.text || '').substring(0, 50)}..."
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+              `);
               // Set audio playing flag and reset inactivity timer
               this.isAudioPlaying = true;
               if (this.connection && this.connection.updateActivityTime) {
@@ -1344,6 +1386,9 @@ class LiveKitBridge extends Emitter {
                   `🎵 [AUDIO-START] TTS started, timer reset for device: ${this.macAddress}`
                 );
               }
+              console.log(`📤 [MQTT TRIGGER] LiveKit: speech_created event`);
+              console.log(`📤 [MQTT SENDING] Type: tts, State: start, Text: "${(data.data.text || '').substring(0, 30)}..."`);
+
               // Send TTS start message to device
               this.sendTtsStartMessage(data.data.text);
               break;

@@ -605,18 +605,18 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     # Get STT wrapper reference for mute control (only for chirp/google)
     stt_wrapper = None
     if stt_provider_name in ('chirp', 'google'):
-        # Try to get the wrapper from FallbackAdapter or direct reference
         from src.providers.google_chirp_stt_wrapper import GoogleChirpSTTWrapper
         if isinstance(stt, GoogleChirpSTTWrapper):
             stt_wrapper = stt
-        elif hasattr(stt, '_adapters'):
-            # FallbackAdapter - get first adapter which should be our wrapper
-            for adapter in stt._adapters:
+        elif hasattr(stt, '_stt_instances'):
+            for adapter in stt._stt_instances:
                 if isinstance(adapter, GoogleChirpSTTWrapper):
                     stt_wrapper = adapter
                     break
         if stt_wrapper:
-            logger.info("🎤 STT wrapper reference obtained for mute control")
+            logger.info("🎤 STT mute control enabled")
+        else:
+            logger.warning(f"🎤 STT mute control unavailable - wrapper not found")
 
     # Get TTS config, with API override if available
     tts_config = ConfigLoader.get_tts_config(api_config=tts_config_from_api)
@@ -714,7 +714,10 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     ChatEventHandler.set_stt_provider(stt_provider_name)
     if stt_wrapper:
         ChatEventHandler.set_stt_wrapper(stt_wrapper)
-        logger.info("🎤 STT wrapper connected for mute control")
+        # Also set STT wrapper in audio_state_manager for unmuting after music stops
+        from src.utils.audio_state_manager import audio_state_manager
+        audio_state_manager.set_stt_wrapper(stt_wrapper)
+        logger.info("🎤 STT mute control enabled")
     if chat_history_service:
         ChatEventHandler.set_chat_history_service(chat_history_service)
         logger.info(f"📝🔗 Chat history service connected to event handlers")

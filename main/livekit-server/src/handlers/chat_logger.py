@@ -287,22 +287,19 @@ class ChatEventHandler:
 
         @session.on("agent_state_changed")
         def _on_agent_state_changed(ev: AgentStateChangedEvent):
-            logger.info(f"Agent state changed: {ev}")
+            logger.debug(f"Agent state: {ev.old_state} -> {ev.new_state}")
 
-            # Mute STT when agent starts thinking to prevent overlapping transcripts
-            # This is critical for streaming STT providers (Chirp, OpenAI) that don't use VAD
-            if ev.new_state == "thinking" and ChatEventHandler._stt_wrapper:
+            # Mute STT when agent is thinking/speaking to prevent "thinking stuck" issue
+            if ev.new_state in ("thinking", "speaking") and ChatEventHandler._stt_wrapper:
                 try:
                     ChatEventHandler._stt_wrapper.mute()
-                    logger.info("🔇 STT muted - agent is thinking (prevents race conditions)")
                 except Exception as e:
                     logger.warning(f"Failed to mute STT: {e}")
 
-            # Unmute STT when agent goes back to listening
+            # Unmute STT when agent is listening again
             if ev.new_state == "listening" and ChatEventHandler._stt_wrapper:
                 try:
                     ChatEventHandler._stt_wrapper.unmute()
-                    logger.info("🔊 STT unmuted - agent is listening again")
                 except Exception as e:
                     logger.warning(f"Failed to unmute STT: {e}")
 
@@ -690,11 +687,9 @@ class ChatEventHandler:
                 logger.info(
                     f"📨 Received data channel message: {message.get('type', 'unknown')}")
 
-                # Handle abort playback message from MQTT gateway
-                if message.get('type') == 'abort_playback':
-                    logger.info(
-                        "🛑 Processing abort playback signal from MQTT gateway")
-                    # Create task for immediate execution (stop() method is now aggressive)
+                # Handle abort playback message from MQTT gateway (supports both "abort" and "abort_playback")
+                if message.get('type') in ('abort', 'abort_playback'):
+                    logger.info("🛑 Processing abort signal from MQTT gateway")
                     asyncio.create_task(
                         ChatEventHandler._handle_abort_playback(session, ctx))
 

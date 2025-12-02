@@ -195,3 +195,10 @@ main/mqtt-gateway/config/mqtt.json
 # LiveKit server configuration (contains API keys)
 main/livekit-server/config.yaml
 nul
+AGENT_THINKING_STUCK_ISSUE.md
+ALL_THINKING_STUCK_CONDITIONS.md
+ESP32_THINKING_STUCK_ROOT_CAUSE.md
+FIX_THINKING_MODE_STUCK.md
+FIXES_SUMMARY.md
+LIVEKIT_COMPLIANT_FIXES.md
+MQTT_THINKING_MESSAGE_FLOW.md

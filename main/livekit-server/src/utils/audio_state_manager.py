@@ -4,7 +4,7 @@ Audio State Manager for coordinating agent states with audio playback
 
 import logging
 import asyncio
-from typing import Optional
+from typing import Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,13 @@ class AudioStateManager:
         self.is_music_playing = False
         self.current_track_title = None
         self.music_start_time = None
+        self._stt_wrapper: Any = None  # Reference to STT wrapper for mute control
         self._initialized = True
         logger.info("AudioStateManager initialized")
+
+    def set_stt_wrapper(self, stt_wrapper) -> None:
+        """Set STT wrapper reference for mute control during music playback"""
+        self._stt_wrapper = stt_wrapper
 
     def set_music_playing(self, is_playing: bool, track_title: str = None):
         """Set music playback state"""
@@ -42,11 +47,20 @@ class AudioStateManager:
             logger.info(f"🎵 Music stopped")
 
     def force_stop_music(self):
-        """Force stop music and clear all states"""
+        """Force stop music, clear all states, and unmute STT"""
         self.is_music_playing = False
         self.current_track_title = None
         self.music_start_time = None
-        logger.info("🎵 Music forcefully stopped and state cleared")
+
+        # Unmute STT so user can speak after music ends
+        if self._stt_wrapper:
+            try:
+                self._stt_wrapper.unmute()
+                logger.info("🎵 Music stopped, STT unmuted")
+            except Exception as e:
+                logger.warning(f"Failed to unmute STT: {e}")
+        else:
+            logger.info("🎵 Music stopped")
 
     def is_audio_playing(self) -> bool:
         """Check if any audio is currently playing"""
