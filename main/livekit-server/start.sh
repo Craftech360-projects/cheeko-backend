@@ -9,4 +9,4 @@ python -m uvicorn media_api:app --host 0.0.0.0 --port 8003 &
 
 # Wait for any process to exit so logs stay visible
 wait -n
-exit $?s
+exit $?

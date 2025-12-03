@@ -384,15 +384,21 @@ public class PlaylistServiceImpl implements PlaylistService {
         for (T entry : playlistEntries) {
             String contentId;
             Integer position;
+            Date createdAt;
+            Date updatedAt;
 
             if (entry instanceof MusicPlaylistEntity) {
                 MusicPlaylistEntity musicEntry = (MusicPlaylistEntity) entry;
                 contentId = musicEntry.getContentId();
                 position = musicEntry.getPosition();
+                createdAt = musicEntry.getCreatedAt();
+                updatedAt = musicEntry.getUpdatedAt();
             } else {
                 StoryPlaylistEntity storyEntry = (StoryPlaylistEntity) entry;
                 contentId = storyEntry.getContentId();
                 position = storyEntry.getPosition();
+                createdAt = storyEntry.getCreatedAt();
+                updatedAt = storyEntry.getUpdatedAt();
             }
 
             ContentItemsEntity content = contentMap.get(contentId);
@@ -406,6 +412,8 @@ public class PlaylistServiceImpl implements PlaylistService {
                 dto.setPosition(position);
                 dto.setDurationSeconds(content.getDurationSeconds());
                 dto.setThumbnailUrl(content.getThumbnailUrl());
+                dto.setCreatedAt(createdAt);
+                dto.setUpdatedAt(updatedAt);
                 result.add(dto);
             } else {
                 log.warn("Content item not found for ID: {}", contentId);

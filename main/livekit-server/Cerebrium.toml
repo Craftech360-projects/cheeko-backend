@@ -2,6 +2,7 @@
 name = "livekit-server-simple"
 python_version = "3.11"
 disable_auth = false
+region = "ap-south-1"
 include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'src/**/*', 'config/**/*']
 exclude = ['.*', '__pycache__/**/*', 'transcripts/**/*', '*.pyc']
 
@@ -14,7 +15,7 @@ compute = "CPU"
 min_replicas = 1
 max_replicas = 8
 cooldown = 30
-replica_concurrency = 1
+replica_concurrency = 4
 response_grace_period = 900
 scaling_metric = "cpu_utilization"
 scaling_target = 60

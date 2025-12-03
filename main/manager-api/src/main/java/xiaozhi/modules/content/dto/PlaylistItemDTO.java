@@ -38,5 +38,11 @@ public class PlaylistItemDTO implements Serializable {
     @Schema(description = "Thumbnail URL")
     private String thumbnailUrl;
 
+    @Schema(description = "Creation timestamp (IST)")
+    private java.util.Date createdAt;
+
+    @Schema(description = "Last update timestamp (IST)")
+    private java.util.Date updatedAt;
+
     private static final long serialVersionUID = 1L;
 }

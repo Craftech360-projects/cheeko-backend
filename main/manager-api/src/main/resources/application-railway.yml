@@ -14,7 +14,7 @@ spring:
       #Railway MySQL Configuration
       driver-class-name: com.mysql.cj.jdbc.Driver
       # Railway database connection
-      url: jdbc:mysql://nozomi.proxy.rlwy.net:25037/railway?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=true&allowPublicKeyRetrieval=true
+      url: jdbc:mysql://nozomi.proxy.rlwy.net:25037/railway?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Kolkata&nullCatalogMeansCurrent=true&useSSL=true&allowPublicKeyRetrieval=true
       username: root
       password: OcaVNLKcwNdyElfaeUPqvvfYZiiEHgdm
       initial-size: 10
