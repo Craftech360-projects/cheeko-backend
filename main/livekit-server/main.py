@@ -288,6 +288,37 @@ def prewarm(proc: JobProcess):
         logger.info("[PREWARM] Background model loading in progress...")
         # Don't wait - let the session start immediately
 
+async def check_analytics_health(analytics_service, device_mac: str, session_id: str) -> bool:
+    """
+    Health check for analytics service
+
+    Args:
+        analytics_service: Analytics service instance
+        device_mac: Device MAC address
+        session_id: Session ID
+
+    Returns:
+        bool: True if analytics service is healthy and responsive
+    """
+    if not analytics_service:
+        logger.error(f"📊❌ Analytics health check FAILED: service is None")
+        return False
+
+    try:
+        # Try to get overall stats (lightweight API call)
+        logger.info(f"📊 Running analytics health check...")
+        stats = await analytics_service.get_overall_stats()
+
+        if stats is not None:
+            logger.info(f"📊✅ Analytics health check PASSED - service is responsive")
+            return True
+        else:
+            logger.warning(f"📊⚠️ Analytics health check: API responded but returned None")
+            return False
+    except Exception as e:
+        logger.error(f"📊❌ Analytics health check FAILED: {e}")
+        return False
+
 async def entrypoint(ctx: JobContext):
     """Enhanced entrypoint with full production features"""
     ctx.log_context_fields = {"room": ctx.room.name}
@@ -330,6 +361,9 @@ async def entrypoint(ctx: JobContext):
             if len(mac_part) == 12 and mac_part.isalnum():  # Valid MAC length and hex
                 device_mac = ':'.join(mac_part[i:i+2] for i in range(0, 12, 2))
                 logger.info(f"📱 Extracted from room '{room_name}': MAC={device_mac}, Room Type={room_type}")
+            else:
+                logger.error(f"📱❌ INVALID MAC FORMAT in room name '{room_name}': mac_part='{mac_part}' (expected 12 hex chars)")
+                device_mac = None  # Explicit None
         elif len(parts) >= 2:
             # Legacy format: UUID_MAC (backward compatibility)
             mac_part = parts[-1]
@@ -337,6 +371,15 @@ async def entrypoint(ctx: JobContext):
                 device_mac = ':'.join(mac_part[i:i+2] for i in range(0, 12, 2))
                 room_type = "conversation"  # Default to conversation for legacy format
                 logger.info(f"📱 Extracted MAC from legacy room name: {device_mac} (defaulting to conversation)")
+            else:
+                logger.error(f"📱❌ INVALID MAC FORMAT in legacy room name '{room_name}': mac_part='{mac_part}'")
+                device_mac = None
+        else:
+            logger.error(f"📱❌ INSUFFICIENT PARTS in room name '{room_name}': got {len(parts)} parts, expected ≥2")
+            device_mac = None
+    else:
+        logger.error(f"📱❌ NO UNDERSCORE in room name '{room_name}' - cannot extract MAC")
+        device_mac = None
 
     # CRITICAL: Only proceed if room_type is "conversation"
     # Agents should NEVER join music or story rooms (those have media bots)
@@ -520,6 +563,12 @@ async def entrypoint(ctx: JobContext):
                 )
                 logger.info(f"📊✅ Analytics service initialized for MAC: {device_mac}, Session: {room_name}")
 
+                # Health check analytics service
+                analytics_healthy = await check_analytics_health(analytics_service, device_mac, room_name)
+                if not analytics_healthy:
+                    logger.error(f"📊❌ Analytics service failed health check - analytics may not work this session!")
+                    logger.error(f"📊❌ Check: 1) Backend API is running, 2) Network connectivity, 3) API credentials")
+
         except Exception as e:
             logger.error(f"❌ Error in parallel API calls: {e}")
             agent_prompt = ConfigLoader.get_default_prompt()
@@ -527,11 +576,17 @@ async def entrypoint(ctx: JobContext):
             child_profile = None
             chat_history_service = None
             analytics_service = None
+            logger.error(f"📊❌ ANALYTICS SERVICE IS NONE - Analytics will NOT be tracked for this session!")
+            logger.error(f"📊❌ Reason: API call error - {str(e)}")
     else:
         # No device MAC - use defaults
         agent_prompt = ConfigLoader.get_default_prompt()
         tts_config_from_api = None
         logger.info(f"📄 Using default prompt - no MAC in room name '{room_name}' (length: {len(agent_prompt)} chars)")
+        chat_history_service = None
+        analytics_service = None
+        logger.warning(f"📊⚠️ No device MAC - analytics service not initialized for room: {room_name}")
+        logger.warning(f"📊⚠️ Analytics will NOT be tracked for this session")
 
     # Initialize conversation buffer for mem0
     conversation_messages = []  # Buffer to store conversation messages
@@ -919,10 +974,21 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
             except Exception as e:
                 logger.warning(f"📝❌ Chat history cleanup error: {e}")
 
-            # 3.5. End analytics session
+            # 3.5. Log analytics summary and end session
             try:
                 if analytics_service:
-                    logger.info("📊 Ending analytics session")
+                    logger.info("📊 Ending analytics session - Summary:")
+
+                    # Log session stats if available
+                    try:
+                        stats = await analytics_service.get_overall_stats()
+                        if stats:
+                            logger.info(f"📊   Total sessions: {stats.get('totalSessions', 'N/A')}")
+                            logger.info(f"📊   Success rate: {stats.get('successRatePercentage', 'N/A')}%")
+                            logger.info(f"📊   Total interactions: {stats.get('totalInteractions', 'N/A')}")
+                    except Exception as e:
+                        logger.warning(f"📊 Could not fetch summary stats: {e}")
+
                     await analytics_service.end_session(completion_status="completed")
                     logger.info("📊✅ Analytics session ended")
             except Exception as e:

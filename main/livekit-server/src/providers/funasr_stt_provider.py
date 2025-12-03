@@ -182,7 +182,7 @@ class FunASRSTT(stt.STT):
         self,
         buffer: utils.AudioBuffer,
         *,
-        language: str | None = None,
+        language: Optional[str] = None,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> stt.SpeechEvent:
         """
@@ -281,7 +281,7 @@ class FunASRSTT(stt.STT):
     def stream(
         self,
         *,
-        language: str | None = None,
+        language: Optional[str] = None,
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "FunASRRecognizeStream":
         """Create a streaming recognition session"""

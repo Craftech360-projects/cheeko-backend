@@ -16,7 +16,7 @@
   docker-compose up -d
 
   View logs:
-  docker-compose logs -f
+  docker-compose logs -f mqtt-gateway
 
   Stop the service:
   docker-compose down
