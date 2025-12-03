@@ -974,6 +974,8 @@ class LiveKitBridge extends Emitter {
     this.userData = userData;
     this.roomType = connection.roomType || "conversation"; // ADD: Store room type from connection
     this.room = null;
+    this.roomService = null; // Store roomService for cleanup on disconnect
+    this.roomName = null; // Store room name for deletion on disconnect
     this.audioSource = new AudioSource(16000, 1);
     this.protocolVersion = protocolVersion;
     this.isAudioPlaying = false; // Track if audio is actively playing
@@ -1178,6 +1180,10 @@ class LiveKitBridge extends Emitter {
     const macForRoom = this.macAddress.replace(/:/g, ""); // Remove colons: 00:16:3e:ac:b5:38 → 00163eacb538
     const roomName = `${this.uuid}_${macForRoom}_${this.roomType}`; // CHANGED: Include room type
     const participantName = this.macAddress;
+
+    // Store roomService and roomName for cleanup on disconnect
+    this.roomService = roomService;
+    this.roomName = roomName;
 
     console.log(
       `🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`
@@ -3060,10 +3066,7 @@ class LiveKitBridge extends Emitter {
         `🎵 [CLEANUP] Cleared audio flag on bridge close for device: ${this.macAddress}`
       );
 
-      // First disconnect from the room
-      await this.room.disconnect();
-
-      // Send a final cleanup signal to ensure the agent side also cleans up
+      // Step 1: Send cleanup signal to agent BEFORE disconnecting (while still connected)
       try {
         const cleanupMessage = {
           type: "cleanup_request",
@@ -3084,8 +3087,29 @@ class LiveKitBridge extends Emitter {
         }
       } catch (error) {
         console.log(
-          "Note: Could not send cleanup signal (room already disconnected)"
+          "Note: Could not send cleanup signal (room may already be disconnecting)"
         );
+      }
+
+      // Step 2: Disconnect from the room
+      try {
+        await this.room.disconnect();
+        console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
+      } catch (error) {
+        console.log(`⚠️ [CLEANUP] Error disconnecting from room: ${error.message}`);
+      }
+
+      // Step 3: Force delete the room from LiveKit server to remove all participants
+      if (this.roomService && this.roomName) {
+        try {
+          await this.roomService.deleteRoom(this.roomName);
+          console.log(`✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`);
+        } catch (error) {
+          // Room might already be gone, that's okay
+          console.log(`⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`);
+        }
+      } else {
+        console.log(`⚠️ [CLEANUP] No roomService or roomName available for room deletion`);
       }
 
       this.room = null;
@@ -3555,8 +3579,7 @@ class VirtualMQTTConnection {
       debug(
         `${this.deviceId} received duplicate hello message, closing previous bridge`
       );
-      this.bridge.close();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await this.bridge.close(); // FIXED: await the async close() to ensure room is deleted
       this.bridge = null;
     }
 
@@ -4054,7 +4077,39 @@ class VirtualMQTTConnection {
           return;
         }
 
-        // For non-volume functions, forward to LiveKit agent
+        // Define MCP query functions that should be handled directly by gateway
+        const mcpQueryFunctions = [
+          "self_get_battery_status",
+          "self_get_volume",
+          "self_get_device_status"
+        ];
+
+        // For Music/Story modes, handle MCP query functions directly via gateway
+        // Music/Story bots don't support function calls - they only stream audio
+        if (this.roomType && (this.roomType === "music" || this.roomType === "story")) {
+          if (mcpQueryFunctions.includes(functionName)) {
+            console.log(
+              `🔋 [MOBILE-MCP] ${this.roomType} mode detected - handling MCP query directly via gateway`
+            );
+
+            if (!this.bridge) {
+              console.error(`❌ [MOBILE-MCP] No bridge available`);
+              return;
+            }
+
+            // Use bridge's handleFunctionCall to send MCP request to device
+            await this.bridge.handleFunctionCall({
+              function_call: json.function_call,
+              timestamp: json.timestamp || new Date().toISOString(),
+              request_id: json.request_id || `mobile_req_${Date.now()}`,
+            });
+
+            console.log(`✅ [MOBILE-MCP] MCP query sent directly to device (bypassing agent)`);
+            return;
+          }
+        }
+
+        // For non-volume, non-MCP-query functions, forward to LiveKit agent (conversation mode only)
         console.log(`🎵 [MOBILE] Forwarding to LiveKit agent for processing`);
 
         // Check if bridge and room are available
@@ -4069,12 +4124,24 @@ class VirtualMQTTConnection {
           return;
         }
 
-        // First send abort signal to stop any current playback
-        console.log(`🛑 [MOBILE] Sending abort signal before new playback`);
-        await this.bridge.sendAbortSignal(this.udp.session_id);
+        // Only send abort signal for playback-related functions
+        // Don't send abort for query functions like battery status
+        const playbackFunctions = [
+          "play_music",
+          "play_story",
+          "next_song",
+          "previous_song",
+          "skip_song"
+        ];
 
-        // Wait a moment for abort to process
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (playbackFunctions.includes(functionName)) {
+          console.log(`🛑 [MOBILE] Sending abort signal before new playback`);
+          await this.bridge.sendAbortSignal(this.udp.session_id);
+          // Wait a moment for abort to process
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        } else {
+          console.log(`ℹ️ [MOBILE] Query function detected, skipping abort signal`);
+        }
 
         // Then forward the new function call to LiveKit agent
         const messageString = JSON.stringify({
@@ -4399,7 +4466,7 @@ class VirtualMQTTConnection {
     }
 
     if (this.bridge) {
-      this.bridge.close();
+      await this.bridge.close(); // FIXED: await to ensure room is deleted from LiveKit
       this.bridge = null;
     }
 
