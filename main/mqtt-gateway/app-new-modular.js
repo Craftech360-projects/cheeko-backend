@@ -14,19 +14,27 @@ const { validateCerebriumToken } = require("./core/media-api-client");
 const { initializeOpus } = require("./core/opus-initializer");
 const { setupDebugLogger } = require("./utils/debug-logger");
 const { ConfigManager } = require("./utils/config-manager");
+const logger = require("./utils/logger");
 
 // Validate environment
 validateCerebriumToken();
 
 // Initialize Opus codec
 const { opusEncoder, opusDecoder } = initializeOpus();
-console.log("✅ [INIT] Opus codec initialized");
+logger.info("✅ [INIT] Opus codec initialized");
 
 // Setup configuration and debug logging
 const configManager = new ConfigManager("mqtt.json");
 const debug = setupDebugLogger(configManager);
 
-console.log("✅ [INIT] Core modules initialized");
+logger.info("✅ [INIT] Core modules initialized");
+
+// Check and log Loki status
+if (process.env.LOKI_HOST) {
+    logger.info(`✅ [LOGGING] Grafana Loki enabled. Sending logs to: ${process.env.LOKI_HOST}`);
+} else {
+    logger.warn("⚠️ [LOGGING] Grafana Loki NOT configured. Logs will only be saved locally.");
+}
 
 // ================================
 // Import Gateway and inject config
@@ -36,30 +44,30 @@ const { MQTTGateway, setConfigManager } = require("./gateway/mqtt-gateway");
 // Inject config manager into gateway (which will cascade to LiveKit bridge)
 setConfigManager(configManager);
 
-console.log("✅ [CONFIG] ConfigManager injected into all modules");
+logger.info("✅ [CONFIG] ConfigManager injected into all modules");
 
 // ================================
 // Main Application
 // ================================
 async function main() {
-    console.log("🚀 [MAIN] Starting MQTT Gateway (Modular Architecture)...");
-    console.log("📦 [MODULES] Loaded:");
-    console.log("   ✅ Phase 1: Constants & Utilities (3 modules)");
-    console.log("   ✅ Phase 2: Core Layer (5 modules)");
-    console.log("   ✅ Phase 3: LiveKit Layer (4 modules)");
-    console.log("   ✅ Phase 4: MQTT Layer (2 modules)");
-    console.log("   ✅ Phase 5: Gateway Layer (5 modules)");
-    console.log("   ✅ Total: 19 modules loaded");
+    logger.info("🚀 [MAIN] Starting MQTT Gateway (Modular Architecture)...");
+    logger.info("📦 [MODULES] Loaded:");
+    logger.info("   ✅ Phase 1: Constants & Utilities (3 modules)");
+    logger.info("   ✅ Phase 2: Core Layer (5 modules)");
+    logger.info("   ✅ Phase 3: LiveKit Layer (4 modules)");
+    logger.info("   ✅ Phase 4: MQTT Layer (2 modules)");
+    logger.info("   ✅ Phase 5: Gateway Layer (5 modules)");
+    logger.info("   ✅ Total: 19 modules loaded");
 
     try {
         // Initialize and start the gateway
         const gateway = new MQTTGateway();
         await gateway.start();
 
-        console.log("✅ [MAIN] MQTT Gateway started successfully");
-        console.log("🎯 [READY] System ready to accept device connections");
+        logger.info("✅ [MAIN] MQTT Gateway started successfully");
+        logger.info("🎯 [READY] System ready to accept device connections");
     } catch (error) {
-        console.error("❌ [FATAL] Failed to start MQTT Gateway:", error);
+        logger.error("❌ [FATAL] Failed to start MQTT Gateway:", error);
         process.exit(1);
     }
 }
@@ -70,18 +78,28 @@ async function main() {
 let gateway = null;
 
 process.on("SIGINT", async () => {
-    console.log("\n🛑 [SHUTDOWN] Received SIGINT, shutting down gracefully...");
+    logger.info("\n🛑 [SHUTDOWN] Received SIGINT, shutting down gracefully...");
     if (gateway && gateway.stop) {
         await gateway.stop();
     }
+    
+    // Wait for Loki batches to be sent before exiting
+    console.log("⏳ [SHUTDOWN] Waiting 3 seconds for log batches to be sent...");
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
     process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
-    console.log("\n🛑 [SHUTDOWN] Received SIGTERM, shutting down gracefully...");
+    logger.info("\n🛑 [SHUTDOWN] Received SIGTERM, shutting down gracefully...");
     if (gateway && gateway.stop) {
         await gateway.stop();
     }
+    
+    // Wait for Loki batches to be sent before exiting
+    console.log("⏳ [SHUTDOWN] Waiting 3 seconds for log batches to be sent...");
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
     process.exit(0);
 });
 
@@ -90,7 +108,7 @@ process.on("SIGTERM", async () => {
 // ================================
 if (require.main === module) {
     main().catch((error) => {
-        console.error("❌ [FATAL] Application error:", error);
+        logger.error("❌ [FATAL] Application error:", error);
         process.exit(1);
     });
 }

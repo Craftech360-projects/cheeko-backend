@@ -1,6 +1,7 @@
 
 require("dotenv").config();
 const JSON5 = require("json5");
+const logger = require("./utils/logger");
 
 const net = require("net");
 const debugModule = require("debug");
@@ -42,12 +43,12 @@ const CEREBRIUM_TOKEN = process.env.CEREBRIUM_API_TOKEN;
 
 // Validate token on startup
 if (!CEREBRIUM_TOKEN) {
-  console.error("❌ [FATAL] CEREBRIUM_API_TOKEN not set in environment!");
-  console.error("💡 [HINT] Add CEREBRIUM_API_TOKEN to your .env file");
+  logger.error("❌ [FATAL] CEREBRIUM_API_TOKEN not set in environment!");
+  logger.error("💡 [HINT] Add CEREBRIUM_API_TOKEN to your .env file");
   process.exit(1);
 }
 
-console.log("✅ [AUTH] Cerebrium authentication configured");
+logger.info("✅ [AUTH] Cerebrium authentication configured");
 
 function mediaAxiosConfig(extra = {}) {
   const cfg = {
@@ -76,12 +77,12 @@ try {
   OpusEncoder = discordOpus.OpusEncoder;
   OpusDecoder = discordOpus.OpusEncoder; // Discord opus uses same class for encoding/decoding
   opusLib = "@discordjs/opus";
-  console.log(
+  logger.info(
     "✅ [OPUS PHASE-1] Using native @discordjs/opus only (libopus bindings - OPTIMIZED)"
   );
 } catch (err) {
-  console.error("❌ [OPUS] @discordjs/opus not available:", err.message);
-  console.error(
+  logger.error("❌ [OPUS] @discordjs/opus not available:", err.message);
+  logger.error(
     "❌ [OPUS] Cannot proceed without Opus library. Please run: npm install @discordjs/opus"
   );
   OpusEncoder = null;
@@ -111,15 +112,15 @@ if (OpusEncoder) {
     // @discordjs/opus API: new OpusEncoder(sampleRate, channels)
     opusEncoder = new OpusEncoder(OUTGOING_SAMPLE_RATE, CHANNELS);
     opusDecoder = new OpusEncoder(INCOMING_SAMPLE_RATE, CHANNELS); // Same class for decode
-    console.log(`✅ [OPUS PHASE-1] Native encoder/decoder initialized:`);
-    console.log(
+    logger.info(`✅ [OPUS PHASE-1] Native encoder/decoder initialized:`);
+    logger.info(
       `   Encoder: ${OUTGOING_SAMPLE_RATE}Hz ${OUTGOING_FRAME_DURATION_MS}ms mono`
     );
-    console.log(
+    logger.info(
       `   Decoder: ${INCOMING_SAMPLE_RATE}Hz ${INCOMING_FRAME_DURATION_MS}ms mono`
     );
   } catch (err) {
-    console.error(
+    logger.error(
       `❌ [OPUS] Failed to initialize encoder/decoder:`,
       err.message
     );
@@ -130,6 +131,7 @@ if (OpusEncoder) {
 const mqtt = require("mqtt");
 const axios = require("axios"); // ADD: For calling Media API
 const { ConfigManager } = require("./utils/config-manager");
+
 
 // ========================================
 // PHASE 1 OPTIMIZATION: Streaming AES Encryption
@@ -502,7 +504,7 @@ class WorkerPoolManager {
 
     // Ensure we start with at least minWorkers
     if (this.workerCount < this.minWorkers) {
-      console.log(
+      logger.info(
         `⚠️  [WORKER-POOL] Starting with ${this.workerCount} workers, scaling to minWorkers (${this.minWorkers})`
       );
       this.workerCount = this.minWorkers;
@@ -519,12 +521,12 @@ class WorkerPoolManager {
 
       worker.on("message", this.handleWorkerMessage.bind(this));
       worker.on("error", (error) => {
-        console.error(`❌ [WORKER-${i}] Error:`, error);
+        logger.error(`❌ [WORKER-${i}] Error:`, error);
         this.restartWorker(i);
       });
       worker.on("exit", (code) => {
         if (code !== 0) {
-          console.error(
+          logger.error(
             `❌ [WORKER-${i}] Exited with code ${code}, restarting...`
           );
           this.restartWorker(i);
@@ -533,10 +535,10 @@ class WorkerPoolManager {
 
       this.workers.push({ worker, id: i, active: true });
       this.workerPendingCount.push(0); // Initialize pending count for this worker
-      console.log(`✅ [WORKER-POOL] Worker ${i} initialized`);
+      logger.info(`✅ [WORKER-POOL] Worker ${i} initialized`);
     }
 
-    console.log(
+    logger.info(
       `✅ [WORKER-POOL] Created pool with ${this.workerCount} workers`
     );
   }
@@ -554,11 +556,11 @@ class WorkerPoolManager {
       const newWorker = new Worker(workerPath);
       newWorker.on("message", this.handleWorkerMessage.bind(this));
       newWorker.on("error", (error) => {
-        console.error(`❌ [WORKER-${index}] Error:`, error);
+        logger.error(`❌ [WORKER-${index}] Error:`, error);
       });
 
       this.workers[index] = { worker: newWorker, id: index, active: true };
-      console.log(`🔄 [WORKER-POOL] Worker ${index} restarted`);
+      logger.info(`🔄 [WORKER-POOL] Worker ${index} restarted`);
     }
   }
 
@@ -733,7 +735,7 @@ class WorkerPoolManager {
       return; // Already running
     }
 
-    console.log(
+    logger.info(
       `🔄 [AUTO-SCALE] Starting dynamic scaling (${this.minWorkers}-${this.maxWorkers} workers)`
     );
 
@@ -749,7 +751,7 @@ class WorkerPoolManager {
     if (this.scaleCheckTimer) {
       clearInterval(this.scaleCheckTimer);
       this.scaleCheckTimer = null;
-      console.log("🛑 [AUTO-SCALE] Stopped dynamic scaling");
+      logger.info("🛑 [AUTO-SCALE] Stopped dynamic scaling");
     }
   }
 
@@ -805,7 +807,7 @@ class WorkerPoolManager {
     const currentCount = this.workers.length;
     const workersToAdd = targetCount - currentCount;
 
-    console.log(
+    logger.info(
       `📈 [AUTO-SCALE] Scaling UP: ${currentCount} → ${targetCount} workers (+${workersToAdd})`
     );
 
@@ -817,12 +819,12 @@ class WorkerPoolManager {
 
       worker.on("message", this.handleWorkerMessage.bind(this));
       worker.on("error", (error) => {
-        console.error(`❌ [WORKER-${workerId}] Error:`, error);
+        logger.error(`❌ [WORKER-${workerId}] Error:`, error);
         this.restartWorker(workerId);
       });
       worker.on("exit", (code) => {
         if (code !== 0) {
-          console.error(
+          logger.error(
             `❌ [WORKER-${workerId}] Exited with code ${code}, restarting...`
           );
           this.restartWorker(workerId);
@@ -832,7 +834,7 @@ class WorkerPoolManager {
       this.workers.push({ worker, id: workerId, active: true });
       this.workerPendingCount.push(0);
 
-      console.log(`✅ [AUTO-SCALE] Worker ${workerId} added`);
+      logger.info(`✅ [AUTO-SCALE] Worker ${workerId} added`);
     }
 
     this.lastScaleAction = Date.now();
@@ -849,7 +851,7 @@ class WorkerPoolManager {
     const currentCount = this.workers.length;
     const workersToRemove = currentCount - targetCount;
 
-    console.log(
+    logger.info(
       `📉 [AUTO-SCALE] Scaling DOWN: ${currentCount} → ${targetCount} workers (-${workersToRemove})`
     );
 
@@ -872,9 +874,9 @@ class WorkerPoolManager {
       // Terminate worker
       try {
         await workerInfo.worker.terminate();
-        console.log(`🗑️ [AUTO-SCALE] Worker ${workerInfo.id} removed`);
+        logger.info(`🗑️ [AUTO-SCALE] Worker ${workerInfo.id} removed`);
       } catch (error) {
-        console.error(
+        logger.error(
           `❌ [AUTO-SCALE] Error terminating worker ${workerInfo.id}:`,
           error
         );
@@ -923,12 +925,12 @@ class WorkerPoolManager {
         )
       );
 
-      console.log(
+      logger.info(
         `✅ [AUTO-SCALE] New workers initialized (${startIndex}-${endIndex - 1
         })`
       );
     } catch (error) {
-      console.error(`❌ [AUTO-SCALE] Failed to initialize new workers:`, error);
+      logger.error(`❌ [AUTO-SCALE] Failed to initialize new workers:`, error);
     }
   }
 
@@ -937,7 +939,7 @@ class WorkerPoolManager {
   // ========================================
 
   async terminate() {
-    console.log("🛑 [WORKER-POOL] Terminating all workers...");
+    logger.info("🛑 [WORKER-POOL] Terminating all workers...");
 
     // Stop auto-scaling
     this.stopAutoScaling();
@@ -1018,7 +1020,7 @@ class LiveKitBridge extends Emitter {
 
     // PHASE 2: Initialize Worker Pool for parallel audio processing
     this.workerPool = new WorkerPoolManager(4); // Start with minWorkers (4) for proper scaling
-    console.log(`✅ [PHASE-2] Worker pool initialized for ${this.macAddress}`);
+    logger.info(`✅ [PHASE-2] Worker pool initialized for ${this.macAddress}`);
 
     // Initialize workers with encoder/decoder settings
     this.workerPool
@@ -1027,12 +1029,12 @@ class LiveKitBridge extends Emitter {
         channels: CHANNELS,
       })
       .then(() => {
-        console.log(
+        logger.info(
           `✅ [PHASE-2] Workers encoder ready (${OUTGOING_SAMPLE_RATE}Hz)`
         );
       })
       .catch((err) => {
-        console.error(`❌ [PHASE-2] Worker encoder init failed:`, err.message);
+        logger.error(`❌ [PHASE-2] Worker encoder init failed:`, err.message);
       });
 
     this.workerPool
@@ -1041,12 +1043,12 @@ class LiveKitBridge extends Emitter {
         channels: CHANNELS,
       })
       .then(() => {
-        console.log(
+        logger.info(
           `✅ [PHASE-2] Workers decoder ready (${INCOMING_SAMPLE_RATE}Hz)`
         );
       })
       .catch((err) => {
-        console.error(`❌ [PHASE-2] Worker decoder init failed:`, err.message);
+        logger.error(`❌ [PHASE-2] Worker decoder init failed:`, err.message);
       });
 
     this.initializeLiveKit();
@@ -1065,12 +1067,12 @@ class LiveKitBridge extends Emitter {
    * bleeding into new session during mode change
    */
   clearAudioBuffers() {
-    console.log(`🧹 [AUDIO-CLEAR] Clearing audio buffers for ${this.macAddress}...`);
+    logger.info(`🧹 [AUDIO-CLEAR] Clearing audio buffers for ${this.macAddress}...`);
 
     // 1. Clear frame buffer (accumulated PCM data waiting to be encoded)
     const oldFrameBufferSize = this.frameBuffer.length;
     this.frameBuffer = Buffer.alloc(0);
-    console.log(`🧹 [AUDIO-CLEAR] Cleared frame buffer (was ${oldFrameBufferSize} bytes)`);
+    logger.info(`🧹 [AUDIO-CLEAR] Cleared frame buffer (was ${oldFrameBufferSize} bytes)`);
 
     // 2. Clear worker pool pending requests
     if (this.workerPool && this.workerPool.pendingRequests) {
@@ -1088,7 +1090,7 @@ class LiveKitBridge extends Emitter {
       this.workerPool.pendingRequests.clear();
       // Reset pending counts per worker
       this.workerPool.workerPendingCount = this.workerPool.workerPendingCount.map(() => 0);
-      console.log(`🧹 [AUDIO-CLEAR] Cleared ${pendingCount} pending worker requests`);
+      logger.info(`🧹 [AUDIO-CLEAR] Cleared ${pendingCount} pending worker requests`);
     }
 
     // 3. Reset audio playing state
@@ -1097,13 +1099,13 @@ class LiveKitBridge extends Emitter {
     // 4. Set flag to stop any ongoing audio forwarding
     this.stopAudioForwarding = true;
 
-    console.log(`✅ [AUDIO-CLEAR] Audio buffers cleared for ${this.macAddress}`);
+    logger.info(`✅ [AUDIO-CLEAR] Audio buffers cleared for ${this.macAddress}`);
   }
 
   // PHASE 2: Process buffered audio frames and encode to Opus using worker threads
   async processBufferedFrames(timestamp, frameCount) {
     if (!this.connection) {
-      console.error(`❌ [PROCESS] No connection available, cannot send audio`);
+      logger.error(`❌ [PROCESS] No connection available, cannot send audio`);
       return;
     }
 
@@ -1130,14 +1132,14 @@ class LiveKitBridge extends Emitter {
         const isNearlySilent = maxAmplitude < 10;
 
         if (frameCount <= 5) {
-          console.log(
+          logger.info(
             `🔍 [DEBUG] Frame ${frameCount}: samples=${samples.length}, max=${maxAmplitude}`
           );
         }
 
         if (isSilent || isNearlySilent) {
           if (frameCount <= 5) {
-            console.log(
+            logger.info(
               `🔇 [PCM] Silent frame ${frameCount} detected (max=${maxAmplitude}), skipping`
             );
           }
@@ -1152,14 +1154,14 @@ class LiveKitBridge extends Emitter {
           );
 
           if (frameCount <= 3 || frameCount % 100 === 0) {
-            console.log(
+            logger.info(
               `🎵 [WORKER] Frame ${frameCount}: PCM ${frameData.length}B → Opus ${opusBuffer.length}B`
             );
           }
 
           this.connection.sendUdpMessage(opusBuffer, timestamp);
         } catch (err) {
-          console.error(`❌ [SYNC] Encode error: ${err.message}`);
+          logger.error(`❌ [SYNC] Encode error: ${err.message}`);
           // Fallback to PCM if encoding fails
           this.connection.sendUdpMessage(frameData, timestamp);
         }
@@ -1169,10 +1171,10 @@ class LiveKitBridge extends Emitter {
 
   async connect(audio_params, features, roomService) {
     const connectStartTime = Date.now();
-    console.log(
+    logger.info(
       `🔍 [DEBUG] LiveKitBridge.connect() called - UUID: ${this.uuid}, MAC: ${this.macAddress}`
     );
-    console.log(
+    logger.info(
       `⏱️ [TIMING-START] Connection initiated at ${connectStartTime}`
     );
     const { url, api_key, api_secret } = this.livekitConfig;
@@ -1185,7 +1187,7 @@ class LiveKitBridge extends Emitter {
     this.roomService = roomService;
     this.roomName = roomName;
 
-    console.log(
+    logger.info(
       `🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`
     );
 
@@ -1197,19 +1199,19 @@ class LiveKitBridge extends Emitter {
           empty_timeout: 60, // Auto-close room if empty for 60 seconds (snake_case for LiveKit API)
           max_participants: 2,
         });
-        console.log(
+        logger.info(
           `✅ [ROOM] Pre-created room with 60-second empty_timeout: ${roomName}`
         );
       } catch (error) {
         // Log the actual error for debugging
-        console.error(`❌ [ROOM] Error pre-creating room: ${error.message}`);
-        console.error(`❌ [ROOM] Full error:`, error);
+        logger.error(`❌ [ROOM] Error pre-creating room: ${error.message}`);
+        logger.error(`❌ [ROOM] Full error:`, error);
 
         // Room might already exist, that's okay - continue anyway
         if (error.message && !error.message.includes("already exists")) {
-          console.warn(`⚠️ [ROOM] Continuing despite error...`);
+          logger.warn(`⚠️ [ROOM] Continuing despite error...`);
         } else {
-          console.log(`ℹ️ [ROOM] Room already exists: ${roomName}`);
+          logger.info(`ℹ️ [ROOM] Room already exists: ${roomName}`);
         }
         // Don't throw - continue with connection even if room pre-creation fails
       }
@@ -1237,18 +1239,18 @@ class LiveKitBridge extends Emitter {
 
     // Add connection state monitoring
     this.room.on("connectionStateChanged", (state) => {
-      console.log(`[LiveKitBridge] Connection state changed: ${state}`);
+      logger.info(`[LiveKitBridge] Connection state changed: ${state}`);
     });
 
     this.room.on("connected", () => {
-      console.log("[LiveKitBridge] Room connected event fired");
+      logger.info("[LiveKitBridge] Room connected event fired");
     });
 
     this.room.on("disconnected", (reason) => {
-      console.log(`[LiveKitBridge] Room disconnected: ${reason}`);
+      logger.info(`[LiveKitBridge] Room disconnected: ${reason}`);
       // CRITICAL: Clear audio flag on disconnect to prevent stuck state
       this.isAudioPlaying = false;
-      console.log(
+      logger.info(
         `🎵 [CLEANUP] Cleared audio flag on room disconnect for device: ${this.macAddress}`
       );
     });
@@ -1260,7 +1262,7 @@ class LiveKitBridge extends Emitter {
           const str = Buffer.from(payload).toString("utf-8");
 
           // COMPREHENSIVE LOGGING: Capture all details about incoming data
-          console.log(`
+          logger.info(`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📨 [INCOMING TEXT STREAM]
   Topic: ${topic || '(undefined)'}
@@ -1274,24 +1276,24 @@ class LiveKitBridge extends Emitter {
           let data;
           try {
             data = JSON5.parse(str);
-            console.log(
+            logger.info(
               `📨 [DATA RECEIVED - PARSED] Type: ${data?.type}, Full Data:`,
               JSON.stringify(data, null, 2)
             );
           } catch (err) {
-            console.error("❌ [PARSE ERROR] Invalid JSON5:", err.message);
-            console.error("Full raw payload:", str);
+            logger.error("❌ [PARSE ERROR] Invalid JSON5:", err.message);
+            logger.error("Full raw payload:", str);
           }
           switch (data.type) {
             case "agent_state_changed":
-              // console.log(`Agent state changed: ${JSON.stringify(data.data)}`);
+              // logger.info(`Agent state changed: ${JSON.stringify(data.data)}`);
               if (
                 data.data.old_state === "speaking" &&
                 data.data.new_state === "listening"
               ) {
                 // Set audio playing flag to false
                 this.isAudioPlaying = false;
-                console.log(
+                logger.info(
                   `🎵 [AUDIO-STOP] TTS stopped for device: ${this.macAddress}`
                 );
                 // Send TTS stop message to device
@@ -1303,7 +1305,7 @@ class LiveKitBridge extends Emitter {
                   this.connection.isEnding &&
                   !this.connection.goodbyeSent
                 ) {
-                  console.log(
+                  logger.info(
                     `👋 [END-COMPLETE] TTS goodbye finished, sending goodbye MQTT message to device: ${this.macAddress}`
                   );
                   this.connection.goodbyeSent = true;
@@ -1317,7 +1319,7 @@ class LiveKitBridge extends Emitter {
                       timestamp: Date.now(),
                     })
                   );
-                  console.log(
+                  logger.info(
                     `👋 [GOODBYE-MQTT] Sent goodbye MQTT message after TTS completed: ${this.macAddress}`
                   );
 
@@ -1336,17 +1338,17 @@ class LiveKitBridge extends Emitter {
               }
               break;
             case "user_input_transcribed":
-              // console.log(`Transcription: ${JSON.stringify(data.data)}`);
+              // logger.info(`Transcription: ${JSON.stringify(data.data)}`);
               // Send STT result back to device
               this.sendSttMessage(data.data.text || data.data.transcript);
               break;
             case "speech_created":
-              // console.log(`Speech created: ${JSON.stringify(data.data)}`);
+              // logger.info(`Speech created: ${JSON.stringify(data.data)}`);
               // Set audio playing flag and reset inactivity timer
               this.isAudioPlaying = true;
               if (this.connection && this.connection.updateActivityTime) {
                 this.connection.updateActivityTime();
-                console.log(
+                logger.info(
                   `🎵 [AUDIO-START] TTS started, timer reset for device: ${this.macAddress}`
                 );
               }
@@ -1355,34 +1357,34 @@ class LiveKitBridge extends Emitter {
               break;
             case "device_control":
               // Convert device_control commands to MCP function calls
-              console.log(
+              logger.info(
                 `🎛️ [DEVICE CONTROL] Received action: ${data.action}`
               );
               this.convertDeviceControlToMcp(data);
               break;
             case "function_call":
               // Handle xiaozhi function calls (volume controls, etc.)
-              console.log(
+              logger.info(
                 `🔧 [FUNCTION CALL] Received function: ${data.function_call?.name}`
               );
               this.handleFunctionCall(data);
               break;
             case "mobile_music_request":
               // Handle music play request from mobile app
-              console.log(
+              logger.info(
                 `🎵 [MOBILE] Music play request received from mobile app`
               );
-              console.log(`   📱 Device: ${this.macAddress}`);
-              console.log(`   🎵 Song: ${data.song_name}`);
-              console.log(`   🗂️ Type: ${data.content_type}`);
-              console.log(
+              logger.info(`   📱 Device: ${this.macAddress}`);
+              logger.info(`   🎵 Song: ${data.song_name}`);
+              logger.info(`   🗂️ Type: ${data.content_type}`);
+              logger.info(
                 `   🌐 Language: ${data.language || "Not specified"}`
               );
               this.handleMobileMusicRequest(data);
               break;
             case "music_playback_stopped":
               // Handle music playback stopped - force clear audio playing flag
-              console.log(
+              logger.info(
                 `🎵 [MUSIC-STOP] Music playback stopped for device: ${this.macAddress}`
               );
               this.isAudioPlaying = false;
@@ -1391,39 +1393,39 @@ class LiveKitBridge extends Emitter {
               break;
             case "llm":
               // Handle emotion from LLM response
-              console.log(
+              logger.info(
                 `😊 [EMOTION] Received: ${data.emotion} (${data.text})`
               );
               this.sendEmotionMessage(data.text, data.emotion);
               break;
 
             // case "metrics_collected":
-            //   console.log(`Metrics: ${JSON.stringify(data.data)}`);
+            //   logger.info(`Metrics: ${JSON.stringify(data.data)}`);
             //   break;
             default:
-            //console.log(`Unknown data type: ${data.type}`);
+            //logger.info(`Unknown data type: ${data.type}`);
           }
         } catch (error) {
-          console.error(`Error processing data packet: ${error}`);
+          logger.error(`Error processing data packet: ${error}`);
         }
       }
     );
 
     return new Promise(async (resolve, reject) => {
       try {
-        console.log(`[LiveKitBridge] Connecting to LiveKit room: ${roomName}`);
+        logger.info(`[LiveKitBridge] Connecting to LiveKit room: ${roomName}`);
         await this.room.connect(url, token, {
           autoSubscribe: true,
           dynacast: true,
         });
         const roomConnectedTime = Date.now();
-        console.log(`✅ [ROOM] Connected to LiveKit room: ${roomName}`);
-        console.log(
+        logger.info(`✅ [ROOM] Connected to LiveKit room: ${roomName}`);
+        logger.info(
           `⏱️ [TIMING-ROOM] Room connection took ${roomConnectedTime - connectStartTime
           }ms`
         );
-        console.log(`🔗 [CONNECTION] State: ${this.room.connectionState}`);
-        console.log(`🟢 [STATUS] Is connected: ${this.room.isConnected}`);
+        logger.info(`🔗 [CONNECTION] State: ${this.room.connectionState}`);
+        logger.info(`🟢 [STATUS] Is connected: ${this.room.isConnected}`);
 
         // Store the current mode in deviceInfo for function_call validation
         if (this.connection && this.connection.gateway) {
@@ -1431,30 +1433,30 @@ class LiveKitBridge extends Emitter {
           if (deviceInfo) {
             deviceInfo.currentMode = this.roomType;
             deviceInfo.currentRoomName = roomName;
-            console.log(
+            logger.info(
               `✅ [MODE] Set currentMode to '${this.roomType}' for device ${this.macAddress}`
             );
           } else {
-            console.warn(
+            logger.warn(
               `⚠️ [MODE] Could not find deviceInfo for ${this.macAddress}`
             );
           }
         } else {
-          console.warn(
+          logger.warn(
             `⚠️ [MODE] Gateway reference not available to set currentMode`
           );
         }
 
         // Log existing participants in the room
-        console.log(
+        logger.info(
           `👥 [PARTICIPANTS] Remote participants in room: ${this.room.remoteParticipants.size}`
         );
         this.room.remoteParticipants.forEach((participant, sid) => {
-          console.log(`   - ${participant.identity} (${sid})`);
+          logger.info(`   - ${participant.identity} (${sid})`);
 
           // Log existing tracks from participants
           participant.trackPublications.forEach((pub, trackSid) => {
-            console.log(
+            logger.info(
               `     📡 Track: ${trackSid}, kind: ${pub.kind}, subscribed: ${pub.isSubscribed}`
             );
           });
@@ -1463,14 +1465,14 @@ class LiveKitBridge extends Emitter {
         this.room.on(
           RoomEvent.TrackSubscribed,
           (track, publication, participant) => {
-            console.log(
+            logger.info(
               `🎵 [TRACK] Subscribed to track: ${track.sid} from ${participant.identity}, kind: ${track.kind}`
             );
 
             // Handle audio track from agent (TTS audio)
             // Check for both string "audio" and TrackKind.KIND_AUDIO constant
             if (track.kind === "audio" || track.kind === TrackKind.KIND_AUDIO) {
-              console.log(
+              logger.info(
                 `🔊 [AUDIO TRACK] Starting audio stream processing for ${participant.identity}`
               );
 
@@ -1483,7 +1485,7 @@ class LiveKitBridge extends Emitter {
 
               const readStream = async () => {
                 try {
-                  console.log(
+                  logger.info(
                     `🎧 [AUDIO STREAM] Starting to read audio frames from ${participant.identity}`
                   );
 
@@ -1491,7 +1493,7 @@ class LiveKitBridge extends Emitter {
                     const { done, value } = await reader.read();
                     if (done) {
                       this.sendTtsStopMessage();
-                      console.log(
+                      logger.info(
                         `🏁 [AUDIO STREAM] Stream ended for ${participant.identity}. Total frames: ${frameCount}, Total bytes: ${totalBytes}`
                       );
 
@@ -1523,7 +1525,7 @@ class LiveKitBridge extends Emitter {
                       // SKIP partial frames - they cause Opus encoder to crash
                       // Opus encoder requires exact frame sizes, partial frames will be dropped
                       if (this.frameBuffer.length > 0) {
-                        console.log(
+                        logger.info(
                           `⏭️ [FLUSH] Skipping partial frame (${this.frameBuffer.length}B) - would cause Opus crash`
                         );
                       }
@@ -1533,7 +1535,7 @@ class LiveKitBridge extends Emitter {
 
                       // Notify connection that audio stream has ended
                       if (this.connection && this.connection.isEnding) {
-                        console.log(
+                        logger.info(
                           `✅ [END-COMPLETE] Audio stream completed, closing connection: ${this.connection.clientId || this.connection.deviceId
                           }`
                         );
@@ -1560,7 +1562,7 @@ class LiveKitBridge extends Emitter {
                       }
 
                       if (!value || !value.data) {
-                        console.warn(`⚠️ [AUDIO] Invalid AudioFrame received, skipping`);
+                        logger.warn(`⚠️ [AUDIO] Invalid AudioFrame received, skipping`);
                         continue;
                       }
 
@@ -1570,7 +1572,7 @@ class LiveKitBridge extends Emitter {
                       // Add resampled frames to buffer instead of processing directly
                       for (const resampledFrame of resampledFrames) {
                         if (!resampledFrame || !resampledFrame.data) {
-                          console.warn(`⚠️ [AUDIO] Invalid resampled frame, skipping`);
+                          logger.warn(`⚠️ [AUDIO] Invalid resampled frame, skipping`);
                           continue;
                         }
 
@@ -1583,7 +1585,7 @@ class LiveKitBridge extends Emitter {
                             resampledFrame.data.byteLength
                           );
                         } catch (bufferError) {
-                          console.error(`❌ [AUDIO] Buffer creation failed:`, bufferError.message);
+                          logger.error(`❌ [AUDIO] Buffer creation failed:`, bufferError.message);
                           continue;
                         }
 
@@ -1604,25 +1606,25 @@ class LiveKitBridge extends Emitter {
                       // Log every 50 frames or every 5 seconds
                       // const now = Date.now();
                       // if (frameCount % 50 === 0 || now - lastLogTime > 5000) {
-                      //   console.log(
+                      //   logger.info(
                       //     `🎵 [AUDIO FRAMES] Received ${frameCount} frames, ${totalBytes} total bytes from ${participant.identity}, buffer: ${this.frameBuffer.length}B`
                       //   );
                       //   lastLogTime = now;
                       // }
 
                     } catch (audioProcessError) {
-                      console.error(`❌ [AUDIO] Frame processing error:`, audioProcessError.message);
+                      logger.error(`❌ [AUDIO] Frame processing error:`, audioProcessError.message);
                       // Continue processing other frames
                     }
 
                   }
                 } catch (error) {
-                  console.error(
+                  logger.error(
                     `❌ [AUDIO STREAM] Error reading audio stream from ${participant.identity}:`,
                     error
                   );
                 } finally {
-                  console.log(
+                  logger.info(
                     `🔒 [AUDIO STREAM] Releasing reader lock for ${participant.identity}`
                   );
                   reader.releaseLock();
@@ -1631,7 +1633,7 @@ class LiveKitBridge extends Emitter {
 
               readStream();
             } else {
-              console.log(
+              logger.info(
                 `⚠️ [TRACK] Non-audio track subscribed: ${track.kind
                 } (type: ${typeof track.kind}) from ${participant.identity}`
               );
@@ -1643,7 +1645,7 @@ class LiveKitBridge extends Emitter {
         this.room.on(
           RoomEvent.TrackUnsubscribed,
           (track, publication, participant) => {
-            console.log(
+            logger.info(
               `🔇 [TRACK] Unsubscribed from track: ${track.sid} from ${participant.identity}, kind: ${track.kind}`
             );
           }
@@ -1651,13 +1653,13 @@ class LiveKitBridge extends Emitter {
 
         // Add participant connection handlers
         this.room.on(RoomEvent.ParticipantConnected, (participant) => {
-          console.log(
+          logger.info(
             `👤 [PARTICIPANT] Connected: ${participant.identity} (${participant.sid})`
           );
 
           // Check if this is an agent joining (agent identity typically contains "agent")
           if (participant.identity.includes("agent")) {
-            console.log(
+            logger.info(
               `🤖 [AGENT] Agent joined the room: ${participant.identity}`
             );
 
@@ -1665,7 +1667,7 @@ class LiveKitBridge extends Emitter {
             this.agentJoined = true;
             if (this.agentJoinResolve) {
               this.agentJoinResolve();
-              console.log(`✅ [AGENT-READY] Agent join promise resolved`);
+              logger.info(`✅ [AGENT-READY] Agent join promise resolved`);
             }
 
             // Clear timeouts if set
@@ -1675,14 +1677,14 @@ class LiveKitBridge extends Emitter {
             }
             // Note: Room emptyTimeout is handled by LiveKit server automatically
 
-            console.log(
+            logger.info(
               `✅ [AGENT] Agent ready, waiting for 's' key press from client to trigger greeting`
             );
           }
         });
 
         this.room.on(RoomEvent.ParticipantDisconnected, (participant) => {
-          console.log(
+          logger.info(
             `👤 [PARTICIPANT] Disconnected: ${participant.identity} (${participant.sid})`
           );
         });
@@ -1706,11 +1708,11 @@ class LiveKitBridge extends Emitter {
           options
         );
         const trackPublishedTime = Date.now();
-        console.log(
+        logger.info(
           `🎤 [PUBLISH] Published local audio track: ${publication.trackSid || publication.sid
           }`
         );
-        console.log(
+        logger.info(
           `⏱️ [TIMING-TRACK] Track publish took ${trackPublishedTime - roomConnectedTime
           }ms`
         );
@@ -1719,7 +1721,7 @@ class LiveKitBridge extends Emitter {
         // The room.sid might not be immediately available, but roomName is our session identifier
         // Include audio_params that the client expects
         const totalConnectTime = Date.now() - connectStartTime;
-        console.log(
+        logger.info(
           `⏱️ [TIMING-TOTAL] Total connection setup took ${totalConnectTime}ms`
         );
         resolve({
@@ -1732,9 +1734,9 @@ class LiveKitBridge extends Emitter {
           },
         });
       } catch (error) {
-        console.error("[LiveKitBridge] Error connecting to LiveKit:", error);
-        console.error("[LiveKitBridge] Error name:", error.name);
-        console.error("[LiveKitBridge] Error message:", error.message);
+        logger.error("[LiveKitBridge] Error connecting to LiveKit:", error);
+        logger.error("[LiveKitBridge] Error name:", error.name);
+        logger.error("[LiveKitBridge] Error message:", error.message);
         reject(error);
       }
     });
@@ -1743,7 +1745,7 @@ class LiveKitBridge extends Emitter {
   async sendAudio(opusData, timestamp) {
     // Check if audioSource is available and room is connected
     if (!this.audioSource || !this.room || !this.room.isConnected) {
-      console.warn(
+      logger.warn(
         `⚠️ [AUDIO] Cannot send audio - audioSource or room not ready. Room connected: ${this.room?.isConnected}`
       );
       return;
@@ -1758,7 +1760,7 @@ class LiveKitBridge extends Emitter {
         try {
           const pcmBuffer = await this.workerPool.decodeOpus(opusData);
 
-          // console.log(`✅ [WORKER DECODE] Decoded ${opusData.length}B Opus → ${pcmBuffer.length}B PCM`);
+          // logger.info(`✅ [WORKER DECODE] Decoded ${opusData.length}B Opus → ${pcmBuffer.length}B PCM`);
 
           if (pcmBuffer && pcmBuffer.length > 0) {
             // Convert Buffer to Int16Array
@@ -1771,21 +1773,21 @@ class LiveKitBridge extends Emitter {
 
             // Safe capture with error handling
             this.safeCaptureFrame(frame).catch((err) => {
-              console.error(
+              logger.error(
                 `❌ [AUDIO] Unhandled error in safeCaptureFrame: ${err.message}`
               );
             });
           }
         } catch (err) {
-          console.error(`❌ [WORKER] Decode error: ${err.message}`);
-          console.error(
+          logger.error(`❌ [WORKER] Decode error: ${err.message}`);
+          logger.error(
             `    Data size: ${opusData.length}B, First 8 bytes: ${opusData
               .subarray(0, Math.min(8, opusData.length))
               .toString("hex")}`
           );
 
           // PHASE 2: Fallback to PCM if worker decode fails (likely false positive detection)
-          console.log(`⚠️ [FALLBACK] Treating as PCM instead`);
+          logger.info(`⚠️ [FALLBACK] Treating as PCM instead`);
           const samples = new Int16Array(
             opusData.buffer,
             opusData.byteOffset,
@@ -1793,7 +1795,7 @@ class LiveKitBridge extends Emitter {
           );
           const frame = new AudioFrame(samples, 16000, 1, samples.length);
           this.safeCaptureFrame(frame).catch((err) => {
-            console.error(`❌ [AUDIO] PCM fallback failed: ${err.message}`);
+            logger.error(`❌ [AUDIO] PCM fallback failed: ${err.message}`);
           });
         }
       } else {
@@ -1807,13 +1809,13 @@ class LiveKitBridge extends Emitter {
 
         // Safe capture with error handling
         this.safeCaptureFrame(frame).catch((err) => {
-          console.error(
+          logger.error(
             `❌ [AUDIO] Unhandled error in safeCaptureFrame: ${err.message}`
           );
         });
       }
     } catch (error) {
-      console.error(`❌ [AUDIO] Error in sendAudio: ${error.message}`);
+      logger.error(`❌ [AUDIO] Error in sendAudio: ${error.message}`);
     }
   }
 
@@ -1821,7 +1823,7 @@ class LiveKitBridge extends Emitter {
     try {
       // Validate frame before capture
       if (!frame || !frame.data || frame.data.length === 0) {
-        console.warn(`⚠️ [AUDIO] Invalid frame data, treating as keepalive/ping`);
+        logger.warn(`⚠️ [AUDIO] Invalid frame data, treating as keepalive/ping`);
         // Reset activity timer - treat invalid frames as keepalive signals
         if (this.connection && this.connection.updateActivityTime) {
           this.connection.updateActivityTime();
@@ -1831,13 +1833,13 @@ class LiveKitBridge extends Emitter {
 
       // Check if audioSource is still valid
       if (!this.audioSource) {
-        console.warn(`⚠️ [AUDIO] AudioSource is null, cannot capture frame`);
+        logger.warn(`⚠️ [AUDIO] AudioSource is null, cannot capture frame`);
         return;
       }
 
       // Check if room is still connected before attempting to send audio
       if (!this.room || !this.room.isConnected) {
-        console.warn(
+        logger.warn(
           `⚠️ [AUDIO] Room disconnected or not available, skipping frame`
         );
         return;
@@ -1846,14 +1848,14 @@ class LiveKitBridge extends Emitter {
       // Attempt to capture the frame
       await this.audioSource.captureFrame(frame);
     } catch (error) {
-      console.error(`❌ [AUDIO] Failed to capture frame: ${error.message}`);
+      logger.error(`❌ [AUDIO] Failed to capture frame: ${error.message}`);
 
       // If we get InvalidState error, it's likely the peer connection is disconnecting
       if (error.message.includes("InvalidState")) {
-        console.warn(
+        logger.warn(
           `⚠️ [AUDIO] InvalidState error - peer connection may be disconnecting`
         );
-        console.warn(
+        logger.warn(
           `💡 [HINT] This is normal during room disconnect, frames will be skipped`
         );
         // Don't reinitialize - the room connection check above will prevent future frames
@@ -1866,18 +1868,18 @@ class LiveKitBridge extends Emitter {
     const isOpus = this.checkOpusFormat(audioData);
     const isPCM = this.checkPCMFormat(audioData);
 
-    console.log(`🔍 [AUDIO ANALYSIS] Format Detection:`);
-    console.log(`   📊 Size: ${audioData.length} bytes`);
-    console.log(`   🎵 Timestamp: ${timestamp}`);
-    console.log(
+    logger.info(`🔍 [AUDIO ANALYSIS] Format Detection:`);
+    logger.info(`   📊 Size: ${audioData.length} bytes`);
+    logger.info(`   🎵 Timestamp: ${timestamp}`);
+    logger.info(
       `   📋 First 16 bytes: ${audioData
         .slice(0, Math.min(16, audioData.length))
         .toString("hex")}`
     );
-    console.log(
+    logger.info(
       `   🎼 Opus signature: ${isOpus ? "✅ DETECTED" : "❌ NOT FOUND"}`
     );
-    console.log(
+    logger.info(
       `   🎤 PCM characteristics: ${isPCM ? "✅ LIKELY PCM" : "❌ UNLIKELY PCM"
       }`
     );
@@ -1894,7 +1896,7 @@ class LiveKitBridge extends Emitter {
     try {
       const textCheck = data.toString("utf8", 0, Math.min(10, data.length));
       if (/^(keepalive|ping|pong|hello|goodbye)/.test(textCheck)) {
-        // console.log(`🚫 Filtered out text message: ${textCheck}`);
+        // logger.info(`🚫 Filtered out text message: ${textCheck}`);
         return false; // This is a text message, not Opus
       }
     } catch (e) {
@@ -1907,7 +1909,7 @@ class LiveKitBridge extends Emitter {
 
     // Validate packet size range
     if (data.length < MIN_OPUS_SIZE || data.length > MAX_OPUS_SIZE) {
-      // console.log(`❌ Invalid OPUS size: ${data.length}B (expected ${MIN_OPUS_SIZE}-${MAX_OPUS_SIZE}B)`);
+      // logger.info(`❌ Invalid OPUS size: ${data.length}B (expected ${MIN_OPUS_SIZE}-${MAX_OPUS_SIZE}B)`);
       return false;
     }
 
@@ -1917,7 +1919,7 @@ class LiveKitBridge extends Emitter {
     const stereo = (firstByte >> 2) & 0x01; // Bit 2: stereo flag
     const frameCount = firstByte & 0x03; // Bits 1-0: frame count
 
-    // console.log(`🔍 OPUS TOC: config=${config}, stereo=${stereo}, frames=${frameCount}, size=${data.length}B`);
+    // logger.info(`🔍 OPUS TOC: config=${config}, stereo=${stereo}, frames=${frameCount}, size=${data.length}B`);
 
     // Validate OPUS TOC byte
     const validConfig = config >= 0 && config <= 31;
@@ -1966,12 +1968,12 @@ class LiveKitBridge extends Emitter {
     const isValidOpus =
       validConfig && validStereo && validFrameCount && isValidConfig;
 
-    // console.log(`📊 OPUS validation: config=${validConfig}(${config}), mono=${validStereo}, frames=${validFrameCount}, validConfig=${isValidConfig} → ${isValidOpus ? "✅ VALID" : "❌ INVALID"}`);
+    // logger.info(`📊 OPUS validation: config=${validConfig}(${config}), mono=${validStereo}, frames=${validFrameCount}, validConfig=${isValidConfig} → ${isValidOpus ? "✅ VALID" : "❌ INVALID"}`);
 
     // ✅ ADDITIONAL: Log first few bytes for debugging
     if (!isValidOpus) {
       const hexDump = data.slice(0, Math.min(8, data.length)).toString("hex");
-      //  console.log(`🔍 OPUS debug - first ${Math.min(8, data.length)} bytes: ${hexDump}`);
+      //  logger.info(`🔍 OPUS debug - first ${Math.min(8, data.length)} bytes: ${hexDump}`);
     }
 
     return isValidOpus;
@@ -1986,7 +1988,7 @@ class LiveKitBridge extends Emitter {
     const commonOpusSizes = [20, 40, 60, 80, 120, 160, 240, 320, 480, 640, 960];
     const isCommonOpusSize = commonOpusSizes.includes(data.length);
 
-    // console.log(
+    // logger.info(
     //   `   📏 Common Opus size (${data.length}B): ${isCommonOpusSize ? "✅" : "❌"}`
     // );
 
@@ -2018,11 +2020,11 @@ class LiveKitBridge extends Emitter {
     const avgAmplitude = sum / samples.length;
     const zeroRatio = zeroCount / samples.length;
 
-    console.log(`   📈 PCM Statistics:`);
-    console.log(`      🔊 Avg amplitude: ${avgAmplitude.toFixed(1)}`);
-    console.log(`      📊 Max amplitude: ${maxAbs}`);
-    console.log(`      🔇 Zero ratio: ${(zeroRatio * 100).toFixed(1)}%`);
-    console.log(`      📐 Sample count: ${samples.length}`);
+    logger.info(`   📈 PCM Statistics:`);
+    logger.info(`      🔊 Avg amplitude: ${avgAmplitude.toFixed(1)}`);
+    logger.info(`      📊 Max amplitude: ${maxAbs}`);
+    logger.info(`      🔇 Zero ratio: ${(zeroRatio * 100).toFixed(1)}%`);
+    logger.info(`      📐 Sample count: ${samples.length}`);
 
     // PCM heuristics
     const hasReasonableAmplitude = avgAmplitude > 10 && avgAmplitude < 10000;
@@ -2030,15 +2032,15 @@ class LiveKitBridge extends Emitter {
     const notTooManyZeros = zeroRatio < 0.8;
     const reasonableSize = data.length >= 160 && data.length <= 3840; // 10ms to 240ms at 16kHz
 
-    console.log(`   ✅ PCM Checks:`);
-    console.log(
+    logger.info(`   ✅ PCM Checks:`);
+    logger.info(
       `      🔊 Reasonable amplitude: ${hasReasonableAmplitude ? "✅" : "❌"}`
     );
-    console.log(`      📊 Has variation: ${hasVariation ? "✅" : "❌"}`);
-    console.log(
+    logger.info(`      📊 Has variation: ${hasVariation ? "✅" : "❌"}`);
+    logger.info(
       `      🔇 Not too many zeros: ${notTooManyZeros ? "✅" : "❌"}`
     );
-    console.log(`      📏 Reasonable size: ${reasonableSize ? "✅" : "❌"}`);
+    logger.info(`      📏 Reasonable size: ${reasonableSize ? "✅" : "❌"}`);
 
     return (
       hasReasonableAmplitude &&
@@ -2051,11 +2053,11 @@ class LiveKitBridge extends Emitter {
   analyzeAudioStatistics(data) {
     // Frame size analysis for common audio formats
     const frameSizeAnalysis = this.analyzeFrameSize(data.length);
-    console.log(`   ⏱️  Frame Analysis: ${frameSizeAnalysis}`);
+    logger.info(`   ⏱️  Frame Analysis: ${frameSizeAnalysis}`);
 
     // Entropy analysis (compressed data has higher entropy)
     const entropy = this.calculateEntropy(data);
-    console.log(
+    logger.info(
       `   🎲 Data entropy: ${entropy.toFixed(3)} (PCM: ~7-11, Opus: ~7.5-8)`
     );
   }
@@ -2126,7 +2128,7 @@ class LiveKitBridge extends Emitter {
       message.text = text;
     }
 
-    // console.log(
+    // logger.info(
     //   `📤 [MQTT OUT] Sending TTS start to device: ${this.macAddress}`
     // );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2143,7 +2145,7 @@ class LiveKitBridge extends Emitter {
       text: text || "",
     };
 
-    console.log(
+    logger.info(
       `📤 [MQTT OUT] Sending TTS sentence start to device: ${this.macAddress} - "${text}"`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2159,20 +2161,20 @@ class LiveKitBridge extends Emitter {
       session_id: this.connection.udp.session_id,
     };
 
-    console.log(`📤 [MQTT OUT] Sending TTS stop to device: ${this.macAddress}`);
+    logger.info(`📤 [MQTT OUT] Sending TTS stop to device: ${this.macAddress}`);
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
   sendLLMThinkMessage() {
     if (!this.connection) return;
-    console.log("Sending LLM think message");
+    logger.info("Sending LLM think message");
     const message = {
       type: "llm",
       state: "think",
       session_id: this.connection.udp.session_id,
     };
 
-    console.log(`📤 [MQTT OUT] Sending TTS stop to device: ${this.macAddress}`);
+    logger.info(`📤 [MQTT OUT] Sending TTS stop to device: ${this.macAddress}`);
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
@@ -2186,7 +2188,7 @@ class LiveKitBridge extends Emitter {
       session_id: this.connection.udp.session_id,
     };
 
-    console.log(
+    logger.info(
       `📤 [MQTT OUT] Sending STT result to device: ${this.macAddress} - "${text}"`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2203,7 +2205,7 @@ class LiveKitBridge extends Emitter {
       session_id: this.connection.udp.session_id,
     };
 
-    console.log(
+    logger.info(
       `📤 [MQTT OUT] Sending emotion to device: ${this.macAddress} - ${emotion} (${emoji})`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2231,7 +2233,7 @@ class LiveKitBridge extends Emitter {
 
     const functionName = actionToFunctionMap[action];
     if (!functionName) {
-      console.error(`❌ [DEVICE CONTROL] Unknown action: ${action}`);
+      logger.error(`❌ [DEVICE CONTROL] Unknown action: ${action}`);
       return;
     }
 
@@ -2253,7 +2255,7 @@ class LiveKitBridge extends Emitter {
       request_id: controlData.request_id || `req_${Date.now()}`,
     };
 
-    console.log(
+    logger.info(
       `🔄 [DEVICE CONTROL] Converting to MCP: ${action} -> ${functionName}, Args: ${JSON.stringify(
         functionArguments
       )}`
@@ -2269,7 +2271,7 @@ class LiveKitBridge extends Emitter {
 
     const functionCall = functionData.function_call;
     if (!functionCall || !functionCall.name) {
-      console.error(
+      logger.error(
         `❌ [FUNCTION CALL] Invalid function call data:`,
         functionData
       );
@@ -2278,7 +2280,7 @@ class LiveKitBridge extends Emitter {
 
     // Handle volume up/down with adjust logic (get current + calculate + set)
     if (functionCall.name === "self_volume_up" || functionCall.name === "self_volume_down") {
-      console.log(
+      logger.info(
         `🎛️ [VOICE-MCP] Volume control detected from voice command, using adjust logic`
       );
 
@@ -2287,9 +2289,9 @@ class LiveKitBridge extends Emitter {
         const step = functionCall.arguments?.step || 10;
 
         const newVolume = await this.debouncedAdjustVolume(action, step, 300);
-        console.log(`✅ [VOICE-MCP] Volume adjusted successfully to ${newVolume}`);
+        logger.info(`✅ [VOICE-MCP] Volume adjusted successfully to ${newVolume}`);
       } catch (error) {
-        console.error(`❌ [VOICE-MCP] Failed to adjust volume:`, error);
+        logger.error(`❌ [VOICE-MCP] Failed to adjust volume:`, error);
       }
 
       return;
@@ -2309,7 +2311,7 @@ class LiveKitBridge extends Emitter {
 
     const mcpToolName = functionToMcpToolMap[functionCall.name];
     if (!mcpToolName) {
-      console.log(
+      logger.info(
         `⚠️ [FUNCTION CALL] Unknown function: ${functionCall.name}, forwarding as MCP message`
       );
       // Forward unknown functions as MCP tool calls
@@ -2337,7 +2339,7 @@ class LiveKitBridge extends Emitter {
       request_id: `req_${requestId}`,
     };
 
-    console.log(
+    logger.info(
       `🔧 [MCP] Sending to device: ${this.macAddress
       } - Tool: ${mcpToolName}, Args: ${JSON.stringify(functionCall.arguments)}`
     );
@@ -2352,10 +2354,10 @@ class LiveKitBridge extends Emitter {
   // Handle mobile app music play requests
   async handleMobileMusicRequest(requestData) {
     try {
-      console.log(`🎵 [MOBILE] Processing music request...`);
+      logger.info(`🎵 [MOBILE] Processing music request...`);
 
       if (!this.room || !this.room.localParticipant) {
-        console.error(`❌ [MOBILE] Room not connected, cannot forward request`);
+        logger.error(`❌ [MOBILE] Room not connected, cannot forward request`);
         return;
       }
 
@@ -2404,14 +2406,14 @@ class LiveKitBridge extends Emitter {
         reliable: true,
       });
 
-      console.log(`✅ [MOBILE] Music request forwarded to LiveKit agent`);
-      console.log(`   🎯 Function: ${functionName}`);
-      console.log(`   📝 Arguments: ${JSON.stringify(functionArguments)}`);
+      logger.info(`✅ [MOBILE] Music request forwarded to LiveKit agent`);
+      logger.info(`   🎯 Function: ${functionName}`);
+      logger.info(`   📝 Arguments: ${JSON.stringify(functionArguments)}`);
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [MOBILE] Failed to forward music request: ${error.message}`
       );
-      console.error(`   Stack: ${error.stack}`);
+      logger.error(`   Stack: ${error.stack}`);
     }
   }
 
@@ -2427,7 +2429,7 @@ class LiveKitBridge extends Emitter {
       request_id: functionData.request_id || `req_${Date.now()}`,
     };
 
-    console.log(
+    logger.info(
       `📤 [FUNCTION FORWARD] Forwarding unknown function to device: ${this.macAddress} - ${functionData.function_call?.name}`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2454,7 +2456,7 @@ class LiveKitBridge extends Emitter {
       request_id: `req_${requestId}`,
     };
 
-    console.log(
+    logger.info(
       `📤 [MCP] Sending MCP tool call to device: ${this.macAddress
       } - Tool: ${toolName}, Args: ${JSON.stringify(toolArgs)}`
     );
@@ -2510,11 +2512,11 @@ class LiveKitBridge extends Emitter {
       const messageData = new Uint8Array(Buffer.from(messageString, "utf8"));
       this.room.localParticipant.publishData(messageData, { reliable: true });
 
-      console.log(
+      logger.info(
         `🎛️ [DEVICE RESPONSE] Simulated response: Action ${action}, Success: ${success}, Value: ${currentValue}`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [DEVICE RESPONSE] Error simulating device response:`,
         error
       );
@@ -2574,12 +2576,12 @@ class LiveKitBridge extends Emitter {
       const messageData = new Uint8Array(Buffer.from(messageString, "utf8"));
       this.room.localParticipant.publishData(messageData, { reliable: true });
 
-      console.log(
+      logger.info(
         `🔧 [FUNCTION RESPONSE] Simulated response: Function ${functionCall.name
         }, Success: ${success}, Result: ${JSON.stringify(result)}`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [FUNCTION RESPONSE] Error simulating function response:`,
         error
       );
@@ -2588,12 +2590,12 @@ class LiveKitBridge extends Emitter {
 
   // Forward MCP response to LiveKit agent
   async forwardMcpResponse(mcpPayload, sessionId, requestId) {
-    console.log(
+    logger.info(
       `🔋 [MCP-FORWARD] Forwarding MCP response for device ${this.macAddress}`
     );
 
     if (!this.room || !this.room.localParticipant) {
-      console.error(
+      logger.error(
         `❌ [MCP-FORWARD] No room available for device ${this.macAddress}`
       );
       return false;
@@ -2615,13 +2617,13 @@ class LiveKitBridge extends Emitter {
         reliable: true,
       });
 
-      console.log(
+      logger.info(
         `✅ [MCP-FORWARD] Successfully forwarded MCP response to LiveKit agent`
       );
-      console.log(`✅ [MCP-FORWARD] Request ID: ${requestId}`);
+      logger.info(`✅ [MCP-FORWARD] Request ID: ${requestId}`);
       return true;
     } catch (error) {
-      console.error(`❌ [MCP-FORWARD] Error forwarding MCP response:`, error);
+      logger.error(`❌ [MCP-FORWARD] Error forwarding MCP response:`, error);
       return false;
     }
   }
@@ -2667,7 +2669,7 @@ class LiveKitBridge extends Emitter {
         request_id: `req_${requestId}`,
       };
 
-      console.log(
+      logger.info(
         `🔧 [MCP] Sending to device: ${this.macAddress} - Tool: ${toolName}, Args: ${JSON.stringify(args)}`
       );
 
@@ -2682,14 +2684,14 @@ class LiveKitBridge extends Emitter {
       // Clear existing debounce timer
       if (this.volumeDebounceTimer) {
         clearTimeout(this.volumeDebounceTimer);
-        console.log(`🔄 [VOLUME-DEBOUNCE] Cancelled previous timer, accumulating...`);
+        logger.info(`🔄 [VOLUME-DEBOUNCE] Cancelled previous timer, accumulating...`);
       }
 
       // Accumulate steps if same action
       if (this.pendingVolumeAction && this.pendingVolumeAction.action === action) {
         this.pendingVolumeAction.step += step;
         this.pendingVolumeAction.resolvers.push(resolve);
-        console.log(
+        logger.info(
           `📊 [VOLUME-DEBOUNCE] Accumulated ${action} (total step: ${this.pendingVolumeAction.step})`
         );
       } else {
@@ -2699,7 +2701,7 @@ class LiveKitBridge extends Emitter {
           step,
           resolvers: [resolve],
         };
-        console.log(`🆕 [VOLUME-DEBOUNCE] New action: ${action} (step: ${step})`);
+        logger.info(`🆕 [VOLUME-DEBOUNCE] New action: ${action} (step: ${step})`);
       }
 
       // Set new debounce timer
@@ -2708,7 +2710,7 @@ class LiveKitBridge extends Emitter {
         this.pendingVolumeAction = null;
         this.volumeDebounceTimer = null;
 
-        console.log(
+        logger.info(
           `⏰ [VOLUME-DEBOUNCE] Executing accumulated ${finalAction} (total step: ${finalStep})`
         );
 
@@ -2727,7 +2729,7 @@ class LiveKitBridge extends Emitter {
     return new Promise((resolve, reject) => {
       // Add request to queue
       this.volumeAdjustmentQueue.push({ action, step, resolve, reject });
-      console.log(`📥 [VOLUME-QUEUE] Added request to queue (size: ${this.volumeAdjustmentQueue.length})`);
+      logger.info(`📥 [VOLUME-QUEUE] Added request to queue (size: ${this.volumeAdjustmentQueue.length})`);
 
       // Process queue if not already processing
       this.processVolumeQueue();
@@ -2738,7 +2740,7 @@ class LiveKitBridge extends Emitter {
   async processVolumeQueue() {
     // If already processing, return (serialization)
     if (this.isAdjustingVolume) {
-      console.log(`⏳ [VOLUME-QUEUE] Already processing, waiting...`);
+      logger.info(`⏳ [VOLUME-QUEUE] Already processing, waiting...`);
       return;
     }
 
@@ -2754,7 +2756,7 @@ class LiveKitBridge extends Emitter {
     const request = this.volumeAdjustmentQueue.shift();
     const { action, step, resolve, reject } = request;
 
-    console.log(
+    logger.info(
       `🔄 [VOLUME-QUEUE] Processing request (${action}, step=${step}), ${this.volumeAdjustmentQueue.length} remaining`
     );
 
@@ -2764,10 +2766,10 @@ class LiveKitBridge extends Emitter {
       // Use optimistic volume tracking (avoid expensive get_device_status call)
       if (this.lastKnownVolume !== null) {
         currentVolume = this.lastKnownVolume;
-        console.log(`📊 [VOLUME-OPTIMISTIC] Using cached volume: ${currentVolume}`);
+        logger.info(`📊 [VOLUME-OPTIMISTIC] Using cached volume: ${currentVolume}`);
       } else {
         // First time or after error - query device
-        console.log(`🔊 [VOLUME-QUERY] Querying device for current volume...`);
+        logger.info(`🔊 [VOLUME-QUERY] Querying device for current volume...`);
         const statusResult = await this.sendMcpAndWait("self.get_device_status", {}, 3000);
 
         let deviceStatus;
@@ -2779,7 +2781,7 @@ class LiveKitBridge extends Emitter {
 
         currentVolume = deviceStatus?.audio_speaker?.volume || 50;
         this.lastKnownVolume = currentVolume;
-        console.log(`📊 [VOLUME-QUERY] Device volume: ${currentVolume}`);
+        logger.info(`📊 [VOLUME-QUERY] Device volume: ${currentVolume}`);
       }
 
       // Calculate new volume
@@ -2790,7 +2792,7 @@ class LiveKitBridge extends Emitter {
         newVolume = Math.max(0, currentVolume - step);
       }
 
-      console.log(
+      logger.info(
         `🔧 [VOLUME-ADJUST] Calculating new volume: ${currentVolume} ${action === "up" ? "+" : "-"} ${step} = ${newVolume}`
       );
 
@@ -2800,10 +2802,10 @@ class LiveKitBridge extends Emitter {
       // Update cached volume
       this.lastKnownVolume = newVolume;
 
-      console.log(`✅ [VOLUME-ADJUST] Volume adjusted successfully: ${currentVolume} → ${newVolume}`);
+      logger.info(`✅ [VOLUME-ADJUST] Volume adjusted successfully: ${currentVolume} → ${newVolume}`);
       resolve(newVolume);
     } catch (error) {
-      console.warn(`⚠️ [VOLUME-ADJUST] Error adjusting volume (non-critical):`, error.message);
+      logger.warn(`⚠️ [VOLUME-ADJUST] Error adjusting volume (non-critical):`, error.message);
 
       // Reset cached volume on error to force re-query next time
       this.lastKnownVolume = null;
@@ -2816,7 +2818,7 @@ class LiveKitBridge extends Emitter {
 
       // Process next request in queue (if any)
       if (this.volumeAdjustmentQueue.length > 0) {
-        console.log(`🔄 [VOLUME-QUEUE] Processing next request in queue...`);
+        logger.info(`🔄 [VOLUME-QUEUE] Processing next request in queue...`);
         setImmediate(() => this.processVolumeQueue());
       }
     }
@@ -2832,7 +2834,7 @@ class LiveKitBridge extends Emitter {
       session_id: this.connection.udp.session_id,
     };
 
-    console.log(
+    logger.info(
       `📤 [MQTT OUT] Sending LLM response to device: ${this.macAddress} - "${text}"`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2847,7 +2849,7 @@ class LiveKitBridge extends Emitter {
       session_id: this.connection.udp.session_id,
     };
 
-    console.log(
+    logger.info(
       `📤 [MQTT OUT] Sending record stop to device: ${this.macAddress}`
     );
     this.connection.sendMqttMessage(JSON.stringify(message));
@@ -2869,11 +2871,11 @@ class LiveKitBridge extends Emitter {
       };
 
       this.connection.sendMqttMessage(JSON.stringify(readyMessage));
-      console.log(
+      logger.info(
         `✅ [READY] Sent ready_for_greeting notification to client ${this.macAddress}. Waiting for 's' key press...`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [READY] Error sending ready notification to client ${this.macAddress}:`,
         error
       );
@@ -2903,7 +2905,7 @@ class LiveKitBridge extends Emitter {
           reliable: true,
         });
 
-        console.log(
+        logger.info(
           `📱 [DEVICE INFO] Sent device MAC (${this.macAddress}) to agent via data channel`
         );
 
@@ -2921,16 +2923,16 @@ class LiveKitBridge extends Emitter {
           reliable: true,
         });
 
-        console.log(
+        logger.info(
           `🤖 [AGENT READY] Sent initial greeting trigger to agent for device: ${this.macAddress}`
         );
       } else {
-        console.warn(
+        logger.warn(
           `⚠️ [AGENT READY] Cannot send messages - room not ready for device: ${this.macAddress}`
         );
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [AGENT READY] Error sending messages to agent for device ${this.macAddress}:`,
         error
       );
@@ -2945,18 +2947,18 @@ class LiveKitBridge extends Emitter {
   async waitForAgentJoin(timeoutMs = 4000) {
     // If agent already joined, return immediately
     if (this.agentJoined) {
-      console.log(`✅ [AGENT-WAIT] Agent already joined`);
+      logger.info(`✅ [AGENT-WAIT] Agent already joined`);
       return true;
     }
 
-    console.log(
+    logger.info(
       `⏳ [AGENT-WAIT] Waiting for agent to join (timeout: ${timeoutMs}ms)...`
     );
 
     // Race between agent join and timeout
     const timeoutPromise = new Promise((resolve) => {
       this.agentJoinTimeout = setTimeout(() => {
-        console.log(`⏰ [AGENT-WAIT] Timeout reached, proceeding anyway`);
+        logger.info(`⏰ [AGENT-WAIT] Timeout reached, proceeding anyway`);
         resolve(false);
       }, timeoutMs);
     });
@@ -2994,17 +2996,17 @@ class LiveKitBridge extends Emitter {
         reliable: true,
       });
 
-      console.log(
+      logger.info(
         `🛑 [ABORT] Sent abort signal to LiveKit agent via data channel`
       );
 
       // CRITICAL: Clear the audio playing flag immediately when abort is sent
       this.isAudioPlaying = false;
-      console.log(
+      logger.info(
         `🎵 [ABORT-CLEAR] Cleared audio playing flag for device: ${this.macAddress}`
       );
     } catch (error) {
-      console.error(`[LiveKitBridge] Failed to send abort signal:`, error);
+      logger.error(`[LiveKitBridge] Failed to send abort signal:`, error);
       throw error;
     }
   }
@@ -3020,7 +3022,7 @@ class LiveKitBridge extends Emitter {
 
     // Check if the room is still connected before trying to send data
     if (!this.room.isConnected) {
-      console.log(
+      logger.info(
         `👋 [END-PROMPT] Room already disconnected, skipping end prompt`
       );
       return;
@@ -3044,13 +3046,13 @@ class LiveKitBridge extends Emitter {
         reliable: true,
       });
 
-      console.log(
+      logger.info(
         `👋 [END-PROMPT] Sent end prompt to LiveKit agent via data channel`
       );
     } catch (error) {
-      console.error(`[LiveKitBridge] Failed to send end prompt:`, error);
+      logger.error(`[LiveKitBridge] Failed to send end prompt:`, error);
       // Don't throw the error - just log it and continue with cleanup
-      console.log(
+      logger.info(
         `👋 [END-PROMPT] Continuing with connection cleanup despite end prompt failure`
       );
     }
@@ -3058,11 +3060,11 @@ class LiveKitBridge extends Emitter {
 
   async close() {
     if (this.room) {
-      console.log("[LiveKitBridge] Disconnecting from LiveKit room");
+      logger.info("[LiveKitBridge] Disconnecting from LiveKit room");
 
       // CRITICAL: Clear audio flag before disconnect to prevent stuck state
       this.isAudioPlaying = false;
-      console.log(
+      logger.info(
         `🎵 [CLEANUP] Cleared audio flag on bridge close for device: ${this.macAddress}`
       );
 
@@ -3083,10 +3085,10 @@ class LiveKitBridge extends Emitter {
           await this.room.localParticipant.publishData(messageData, {
             reliable: true,
           });
-          console.log("🧹 Sent cleanup signal to agent before disconnect");
+          logger.info("🧹 Sent cleanup signal to agent before disconnect");
         }
       } catch (error) {
-        console.log(
+        logger.info(
           "Note: Could not send cleanup signal (room may already be disconnecting)"
         );
       }
@@ -3094,22 +3096,22 @@ class LiveKitBridge extends Emitter {
       // Step 2: Disconnect from the room
       try {
         await this.room.disconnect();
-        console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
+        logger.info(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
       } catch (error) {
-        console.log(`⚠️ [CLEANUP] Error disconnecting from room: ${error.message}`);
+        logger.info(`⚠️ [CLEANUP] Error disconnecting from room: ${error.message}`);
       }
 
       // Step 3: Force delete the room from LiveKit server to remove all participants
       if (this.roomService && this.roomName) {
         try {
           await this.roomService.deleteRoom(this.roomName);
-          console.log(`✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`);
+          logger.info(`✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`);
         } catch (error) {
           // Room might already be gone, that's okay
-          console.log(`⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`);
+          logger.info(`⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`);
         }
       } else {
-        console.log(`⚠️ [CLEANUP] No roomService or roomName available for room deletion`);
+        logger.info(`⚠️ [CLEANUP] No roomService or roomName available for room deletion`);
       }
 
       this.room = null;
@@ -3132,24 +3134,24 @@ class LiveKitBridge extends Emitter {
     try {
       // Convert MAC address format: "28:56:2f:07:c6:ec" → "28562f07c6ec"
       const macForRoom = macAddress.replace(/:/g, "");
-      console.log(
+      logger.info(
         `🧹 [CLEANUP] Searching for old sessions for MAC: ${macAddress} (${macForRoom})`
       );
       if (currentRoomName) {
-        console.log(
+        logger.info(
           `🔒 [CLEANUP] Protecting current room from deletion: ${currentRoomName}`
         );
       }
 
       // Safety check: Ensure roomService is available
       if (!roomService) {
-        console.log(`⚠️ [CLEANUP] RoomService not available, skipping cleanup`);
+        logger.info(`⚠️ [CLEANUP] RoomService not available, skipping cleanup`);
         return;
       }
 
       // Get ALL active rooms from LiveKit server
       const allRooms = await roomService.listRooms();
-      console.log(`📊 [CLEANUP] Found ${allRooms.length} total active rooms`);
+      logger.info(`📊 [CLEANUP] Found ${allRooms.length} total active rooms`);
 
       // Filter rooms belonging to this device (pattern: *_28562f07c6ec)
       // BUT exclude the current room being created
@@ -3160,7 +3162,7 @@ class LiveKitBridge extends Emitter {
 
         // CRITICAL: Never delete the room we're currently creating
         if (currentRoomName && room.name === currentRoomName) {
-          console.log(
+          logger.info(
             `   🔒 Skipping current room: ${room.name} (actively being used)`
           );
           return false;
@@ -3170,7 +3172,7 @@ class LiveKitBridge extends Emitter {
       });
 
       if (deviceRooms.length > 0) {
-        console.log(
+        logger.info(
           `🗑️ [CLEANUP] Found ${deviceRooms.length} old session(s) for MAC ${macAddress}:`
         );
 
@@ -3178,15 +3180,15 @@ class LiveKitBridge extends Emitter {
         for (const room of deviceRooms) {
           const roomCreationTime = Number(room.creationTime);
           const roomAge = now - roomCreationTime;
-          console.log(
+          logger.info(
             `   - Deleting room: ${room.name} (${room.numParticipants
             } participants, age: ${roomAge.toFixed(0)}s)`
           );
           try {
             await roomService.deleteRoom(room.name);
-            console.log(`   ✅ Successfully deleted room: ${room.name}`);
+            logger.info(`   ✅ Successfully deleted room: ${room.name}`);
           } catch (deleteError) {
-            console.error(
+            logger.error(
               `   ❌ Failed to delete room ${room.name}:`,
               deleteError.message
             );
@@ -3194,15 +3196,15 @@ class LiveKitBridge extends Emitter {
           }
         }
 
-        console.log(`✅ [CLEANUP] Completed cleanup for MAC ${macAddress}`);
+        logger.info(`✅ [CLEANUP] Completed cleanup for MAC ${macAddress}`);
 
         // Wait for cleanup to propagate on LiveKit server
         await new Promise((resolve) => setTimeout(resolve, 500));
       } else {
-        console.log(`✓ [CLEANUP] No old sessions found for MAC: ${macAddress}`);
+        logger.info(`✓ [CLEANUP] No old sessions found for MAC: ${macAddress}`);
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [CLEANUP] Error cleaning up sessions for MAC ${macAddress}:`,
         error.message
       );
@@ -3258,14 +3260,14 @@ class VirtualMQTTConnection {
         this.uuid = parts[2];
         this.userData = null; // Set to null since we don't have user data
 
-        console.log(`📱 [VIRTUAL] Parsed client info:`);
-        console.log(`   - Group ID: ${this.groupId}`);
-        console.log(`   - MAC Address: ${this.macAddress}`);
-        console.log(`   - UUID: ${this.uuid}`);
+        logger.info(`📱 [VIRTUAL] Parsed client info:`);
+        logger.info(`   - Group ID: ${this.groupId}`);
+        logger.info(`   - MAC Address: ${this.macAddress}`);
+        logger.info(`   - UUID: ${this.uuid}`);
 
         // Validate MAC address format
         if (!MacAddressRegex.test(this.macAddress)) {
-          console.error(`❌ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
+          logger.error(`❌ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
           this.close();
           return;
         }
@@ -3279,12 +3281,12 @@ class VirtualMQTTConnection {
         this.userData = null;
 
         if (!MacAddressRegex.test(this.macAddress)) {
-          console.error(`❌ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
+          logger.error(`❌ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
           this.close();
           return;
         }
       } else {
-        console.error(
+        logger.error(
           `❌ [VIRTUAL] Invalid clientId format: ${helloPayload.clientId}`
         );
         this.close();
@@ -3292,9 +3294,9 @@ class VirtualMQTTConnection {
       }
 
       this.replyTo = `devices/p2p/${parts[1]}`;
-      console.log(`📱 [VIRTUAL] Reply topic set to: ${this.replyTo}`);
+      logger.info(`📱 [VIRTUAL] Reply topic set to: ${this.replyTo}`);
     } else {
-      console.error(`❌ [VIRTUAL] No clientId provided in hello payload`);
+      logger.error(`❌ [VIRTUAL] No clientId provided in hello payload`);
       this.close();
       return;
     }
@@ -3305,7 +3307,7 @@ class VirtualMQTTConnection {
   updateActivityTime(messageType = null) {
     // CRITICAL FIX: Don't reset timer if connection is closing
     if (this.closing) {
-      console.log(
+      logger.info(
         `⚠️ [TIMER-IGNORE] Ignoring activity during cleanup for virtual device: ${this.deviceId}`
       );
       return;
@@ -3317,7 +3319,7 @@ class VirtualMQTTConnection {
     const allowedDuringEnding = ['playback_control', 'playing', 'status'];
 
     if (this.isEnding && (!messageType || !allowedDuringEnding.includes(messageType))) {
-      console.log(
+      logger.info(
         `� [[ENDING-IGNORE] Activity during goodbye sequence ignored for virtual device: ${this.deviceId}`
       );
       return; // Don't log timer reset during ending
@@ -3325,7 +3327,7 @@ class VirtualMQTTConnection {
 
     // If we reach here, either not ending OR it's an allowed message type
     if (this.isEnding && messageType) {
-      console.log(
+      logger.info(
         `🔄 [ENDING-RESET] Timer reset allowed for message type '${messageType}' during ending: ${this.deviceId}`
       );
       // Reset ending state since device is still active
@@ -3333,14 +3335,14 @@ class VirtualMQTTConnection {
       this.endPromptSentTime = null;
     }
 
-    console.log(
+    logger.info(
       `⏰ [TIMER-RESET] Virtual device ${this.deviceId} activity timer reset`
     );
   }
 
   handlePublish(publishData) {
     // Update activity timestamp on any MQTT message receipt
-    console.log(
+    logger.info(
       `📨 [ACTIVITY] MQTT message received from virtual device ${this.deviceId}, resetting inactivity timer`
     );
 
@@ -3350,7 +3352,7 @@ class VirtualMQTTConnection {
       const json = JSON.parse(publishData.payload);
       messageType = json.type || json.msg; // Handle both 'type' and 'msg' fields
     } catch (error) {
-      console.log(`⚠️ [PARSE] Could not parse message type for timer reset: ${error.message}`);
+      logger.info(`⚠️ [PARSE] Could not parse message type for timer reset: ${error.message}`);
     }
 
     this.updateActivityTime(messageType);
@@ -3369,11 +3371,11 @@ class VirtualMQTTConnection {
         }
 
         this.parseHelloMessage(json).catch((error) => {
-          console.error(
+          logger.error(
             `❌ [HELLO-ERROR] Failed to process hello message for ${this.deviceId}:`,
             error
           );
-          console.error(`❌ [HELLO-ERROR] Error stack:`, error.stack);
+          logger.error(`❌ [HELLO-ERROR] Error stack:`, error.stack);
           debug("Failed to process hello message:", error);
           this.close();
         });
@@ -3389,21 +3391,21 @@ class VirtualMQTTConnection {
   }
 
   sendMqttMessage(payload) {
-    console.log(
+    logger.info(
       `📤 [VIRTUAL] sendMqttMessage called for device: ${this.deviceId}`
     );
-    console.log(`📤 [VIRTUAL] Payload: ${payload}`);
+    logger.info(`📤 [VIRTUAL] Payload: ${payload}`);
     debug(`Sending message to ${this.deviceId}: ${payload}`);
 
     try {
       const parsedPayload = JSON.parse(payload);
-      console.log(`📤 [VIRTUAL] Parsed payload:`, parsedPayload);
+      logger.info(`📤 [VIRTUAL] Parsed payload:`, parsedPayload);
       this.gateway.publishToDevice(this.fullClientId, parsedPayload);
-      console.log(
+      logger.info(
         `📤 [VIRTUAL] Called publishToDevice for device: ${this.deviceId}`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [VIRTUAL] Error in sendMqttMessage for device ${this.deviceId}:`,
         error
       );
@@ -3412,7 +3414,7 @@ class VirtualMQTTConnection {
 
   // Forward MCP response to LiveKit agent
   async forwardMcpResponse(mcpPayload, sessionId, requestId) {
-    console.log(
+    logger.info(
       `🔋 [MCP-FORWARD] Forwarding MCP response for device ${this.deviceId}`
     );
 
@@ -3421,7 +3423,7 @@ class VirtualMQTTConnection {
       !this.bridge.room ||
       !this.bridge.room.localParticipant
     ) {
-      console.error(
+      logger.error(
         `❌ [MCP-FORWARD] No LiveKit room available for device ${this.deviceId}`
       );
       return false;
@@ -3443,13 +3445,13 @@ class VirtualMQTTConnection {
         reliable: true,
       });
 
-      console.log(
+      logger.info(
         `✅ [MCP-FORWARD] Successfully forwarded MCP response to LiveKit agent`
       );
-      console.log(`✅ [MCP-FORWARD] Request ID: ${requestId}`);
+      logger.info(`✅ [MCP-FORWARD] Request ID: ${requestId}`);
       return true;
     } catch (error) {
-      console.error(`❌ [MCP-FORWARD] Error forwarding MCP response:`, error);
+      logger.error(`❌ [MCP-FORWARD] Error forwarding MCP response:`, error);
       return false;
     }
   }
@@ -3457,7 +3459,7 @@ class VirtualMQTTConnection {
   sendUdpMessage(payload, timestamp) {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
-      console.log(
+      logger.info(
         //`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`
       );
       return;
@@ -3492,16 +3494,16 @@ class VirtualMQTTConnection {
   }
 
   async parseHelloMessage(json) {
-    console.log(
+    logger.info(
       `🔍 [PARSE-HELLO] Starting parseHelloMessage for ${this.deviceId}`
     );
-    console.log(
+    logger.info(
       `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${this.udp.remoteAddress
         ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
         : "null"
       }`
     );
-    console.log(
+    logger.info(
       `🔍 [PARSE-HELLO] JSON version: ${json.version}, has bridge: ${!!this
         .bridge}`
     );
@@ -3514,24 +3516,24 @@ class VirtualMQTTConnection {
       const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
       const apiUrl = `${baseUrl}/toy/device/${macAddress}/mode`;
 
-      console.log(
+      logger.info(
         `🔍 [ROOM-TYPE] Querying database for device ${this.deviceId} mode...`
       );
       const response = await axios.get(apiUrl, { timeout: 5000 });
 
       if (response.data.code === 0) {
         this.roomType = response.data.data;
-        console.log(
+        logger.info(
           `✅ [ROOM-TYPE] Device ${this.deviceId} mode from DB: ${this.roomType}`
         );
       } else {
-        console.warn(
+        logger.warn(
           `⚠️ [ROOM-TYPE] API returned error: ${response.data.msg}, using default 'conversation'`
         );
         this.roomType = "conversation";
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [ROOM-TYPE] Error querying mode from DB: ${error.message}, using default 'conversation'`
       );
       this.roomType = "conversation";
@@ -3539,14 +3541,14 @@ class VirtualMQTTConnection {
 
     // Extract language from hello message
     this.language = json.language || null;
-    console.log(
+    logger.info(
       `📱 [ROOM-TYPE] Final room type: ${this.roomType}, language: ${this.language || "N/A"
       }`
     );
 
     // Validate room type
     if (!["conversation", "music", "story"].includes(this.roomType)) {
-      console.error(
+      logger.error(
         `❌ [ROOM-TYPE] Invalid room_type from DB: ${this.roomType}, using 'conversation'`
       );
       this.roomType = "conversation";
@@ -3556,7 +3558,7 @@ class VirtualMQTTConnection {
     this.currentCharacter = null;
     if (this.roomType === "conversation") {
       this.currentCharacter = await this.fetchCurrentCharacter(this.deviceId);
-      console.log(`🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`);
+      logger.info(`🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`);
     }
 
     this.udp = {
@@ -3568,7 +3570,7 @@ class VirtualMQTTConnection {
       localSequence: 0,
       startTime: Date.now(),
     };
-    console.log(
+    logger.info(
       `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${this.udp.remoteAddress
         ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
         : "null"
@@ -3585,23 +3587,23 @@ class VirtualMQTTConnection {
 
     // Generate new UUID for session
     const newSessionUuid = crypto.randomUUID();
-    console.log(`🔄 [NEW-SESSION] Generated UUID: ${newSessionUuid}`);
+    logger.info(`🔄 [NEW-SESSION] Generated UUID: ${newSessionUuid}`);
 
     // Generate session_id for room WITH ROOM TYPE
     const macForRoom = this.macAddress.replace(/:/g, "");
     const futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
     this.udp.session_id = futureSessionId;
 
-    console.log(`🏠 [ROOM-NAME] Room will be: ${futureSessionId}`);
+    logger.info(`🏠 [ROOM-NAME] Room will be: ${futureSessionId}`);
 
-    console.log(
+    logger.info(
       `🏗️ [HELLO] Creating LiveKit room and connecting gateway (NO agent deployment yet)`
     );
 
     // Clean up old sessions
     if (this.gateway.roomService) {
       const newRoomName = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
-      console.log(
+      logger.info(
         `🧹 [CLEANUP] Cleaning up old sessions for device: ${this.deviceId}`
       );
       LiveKitBridge.cleanupOldSessionsForDevice(
@@ -3610,10 +3612,10 @@ class VirtualMQTTConnection {
         newRoomName
       )
         .then(() => {
-          console.log(`✅ [CLEANUP] Old sessions cleaned up`);
+          logger.info(`✅ [CLEANUP] Old sessions cleaned up`);
         })
         .catch((err) => {
-          console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err);
+          logger.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err);
         });
     }
 
@@ -3632,7 +3634,7 @@ class VirtualMQTTConnection {
     // Setup bridge close handler
     this.bridge.on("close", () => {
       const seconds = (Date.now() - this.udp.startTime) / 1000;
-      console.log(`Call ended: ${this.deviceId} Duration: ${seconds}s`);
+      logger.info(`Call ended: ${this.deviceId} Duration: ${seconds}s`);
       this.sendMqttMessage(
         JSON.stringify({ type: "goodbye", session_id: this.udp.session_id })
       );
@@ -3651,12 +3653,12 @@ class VirtualMQTTConnection {
         this.server?.roomService || this.gateway?.roomService
       );
       const roomCreationTime = Date.now() - roomCreationStart;
-      console.log(
+      logger.info(
         `✅ [HELLO] Room created and gateway connected in ${roomCreationTime}ms`
       );
 
       // Send mode_update to device firmware
-      console.log(`📤 [HELLO] Sending mode_update to device...`);
+      logger.info(`📤 [HELLO] Sending mode_update to device...`);
       const modeUpdateMsg = {
         type: "mode_update",
         mode: this.roomType,
@@ -3665,21 +3667,21 @@ class VirtualMQTTConnection {
         timestamp: Date.now(),
       };
       this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
+      logger.info(`✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
 
       // ADD: Room type-specific initialization
       if (this.roomType === "conversation") {
-        console.log(`🗣️ [CONVERSATION] Waiting for agent dispatch...`);
+        logger.info(`🗣️ [CONVERSATION] Waiting for agent dispatch...`);
         // Agent dispatched separately
       } else if (this.roomType === "music") {
-        console.log(`🎵 [MUSIC] Spawning music bot via Python API...`);
+        logger.info(`🎵 [MUSIC] Spawning music bot via Python API...`);
         await this.spawnMusicBot(futureSessionId);
       } else if (this.roomType === "story") {
-        console.log(`📖 [STORY] Spawning story bot via Python API...`);
+        logger.info(`📖 [STORY] Spawning story bot via Python API...`);
         await this.spawnStoryBot(futureSessionId);
       }
 
-      console.log(
+      logger.info(
         `⏰ [HELLO] Room will auto-close if no participants join within 60 seconds (LiveKit emptyTimeout)`
       );
 
@@ -3724,7 +3726,7 @@ class VirtualMQTTConnection {
           timestamp: Date.now(),
         })
       );
-      console.log(`✅ [READY] Room ready. Press 's' to deploy agent.`);
+      logger.info(`✅ [READY] Room ready. Press 's' to deploy agent.`);
     } catch (error) {
       this.sendMqttMessage(
         JSON.stringify({
@@ -3732,7 +3734,7 @@ class VirtualMQTTConnection {
           message: "Failed to create room",
         })
       );
-      console.error(`${this.deviceId} failed to create room: ${error}`);
+      logger.error(`${this.deviceId} failed to create room: ${error}`);
     }
   }
 
@@ -3741,25 +3743,25 @@ class VirtualMQTTConnection {
       const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
       const playlistUrl = `${baseUrl}/toy/device/${this.deviceId}/playlist/${mode}`;
 
-      console.log(
+      logger.info(
         `📋 [PLAYLIST] Fetching ${mode} playlist from: ${playlistUrl}`
       );
       const response = await axios.get(playlistUrl, { timeout: 5000 });
 
       if (response.data && response.data.code === 0 && response.data.data) {
         const playlist = response.data.data;
-        console.log(
+        logger.info(
           `✅ [PLAYLIST] Fetched ${playlist.length} ${mode} items for device ${this.deviceId}`
         );
         return playlist;
       } else {
-        console.log(
+        logger.info(
           `ℹ️ [PLAYLIST] No ${mode} playlist found for device ${this.deviceId}`
         );
         return [];
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [PLAYLIST] Failed to fetch ${mode} playlist: ${error.message}`
       );
       return []; // Return empty playlist on error
@@ -3772,27 +3774,27 @@ class VirtualMQTTConnection {
       const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
       const apiUrl = `${baseUrl}/toy/agent/device/${cleanMac}/current-character`;
 
-      console.log(`🎭 [CHARACTER] Fetching current character from: ${apiUrl}`);
+      logger.info(`🎭 [CHARACTER] Fetching current character from: ${apiUrl}`);
 
       const response = await axios.get(apiUrl, { timeout: 5000 });
 
       if (response.data && response.data.code === 0 && response.data.data) {
         const character = response.data.data;
-        console.log(`✅ [CHARACTER] Current character for ${cleanMac}: ${character}`);
+        logger.info(`✅ [CHARACTER] Current character for ${cleanMac}: ${character}`);
         return character;
       } else {
-        console.log(`ℹ️ [CHARACTER] No character found in response, using default: Cheeko`);
+        logger.info(`ℹ️ [CHARACTER] No character found in response, using default: Cheeko`);
         return "Cheeko";
       }
     } catch (error) {
-      console.error(`❌ [CHARACTER] Failed to fetch character: ${error.message}`);
+      logger.error(`❌ [CHARACTER] Failed to fetch character: ${error.message}`);
       return "Cheeko"; // Default fallback
     }
   }
 
   // async spawnMusicBot(roomName, playlist = null) {
   //   try {
-  //     console.log(`🎵 [MUSIC-BOT] Calling Python API: ${roomName}`);
+  //     logger.info(`🎵 [MUSIC-BOT] Calling Python API: ${roomName}`);
 
   //     // If no playlist provided, fetch it
   //     if (!playlist) {
@@ -3811,8 +3813,8 @@ class VirtualMQTTConnection {
   //     );
 
   //     if (response.data && response.data.status === "started") {
-  //       console.log(`✅ [MUSIC-BOT] Music bot spawned successfully`);
-  //       console.log(
+  //       logger.info(`✅ [MUSIC-BOT] Music bot spawned successfully`);
+  //       logger.info(
   //         `🎵 [MUSIC-BOT] Language: ${
   //           response.data.language
   //         }, Playlist items: ${playlist?.length || 0}`
@@ -3823,18 +3825,18 @@ class VirtualMQTTConnection {
   //       if (deviceInfo) {
   //         deviceInfo.currentRoomName = roomName;
   //         deviceInfo.currentMode = "music";
-  //         console.log(
+  //         logger.info(
   //           `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
   //         );
   //       }
   //     }
   //   } catch (error) {
-  //     console.error(`❌ [MUSIC-BOT] Failed: ${error.message}`);
+  //     logger.error(`❌ [MUSIC-BOT] Failed: ${error.message}`);
   //   }
   // }
   async spawnMusicBot(roomName, playlist = null) {
     try {
-      console.log(
+      logger.info(
         `🎵 [MUSIC-BOT] Calling Python API to spawn music bot for room: ${roomName}`
       );
 
@@ -3857,10 +3859,10 @@ class VirtualMQTTConnection {
       );
 
       if (response.data && response.data.status === "started") {
-        console.log(
+        logger.info(
           `✅ [MUSIC-BOT] Music bot spawned successfully for room: ${roomName}`
         );
-        console.log(
+        logger.info(
           `🎵 [MUSIC-BOT] Language: ${response.data.language
           }, Playlist items: ${playlist?.length || 0}`
         );
@@ -3870,26 +3872,26 @@ class VirtualMQTTConnection {
         if (deviceInfo) {
           deviceInfo.currentRoomName = roomName;
           deviceInfo.currentMode = "music";
-          console.log(
+          logger.info(
             `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
           );
         }
       } else if (response.data && response.data.status === "already_active") {
-        console.log(
+        logger.info(
           `ℹ️ [MUSIC-BOT] Music bot already active for room: ${roomName}`
         );
       } else {
-        console.log(
+        logger.info(
           `⚠️ [MUSIC-BOT] Unexpected response from Media API:`,
           response.data
         );
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [MUSIC-BOT] Failed to spawn music bot: ${error.message}`
       );
       if (error.response) {
-        console.error(`❌ [MUSIC-BOT] API response:`, error.response.data);
+        logger.error(`❌ [MUSIC-BOT] API response:`, error.response.data);
       }
       // Don't throw - let the connection continue even if bot spawn fails
     }
@@ -3897,7 +3899,7 @@ class VirtualMQTTConnection {
 
   async spawnStoryBot(roomName, playlist = null) {
     try {
-      console.log(
+      logger.info(
         `📖 [STORY-BOT] Calling Python API to spawn story bot for room: ${roomName}`
       );
 
@@ -3920,10 +3922,10 @@ class VirtualMQTTConnection {
       );
 
       if (response.data && response.data.status === "started") {
-        console.log(
+        logger.info(
           `✅ [STORY-BOT] Story bot spawned successfully for room: ${roomName}`
         );
-        console.log(
+        logger.info(
           `📖 [STORY-BOT] Playlist items: ${playlist?.length || 0}`
         );
 
@@ -3931,26 +3933,26 @@ class VirtualMQTTConnection {
         if (deviceInfo) {
           deviceInfo.currentRoomName = roomName;
           deviceInfo.currentMode = "story";
-          console.log(
+          logger.info(
             `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: story`
           );
         }
       } else if (response.data && response.data.status === "already_active") {
-        console.log(
+        logger.info(
           `ℹ️ [STORY-BOT] Story bot already active for room: ${roomName}`
         );
       } else {
-        console.log(
+        logger.info(
           `⚠️ [STORY-BOT] Unexpected response from Media API:`,
           response.data
         );
       }
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [STORY-BOT] Failed to spawn story bot: ${error.message}`
       );
       if (error.response) {
-        console.error(`❌ [STORY-BOT] API response:`, error.response.data);
+        logger.error(`❌ [STORY-BOT] API response:`, error.response.data);
       }
       // Don't throw - let the connection continue even if bot spawn fails
     }
@@ -3968,7 +3970,7 @@ class VirtualMQTTConnection {
     }
 
     if (json.type === "goodbye") {
-      console.log(
+      logger.info(
         `🔌 [DISCONNECT-AGENT] Received goodbye from device: ${this.deviceId} - disconnecting agent but keeping room alive`
       );
 
@@ -3996,7 +3998,7 @@ class VirtualMQTTConnection {
             reliable: true,
           });
 
-          console.log(`✅ [DISCONNECT-AGENT] Sent disconnect signal to agent`);
+          logger.info(`✅ [DISCONNECT-AGENT] Sent disconnect signal to agent`);
 
           // Mark agent as not joined so it can rejoin
           this.bridge.agentJoined = false;
@@ -4007,11 +4009,11 @@ class VirtualMQTTConnection {
             this.bridge.agentJoinResolve = resolve;
           });
 
-          console.log(
+          logger.info(
             `🏠 [DISCONNECT-AGENT] Room remains alive, agent can rejoin on 's' press`
           );
         } catch (error) {
-          console.error(
+          logger.error(
             `❌ [DISCONNECT-AGENT] Failed to disconnect agent:`,
             error
           );
@@ -4025,17 +4027,17 @@ class VirtualMQTTConnection {
     // Handle abort message - forward to LiveKit agent via data channel
     if (json.type === "abort") {
       try {
-        console.log(
+        logger.info(
           `🛑 [ABORT] Received abort signal from device: ${this.deviceId}`
         );
         await this.bridge.sendAbortSignal(json.session_id);
-        console.log(`✅ [ABORT] Successfully forwarded abort signal to LiveKit agent`);
+        logger.info(`✅ [ABORT] Successfully forwarded abort signal to LiveKit agent`);
 
         // Send TTS stop to device to return it to listening mode (red light)
         this.bridge.sendTtsStopMessage();
-        console.log(`🛑 [ABORT] Sent TTS stop message to device: ${this.deviceId}`);
+        logger.info(`🛑 [ABORT] Sent TTS stop message to device: ${this.deviceId}`);
       } catch (error) {
-        console.error(`❌ [ABORT] Failed to forward abort signal to LiveKit:`, error);
+        logger.error(`❌ [ABORT] Failed to forward abort signal to LiveKit:`, error);
       }
       return;
     }
@@ -4043,11 +4045,11 @@ class VirtualMQTTConnection {
     // Handle function_call from mobile app
     if (json.type === "function_call" && json.source === "mobile_app") {
       try {
-        console.log(
+        logger.info(
           `🎵 [MOBILE] Function call received from mobile app: ${this.deviceId}`
         );
-        console.log(`   🎯 Function: ${json.function_call?.name}`);
-        console.log(
+        logger.info(`   🎯 Function: ${json.function_call?.name}`);
+        logger.info(
           `   📝 Arguments: ${JSON.stringify(json.function_call?.arguments)}`
         );
 
@@ -4055,12 +4057,12 @@ class VirtualMQTTConnection {
 
         // Handle volume controls directly via MCP (bypass agent for faster response)
         if (functionName === "self_volume_up" || functionName === "self_volume_down") {
-          console.log(
+          logger.info(
             `🎛️ [MOBILE-MCP] Volume control detected, using direct MCP adjust logic`
           );
 
           if (!this.bridge) {
-            console.error(`❌ [MOBILE-MCP] No bridge available`);
+            logger.error(`❌ [MOBILE-MCP] No bridge available`);
             return;
           }
 
@@ -4069,9 +4071,9 @@ class VirtualMQTTConnection {
             const step = json.function_call.arguments?.step || 10;
 
             const newVolume = await this.bridge.debouncedAdjustVolume(action, step, 300);
-            console.log(`✅ [MOBILE-MCP] Volume adjusted successfully to ${newVolume}`);
+            logger.info(`✅ [MOBILE-MCP] Volume adjusted successfully to ${newVolume}`);
           } catch (error) {
-            console.error(`❌ [MOBILE-MCP] Failed to adjust volume:`, error);
+            logger.error(`❌ [MOBILE-MCP] Failed to adjust volume:`, error);
           }
 
           return;
@@ -4088,12 +4090,12 @@ class VirtualMQTTConnection {
         // Music/Story bots don't support function calls - they only stream audio
         if (this.roomType && (this.roomType === "music" || this.roomType === "story")) {
           if (mcpQueryFunctions.includes(functionName)) {
-            console.log(
+            logger.info(
               `🔋 [MOBILE-MCP] ${this.roomType} mode detected - handling MCP query directly via gateway`
             );
 
             if (!this.bridge) {
-              console.error(`❌ [MOBILE-MCP] No bridge available`);
+              logger.error(`❌ [MOBILE-MCP] No bridge available`);
               return;
             }
 
@@ -4104,13 +4106,13 @@ class VirtualMQTTConnection {
               request_id: json.request_id || `mobile_req_${Date.now()}`,
             });
 
-            console.log(`✅ [MOBILE-MCP] MCP query sent directly to device (bypassing agent)`);
+            logger.info(`✅ [MOBILE-MCP] MCP query sent directly to device (bypassing agent)`);
             return;
           }
         }
 
         // For non-volume, non-MCP-query functions, forward to LiveKit agent (conversation mode only)
-        console.log(`🎵 [MOBILE] Forwarding to LiveKit agent for processing`);
+        logger.info(`🎵 [MOBILE] Forwarding to LiveKit agent for processing`);
 
         // Check if bridge and room are available
         if (
@@ -4118,7 +4120,7 @@ class VirtualMQTTConnection {
           !this.bridge.room ||
           !this.bridge.room.localParticipant
         ) {
-          console.error(
+          logger.error(
             `❌ [MOBILE] No bridge/room available to handle function call`
           );
           return;
@@ -4135,12 +4137,12 @@ class VirtualMQTTConnection {
         ];
 
         if (playbackFunctions.includes(functionName)) {
-          console.log(`🛑 [MOBILE] Sending abort signal before new playback`);
+          logger.info(`🛑 [MOBILE] Sending abort signal before new playback`);
           await this.bridge.sendAbortSignal(this.udp.session_id);
           // Wait a moment for abort to process
           await new Promise((resolve) => setTimeout(resolve, 100));
         } else {
-          console.log(`ℹ️ [MOBILE] Query function detected, skipping abort signal`);
+          logger.info(`ℹ️ [MOBILE] Query function detected, skipping abort signal`);
         }
 
         // Then forward the new function call to LiveKit agent
@@ -4157,9 +4159,9 @@ class VirtualMQTTConnection {
           reliable: true,
         });
 
-        console.log(`✅ [MOBILE] Function call forwarded to LiveKit agent`);
+        logger.info(`✅ [MOBILE] Function call forwarded to LiveKit agent`);
       } catch (error) {
-        console.error(`❌ [MOBILE] Failed to handle function call:`, error);
+        logger.error(`❌ [MOBILE] Failed to handle function call:`, error);
       }
       return;
     }
@@ -4167,16 +4169,16 @@ class VirtualMQTTConnection {
     // Handle mobile music request - forward to LiveKit bridge (legacy support)
     if (json.type === "mobile_music_request") {
       try {
-        console.log(
+        logger.info(
           `🎵 [MOBILE] Mobile music request received from virtual device: ${this.deviceId}`
         );
-        console.log(`   🎵 Song: ${json.song_name}`);
-        console.log(`   🗂️ Type: ${json.content_type}`);
-        console.log(`   🌐 Language: ${json.language || "Not specified"}`);
+        logger.info(`   🎵 Song: ${json.song_name}`);
+        logger.info(`   🗂️ Type: ${json.content_type}`);
+        logger.info(`   🌐 Language: ${json.language || "Not specified"}`);
 
         // Mark this as a mobile-initiated connection
         this.isMobileConnection = true;
-        console.log(
+        logger.info(
           `   📱 Marked as mobile connection for MAC: ${this.macAddress}`
         );
 
@@ -4186,7 +4188,7 @@ class VirtualMQTTConnection {
           !this.bridge.room ||
           !this.bridge.room.localParticipant
         ) {
-          console.error(
+          logger.error(
             `❌ [MOBILE] No bridge/room available to handle music request`
           );
           return;
@@ -4235,11 +4237,11 @@ class VirtualMQTTConnection {
           reliable: true,
         });
 
-        console.log(`✅ [MOBILE] Music request forwarded to LiveKit agent`);
-        console.log(`   🎯 Function: ${functionName}`);
-        console.log(`   📝 Arguments: ${JSON.stringify(functionArguments)}`);
+        logger.info(`✅ [MOBILE] Music request forwarded to LiveKit agent`);
+        logger.info(`   🎯 Function: ${functionName}`);
+        logger.info(`   📝 Arguments: ${JSON.stringify(functionArguments)}`);
       } catch (error) {
-        console.error(
+        logger.error(
           `❌ [MOBILE] Failed to handle mobile music request:`,
           error
         );
@@ -4258,7 +4260,7 @@ class VirtualMQTTConnection {
     }
 
     if (this.udp.remoteAddress !== rinfo) {
-      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
+      // logger.info(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
       this.udp.remoteAddress = rinfo;
     }
 
@@ -4278,7 +4280,7 @@ class VirtualMQTTConnection {
 
     const payloadStr = payload.toString();
     if (payloadStr.startsWith("ping:")) {
-      console.log(
+      logger.info(
         `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
       );
       return;
@@ -4290,7 +4292,7 @@ class VirtualMQTTConnection {
 
   async checkKeepAlive() {
     // Don't check keepalive if connection is closing
-    console.log("timer 2");
+    logger.info("timer 2");
     if (this.closing) {
       return;
     }
@@ -4303,7 +4305,7 @@ class VirtualMQTTConnection {
       const maxEndWaitTime = 30 * 1000; // 30 seconds max wait for end prompt audio
 
       if (timeSinceEndPrompt > maxEndWaitTime) {
-        console.log(
+        logger.info(
           `🕒 [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${this.deviceId
           } (waited ${Math.round(timeSinceEndPrompt / 1000)}s)`
         );
@@ -4318,11 +4320,11 @@ class VirtualMQTTConnection {
               timestamp: Date.now(),
             })
           );
-          console.log(
+          logger.info(
             `👋 [GOODBYE-MQTT] Sent goodbye MQTT message to virtual device on timeout: ${this.deviceId}`
           );
         } catch (error) {
-          console.error(
+          logger.error(
             `Failed to send goodbye MQTT message: ${error.message}`
           );
         }
@@ -4336,7 +4338,7 @@ class VirtualMQTTConnection {
         const remainingSeconds = Math.round(
           (maxEndWaitTime - timeSinceEndPrompt) / 1000
         );
-        console.log(
+        logger.info(
           `⏳ [END-WAIT] Virtual device ${this.deviceId}: ${remainingSeconds}s until force disconnect`
         );
       }
@@ -4348,7 +4350,7 @@ class VirtualMQTTConnection {
 
     // Skip timeout check if audio is actively playing (but don't reset timer)
     if (this.bridge && this.bridge.isAudioPlaying) {
-      console.log(
+      logger.info(
         `🎵 [AUDIO-ACTIVE] Audio is playing for virtual device: ${this.deviceId} - skipping timeout check but not resetting timer`
       );
       return;
@@ -4359,7 +4361,7 @@ class VirtualMQTTConnection {
       if (!this.isEnding && this.bridge) {
         this.isEnding = true;
         this.endPromptSentTime = now;
-        console.log(
+        logger.info(
           `👋 [END-PROMPT] Sending goodbye message before timeout: ${this.deviceId
           } (inactive for ${Math.round(
             timeSinceLastActivity / 1000
@@ -4373,18 +4375,18 @@ class VirtualMQTTConnection {
           // Note: Goodbye MQTT will be sent AFTER TTS finishes (in agent_state_changed handler)
           this.goodbyeSent = false; // Flag to track if goodbye MQTT was sent
           await this.bridge.sendEndPrompt(this.udp.session_id);
-          console.log(
+          logger.info(
             `👋 [END-PROMPT-SENT] Waiting for TTS goodbye to complete before sending goodbye MQTT: ${this.deviceId}`
           );
         } catch (error) {
-          console.error(`Failed to send end prompt: ${error.message}`);
+          logger.error(`Failed to send end prompt: ${error.message}`);
           // If end prompt fails, close immediately
           this.close();
         }
         return;
       } else {
         // No bridge available, send goodbye message and close immediately
-        console.log(
+        logger.info(
           `🕒 [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${this.deviceId
           } (inactive for ${Math.round(timeSinceLastActivity / 1000)}s)`
         );
@@ -4399,11 +4401,11 @@ class VirtualMQTTConnection {
               timestamp: Date.now(),
             })
           );
-          console.log(
+          logger.info(
             `👋 [GOODBYE-MQTT] Sent goodbye MQTT message to virtual device: ${this.deviceId}`
           );
         } catch (error) {
-          console.error(
+          logger.error(
             `Failed to send goodbye MQTT message: ${error.message}`
           );
         }
@@ -4418,7 +4420,7 @@ class VirtualMQTTConnection {
       const remainingSeconds = Math.round(
         (this.inactivityTimeoutMs - timeSinceLastActivity) / 1000
       );
-      console.log(
+      logger.info(
         `⏰ [TIMER-CHECK] Virtual device ${this.deviceId}: ${remainingSeconds}s until timeout`
       );
     }
@@ -4429,7 +4431,7 @@ class VirtualMQTTConnection {
   async close() {
     // Prevent duplicate close calls
     if (this.closing) {
-      console.log(`⚠️ [CLEANUP] Already closing ${this.deviceId}, skipping duplicate close`);
+      logger.info(`⚠️ [CLEANUP] Already closing ${this.deviceId}, skipping duplicate close`);
       return;
     }
 
@@ -4437,8 +4439,8 @@ class VirtualMQTTConnection {
     const stack = new Error().stack;
     const callerLine = stack.split('\n')[2]?.trim() || 'Unknown caller';
 
-    console.log(`🛑 [CLEANUP] Starting cleanup for virtual device: ${this.deviceId}`);
-    console.log(`📍 [CLEANUP-TRACE] close() called from: ${callerLine}`);
+    logger.info(`🛑 [CLEANUP] Starting cleanup for virtual device: ${this.deviceId}`);
+    logger.info(`📍 [CLEANUP-TRACE] close() called from: ${callerLine}`);
     this.closing = true;
 
     // ADD: Stop media bot if music/story room
@@ -4449,7 +4451,7 @@ class VirtualMQTTConnection {
     ) {
       const roomName = this.bridge.room.name;
       try {
-        console.log(
+        logger.info(
           `🛑 [CLEANUP] Stopping ${this.roomType} bot for room: ${roomName}`
         );
         await axios.post(
@@ -4459,9 +4461,9 @@ class VirtualMQTTConnection {
           },
           mediaAxiosConfig({ timeout: 3000 })
         );
-        console.log(`✅ [CLEANUP] ${this.roomType} bot stopped`);
+        logger.info(`✅ [CLEANUP] ${this.roomType} bot stopped`);
       } catch (error) {
-        console.warn(`⚠️ [CLEANUP] Failed to stop bot:`, error.message);
+        logger.warn(`⚠️ [CLEANUP] Failed to stop bot:`, error.message);
       }
     }
 
@@ -4472,13 +4474,13 @@ class VirtualMQTTConnection {
 
     // Remove from connections map immediately
     this.gateway.connections.delete(this.connectionId);
-    console.log(`🗑️ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`);
+    logger.info(`🗑️ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`);
 
     // CRITICAL FIX: Keep connection in deviceConnections map longer during cleanup
     // This prevents "No connection found" errors when messages arrive during cleanup
     setTimeout(() => {
       this.gateway.deviceConnections.delete(this.deviceId);
-      console.log(`🗑️ [CLEANUP] Removed ${this.deviceId} from deviceConnections map`);
+      logger.info(`🗑️ [CLEANUP] Removed ${this.deviceId} from deviceConnections map`);
     }, 2000); // Increased from 1s to 2s to handle slower cleanup scenarios
   }
 
@@ -4513,7 +4515,7 @@ class MQTTGateway {
           livekitConfig.api_key,
           livekitConfig.api_secret
         );
-        console.log(
+        logger.info(
           "✅ [INIT] RoomServiceClient initialized for session cleanup"
         );
 
@@ -4523,18 +4525,18 @@ class MQTTGateway {
           livekitConfig.api_key,
           livekitConfig.api_secret
         );
-        console.log(
+        logger.info(
           "✅ [INIT] AgentDispatchClient initialized for explicit agent dispatch"
         );
       } else {
-        console.warn(
+        logger.warn(
           "⚠️ [INIT] LiveKit config incomplete, room cleanup will be skipped"
         );
         this.roomService = null;
         this.agentDispatchClient = null;
       }
     } catch (error) {
-      console.error(
+      logger.error(
         "❌ [INIT] Failed to initialize LiveKit clients:",
         error.message
       );
@@ -4559,14 +4561,14 @@ class MQTTGateway {
     this.udpServer = dgram.createSocket("udp4");
     this.udpServer.on("message", this.onUdpMessage.bind(this));
     this.udpServer.on("error", (err) => {
-      console.error("UDP error", err);
+      logger.error("UDP error", err);
       setTimeout(() => {
         process.exit(1);
       }, 1000);
     });
 
     this.udpServer.bind(this.udpPort, () => {
-      console.warn(`UDP server listening on ${this.publicIp}:${this.udpPort}`);
+      logger.warn(`UDP server listening on ${this.publicIp}:${this.udpPort}`);
     });
 
     // Start global heartbeat check timer
@@ -4576,7 +4578,7 @@ class MQTTGateway {
   connectToEmqxBroker() {
     const brokerConfig = configManager.get("mqtt_broker");
     if (!brokerConfig) {
-      console.error("MQTT broker configuration not found in config");
+      logger.error("MQTT broker configuration not found in config");
       process.exit(1);
     }
 
@@ -4585,7 +4587,7 @@ class MQTTGateway {
       .substr(2, 9)}`;
     const brokerUrl = `${brokerConfig.protocol}://${brokerConfig.host}:${brokerConfig.port}`;
 
-    console.log(`Connecting to EMQX broker: ${brokerUrl}`);
+    logger.info(`Connecting to EMQX broker: ${brokerUrl}`);
 
     this.mqttClient = mqtt.connect(brokerUrl, {
       clientId: clientId,
@@ -4596,45 +4598,45 @@ class MQTTGateway {
     });
 
     this.mqttClient.on("connect", () => {
-      console.log(`✅ Connected to EMQX broker: ${brokerUrl}`);
+      logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
       // Subscribe to gateway control topics
       this.mqttClient.subscribe("devices/+/hello", (err) => {
         if (err) {
-          console.error("Failed to subscribe to device hello topic:", err);
+          logger.error("Failed to subscribe to device hello topic:", err);
         } else {
-          console.log("📡 Subscribed to devices/+/hello");
+          logger.info("📡 Subscribed to devices/+/hello");
         }
       });
       this.mqttClient.subscribe("devices/+/data", (err) => {
         if (err) {
-          console.error("Failed to subscribe to device data topic:", err);
+          logger.error("Failed to subscribe to device data topic:", err);
         } else {
-          console.log("📡 Subscribed to devices/+/data");
+          logger.info("📡 Subscribed to devices/+/data");
         }
       });
       // Subscribe to the internal topic where EMQX republishes with client info
       this.mqttClient.subscribe("internal/server-ingest", (err) => {
         if (err) {
-          console.error(
+          logger.error(
             "Failed to subscribe to internal/server-ingest topic:",
             err
           );
         } else {
-          console.log("📡 Subscribed to internal/server-ingest");
+          logger.info("📡 Subscribed to internal/server-ingest");
         }
       });
     });
 
     this.mqttClient.on("error", (err) => {
-      console.error("MQTT connection error:", err);
+      logger.error("MQTT connection error:", err);
     });
 
     this.mqttClient.on("offline", () => {
-      console.warn("MQTT client went offline");
+      logger.warn("MQTT client went offline");
     });
 
     this.mqttClient.on("reconnect", () => {
-      console.log("MQTT client reconnecting...");
+      logger.info("MQTT client reconnecting...");
     });
 
     this.mqttClient.on("message", (topic, message) => {
@@ -4644,8 +4646,8 @@ class MQTTGateway {
 
   async handleMqttMessage(topic, message) {
     // Add detailed logging for all incoming MQTT messages
-    console.log(`📨 [MQTT IN] Received message on topic: ${topic}`);
-    console.log(`📨 [MQTT IN] Message length: ${message.length} bytes`);
+    logger.info(`📨 [MQTT IN] Received message on topic: ${topic}`);
+    logger.info(`📨 [MQTT IN] Message length: ${message.length} bytes`);
 
     try {
       // Check if this is a control message first (before parsing)
@@ -4661,34 +4663,34 @@ class MQTTGateway {
       const payload = JSON.parse(message.toString());
       const topicParts = topic.split("/");
 
-      console.log(
+      logger.info(
         `📨 [MQTT IN] Parsed payload:`,
         JSON.stringify(payload, null, 2)
       );
-      console.log(`📨 [MQTT IN] Topic parts:`, topicParts);
+      logger.info(`📨 [MQTT IN] Topic parts:`, topicParts);
 
       if (topic === "internal/server-ingest") {
         // Handle messages republished by EMQX with client ID info
-        console.log(`📨 [MQTT IN] Message from internal/server-ingest topic`);
+        logger.info(`📨 [MQTT IN] Message from internal/server-ingest topic`);
 
         // Extract client ID and original payload from EMQX republish rule
         const clientId = payload.sender_client_id;
         const originalPayload = payload.orginal_payload;
 
-        console.log(
+        logger.info(
           `🔍 [DEBUG] Received message - Topic: ${topic}, ClientId: ${clientId}`
         );
-        console.log(`🔍 [DEBUG] Original payload:`, originalPayload);
+        logger.info(`🔍 [DEBUG] Original payload:`, originalPayload);
 
         if (!clientId || !originalPayload) {
-          console.error(
+          logger.error(
             `❌ [MQTT IN] Invalid republished message format - missing clientId or originalPayload`
           );
           return;
         }
 
-        console.log(`📨 [MQTT IN] Client ID: ${clientId}`);
-        console.log(
+        logger.info(`📨 [MQTT IN] Client ID: ${clientId}`);
+        logger.info(
           `📨 [MQTT IN] Original payload:`,
           JSON.stringify(originalPayload, null, 2)
         );
@@ -4700,7 +4702,7 @@ class MQTTGateway {
           deviceId = parts[1].replace(/_/g, ":"); // Convert MAC format
         }
 
-        console.log(
+        logger.info(
           `📨 [MQTT IN] Device message from internal/server-ingest - Device: ${deviceId}, Message type: ${originalPayload.type}`
         );
 
@@ -4716,7 +4718,7 @@ class MQTTGateway {
           originalPayload.type === "playback_control" &&
           originalPayload.action === "next"
         ) {
-          console.log(
+          logger.info(
             `⏭️ [PLAYBACK-CONTROL] Next action received from topic: ${topic}`
           );
           await this.handleNextControl(topic, clientId);
@@ -4725,7 +4727,7 @@ class MQTTGateway {
           originalPayload.type === "playback_control" &&
           originalPayload.action === "previous"
         ) {
-          console.log(
+          logger.info(
             `⏮️ [PLAYBACK-CONTROL] Previous action received from topic: ${topic}`
           );
           await this.handlePreviousControl(topic, clientId);
@@ -4734,7 +4736,7 @@ class MQTTGateway {
           originalPayload.type === "playback_control" &&
           originalPayload.action === "start_agent"
         ) {
-          console.log(
+          logger.info(
             `▶️ [PLAYBACK-CONTROL] Start agent action received from topic: ${topic}`
           );
           await this.handleStartAgentControl(deviceId, originalPayload, clientId);
@@ -4746,13 +4748,13 @@ class MQTTGateway {
           const functionName = originalPayload.function_call?.name;
 
           if (functionName === "play_music") {
-            console.log(
+            logger.info(
               `🎵 [SPECIFIC-MUSIC] Music request from ${deviceId}`
             );
             await this.handleSpecificMusicRequest(deviceId, originalPayload, clientId);
             return;
           } else if (functionName === "play_story") {
-            console.log(
+            logger.info(
               `📖 [SPECIFIC-STORY] Story request from ${deviceId}`
             );
             await this.handleSpecificStoryRequest(deviceId, originalPayload, clientId);
@@ -4766,7 +4768,7 @@ class MQTTGateway {
           originalPayload.payload &&
           (originalPayload.payload.result || originalPayload.payload.error)
         ) {
-          console.log(
+          logger.info(
             `🔋 [MCP-RESPONSE] Processing MCP response from device ${deviceId}`
           );
 
@@ -4781,7 +4783,7 @@ class MQTTGateway {
             if (bridge && bridge.pendingMcpRequests) {
               const pendingRequest = bridge.pendingMcpRequests.get(mcpRequestId);
               if (pendingRequest) {
-                console.log(
+                logger.info(
                   `✅ [MCP-RESPONSE] Resolving pending MCP request ID: ${mcpRequestId}`
                 );
 
@@ -4819,50 +4821,50 @@ class MQTTGateway {
               requestId
             );
           } else {
-            console.warn(
+            logger.warn(
               `⚠️ [MCP-RESPONSE] No connection found for device ${deviceId}, cannot forward response`
             );
           }
         }
 
         if (originalPayload.type === "hello") {
-          console.log(
+          logger.info(
             `👋 [HELLO] Processing hello message from internal/server-ingest: ${deviceId}`
           );
           this.handleDeviceHello(deviceId, enhancedPayload);
         } else if (originalPayload.type === "character-change") {
-          console.log(
+          logger.info(
             `🔘 [CHARACTER-CHANGE] Processing character change from internal/server-ingest: ${deviceId}`
           );
           this.handleDeviceCharacterChange(deviceId, enhancedPayload);
         } else if (originalPayload.type === "mode-change") {
-          console.log(
+          logger.info(
             `🔄 [MODE-CHANGE] Processing mode change from internal/server-ingest: ${deviceId}`
           );
           this.handleDeviceModeChange(deviceId, enhancedPayload);
         } else if (originalPayload.type === "abort") {
           // Special handling for abort messages - send to virtual device
-          console.log(
+          logger.info(
             `🛑 [ABORT] Processing abort message from internal/server-ingest: ${deviceId}`
           );
 
           // Send abort to virtual device connection
           const deviceInfo = this.deviceConnections.get(deviceId);
           if (deviceInfo && deviceInfo.connection) {
-            console.log(
+            logger.info(
               `🛑 [ABORT] Routing abort to virtual device: ${deviceId}`
             );
             deviceInfo.connection.handlePublish({
               payload: JSON.stringify(originalPayload),
             });
           } else {
-            console.log(
+            logger.info(
               `⚠️ [ABORT] No connection found for device: ${deviceId}, abort cannot be processed`
             );
           }
         } else if (originalPayload.type === "start_greeting") {
           // Special handling for start_greeting - CREATE ROOM and deploy agent, then trigger greeting
-          console.log(
+          logger.info(
             `👋 [START-GREETING] Processing start_greeting from internal/server-ingest: ${deviceId}`
           );
 
@@ -4875,7 +4877,7 @@ class MQTTGateway {
 
             // Room should already exist from parseHelloMessage, explicitly dispatch agent
             if (connection.bridge) {
-              console.log(
+              logger.info(
                 `👋 [START-GREETING] Room exists, explicitly dispatching agent...`
               );
 
@@ -4884,7 +4886,7 @@ class MQTTGateway {
               const roomName = bridge.room ? bridge.room.name : null;
 
               if (!roomName) {
-                console.error(
+                logger.error(
                   `❌ [START-GREETING] Cannot dispatch agent - room name not available`
                 );
                 return;
@@ -4892,12 +4894,12 @@ class MQTTGateway {
 
               // ADD: ONLY dispatch agent for conversation rooms
               if (connection.roomType !== "conversation") {
-                console.log(
+                logger.info(
                   `ℹ️ [AGENT-DISPATCH] Skipping agent dispatch for ${connection.roomType} room`
                 );
 
                 // For music/story rooms, send TTS start message to trigger UDP connection
-                console.log(
+                logger.info(
                   `🎵 [${connection.roomType.toUpperCase()}] Sending TTS start message to establish UDP connection`
                 );
 
@@ -4909,7 +4911,7 @@ class MQTTGateway {
                   })
                 );
 
-                console.log(
+                logger.info(
                   `✅ [${connection.roomType.toUpperCase()}] TTS start sent, device should now send UDP packet`
                 );
                 return; // Don't dispatch agent for music/story rooms
@@ -4917,7 +4919,7 @@ class MQTTGateway {
 
               // For conversation mode, skip sending greeting here
               // The start_agent handler already sends it with the correct is_mode_switch flag
-              console.log(
+              logger.info(
                 `ℹ️ [START-GREETING] Skipping duplicate greeting for conversation mode (handled by start_agent)`
               );
               return;
@@ -4926,7 +4928,7 @@ class MQTTGateway {
               const agentCheck = await this.checkAgentInRoom(roomName);
 
               if (agentCheck.exists) {
-                console.log(
+                logger.info(
                   `✅ [START-GREETING] Agent already in room (verified via LiveKit API): ${agentCheck.identity}`
                 );
                 // Sync local flags with actual state
@@ -4934,7 +4936,7 @@ class MQTTGateway {
                 bridge.agentDeployed = true;
               } else if (bridge.agentJoined) {
                 // Local flag says joined but API says not - trust API, reset flags
-                console.log(
+                logger.info(
                   `⚠️ [START-GREETING] Local flag says agent joined, but not found in room - resetting flags`
                 );
                 bridge.agentJoined = false;
@@ -4943,16 +4945,16 @@ class MQTTGateway {
 
               // Now check flags and dispatch if needed
               if (bridge.agentJoined) {
-                console.log(
+                logger.info(
                   `✅ [START-GREETING] Agent already joined, skipping dispatch`
                 );
               } else if (bridge.agentDeployed) {
-                console.log(
+                logger.info(
                   `⏳ [START-GREETING] Agent already being deployed, waiting for it to join...`
                 );
               } else {
                 // Explicitly dispatch agent using AgentDispatchClient
-                console.log(
+                logger.info(
                   `🤖 [AGENT-DISPATCH] Dispatching AI agent for conversation room...`
                 );
                 if (this.agentDispatchClient) {
@@ -4966,23 +4968,23 @@ class MQTTGateway {
                       }),
                     })
                     .then((dispatch) => {
-                      console.log(
+                      logger.info(
                         `✅ [START-GREETING] Agent dispatch created:`,
                         dispatch.id
                       );
-                      console.log(
+                      logger.info(
                         `📤 [START-GREETING] Agent 'cheeko-agent' dispatched to room: ${roomName}`
                       );
                     })
                     .catch((error) => {
-                      console.error(
+                      logger.error(
                         `❌ [START-GREETING] Failed to dispatch agent:`,
                         error.message
                       );
                       bridge.agentDeployed = false; // Reset on failure
                     });
                 } else {
-                  console.warn(
+                  logger.warn(
                     `⚠️ [START-GREETING] AgentDispatchClient not initialized, agent may not join`
                   );
                 }
@@ -4993,19 +4995,19 @@ class MQTTGateway {
                 .waitForAgentJoin(4000)
                 .then((agentReady) => {
                   const waitTime = Date.now() - startTime;
-                  console.log(
+                  logger.info(
                     `⏱️ [START-GREETING] Agent join wait took ${waitTime}ms`
                   );
 
                   if (agentReady) {
-                    console.log(
+                    logger.info(
                       `✅ [START-GREETING] Agent ready, sending initial greeting...`
                     );
                     // Mark agent as deployed
                     bridge.agentDeployed = true;
                     return bridge.sendInitialGreeting();
                   } else {
-                    console.warn(
+                    logger.warn(
                       `⚠️ [START-GREETING] Agent join timeout, trying to send greeting anyway...`
                     );
                     bridge.agentDeployed = true;
@@ -5013,12 +5015,12 @@ class MQTTGateway {
                   }
                 })
                 .then(() => {
-                  console.log(
+                  logger.info(
                     `✅ [START-GREETING] Successfully triggered initial greeting for device: ${deviceId}`
                   );
                 })
                 .catch((error) => {
-                  console.error(
+                  logger.error(
                     `❌ [START-GREETING] Error triggering greeting for ${deviceId}:`,
                     error
                   );
@@ -5026,20 +5028,20 @@ class MQTTGateway {
 
               greetingSent = true;
             } else {
-              console.error(
+              logger.error(
                 `❌ [START-GREETING] No bridge found for device ${deviceId} - room should have been created during hello!`
               );
-              console.log(
+              logger.info(
                 `⚠️ [START-GREETING] This shouldn't happen. Client may need to reconnect.`
               );
             }
           }
 
           if (!greetingSent) {
-            console.log(
+            logger.info(
               `⚠️ [START-GREETING] No bridge found for device: ${deviceId}, greeting cannot be triggered`
             );
-            console.log(
+            logger.info(
               `⚠️ [START-GREETING] DeviceInfo exists: ${!!deviceInfo}, Connection exists: ${!!(
                 deviceInfo && deviceInfo.connection
               )}, Bridge exists: ${!!(
@@ -5054,7 +5056,7 @@ class MQTTGateway {
           const deviceInfo = this.deviceConnections.get(deviceId);
 
           if (deviceInfo && deviceInfo.connection) {
-            console.log(
+            logger.info(
               `📊 [DATA] Routing to virtual device connection: ${deviceId}`
             );
 
@@ -5069,7 +5071,7 @@ class MQTTGateway {
 
             // Publish to app/p2p/{macAddress}
             const appTopic = `app/p2p/${deviceId}`;
-            console.log(
+            logger.info(
               `✅ [MOBILE-RESPONSE] Sending device connected status to ${appTopic}`
             );
 
@@ -5079,12 +5081,12 @@ class MQTTGateway {
                 JSON.stringify(successMessage),
                 (err) => {
                   if (err) {
-                    console.error(
+                    logger.error(
                       `❌ [MOBILE-RESPONSE] Failed to send success to mobile app:`,
                       err
                     );
                   } else {
-                    console.log(
+                    logger.info(
                       `✅ [MOBILE-RESPONSE] Device connected status sent to mobile app`
                     );
                   }
@@ -5094,7 +5096,7 @@ class MQTTGateway {
 
             this.handleDeviceData(deviceId, enhancedPayload);
           } else {
-            console.log(
+            logger.info(
               `⚠️ [DATA] No connection found for device: ${deviceId}, message type: ${originalPayload.type}`
             );
 
@@ -5109,7 +5111,7 @@ class MQTTGateway {
 
             // Publish to app/p2p/{macAddress}
             const appTopic = `app/p2p/${deviceId}`;
-            console.log(
+            logger.info(
               `❌ [MOBILE-RESPONSE] Sending device not connected status to ${appTopic}`
             );
 
@@ -5119,12 +5121,12 @@ class MQTTGateway {
                 JSON.stringify(errorMessage),
                 (err) => {
                   if (err) {
-                    console.error(
+                    logger.error(
                       `❌ [MOBILE-RESPONSE] Failed to send error to mobile app:`,
                       err
                     );
                   } else {
-                    console.log(
+                    logger.info(
                       `✅ [MOBILE-RESPONSE] Device not connected status sent to mobile app`
                     );
                   }
@@ -5137,7 +5139,7 @@ class MQTTGateway {
         const deviceId = topicParts[1];
         const messageType = topicParts[2];
 
-        console.log(
+        logger.info(
           `📨 [MQTT IN] Device message - Device: ${deviceId}, Type: ${messageType}`
         );
         debug(
@@ -5145,28 +5147,28 @@ class MQTTGateway {
         );
 
         if (messageType === "hello") {
-          console.log(
+          logger.info(
             `👋 [HELLO] Processing hello message from device: ${deviceId}`
           );
           this.handleDeviceHello(deviceId, payload);
         } else if (messageType === "data") {
-          console.log(
+          logger.info(
             `📊 [DATA] Processing data message from device: ${deviceId}`
           );
           this.handleDeviceData(deviceId, payload);
         } else {
-          console.log(
+          logger.info(
             `❓ [UNKNOWN] Unknown message type '${messageType}' from device: ${deviceId}`
           );
         }
       } else {
-        console.log(
+        logger.info(
           `❓ [MQTT IN] Message on unexpected topic format: ${topic}`
         );
       }
     } catch (error) {
-      console.error("❌ [MQTT IN] Error processing MQTT message:", error);
-      console.log(`📨 [MQTT IN] Raw message:`, message.toString());
+      logger.error("❌ [MQTT IN] Error processing MQTT message:", error);
+      logger.info(`📨 [MQTT IN] Raw message:`, message.toString());
     }
   }
 
@@ -5179,33 +5181,33 @@ class MQTTGateway {
   async checkAgentInRoom(roomName) {
     try {
       if (!this.roomService) {
-        console.warn(`⚠️ [AGENT-CHECK] RoomService not available, cannot check participants`);
+        logger.warn(`⚠️ [AGENT-CHECK] RoomService not available, cannot check participants`);
         return { exists: false, identity: null };
       }
 
-      console.log(`🔍 [AGENT-CHECK] Checking for existing agent in room: ${roomName}`);
+      logger.info(`🔍 [AGENT-CHECK] Checking for existing agent in room: ${roomName}`);
 
       const participants = await this.roomService.listParticipants(roomName);
 
-      console.log(`👥 [AGENT-CHECK] Found ${participants.length} participants in room`);
+      logger.info(`👥 [AGENT-CHECK] Found ${participants.length} participants in room`);
 
       for (const participant of participants) {
-        console.log(`   - Participant: ${participant.identity} (state: ${participant.state})`);
+        logger.info(`   - Participant: ${participant.identity} (state: ${participant.state})`);
 
         // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-agent')
         if (participant.identity &&
           (participant.identity.toLowerCase().includes('agent') ||
             participant.identity === 'cheeko-agent')) {
-          console.log(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
+          logger.info(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
           return { exists: true, identity: participant.identity };
         }
       }
 
-      console.log(`ℹ️ [AGENT-CHECK] No agent found in room`);
+      logger.info(`ℹ️ [AGENT-CHECK] No agent found in room`);
       return { exists: false, identity: null };
 
     } catch (error) {
-      console.error(`❌ [AGENT-CHECK] Error checking room participants:`, error.message);
+      logger.error(`❌ [AGENT-CHECK] Error checking room participants:`, error.message);
       // On error, return false to allow dispatch attempt (fail-safe)
       return { exists: false, identity: null };
     }
@@ -5218,17 +5220,17 @@ class MQTTGateway {
 
     this.mqttClient.subscribe(nextTopic, (err) => {
       if (!err) {
-        console.log(`✅ [CONTROL] Subscribed to: ${nextTopic}`);
+        logger.info(`✅ [CONTROL] Subscribed to: ${nextTopic}`);
       } else {
-        console.error(`❌ [CONTROL] Failed to subscribe to ${nextTopic}:`, err);
+        logger.error(`❌ [CONTROL] Failed to subscribe to ${nextTopic}:`, err);
       }
     });
 
     this.mqttClient.subscribe(previousTopic, (err) => {
       if (!err) {
-        console.log(`✅ [CONTROL] Subscribed to: ${previousTopic}`);
+        logger.info(`✅ [CONTROL] Subscribed to: ${previousTopic}`);
       } else {
-        console.error(
+        logger.error(
           `❌ [CONTROL] Failed to subscribe to ${previousTopic}:`,
           err
         );
@@ -5251,8 +5253,8 @@ class MQTTGateway {
       macAddress = topicParts[1];
     }
 
-    console.log(`⏭️ [CONTROL] Next requested for device: ${macAddress}`);
-    console.log(
+    logger.info(`⏭️ [CONTROL] Next requested for device: ${macAddress}`);
+    logger.info(
       `🔍 [CONTROL] Available devices:`,
       Array.from(this.deviceConnections.keys())
     );
@@ -5260,15 +5262,15 @@ class MQTTGateway {
     // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
     if (!deviceInfo) {
-      console.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
-      console.warn(
+      logger.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
+      logger.warn(
         `⚠️ [CONTROL] Available devices:`,
         Array.from(this.deviceConnections.keys())
       );
       return;
     }
 
-    console.log(`🔍 [CONTROL] Device info:`, {
+    logger.info(`🔍 [CONTROL] Device info:`, {
       currentRoomName: deviceInfo.currentRoomName,
       currentMode: deviceInfo.currentMode,
       hasConnection: !!deviceInfo.connection,
@@ -5278,7 +5280,7 @@ class MQTTGateway {
     const mode = deviceInfo.currentMode;
 
     if (!roomName || !mode) {
-      console.warn(
+      logger.warn(
         `⚠️ [CONTROL] No active room or mode for device: ${macAddress}`
       );
       return;
@@ -5292,10 +5294,10 @@ class MQTTGateway {
       } else if (mode === "story") {
         apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/next`;
       } else {
-        console.warn(
+        logger.warn(
           `⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}. Device is in '${mode}' mode, but controls only work for 'music' or 'story' modes.`
         );
-        console.warn(
+        logger.warn(
           `💡 [CONTROL] To use playback controls, the device needs to be in music or story mode, not conversation mode.`
         );
         return;
@@ -5315,9 +5317,9 @@ class MQTTGateway {
           JSON.stringify(ttsStopMsg),
           (err) => {
             if (err) {
-              console.error(`❌ [CONTROL] Failed to send TTS stop:`, err);
+              logger.error(`❌ [CONTROL] Failed to send TTS stop:`, err);
             } else {
-              console.log(
+              logger.info(
                 `🛑 [CONTROL] TTS stop sent to ${macAddress} before skip`
               );
             }
@@ -5325,16 +5327,16 @@ class MQTTGateway {
         );
       }
 
-      console.log(`⏭️ [CONTROL] Sending next skip request to: ${apiUrl}`);
+      logger.info(`⏭️ [CONTROL] Sending next skip request to: ${apiUrl}`);
       const response = await axios.post(apiUrl, {}, mediaAxiosConfig({ timeout: 5000 }));
 
-      console.log(`✅ [CONTROL] Next skip successful:`, response.data);
-      console.log(`✅ [CONTROL] Response status:`, response.status);
+      logger.info(`✅ [CONTROL] Next skip successful:`, response.data);
+      logger.info(`✅ [CONTROL] Response status:`, response.status);
 
       // Log current status for debugging
       if (response.data && response.data.current_status) {
         const status = response.data.current_status;
-        console.log(`🎵 [CONTROL] Current playback status after next skip:`, {
+        logger.info(`🎵 [CONTROL] Current playback status after next skip:`, {
           mode: status.mode,
           current_index: status.current_index,
           playlist_length: status.playlist_length,
@@ -5360,36 +5362,36 @@ class MQTTGateway {
           JSON.stringify(ttsStartMsg),
           (err) => {
             if (err) {
-              console.error(
+              logger.error(
                 `❌ [CONTROL] Failed to send skip TTS notification:`,
                 err
               );
             } else {
-              console.log(
+              logger.info(
                 `🎵 [CONTROL] Skip TTS notification sent to ${macAddress}`
               );
             }
           }
         );
       } else {
-        console.warn(
+        logger.warn(
           `⚠️ [CONTROL] No clientId available, cannot send TTS notification`
         );
       }
     } catch (error) {
-      console.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
+      logger.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
 
       // Log additional error details for debugging
       if (error.response) {
-        console.error(`❌ [CONTROL] API Response Error:`, {
+        logger.error(`❌ [CONTROL] API Response Error:`, {
           status: error.response.status,
           data: error.response.data,
           url: apiUrl || 'URL not set'
         });
       } else if (error.request) {
-        console.error(`❌ [CONTROL] Network Error - No response received from:`, apiUrl || 'URL not set');
+        logger.error(`❌ [CONTROL] Network Error - No response received from:`, apiUrl || 'URL not set');
       } else {
-        console.error(`❌ [CONTROL] Request Setup Error:`, error.message);
+        logger.error(`❌ [CONTROL] Request Setup Error:`, error.message);
       }
 
       // Send error notification to device if possible
@@ -5404,7 +5406,7 @@ class MQTTGateway {
 
         this.mqttClient.publish(errorTopic, JSON.stringify(errorMsg), (err) => {
           if (!err) {
-            console.log(`📤 [CONTROL] Error notification sent to ${macAddress}`);
+            logger.info(`📤 [CONTROL] Error notification sent to ${macAddress}`);
           }
         });
       }
@@ -5426,8 +5428,8 @@ class MQTTGateway {
       macAddress = topicParts[1];
     }
 
-    console.log(`⏮️ [CONTROL] Previous requested for device: ${macAddress}`);
-    console.log(
+    logger.info(`⏮️ [CONTROL] Previous requested for device: ${macAddress}`);
+    logger.info(
       `🔍 [CONTROL] Available devices:`,
       Array.from(this.deviceConnections.keys())
     );
@@ -5435,15 +5437,15 @@ class MQTTGateway {
     // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
     if (!deviceInfo) {
-      console.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
-      console.warn(
+      logger.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
+      logger.warn(
         `⚠️ [CONTROL] Available devices:`,
         Array.from(this.deviceConnections.keys())
       );
       return;
     }
 
-    console.log(`🔍 [CONTROL] Device info:`, {
+    logger.info(`🔍 [CONTROL] Device info:`, {
       currentRoomName: deviceInfo.currentRoomName,
       currentMode: deviceInfo.currentMode,
       hasConnection: !!deviceInfo.connection,
@@ -5453,7 +5455,7 @@ class MQTTGateway {
     const mode = deviceInfo.currentMode;
 
     if (!roomName || !mode) {
-      console.warn(
+      logger.warn(
         `⚠️ [CONTROL] No active room or mode for device: ${macAddress}`
       );
       return;
@@ -5467,10 +5469,10 @@ class MQTTGateway {
       } else if (mode === "story") {
         apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/previous`;
       } else {
-        console.warn(
+        logger.warn(
           `⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}. Device is in '${mode}' mode, but controls only work for 'music' or 'story' modes.`
         );
-        console.warn(
+        logger.warn(
           `💡 [CONTROL] To use playback controls, the device needs to be in music or story mode, not conversation mode.`
         );
         return;
@@ -5490,9 +5492,9 @@ class MQTTGateway {
           JSON.stringify(ttsStopMsg),
           (err) => {
             if (err) {
-              console.error(`❌ [CONTROL] Failed to send TTS stop:`, err);
+              logger.error(`❌ [CONTROL] Failed to send TTS stop:`, err);
             } else {
-              console.log(
+              logger.info(
                 `🛑 [CONTROL] TTS stop sent to ${macAddress} before previous`
               );
             }
@@ -5500,16 +5502,16 @@ class MQTTGateway {
         );
       }
 
-      console.log(`⏮️ [CONTROL] Sending previous skip request to: ${apiUrl}`);
+      logger.info(`⏮️ [CONTROL] Sending previous skip request to: ${apiUrl}`);
       const response = await axios.post(apiUrl, {}, mediaAxiosConfig());
 
-      console.log(`✅ [CONTROL] Previous skip successful:`, response.data);
-      console.log(`✅ [CONTROL] Response status:`, response.status);
+      logger.info(`✅ [CONTROL] Previous skip successful:`, response.data);
+      logger.info(`✅ [CONTROL] Response status:`, response.status);
 
       // Log current status for debugging
       if (response.data && response.data.current_status) {
         const status = response.data.current_status;
-        console.log(`🎵 [CONTROL] Current playback status after previous skip:`, {
+        logger.info(`🎵 [CONTROL] Current playback status after previous skip:`, {
           mode: status.mode,
           current_index: status.current_index,
           playlist_length: status.playlist_length,
@@ -5535,36 +5537,36 @@ class MQTTGateway {
           JSON.stringify(ttsStartMsg),
           (err) => {
             if (err) {
-              console.error(
+              logger.error(
                 `❌ [CONTROL] Failed to send previous TTS notification:`,
                 err
               );
             } else {
-              console.log(
+              logger.info(
                 `🎵 [CONTROL] Previous TTS notification sent to ${macAddress}`
               );
             }
           }
         );
       } else {
-        console.warn(
+        logger.warn(
           `⚠️ [CONTROL] No clientId available, cannot send TTS notification`
         );
       }
     } catch (error) {
-      console.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);
+      logger.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);
 
       // Log additional error details for debugging
       if (error.response) {
-        console.error(`❌ [CONTROL] API Response Error:`, {
+        logger.error(`❌ [CONTROL] API Response Error:`, {
           status: error.response.status,
           data: error.response.data,
           url: apiUrl || 'URL not set'
         });
       } else if (error.request) {
-        console.error(`❌ [CONTROL] Network Error - No response received from:`, apiUrl || 'URL not set');
+        logger.error(`❌ [CONTROL] Network Error - No response received from:`, apiUrl || 'URL not set');
       } else {
-        console.error(`❌ [CONTROL] Request Setup Error:`, error.message);
+        logger.error(`❌ [CONTROL] Request Setup Error:`, error.message);
       }
 
       // Send error notification to device if possible
@@ -5579,7 +5581,7 @@ class MQTTGateway {
 
         this.mqttClient.publish(errorTopic, JSON.stringify(errorMsg), (err) => {
           if (!err) {
-            console.log(`📤 [CONTROL] Error notification sent to ${macAddress}`);
+            logger.info(`📤 [CONTROL] Error notification sent to ${macAddress}`);
           }
         });
       }
@@ -5591,26 +5593,26 @@ class MQTTGateway {
       // Extract session_id which contains room info: uuid_mac_mode
       const sessionId = payload.session_id;
       if (!sessionId) {
-        console.warn(`⚠️ [START-AGENT] No session_id in payload`);
+        logger.warn(`⚠️ [START-AGENT] No session_id in payload`);
         return;
       }
 
       // Parse session_id to get room type (format: uuid_mac_mode)
       const parts = sessionId.split('_');
       if (parts.length < 3) {
-        console.warn(`⚠️ [START-AGENT] Invalid session_id format: ${sessionId}`);
+        logger.warn(`⚠️ [START-AGENT] Invalid session_id format: ${sessionId}`);
         return;
       }
 
       const roomType = parts[parts.length - 1]; // Last part is the mode (music/story/conversation)
       const roomName = sessionId; // The full session_id is the room name
 
-      console.log(`▶️ [START-AGENT] Processing start_agent for mode: ${roomType}, room: ${roomName}`);
+      logger.info(`▶️ [START-AGENT] Processing start_agent for mode: ${roomType}, room: ${roomName}`);
 
       // Find device info
       const deviceInfo = this.deviceConnections.get(deviceId);
       if (!deviceInfo) {
-        console.warn(`⚠️ [START-AGENT] Device not found: ${deviceId}`);
+        logger.warn(`⚠️ [START-AGENT] Device not found: ${deviceId}`);
         return;
       }
 
@@ -5619,7 +5621,7 @@ class MQTTGateway {
       const previousMode = deviceInfo.previousMode || deviceInfo.currentMode || null;
       const isModeSwitch = previousMode !== null && previousMode !== roomType;
 
-      console.log(`🔍 [START-AGENT] Previous mode: ${previousMode}, Current mode: ${roomType}, Is mode switch: ${isModeSwitch}`);
+      logger.info(`🔍 [START-AGENT] Previous mode: ${previousMode}, Current mode: ${roomType}, Is mode switch: ${isModeSwitch}`);
 
       // Clear previousMode after detection to avoid false positives
       if (deviceInfo.previousMode) {
@@ -5630,7 +5632,7 @@ class MQTTGateway {
       if (roomType === "music") {
         // Call Media API to start music playback
         const apiUrl = `${MEDIA_API_BASE}/music-bot/${roomName}/start`;
-        console.log(`🎵 [START-AGENT] Starting music bot playback: ${apiUrl}`);
+        logger.info(`🎵 [START-AGENT] Starting music bot playback: ${apiUrl}`);
 
         try {
           const response = await axios.post(
@@ -5638,12 +5640,12 @@ class MQTTGateway {
             { is_mode_switch: isModeSwitch },  // Pass mode switch flag
             mediaAxiosConfig({ timeout: 5000 })
           );
-          console.log(`✅ [START-AGENT] Music bot started:`, response.data);
+          logger.info(`✅ [START-AGENT] Music bot started:`, response.data);
 
           // Only send TTS start when bot actually starts playing (mode switch)
           // On fresh boot, bot returns "ready" and waits for next/previous button press
           if (response.data && response.data.status === "started") {
-            console.log(`📤 [START-AGENT] Bot started playing, sending TTS start to firmware...`);
+            logger.info(`📤 [START-AGENT] Bot started playing, sending TTS start to firmware...`);
             const connection = deviceInfo.connection;
             if (connection) {
               connection.sendMqttMessage(
@@ -5653,24 +5655,24 @@ class MQTTGateway {
                   session_id: roomName,
                 })
               );
-              console.log(`✅ [START-AGENT] TTS start sent to firmware`);
+              logger.info(`✅ [START-AGENT] TTS start sent to firmware`);
             } else {
-              console.error(`❌ [START-AGENT] No connection found to send TTS start`);
+              logger.error(`❌ [START-AGENT] No connection found to send TTS start`);
             }
           } else {
-            console.log(`ℹ️ [START-AGENT] Bot is ready but not playing yet (fresh boot - waiting for user interaction)`);
+            logger.info(`ℹ️ [START-AGENT] Bot is ready but not playing yet (fresh boot - waiting for user interaction)`);
           }
         } catch (error) {
-          console.error(`❌ [START-AGENT] Failed to start music bot:`, error.message);
+          logger.error(`❌ [START-AGENT] Failed to start music bot:`, error.message);
           if (error.response) {
-            console.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
+            logger.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
           }
         }
 
       } else if (roomType === "story") {
         // Call Media API to start story playback
         const apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/start`;
-        console.log(`📖 [START-AGENT] Starting story bot playback: ${apiUrl}`);
+        logger.info(`📖 [START-AGENT] Starting story bot playback: ${apiUrl}`);
 
         try {
           const response = await axios.post(
@@ -5678,12 +5680,12 @@ class MQTTGateway {
             { is_mode_switch: isModeSwitch },  // Pass mode switch flag
             mediaAxiosConfig({ timeout: 5000 })
           );
-          console.log(`✅ [START-AGENT] Story bot started:`, response.data);
+          logger.info(`✅ [START-AGENT] Story bot started:`, response.data);
 
           // Only send TTS start when bot actually starts playing (mode switch)
           // On fresh boot, bot returns "ready" and waits for next/previous button press
           if (response.data && response.data.status === "started") {
-            console.log(`📤 [START-AGENT] Bot started playing, sending TTS start to firmware...`);
+            logger.info(`📤 [START-AGENT] Bot started playing, sending TTS start to firmware...`);
             const connection = deviceInfo.connection;
             if (connection) {
               connection.sendMqttMessage(
@@ -5693,29 +5695,29 @@ class MQTTGateway {
                   session_id: roomName,
                 })
               );
-              console.log(`✅ [START-AGENT] TTS start sent to firmware`);
+              logger.info(`✅ [START-AGENT] TTS start sent to firmware`);
             } else {
-              console.error(`❌ [START-AGENT] No connection found to send TTS start`);
+              logger.error(`❌ [START-AGENT] No connection found to send TTS start`);
             }
           } else {
-            console.log(`ℹ️ [START-AGENT] Bot is ready but not playing yet (fresh boot - waiting for user interaction)`);
+            logger.info(`ℹ️ [START-AGENT] Bot is ready but not playing yet (fresh boot - waiting for user interaction)`);
           }
         } catch (error) {
-          console.error(`❌ [START-AGENT] Failed to start story bot:`, error.message);
+          logger.error(`❌ [START-AGENT] Failed to start story bot:`, error.message);
           if (error.response) {
-            console.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
+            logger.error(`❌ [START-AGENT] API Response:`, error.response.status, error.response.data);
           }
         }
 
       } else if (roomType === "conversation") {
         // Handle conversation mode - dispatch agent if needed, then trigger greeting
-        console.log(`💬 [START-AGENT] Triggering agent greeting for conversation mode`);
+        logger.info(`💬 [START-AGENT] Triggering agent greeting for conversation mode`);
 
         const connection = deviceInfo.connection;
         if (connection && connection.bridge && connection.bridge.room && connection.bridge.room.localParticipant) {
 
           // Step 1: Check if agent is already in the room
-          console.log(`🔍 [START-AGENT] Checking if agent is already in room...`);
+          logger.info(`🔍 [START-AGENT] Checking if agent is already in room...`);
           const agentCheck = await this.checkAgentInRoom(roomName);
 
           if (!agentCheck.exists) {
@@ -5723,10 +5725,10 @@ class MQTTGateway {
             if (isModeSwitch) {
               // Mode switch: agent was already dispatched by handleDeviceModeChange()
               // Just wait for it to join, don't dispatch again
-              console.log(`⏳ [START-AGENT] Mode switch - agent already dispatched, waiting for it to join...`);
+              logger.info(`⏳ [START-AGENT] Mode switch - agent already dispatched, waiting for it to join...`);
             } else {
               // Fresh boot: need to dispatch agent now
-              console.log(`🚀 [START-AGENT] Fresh boot - dispatching agent now...`);
+              logger.info(`🚀 [START-AGENT] Fresh boot - dispatching agent now...`);
 
               if (this.agentDispatchClient) {
                 try {
@@ -5741,13 +5743,13 @@ class MQTTGateway {
                       }),
                     }
                   );
-                  console.log(`✅ [START-AGENT] Agent dispatched successfully: ${dispatch.id}`);
+                  logger.info(`✅ [START-AGENT] Agent dispatched successfully: ${dispatch.id}`);
 
                   // Mark bridge as having agent deployed
                   connection.bridge.agentDeployed = true;
 
                 } catch (dispatchError) {
-                  console.error(`❌ [START-AGENT] Failed to dispatch agent:`, dispatchError.message);
+                  logger.error(`❌ [START-AGENT] Failed to dispatch agent:`, dispatchError.message);
                   // Send error to device
                   connection.sendMqttMessage(JSON.stringify({
                     type: "error",
@@ -5758,18 +5760,18 @@ class MQTTGateway {
                   return;
                 }
               } else {
-                console.error(`❌ [START-AGENT] AgentDispatchClient not initialized`);
+                logger.error(`❌ [START-AGENT] AgentDispatchClient not initialized`);
                 return;
               }
             }
           } else {
-            console.log(`✅ [START-AGENT] Agent already in room: ${agentCheck.identity}`);
+            logger.info(`✅ [START-AGENT] Agent already in room: ${agentCheck.identity}`);
             connection.bridge.agentJoined = true;
             connection.bridge.agentDeployed = true;
           }
 
           // Step 3: Wait for agent to join the room (if just dispatched, wait for it to connect)
-          console.log(`⏳ [START-AGENT] Waiting for agent to be ready...`);
+          logger.info(`⏳ [START-AGENT] Waiting for agent to be ready...`);
 
           // Wait for agent join with timeout
           const maxWaitTime = 10000; // 10 seconds max
@@ -5778,14 +5780,14 @@ class MQTTGateway {
           while (Date.now() - startTime < maxWaitTime) {
             const check = await this.checkAgentInRoom(roomName);
             if (check.exists) {
-              console.log(`✅ [START-AGENT] Agent is ready in room`);
+              logger.info(`✅ [START-AGENT] Agent is ready in room`);
               break;
             }
             await new Promise(resolve => setTimeout(resolve, 500)); // Check every 500ms
           }
 
           // Step 4: Send greeting trigger to agent
-          console.log(`✅ [START-AGENT] Sending greeting message to agent`);
+          logger.info(`✅ [START-AGENT] Sending greeting message to agent`);
 
           const greetingMessage = {
             type: "start_greeting",
@@ -5800,17 +5802,17 @@ class MQTTGateway {
             reliable: true
           });
 
-          console.log(`✅ [START-AGENT] Greeting trigger sent to LiveKit agent (is_mode_switch: ${isModeSwitch})`);
+          logger.info(`✅ [START-AGENT] Greeting trigger sent to LiveKit agent (is_mode_switch: ${isModeSwitch})`);
         } else {
-          console.error(`❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`);
+          logger.error(`❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`);
         }
 
       } else {
-        console.warn(`⚠️ [START-AGENT] Unknown room type: ${roomType}`);
+        logger.warn(`⚠️ [START-AGENT] Unknown room type: ${roomType}`);
       }
 
     } catch (error) {
-      console.error(`❌ [START-AGENT] Error:`, error.message);
+      logger.error(`❌ [START-AGENT] Error:`, error.message);
     }
   }
 
@@ -5821,20 +5823,20 @@ class MQTTGateway {
       const language = payload.function_call.arguments.language;
       const loopEnabled = payload.function_call.arguments.loop_enabled || false;
 
-      console.log(`🎵 [SPECIFIC-MUSIC] Request for device: ${macAddress}`);
-      console.log(`🎵 [SPECIFIC-MUSIC] Song: "${songName}", Language: ${language || 'Any'}`);
+      logger.info(`🎵 [SPECIFIC-MUSIC] Request for device: ${macAddress}`);
+      logger.info(`🎵 [SPECIFIC-MUSIC] Song: "${songName}", Language: ${language || 'Any'}`);
 
       // Find device connection using MAC address
       const deviceInfo = this.deviceConnections.get(macAddress);
       if (!deviceInfo || !deviceInfo.connection) {
-        console.warn(`⚠️ [SPECIFIC-MUSIC] Device not connected: ${macAddress}`);
+        logger.warn(`⚠️ [SPECIFIC-MUSIC] Device not connected: ${macAddress}`);
         await this.sendErrorResponse(clientId, "Device not connected", macAddress);
         return;
       }
 
       // Validate device is in music mode or conversation mode (conversation mode allows all content types)
       if (deviceInfo.currentMode !== "music" && deviceInfo.currentMode !== "conversation") {
-        console.warn(`⚠️ [SPECIFIC-MUSIC] Device ${macAddress} not in music/conversation mode (current: ${deviceInfo.currentMode})`);
+        logger.warn(`⚠️ [SPECIFIC-MUSIC] Device ${macAddress} not in music/conversation mode (current: ${deviceInfo.currentMode})`);
         await this.sendErrorResponse(clientId, `Device is in ${deviceInfo.currentMode} mode, cannot play music`, macAddress);
         return;
       }
@@ -5857,18 +5859,18 @@ class MQTTGateway {
           reliable: true
         });
 
-        console.log(`✅ [SPECIFIC-MUSIC] Request forwarded to LiveKit room for ${macAddress}`);
+        logger.info(`✅ [SPECIFIC-MUSIC] Request forwarded to LiveKit room for ${macAddress}`);
 
         // Send acknowledgment to mobile app
         await this.sendSuccessResponse(clientId, `Playing "${songName}"`, macAddress);
 
       } else {
-        console.error(`❌ [SPECIFIC-MUSIC] No active LiveKit room for device: ${macAddress}`);
+        logger.error(`❌ [SPECIFIC-MUSIC] No active LiveKit room for device: ${macAddress}`);
         await this.sendErrorResponse(clientId, "No active audio session", macAddress);
       }
 
     } catch (error) {
-      console.error(`❌ [SPECIFIC-MUSIC] Error processing request: ${error.message}`);
+      logger.error(`❌ [SPECIFIC-MUSIC] Error processing request: ${error.message}`);
       await this.sendErrorResponse(clientId, "Failed to process music request", payload.session_id);
     }
   }
@@ -5880,20 +5882,20 @@ class MQTTGateway {
       const category = payload.function_call.arguments.category;
       const loopEnabled = payload.function_call.arguments.loop_enabled || false;
 
-      console.log(`📖 [SPECIFIC-STORY] Request for device: ${macAddress}`);
-      console.log(`📖 [SPECIFIC-STORY] Story: "${storyName}", Category: ${category || 'Any'}`);
+      logger.info(`📖 [SPECIFIC-STORY] Request for device: ${macAddress}`);
+      logger.info(`📖 [SPECIFIC-STORY] Story: "${storyName}", Category: ${category || 'Any'}`);
 
       // Find device connection using MAC address
       const deviceInfo = this.deviceConnections.get(macAddress);
       if (!deviceInfo || !deviceInfo.connection) {
-        console.warn(`⚠️ [SPECIFIC-STORY] Device not connected: ${macAddress}`);
+        logger.warn(`⚠️ [SPECIFIC-STORY] Device not connected: ${macAddress}`);
         await this.sendErrorResponse(clientId, "Device not connected", macAddress);
         return;
       }
 
       // Validate device is in story mode or conversation mode (conversation mode allows all content types)
       if (deviceInfo.currentMode !== "story" && deviceInfo.currentMode !== "conversation") {
-        console.warn(`⚠️ [SPECIFIC-STORY] Device ${macAddress} not in story/conversation mode (current: ${deviceInfo.currentMode})`);
+        logger.warn(`⚠️ [SPECIFIC-STORY] Device ${macAddress} not in story/conversation mode (current: ${deviceInfo.currentMode})`);
         await this.sendErrorResponse(clientId, `Device is in ${deviceInfo.currentMode} mode, cannot play story`, macAddress);
         return;
       }
@@ -5916,18 +5918,18 @@ class MQTTGateway {
           reliable: true
         });
 
-        console.log(`✅ [SPECIFIC-STORY] Request forwarded to LiveKit room for ${macAddress}`);
+        logger.info(`✅ [SPECIFIC-STORY] Request forwarded to LiveKit room for ${macAddress}`);
 
         // Send acknowledgment to mobile app
         await this.sendSuccessResponse(clientId, `Playing "${storyName}"`, macAddress);
 
       } else {
-        console.error(`❌ [SPECIFIC-STORY] No active LiveKit room for device: ${macAddress}`);
+        logger.error(`❌ [SPECIFIC-STORY] No active LiveKit room for device: ${macAddress}`);
         await this.sendErrorResponse(clientId, "No active audio session", macAddress);
       }
 
     } catch (error) {
-      console.error(`❌ [SPECIFIC-STORY] Error processing request: ${error.message}`);
+      logger.error(`❌ [SPECIFIC-STORY] Error processing request: ${error.message}`);
       await this.sendErrorResponse(clientId, "Failed to process story request", payload.session_id);
     }
   }
@@ -5942,11 +5944,11 @@ class MQTTGateway {
         topic: "specific_content"
       });
 
-      console.log(`📡 [DATA-CHANNEL] Forwarded specific content request to LiveKit room`);
-      console.log(`📡 [DATA-CHANNEL] Content: ${requestData.content_name} (${requestData.content_type})`);
+      logger.info(`📡 [DATA-CHANNEL] Forwarded specific content request to LiveKit room`);
+      logger.info(`📡 [DATA-CHANNEL] Content: ${requestData.content_name} (${requestData.content_type})`);
 
     } catch (error) {
-      console.error(`❌ [DATA-CHANNEL] Failed to forward request: ${error.message}`);
+      logger.error(`❌ [DATA-CHANNEL] Failed to forward request: ${error.message}`);
       throw error;
     }
   }
@@ -5965,9 +5967,9 @@ class MQTTGateway {
     const responseTopic = `devices/p2p/${clientId}`;
     this.mqttClient.publish(responseTopic, JSON.stringify(successMessage), (err) => {
       if (err) {
-        console.error(`❌ [RESPONSE] Failed to send success response:`, err);
+        logger.error(`❌ [RESPONSE] Failed to send success response:`, err);
       } else {
-        console.log(`✅ [RESPONSE] Success sent to ${macAddress}: ${message}`);
+        logger.info(`✅ [RESPONSE] Success sent to ${macAddress}: ${message}`);
       }
     });
   }
@@ -5986,15 +5988,15 @@ class MQTTGateway {
     const responseTopic = `devices/p2p/${clientId}`;
     this.mqttClient.publish(responseTopic, JSON.stringify(errorResponse), (err) => {
       if (err) {
-        console.error(`❌ [RESPONSE] Failed to send error response:`, err);
+        logger.error(`❌ [RESPONSE] Failed to send error response:`, err);
       } else {
-        console.log(`❌ [RESPONSE] Error sent to ${macAddress}: ${errorMessage}`);
+        logger.info(`❌ [RESPONSE] Error sent to ${macAddress}: ${errorMessage}`);
       }
     });
   }
 
   handleDeviceHello(deviceId, payload) {
-    console.log(`📱 [HELLO] handleDeviceHello called for device: ${deviceId}`);
+    logger.info(`📱 [HELLO] handleDeviceHello called for device: ${deviceId}`);
 
     // Close and remove old connection if exists (prevents timer conflicts)
     const existingDeviceInfo = this.deviceConnections.get(deviceId);
@@ -6002,25 +6004,25 @@ class MQTTGateway {
       const oldConnection = existingDeviceInfo.connection;
       const oldConnectionId = existingDeviceInfo.connectionId;
 
-      console.log(
+      logger.info(
         `📱 [HELLO] Closing old connection for ${deviceId} (connectionId: ${oldConnectionId})`
       );
 
       // Remove from connections map first
       this.connections.delete(oldConnectionId);
-      console.log(`🗑️ [HELLO] Removed old connectionId ${oldConnectionId} from connections map`);
+      logger.info(`🗑️ [HELLO] Removed old connectionId ${oldConnectionId} from connections map`);
 
       // Close the old connection (this will clean up timers and bridge)
       if (oldConnection && !oldConnection.closing) {
         oldConnection.closing = true; // Prevent duplicate close
         oldConnection.close();
-        console.log(`🗑️ [HELLO] Closed old connection for device: ${deviceId}`);
+        logger.info(`🗑️ [HELLO] Closed old connection for device: ${deviceId}`);
       }
     }
 
     // Create a virtual connection for this device
     const connectionId = this.generateNewConnectionId();
-    console.log(`📱 [HELLO] Generated connection ID: ${connectionId}`);
+    logger.info(`📱 [HELLO] Generated connection ID: ${connectionId}`);
 
     const virtualConnection = new VirtualMQTTConnection(
       deviceId,
@@ -6028,7 +6030,7 @@ class MQTTGateway {
       this,
       payload
     );
-    console.log(
+    logger.info(
       `📱 [HELLO] Created VirtualMQTTConnection for device: ${deviceId}`
     );
 
@@ -6041,19 +6043,19 @@ class MQTTGateway {
     // Subscribe to control topics for this device
     this.setupControlTopics(deviceId);
 
-    console.log(`📱 [HELLO] Device ${deviceId} connected via EMQX`);
-    console.log(
+    logger.info(`📱 [HELLO] Device ${deviceId} connected via EMQX`);
+    logger.info(
       `📱 [HELLO] Now calling handlePublish to process hello message...`
     );
 
     // Manually trigger the hello message processing
     try {
       virtualConnection.handlePublish({ payload: JSON.stringify(payload) });
-      console.log(
+      logger.info(
         `📱 [HELLO] Successfully called handlePublish for device: ${deviceId}`
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `❌ [HELLO] Error in handlePublish for device ${deviceId}:`,
         error
       );
@@ -6061,16 +6063,16 @@ class MQTTGateway {
   }
 
   handleDeviceData(deviceId, payload) {
-    console.log(`🔍 [DEBUG] Looking up connection for device: ${deviceId}`);
+    logger.info(`🔍 [DEBUG] Looking up connection for device: ${deviceId}`);
 
     const deviceInfo = this.deviceConnections.get(deviceId);
 
     if (deviceInfo && deviceInfo.connection) {
-      console.log(`✅ [DEBUG] Connection found for ${deviceId}, state: ending=${deviceInfo.connection.isEnding}, closing=${deviceInfo.connection.closing}`);
+      logger.info(`✅ [DEBUG] Connection found for ${deviceId}, state: ending=${deviceInfo.connection.isEnding}, closing=${deviceInfo.connection.closing}`);
       deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
     } else {
-      console.log(`❌ [DEBUG] No connection found for device: ${deviceId}`);
-      console.log(`🔍 [DEBUG] Available devices in map: [${Array.from(this.deviceConnections.keys()).join(', ')}]`);
+      logger.info(`❌ [DEBUG] No connection found for device: ${deviceId}`);
+      logger.info(`🔍 [DEBUG] Available devices in map: [${Array.from(this.deviceConnections.keys()).join(', ')}]`);
 
       // Try to find similar device IDs (in case of format mismatch)
       const similarDevices = Array.from(this.deviceConnections.keys()).filter(key =>
@@ -6078,10 +6080,10 @@ class MQTTGateway {
       );
 
       if (similarDevices.length > 0) {
-        console.log(`🔍 [DEBUG] Found similar device IDs: [${similarDevices.join(', ')}] - possible format mismatch`);
+        logger.info(`🔍 [DEBUG] Found similar device IDs: [${similarDevices.join(', ')}] - possible format mismatch`);
       }
 
-      console.warn(`📱 Received data from unknown device: ${deviceId}`);
+      logger.warn(`📱 Received data from unknown device: ${deviceId}`);
     }
   }
 
@@ -6092,11 +6094,11 @@ class MQTTGateway {
         payload.characterName || payload.character_name || null;
 
       if (characterName) {
-        console.log(
+        logger.info(
           `🔘 [CHARACTER-CHANGE] Device ${deviceId} requesting character: ${characterName}`
         );
       } else {
-        console.log(
+        logger.info(
           `🔘 [CHARACTER-CHANGE] Device ${deviceId} requesting character cycle`
         );
       }
@@ -6118,14 +6120,14 @@ class MQTTGateway {
         requestBody = {};
       }
 
-      console.log(`📡 [CHARACTER-CHANGE] Calling API: ${apiUrl}`);
+      logger.info(`📡 [CHARACTER-CHANGE] Calling API: ${apiUrl}`);
       const response = await axios.post(apiUrl, requestBody, {
         timeout: 10000,
       });
 
       if (response.data.code === 0 && response.data.data.success) {
         const { newModeName, oldModeName, agentId } = response.data.data;
-        console.log(
+        logger.info(
           `✅ [CHARACTER-CHANGE] Mode updated: ${oldModeName} → ${newModeName}`
         );
 
@@ -6151,13 +6153,13 @@ class MQTTGateway {
         );
 
         if (!fs.existsSync(audioFilePath)) {
-          console.error(
+          logger.error(
             `❌ [CHARACTER-CHANGE] Audio file not found: ${audioFilePath}`
           );
           return;
         }
 
-        console.log(`🎵 [CHARACTER-CHANGE] Streaming audio: ${pcmFileName}`);
+        logger.info(`🎵 [CHARACTER-CHANGE] Streaming audio: ${pcmFileName}`);
 
         // Stream audio via UDP and send goodbye after
         await this.streamAudioViaUdp(
@@ -6167,10 +6169,10 @@ class MQTTGateway {
           true
         );
       } else {
-        console.error(`❌ [CHARACTER-CHANGE] API error:`, response.data);
+        logger.error(`❌ [CHARACTER-CHANGE] API error:`, response.data);
       }
     } catch (error) {
-      console.error(`❌ [CHARACTER-CHANGE] Error:`, error.message);
+      logger.error(`❌ [CHARACTER-CHANGE] Error:`, error.message);
     }
   }
 
@@ -6186,7 +6188,7 @@ class MQTTGateway {
       const connection = this.deviceConnections.get(deviceId)?.connection;
 
       if (!connection) {
-        console.error(
+        logger.error(
           `❌ [AUDIO-STREAM] No active connection for device: ${deviceId}`
         );
         return;
@@ -6195,7 +6197,7 @@ class MQTTGateway {
       // Get client ID for publishing MQTT messages
       const clientId = connection.clientId;
       if (!clientId) {
-        console.error(
+        logger.error(
           `❌ [AUDIO-STREAM] No client ID found for device: ${deviceId}`
         );
         return;
@@ -6205,19 +6207,19 @@ class MQTTGateway {
       const pcmFilePath = audioFilePath.replace(".opus", ".pcm");
 
       if (!fs.existsSync(pcmFilePath)) {
-        console.log(
+        logger.info(
           `⚠️ [CHARACTER-CHANGE] PCM file not found. Please convert Opus to PCM:`
         );
-        console.log(
+        logger.info(
           `   ffmpeg -i ${audioFilePath} -f s16le -ar 24000 -ac 1 ${pcmFilePath}`
         );
-        console.error(`❌ [CHARACTER-CHANGE] Cannot stream without PCM file`);
+        logger.error(`❌ [CHARACTER-CHANGE] Cannot stream without PCM file`);
         return;
       }
 
       // Read PCM file (24kHz, mono, 16-bit signed)
       const pcmData = fs.readFileSync(pcmFilePath);
-      console.log(
+      logger.info(
         `📦 [CHARACTER-CHANGE] Loaded ${pcmData.length} bytes PCM from ${pcmFilePath}`
       );
 
@@ -6235,12 +6237,12 @@ class MQTTGateway {
         JSON.stringify(ttsStartMsg),
         (err) => {
           if (err) {
-            console.error(
+            logger.error(
               `❌ [CHARACTER-CHANGE] Failed to publish TTS start:`,
               err
             );
           } else {
-            console.log(
+            logger.info(
               `📤 [CHARACTER-CHANGE] TTS start sent to ${deviceId} via ${controlTopic}`
             );
           }
@@ -6287,7 +6289,7 @@ class MQTTGateway {
             );
 
             if (frameCount % 20 === 0) {
-              console.log(
+              logger.info(
                 `🎵 [CHARACTER-CHANGE] Frame ${frameCount}: PCM ${frameTosend.length}B → Opus ${opusBuffer.length}B`
               );
             }
@@ -6295,7 +6297,7 @@ class MQTTGateway {
             // Send via UDP (will be encrypted automatically)
             connection.sendUdpMessage(opusBuffer, timestamp);
           } catch (err) {
-            console.error(
+            logger.error(
               `❌ [CHARACTER-CHANGE] Opus encode error:`,
               err.message
             );
@@ -6304,7 +6306,7 @@ class MQTTGateway {
           }
         } else {
           // No Opus encoder available, send PCM directly
-          console.warn(`⚠️ [CHARACTER-CHANGE] No Opus encoder, sending PCM`);
+          logger.warn(`⚠️ [CHARACTER-CHANGE] No Opus encoder, sending PCM`);
           connection.sendUdpMessage(frameTosend, timestamp);
         }
 
@@ -6315,7 +6317,7 @@ class MQTTGateway {
         await new Promise((resolve) => setTimeout(resolve, 60));
       }
 
-      console.log(
+      logger.info(
         `📦 [CHARACTER-CHANGE] Streamed ${frameCount} frames (${pcmData.length} bytes PCM)`
       );
 
@@ -6333,12 +6335,12 @@ class MQTTGateway {
         JSON.stringify(ttsStopMsg),
         (err) => {
           if (err) {
-            console.error(
+            logger.error(
               `❌ [CHARACTER-CHANGE] Failed to publish TTS stop:`,
               err
             );
           } else {
-            console.log(
+            logger.info(
               `📤 [CHARACTER-CHANGE] TTS stop sent to ${deviceId} via ${controlTopic}`
             );
           }
@@ -6362,29 +6364,29 @@ class MQTTGateway {
           JSON.stringify(goodbyeMsg),
           (err) => {
             if (err) {
-              console.error(
+              logger.error(
                 `❌ [CHARACTER-CHANGE] Failed to publish goodbye:`,
                 err
               );
             } else {
-              console.log(
+              logger.info(
                 `👋 [CHARACTER-CHANGE] Goodbye sent to ${deviceId} - LiveKit session will close`
               );
             }
           }
         );
       } else {
-        console.log(`ℹ️ [AUDIO-STREAM] Goodbye NOT sent (sendGoodbye=false)`);
+        logger.info(`ℹ️ [AUDIO-STREAM] Goodbye NOT sent (sendGoodbye=false)`);
       }
     } catch (error) {
-      console.error(`❌ [AUDIO-STREAM] Audio streaming error:`, error.message);
-      console.error(error.stack);
+      logger.error(`❌ [AUDIO-STREAM] Audio streaming error:`, error.message);
+      logger.error(error.stack);
     }
   }
 
   async handleDeviceModeChange(deviceId, payload) {
     try {
-      console.log(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode change`);
+      logger.info(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode change`);
 
       // Extract MAC address (remove colons for API call)
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
@@ -6398,14 +6400,14 @@ class MQTTGateway {
       }
 
       // STEP 0a: Clear audio buffers IMMEDIATELY to prevent old audio from playing
-      console.log(`🧹 [MODE-CHANGE] Step 0a: Clearing audio buffers...`);
+      logger.info(`🧹 [MODE-CHANGE] Step 0a: Clearing audio buffers...`);
       if (existingConnection && existingConnection.bridge) {
         existingConnection.bridge.clearAudioBuffers();
-        console.log(`✅ [MODE-CHANGE] Audio buffers cleared`);
+        logger.info(`✅ [MODE-CHANGE] Audio buffers cleared`);
       }
 
       // STEP 0b: Stop old bot (if music/story mode)
-      console.log(`🛑 [MODE-CHANGE] Step 0b: Checking for old bot to stop...`);
+      logger.info(`🛑 [MODE-CHANGE] Step 0b: Checking for old bot to stop...`);
       if (
         existingConnection &&
         existingConnection.roomType &&
@@ -6417,7 +6419,7 @@ class MQTTGateway {
           : null;
 
         if ((oldMode === "music" || oldMode === "story") && oldRoomName) {
-          console.log(
+          logger.info(
             `🛑 [MODE-CHANGE] Stopping old ${oldMode} bot for room: ${oldRoomName}...`
           );
 
@@ -6433,14 +6435,14 @@ class MQTTGateway {
 
 
             if (stopResponse.data && stopResponse.data.status === "stopped") {
-              console.log(
+              logger.info(
                 `✅ [MODE-CHANGE] Old ${oldMode} bot stopped successfully`
               );
             } else if (
               stopResponse.data &&
               stopResponse.data.status === "not_found"
             ) {
-              console.log(
+              logger.info(
                 `ℹ️ [MODE-CHANGE] Old ${oldMode} bot was not running`
               );
             }
@@ -6448,27 +6450,27 @@ class MQTTGateway {
             // Wait a moment for bot to fully stop
             await new Promise((resolve) => setTimeout(resolve, 500));
           } catch (error) {
-            console.error(
+            logger.error(
               `⚠️ [MODE-CHANGE] Failed to stop old ${oldMode} bot: ${error.message}`
             );
-            console.log(
+            logger.info(
               `⚠️ [MODE-CHANGE] Continuing with mode change anyway...`
             );
             // Continue anyway - room deletion will disconnect bot
           }
         } else {
-          console.log(
+          logger.info(
             `ℹ️ [MODE-CHANGE] Old mode is '${oldMode}', no bot to stop`
           );
         }
       } else {
-        console.log(
+        logger.info(
           `ℹ️ [MODE-CHANGE] No existing connection or bridge found, skipping bot stop`
         );
       }
 
       // STEP 1: Delete existing room
-      console.log(`🗑️ [MODE-CHANGE] Step 1: Deleting existing room...`);
+      logger.info(`🗑️ [MODE-CHANGE] Step 1: Deleting existing room...`);
 
       if (existingConnection && existingConnection.bridge) {
         const oldBridge = existingConnection.bridge;
@@ -6477,9 +6479,9 @@ class MQTTGateway {
         if (oldRoomName && this.roomService) {
           try {
             await this.roomService.deleteRoom(oldRoomName);
-            console.log(`✅ [MODE-CHANGE] Deleted old room: ${oldRoomName}`);
+            logger.info(`✅ [MODE-CHANGE] Deleted old room: ${oldRoomName}`);
           } catch (error) {
-            console.error(
+            logger.error(
               `❌ [MODE-CHANGE] Failed to delete old room: ${error.message}`
             );
           }
@@ -6489,27 +6491,27 @@ class MQTTGateway {
         if (oldBridge) {
           // CRITICAL: Stop audio forwarding immediately to prevent ghost audio
           oldBridge.stopAudioForwarding = true;
-          console.log(`🛑 [MODE-CHANGE] Stopped audio forwarding on old bridge`);
+          logger.info(`🛑 [MODE-CHANGE] Stopped audio forwarding on old bridge`);
 
           // Disconnect from LiveKit room without triggering connection cleanup
           if (oldBridge.room) {
             try {
               await oldBridge.room.disconnect();
-              console.log(`✅ [MODE-CHANGE] Disconnected old bridge from LiveKit room`);
+              logger.info(`✅ [MODE-CHANGE] Disconnected old bridge from LiveKit room`);
             } catch (error) {
-              console.warn(`⚠️ [MODE-CHANGE] Error disconnecting old bridge:`, error.message);
+              logger.warn(`⚠️ [MODE-CHANGE] Error disconnecting old bridge:`, error.message);
             }
           }
           existingConnection.bridge = null;
-          console.log(`✅ [MODE-CHANGE] Old bridge reference cleared (connection preserved)`);
+          logger.info(`✅ [MODE-CHANGE] Old bridge reference cleared (connection preserved)`);
           // NOTE: Don't call oldBridge.close() - it would delete the connection from deviceConnections!
         }
       } else {
-        console.log(`ℹ️ [MODE-CHANGE] No existing room to delete`);
+        logger.info(`ℹ️ [MODE-CHANGE] No existing room to delete`);
       }
 
       // STEP 2: Update mode in DB
-      console.log(`📡 [MODE-CHANGE] Step 2: Updating mode in DB...`);
+      logger.info(`📡 [MODE-CHANGE] Step 2: Updating mode in DB...`);
       const axios = require("axios");
       const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
       const apiUrl = `${baseUrl}/toy/device/${macAddress}/cycle-mode`;
@@ -6518,7 +6520,7 @@ class MQTTGateway {
 
       if (response.data.code === 0 && response.data.data.success) {
         const { newMode, oldMode } = response.data.data;
-        console.log(
+        logger.info(
           `✅ [MODE-CHANGE] Mode updated in DB: ${oldMode} → ${newMode}`
         );
 
@@ -6528,7 +6530,7 @@ class MQTTGateway {
         }
 
         // STEP 3: Handle mode-specific flow
-        console.log(
+        logger.info(
           `🏗️ [MODE-CHANGE] Step 3: Preparing for mode: ${newMode}...`
         );
 
@@ -6538,16 +6540,16 @@ class MQTTGateway {
         // Check virtual connections (mobile app)
         if (deviceInfo && deviceInfo.connection) {
           connection = deviceInfo.connection;
-          console.log(
+          logger.info(
             `✅ [MODE-CHANGE] Found virtual connection for device: ${deviceId}`
           );
         }
 
         if (!connection) {
-          console.error(
+          logger.error(
             `❌ [MODE-CHANGE] No connection found for device: ${deviceId}`
           );
-          console.error(
+          logger.error(
             `❌ [MODE-CHANGE] Device must send 'hello' message first before mode-change`
           );
 
@@ -6561,7 +6563,7 @@ class MQTTGateway {
               timestamp: Date.now(),
             };
             this.publishToDevice(senderClientId, errorMsg);
-            console.log(
+            logger.info(
               `📤 [MODE-CHANGE] Sent error message to device: ${senderClientId}`
             );
           }
@@ -6570,11 +6572,11 @@ class MQTTGateway {
         }
 
         // Create room for all modes (conversation/music/story)
-        console.log(`🏠 [MODE-CHANGE] Creating room for ${newMode} mode...`);
+        logger.info(`🏠 [MODE-CHANGE] Creating room for ${newMode} mode...`);
 
         // Update connection room type
         connection.roomType = newMode;
-        console.log(
+        logger.info(
           `✅ [MODE-CHANGE] Updated connection.roomType to: ${newMode}`
         );
 
@@ -6583,7 +6585,7 @@ class MQTTGateway {
         const macForRoom = deviceId.replace(/:/g, "");
         const newRoomName = `${newSessionUuid}_${macForRoom}_${newMode}`;
 
-        console.log(`🏠 [MODE-CHANGE] New room name: ${newRoomName}`);
+        logger.info(`🏠 [MODE-CHANGE] New room name: ${newRoomName}`);
 
         // Update connection session
         connection.udp.session_id = newRoomName;
@@ -6593,7 +6595,7 @@ class MQTTGateway {
         connection.endPromptSentTime = null;
         connection.goodbyeSent = false;
         connection.lastActivityTime = Date.now(); // Reset activity timer
-        console.log(
+        logger.info(
           `🔄 [MODE-CHANGE] Reset ending flags and activity timer for fresh session`
         );
 
@@ -6610,7 +6612,7 @@ class MQTTGateway {
 
         // Setup bridge close handler
         newBridge.on("close", () => {
-          console.log(`🔒 [MODE-CHANGE] Bridge closed for: ${deviceId}`);
+          logger.info(`🔒 [MODE-CHANGE] Bridge closed for: ${deviceId}`);
           connection.bridge = null;
         });
 
@@ -6621,7 +6623,7 @@ class MQTTGateway {
           this.roomService
         );
 
-        console.log(
+        logger.info(
           `✅ [MODE-CHANGE] New room created and gateway connected: ${newRoomName}`
         );
 
@@ -6630,11 +6632,11 @@ class MQTTGateway {
         if (newMode === "conversation") {
           currentCharacter = await connection.fetchCurrentCharacter(macAddress);
           connection.currentCharacter = currentCharacter;
-          console.log(`🎭 [MODE-CHANGE] Fetched character for conversation: ${currentCharacter}`);
+          logger.info(`🎭 [MODE-CHANGE] Fetched character for conversation: ${currentCharacter}`);
         }
 
         // Send mode_update to device firmware
-        console.log(`📤 [MODE-CHANGE] Sending mode_update to device...`);
+        logger.info(`📤 [MODE-CHANGE] Sending mode_update to device...`);
         const modeUpdateMsg = {
           type: "mode_update",
           mode: newMode,
@@ -6657,23 +6659,23 @@ class MQTTGateway {
           },
         };
         connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-        console.log(`✅ [MODE-CHANGE] Sent mode_update (${newMode}${currentCharacter ? ', character: ' + currentCharacter : ''}) to device with UDP details`);
+        logger.info(`✅ [MODE-CHANGE] Sent mode_update (${newMode}${currentCharacter ? ', character: ' + currentCharacter : ''}) to device with UDP details`);
 
         // STEP 4: Handle mode-specific startup
-        console.log(`🎬 [MODE-CHANGE] Step 4: Starting ${newMode} flow...`);
+        logger.info(`🎬 [MODE-CHANGE] Step 4: Starting ${newMode} flow...`);
 
         if (newMode === "music") {
-          console.log(`🎵 [MODE-CHANGE] Spawning music bot...`);
+          logger.info(`🎵 [MODE-CHANGE] Spawning music bot...`);
           await connection.spawnMusicBot(newRoomName);
-          console.log(`✅ [MODE-CHANGE] Music bot spawned`);
-          console.log(`ℹ️ [MODE-CHANGE] TTS start will be sent after firmware sends start_agent signal`);
+          logger.info(`✅ [MODE-CHANGE] Music bot spawned`);
+          logger.info(`ℹ️ [MODE-CHANGE] TTS start will be sent after firmware sends start_agent signal`);
         } else if (newMode === "story") {
-          console.log(`📖 [MODE-CHANGE] Spawning story bot...`);
+          logger.info(`📖 [MODE-CHANGE] Spawning story bot...`);
           await connection.spawnStoryBot(newRoomName);
-          console.log(`✅ [MODE-CHANGE] Story bot spawned`);
-          console.log(`ℹ️ [MODE-CHANGE] TTS start will be sent after firmware sends start_agent signal`);
+          logger.info(`✅ [MODE-CHANGE] Story bot spawned`);
+          logger.info(`ℹ️ [MODE-CHANGE] TTS start will be sent after firmware sends start_agent signal`);
         } else if (newMode === "conversation") {
-          console.log(
+          logger.info(
             `🗣️ [MODE-CHANGE] Conversation mode - auto-dispatching agent...`
           );
 
@@ -6692,7 +6694,7 @@ class MQTTGateway {
                 }
               );
 
-              console.log(
+              logger.info(
                 `✅ [MODE-CHANGE] Agent dispatched successfully:`,
                 dispatch.id
               );
@@ -6700,51 +6702,51 @@ class MQTTGateway {
               // Mark bridge as having agent deployed
               newBridge.agentDeployed = true;
 
-              console.log(`ℹ️ [MODE-CHANGE] Agent will auto-greet when ready (no manual trigger needed)`);
+              logger.info(`ℹ️ [MODE-CHANGE] Agent will auto-greet when ready (no manual trigger needed)`);
             } catch (error) {
-              console.error(
+              logger.error(
                 `❌ [MODE-CHANGE] Failed to dispatch agent or send greeting:`,
                 error.message
               );
             }
           } else {
-            console.error(
+            logger.error(
               `❌ [MODE-CHANGE] AgentDispatchClient not initialized, cannot dispatch agent`
             );
           }
         }
 
-        console.log(
+        logger.info(
           `✅ [MODE-CHANGE] Mode change complete! ${oldMode} → ${newMode}`
         );
       } else {
-        console.error(`❌ [MODE-CHANGE] API error:`, response.data);
+        logger.error(`❌ [MODE-CHANGE] API error:`, response.data);
       }
     } catch (error) {
-      console.error(`❌ [MODE-CHANGE] Error:`, error.message);
-      console.error(error.stack);
+      logger.error(`❌ [MODE-CHANGE] Error:`, error.message);
+      logger.error(error.stack);
     }
   }
 
   publishToDevice(clientIdOrDeviceId, message) {
-    console.log(
+    logger.info(
       `📤 [MQTT OUT] publishToDevice called - Client/Device: ${clientIdOrDeviceId}`
     );
-    console.log(`📤 [MQTT OUT] Message:`, JSON.stringify(message, null, 2));
+    logger.info(`📤 [MQTT OUT] Message:`, JSON.stringify(message, null, 2));
 
     if (this.mqttClient && this.mqttClient.connected) {
       // Use the full client ID directly in the topic
       const topic = `devices/p2p/${clientIdOrDeviceId}`;
-      console.log(`📤 [MQTT OUT] Publishing to topic: ${topic}`);
+      logger.info(`📤 [MQTT OUT] Publishing to topic: ${topic}`);
 
       this.mqttClient.publish(topic, JSON.stringify(message), (err) => {
         if (err) {
-          console.error(
+          logger.error(
             `❌ [MQTT OUT] Failed to publish to client ${clientIdOrDeviceId}:`,
             err
           );
         } else {
-          console.log(
+          logger.info(
             `✅ [MQTT OUT] Successfully published to client ${clientIdOrDeviceId} on topic ${topic}`
           );
           debug(
@@ -6755,10 +6757,10 @@ class MQTTGateway {
         }
       });
     } else {
-      console.error(
+      logger.error(
         "❌ [MQTT OUT] MQTT client not connected, cannot publish message"
       );
-      console.log(
+      logger.info(
         `📊 [MQTT OUT] Client connected: ${this.mqttClient ? this.mqttClient.connected : "null"
         }`
       );
@@ -6788,7 +6790,7 @@ class MQTTGateway {
         activeCount !== this.lastActiveConnectionCount ||
         this.connections.size !== this.lastConnectionCount
       ) {
-        // console.log(
+        // logger.info(
         //   `Connections: ${this.connections.size}, Active: ${activeCount}`
         // );
         this.lastActiveConnectionCount = activeCount;
@@ -6834,7 +6836,7 @@ class MQTTGateway {
   onUdpMessage(message, rinfo) {
     // message format: [type: 1u, flag: 1u, payloadLength: 2u, cookie: 4u, timestamp: 4u, sequence: 4u, payload: n]
     if (message.length < 16) {
-      console.warn(
+      logger.warn(
         `📡 [UDP SERVER] Received incomplete UDP header from ${rinfo.address}:${rinfo.port}, length=${message.length}`
       );
       return;
@@ -6843,7 +6845,7 @@ class MQTTGateway {
     try {
       const type = message.readUInt8(0);
       if (type !== 1) {
-        console.warn(
+        logger.warn(
           `📡 [UDP SERVER] Invalid packet type: ${type} from ${rinfo.address}:${rinfo.port}`
         );
         return;
@@ -6851,7 +6853,7 @@ class MQTTGateway {
 
       const payloadLength = message.readUInt16BE(2);
       if (message.length < 16 + payloadLength) {
-        console.warn(
+        logger.warn(
           `📡 [UDP SERVER] Incomplete message from ${rinfo.address}:${rinfo.port}, expected=${16 + payloadLength}, got=${message.length}`
         );
         return;
@@ -6860,14 +6862,14 @@ class MQTTGateway {
       const connectionId = message.readUInt32BE(4);
       const connection = this.connections.get(connectionId);
       if (!connection) {
-        console.warn(`📡 [UDP SERVER] No connection found for ID: ${connectionId} from ${rinfo.address}:${rinfo.port}`);
+        logger.warn(`📡 [UDP SERVER] No connection found for ID: ${connectionId} from ${rinfo.address}:${rinfo.port}`);
         return;
       }
 
       const timestamp = message.readUInt32BE(8);
       const sequence = message.readUInt32BE(12);
 
-      // console.log(
+      // logger.info(
       //   `📡 [UDP SERVER] Routing message to connection ${connectionId} (${connection.clientId})`
       // );
       connection.onUdpMessage(
@@ -6878,7 +6880,7 @@ class MQTTGateway {
         sequence
       );
     } catch (error) {
-      console.error(
+      logger.error(
         `📡 [UDP SERVER] Message processing error from ${rinfo.address}:${rinfo.port}:`,
         error
       );
@@ -6898,7 +6900,7 @@ class MQTTGateway {
     this.clearKeepAliveTimer();
 
     if (this.connections.size > 0) {
-      console.warn(`Waiting for ${this.connections.size} connections to close`);
+      logger.warn(`Waiting for ${this.connections.size} connections to close`);
       for (const connection of this.connections.values()) {
         connection.close();
       }
@@ -6911,14 +6913,14 @@ class MQTTGateway {
     if (this.udpServer) {
       this.udpServer.close();
       this.udpServer = null;
-      console.warn("UDP server stopped");
+      logger.warn("UDP server stopped");
     }
 
     // Close MQTT client
     if (this.mqttClient) {
       this.mqttClient.end();
       this.mqttClient = null;
-      console.warn("MQTT client disconnected");
+      logger.warn("MQTT client disconnected");
     }
 
     process.exit(0);
@@ -6935,21 +6937,21 @@ process.on("uncaughtException", (error) => {
     error.message &&
     error.message.includes("InvalidState - failed to capture frame")
   ) {
-    console.warn(
+    logger.warn(
       `⚠️ [GLOBAL] Caught InvalidState error (non-fatal), continuing operation...`
     );
-    console.warn(
+    logger.warn(
       `💡 [INFO] This occurs when audio frames arrive during room disconnect - now handled gracefully`
     );
     // Don't exit - the error is non-fatal and now prevented by room connection checks
   } else {
-    console.error(`❌ [FATAL] Uncaught exception:`, error);
+    logger.error(`❌ [FATAL] Uncaught exception:`, error);
     process.exit(1);
   }
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  console.error(
+  logger.error(
     `❌ [FATAL] Unhandled rejection at:`,
     promise,
     `reason:`,
@@ -6958,6 +6960,6 @@ process.on("unhandledRejection", (reason, promise) => {
 });
 
 process.on("SIGINT", () => {
-  console.warn("Received SIGINT signal, starting shutdown");
+  logger.warn("Received SIGINT signal, starting shutdown");
   gateway.stop();
 });
