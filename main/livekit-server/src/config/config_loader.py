@@ -171,3 +171,30 @@ class ConfigLoader:
         """Get manager API configuration from config.yaml"""
         config = ConfigLoader.load_yaml_config()
         return config.get('manager_api', {})
+
+    @staticmethod
+    def get_gemini_realtime_config():
+        """Get Gemini Realtime configuration from config.yaml and environment variables"""
+        # Load from config.yaml first
+        yaml_config = ConfigLoader.load_yaml_config()
+        gemini_config = yaml_config.get('gemini_realtime', {})
+
+        # Environment variables can override yaml config
+        return {
+            'provider': os.getenv('REALTIME_PROVIDER', 'gemini').lower(),  # gemini or openai
+            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.0-flash-exp')),
+            'voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
+            'temperature': float(os.getenv('GEMINI_REALTIME_TEMPERATURE', gemini_config.get('temperature', 0.6))),
+            'prompt': gemini_config.get('prompt', 'You are a helpful voice assistant.'),
+            # VAD configuration for Gemini Realtime
+            'vad_disabled': os.getenv('GEMINI_VAD_DISABLED', 'false').lower() == 'true',
+            'start_sensitivity': os.getenv('GEMINI_START_SENSITIVITY', 'high').lower(),  # high, medium, low
+            'end_sensitivity': os.getenv('GEMINI_END_SENSITIVITY', 'high').lower(),
+            'prefix_padding_ms': int(os.getenv('GEMINI_PREFIX_PADDING_MS', '10')),
+            'silence_duration_ms': int(os.getenv('GEMINI_SILENCE_DURATION_MS', '200')),
+            # Google Search integration
+            'enable_google_search': os.getenv('GEMINI_ENABLE_GOOGLE_SEARCH', 'true').lower() == 'true',
+            # OpenAI Realtime settings (if using OpenAI provider)
+            'openai_model': os.getenv('OPENAI_REALTIME_MODEL', 'gpt-4o-realtime-preview'),
+            'openai_voice': os.getenv('OPENAI_REALTIME_VOICE', 'alloy'),
+        }

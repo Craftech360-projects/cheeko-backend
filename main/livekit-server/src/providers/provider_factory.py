@@ -311,3 +311,149 @@ class ProviderFactory:
        # return MultilingualModel()
        # return EnglishModel()
         return None  # Disabled to avoid HuggingFace download errors
+
+    @staticmethod
+    def create_realtime_model(config=None):
+        """
+        Create a Realtime model (Gemini or OpenAI) for end-to-end voice streaming.
+
+        Args:
+            config: Optional config dict. If not provided, will load from ConfigLoader.
+
+        Returns:
+            Realtime model instance (google.realtime.RealtimeModel or openai.realtime.RealtimeModel)
+        """
+        import os
+        import logging
+        logger = logging.getLogger("provider_factory")
+
+        # Load config if not provided
+        if config is None:
+            from ..config.config_loader import ConfigLoader
+            config = ConfigLoader.get_gemini_realtime_config()
+
+        provider = config.get('provider', 'gemini').lower()
+        logger.info(f"[REALTIME] Creating Realtime model provider: {provider}")
+
+        if provider == 'openai':
+            # OpenAI Realtime API
+            try:
+                from livekit.plugins import openai as openai_plugin
+
+                api_key = os.getenv('OPENAI_API_KEY')
+                if not api_key:
+                    raise ValueError("OPENAI_API_KEY environment variable is not set")
+
+                model = config.get('openai_model', 'gpt-4o-realtime-preview')
+                voice = config.get('openai_voice', 'alloy')
+                temperature = config.get('temperature', 0.6)
+
+                logger.info(f"[REALTIME] OpenAI Realtime - Model: {model}, Voice: {voice}")
+
+                return openai_plugin.realtime.RealtimeModel(
+                    model=model,
+                    voice=voice,
+                    temperature=temperature,
+                )
+            except ImportError as e:
+                logger.error(f"[REALTIME] Failed to import OpenAI Realtime plugin: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"[REALTIME] Failed to create OpenAI Realtime model: {e}")
+                raise
+
+        else:
+            # Gemini Realtime (default)
+            try:
+                from livekit.plugins import google
+                from google.genai import types
+
+                model = config.get('model', 'gemini-2.0-flash-exp')
+                voice = config.get('voice', 'Zephyr')
+                temperature = config.get('temperature', 0.6)
+
+                logger.info(f"[REALTIME] Gemini Realtime - Model: {model}, Voice: {voice}, Temp: {temperature}")
+
+                # Build VAD configuration
+                start_sensitivity_map = {
+                    'high': types.StartSensitivity.START_SENSITIVITY_HIGH,
+                    'medium': types.StartSensitivity.START_SENSITIVITY_MEDIUM,
+                    'low': types.StartSensitivity.START_SENSITIVITY_LOW,
+                }
+                end_sensitivity_map = {
+                    'high': types.EndSensitivity.END_SENSITIVITY_HIGH,
+                    'medium': types.EndSensitivity.END_SENSITIVITY_MEDIUM,
+                    'low': types.EndSensitivity.END_SENSITIVITY_LOW,
+                }
+
+                start_sensitivity = start_sensitivity_map.get(
+                    config.get('start_sensitivity', 'high'),
+                    types.StartSensitivity.START_SENSITIVITY_HIGH
+                )
+                end_sensitivity = end_sensitivity_map.get(
+                    config.get('end_sensitivity', 'high'),
+                    types.EndSensitivity.END_SENSITIVITY_HIGH
+                )
+
+                vad_config = types.RealtimeInputConfig(
+                    automatic_activity_detection=types.AutomaticActivityDetection(
+                        disabled=config.get('vad_disabled', False),
+                        start_of_speech_sensitivity=start_sensitivity,
+                        end_of_speech_sensitivity=end_sensitivity,
+                        prefix_padding_ms=config.get('prefix_padding_ms', 10),
+                        silence_duration_ms=config.get('silence_duration_ms', 200),
+                    )
+                )
+
+                logger.info(f"[REALTIME] VAD Config - Start: {config.get('start_sensitivity', 'high')}, "
+                           f"End: {config.get('end_sensitivity', 'high')}, "
+                           f"Silence: {config.get('silence_duration_ms', 200)}ms")
+
+                # Build tools list
+                gemini_tools = []
+                if config.get('enable_google_search', True):
+                    google_search = types.GoogleSearch()
+                    gemini_tools.append(google_search)
+                    logger.info("[REALTIME] Google Search tool enabled")
+
+                return google.realtime.RealtimeModel(
+                    model=model,
+                    voice=voice,
+                    temperature=temperature,
+                    realtime_input_config=vad_config,
+                    _gemini_tools=gemini_tools if gemini_tools else None,
+                )
+
+            except ImportError as e:
+                logger.error(f"[REALTIME] Failed to import Google Realtime plugin: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"[REALTIME] Failed to create Gemini Realtime model: {e}")
+                raise
+
+    @staticmethod
+    def create_realtime_session(config=None, agent=None):
+        """
+        Create an AgentSession configured for Realtime (end-to-end voice).
+
+        This is a convenience method that creates both the Realtime model
+        and wraps it in an AgentSession.
+
+        Args:
+            config: Optional config dict for the Realtime model.
+            agent: Optional Agent instance to use with the session.
+
+        Returns:
+            AgentSession configured with Realtime model
+        """
+        from livekit.agents import AgentSession
+        import logging
+        logger = logging.getLogger("provider_factory")
+
+        realtime_model = ProviderFactory.create_realtime_model(config)
+
+        session = AgentSession(llm=realtime_model)
+
+        logger.info("[REALTIME] AgentSession created with Realtime model")
+
+        return session

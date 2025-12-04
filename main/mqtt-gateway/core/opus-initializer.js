@@ -28,15 +28,11 @@ function loadOpusLibrary() {
         OpusEncoder = discordOpus.OpusEncoder;
         OpusDecoder = discordOpus.OpusEncoder; // Discord opus uses same class for encoding/decoding
         opusLib = "@discordjs/opus";
-        console.log(
-            "✅ [OPUS PHASE-1] Using native @discordjs/opus only (libopus bindings - OPTIMIZED)"
-        );
+        // console.log("✅ [OPUS] Using native @discordjs/opus");
         return true;
     } catch (err) {
         console.error("❌ [OPUS] @discordjs/opus not available:", err.message);
-        console.error(
-            "❌ [OPUS] Cannot proceed without Opus library. Please run: npm install @discordjs/opus"
-        );
+        console.error("❌ [OPUS] Please run: npm install @discordjs/opus");
         OpusEncoder = null;
         OpusDecoder = null;
         return false;
@@ -61,20 +57,11 @@ function initializeOpus() {
         opusEncoder = new OpusEncoder(OUTGOING_SAMPLE_RATE, CHANNELS);
         opusDecoder = new OpusEncoder(INCOMING_SAMPLE_RATE, CHANNELS); // Same class for decode
 
-        console.log(`✅ [OPUS PHASE-1] Native encoder/decoder initialized:`);
-        console.log(
-            `   Encoder: ${OUTGOING_SAMPLE_RATE}Hz ${OUTGOING_FRAME_DURATION_MS}ms mono`
-        );
-        console.log(
-            `   Decoder: ${INCOMING_SAMPLE_RATE}Hz ${INCOMING_FRAME_DURATION_MS}ms mono`
-        );
+        // console.log(`✅ [OPUS] Encoder: ${OUTGOING_SAMPLE_RATE}Hz, Decoder: ${INCOMING_SAMPLE_RATE}Hz`);
 
         return { opusEncoder, opusDecoder };
     } catch (err) {
-        console.error(
-            `❌ [OPUS] Failed to initialize encoder/decoder:`,
-            err.message
-        );
+        console.error(`❌ [OPUS] Failed to initialize encoder/decoder:`, err.message);
         process.exit(1); // Exit if initialization fails
     }
 }

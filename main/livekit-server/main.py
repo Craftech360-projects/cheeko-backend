@@ -33,11 +33,15 @@ from livekit.agents import (
     function_tool,
     Agent,
     RunContext,
-    room_io,
+    RoomIO,
+    RoomInputOptions,
+    RoomOutputOptions,
+    AutoSubscribe,
 )
 from livekit.agents.llm import ChatContext
 from livekit import rtc
-from livekit.plugins import silero, groq, noise_cancellation
+from livekit.plugins import silero, groq, noise_cancellation, google
+from google.genai import types
 
 # Load environment variables first
 load_dotenv(".env")
@@ -255,24 +259,16 @@ resource_monitor = ResourceMonitor(log_interval=10)  # Log every 10 seconds (red
 # No need to define it here - it includes all the enhanced functionality
 
 def prewarm(proc: JobProcess):
-    """Enhanced prewarm function with full service preloading"""
-    logger.info("[PREWARM] Enhanced prewarm: Loading all models and services")
+    """Enhanced prewarm function with service preloading for Gemini Realtime"""
+    logger.info("[PREWARM] Prewarm: Loading services for Gemini Realtime")
 
     # Start background model loading if not already started
     if not model_preloader.is_ready():
         model_preloader.start_background_loading()
 
-    # Load VAD model directly on main thread (required by Silero)
-    if "vad_model" not in model_cache._models:
-        logger.info("[PREWARM] Loading VAD model on main thread...")
-        vad = ProviderFactory.create_vad()
-        model_cache._models["vad_model"] = vad
-        logger.info("[PREWARM] VAD model loaded and cached")
-    else:
-        vad = model_cache._models["vad_model"]
-        logger.info("[PREWARM] Using cached VAD model")
+    # Note: VAD is not needed for Gemini Realtime (it has built-in VAD)
+    # We only preload embedding models for music/story services
 
-    proc.userdata["vad"] = vad
     proc.userdata["embedding_model"] = model_cache.get_embedding_model()
     proc.userdata["qdrant_client"] = model_cache.get_qdrant_client()
 
@@ -282,12 +278,11 @@ def prewarm(proc: JobProcess):
     # Log cache status
     stats = model_cache.get_cache_stats()
     logger.info(
-        f"[PREWARM] Enhanced prewarm complete: {stats['cache_size']} models cached")
+        f"[PREWARM] Prewarm complete: {stats['cache_size']} models cached (Gemini Realtime mode)")
 
     # Optional: Wait briefly for background loading (non-blocking)
     if not model_preloader.is_ready():
         logger.info("[PREWARM] Background model loading in progress...")
-        # Don't wait - let the session start immediately
 
 async def entrypoint(ctx: JobContext):
     """Enhanced entrypoint with full production features"""
@@ -574,40 +569,132 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     # Log the full prompt after memory injection
     logger.info(f"📝 Full prompt after memory injection:\n{'-'*50}\n{agent_prompt}\n{'-'*50}")
 
-    # Get VAD first as it's needed for STT
-    vad = ctx.proc.userdata["vad"]
+    # ============================================================================
+    # GEMINI REALTIME MODEL SETUP (End-to-End Voice)
+    # ============================================================================
 
-    # Create providers using factory
-    llm = ProviderFactory.create_llm(groq_config)
+    # Load Gemini Realtime configuration
+    realtime_config = ConfigLoader.get_gemini_realtime_config()
+    gemini_model = realtime_config.get('model', 'gemini-2.0-flash-exp')
+    gemini_voice = realtime_config.get('voice', 'Zephyr')
+    gemini_temperature = realtime_config.get('temperature', 0.6)
 
-    # Log LLM info for debugging (but don't hook into it - use conversation events instead)
-    if chat_history_service:
-        logger.debug(
-            f"🧠 Using LLM type: {type(llm)} (will capture responses via conversation_item_added event)")
+    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
 
-    stt = ProviderFactory.create_stt(
-        groq_config, vad)  # Pass VAD to STT factory
-
-    # Get TTS config, with API override if available
-    tts_config = ConfigLoader.get_tts_config(api_config=tts_config_from_api)
-    tts = ProviderFactory.create_tts(groq_config, tts_config)
-
-    logger.info(f"🎤 Final TTS Provider: {tts_config.get('provider')}")
-
-    # Disable turn detection to avoid timeout issues
-    turn_detection = ProviderFactory.create_turn_detection()
-
-    # Set up voice AI pipeline
-    session = AgentSession(
-        llm=llm,
-        stt=stt,
-        tts=tts,
-        turn_detection=turn_detection,  # Disabled to avoid timeout
-        vad=vad,
-        preemptive_generation=agent_config['preemptive_generation'],
-        min_endpointing_delay=0.8,      # Reduced from 1.2s for faster response with children
-        min_interruption_duration=0.6,   # Reduced from 1.0s to allow children to interrupt
+    # VAD configuration optimized for kids' voices (same as realtimeagent.py)
+    vad_config = types.RealtimeInputConfig(
+        automatic_activity_detection=types.AutomaticActivityDetection(
+            disabled=False,
+            start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+            end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+            prefix_padding_ms=10,
+            silence_duration_ms=200,
+        )
     )
+
+    # Enable Google Search for real-time information
+    google_search = types.GoogleSearch()
+
+    # Create Gemini Realtime model (uses GOOGLE_API_KEY from environment, same as realtimeagent.py)
+    realtime_model = google.realtime.RealtimeModel(
+        model=gemini_model,
+        voice=gemini_voice,
+        temperature=gemini_temperature,
+        realtime_input_config=vad_config,
+        _gemini_tools=[google_search],
+    )
+
+    logger.info(f"✅ Gemini Realtime model created with voice: {gemini_voice}")
+
+    # Set up voice AI pipeline with Gemini Realtime (no separate STT/TTS needed)
+    session = AgentSession(
+        llm=realtime_model,
+    )
+
+    # ============================================================================
+    # STATE MANAGEMENT FOR LED FEEDBACK (same as realtimeagent.py)
+    # ============================================================================
+
+    current_state = "idle"
+    last_state_change_time = 0.0
+    STATE_DEBOUNCE_MS = 350  # Minimum time between state changes to prevent LED flickering
+
+    async def emit_agent_state(new_state: str):
+        """Emit agent state via data channel for MQTT gateway with debouncing"""
+        nonlocal current_state, last_state_change_time
+
+        try:
+            # Debounce: prevent rapid state changes from causing LED flickering
+            current_time = time.time() * 1000  # Convert to ms
+            if current_time - last_state_change_time < STATE_DEBOUNCE_MS:
+                logger.debug(f"🚫 State change debounced: {current_state} → {new_state} (too fast)")
+                return
+
+            if new_state == current_state:
+                return
+
+            old_state = current_state
+
+            # Skip listening → thinking for Gemini Realtime (no separate thinking phase)
+            if old_state == "listening" and new_state == "thinking":
+                logger.info(
+                    f"🧠 Skipping listening → thinking state change (Gemini Realtime mode)"
+                )
+                return
+
+            current_state = new_state
+            last_state_change_time = current_time
+
+            payload = json.dumps({
+                "type": "agent_state_changed",
+                "data": {"old_state": old_state, "new_state": new_state},
+            })
+
+            await ctx.room.local_participant.publish_data(
+                payload.encode("utf-8"), reliable=True
+            )
+            logger.info(f"📊 State: {old_state} → {new_state}")
+        except Exception as e:
+            logger.error(f"Failed to emit state: {e}")
+
+    async def emit_speech_created(text: str = ""):
+        """Emit speech_created event via data channel - triggers TTS start in MQTT gateway"""
+        try:
+            payload = json.dumps(
+                {
+                    "type": "speech_created",
+                    "data": {"text": text},
+                }
+            )
+
+            await ctx.room.local_participant.publish_data(
+                payload.encode("utf-8"), reliable=True
+            )
+            logger.info(f"📢 speech_created event emitted")
+        except Exception as e:
+            logger.error(f"Failed to emit speech_created: {e}")
+
+    # Hook into agent_state_changed to emit speech_created when agent starts speaking
+    # This is needed because Gemini Realtime doesn't fire agent_speech_started events
+    @session.on("agent_state_changed")
+    def on_agent_state_changed_for_tts(ev):
+        """Emit speech_created when agent transitions to speaking state"""
+        try:
+            # Get old and new state from the event
+            old_state = getattr(ev, 'old_state', None)
+            new_state = getattr(ev, 'new_state', None)
+
+            logger.info(f"🔊 EVENT: agent_state_changed - {old_state} → {new_state}")
+
+            # When transitioning TO speaking, emit speech_created for TTS start
+            if new_state == 'speaking' and old_state != 'speaking':
+                logger.info(f"📢 Emitting speech_created (state: {old_state} → speaking)")
+                asyncio.create_task(emit_speech_created())
+
+        except Exception as e:
+            logger.error(f"❌ Error in agent_state_changed handler: {e}")
+
+    logger.info("📊 State management events registered for LED feedback (using agent_state_changed)")
 
     # Add comprehensive error handling using our error handler module
     from src.agent.error_handler import setup_error_handling
@@ -659,7 +746,8 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         logger.info("📚 Wikipedia search service disabled (check .env: GOOGLE_SEARCH_ENABLED, GOOGLE_API_KEY, GOOGLE_SEARCH_ENGINE_ID)")
 
     # Create enhanced assistant with dynamic prompt and inject services
-    assistant = Assistant(instructions=agent_prompt, tts_provider=tts)
+    # Note: tts_provider not needed for Gemini Realtime (TTS is built-in)
+    assistant = Assistant(instructions=agent_prompt)
     assistant.set_services(music_service, story_service,
                            audio_player, unified_audio_player, device_control_service, mcp_executor,
                            google_search_service, question_generator_service, riddle_generator_service, analytics_service)
@@ -817,30 +905,11 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
     # Create room options with 16kHz sample rate to match MQTT gateway
     # This ensures audio from ESP32 devices (16kHz) is not resampled unnecessarily
-    audio_input_options = room_io.AudioInputOptions(
-        sample_rate=16000,  # Match MQTT gateway's 16kHz audio
-        num_channels=1,     # Mono audio from ESP32
+    room_input_options = RoomInputOptions(
+        audio_sample_rate=16000,  # Match MQTT gateway's 16kHz audio
+        audio_num_channels=1,     # Mono audio from ESP32
     )
     logger.info("Room input configured: 16kHz mono audio to match MQTT gateway")
-
-    # Add noise cancellation if enabled
-    if agent_config['noise_cancellation']:
-        try:
-            audio_input_options = room_io.AudioInputOptions(
-                sample_rate=16000,
-                num_channels=1,
-                # noise_cancellation=noise_cancellation.BVC()
-            )
-            logger.info("Noise cancellation enabled (requires LiveKit Cloud)")
-        except Exception as e:
-            logger.warning(f"Could not enable noise cancellation: {e}")
-            logger.info("Continuing without noise cancellation (local server mode)")
-    else:
-        logger.info("Noise cancellation disabled by configuration")
-
-    room_options = room_io.RoomOptions(
-        audio_input=audio_input_options,
-    )
 
     # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)
@@ -1065,11 +1134,41 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
 
-    # Start agent session
+    # ============================================================================
+    # START GEMINI REALTIME SESSION (like realtimeagent.py)
+    # ============================================================================
+
+    # Connect to room first (audio only for Gemini Realtime)
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
+    # Wait for a participant to join (critical for Gemini Realtime!)
+    participant = await ctx.wait_for_participant()
+    logger.info(f"👤 Participant joined: {participant.identity}")
+
+    # Pass session reference to assistant for dynamic updates
+    assistant.set_agent_session(session)
+    logger.info("🔗 Session reference passed to assistant for dynamic prompt updates")
+
+    # Pass context to assistant for emotion publishing via data channel
+    assistant._session_context = ctx
+    logger.info("😊 Context reference passed to assistant for emotion publishing")
+
+    # Set up music/story integration with session and context
+    try:
+        # Pass session and context to both audio players
+        audio_player.set_session(session)
+        audio_player.set_context(ctx)
+        unified_audio_player.set_session(session)
+        unified_audio_player.set_context(ctx)
+        logger.info("Audio players integrated with session and context")
+    except Exception as e:
+        logger.warning(f"Failed to integrate audio players with session/context: {e}")
+
+    # Start Gemini Realtime session with the room and agent
     await session.start(
-        agent=assistant,
         room=ctx.room,
-        room_options=room_options,
+        agent=assistant,
+        room_input_options=room_input_options,  # Keep room options for ESP32 audio config
     )
 
     # Start analytics session tracking
@@ -1086,31 +1185,7 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     init_elapsed_time = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"⚡ Total room initialization completed in {init_elapsed_time:.0f}ms")
 
-    # Pass session reference to assistant for dynamic updates
-    assistant.set_agent_session(session)
-    logger.info(
-        "🔗 Session reference passed to assistant for dynamic prompt updates")
-
-    # Pass context to assistant for emotion publishing via data channel
-    assistant._session_context = ctx
-    logger.info(
-        "😊 Context reference passed to assistant for emotion publishing")
-
-    # Set up music/story integration with session and context
-    try:
-        # Pass session and context to both audio players
-        audio_player.set_session(session)
-        audio_player.set_context(ctx)
-        unified_audio_player.set_session(session)
-        unified_audio_player.set_context(ctx)
-        logger.info("Audio players integrated with session and context")
-    except Exception as e:
-        logger.warning(
-            f"Failed to integrate audio players with session/context: {e}")
-
-    await ctx.connect()
-
-    logger.info("✅ Enhanced agent started successfully")
+    logger.info("✅ Gemini Realtime agent is LIVE!")
 
     # GREETING: Agent waits for start_greeting signal from MQTT gateway (via data channel)
     # This is triggered when ESP32 sends action: "start_agent" in playback_control message

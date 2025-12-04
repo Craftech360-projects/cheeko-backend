@@ -281,6 +281,14 @@ class ChatEventHandler:
                     f"🎵 Suppressing agent state change from {ev.old_state} to {ev.new_state} - music is playing")
                 return
 
+            # Skip listening → thinking for Gemini Realtime (no separate thinking phase)
+            old_state_str = str(ev.old_state).lower() if ev.old_state else ""
+            new_state_str = str(ev.new_state).lower() if ev.new_state else ""
+            if "listening" in old_state_str and "thinking" in new_state_str:
+                logger.info(
+                    f"🧠 Skipping listening → thinking state change (Gemini Realtime mode)")
+                return
+
             payload = json.dumps({
                 "type": "agent_state_changed",
                 "data": ev.model_dump()

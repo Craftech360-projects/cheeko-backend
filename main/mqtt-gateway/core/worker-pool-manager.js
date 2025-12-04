@@ -40,9 +40,6 @@ class WorkerPoolManager {
 
         // Ensure we start with at least minWorkers
         if (this.workerCount < this.minWorkers) {
-            console.log(
-                `⚠️  [WORKER-POOL] Starting with ${this.workerCount} workers, scaling to minWorkers (${this.minWorkers})`
-            );
             this.workerCount = this.minWorkers;
         }
 
@@ -62,21 +59,16 @@ class WorkerPoolManager {
             });
             worker.on("exit", (code) => {
                 if (code !== 0) {
-                    console.error(
-                        `❌ [WORKER-${i}] Exited with code ${code}, restarting...`
-                    );
+                    console.error(`❌ [WORKER-${i}] Exited with code ${code}, restarting...`);
                     this.restartWorker(i);
                 }
             });
 
             this.workers.push({ worker, id: i, active: true });
-            this.workerPendingCount.push(0); // Initialize pending count for this worker
-            console.log(`✅ [WORKER-POOL] Worker ${i} initialized`);
+            this.workerPendingCount.push(0);
         }
 
-        console.log(
-            `✅ [WORKER-POOL] Created pool with ${this.workerCount} workers`
-        );
+        // console.log(`✅ [WORKER-POOL] Created pool with ${this.workerCount} workers`);
     }
 
     restartWorker(index) {
@@ -96,7 +88,7 @@ class WorkerPoolManager {
             });
 
             this.workers[index] = { worker: newWorker, id: index, active: true };
-            console.log(`🔄 [WORKER-POOL] Worker ${index} restarted`);
+            // console.log(`🔄 [WORKER-POOL] Worker ${index} restarted`);
         }
     }
 
@@ -271,9 +263,7 @@ class WorkerPoolManager {
             return; // Already running
         }
 
-        console.log(
-            `🔄 [AUTO-SCALE] Starting dynamic scaling (${this.minWorkers}-${this.maxWorkers} workers)`
-        );
+        // console.log(`🔄 [AUTO-SCALE] Starting dynamic scaling (${this.minWorkers}-${this.maxWorkers} workers)`);
 
         this.scaleCheckTimer = setInterval(() => {
             this.checkAndScale();
@@ -287,7 +277,7 @@ class WorkerPoolManager {
         if (this.scaleCheckTimer) {
             clearInterval(this.scaleCheckTimer);
             this.scaleCheckTimer = null;
-            console.log("🛑 [AUTO-SCALE] Stopped dynamic scaling");
+            // console.log("🛑 [AUTO-SCALE] Stopped dynamic scaling");
         }
     }
 
@@ -343,9 +333,7 @@ class WorkerPoolManager {
         const currentCount = this.workers.length;
         const workersToAdd = targetCount - currentCount;
 
-        console.log(
-            `📈 [AUTO-SCALE] Scaling UP: ${currentCount} → ${targetCount} workers (+${workersToAdd})`
-        );
+        // console.log(`📈 [AUTO-SCALE] Scaling UP: ${currentCount} → ${targetCount} workers`);
 
         const workerPath = path.join(__dirname, "../audio-worker.js");
 
@@ -360,17 +348,13 @@ class WorkerPoolManager {
             });
             worker.on("exit", (code) => {
                 if (code !== 0) {
-                    console.error(
-                        `❌ [WORKER-${workerId}] Exited with code ${code}, restarting...`
-                    );
+                    console.error(`❌ [WORKER-${workerId}] Exited with code ${code}, restarting...`);
                     this.restartWorker(workerId);
                 }
             });
 
             this.workers.push({ worker, id: workerId, active: true });
             this.workerPendingCount.push(0);
-
-            console.log(`✅ [AUTO-SCALE] Worker ${workerId} added`);
         }
 
         this.lastScaleAction = Date.now();
@@ -387,9 +371,7 @@ class WorkerPoolManager {
         const currentCount = this.workers.length;
         const workersToRemove = currentCount - targetCount;
 
-        console.log(
-            `📉 [AUTO-SCALE] Scaling DOWN: ${currentCount} → ${targetCount} workers (-${workersToRemove})`
-        );
+        // console.log(`📉 [AUTO-SCALE] Scaling DOWN: ${currentCount} → ${targetCount} workers`);
 
         // Remove workers from the end (newest first)
         for (let i = 0; i < workersToRemove; i++) {
@@ -397,25 +379,18 @@ class WorkerPoolManager {
             const workerInfo = this.workers[workerIndex];
 
             // Wait for any pending operations on this worker
-            const maxWaitTime = 5000; // 5 seconds max wait
+            const maxWaitTime = 5000;
             const startWait = Date.now();
 
-            while (
-                this.workerPendingCount[workerIndex] > 0 &&
-                Date.now() - startWait < maxWaitTime
-            ) {
+            while (this.workerPendingCount[workerIndex] > 0 && Date.now() - startWait < maxWaitTime) {
                 await new Promise((resolve) => setTimeout(resolve, 100));
             }
 
             // Terminate worker
             try {
                 await workerInfo.worker.terminate();
-                console.log(`🗑️ [AUTO-SCALE] Worker ${workerInfo.id} removed`);
             } catch (error) {
-                console.error(
-                    `❌ [AUTO-SCALE] Error terminating worker ${workerInfo.id}:`,
-                    error
-                );
+                console.error(`❌ [AUTO-SCALE] Error terminating worker ${workerInfo.id}:`, error);
             }
 
             // Remove from arrays
@@ -437,34 +412,17 @@ class WorkerPoolManager {
         try {
             await Promise.all(
                 workersToInit.map((w) =>
-                    this.sendMessage(
-                        w.worker,
-                        {
-                            type: "init_encoder",
-                            data: { sampleRate: 24000, channels: 1 },
-                        },
-                        500
-                    )
+                    this.sendMessage(w.worker, { type: "init_encoder", data: { sampleRate: 24000, channels: 1 } }, 500)
                 )
             );
 
             await Promise.all(
                 workersToInit.map((w) =>
-                    this.sendMessage(
-                        w.worker,
-                        {
-                            type: "init_decoder",
-                            data: { sampleRate: 16000, channels: 1 },
-                        },
-                        500
-                    )
+                    this.sendMessage(w.worker, { type: "init_decoder", data: { sampleRate: 16000, channels: 1 } }, 500)
                 )
             );
 
-            console.log(
-                `✅ [AUTO-SCALE] New workers initialized (${startIndex}-${endIndex - 1
-                })`
-            );
+            // console.log(`✅ [AUTO-SCALE] New workers initialized (${startIndex}-${endIndex - 1})`);
         } catch (error) {
             console.error(`❌ [AUTO-SCALE] Failed to initialize new workers:`, error);
         }
@@ -475,7 +433,7 @@ class WorkerPoolManager {
     // ========================================
 
     async terminate() {
-        console.log("🛑 [WORKER-POOL] Terminating all workers...");
+        // console.log("🛑 [WORKER-POOL] Terminating all workers...");
 
         // Stop auto-scaling
         this.stopAutoScaling();
