@@ -69,7 +69,8 @@ from src.memory.mem0_provider import Mem0MemoryProvider
 from src.services.question_generator_service import QuestionGeneratorService
 from src.services.riddle_generator_service import RiddleGeneratorService
 
-logger = logging.getLogger("agent")
+# logger = logging.getLogger("agent")  # Now using Loki logger
+from src.utils.loki_agent_logger import logger
 
 
 async def delete_livekit_room(room_name: str):

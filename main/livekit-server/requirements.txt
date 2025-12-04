@@ -34,6 +34,10 @@ gtts
 pyttsx3
 
 silero-vad==6.2.0
+
 # Datadog monitoring and logging
 datadog-api-client
 ddtrace
+
+# Grafana Loki logging
+python-logging-loki>=0.3.1

@@ -6,7 +6,6 @@ from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List
-import logging
 import asyncio
 import os
 import json
@@ -20,13 +19,7 @@ from src.services.music_service import MusicService
 from src.services.story_service import StoryService
 from src.services.analytics_service import AnalyticsService
 from src.utils.model_cache import model_cache
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(name)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from src.utils.loki_bot_logger import logger
 
 load_dotenv(".env")
 
@@ -86,6 +79,12 @@ async def startup_event():
     await story_service.initialize()
 
     logger.info("✅ Media API services initialized")
+    
+    # Log Loki status
+    if os.getenv("LOKI_HOST"):
+        logger.info(f"✅ [LOGGING] Grafana Loki enabled. Sending logs to: {os.getenv('LOKI_HOST')}")
+    else:
+        logger.warning("⚠️ [LOGGING] Grafana Loki NOT configured. Logs will only be saved locally.")
 
 
 class StartMusicBotRequest(BaseModel):
