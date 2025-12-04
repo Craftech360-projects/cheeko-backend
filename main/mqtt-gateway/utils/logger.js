@@ -37,14 +37,14 @@ const logger = winston.createLogger({
 // 3. Loki Transport (Only if configured)
 if (process.env.LOKI_HOST) {
     console.log('🔧 [LOKI] Initializing Loki transport...');
-    
+
     const lokiTransport = new LokiTransport({
         host: process.env.LOKI_HOST,
         basicAuth: `${process.env.LOKI_USER}:${process.env.LOKI_PASSWORD}`,
         labels: { app: 'mqtt-gateway' },
         json: true,
         batching: true,
-        interval: 1000, // Send batches every 1 second
+        interval: 500, // Send batches every 0.5 seconds (faster than default 1s)
         timeout: 30000, // 30 second timeout
         onConnectionError: (err) => {
             console.error('❌ [LOKI] Connection error:', err.message);
@@ -57,7 +57,7 @@ if (process.env.LOKI_HOST) {
         console.error('❌ [LOKI] Transport error:', err.message);
         console.error('❌ [LOKI] Full error:', err);
     });
-    
+
     lokiTransport.on('warn', (warning) => {
         console.warn('⚠️ [LOKI] Transport warning:', warning);
     });
@@ -65,7 +65,7 @@ if (process.env.LOKI_HOST) {
     lokiTransport.on('logged', (info) => {
         // Log queued for batching (debug disabled)
     });
-    
+
     // Add batch sent confirmation (if available)
     if (lokiTransport.on) {
         lokiTransport.on('batch', (batch) => {
@@ -75,12 +75,12 @@ if (process.env.LOKI_HOST) {
 
     logger.add(lokiTransport);
     console.log('✅ [LOKI] Transport added to logger');
-    
+
     // Register logger with console override (if it exists)
     if (global.setConsoleLogger) {
         global.setConsoleLogger(logger);
     }
-    
+
     // Test the transport immediately
     setTimeout(() => {
         logger.info('🧪 [LOKI-TEST] Transport test log from main app');
@@ -101,7 +101,7 @@ if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
             }
         }, 0);
     };
-    
+
     console.warn = (...args) => {
         originalConsole.warn(...args);
         setTimeout(() => {
@@ -110,7 +110,7 @@ if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
             }
         }, 0);
     };
-    
+
     console.error = (...args) => {
         originalConsole.error(...args);
         setTimeout(() => {
@@ -119,7 +119,7 @@ if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
             }
         }, 0);
     };
-    
+
     originalConsole.log('🔧 [LOKI] Console override enabled - console.log will also go to Loki');
 }
 
