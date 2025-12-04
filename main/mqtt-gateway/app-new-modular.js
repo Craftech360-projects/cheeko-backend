@@ -10,6 +10,9 @@
 // ================================
 require("dotenv").config();
 
+// Load console override FIRST (before any other modules)
+require("./utils/console-override");
+
 const { validateCerebriumToken } = require("./core/media-api-client");
 const { initializeOpus } = require("./core/opus-initializer");
 const { setupDebugLogger } = require("./utils/debug-logger");

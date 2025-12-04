@@ -3,6 +3,13 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 const LokiTransport = require('winston-loki');
 require('dotenv').config();
 
+// Store original console methods before any overrides
+const originalConsole = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error
+};
+
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
     format: winston.format.combine(
@@ -69,6 +76,11 @@ if (process.env.LOKI_HOST) {
     logger.add(lokiTransport);
     console.log('✅ [LOKI] Transport added to logger');
     
+    // Register logger with console override (if it exists)
+    if (global.setConsoleLogger) {
+        global.setConsoleLogger(logger);
+    }
+    
     // Test the transport immediately
     setTimeout(() => {
         logger.info('🧪 [LOKI-TEST] Transport test log from main app');
@@ -78,28 +90,37 @@ if (process.env.LOKI_HOST) {
     console.log('⚠️ [LOKI] No LOKI_HOST found, skipping Loki transport');
 }
 
-// Optional: Override console.log to send to Loki as well
+// Override console methods to send to Loki as well (if enabled)
 if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
-    const originalConsoleLog = console.log;
-    const originalConsoleWarn = console.warn;
-    const originalConsoleError = console.error;
-    
     console.log = (...args) => {
-        originalConsoleLog(...args); // Still show in terminal
-        logger.info(args.join(' ')); // Also send to Loki
+        originalConsole.log(...args); // Still show in terminal
+        // Use setTimeout to ensure logger is ready
+        setTimeout(() => {
+            if (logger && logger.info) {
+                logger.info(args.join(' ')); // Also send to Loki
+            }
+        }, 0);
     };
     
     console.warn = (...args) => {
-        originalConsoleWarn(...args);
-        logger.warn(args.join(' '));
+        originalConsole.warn(...args);
+        setTimeout(() => {
+            if (logger && logger.warn) {
+                logger.warn(args.join(' '));
+            }
+        }, 0);
     };
     
     console.error = (...args) => {
-        originalConsoleError(...args);
-        logger.error(args.join(' '));
+        originalConsole.error(...args);
+        setTimeout(() => {
+            if (logger && logger.error) {
+                logger.error(args.join(' '));
+            }
+        }, 0);
     };
     
-    console.log('🔧 [LOKI] Console override enabled - console.log will also go to Loki');
+    originalConsole.log('🔧 [LOKI] Console override enabled - console.log will also go to Loki');
 }
 
 module.exports = logger;
