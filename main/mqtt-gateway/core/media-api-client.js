@@ -1,14 +1,20 @@
 /**
  * Media API Client Configuration
- * 
+ *
  * Cerebrium API configuration for music and story bot integration.
  * Handles authentication and axios configuration.
  */
 
-// Cerebrium API base URL
+// Ensure dotenv is loaded before reading env vars
+require('dotenv').config();
+
+// Media API base URL (local or Cerebrium)
 const MEDIA_API_BASE =
     process.env.MEDIA_API_BASE ||
     "https://api.aws.us-east-1.cerebrium.ai/v4/p-89052e36/livekit-server-simple";
+
+// Log which API base is being used
+console.log(`🔗 [MEDIA-API] Using base URL: ${MEDIA_API_BASE}`);
 
 // Cerebrium authentication token (required for API calls)
 const CEREBRIUM_TOKEN = process.env.CEREBRIUM_API_TOKEN;

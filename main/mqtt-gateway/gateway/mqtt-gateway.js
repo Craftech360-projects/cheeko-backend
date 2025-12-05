@@ -531,7 +531,9 @@ class MQTTGateway {
         // logger.info(`❓ [MQTT IN] Message on unexpected topic format: ${topic}`);
       }
     } catch (error) {
-      logger.error("❌ [MQTT IN] Error processing MQTT message:", error.message);
+      logger.error(`❌ [MQTT IN] Error processing MQTT message: ${error.message}`);
+      logger.error(`❌ [MQTT IN] Stack trace: ${error.stack}`);
+      logger.error(`❌ [MQTT IN] Topic: ${topic}, Raw message: ${message.toString().substring(0, 200)}`);
     }
   }
 

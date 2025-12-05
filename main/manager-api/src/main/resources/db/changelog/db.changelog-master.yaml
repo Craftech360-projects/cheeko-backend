@@ -655,14 +655,6 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/202511261230_word_ladder_initial_greeting_fix.sql
 
-#   - changeSet:
-#       id: 202511271500
-#       author: claude
-#       changes:
-#         - sqlFile:
-#             encoding: utf8
-#             path: classpath:db/changelog/202511271500_add_funasr_websocket_stt.sql
-
   - changeSet:
       id: 202511291430
       author: claude
@@ -670,3 +662,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202511291430_update_all_prompts.sql
+        
+  - changeSet:
+      id: 202511291434
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511291434.sql

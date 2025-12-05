@@ -1161,11 +1161,11 @@ class Assistant(FilteredAgent):
                 logger.warning(f"Failed to send music start signal: {e}")
 
             # Start playing the song through TTS channel - this will queue it
+            # Note: play_from_url has a built-in delay to let agent speak first
             await player.play_from_url(song['url'], song['title'])
 
-            # Return special instruction to suppress immediate response
-            # The agent should stay silent while music plays
-            return "[MUSIC_PLAYING - STAY_SILENT]"
+            # Return song info - agent will speak this BEFORE music starts (due to delay in player)
+            return f"Now playing {song['title']}. Enjoy the music!"
 
         except Exception as e:
             logger.error(f"Error playing music: {e}")
@@ -1798,9 +1798,8 @@ class Assistant(FilteredAgent):
             # Start playing the story through TTS channel
             await player.play_from_url(story['url'], story['title'])
 
-            # Return special instruction to suppress immediate response
-            # The agent should stay silent while story plays
-            return "[STORY_PLAYING - STAY_SILENT]"
+            # Return story info - agent will speak this BEFORE story starts (due to delay in player)
+            return f"Here comes {story['title']}. Get cozy!"
 
         except Exception as e:
             logger.error(f"Error playing story: {e}")

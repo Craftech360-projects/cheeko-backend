@@ -478,133 +478,193 @@ class StreamingAudioIterator:
             pass
 
     async def _produce_frames(self):
-        """Background task: Download MP3 chunks, convert to PCM, create LiveKit frames"""
-        try:
-            logger.info(f"🎵 Starting progressive download: {self.title}")
+        """Background task: Download MP3 chunks, convert to PCM, create LiveKit frames
 
-            # Start streaming download from CDN
-            self.session = aiohttp.ClientSession()
-            async with self.session.get(self.cdn_url, timeout=aiohttp.ClientTimeout(total=300)) as response:
-                if response.status != 200:
-                    raise Exception(f"CDN returned status {response.status}")
+        ROBUST STREAMING for long files (25+ min stories):
+        - No timeouts on read operations
+        - Retry logic with exponential backoff for transient failures
+        - Graceful handling of network interruptions
+        """
+        max_retries = 3
+        retry_delay = 2  # seconds, doubles each retry
 
-                # MP3 decoding state
-                mp3_buffer = bytearray()
-                chunk_count = 0
-                total_bytes = 0
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"🎵 Starting progressive download: {self.title}" +
+                           (f" (attempt {attempt + 1}/{max_retries})" if attempt > 0 else ""))
 
-                # LiveKit audio parameters
-                sample_rate = 48000
-                frame_duration_ms = 20
-                samples_per_frame = sample_rate * frame_duration_ms // 1000  # 960 samples
+                # ROBUST STREAMING: No timeouts for long files (25+ min stories)
+                # total=None: no overall timeout (can stream for hours)
+                # sock_read=None: no read timeout between chunks
+                # sock_connect=60: 60 second connection timeout
+                timeout = aiohttp.ClientTimeout(total=None, sock_read=None, sock_connect=60)
+                self.session = aiohttp.ClientSession(
+                    timeout=timeout,
+                    connector=aiohttp.TCPConnector(
+                        limit=1,  # Single connection
+                        force_close=False,  # Keep connection alive
+                        enable_cleanup_closed=True
+                    )
+                )
 
-                # Download and process chunks
-                async for chunk in response.content.iter_chunked(self.chunk_size):
-                    if self.stop_event or self.is_closed:
-                        logger.info("⏹️ Stop/skip event triggered, halting download")
-                        break
+                async with self.session.get(self.cdn_url) as response:
+                    if response.status != 200:
+                        raise Exception(f"CDN returned status {response.status}")
 
-                    chunk_count += 1
-                    total_bytes += len(chunk)
-                    mp3_buffer.extend(chunk)
+                    # Get content length for progress tracking
+                    content_length = response.headers.get('Content-Length')
+                    if content_length:
+                        total_size_mb = int(content_length) / (1024 * 1024)
+                        logger.info(f"📁 File size: {total_size_mb:.2f} MB")
 
-                    # Try to decode accumulated MP3 data
-                    try:
-                        # Attempt to decode the buffer as MP3
-                        audio_segment = AudioSegment.from_mp3(io.BytesIO(bytes(mp3_buffer)))
+                    # MP3 decoding state
+                    mp3_buffer = bytearray()
+                    chunk_count = 0
+                    total_bytes = 0
+                    frames_produced = 0
 
-                        # Convert to LiveKit format: 48kHz, mono, 16-bit
-                        audio_segment = audio_segment.set_frame_rate(sample_rate)
-                        audio_segment = audio_segment.set_channels(1)
-                        audio_segment = audio_segment.set_sample_width(2)  # 16-bit
+                    # LiveKit audio parameters
+                    sample_rate = 48000
+                    frame_duration_ms = 20
+                    samples_per_frame = sample_rate * frame_duration_ms // 1000  # 960 samples
 
-                        # Get raw PCM data
-                        raw_pcm = audio_segment.raw_data
+                    # Download and process chunks
+                    async for chunk in response.content.iter_chunked(self.chunk_size):
+                        if self.stop_event or self.is_closed:
+                            logger.info("⏹️ Stop/skip event triggered, halting download")
+                            break
 
-                        # Clear buffer since we successfully decoded
-                        mp3_buffer.clear()
+                        chunk_count += 1
+                        total_bytes += len(chunk)
+                        mp3_buffer.extend(chunk)
 
-                        # Split PCM into LiveKit frames (20ms each = 960 samples)
-                        total_samples = len(raw_pcm) // 2  # 16-bit = 2 bytes per sample
-                        total_frames = total_samples // samples_per_frame
+                        # Try to decode accumulated MP3 data
+                        try:
+                            # Attempt to decode the buffer as MP3
+                            audio_segment = AudioSegment.from_mp3(io.BytesIO(bytes(mp3_buffer)))
 
-                        for frame_num in range(total_frames):
-                            if self.stop_event or self.is_closed:
-                                break
+                            # Convert to LiveKit format: 48kHz, mono, 16-bit
+                            audio_segment = audio_segment.set_frame_rate(sample_rate)
+                            audio_segment = audio_segment.set_channels(1)
+                            audio_segment = audio_segment.set_sample_width(2)  # 16-bit
 
-                            # Extract frame data
-                            start_byte = frame_num * samples_per_frame * 2
-                            end_byte = start_byte + (samples_per_frame * 2)
-                            frame_data = raw_pcm[start_byte:end_byte]
+                            # Get raw PCM data
+                            raw_pcm = audio_segment.raw_data
 
-                            # Pad if necessary
-                            if len(frame_data) < samples_per_frame * 2:
-                                frame_data += b'\x00' * (samples_per_frame * 2 - len(frame_data))
-
-                            # Create LiveKit AudioFrame
-                            livekit_frame = rtc.AudioFrame(
-                                data=frame_data,
-                                sample_rate=sample_rate,
-                                num_channels=1,
-                                samples_per_channel=samples_per_frame
-                            )
-
-                            # Add to queue (blocks if queue is full - provides backpressure)
-                            await self.frame_queue.put(livekit_frame)
-
-                        # Log progress periodically
-                        if chunk_count % 10 == 0:
-                            mb_downloaded = total_bytes / (1024 * 1024)
-                            logger.info(f"   📥 Downloaded {mb_downloaded:.2f} MB ({chunk_count} chunks)")
-
-                    except Exception as decode_error:
-                        # Incomplete MP3 frame - need more data
-                        # Keep accumulating in mp3_buffer
-                        if len(mp3_buffer) > 10 * 1024 * 1024:  # Safety: clear if buffer > 10MB
-                            logger.warning(f"⚠️ MP3 buffer too large ({len(mp3_buffer)} bytes), clearing")
+                            # Clear buffer since we successfully decoded
                             mp3_buffer.clear()
-                        continue
 
-                # Process any remaining buffered data
-                if len(mp3_buffer) > 0 and not self.stop_event and not self.is_closed:
-                    try:
-                        audio_segment = AudioSegment.from_mp3(io.BytesIO(bytes(mp3_buffer)))
-                        audio_segment = audio_segment.set_frame_rate(sample_rate).set_channels(1).set_sample_width(2)
-                        raw_pcm = audio_segment.raw_data
+                            # Split PCM into LiveKit frames (20ms each = 960 samples)
+                            total_samples = len(raw_pcm) // 2  # 16-bit = 2 bytes per sample
+                            total_frames = total_samples // samples_per_frame
 
-                        # Convert remaining PCM to frames
-                        total_samples = len(raw_pcm) // 2
-                        total_frames = total_samples // samples_per_frame
+                            for frame_num in range(total_frames):
+                                if self.stop_event or self.is_closed:
+                                    break
 
-                        for frame_num in range(total_frames):
-                            start_byte = frame_num * samples_per_frame * 2
-                            end_byte = start_byte + (samples_per_frame * 2)
-                            frame_data = raw_pcm[start_byte:end_byte]
+                                # Extract frame data
+                                start_byte = frame_num * samples_per_frame * 2
+                                end_byte = start_byte + (samples_per_frame * 2)
+                                frame_data = raw_pcm[start_byte:end_byte]
 
-                            if len(frame_data) < samples_per_frame * 2:
-                                frame_data += b'\x00' * (samples_per_frame * 2 - len(frame_data))
+                                # Pad if necessary
+                                if len(frame_data) < samples_per_frame * 2:
+                                    frame_data += b'\x00' * (samples_per_frame * 2 - len(frame_data))
 
-                            livekit_frame = rtc.AudioFrame(
-                                data=frame_data,
-                                sample_rate=sample_rate,
-                                num_channels=1,
-                                samples_per_channel=samples_per_frame
-                            )
-                            await self.frame_queue.put(livekit_frame)
-                    except:
-                        pass  # Ignore final incomplete data
+                                # Create LiveKit AudioFrame
+                                livekit_frame = rtc.AudioFrame(
+                                    data=frame_data,
+                                    sample_rate=sample_rate,
+                                    num_channels=1,
+                                    samples_per_channel=samples_per_frame
+                                )
 
-                logger.info(f"✅ Download complete: {total_bytes / (1024 * 1024):.2f} MB")
+                                # Add to queue (blocks if queue is full - provides backpressure)
+                                await self.frame_queue.put(livekit_frame)
+                                frames_produced += 1
 
-        except Exception as e:
-            logger.error(f"❌ Error in streaming producer: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
+                            # Log progress periodically
+                            if chunk_count % 10 == 0:
+                                mb_downloaded = total_bytes / (1024 * 1024)
+                                duration_mins = (frames_produced * 20) / (1000 * 60)  # 20ms per frame
+                                progress = ""
+                                if content_length:
+                                    pct = (total_bytes / int(content_length)) * 100
+                                    progress = f" ({pct:.1f}%)"
+                                logger.info(f"   📥 Downloaded {mb_downloaded:.2f} MB{progress} | {duration_mins:.1f} min streamed")
+
+                        except Exception as decode_error:
+                            # Incomplete MP3 frame - need more data
+                            # Keep accumulating in mp3_buffer
+                            if len(mp3_buffer) > 10 * 1024 * 1024:  # Safety: clear if buffer > 10MB
+                                logger.warning(f"⚠️ MP3 buffer too large ({len(mp3_buffer)} bytes), clearing")
+                                mp3_buffer.clear()
+                            continue
+
+                    # Process any remaining buffered data
+                    if len(mp3_buffer) > 0 and not self.stop_event and not self.is_closed:
+                        try:
+                            audio_segment = AudioSegment.from_mp3(io.BytesIO(bytes(mp3_buffer)))
+                            audio_segment = audio_segment.set_frame_rate(sample_rate).set_channels(1).set_sample_width(2)
+                            raw_pcm = audio_segment.raw_data
+
+                            # Convert remaining PCM to frames
+                            total_samples = len(raw_pcm) // 2
+                            total_frames = total_samples // samples_per_frame
+
+                            for frame_num in range(total_frames):
+                                start_byte = frame_num * samples_per_frame * 2
+                                end_byte = start_byte + (samples_per_frame * 2)
+                                frame_data = raw_pcm[start_byte:end_byte]
+
+                                if len(frame_data) < samples_per_frame * 2:
+                                    frame_data += b'\x00' * (samples_per_frame * 2 - len(frame_data))
+
+                                livekit_frame = rtc.AudioFrame(
+                                    data=frame_data,
+                                    sample_rate=sample_rate,
+                                    num_channels=1,
+                                    samples_per_channel=samples_per_frame
+                                )
+                                await self.frame_queue.put(livekit_frame)
+                                frames_produced += 1
+                        except:
+                            pass  # Ignore final incomplete data
+
+                    total_duration_mins = (frames_produced * 20) / (1000 * 60)
+                    logger.info(f"✅ Download complete: {total_bytes / (1024 * 1024):.2f} MB | {total_duration_mins:.1f} min total")
+
+                    # Success - break out of retry loop
+                    break
+
+            except (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError) as e:
+                logger.warning(f"⚠️ Network error during streaming (attempt {attempt + 1}/{max_retries}): {e}")
+                if self.session:
+                    await self.session.close()
+                    self.session = None
+
+                if attempt < max_retries - 1 and not self.stop_event and not self.is_closed:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.info(f"🔄 Retrying in {wait_time} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"❌ Failed after {max_retries} attempts")
+                    break
+
+            except Exception as e:
+                logger.error(f"❌ Error in streaming producer: {e}")
+                import traceback
+                traceback.print_exc()
+                break
+
+        # Cleanup
+        try:
             # Signal end of stream
             await self.frame_queue.put(None)
             if self.session:
                 await self.session.close()
+        except:
+            pass
 
     async def __anext__(self):
         """Return next audio frame when ready"""

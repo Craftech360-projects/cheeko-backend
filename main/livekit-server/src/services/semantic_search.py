@@ -274,13 +274,13 @@ class QdrantSemanticSearch:
                     # Generate query embedding for true semantic search
                     query_embedding = self._get_embedding(query)
                     if query_embedding:
-                        search_result = self.client.search(
+                        search_result = self.client.query_points(
                             collection_name=self.config["music_collection"],
-                            query_vector=query_embedding,
+                            query=query_embedding,
                             limit=limit * 3,  # Get more results for filtering
                             with_payload=True,
                             score_threshold=0.3  # Lower threshold for better recall
-                        )
+                        ).points
                         
                         # Convert to our result format
                         results = []
@@ -487,13 +487,13 @@ class QdrantSemanticSearch:
 
             # First try vector similarity search
             try:
-                search_result = self.client.search(
+                search_result = self.client.query_points(
                     collection_name=self.config["stories_collection"],
-                    query_vector=query_embedding,
+                    query=query_embedding,
                     limit=limit * 3,  # Get more results for filtering
                     with_payload=True,
                     score_threshold=0.3  # Lower threshold for better recall
-                )
+                ).points
                 
                 # Convert to our result format
                 results = []

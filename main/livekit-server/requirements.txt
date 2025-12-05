@@ -16,8 +16,8 @@ uvicorn[standard]>=0.24.0
 # TTS  # Coqui TTS for local text-to-speech
 
 # Optional dependencies for enhanced semantic search
-qdrant-client
-sentence-transformers
+qdrant-client>=1.15.1
+sentence-transformers>=2.2.0
 
 # EdgeTTS support (uses Microsoft servers but can work offline)
 edge-tts==7.0.2

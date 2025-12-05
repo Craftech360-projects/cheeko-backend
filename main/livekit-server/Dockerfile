@@ -61,7 +61,7 @@ RUN python -m pip install --user --no-cache-dir \
     'mem0ai==1.0.0' \
     'jinja2' \
     'pytz' \
-    'qdrant-client>=1.7.0' \
+    'qdrant-client>=1.15.1' \
     'sentence-transformers>=2.2.0' \
     'uvicorn[standard]'
 

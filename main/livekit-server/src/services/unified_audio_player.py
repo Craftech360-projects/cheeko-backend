@@ -126,24 +126,19 @@ class UnifiedAudioPlayer:
 
             await self.stop()  # Stop any current playback and wait for full cancellation
 
-            # CRITICAL: Small delay to ensure LiveKit session clears its internal audio buffer
-            # Without this, old audio frames may still be in the pipeline
-            await asyncio.sleep(0.2)
-            logger.info(f"🎵 UNIFIED: Audio pipeline cleared, starting playback: {title}")
-
-            logger.info(f"🎵 UNIFIED: Starting playback: {title}")
+            logger.info(f"🎵 UNIFIED: Scheduling playback for: {title}")
             self.is_playing = True
             self.stop_event.clear()
 
             # Set global music state
             audio_state_manager.set_music_playing(True, title)
 
-            # Start playback task (non-blocking)
+            # Start playback task (non-blocking) - delay happens INSIDE the task
+            # This allows the tool to return immediately so LLM can speak FIRST
             self.current_task = asyncio.create_task(self._play_via_session_say(url, title))
 
-            # Return immediately - don't wait for completion to avoid blocking the agent
-            # The agent function should return empty string to avoid TTS interference
-            logger.info(f"🎵 UNIFIED: Started playback task for: {title}")
+            # Return immediately - LLM will speak its response, then music starts after delay
+            logger.info(f"🎵 UNIFIED: Scheduled playback task for: {title}")
             return f"Started playing {title}"
 
     async def _play_via_session_say(self, url: str, title: str):
@@ -152,6 +147,18 @@ class UnifiedAudioPlayer:
             if not self.session:
                 logger.error("No session available for playback")
                 return
+
+            # CRITICAL: Wait for agent to finish speaking FIRST
+            # This delay allows the LLM to generate and speak its response before music starts
+            logger.info(f"🎵 UNIFIED: Waiting 4 seconds for agent to speak before playing: {title}")
+            await asyncio.sleep(4.0)
+
+            # Check if playback was cancelled during the delay
+            if self.stop_event.is_set():
+                logger.info(f"🎵 UNIFIED: Playback cancelled during delay: {title}")
+                return
+
+            logger.info(f"🎵 UNIFIED: Agent speech window complete, now starting: {title}")
 
             # Stream and convert audio to frames (NEW: no full download!)
             audio_frames = await self._stream_download_and_convert(url, title)
@@ -166,10 +173,11 @@ class UnifiedAudioPlayer:
 
                 try:
                     # Use session.say() with audio frames - NO TEXT to avoid TTS before music!
+                    # allow_interruptions=False prevents LLM responses from stopping the music
                     speech_handle = self.session.say(
                         text="",  # EMPTY TEXT - no TTS before music!
                         audio=audio_frames,  # Pre-recorded audio to play
-                        allow_interruptions=True,  # Allow user to interrupt
+                        allow_interruptions=False,  # Don't let LLM responses interrupt music
                         add_to_chat_ctx=False  # Don't add music to chat context
                     )
 
