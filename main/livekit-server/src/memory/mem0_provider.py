@@ -136,9 +136,9 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
         """
         try:
             logger.info(f"💭 Getting all memories for user: {self.role_id}")
-            # Mem0 API v2 requires filters parameter with user_id
+            # Mem0 API requires user_id as direct parameter (not inside filters)
             results = self.client.get_all(
-                filters={"user_id": self.role_id}
+                user_id=self.role_id
             )
 
             # Handle both list response and dict with "results" key
