@@ -173,29 +173,59 @@ async def entrypoint(ctx: JobContext):
         f"🎙️ Initializing Gemini Realtime (model: {GEMINI_MODEL}, voice: {GEMINI_VOICE})..."
     )
 
-    # VAD configuration optimized for kids' voices
-    vad_config = types.RealtimeInputConfig(
-        automatic_activity_detection=types.AutomaticActivityDetection(
-            disabled=False,
-            start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-            end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-            prefix_padding_ms=10,
-            silence_duration_ms=200,
+    # Check if Push-to-Talk mode is enabled
+    ptt_mode = os.getenv("PTT_MODE", "auto").lower() == "manual"
+    logger.info(f"🎤 PTT Mode: {ptt_mode}")
+
+    # VAD configuration - optimized for PTT or auto mode
+    if ptt_mode:
+        # PTT Mode: Keep VAD enabled but with longer silence detection
+        # Gemini needs VAD to process audio - PTT controls when audio is sent
+        vad_config = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                disabled=False,
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                prefix_padding_ms=100,
+                silence_duration_ms=1500,  # Longer silence before ending turn
+            )
         )
-    )
+    else:
+        # Auto Mode: VAD optimized for kids' voices
+        vad_config = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                disabled=False,
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                prefix_padding_ms=10,
+                silence_duration_ms=200,
+            )
+        )
 
     # Enable Google Search for real-time information
     google_search = types.GoogleSearch()
 
-    session = AgentSession(
-        llm=google.realtime.RealtimeModel(
-            model=GEMINI_MODEL,
-            voice=GEMINI_VOICE,
-            temperature=GEMINI_TEMPERATURE,
-            realtime_input_config=vad_config,
-            _gemini_tools=[google_search],
-        ),
+    # Create Gemini Realtime model
+    realtime_model = google.realtime.RealtimeModel(
+        model=GEMINI_MODEL,
+        voice=GEMINI_VOICE,
+        temperature=GEMINI_TEMPERATURE,
+        realtime_input_config=vad_config,
+        _gemini_tools=[google_search],
     )
+
+    # Create AgentSession with appropriate turn detection mode
+    if ptt_mode:
+        session = AgentSession(
+            llm=realtime_model,
+            turn_detection="manual",  # Manual turn control for PTT
+        )
+        logger.info("🎤 [PTT] AgentSession created with turn_detection='manual'")
+    else:
+        session = AgentSession(
+            llm=realtime_model,
+        )
+        logger.info("🎤 [AUTO] AgentSession created with automatic turn detection")
 
     
     # Set session and context on audio player (needed for playback to work)
@@ -272,6 +302,28 @@ async def entrypoint(ctx: JobContext):
             logger.info(f"📢 speech_created event emitted")
         except Exception as e:
             logger.error(f"Failed to emit speech_created: {e}")
+
+    # Hook into user_input_transcribed to log when user speaks
+    @session.on("user_input_transcribed")
+    def on_user_input_transcribed(ev):
+        """Log user transcripts (only final ones)"""
+        try:
+            # Skip partial transcripts
+            if hasattr(ev, 'is_final') and not ev.is_final:
+                return
+
+            transcript = getattr(ev, 'transcript', None) or getattr(ev, 'text', None) or str(ev)
+            logger.info(f"👤 User said: {transcript}")
+
+            # Emit via data channel for gateway
+            payload = json.dumps({
+                "type": "user_input_transcribed",
+                "data": {"transcript": transcript, "is_final": True}
+            })
+            asyncio.create_task(ctx.room.local_participant.publish_data(
+                payload.encode("utf-8"), reliable=True))
+        except Exception as e:
+            logger.error(f"❌ Error in user_input_transcribed handler: {e}")
 
     # Hook into agent_state_changed to emit speech_created when agent starts speaking
     # This is needed because Gemini Realtime doesn't fire agent_speech_started events
@@ -412,6 +464,93 @@ async def entrypoint(ctx: JobContext):
     )
 
     logger.info("✅ Gemini Realtime agent is LIVE!")
+
+    # ============================================================================
+    # PUSH-TO-TALK RPC METHODS
+    # ============================================================================
+    # These methods allow the MQTT gateway to control audio input for PTT mode
+
+    if ptt_mode:
+        # Disable audio input by default - wait for start_turn RPC
+        try:
+            session.input.set_audio_enabled(False)
+            logger.info("🎤 [PTT] Audio input disabled by default - waiting for start_turn RPC")
+        except Exception as e:
+            logger.warning(f"⚠️ [PTT] Could not disable audio input: {e}")
+
+    @ctx.room.local_participant.register_rpc_method("start_turn")
+    async def start_turn(data: rtc.RpcInvocationData):
+        """Handle PTT start - enable audio input and prepare for user speech"""
+        logger.info("🎤 [PTT] start_turn RPC received - enabling audio input")
+        try:
+            # Interrupt any current agent speech
+            if hasattr(session, 'interrupt'):
+                session.interrupt()
+                logger.info("🎤 [PTT] Interrupted current speech")
+
+            # Clear any pending user turn
+            if hasattr(session, 'clear_user_turn'):
+                session.clear_user_turn()
+                logger.info("🎤 [PTT] Cleared user turn")
+
+            # Enable audio input
+            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                session.input.set_audio_enabled(True)
+                logger.info("✅ [PTT] Audio input enabled, ready to receive speech")
+            else:
+                logger.warning("⚠️ [PTT] session.input.set_audio_enabled not available")
+
+            return "ok"
+        except Exception as e:
+            logger.error(f"❌ [PTT] start_turn failed: {e}")
+            import traceback
+            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
+            return f"error: {e}"
+
+    @ctx.room.local_participant.register_rpc_method("end_turn")
+    async def end_turn(data: rtc.RpcInvocationData):
+        """Handle PTT end - let Gemini's VAD detect silence and respond naturally."""
+        logger.info("🎤 [PTT] end_turn RPC received - letting Gemini VAD handle turn end")
+        try:
+            # DON'T disable audio immediately - let Gemini's VAD detect the silence
+            # The silence_duration_ms=1500 setting will trigger turn end after 1.5s of silence
+            logger.info("🎤 [PTT] Waiting for Gemini VAD to detect silence...")
+
+            # Optionally disable audio after a longer delay (after Gemini should have responded)
+            async def delayed_disable():
+                await asyncio.sleep(3.0)  # Wait 3 seconds for Gemini to process
+                if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                    # Only disable if still enabled (might have been disabled by cancel_turn)
+                    session.input.set_audio_enabled(False)
+                    logger.info("🎤 [PTT] Audio input disabled after delay")
+
+            asyncio.create_task(delayed_disable())
+
+            return "ok"
+        except Exception as e:
+            logger.error(f"❌ [PTT] end_turn failed: {e}")
+            import traceback
+            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
+            return f"error: {e}"
+
+    @ctx.room.local_participant.register_rpc_method("cancel_turn")
+    async def cancel_turn(data: rtc.RpcInvocationData):
+        """Handle PTT cancel - disable audio and discard user turn"""
+        logger.info("🎤 [PTT] cancel_turn RPC received - canceling turn")
+        try:
+            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                session.input.set_audio_enabled(False)
+            if hasattr(session, 'clear_user_turn'):
+                session.clear_user_turn()
+            logger.info("✅ [PTT] Turn canceled")
+            return "ok"
+        except Exception as e:
+            logger.error(f"❌ [PTT] cancel_turn failed: {e}")
+            import traceback
+            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
+            return f"error: {e}"
+
+    logger.info("🎤 [PTT] Push-to-talk RPC methods registered")
 
 
 if __name__ == "__main__":

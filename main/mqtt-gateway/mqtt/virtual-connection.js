@@ -514,15 +514,71 @@ class VirtualMQTTConnection {
       };
       this.sendMqttMessage(JSON.stringify(helloResponseMsg));
 
-      // Send ready_for_greeting (room created, waiting for agent deployment)
-      this.sendMqttMessage(
-        JSON.stringify({
-          type: "ready_for_greeting",
-          session_id: this.udp.session_id,
-          timestamp: Date.now(),
-        })
-      );
-      console.log(`✅ [READY] Room ready. Press 's' to deploy agent.`);
+      // AUTO-DEPLOY AGENT: Dispatch agent immediately for conversation mode
+      if (this.roomType === "conversation" && this.gateway?.agentDispatchClient) {
+        const roomName = this.bridge?.room?.name || this.udp.session_id;
+        console.log(`🚀 [AUTO-DEPLOY] Dispatching agent to room: ${roomName}`);
+
+        try {
+          await this.gateway.agentDispatchClient.createDispatch(roomName, 'cheeko-agent', {
+            metadata: JSON.stringify({
+              device_mac: this.macAddress,
+              device_uuid: this.deviceId,
+              timestamp: Date.now()
+            })
+          });
+          console.log(`✅ [AUTO-DEPLOY] Agent dispatched to room: ${roomName}`);
+          this.bridge.agentDeployed = true;
+
+          // Wait for agent to join and then trigger initial greeting
+          console.log(`⏳ [AUTO-DEPLOY] Waiting for agent to join...`);
+          const agentJoinTimeout = 6000; // 6 seconds
+          const agentReady = await this.bridge.waitForAgentJoin(agentJoinTimeout);
+
+          if (agentReady) {
+            console.log(`✅ [AUTO-DEPLOY] Agent joined, sending start_greeting...`);
+
+            // Send start_greeting to agent via data channel
+            const startGreetingMsg = {
+              type: "start_greeting",
+              session_id: this.udp.session_id,
+              is_mode_switch: false,
+              timestamp: Date.now()
+            };
+
+            const messageString = JSON.stringify(startGreetingMsg);
+            const messageData = new Uint8Array(Buffer.from(messageString, 'utf8'));
+
+            await this.bridge.room.localParticipant.publishData(messageData, { reliable: true });
+            console.log(`✅ [AUTO-DEPLOY] start_greeting sent to agent`);
+          } else {
+            console.warn(`⚠️ [AUTO-DEPLOY] Agent join timeout, but continuing...`);
+          }
+        } catch (dispatchError) {
+          console.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent:`, dispatchError.message);
+          // Send ready_for_greeting as fallback so user can press 's' manually
+          this.sendMqttMessage(
+            JSON.stringify({
+              type: "ready_for_greeting",
+              session_id: this.udp.session_id,
+              timestamp: Date.now(),
+            })
+          );
+        }
+      } else if (this.roomType !== "conversation") {
+        // For music/story modes, no agent needed
+        console.log(`🎵 [MODE] ${this.roomType} mode - no agent deployment needed`);
+      } else {
+        // Fallback: Send ready_for_greeting if no dispatch client available
+        console.log(`⚠️ [FALLBACK] No agentDispatchClient, sending ready_for_greeting`);
+        this.sendMqttMessage(
+          JSON.stringify({
+            type: "ready_for_greeting",
+            session_id: this.udp.session_id,
+            timestamp: Date.now(),
+          })
+        );
+      }
     } catch (error) {
       this.sendMqttMessage(
         JSON.stringify({
@@ -1041,6 +1097,81 @@ class VirtualMQTTConnection {
           `❌ [MOBILE] Failed to handle mobile music request:`,
           error
         );
+      }
+      return;
+    }
+
+    // Handle push-to-talk messages (ESP32 format: listen with mode=manual)
+    if (json.type === "listen") {
+      const state = json.state;
+      const mode = json.mode;
+      console.log(`🎤 [PTT] Received listen message - State: ${state}, Mode: ${mode}`);
+
+      if (!this.bridge || !this.bridge.room || !this.bridge.room.localParticipant) {
+        console.error(`❌ [PTT] No bridge/room available for PTT control`);
+        return;
+      }
+
+      // Check if agent has joined the room
+      if (!this.bridge.agentJoined) {
+        console.log(`⏳ [PTT] Agent not yet joined, waiting for agent...`);
+
+        // Wait for agent to join (with timeout)
+        try {
+          if (this.bridge.agentJoinPromise) {
+            const timeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Agent join timeout')), 5000)
+            );
+            await Promise.race([this.bridge.agentJoinPromise, timeout]);
+            console.log(`✅ [PTT] Agent joined, proceeding with PTT`);
+          } else {
+            console.error(`❌ [PTT] Agent not deployed yet. Press 's' to deploy agent first.`);
+            return;
+          }
+        } catch (err) {
+          console.error(`❌ [PTT] Agent did not join in time: ${err.message}`);
+          return;
+        }
+      }
+
+      // Find the agent participant
+      const participants = Array.from(this.bridge.room.remoteParticipants.values());
+      const agentParticipant = participants.find(p =>
+        p.identity.includes('agent') || p.identity.includes('cheeko')
+      );
+
+      if (!agentParticipant) {
+        console.error(`❌ [PTT] No agent participant found in room`);
+        // List available participants for debugging
+        console.log(`📋 [PTT] Available participants: ${participants.map(p => p.identity).join(', ')}`);
+        console.log(`💡 [PTT] Hint: Press 's' to deploy the agent first`);
+        return;
+      }
+
+      console.log(`🎤 [PTT] Agent participant found: ${agentParticipant.identity}`);
+
+      try {
+        if (state === "start" && (mode === "manual" || mode === "auto")) {
+          // PTT started - call agent's start_turn RPC
+          console.log(`🎤 [PTT] Starting push-to-talk - calling start_turn RPC`);
+          const result = await this.bridge.room.localParticipant.performRpc({
+            destinationIdentity: agentParticipant.identity,
+            method: "start_turn",
+            payload: ""
+          });
+          console.log(`✅ [PTT] start_turn RPC completed: ${result}`);
+        } else if (state === "stop") {
+          // PTT ended - call agent's end_turn RPC
+          console.log(`🎤 [PTT] Stopping push-to-talk - calling end_turn RPC`);
+          const result = await this.bridge.room.localParticipant.performRpc({
+            destinationIdentity: agentParticipant.identity,
+            method: "end_turn",
+            payload: ""
+          });
+          console.log(`✅ [PTT] end_turn RPC completed: ${result}`);
+        }
+      } catch (error) {
+        console.error(`❌ [PTT] Failed to handle PTT message:`, error);
       }
       return;
     }

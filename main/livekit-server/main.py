@@ -233,21 +233,21 @@ class ResourceMonitor:
                 f"Net: ↓{net_io.bytes_recv/1024/1024:.1f}MB ↑{net_io.bytes_sent/1024/1024:.1f}MB"
             )
             
-            # Enhanced alerting with performance recommendations
-            if cpu_percent > 80:
-                logger.warning(f"⚠️ HIGH CPU USAGE: {cpu_percent:.1f}% - Consider reducing client load")
-            if memory.percent > 85:
-                logger.warning(f"⚠️ HIGH MEMORY USAGE: {memory.percent:.1f}% - Memory cleanup recommended")
-            if self.client_count > 4 and cpu_percent > 60:
-                logger.warning(f"⚠️ PERFORMANCE RISK: {self.client_count} clients, CPU {cpu_percent:.1f}% - Audio jitter possible")
-            if self.client_count > 6:
-                logger.error(f"🚨 OVERLOAD: {self.client_count} clients exceeds recommended limit of 6")
+            # Enhanced alerting with performance recommendations (disabled to reduce log noise)
+            # if cpu_percent > 80:
+            #     logger.warning(f"⚠️ HIGH CPU USAGE: {cpu_percent:.1f}% - Consider reducing client load")
+            # if memory.percent > 85:
+            #     logger.warning(f"⚠️ HIGH MEMORY USAGE: {memory.percent:.1f}% - Memory cleanup recommended")
+            # if self.client_count > 4 and cpu_percent > 60:
+            #     logger.warning(f"⚠️ PERFORMANCE RISK: {self.client_count} clients, CPU {cpu_percent:.1f}% - Audio jitter possible")
+            # if self.client_count > 6:
+            #     logger.error(f"🚨 OVERLOAD: {self.client_count} clients exceeds recommended limit of 6")
             
-            # Performance optimization suggestions
-            if cpu_percent > 70 and self.client_count > 2:
-                logger.info(f"💡 OPTIMIZATION TIP: High CPU with {self.client_count} clients - consider process scaling")
-            if process_memory.rss/1024/1024 > 500:  # 500MB
-                logger.info(f"💡 MEMORY TIP: Process using {process_memory.rss/1024/1024:.1f}MB - consider restart if growing")
+            # Performance optimization suggestions (disabled to reduce log noise)
+            # if cpu_percent > 70 and self.client_count > 2:
+            #     logger.info(f"💡 OPTIMIZATION TIP: High CPU with {self.client_count} clients - consider process scaling")
+            # if process_memory.rss/1024/1024 > 500:  # 500MB
+            #     logger.info(f"💡 MEMORY TIP: Process using {process_memory.rss/1024/1024:.1f}MB - consider restart if growing")
                 
         except Exception as e:
             logger.error(f"📊 Failed to log resources: {e}")
@@ -579,18 +579,34 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.6)
 
-    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
+    # Check if Push-to-Talk mode is enabled
+    ptt_mode = os.getenv("PTT_MODE", "auto").lower() == "manual"
+    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice}, PTT: {ptt_mode})...")
 
-    # VAD configuration optimized for kids' voices (same as realtimeagent.py)
-    vad_config = types.RealtimeInputConfig(
-        automatic_activity_detection=types.AutomaticActivityDetection(
-            disabled=False,
-            start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-            end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-            prefix_padding_ms=10,
-            silence_duration_ms=200,
+    if ptt_mode:
+        # PTT Mode: Keep Gemini's VAD enabled but with longer silence detection
+        # Gemini Realtime needs its VAD to process audio - PTT controls when audio is sent
+        logger.info("🎤 [PTT] Push-to-talk mode enabled - using Gemini's VAD with extended silence")
+        vad_config = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                disabled=False,  # Keep VAD enabled for Gemini to process audio
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,  # Less sensitive to silence
+                prefix_padding_ms=100,
+                silence_duration_ms=1500,  # Longer silence before ending turn
+            )
         )
-    )
+    else:
+        # Auto Mode: VAD configuration optimized for kids' voices
+        vad_config = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                disabled=False,
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                prefix_padding_ms=10,
+                silence_duration_ms=200,
+            )
+        )
 
     # Enable Google Search for real-time information
     google_search = types.GoogleSearch()
@@ -606,10 +622,19 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
     logger.info(f"✅ Gemini Realtime model created with voice: {gemini_voice}")
 
-    # Set up voice AI pipeline with Gemini Realtime (no separate STT/TTS needed)
-    session = AgentSession(
-        llm=realtime_model,
-    )
+    # Set up voice AI pipeline with Gemini Realtime
+    if ptt_mode:
+        # PTT Mode: Use manual turn detection
+        session = AgentSession(
+            llm=realtime_model,
+            turn_detection="manual",  # Manual turn control for PTT
+        )
+        logger.info("🎤 [PTT] AgentSession created with turn_detection='manual'")
+    else:
+        # Auto Mode: Use Gemini's built-in turn detection
+        session = AgentSession(
+            llm=realtime_model,
+        )
 
     # ============================================================================
     # STATE MANAGEMENT FOR LED FEEDBACK (same as realtimeagent.py)
@@ -1171,6 +1196,14 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         room_input_options=room_input_options,  # Keep room options for ESP32 audio config
     )
 
+    # For PTT mode, disable audio input by default (wait for start_turn RPC)
+    if ptt_mode:
+        try:
+            session.input.set_audio_enabled(False)
+            logger.info("🎤 [PTT] Audio input disabled by default - waiting for start_turn RPC")
+        except Exception as e:
+            logger.warning(f"⚠️ [PTT] Could not disable audio input: {e}")
+
     # Start analytics session tracking
     if analytics_service:
         try:
@@ -1186,6 +1219,90 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     logger.info(f"⚡ Total room initialization completed in {init_elapsed_time:.0f}ms")
 
     logger.info("✅ Gemini Realtime agent is LIVE!")
+
+    # ============================================================================
+    # PUSH-TO-TALK RPC METHODS
+    # ============================================================================
+    # These methods allow the MQTT gateway to control audio input for PTT mode
+    # Note: For Gemini Realtime, we use session methods if available
+
+    @ctx.room.local_participant.register_rpc_method("start_turn")
+    async def start_turn(data: rtc.RpcInvocationData):
+        """Handle PTT start - enable audio input and prepare for user speech"""
+        logger.info("🎤 [PTT] start_turn RPC received - enabling audio input")
+        try:
+            # Interrupt any current agent speech (if method exists)
+            if hasattr(session, 'interrupt'):
+                session.interrupt()
+                logger.info("🎤 [PTT] Interrupted current speech")
+
+            # Clear any pending user turn (if method exists)
+            if hasattr(session, 'clear_user_turn'):
+                session.clear_user_turn()
+                logger.info("🎤 [PTT] Cleared user turn")
+
+            # Enable audio input for this participant (if method exists)
+            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                session.input.set_audio_enabled(True)
+                logger.info("✅ [PTT] Audio input enabled, ready to receive speech")
+            else:
+                logger.warning("⚠️ [PTT] session.input.set_audio_enabled not available")
+
+            return "ok"
+        except Exception as e:
+            logger.error(f"❌ [PTT] start_turn failed: {e}")
+            import traceback
+            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
+            return f"error: {e}"
+
+    @ctx.room.local_participant.register_rpc_method("end_turn")
+    async def end_turn(data: rtc.RpcInvocationData):
+        """Handle PTT end - disable audio input. Gemini's VAD will detect silence and respond."""
+        logger.info("🎤 [PTT] end_turn RPC received - disabling audio input")
+        try:
+            # Disable audio input - Gemini's VAD will detect the silence and process the turn
+            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                session.input.set_audio_enabled(False)
+                logger.info("🎤 [PTT] Audio input disabled - Gemini will process the turn")
+
+            # For Gemini Realtime with VAD enabled, commit_user_turn may not be needed
+            # Gemini's VAD should detect end of speech and trigger response
+            # But we'll try it anyway as a fallback
+            try:
+                if hasattr(session, 'commit_user_turn'):
+                    session.commit_user_turn(
+                        transcript_timeout=10.0,
+                        stt_flush_duration=2.0,
+                    )
+                    logger.info("✅ [PTT] User turn committed (fallback)")
+            except Exception as commit_err:
+                logger.debug(f"🎤 [PTT] commit_user_turn skipped: {commit_err}")
+
+            return "ok"
+        except Exception as e:
+            logger.error(f"❌ [PTT] end_turn failed: {e}")
+            import traceback
+            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
+            return f"error: {e}"
+
+    @ctx.room.local_participant.register_rpc_method("cancel_turn")
+    async def cancel_turn(data: rtc.RpcInvocationData):
+        """Handle PTT cancel - disable audio and discard user turn"""
+        logger.info("🎤 [PTT] cancel_turn RPC received - canceling turn")
+        try:
+            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                session.input.set_audio_enabled(False)
+            if hasattr(session, 'clear_user_turn'):
+                session.clear_user_turn()
+            logger.info("✅ [PTT] Turn canceled")
+            return "ok"
+        except Exception as e:
+            logger.error(f"❌ [PTT] cancel_turn failed: {e}")
+            import traceback
+            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
+            return f"error: {e}"
+
+    logger.info("🎤 [PTT] Push-to-talk RPC methods registered")
 
     # GREETING: Agent waits for start_greeting signal from MQTT gateway (via data channel)
     # This is triggered when ESP32 sends action: "start_agent" in playback_control message
@@ -1212,5 +1329,5 @@ if __name__ == "__main__":
         num_idle_processes=1,  # Optimized for enhanced functionality
         initialize_process_timeout=120.0,  # Increased timeout for heavy model loading
         job_memory_warn_mb=2000,
-        agent_name="cheeko-agent",  # Named agent for explicit dispatch
+        # agent_name="cheeko-agent",  # Named agent for explicit dispatch
     ))

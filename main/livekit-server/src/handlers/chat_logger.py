@@ -299,6 +299,9 @@ class ChatEventHandler:
 
         @session.on("user_input_transcribed")
         def _on_user_input_transcribed(ev: UserInputTranscribedEvent):
+            # Skip partial transcripts - only log final ones
+            if hasattr(ev, 'is_final') and not ev.is_final:
+                return
             logger.info(f"👤 User said: {ev}")
 
             # Try to extract transcript text from different possible attributes
