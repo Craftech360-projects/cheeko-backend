@@ -48,6 +48,7 @@ class LiveKitBridge extends EventEmitter {
 
     // Add agent join tracking
     this.agentJoined = false;
+    this.greetingSent = false;  // Track if greeting has been sent
     this.agentJoinPromise = null;
     this.agentJoinResolve = null;
     this.agentJoinTimeout = null;
@@ -642,9 +643,47 @@ class LiveKitBridge extends EventEmitter {
               clearTimeout(this.agentJoinTimeout);
               this.agentJoinTimeout = null;
             }
-            // Note: Room emptyTimeout is handled by LiveKit server automatically
 
-            // console.log(`✅ [AGENT] Agent ready, waiting for 's' key press from client to trigger greeting`);
+            // Send start_greeting to agent when it joins AND UDP is ready
+            const waitForUdpAndGreet = async () => {
+              try {
+                if (this.greetingSent) return;
+
+                // Wait for UDP connection to be ready (max 10 seconds)
+                let waitCount = 0;
+                const maxWait = 100; // 100 * 100ms = 10 seconds
+                while (!this.connection?.udp?.remoteAddress && waitCount < maxWait) {
+                  await new Promise(resolve => setTimeout(resolve, 100));
+                  waitCount++;
+                }
+
+                if (!this.connection?.udp?.remoteAddress) {
+                  console.log(`⚠️ [AGENT-READY] UDP not ready after 10s, sending greeting anyway`);
+                }
+
+                // Additional delay for stability after UDP is ready
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                if (!this.greetingSent) {
+                  this.greetingSent = true;
+                  console.log(`👋 [AGENT-READY] UDP ready, sending start_greeting to agent...`);
+                  const startGreetingMsg = {
+                    type: "start_greeting",
+                    session_id: this.connection?.udp?.session_id || null,
+                    is_mode_switch: false,
+                    timestamp: Date.now()
+                  };
+                  await this.room.localParticipant.publishData(
+                    Buffer.from(JSON.stringify(startGreetingMsg)),
+                    { reliable: true }
+                  );
+                  console.log(`✅ [AGENT-READY] start_greeting sent to agent`);
+                }
+              } catch (err) {
+                console.error(`❌ [AGENT-READY] Failed to send greeting:`, err.message);
+              }
+            };
+            waitForUdpAndGreet();
           }
         });
 

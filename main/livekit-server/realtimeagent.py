@@ -243,8 +243,8 @@ async def entrypoint(ctx: JobContext):
         350  # Minimum time between state changes to prevent LED flickering
     )
 
-    async def emit_agent_state(new_state: str):
-        """Emit agent state via data channel for MQTT gateway with debouncing"""
+    async def emit_agent_state(old_state: str, new_state: str):
+        """Emit agent state via data channel for MQTT gateway"""
         nonlocal current_state, last_state_change_time
         import time
 
@@ -253,18 +253,13 @@ async def entrypoint(ctx: JobContext):
             current_time = time.time() * 1000  # Convert to ms
             if current_time - last_state_change_time < STATE_DEBOUNCE_MS:
                 logger.debug(
-                    f"🚫 State change debounced: {current_state} → {new_state} (too fast)"
+                    f"🚫 State change debounced: {old_state} → {new_state} (too fast)"
                 )
                 return
 
-            if new_state == current_state:
-                return
-
-            old_state = current_state
-
             # Skip listening → thinking for Gemini Realtime (no separate thinking phase)
-            if old_state == "listening" and new_state == "thinking":
-                logger.info(
+            if "listening" in old_state and "thinking" in new_state:
+                logger.debug(
                     f"🧠 Skipping listening → thinking state change (Gemini Realtime mode)"
                 )
                 return
@@ -282,7 +277,7 @@ async def entrypoint(ctx: JobContext):
             await ctx.room.local_participant.publish_data(
                 payload.encode("utf-8"), reliable=True
             )
-            logger.info(f"📊 State: {old_state} → {new_state}")
+            logger.info(f"📊 State emitted: {old_state} → {new_state}")
         except Exception as e:
             logger.error(f"Failed to emit state: {e}")
 
@@ -325,21 +320,27 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"❌ Error in user_input_transcribed handler: {e}")
 
-    # Hook into agent_state_changed to emit speech_created when agent starts speaking
-    # This is needed because Gemini Realtime doesn't fire agent_speech_started events
+    # Hook into agent_state_changed to emit events to gateway
     @session.on("agent_state_changed")
     def on_agent_state_changed_for_tts(ev):
-        """Emit speech_created when agent transitions to speaking state"""
+        """Emit agent_state_changed and speech_created to gateway"""
         try:
             # Get old and new state from the event
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
 
-            logger.info(f"🔊 EVENT: agent_state_changed - {old_state} → {new_state}")
+            # Convert state objects to strings if needed
+            old_state_str = str(old_state).lower() if old_state else "unknown"
+            new_state_str = str(new_state).lower() if new_state else "unknown"
 
-            # When transitioning TO speaking, emit speech_created for TTS start
-            if new_state == 'speaking' and old_state != 'speaking':
-                logger.info(f"📢 Emitting speech_created (state: {old_state} → speaking)")
+            logger.info(f"🔊 EVENT: agent_state_changed - {old_state_str} → {new_state_str}")
+
+            # Always emit agent_state_changed to gateway (it handles TTS stop)
+            asyncio.create_task(emit_agent_state(old_state_str, new_state_str))
+
+            # When transitioning TO speaking, also emit speech_created for TTS start
+            if 'speaking' in new_state_str and 'speaking' not in old_state_str:
+                logger.info(f"📢 Emitting speech_created (state: {old_state_str} → {new_state_str})")
                 asyncio.create_task(emit_speech_created())
 
         except Exception as e:

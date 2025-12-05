@@ -1257,26 +1257,21 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
     @ctx.room.local_participant.register_rpc_method("end_turn")
     async def end_turn(data: rtc.RpcInvocationData):
-        """Handle PTT end - disable audio input. Gemini's VAD will detect silence and respond."""
-        logger.info("🎤 [PTT] end_turn RPC received - disabling audio input")
+        """Handle PTT end - let Gemini's VAD detect silence and respond naturally."""
+        logger.info("🎤 [PTT] end_turn RPC received - letting Gemini VAD handle turn end")
         try:
-            # Disable audio input - Gemini's VAD will detect the silence and process the turn
-            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
-                session.input.set_audio_enabled(False)
-                logger.info("🎤 [PTT] Audio input disabled - Gemini will process the turn")
+            # DON'T disable audio immediately - let Gemini's VAD detect the silence
+            # The silence_duration_ms=1500 setting will trigger turn end after 1.5s of silence
+            logger.info("🎤 [PTT] Waiting for Gemini VAD to detect silence...")
 
-            # For Gemini Realtime with VAD enabled, commit_user_turn may not be needed
-            # Gemini's VAD should detect end of speech and trigger response
-            # But we'll try it anyway as a fallback
-            try:
-                if hasattr(session, 'commit_user_turn'):
-                    session.commit_user_turn(
-                        transcript_timeout=10.0,
-                        stt_flush_duration=2.0,
-                    )
-                    logger.info("✅ [PTT] User turn committed (fallback)")
-            except Exception as commit_err:
-                logger.debug(f"🎤 [PTT] commit_user_turn skipped: {commit_err}")
+            # Optionally disable audio after a longer delay (after Gemini should have responded)
+            async def delayed_disable():
+                await asyncio.sleep(3.0)  # Wait 3 seconds for Gemini to process
+                if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
+                    session.input.set_audio_enabled(False)
+                    logger.info("🎤 [PTT] Audio input disabled after delay")
+
+            asyncio.create_task(delayed_disable())
 
             return "ok"
         except Exception as e:

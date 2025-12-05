@@ -269,7 +269,11 @@ class ChatEventHandler:
 
         @session.on("agent_state_changed")
         def _on_agent_state_changed(ev: AgentStateChangedEvent):
-            logger.info(f"Agent state changed: {ev}")
+            # Convert state objects to lowercase strings for gateway compatibility
+            old_state_str = str(ev.old_state).lower() if ev.old_state else "unknown"
+            new_state_str = str(ev.new_state).lower() if ev.new_state else "unknown"
+
+            logger.info(f"Agent state changed: {old_state_str} → {new_state_str}")
 
             # Check if this state change should be suppressed due to music playback
             should_suppress = audio_state_manager.should_suppress_agent_state_change(
@@ -278,24 +282,23 @@ class ChatEventHandler:
 
             if should_suppress:
                 logger.info(
-                    f"🎵 Suppressing agent state change from {ev.old_state} to {ev.new_state} - music is playing")
+                    f"🎵 Suppressing agent state change from {old_state_str} to {new_state_str} - music is playing")
                 return
 
             # Skip listening → thinking for Gemini Realtime (no separate thinking phase)
-            old_state_str = str(ev.old_state).lower() if ev.old_state else ""
-            new_state_str = str(ev.new_state).lower() if ev.new_state else ""
             if "listening" in old_state_str and "thinking" in new_state_str:
                 logger.info(
                     f"🧠 Skipping listening → thinking state change (Gemini Realtime mode)")
                 return
 
+            # Send with string values for gateway compatibility
             payload = json.dumps({
                 "type": "agent_state_changed",
-                "data": ev.model_dump()
+                "data": {"old_state": old_state_str, "new_state": new_state_str}
             })
             asyncio.create_task(ctx.room.local_participant.publish_data(
                 payload.encode("utf-8"), reliable=True))
-            logger.info("Sent agent_state_changed via data channel")
+            logger.info(f"Sent agent_state_changed via data channel: {old_state_str} → {new_state_str}")
 
         @session.on("user_input_transcribed")
         def _on_user_input_transcribed(ev: UserInputTranscribedEvent):
