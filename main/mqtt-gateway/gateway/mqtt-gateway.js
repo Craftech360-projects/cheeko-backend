@@ -486,16 +486,7 @@ class MQTTGateway {
             // logger.info(`✅ [MOBILE-RESPONSE] Sending device connected status to ${appTopic}`);
 
             if (this.mqttClient && this.mqttClient.connected) {
-              this.mqttClient.publish(
-                appTopic,
-                JSON.stringify(successMessage),
-                (err) => {
-                  if (err) {
-                    logger.error(`❌ [MOBILE-RESPONSE] Failed to send success to mobile app:`, err);
-                  }
-                  // else logger.info(`✅ [MOBILE-RESPONSE] Device connected status sent to mobile app`);
-                }
-              );
+              this.mqttPublish(appTopic, successMessage);
             }
 
             this.handleDeviceData(deviceId, enhancedPayload);
@@ -516,16 +507,7 @@ class MQTTGateway {
             // logger.info(`❌ [MOBILE-RESPONSE] Sending device not connected status to ${appTopic}`);
 
             if (this.mqttClient && this.mqttClient.connected) {
-              this.mqttClient.publish(
-                appTopic,
-                JSON.stringify(errorMessage),
-                (err) => {
-                  if (err) {
-                    logger.error(`❌ [MOBILE-RESPONSE] Failed to send error to mobile app:`, err);
-                  }
-                  // else logger.info(`✅ [MOBILE-RESPONSE] Device not connected status sent to mobile app`);
-                }
-              );
+              this.mqttPublish(appTopic, errorMessage);
             }
           }
         }
@@ -664,9 +646,7 @@ class MQTTGateway {
           timestamp: Date.now(),
         };
 
-        this.mqttClient.publish(controlTopic, JSON.stringify(ttsStopMsg), (err) => {
-          if (err) logger.error(`❌ [CONTROL] Failed to send TTS stop:`, err);
-        });
+        this.mqttPublish(controlTopic, ttsStopMsg);
       }
 
       // logger.info(`⏭️ [CONTROL] Sending next skip request to: ${apiUrl}`);
@@ -683,9 +663,7 @@ class MQTTGateway {
           session_id: deviceInfo.connection?.udp?.session_id || null,
         };
 
-        this.mqttClient.publish(controlTopic, JSON.stringify(ttsStartMsg), (err) => {
-          if (err) logger.error(`❌ [CONTROL] Failed to send skip TTS notification:`, err);
-        });
+        this.mqttPublish(controlTopic, ttsStartMsg);
       }
     } catch (error) {
       logger.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
@@ -699,7 +677,7 @@ class MQTTGateway {
           text: "Skip failed, please try again",
           session_id: deviceInfo.connection?.udp?.session_id || null,
         };
-        this.mqttClient.publish(errorTopic, JSON.stringify(errorMsg));
+        this.mqttPublish(errorTopic, errorMsg);
       }
     }
   }
@@ -757,9 +735,7 @@ class MQTTGateway {
           timestamp: Date.now(),
         };
 
-        this.mqttClient.publish(controlTopic, JSON.stringify(ttsStopMsg), (err) => {
-          if (err) logger.error(`❌ [CONTROL] Failed to send TTS stop:`, err);
-        });
+        this.mqttPublish(controlTopic, ttsStopMsg);
       }
 
       // logger.info(`⏮️ [CONTROL] Sending previous skip request to: ${apiUrl}`);
@@ -776,9 +752,7 @@ class MQTTGateway {
           session_id: deviceInfo.connection?.udp?.session_id || null,
         };
 
-        this.mqttClient.publish(controlTopic, JSON.stringify(ttsStartMsg), (err) => {
-          if (err) logger.error(`❌ [CONTROL] Failed to send previous TTS notification:`, err);
-        });
+        this.mqttPublish(controlTopic, ttsStartMsg);
       }
     } catch (error) {
       logger.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);
@@ -792,7 +766,7 @@ class MQTTGateway {
           text: "Previous skip failed, please try again",
           session_id: deviceInfo.connection?.udp?.session_id || null,
         };
-        this.mqttClient.publish(errorTopic, JSON.stringify(errorMsg));
+        this.mqttPublish(errorTopic, errorMsg);
       }
     }
   }
@@ -1021,9 +995,7 @@ class MQTTGateway {
     };
 
     const responseTopic = `devices/p2p/${clientId}`;
-    this.mqttClient.publish(responseTopic, JSON.stringify(successMessage), (err) => {
-      if (err) logger.error(`❌ [RESPONSE] Failed to send success response:`, err);
-    });
+    this.mqttPublish(responseTopic, successMessage);
   }
 
   async sendErrorResponse(clientId, errorMessage, macAddress) {
@@ -1038,9 +1010,7 @@ class MQTTGateway {
     };
 
     const responseTopic = `devices/p2p/${clientId}`;
-    this.mqttClient.publish(responseTopic, JSON.stringify(errorResponse), (err) => {
-      if (err) logger.error(`❌ [RESPONSE] Failed to send error response:`, err);
-    });
+    this.mqttPublish(responseTopic, errorResponse);
   }
 
   handleDeviceHello(deviceId, payload) {
@@ -1153,7 +1123,7 @@ class MQTTGateway {
 
       // Send TTS start via MQTT
       const ttsStartMsg = { type: "tts", state: "start", text: `Switched to ${modeName} mode`, timestamp: Date.now() };
-      this.mqttClient.publish(controlTopic, JSON.stringify(ttsStartMsg));
+      this.mqttPublish(controlTopic, ttsStartMsg);
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Stream PCM in 60ms frames
@@ -1196,13 +1166,13 @@ class MQTTGateway {
 
       // Send TTS stop
       const ttsStopMsg = { type: "tts", state: "stop", timestamp: Date.now() };
-      this.mqttClient.publish(controlTopic, JSON.stringify(ttsStopMsg));
+      this.mqttPublish(controlTopic, ttsStopMsg);
       await new Promise((resolve) => setTimeout(resolve, 200));
 
       // Send goodbye if requested
       if (sendGoodbye) {
         const goodbyeMsg = { type: "goodbye", session_id: connection.udp?.session_id || null, reason: "character_change", timestamp: Date.now() };
-        this.mqttClient.publish(controlTopic, JSON.stringify(goodbyeMsg));
+        this.mqttPublish(controlTopic, goodbyeMsg);
       }
     } catch (error) {
       logger.error(`❌ [AUDIO-STREAM] Audio streaming error:`, error.message);
@@ -1370,17 +1340,64 @@ class MQTTGateway {
     }
   }
 
-  publishToDevice(clientIdOrDeviceId, message) {
-    if (this.mqttClient && this.mqttClient.connected) {
-      const topic = `devices/p2p/${clientIdOrDeviceId}`;
-      this.mqttClient.publish(topic, JSON.stringify(message), (err) => {
-        if (err) {
-          logger.error(`❌ [MQTT-OUT] Failed to publish to ${clientIdOrDeviceId}:`, err);
-        }
-      });
-    } else {
-      logger.error("❌ [MQTT-OUT] MQTT client not connected");
+  /**
+   * Central MQTT publish method with detailed logging
+   * All outgoing MQTT messages should go through this method
+   */
+  mqttPublish(topic, payload, options = {}, callback = null) {
+    if (!this.mqttClient || !this.mqttClient.connected) {
+      logger.error(`❌ [MQTT-OUT] MQTT client not connected - Cannot publish to: ${topic}`);
+      if (callback) callback(new Error("MQTT client not connected"));
+      return;
     }
+
+    // Parse payload for logging (handle both string and object)
+    let payloadStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    let payloadObj;
+    try {
+      payloadObj = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    } catch (e) {
+      payloadObj = { raw: payloadStr.substring(0, 200) };
+    }
+
+    // Extract device info from topic
+    const topicParts = topic.split('/');
+    let deviceInfo = '';
+    if (topicParts[0] === 'devices' && topicParts[1] === 'p2p' && topicParts[2]) {
+      // Extract MAC from clientId format: GID_test@@@68_25_dd_bb_f3_a0@@@uuid
+      const clientId = topicParts[2];
+      const parts = clientId.split('@@@');
+      if (parts.length >= 2) {
+        deviceInfo = parts[1].replace(/_/g, ':');
+      } else {
+        deviceInfo = clientId;
+      }
+    } else if (topicParts[0] === 'app' && topicParts[1] === 'p2p') {
+      deviceInfo = topicParts[2] || 'unknown';
+    }
+
+    // Log outgoing message with details
+    const msgType = payloadObj.type || 'unknown';
+    const msgState = payloadObj.state || '';
+    const sessionId = payloadObj.session_id || '';
+
+    logger.info(`📤 [MQTT-OUT] ${deviceInfo || topic} | type: ${msgType}${msgState ? ` | state: ${msgState}` : ''}${sessionId ? ` | session: ${sessionId.substring(0, 20)}...` : ''}`);
+
+    // Log full payload for debugging (truncate if too long)
+    const payloadPreview = payloadStr.length > 500 ? payloadStr.substring(0, 500) + '...' : payloadStr;
+    logger.debug(`📤 [MQTT-OUT] Topic: ${topic} | Payload: ${payloadPreview}`);
+
+    this.mqttClient.publish(topic, payloadStr, options, (err) => {
+      if (err) {
+        logger.error(`❌ [MQTT-OUT] Publish failed - Topic: ${topic} | Error: ${err.message}`);
+      }
+      if (callback) callback(err);
+    });
+  }
+
+  publishToDevice(clientIdOrDeviceId, message) {
+    const topic = `devices/p2p/${clientIdOrDeviceId}`;
+    this.mqttPublish(topic, message);
   }
 
   /**

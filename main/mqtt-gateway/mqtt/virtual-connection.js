@@ -195,17 +195,11 @@ class VirtualMQTTConnection {
   }
 
   sendMqttMessage(payload) {
-    console.log(
-      `📤 [VIRTUAL] sendMqttMessage called for device: ${this.deviceId}`
-    );
     debug(`Sending message to ${this.deviceId}: ${payload}`);
 
     try {
       const parsedPayload = JSON.parse(payload);
       this.gateway.publishToDevice(this.fullClientId, parsedPayload);
-      console.log(
-        `📤 [VIRTUAL] Called publishToDevice for device: ${this.deviceId}`
-      );
     } catch (error) {
       console.error(
         `❌ [VIRTUAL] Error in sendMqttMessage for device ${this.deviceId}:`,

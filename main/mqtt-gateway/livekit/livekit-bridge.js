@@ -362,8 +362,9 @@ class LiveKitBridge extends EventEmitter {
               }
               break;
             case "user_input_transcribed":
-              // Send STT result back to device
-              this.sendSttMessage(data.data.text || data.data.transcript);
+              // DISABLED: Don't send intermediate STT results to device (too many messages)
+              // The device doesn't need partial transcriptions
+              // this.sendSttMessage(data.data.text || data.data.transcript);
               break;
             case "speech_created":
               // Set audio playing flag and reset inactivity timer
