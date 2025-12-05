@@ -705,15 +705,10 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
         logger.info("💭 Mem0 conversation capture enabled")
 
-    # Setup usage tracking
+    # Setup usage tracking with metrics collection
     usage_manager = UsageManager()
-
-    async def log_usage():
-        """Log usage summary on shutdown"""
-        await usage_manager.log_usage()
-        logger.info("Sent usage_summary via data channel")
-
-    ctx.add_shutdown_callback(log_usage)
+    usage_manager.setup_metrics_collection(session)
+    ctx.add_shutdown_callback(usage_manager.log_session_summary)
 
     # OPTIMIZATION PHASE 2: Initialize services in parallel (cold start only)
     if not services_from_cache:
