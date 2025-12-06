@@ -324,7 +324,10 @@ class LiveKitBridge extends EventEmitter {
                 this.isAudioPlaying = false;
                 // console.log(`🎵 [AUDIO-STOP] TTS stopped for device: ${this.macAddress}`);
                 // Send TTS stop message to device
-                this.sendTtsStopMessage();
+                setTimeout(() => {
+                  this.sendTtsStopMessage();
+                }, 1000);
+                
 
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (

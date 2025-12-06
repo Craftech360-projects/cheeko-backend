@@ -583,30 +583,30 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     ptt_mode = os.getenv("PTT_MODE", "auto").lower() == "manual"
     logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice}, PTT: {ptt_mode})...")
 
-    if ptt_mode:
+    # if ptt_mode:
         # PTT Mode: Keep Gemini's VAD enabled but with longer silence detection
         # Gemini Realtime needs its VAD to process audio - PTT controls when audio is sent
-        logger.info("🎤 [PTT] Push-to-talk mode enabled - using Gemini's VAD with extended silence")
-        vad_config = types.RealtimeInputConfig(
+    logger.info("🎤 [PTT] Push-to-talk mode enabled - using Gemini's VAD with extended silence")
+    vad_config = types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
                 disabled=False,  # Keep VAD enabled for Gemini to process audio
                 start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
                 end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,  # Less sensitive to silence
                 prefix_padding_ms=100,
-                silence_duration_ms=1500,  # Longer silence before ending turn
+                silence_duration_ms=2000,  # Longer silence before ending turn
             )
         )
-    else:
-        # Auto Mode: VAD configuration optimized for kids' voices
-        vad_config = types.RealtimeInputConfig(
-            automatic_activity_detection=types.AutomaticActivityDetection(
-                disabled=False,
-                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                prefix_padding_ms=10,
-                silence_duration_ms=200,
-            )
-        )
+    # # else:
+    # #     # Auto Mode: VAD configuration optimized for kids' voices
+    # #     vad_config = types.RealtimeInputConfig(
+    # #         automatic_activity_detection=types.AutomaticActivityDetection(
+    # #             disabled=False,
+    # #             start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+    # #             end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+    # #             prefix_padding_ms=10,
+    # #             silence_duration_ms=200,
+    # #         )
+    #     )
 
     # Enable Google Search for real-time information
     google_search = types.GoogleSearch()
