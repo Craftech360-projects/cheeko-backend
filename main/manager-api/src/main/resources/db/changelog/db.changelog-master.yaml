@@ -670,3 +670,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202511291434.sql
+
+  - changeSet:
+      id: 202512061200
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512061200_create_device_token_usage.sql

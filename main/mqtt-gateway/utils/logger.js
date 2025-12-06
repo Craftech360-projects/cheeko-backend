@@ -81,11 +81,6 @@ if (process.env.LOKI_HOST) {
         global.setConsoleLogger(logger);
     }
 
-    // Test the transport immediately
-    setTimeout(() => {
-        logger.info('🧪 [LOKI-TEST] Transport test log from main app');
-        console.log('📤 [LOKI] Test log sent to transport');
-    }, 1000);
 } else {
     console.log('⚠️ [LOKI] No LOKI_HOST found, skipping Loki transport');
 }

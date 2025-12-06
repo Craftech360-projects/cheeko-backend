@@ -109,6 +109,7 @@ public class ShiroConfig {
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/content/items/**", "anon");
         filterMap.put("/device/**/playlist/**", "anon"); // Allow anonymous access to playlist APIs
+        filterMap.put("/api/usage/**", "anon"); // Allow anonymous access to token usage API (called from LiveKit server)
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);
 
