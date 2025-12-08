@@ -819,7 +819,7 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         logger.info("💭 Mem0 conversation capture enabled")
 
     # Setup usage tracking
-    usage_manager = UsageManager(mac_address=device_mac)
+    usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
     usage_manager.setup_metrics_collection(session)
 
     async def log_usage():

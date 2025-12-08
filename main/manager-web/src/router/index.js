@@ -124,6 +124,17 @@ const routes = [
       return import('../views/ProviderManagement.vue')
     }
   },
+  {
+    path: '/token-analytics',
+    name: 'TokenAnalytics',
+    component: function () {
+      return import('../views/TokenAnalytics.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Token Analytics'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -145,7 +156,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // 需要登录才能访问的路由
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics']
 
 // 路由守卫
 router.beforeEach((to, from, next) => {
