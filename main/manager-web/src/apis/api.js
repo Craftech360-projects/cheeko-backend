@@ -1,6 +1,7 @@
 // 引入各个模块的请求
 import admin from './module/admin.js'
 import agent from './module/agent.js'
+import analytics from './module/analytics.js'
 import device from './module/device.js'
 import dict from './module/dict.js'
 import model from './module/model.js'
@@ -36,6 +37,7 @@ export default {
     user,
     admin,
     agent,
+    analytics,
     device,
     model,
     timbre,

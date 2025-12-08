@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 import httpx
 from livekit.agents import metrics, MetricsCollectedEvent, AgentSession
 
@@ -12,16 +13,35 @@ MANAGER_API_URL = os.environ.get("MANAGER_API_URL", "http://localhost:8002/toy")
 class UsageManager:
     """Utility class for managing usage metrics and logging"""
 
-    def __init__(self, mac_address: str = None):
+    def __init__(self, mac_address: str = None, session_id: str = None):
         self.usage_collector = metrics.UsageCollector()
         self.mac_address = mac_address
-        # Track realtime model tokens separately
+        self.session_id = session_id
+
+        # Track total input/output tokens
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+
+        # Track detailed token breakdown for Gemini cost calculation
+        self.input_audio_tokens = 0
+        self.input_text_tokens = 0
+        self.input_cached_tokens = 0
+        self.output_audio_tokens = 0
+        self.output_text_tokens = 0
+
+        # Track session metrics
+        self.session_start_time = time.time()
+        self.message_count = 0
+        self.total_ttft = 0.0  # Sum of all TTFT values
+        self.total_response_duration = 0.0  # Sum of all response durations
 
     def set_mac_address(self, mac_address: str):
         """Set the MAC address for this session"""
         self.mac_address = mac_address
+
+    def set_session_id(self, session_id: str):
+        """Set the session ID for this session"""
+        self.session_id = session_id
 
     def log_turn_metrics(self, ev: MetricsCollectedEvent):
         """Log metrics for each interaction (LLM/STT/TTS/Realtime)"""
@@ -29,9 +49,51 @@ class UsageManager:
         metric_type = type(m).__name__
 
         # Handle RealtimeModelMetrics (Gemini Realtime)
-        if hasattr(m, 'input_tokens') and hasattr(m, 'output_tokens'):
+        if hasattr(m, 'input_tokens') and hasattr(m, 'output_tokens') and hasattr(m, 'input_token_details'):
+            # Total tokens
             self.total_input_tokens += m.input_tokens
             self.total_output_tokens += m.output_tokens
+
+            # Detailed breakdown from input_token_details
+            if m.input_token_details:
+                self.input_audio_tokens += getattr(m.input_token_details, 'audio_tokens', 0) or 0
+                self.input_text_tokens += getattr(m.input_token_details, 'text_tokens', 0) or 0
+                self.input_cached_tokens += getattr(m.input_token_details, 'cached_tokens', 0) or 0
+
+            # Detailed breakdown from output_token_details
+            if m.output_token_details:
+                self.output_audio_tokens += getattr(m.output_token_details, 'audio_tokens', 0) or 0
+                self.output_text_tokens += getattr(m.output_token_details, 'text_tokens', 0) or 0
+
+            # Track TTFT and duration for analytics
+            if hasattr(m, 'ttft') and m.ttft is not None:
+                self.total_ttft += m.ttft
+            if hasattr(m, 'duration') and m.duration is not None:
+                self.total_response_duration += m.duration
+
+            # Count this as a message/turn
+            self.message_count += 1
+
+            logger.info(
+                f"📊 [METRICS-REALTIME] input={m.input_tokens} (audio={getattr(m.input_token_details, 'audio_tokens', 0)}, "
+                f"text={getattr(m.input_token_details, 'text_tokens', 0)}, cached={getattr(m.input_token_details, 'cached_tokens', 0)}), "
+                f"output={m.output_tokens} (audio={getattr(m.output_token_details, 'audio_tokens', 0)}, "
+                f"text={getattr(m.output_token_details, 'text_tokens', 0)}), "
+                f"total={m.total_tokens}, ttft={m.ttft:.2f}s, duration={m.duration:.2f}s, tokens/s={m.tokens_per_second:.1f}"
+            )
+        elif hasattr(m, 'input_tokens') and hasattr(m, 'output_tokens'):
+            # Realtime metrics without detailed breakdown
+            self.total_input_tokens += m.input_tokens
+            self.total_output_tokens += m.output_tokens
+
+            # Track TTFT and duration
+            if hasattr(m, 'ttft') and m.ttft is not None:
+                self.total_ttft += m.ttft
+            if hasattr(m, 'duration') and m.duration is not None:
+                self.total_response_duration += m.duration
+
+            self.message_count += 1
+
             logger.info(
                 f"📊 [METRICS-REALTIME] input={m.input_tokens}, "
                 f"output={m.output_tokens}, "
@@ -44,6 +106,18 @@ class UsageManager:
             # Traditional LLM metrics
             self.total_input_tokens += m.prompt_tokens
             self.total_output_tokens += m.completion_tokens
+            # For traditional LLM, treat all tokens as text tokens
+            self.input_text_tokens += m.prompt_tokens
+            self.output_text_tokens += m.completion_tokens
+
+            # Track TTFT and duration
+            if hasattr(m, 'ttft') and m.ttft is not None:
+                self.total_ttft += m.ttft
+            if hasattr(m, 'duration') and m.duration is not None:
+                self.total_response_duration += m.duration
+
+            self.message_count += 1
+
             logger.info(
                 f"📊 [METRICS-LLM] prompt_tokens={m.prompt_tokens}, "
                 f"completion_tokens={m.completion_tokens}, "
@@ -78,38 +152,74 @@ class UsageManager:
     async def log_session_summary(self):
         """Log session usage summary on shutdown and send to Manager API"""
         try:
+            # Calculate session duration
+            session_duration = time.time() - self.session_start_time
+
+            # Calculate average TTFT
+            avg_ttft = self.total_ttft / self.message_count if self.message_count > 0 else 0.0
+
             logger.info("=" * 60)
             logger.info("📊 [SESSION-METRICS] Final Usage Summary")
             logger.info("=" * 60)
-            logger.info(f"📊 [SESSION-METRICS] Input Tokens: {self.total_input_tokens}")
-            logger.info(f"📊 [SESSION-METRICS] Output Tokens: {self.total_output_tokens}")
-            logger.info(f"📊 [SESSION-METRICS] Total Tokens: {self.total_input_tokens + self.total_output_tokens}")
+            logger.info(f"📊 [SESSION-METRICS] Session ID: {self.session_id}")
             logger.info(f"📊 [SESSION-METRICS] MAC Address: {self.mac_address}")
+            logger.info(f"📊 [SESSION-METRICS] Session Duration: {session_duration:.2f}s")
+            logger.info(f"📊 [SESSION-METRICS] Message Count: {self.message_count}")
+            logger.info(f"📊 [SESSION-METRICS] Average TTFT: {avg_ttft:.3f}s")
+            logger.info(f"📊 [SESSION-METRICS] Total Response Duration: {self.total_response_duration:.2f}s")
+            logger.info(f"📊 [SESSION-METRICS] Input Tokens: {self.total_input_tokens}")
+            logger.info(f"📊 [SESSION-METRICS]   - Audio: {self.input_audio_tokens}")
+            logger.info(f"📊 [SESSION-METRICS]   - Text: {self.input_text_tokens}")
+            logger.info(f"📊 [SESSION-METRICS]   - Cached: {self.input_cached_tokens}")
+            logger.info(f"📊 [SESSION-METRICS] Output Tokens: {self.total_output_tokens}")
+            logger.info(f"📊 [SESSION-METRICS]   - Audio: {self.output_audio_tokens}")
+            logger.info(f"📊 [SESSION-METRICS]   - Text: {self.output_text_tokens}")
+            logger.info(f"📊 [SESSION-METRICS] Total Tokens: {self.total_input_tokens + self.total_output_tokens}")
             logger.info("=" * 60)
 
-            # Send to Manager API if we have a MAC address
-            if self.mac_address and (self.total_input_tokens > 0 or self.total_output_tokens > 0):
-                await self._send_usage_to_api()
+            # Send to Manager API if we have MAC address and session_id
+            if self.mac_address and self.session_id and (self.total_input_tokens > 0 or self.total_output_tokens > 0):
+                await self._send_usage_to_api(session_duration, avg_ttft)
 
             return {
                 "type": "usage_summary",
                 "mac_address": self.mac_address,
+                "session_id": self.session_id,
+                "session_duration_seconds": session_duration,
+                "message_count": self.message_count,
+                "avg_ttft_seconds": avg_ttft,
+                "total_response_duration_seconds": self.total_response_duration,
                 "input_tokens": self.total_input_tokens,
+                "input_audio_tokens": self.input_audio_tokens,
+                "input_text_tokens": self.input_text_tokens,
+                "input_cached_tokens": self.input_cached_tokens,
                 "output_tokens": self.total_output_tokens,
+                "output_audio_tokens": self.output_audio_tokens,
+                "output_text_tokens": self.output_text_tokens,
                 "total_tokens": self.total_input_tokens + self.total_output_tokens,
             }
         except Exception as e:
             logger.error(f"📊 [SESSION-METRICS] Failed to log usage summary: {e}")
             return None
 
-    async def _send_usage_to_api(self):
+    async def _send_usage_to_api(self, session_duration: float, avg_ttft: float):
         """Send usage data to Manager API"""
         try:
-            url = f"{MANAGER_API_URL}/api/usage/tokens"
+            url = f"{MANAGER_API_URL}/usage/tokens"
             payload = {
                 "macAddress": self.mac_address,
+                "sessionId": self.session_id,
+                "inputAudioTokens": self.input_audio_tokens,
+                "inputTextTokens": self.input_text_tokens,
+                "inputCachedTokens": self.input_cached_tokens,
                 "inputTokens": self.total_input_tokens,
-                "outputTokens": self.total_output_tokens
+                "outputAudioTokens": self.output_audio_tokens,
+                "outputTextTokens": self.output_text_tokens,
+                "outputTokens": self.total_output_tokens,
+                "sessionDurationSeconds": round(session_duration, 3),
+                "avgTtftSeconds": round(avg_ttft, 3),
+                "messageCount": self.message_count,
+                "totalResponseDurationSeconds": round(self.total_response_duration, 3)
             }
 
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -139,8 +249,15 @@ class UsageManager:
         """Get total tokens used in this session"""
         return {
             "input_tokens": self.total_input_tokens,
+            "input_audio_tokens": self.input_audio_tokens,
+            "input_text_tokens": self.input_text_tokens,
+            "input_cached_tokens": self.input_cached_tokens,
             "output_tokens": self.total_output_tokens,
-            "total_tokens": self.total_input_tokens + self.total_output_tokens
+            "output_audio_tokens": self.output_audio_tokens,
+            "output_text_tokens": self.output_text_tokens,
+            "total_tokens": self.total_input_tokens + self.total_output_tokens,
+            "message_count": self.message_count,
+            "avg_ttft_seconds": self.total_ttft / self.message_count if self.message_count > 0 else 0.0
         }
 
     # Legacy method for backwards compatibility

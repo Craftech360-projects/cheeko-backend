@@ -585,7 +585,7 @@ async def entrypoint(ctx: JobContext):
         logger.info("💭 Mem0 conversation capture enabled")
 
     # Setup usage tracking
-    usage_manager = UsageManager(mac_address=device_mac)
+    usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
     usage_manager.setup_metrics_collection(session)
 
     async def log_usage():

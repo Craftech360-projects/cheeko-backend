@@ -1,7 +1,11 @@
 {
   "debug": false,
   "mqtt_broker": {
+<<<<<<< HEAD
     "host": "10.219.149.124",
+=======
+    "host": "192.168.1.166",
+>>>>>>> f2ffa5ae (added metrics and showed it in dashboard)
     "port": 1883,
     "protocol": "mqtt",
     "keepalive": 60,

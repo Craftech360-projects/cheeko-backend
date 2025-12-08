@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
  * Token Usage DTO for API requests/responses
  *
  * @author claude
- * @version 1.0, 2025/12/06
+ * @version 2.0, 2025/12/08
  */
 @Data
 @Builder
@@ -22,12 +22,42 @@ public class TokenUsageDTO {
     private String macAddress;
 
     /**
-     * Input tokens
+     * Session ID
+     */
+    private String sessionId;
+
+    /**
+     * Audio input tokens
+     */
+    private Long inputAudioTokens;
+
+    /**
+     * Text input tokens
+     */
+    private Long inputTextTokens;
+
+    /**
+     * Cached input tokens
+     */
+    private Long inputCachedTokens;
+
+    /**
+     * Total input tokens
      */
     private Long inputTokens;
 
     /**
-     * Output tokens
+     * Audio output tokens
+     */
+    private Long outputAudioTokens;
+
+    /**
+     * Text output tokens
+     */
+    private Long outputTextTokens;
+
+    /**
+     * Total output tokens
      */
     private Long outputTokens;
 
@@ -40,4 +70,24 @@ public class TokenUsageDTO {
      * Number of sessions
      */
     private Integer sessionCount;
+
+    /**
+     * Session duration in seconds
+     */
+    private Double sessionDurationSeconds;
+
+    /**
+     * Average time to first token in seconds (latency)
+     */
+    private Double avgTtftSeconds;
+
+    /**
+     * Number of conversation turns/messages
+     */
+    private Integer messageCount;
+
+    /**
+     * Total response duration in seconds
+     */
+    private Double totalResponseDurationSeconds;
 }
