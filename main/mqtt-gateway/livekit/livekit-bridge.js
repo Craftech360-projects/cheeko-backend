@@ -44,6 +44,7 @@ class LiveKitBridge extends EventEmitter {
     this.audioSource = new AudioSource(16000, 1);
     this.protocolVersion = protocolVersion;
     this.isAudioPlaying = false; // Track if audio is actively playing
+    this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
     this.stopAudioForwarding = false; // Flag to stop audio forwarding during mode switch
 
     // Add agent join tracking
@@ -155,6 +156,7 @@ class LiveKitBridge extends EventEmitter {
 
     // 3. Reset audio playing state
     this.isAudioPlaying = false;
+    this.audioPlayingStartTime = null;
 
     // 4. Set flag to stop any ongoing audio forwarding
     this.stopAudioForwarding = true;
@@ -296,6 +298,7 @@ class LiveKitBridge extends EventEmitter {
       console.log(`[LiveKitBridge] Room disconnected: ${reason}`);
       // CRITICAL: Clear audio flag on disconnect to prevent stuck state
       this.isAudioPlaying = false;
+      this.audioPlayingStartTime = null;
       // console.log(`🎵 [CLEANUP] Cleared audio flag on room disconnect for device: ${this.macAddress}`);
     });
 
@@ -322,6 +325,7 @@ class LiveKitBridge extends EventEmitter {
               ) {
                 // Set audio playing flag to false
                 this.isAudioPlaying = false;
+                this.audioPlayingStartTime = null;
                 // console.log(`🎵 [AUDIO-STOP] TTS stopped for device: ${this.macAddress}`);
                 // Send TTS stop message to device
                 setTimeout(() => {
@@ -373,6 +377,7 @@ class LiveKitBridge extends EventEmitter {
             case "speech_created":
               // Set audio playing flag and reset inactivity timer
               this.isAudioPlaying = true;
+              this.audioPlayingStartTime = Date.now(); // Track when audio started
               if (this.connection && this.connection.updateActivityTime) {
                 this.connection.updateActivityTime();
                 // console.log(`🎵 [AUDIO-START] TTS started, timer reset for device: ${this.macAddress}`);
@@ -403,6 +408,7 @@ class LiveKitBridge extends EventEmitter {
               // Handle music playback stopped - force clear audio playing flag
               // console.log(`🎵 [MUSIC-STOP] Music playback stopped for device: ${this.macAddress}`);
               this.isAudioPlaying = false;
+              this.audioPlayingStartTime = null;
               // Send TTS stop message to ensure device returns to listening state
               this.sendTtsStopMessage();
               break;
@@ -1884,6 +1890,7 @@ class LiveKitBridge extends EventEmitter {
 
       // CRITICAL: Clear the audio playing flag immediately when abort is sent
       this.isAudioPlaying = false;
+      this.audioPlayingStartTime = null;
       // console.log(`🎵 [ABORT-CLEAR] Cleared audio playing flag for device: ${this.macAddress}`);
     } catch (error) {
       console.error(`[LiveKitBridge] Failed to send abort signal:`, error.message);
@@ -1938,6 +1945,7 @@ class LiveKitBridge extends EventEmitter {
 
       // CRITICAL: Clear audio flag before disconnect to prevent stuck state
       this.isAudioPlaying = false;
+      this.audioPlayingStartTime = null;
       console.log(
         `🎵 [CLEANUP] Cleared audio flag on bridge close for device: ${this.macAddress}`
       );

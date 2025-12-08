@@ -527,6 +527,10 @@ public class ConfigServiceImpl implements ConfigService {
         childProfile.setGender(kid.getGender());
         childProfile.setInterests(kid.getInterests());
 
+        // 添加个性化字段
+        childProfile.setPrimaryLanguage(kid.getPrimaryLanguage() != null ? kid.getPrimaryLanguage() : "English");
+        childProfile.setAdditionalNotes(kid.getAdditionalNotes());
+
         return childProfile;
     }
 

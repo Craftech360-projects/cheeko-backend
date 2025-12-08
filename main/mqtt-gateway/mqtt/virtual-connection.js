@@ -52,6 +52,11 @@ class VirtualMQTTConnection {
     this.isEnding = false; // Track if end prompt has been sent
     this.endPromptSentTime = null; // Track when end prompt was sent
 
+    // Session duration tracking (max 60 minutes)
+    this.sessionStartTime = Date.now();
+    this.maxSessionDurationMs = 60 * 60 * 1000; // 60 minutes max session duration
+    this.maxAudioPlayingDurationMs = 90 * 1000; // 90 seconds max before considering audio stuck
+
     // Track target toy for mobile-initiated connections
     this.targetToyMac = null; // MAC address of the toy to route audio to
     this.isMobileConnection = false; // Flag to identify mobile connections
@@ -1100,77 +1105,16 @@ class VirtualMQTTConnection {
     }
 
     // Handle push-to-talk messages (ESP32 format: listen with mode=manual)
+    // NOTE: With simplified agent using default Gemini VAD, PTT works automatically
+    // without RPC calls. The agent detects speech/silence naturally.
+    // We just log the PTT state for debugging purposes.
     if (json.type === "listen") {
       const state = json.state;
       const mode = json.mode;
-      console.log(`🎤 [PTT] Received listen message - State: ${state}, Mode: ${mode}`);
+      console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode} (Gemini VAD handles turn detection)`);
 
-      if (!this.bridge || !this.bridge.room || !this.bridge.room.localParticipant) {
-        console.error(`❌ [PTT] No bridge/room available for PTT control`);
-        return;
-      }
-
-      // Check if agent has joined the room
-      if (!this.bridge.agentJoined) {
-        console.log(`⏳ [PTT] Agent not yet joined, waiting for agent...`);
-
-        // Wait for agent to join (with timeout)
-        try {
-          if (this.bridge.agentJoinPromise) {
-            const timeout = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Agent join timeout')), 5000)
-            );
-            await Promise.race([this.bridge.agentJoinPromise, timeout]);
-            console.log(`✅ [PTT] Agent joined, proceeding with PTT`);
-          } else {
-            console.error(`❌ [PTT] Agent not deployed yet. Press 's' to deploy agent first.`);
-            return;
-          }
-        } catch (err) {
-          console.error(`❌ [PTT] Agent did not join in time: ${err.message}`);
-          return;
-        }
-      }
-
-      // Find the agent participant
-      const participants = Array.from(this.bridge.room.remoteParticipants.values());
-      const agentParticipant = participants.find(p =>
-        p.identity.includes('agent') || p.identity.includes('cheeko')
-      );
-
-      if (!agentParticipant) {
-        console.error(`❌ [PTT] No agent participant found in room`);
-        // List available participants for debugging
-        console.log(`📋 [PTT] Available participants: ${participants.map(p => p.identity).join(', ')}`);
-        console.log(`💡 [PTT] Hint: Press 's' to deploy the agent first`);
-        return;
-      }
-
-      console.log(`🎤 [PTT] Agent participant found: ${agentParticipant.identity}`);
-
-      try {
-        if (state === "start" && (mode === "manual" || mode === "auto")) {
-          // PTT started - call agent's start_turn RPC
-          console.log(`🎤 [PTT] Starting push-to-talk - calling start_turn RPC`);
-          const result = await this.bridge.room.localParticipant.performRpc({
-            destinationIdentity: agentParticipant.identity,
-            method: "start_turn",
-            payload: ""
-          });
-          console.log(`✅ [PTT] start_turn RPC completed: ${result}`);
-        } else if (state === "stop") {
-          // PTT ended - call agent's end_turn RPC
-          console.log(`🎤 [PTT] Stopping push-to-talk - calling end_turn RPC`);
-          const result = await this.bridge.room.localParticipant.performRpc({
-            destinationIdentity: agentParticipant.identity,
-            method: "end_turn",
-            payload: ""
-          });
-          console.log(`✅ [PTT] end_turn RPC completed: ${result}`);
-        }
-      } catch (error) {
-        console.error(`❌ [PTT] Failed to handle PTT message:`, error);
-      }
+      // No RPC calls needed - Gemini's built-in VAD handles turn detection
+      // Audio streaming is controlled by ESP32 (sends audio only while button held)
       return;
     }
 
@@ -1224,6 +1168,16 @@ class VirtualMQTTConnection {
 
     const now = Date.now();
 
+    // Check max session duration (60 minutes absolute limit)
+    const sessionDuration = now - this.sessionStartTime;
+    if (sessionDuration > this.maxSessionDurationMs) {
+      console.log(
+        `⏰ [MAX-DURATION] Session exceeded ${Math.round(this.maxSessionDurationMs / 60000)} minutes - forcing close: ${this.deviceId}`
+      );
+      this.close();
+      return;
+    }
+
     // If we're in ending phase, check for final timeout
     if (this.isEnding && this.endPromptSentTime) {
       const timeSinceEndPrompt = now - this.endPromptSentTime;
@@ -1273,12 +1227,28 @@ class VirtualMQTTConnection {
     // Check for inactivity timeout (2 minutes of no communication)
     const timeSinceLastActivity = now - this.lastActivityTime;
 
-    // Skip timeout check if audio is actively playing (but don't reset timer)
+    // Check if audio is actively playing (but with stuck detection)
     if (this.bridge && this.bridge.isAudioPlaying) {
-      console.log(
-        `🎵 [AUDIO-ACTIVE] Audio is playing for virtual device: ${this.deviceId} - skipping timeout check but not resetting timer`
-      );
-      return;
+      // Check if audio has been playing for too long (stuck state detection)
+      const audioPlayingDuration = this.bridge.audioPlayingStartTime
+        ? now - this.bridge.audioPlayingStartTime
+        : 0;
+
+      if (audioPlayingDuration < this.maxAudioPlayingDurationMs) {
+        // Audio is playing normally - skip timeout check
+        console.log(
+          `🎵 [AUDIO-ACTIVE] Audio is playing for virtual device: ${this.deviceId} (${Math.round(audioPlayingDuration/1000)}s) - skipping timeout check`
+        );
+        return;
+      } else {
+        // Audio has been "playing" for too long - likely stuck
+        console.log(
+          `⚠️ [AUDIO-STUCK] Audio playing for ${Math.round(audioPlayingDuration/1000)}s (>${Math.round(this.maxAudioPlayingDurationMs/1000)}s) for device: ${this.deviceId} - proceeding with timeout check`
+        );
+        // Force clear the stuck audio flag
+        this.bridge.isAudioPlaying = false;
+        this.bridge.audioPlayingStartTime = null;
+      }
     }
 
     if (timeSinceLastActivity > this.inactivityTimeoutMs) {

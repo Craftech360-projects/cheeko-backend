@@ -38,6 +38,12 @@ public class KidProfileEntity extends BaseEntity {
     @Schema(description = "Avatar URL")
     private String avatarUrl;
 
+    @Schema(description = "Primary language for AI conversations")
+    private String primaryLanguage;
+
+    @Schema(description = "Parent-provided context about child personality, traits, likes, dislikes, challenges")
+    private String additionalNotes;
+
     @Schema(description = "Creator user ID")
     @TableField(fill = FieldFill.INSERT)
     private Long creator;

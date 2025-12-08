@@ -182,7 +182,7 @@ class ConfigLoader:
         # Environment variables can override yaml config
         return {
             'provider': os.getenv('REALTIME_PROVIDER', 'gemini').lower(),  # gemini or openai
-            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.0-flash-exp')),
+            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')),
             'voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
             'temperature': float(os.getenv('GEMINI_REALTIME_TEMPERATURE', gemini_config.get('temperature', 0.6))),
             'prompt': gemini_config.get('prompt', 'You are a helpful voice assistant.'),

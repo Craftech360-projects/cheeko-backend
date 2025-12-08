@@ -399,6 +399,41 @@ class ChatEventHandler:
                         # Get role and content
                         role = getattr(item, 'role', 'unknown')
                         content = None
+                        
+                        # ============================================
+                        # GOOGLE SEARCH GROUNDING DETECTION
+                        # ============================================
+                        # Check for grounding metadata to verify if Google Search is being used
+                        grounding_attrs = ['grounding_metadata', 'groundingMetadata', 'grounding_chunks', 
+                                          'grounding_supports', 'search_queries', 'web_search_queries',
+                                          'search_entry_point', 'citations', 'sources']
+                        
+                        for attr in grounding_attrs:
+                            if hasattr(item, attr):
+                                grounding_value = getattr(item, attr)
+                                if grounding_value:
+                                    logger.info(f"🔍✅ GROUNDING DETECTED! Found '{attr}': {grounding_value}")
+                        
+                        # Also check all attributes for any grounding-related data
+                        all_attrs = [a for a in dir(item) if not a.startswith('_')]
+                        for attr in all_attrs:
+                            try:
+                                if 'ground' in attr.lower() or 'search' in attr.lower() or 'citation' in attr.lower():
+                                    value = getattr(item, attr)
+                                    if value and not callable(value):
+                                        logger.info(f"🔍 GROUNDING-RELATED ATTR: {attr} = {value}")
+                            except:
+                                pass
+                        
+                        # Check if item has 'metadata' or similar nested structures
+                        if hasattr(item, 'metadata'):
+                            metadata = getattr(item, 'metadata')
+                            if metadata:
+                                logger.info(f"🔍 Item metadata: {metadata}")
+                        
+                        # ============================================
+                        # END GROUNDING DETECTION
+                        # ============================================
 
                         # Try to get content from various attributes
                         for attr in ['content', 'text', 'message', 'transcript']:

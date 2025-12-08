@@ -5,6 +5,7 @@ import java.util.Date;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
+import org.hibernate.validator.constraints.Length;
 import lombok.Data;
 
 /**
@@ -30,4 +31,12 @@ public class KidProfileUpdateDTO implements Serializable {
 
     @Schema(description = "Avatar URL")
     private String avatarUrl;
+
+    @Schema(description = "Primary language for AI conversations (English, Hindi, Kannada, Malayalam, etc.)", example = "English")
+    @Length(max = 50, message = "Primary language cannot exceed 50 characters")
+    private String primaryLanguage;
+
+    @Schema(description = "Parent-provided context about child personality, traits, likes, dislikes, challenges", example = "Loves reading books about space, shy around new people")
+    @Length(max = 5000, message = "Additional notes cannot exceed 5000 characters")
+    private String additionalNotes;
 }

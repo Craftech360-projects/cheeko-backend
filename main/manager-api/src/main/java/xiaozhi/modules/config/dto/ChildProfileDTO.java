@@ -27,4 +27,10 @@ public class ChildProfileDTO implements Serializable {
 
     @Schema(description = "Interests (comma-separated)")
     private String interests;
+
+    @Schema(description = "Primary language for AI conversations")
+    private String primaryLanguage;
+
+    @Schema(description = "Parent-provided context about child personality, traits, likes, dislikes, challenges")
+    private String additionalNotes;
 }

@@ -249,21 +249,21 @@ databaseChangeLog:
       changes:
         - sqlFile:
             encoding: utf8
-            path: classpath:db/changelog/202507101203.sql            
+            path: classpath:db/changelog/202507101203.sql
   - changeSet:
       id: 202507071130
       author: cgd
       changes:
-          - sqlFile:
-              encoding: utf8
-              path: classpath:db/changelog/202507071130.sql
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202507071130.sql
   - changeSet:
       id: 202507071530
       author: cgd
       changes:
-          - sqlFile:
-              encoding: utf8
-              path: classpath:db/changelog/202507071530.sql
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202507071530.sql
   - changeSet:
       id: 202507031602
       author: zjy
@@ -307,7 +307,6 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/202508131557.sql
   - changeSet:
-
       id: 202508231800
       author: Claude
       changes:
@@ -655,13 +654,13 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/202511261230_word_ladder_initial_greeting_fix.sql
 
-#   - changeSet:
-#       id: 202511271500
-#       author: claude
-#       changes:
-#         - sqlFile:
-#             encoding: utf8
-#             path: classpath:db/changelog/202511271500_add_funasr_websocket_stt.sql
+  #   - changeSet:
+  #       id: 202511271500
+  #       author: claude
+  #       changes:
+  #         - sqlFile:
+  #             encoding: utf8
+  #             path: classpath:db/changelog/202511271500_add_funasr_websocket_stt.sql
 
   - changeSet:
       id: 202511291430
@@ -671,10 +670,27 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/202511291430_update_all_prompts.sql
 
-#  - changeSet:
-#      id: 202511291434
-#      author: claude
-#      changes:
-#        - sqlFile:
-#            encoding: utf8
-#            path: classpath:db/changelog/202511291434.sql
+  #  - changeSet:
+  #      id: 202511291434
+  #      author: claude
+  #      changes:
+  #        - sqlFile:
+  #            encoding: utf8
+  #            path: classpath:db/changelog/202511291434.sql
+
+  - changeSet:
+      id: 202512061830
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512061830_add_personalization_to_kid_profile.sql
+
+  - changeSet:
+      id: 202512061832
+      author: claude
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512061832_update_cheeko_prompt_with_personalization.sql

@@ -867,7 +867,7 @@ class Assistant(FilteredAgent):
         logger.info(f"Looking up weather for {location}")
         return "sunny with a temperature of 70 degrees."
 
-    @function_tool
+    # @function_tool  # DISABLED: Using native Gemini Google Search grounding instead
     async def search_wikipedia(
         self,
         context: RunContext,
@@ -1093,7 +1093,7 @@ class Assistant(FilteredAgent):
             # Fallback to LLM knowledge on exception
             return f"WIKIPEDIA_UNAVAILABLE: Search error occurred. Please answer the question using your own knowledge base instead."
 
-    @function_tool
+    # @function_tool  # DISABLED: Temporarily disabled to test Google Search grounding
     async def play_music(
         self,
         context: RunContext,
@@ -1755,7 +1755,7 @@ class Assistant(FilteredAgent):
         else:
             return None, "failed"
 
-    @function_tool
+    # @function_tool  # DISABLED: Temporarily disabled to test Google Search grounding
     async def play_story(
         self,
         context: RunContext,
