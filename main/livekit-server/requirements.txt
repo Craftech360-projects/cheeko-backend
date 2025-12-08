@@ -27,7 +27,7 @@ livekit-api
 PyJWT
 
 # Memory provider (optional - comment out if using local memory)
-mem0ai==1.0.0
+mem0ai>=1.0.0
 
 jinja2
 gtts

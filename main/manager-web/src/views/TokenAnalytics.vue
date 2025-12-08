@@ -117,22 +117,22 @@
             </div>
           </div>
           <div class="breakdown-section pricing">
-            <h4>Gemini Pricing (INR)</h4>
+            <h4>Gemini 2.5 Flash Native Audio (INR)</h4>
             <div class="pricing-item">
               <span class="label">Text Input:</span>
-              <span class="rate">₹6.25/1M</span>
+              <span class="rate">₹41.67/1M</span>
             </div>
             <div class="pricing-item">
               <span class="label">Audio Input:</span>
-              <span class="rate">₹83.33/1M</span>
+              <span class="rate">₹250/1M</span>
             </div>
             <div class="pricing-item">
               <span class="label">Text Output:</span>
-              <span class="rate">₹25/1M</span>
+              <span class="rate">₹166.67/1M</span>
             </div>
             <div class="pricing-item">
               <span class="label">Audio Output:</span>
-              <span class="rate">₹333.33/1M</span>
+              <span class="rate">₹1,000/1M</span>
             </div>
           </div>
         </div>

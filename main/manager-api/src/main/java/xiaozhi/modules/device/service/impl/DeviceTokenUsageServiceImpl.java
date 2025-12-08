@@ -19,11 +19,13 @@ import xiaozhi.modules.device.service.DeviceTokenUsageService;
 public class DeviceTokenUsageServiceImpl extends BaseServiceImpl<DeviceTokenUsageDao, DeviceTokenUsageEntity>
         implements DeviceTokenUsageService {
 
-    // Gemini pricing in INR per token (1 USD = 83.33 INR)
-    private static final double TEXT_INPUT_RATE_INR = 6.25 / 1_000_000;      // ₹6.25/1M
-    private static final double AUDIO_INPUT_RATE_INR = 83.33 / 1_000_000;    // ₹83.33/1M
-    private static final double TEXT_OUTPUT_RATE_INR = 25.0 / 1_000_000;     // ₹25/1M
-    private static final double AUDIO_OUTPUT_RATE_INR = 333.33 / 1_000_000;  // ₹333.33/1M
+    // Gemini 2.5 Flash Native Audio Preview pricing (USD converted to INR @ ₹83.33/USD)
+    // Source: https://ai.google.dev/gemini-api/docs/pricing
+    // Model: gemini-2.5-flash-native-audio-preview-09-2025
+    private static final double TEXT_INPUT_RATE_INR = 41.67 / 1_000_000;     // $0.50/1M = ₹41.67/1M
+    private static final double AUDIO_INPUT_RATE_INR = 250.0 / 1_000_000;    // $3.00/1M = ₹250.00/1M
+    private static final double TEXT_OUTPUT_RATE_INR = 166.67 / 1_000_000;   // $2.00/1M = ₹166.67/1M
+    private static final double AUDIO_OUTPUT_RATE_INR = 1000.0 / 1_000_000;  // $12.00/1M = ₹1000.00/1M
 
     @Override
     public boolean recordSessionTokenUsage(TokenUsageDTO dto) {
