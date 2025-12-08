@@ -98,7 +98,8 @@ public class ShiroConfig {
         // Analytics endpoints use dual auth (server secret OR OAuth2)
         // This allows both backend services and frontend users to access
         filterMap.put("/analytics/**", "dual");
-        filterMap.put("/api/usage/**", "anon"); // Allow anonymous access to token usage API (called from LiveKit server)
+        filterMap.put("/usage/tokens", "anon"); // Allow anonymous POST for token usage recording (called from LiveKit server)
+        // Note: /usage/analytics/** will use oauth2 (requires login) for dashboard access
         filterMap.put("/agent/device/**/cycle-mode", "anon"); // Allow firmware direct access (legacy)
         filterMap.put("/agent/device/**/cycle-character", "anon"); // Allow firmware direct access (cycle)
         filterMap.put("/agent/device/**/set-character", "anon"); // Allow firmware direct access (set specific)
