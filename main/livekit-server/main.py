@@ -30,6 +30,7 @@ from livekit.agents import (
     cli,
     Agent,
     AutoSubscribe,
+    RoomInputOptions,
 )
 from livekit import rtc, api
 from livekit.plugins import google
@@ -48,6 +49,9 @@ from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 from src.mcp.device_control_service import DeviceControlService
 from src.mcp.mcp_executor import LiveKitMCPExecutor
+from src.utils.helpers import UsageManager
+from src.handlers.chat_logger import ChatEventHandler
+from src.services.chat_history_service import ChatHistoryService
 # FilteredAgent removed for faster response time - using built-in Agent
 
 # Logger
@@ -271,6 +275,7 @@ async def entrypoint(ctx: JobContext):
     prompt_service = PromptService()
     agent_prompt = ConfigLoader.get_default_prompt()
     child_profile = None
+    agent_id = None
 
     if device_mac:
         try:
@@ -303,7 +308,8 @@ async def entrypoint(ctx: JobContext):
             if isinstance(agent_id_result, Exception):
                 logger.error(f"Failed to get agent_id: {agent_id_result}")
             else:
-                logger.info(f"📝 Agent ID: {agent_id_result}")
+                agent_id = agent_id_result
+                logger.info(f"📝 Agent ID: {agent_id}")
 
             # Process prompt
             if isinstance(prompt_config_result, Exception):
@@ -497,17 +503,107 @@ async def entrypoint(ctx: JobContext):
     logger.info("🎛️ Device control service created")
 
     # ============================================================================
+    # CHAT HISTORY & MEM0 SERVICES
+    # ============================================================================
+
+    # Initialize chat history service if agent_id is available
+    chat_history_service = None
+
+    if device_mac and agent_id:
+        try:
+            manager_api_url = os.getenv("MANAGER_API_URL")
+            manager_api_secret = os.getenv("MANAGER_API_SECRET")
+
+            chat_history_service = ChatHistoryService(
+                manager_api_url=manager_api_url,
+                secret=manager_api_secret,
+                device_mac=device_mac,
+                session_id=room_name,
+                agent_id=agent_id
+            )
+            chat_history_service.start_periodic_sending()
+            logger.info(f"📝 Chat history service initialized for agent_id: {agent_id}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize chat history service: {e}")
+
+    # Initialize mem0 provider and conversation messages
+    mem0_provider = None
+    conversation_messages = []
+
+    try:
+        from src.memory.mem0_provider import Mem0Provider
+        mem0_provider = Mem0Provider()
+        logger.info("💭 Mem0 provider initialized")
+    except Exception as e:
+        logger.warning(f"Mem0 provider not available: {e}")
+
+    # ============================================================================
     # CREATE ASSISTANT
     # ============================================================================
 
     assistant = Assistant(instructions=agent_prompt)
     assistant.set_services(device_control_service, mcp_executor)
     assistant.set_room_info(room_name=room_name, device_mac=device_mac)
+    # Log session info (responses will be captured via conversation_item_added event)
+    if chat_history_service:
+        logger.debug(
+            "🎯 Chat history service ready - will capture via conversation_item_added and session.history")
 
-    # ============================================================================
-    # ROOM LIFECYCLE
-    # ============================================================================
+    # Setup event handlers and pass assistant reference for abort handling
+    ChatEventHandler.set_assistant(assistant)
+    if chat_history_service:
+        ChatEventHandler.set_chat_history_service(chat_history_service)
+        logger.info(f"📝🔗 Chat history service connected to event handlers")
+    else:
+        logger.warning(
+            f"📝⚠️ No chat history service available - events will not be captured")
+    ChatEventHandler.setup_session_handlers(session, ctx)
 
+    # Add mem0 conversation capture event handler
+    if mem0_provider:
+        @session.on("conversation_item_added")
+        def _on_mem0_conversation_item(ev):
+            try:
+                item = ev.item
+                if hasattr(item, 'role') and hasattr(item, 'content'):
+                    role = item.role
+                    content = item.content
+                    # Extract text from content (might be list or string)
+                    if isinstance(content, list):
+                        content = ' '.join(str(c) for c in content)
+
+                    if role in ['user', 'assistant'] and content:
+                        conversation_messages.append({
+                            'role': role,
+                            'content': content
+                        })
+                        logger.debug(
+                            f"💭 Captured {role} message for mem0 (buffer size: {len(conversation_messages)})")
+            except Exception as e:
+                logger.error(f"💭 Failed to capture message for mem0: {e}")
+
+        logger.info("💭 Mem0 conversation capture enabled")
+
+    # Setup usage tracking
+    usage_manager = UsageManager(mac_address=device_mac)
+    usage_manager.setup_metrics_collection(session)
+
+    async def log_usage():
+        """Log usage summary on shutdown"""
+        await usage_manager.log_usage()
+        logger.info("Sent usage_summary via data channel")
+
+    ctx.add_shutdown_callback(log_usage)
+
+    # Create room options with 16kHz sample rate to match MQTT gateway
+    # This ensures audio from ESP32 devices (16kHz) is not resampled unnecessarily
+    room_input_options = RoomInputOptions(
+        audio_sample_rate=16000,  # Match MQTT gateway's 16kHz audio
+        audio_num_channels=1,     # Mono audio from ESP32
+    )
+    logger.info("Room input configured: 16kHz mono audio to match MQTT gateway")
+
+    # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
 
