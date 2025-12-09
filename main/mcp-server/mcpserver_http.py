@@ -1,8 +1,9 @@
 """
-MCP Server for ESP32 Device Control via MQTT Gateway
+MCP Server for ESP32 Device Control via MQTT Gateway (HTTP/SSE Transport)
 
 This server exposes tools for controlling ESP32 devices through voice commands.
 It communicates with the MQTT Gateway REST API to send commands to devices.
+Runs as an HTTP server with SSE transport for better reliability.
 """
 
 import os
@@ -13,8 +14,10 @@ from dotenv import load_dotenv
 
 # MCP Server imports
 from mcp.server import Server
-from mcp.server.stdio import stdio_server
+from mcp.server.sse import SseServerTransport
 from mcp.types import Tool, TextContent
+from starlette.applications import Starlette
+from starlette.routing import Route, Mount
 
 # HTTP client for MQTT Gateway API
 import httpx
@@ -25,6 +28,17 @@ load_dotenv()
 # Configuration
 MQTT_GATEWAY_URL = os.getenv("MQTT_GATEWAY_URL", "http://localhost:8081")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "aa:bb:cc:dd:ee:ff")
+MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8080"))
+
+# Device Aliases Mapping
+DEVICE_ALIASES = {
+    "toy": DEFAULT_DEVICE_ID,
+    "my toy": DEFAULT_DEVICE_ID,
+    "the toy": DEFAULT_DEVICE_ID,
+    "esp32": DEFAULT_DEVICE_ID,
+    "device": DEFAULT_DEVICE_ID
+}
 
 # Setup logging
 logging.basicConfig(
@@ -34,7 +48,7 @@ logging.basicConfig(
 logger = logging.getLogger("mcp-esp32-server")
 
 # Create MCP server instance
-app = Server("esp32-controller")
+mcp_server = Server("esp32-controller")
 
 # HTTP client for MQTT Gateway
 http_client = httpx.AsyncClient(
@@ -45,9 +59,10 @@ http_client = httpx.AsyncClient(
 
 # ============ MCP Tools ============
 
-@app.list_tools()
+@mcp_server.list_tools()
 async def list_tools() -> list[Tool]:
     """List all available tools for ESP32 control."""
+    logger.info("Listing tools...")
     return [
         Tool(
             name="control_esp32_light",
@@ -57,7 +72,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "device_id": {
                         "type": "string",
-                        "description": "Device MAC address (e.g., 'aa:bb:cc:dd:ee:ff')"
+                        "description": "Device MAC address or alias like 'toy' (e.g., 'aa:bb:cc:dd:ee:ff' or 'toy')"
                     },
                     "action": {
                         "type": "string",
@@ -82,7 +97,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "device_id": {
                         "type": "string",
-                        "description": "Device MAC address"
+                        "description": "Device MAC address or alias like 'toy'"
                     },
                     "color": {
                         "type": "string",
@@ -100,7 +115,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "device_id": {
                         "type": "string",
-                        "description": "Device MAC address"
+                        "description": "Device MAC address or alias like 'toy'"
                     }
                 },
                 "required": ["device_id"]
@@ -114,7 +129,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "device_id": {
                         "type": "string",
-                        "description": "Device MAC address"
+                        "description": "Device MAC address or alias like 'toy'"
                     },
                     "volume": {
                         "type": "integer",
@@ -129,11 +144,11 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-@app.call_tool()
+@mcp_server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> list[TextContent]:
     """Handle tool calls from the MCP client."""
     
-    logger.info(f"Tool called: {name} with arguments: {arguments}")
+    logger.info(f"🔧 Tool called: {name} with arguments: {arguments}")
     
     try:
         if name == "control_esp32_light":
@@ -150,7 +165,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> list[TextContent]:
                 text=f"Unknown tool: {name}"
             )]
     except Exception as e:
-        logger.error(f"Error executing tool {name}: {e}", exc_info=True)
+        logger.error(f"❌ Error executing tool {name}: {e}", exc_info=True)
         return [TextContent(
             type="text",
             text=f"Error: {str(e)}"
@@ -166,6 +181,10 @@ async def control_esp32_light(
 ) -> list[TextContent]:
     """Control ESP32 LED light."""
     
+    # Resolve alias if possible
+    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
+    logger.info(f"💡 Controlling light: {device_id} -> {resolved_id}, action={action}, brightness={brightness}")
+    
     try:
         # Prepare command payload
         command = {
@@ -173,14 +192,17 @@ async def control_esp32_light(
             "value": brightness if action == "brightness" else None
         }
         
+        logger.info(f"📤 Sending to MQTT Gateway: POST /api/device/{resolved_id}/control with {command}")
+        
         # Call MQTT Gateway API
         response = await http_client.post(
-            f"/api/device/{device_id}/control",
+            f"/api/device/{resolved_id}/control",
             json=command
         )
         response.raise_for_status()
         
         result = response.json()
+        logger.info(f"✅ MQTT Gateway response: {result}")
         
         # Format response message
         if action == "on":
@@ -227,6 +249,10 @@ async def set_esp32_led_color(
     # Convert color name to hex if needed
     color_value = color_map.get(color.lower(), color)
     
+    # Resolve alias
+    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
+    logger.info(f"🎨 Setting color: {device_id} -> {resolved_id}, color={color_value}")
+    
     try:
         command = {
             "action": "led_color",
@@ -234,7 +260,7 @@ async def set_esp32_led_color(
         }
         
         response = await http_client.post(
-            f"/api/device/{device_id}/control",
+            f"/api/device/{resolved_id}/control",
             json=command
         )
         response.raise_for_status()
@@ -253,9 +279,13 @@ async def set_esp32_led_color(
 async def get_esp32_status(device_id: str) -> list[TextContent]:
     """Get ESP32 device status."""
     
+    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
+    logger.info(f"📊 Getting status: {device_id} -> {resolved_id}")
+    
     try:
-        response = await http_client.get(f"/api/device/{device_id}/status")
+        response = await http_client.get(f"/api/device/{resolved_id}/status")
         response.raise_for_status()
+
         
         status = response.json()
         
@@ -290,6 +320,9 @@ async def set_esp32_volume(
 ) -> list[TextContent]:
     """Set ESP32 audio volume."""
     
+    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
+    logger.info(f"🔊 Setting volume: {device_id} -> {resolved_id}, volume={volume}")
+    
     try:
         command = {
             "action": "set_volume",
@@ -297,7 +330,7 @@ async def set_esp32_volume(
         }
         
         response = await http_client.post(
-            f"/api/device/{device_id}/control",
+            f"/api/device/{resolved_id}/control",
             json=command
         )
         response.raise_for_status()
@@ -313,20 +346,49 @@ async def set_esp32_volume(
         return [TextContent(type="text", text=f"❌ {error_msg}")]
 
 
-# ============ Server Lifecycle ============
+# ============ HTTP Server Setup ============
 
-async def main():
-    """Run the MCP server."""
-    logger.info(f"Starting MCP ESP32 Controller Server")
-    logger.info(f"MQTT Gateway URL: {MQTT_GATEWAY_URL}")
+# Create SSE transport instance for handling server-sent events
+sse = SseServerTransport("/messages")
+
+
+async def handle_sse(request):
+    """
+    SSE endpoint that connects to the MCP server.
     
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(
+    This endpoint establishes a Server-Sent Events connection with the client
+    and forwards communication to the Model Context Protocol server.
+    """
+    logger.info("📡 New SSE connection established")
+    
+    # Use sse.connect_sse to establish an SSE connection with the MCP server
+    async with sse.connect_sse(request.scope, request.receive, request._send) as (
+        read_stream,
+        write_stream,
+    ):
+        # Run the MCP server with the established streams
+        await mcp_server.run(
             read_stream,
             write_stream,
-            app.create_initialization_options()
+            mcp_server.create_initialization_options(),
         )
 
 
+# Create Starlette app
+app = Starlette(
+    routes=[
+        Route("/sse", endpoint=handle_sse, methods=["GET"]),
+        Mount("/messages", app=sse.handle_post_message),
+    ]
+)
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    import uvicorn
+    
+    logger.info(f"🚀 Starting MCP ESP32 Controller Server on port {MCP_SERVER_PORT}")
+    logger.info(f"📡 SSE endpoint: http://localhost:{MCP_SERVER_PORT}/sse")
+    logger.info(f"🌐 MQTT Gateway URL: {MQTT_GATEWAY_URL}")
+    logger.info(f"🏷️  Default Device ID: {DEFAULT_DEVICE_ID}")
+    
+    uvicorn.run(app, host="0.0.0.0", port=MCP_SERVER_PORT, log_level="info")

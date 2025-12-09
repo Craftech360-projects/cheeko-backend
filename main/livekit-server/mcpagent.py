@@ -58,6 +58,13 @@ class ESP32VoiceAgent(Agent):
     async def on_enter(self):
         """Called when the agent enters the room."""
         logger.info("ESP32 Voice Agent entered the room")
+        
+        # Log available tools
+        if hasattr(self.session, '_mcp_tools'):
+            logger.info(f"Loaded MCP tools: {list(self.session._mcp_tools.keys())}")
+        else:
+            logger.warning("No MCP tools loaded!")
+        
         # Generate initial greeting
         await self.session.generate_reply()
 
@@ -69,14 +76,6 @@ async def entrypoint(ctx: JobContext):
     This function creates an AgentSession with official MCP support,
     connecting to the custom ESP32 MCP server.
     """
-    
-    # Get MCP server URL from environment
-    mcp_server_url = os.getenv("MCP_SERVER_URL")
-    if not mcp_server_url:
-        logger.error("MCP_SERVER_URL not set in environment variables")
-        raise ValueError("MCP_SERVER_URL environment variable is required")
-    
-    logger.info(f"Connecting to MCP server: {mcp_server_url}")
     
     # Create agent session with official MCP support
     session = AgentSession(
@@ -92,24 +91,11 @@ async def entrypoint(ctx: JobContext):
         # Text-to-Speech
         tts=openai.TTS(),
         
-        # ✅ Official MCP Integration
-        # The MCP server will be started as a subprocess and tools will be
-        # automatically loaded and made available to the agent
+        # ✅ Official MCP Integration via HTTP
+        # Connect to the manually running MCP server via HTTP/SSE
         mcp_servers=[
-            mcp.MCPServerStdio(
-                command="python",
-                args=[
-                    os.path.join(
-                        os.path.dirname(__file__),
-                        "..",
-                        "mcp-server",
-                        "mcp_esp32_server.py"
-                    )
-                ],
-                env={
-                    "MQTT_GATEWAY_URL": os.getenv("MQTT_GATEWAY_URL", "http://localhost:8081"),
-                    "LOG_LEVEL": os.getenv("LOG_LEVEL", "INFO")
-                }
+            mcp.MCPServerHTTP(
+                url="http://localhost:8080/sse"
             )
         ]
     )
