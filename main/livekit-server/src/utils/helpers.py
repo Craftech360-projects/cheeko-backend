@@ -18,14 +18,14 @@ class UsageManager:
         self.mac_address = mac_address
         self.session_id = session_id
 
-        # Track total input/output tokens
-        self.total_input_tokens = 0
+        # Track billable input/output tokens (excluding cached tokens)
+        self.total_input_tokens = 0  # Billable input tokens only
         self.total_output_tokens = 0
 
         # Track detailed token breakdown for Gemini cost calculation
         self.input_audio_tokens = 0
         self.input_text_tokens = 0
-        self.input_cached_tokens = 0
+        self.input_cached_tokens = 0  # Tracked separately, not included in total
         self.output_audio_tokens = 0
         self.output_text_tokens = 0
 
@@ -50,15 +50,21 @@ class UsageManager:
 
         # Handle RealtimeModelMetrics (Gemini Realtime)
         if hasattr(m, 'input_tokens') and hasattr(m, 'output_tokens') and hasattr(m, 'input_token_details'):
-            # Total tokens
-            self.total_input_tokens += m.input_tokens
+            # Get cached tokens count
+            cached_tokens = 0
+            if m.input_token_details:
+                cached_tokens = getattr(m.input_token_details, 'cached_tokens', 0) or 0
+
+            # Billable input tokens = total input - cached (cached tokens are free/discounted)
+            billable_input = m.input_tokens - cached_tokens
+            self.total_input_tokens += billable_input
             self.total_output_tokens += m.output_tokens
 
             # Detailed breakdown from input_token_details
             if m.input_token_details:
                 self.input_audio_tokens += getattr(m.input_token_details, 'audio_tokens', 0) or 0
                 self.input_text_tokens += getattr(m.input_token_details, 'text_tokens', 0) or 0
-                self.input_cached_tokens += getattr(m.input_token_details, 'cached_tokens', 0) or 0
+                self.input_cached_tokens += cached_tokens
 
             # Detailed breakdown from output_token_details
             if m.output_token_details:
@@ -75,8 +81,8 @@ class UsageManager:
             self.message_count += 1
 
             logger.info(
-                f"📊 [METRICS-REALTIME] input={m.input_tokens} (audio={getattr(m.input_token_details, 'audio_tokens', 0)}, "
-                f"text={getattr(m.input_token_details, 'text_tokens', 0)}, cached={getattr(m.input_token_details, 'cached_tokens', 0)}), "
+                f"📊 [METRICS-REALTIME] input={m.input_tokens} (billable={billable_input}, audio={getattr(m.input_token_details, 'audio_tokens', 0)}, "
+                f"text={getattr(m.input_token_details, 'text_tokens', 0)}, cached={cached_tokens}), "
                 f"output={m.output_tokens} (audio={getattr(m.output_token_details, 'audio_tokens', 0)}, "
                 f"text={getattr(m.output_token_details, 'text_tokens', 0)}), "
                 f"total={m.total_tokens}, ttft={m.ttft:.2f}s, duration={m.duration:.2f}s, tokens/s={m.tokens_per_second:.1f}"
@@ -167,14 +173,14 @@ class UsageManager:
             logger.info(f"📊 [SESSION-METRICS] Message Count: {self.message_count}")
             logger.info(f"📊 [SESSION-METRICS] Average TTFT: {avg_ttft:.3f}s")
             logger.info(f"📊 [SESSION-METRICS] Total Response Duration: {self.total_response_duration:.2f}s")
-            logger.info(f"📊 [SESSION-METRICS] Input Tokens: {self.total_input_tokens}")
+            logger.info(f"📊 [SESSION-METRICS] Billable Input Tokens: {self.total_input_tokens}")
             logger.info(f"📊 [SESSION-METRICS]   - Audio: {self.input_audio_tokens}")
             logger.info(f"📊 [SESSION-METRICS]   - Text: {self.input_text_tokens}")
-            logger.info(f"📊 [SESSION-METRICS]   - Cached: {self.input_cached_tokens}")
+            logger.info(f"📊 [SESSION-METRICS]   - Cached (excluded): {self.input_cached_tokens}")
             logger.info(f"📊 [SESSION-METRICS] Output Tokens: {self.total_output_tokens}")
             logger.info(f"📊 [SESSION-METRICS]   - Audio: {self.output_audio_tokens}")
             logger.info(f"📊 [SESSION-METRICS]   - Text: {self.output_text_tokens}")
-            logger.info(f"📊 [SESSION-METRICS] Total Tokens: {self.total_input_tokens + self.total_output_tokens}")
+            logger.info(f"📊 [SESSION-METRICS] Total Billable Tokens: {self.total_input_tokens + self.total_output_tokens}")
             logger.info("=" * 60)
 
             # Send to Manager API if we have MAC address and session_id

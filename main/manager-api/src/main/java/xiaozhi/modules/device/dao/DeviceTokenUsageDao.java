@@ -138,7 +138,7 @@ public interface DeviceTokenUsageDao extends BaseMapper<DeviceTokenUsageEntity> 
 
     /**
      * Get per-device daily usage with owner name
-     * Join path: device_token_usage -> ai_device -> ai_agent -> sys_user
+     * Join path: device_token_usage -> ai_device -> sys_user (directly via ai_device.user_id)
      */
     @Select("SELECT " +
             "dtu.mac_address, " +
@@ -155,9 +155,8 @@ public interface DeviceTokenUsageDao extends BaseMapper<DeviceTokenUsageEntity> 
             "COALESCE(AVG(dtu.avg_ttft_seconds), 0) as avg_ttft_seconds, " +
             "COALESCE(SUM(dtu.session_duration_seconds), 0) as total_duration_seconds " +
             "FROM device_token_usage dtu " +
-            "LEFT JOIN ai_device ad ON dtu.mac_address COLLATE utf8mb4_unicode_ci = ad.mac_address COLLATE utf8mb4_unicode_ci " +
-            "LEFT JOIN ai_agent ag ON ad.agent_id = ag.id " +
-            "LEFT JOIN sys_user su ON ag.user_id = su.id " +
+            "LEFT JOIN ai_device ad ON dtu.mac_address = ad.mac_address COLLATE utf8mb4_unicode_ci " +
+            "LEFT JOIN sys_user su ON ad.user_id = su.id " +
             "WHERE dtu.usage_date >= #{startDate} AND dtu.usage_date <= #{endDate} " +
             "GROUP BY dtu.mac_address, dtu.usage_date, su.username " +
             "ORDER BY dtu.usage_date DESC, dtu.mac_address")
