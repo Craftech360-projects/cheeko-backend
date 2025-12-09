@@ -58,13 +58,8 @@ class ESP32VoiceAgent(Agent):
     async def on_enter(self):
         """Called when the agent enters the room."""
         logger.info("ESP32 Voice Agent entered the room")
-        
-        # Log available tools
-        if hasattr(self.session, '_mcp_tools'):
-            logger.info(f"Loaded MCP tools: {list(self.session._mcp_tools.keys())}")
-        else:
-            logger.warning("No MCP tools loaded!")
-        
+        logger.info("MCP tools from http://localhost:8080/sse should be auto-loaded")
+
         # Generate initial greeting
         await self.session.generate_reply()
 
