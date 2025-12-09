@@ -3184,29 +3184,12 @@ class VirtualMQTTConnection {
 
         console.log(`🎤 [PTT] Agent participant found: ${agentParticipant.identity}`);
 
+        // PTT RPC calls removed - Gemini handles VAD automatically
+        // Just log the PTT state changes for debugging
         if (isPttStart) {
-          // PTT started - enable audio input
-          console.log(`🎤 [PTT] Starting push-to-talk - calling start_turn RPC`);
-
-          const result = await this.bridge.room.localParticipant.performRpc({
-            destinationIdentity: agentParticipant.identity,
-            method: "start_turn",
-            payload: ""
-          });
-
-          console.log(`✅ [PTT] start_turn RPC completed: ${result}`);
-
+          console.log(`🎤 [PTT] Push-to-talk started (Gemini VAD mode - no RPC needed)`);
         } else if (isPttEnd) {
-          // PTT ended - disable audio input and commit turn
-          console.log(`🎤 [PTT] Stopping push-to-talk - calling end_turn RPC`);
-
-          const result = await this.bridge.room.localParticipant.performRpc({
-            destinationIdentity: agentParticipant.identity,
-            method: "end_turn",
-            payload: ""
-          });
-
-          console.log(`✅ [PTT] end_turn RPC completed: ${result}`);
+          console.log(`🎤 [PTT] Push-to-talk stopped (Gemini VAD mode - no RPC needed)`);
         } else {
           console.log(`⚠️ [PTT] Neither start nor end condition met - ignoring message`);
         }
@@ -3617,38 +3600,8 @@ class MQTTGateway {
             console.log(`⚠️ [ABORT] No connections found for device: ${deviceId}, abort cannot be processed`);
           }
         } else if (originalPayload.type === 'start_greeting') {
-          // start_greeting message = ONLY enable PTT (call start_turn RPC)
-          console.log(`🎤 [START-GREETING] Processing start_greeting - enabling PTT for device: ${deviceId}`);
-
-          // Check for virtual device connection
-          const deviceInfo = this.deviceConnections.get(deviceId);
-          if (deviceInfo && deviceInfo.connection && deviceInfo.connection.bridge) {
-            const bridge = deviceInfo.connection.bridge;
-
-            try {
-              // Find the agent participant
-              const participants = Array.from(bridge.room.remoteParticipants.values());
-              const agentParticipant = participants.find(p => p.identity.includes('agent'));
-
-              if (agentParticipant) {
-                console.log(`🎤 [START-GREETING] Agent participant found, calling start_turn RPC...`);
-
-                const result = await bridge.room.localParticipant.performRpc({
-                  destinationIdentity: agentParticipant.identity,
-                  method: "start_turn",
-                  payload: ""
-                });
-
-                console.log(`✅ [START-GREETING] PTT enabled: ${result}`);
-              } else {
-                console.error(`❌ [START-GREETING] No agent participant found in room`);
-              }
-            } catch (pttError) {
-              console.error(`❌ [START-GREETING] Failed to enable PTT:`, pttError);
-            }
-          } else {
-            console.error(`❌ [START-GREETING] No bridge found for device ${deviceId}`);
-          }
+          // start_greeting message - Gemini handles VAD automatically, no RPC needed
+          console.log(`🎤 [START-GREETING] Processing start_greeting for device: ${deviceId} (Gemini VAD mode - no RPC needed)`);
         } else {
           // ALWAYS check for real ESP32 connection FIRST (prioritize over virtual)
           const realConnection = this.findRealDeviceConnection(deviceId);

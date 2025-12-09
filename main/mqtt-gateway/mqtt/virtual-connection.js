@@ -1148,28 +1148,12 @@ class VirtualMQTTConnection {
 
       console.log(`🎤 [PTT] Agent participant found: ${agentParticipant.identity}`);
 
-      try {
-        if (state === "start" && (mode === "manual" || mode === "auto")) {
-          // PTT started - call agent's start_turn RPC
-          console.log(`🎤 [PTT] Starting push-to-talk - calling start_turn RPC`);
-          const result = await this.bridge.room.localParticipant.performRpc({
-            destinationIdentity: agentParticipant.identity,
-            method: "start_turn",
-            payload: ""
-          });
-          console.log(`✅ [PTT] start_turn RPC completed: ${result}`);
-        } else if (state === "stop") {
-          // PTT ended - call agent's end_turn RPC
-          console.log(`🎤 [PTT] Stopping push-to-talk - calling end_turn RPC`);
-          const result = await this.bridge.room.localParticipant.performRpc({
-            destinationIdentity: agentParticipant.identity,
-            method: "end_turn",
-            payload: ""
-          });
-          console.log(`✅ [PTT] end_turn RPC completed: ${result}`);
-        }
-      } catch (error) {
-        console.error(`❌ [PTT] Failed to handle PTT message:`, error);
+      // PTT RPC calls removed - Gemini handles VAD automatically
+      // Just log the PTT state changes for debugging
+      if (state === "start" && (mode === "manual" || mode === "auto")) {
+        console.log(`🎤 [PTT] Push-to-talk started (Gemini VAD mode - no RPC needed)`);
+      } else if (state === "stop") {
+        console.log(`🎤 [PTT] Push-to-talk stopped (Gemini VAD mode - no RPC needed)`);
       }
       return;
     }

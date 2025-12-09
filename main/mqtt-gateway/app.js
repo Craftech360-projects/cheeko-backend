@@ -68,7 +68,28 @@ async function main() {
     await gateway.start();
 
     logger.info("✅ [MAIN] MQTT Gateway started successfully");
-    // logger.info("🎯 [READY] System ready to accept device connections");
+
+    // ================================
+    // Start REST API Server for MCP
+    // ================================
+    const express = require('express');
+    const { initDeviceAPI } = require('./api/device-api');
+
+    const app = express();
+    app.use(express.json());
+
+    // Add device control API routes
+    app.use('/api', initDeviceAPI(gateway));
+
+    const API_PORT = process.env.API_PORT || 8081;
+    app.listen(API_PORT, () => {
+      logger.info(`✅ [API] REST API server listening on port ${API_PORT}`);
+      logger.info(`🎯 [READY] System ready to accept device connections and API requests`);
+    });
+
+    // Store gateway reference for signal handlers
+    global.gateway = gateway;
+
   } catch (error) {
     logger.error("❌ [FATAL] Failed to start MQTT Gateway:", error);
     process.exit(1);
@@ -78,12 +99,11 @@ async function main() {
 // ================================
 // Signal Handlers
 // ================================
-let gateway = null;
 
 process.on("SIGINT", async () => {
   logger.info("\n🛑 [SHUTDOWN] Received SIGINT, shutting down gracefully...");
-  if (gateway && gateway.stop) {
-    await gateway.stop();
+  if (global.gateway && global.gateway.stop) {
+    await global.gateway.stop();
   }
 
   // Wait for Loki batches to be sent before exiting
@@ -95,8 +115,8 @@ process.on("SIGINT", async () => {
 
 process.on("SIGTERM", async () => {
   logger.info("\n🛑 [SHUTDOWN] Received SIGTERM, shutting down gracefully...");
-  if (gateway && gateway.stop) {
-    await gateway.stop();
+  if (global.gateway && global.gateway.stop) {
+    await global.gateway.stop();
   }
 
   // Wait for Loki batches to be sent before exiting
