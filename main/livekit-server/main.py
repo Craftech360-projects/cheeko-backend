@@ -177,33 +177,13 @@ async def delete_livekit_room(room_name: str):
 
 
 # ============================================================================
-# SIMPLIFIED ASSISTANT
+# ASSISTANT WITH FULL FUNCTION TOOLS
 # ============================================================================
 
-class Assistant(Agent):
-    """Simplified Assistant for conversation mode - using built-in Agent for faster response"""
+# Import the full Assistant class with all function tools from main_agent.py
+from src.agent.main_agent import Assistant
 
-    def __init__(self, instructions: str = None) -> None:
-        super().__init__(instructions=instructions or "You are a helpful AI assistant.")
-        self.room_name = None
-        self.device_mac = None
-        self.device_control_service = None
-        self.mcp_executor = None
-        self._agent_session = None
-
-    def set_services(self, device_control_service, mcp_executor):
-        """Inject services"""
-        self.device_control_service = device_control_service
-        self.mcp_executor = mcp_executor
-
-    def set_room_info(self, room_name: str, device_mac: str):
-        """Set room information"""
-        self.room_name = room_name
-        self.device_mac = device_mac
-
-    def set_agent_session(self, session):
-        """Set agent session reference"""
-        self._agent_session = session
+logger.info("✅ Imported Assistant from main_agent.py with all function tools (update_agent_mode, games, device control, etc.)")
 
 
 # ============================================================================
@@ -410,10 +390,8 @@ async def entrypoint(ctx: JobContext):
 
     logger.info(f"✅ Gemini Realtime model created")
 
-    # Create AgentSession
-    session = AgentSession(
-        llm=realtime_model,
-    )
+    # Create AgentSession - LLM is now passed to Agent constructor for function tools to work
+    session = AgentSession()
 
     # ============================================================================
     # STATE MANAGEMENT FOR LED FEEDBACK
@@ -495,12 +473,81 @@ async def entrypoint(ctx: JobContext):
     logger.info("🛡️ Error handling enabled")
 
     # ============================================================================
-    # DEVICE CONTROL SERVICE
+    # INITIALIZE ALL SERVICES FOR FUNCTION TOOLS
     # ============================================================================
 
+    # Import additional services needed by Assistant's function tools
+    from src.services.music_service import MusicService
+    from src.services.story_service import StoryService
+    from src.services.unified_audio_player import UnifiedAudioPlayer
+    from src.services.google_search_service import GoogleSearchService
+    from src.services.question_generator_service import QuestionGeneratorService
+    from src.services.riddle_generator_service import RiddleGeneratorService
+    from src.services.analytics_service import AnalyticsService
+
+    # Device control services
     device_control_service = DeviceControlService()
     mcp_executor = LiveKitMCPExecutor()
     logger.info("🎛️ Device control service created")
+
+    # Initialize Music Service
+    music_service = MusicService()
+    try:
+        await music_service.initialize()
+        logger.info("🎵 Music service initialized")
+    except Exception as e:
+        logger.warning(f"Music service initialization failed: {e}")
+        music_service = None
+
+    # Initialize Story Service
+    story_service = StoryService()
+    try:
+        await story_service.initialize()
+        logger.info("📖 Story service initialized")
+    except Exception as e:
+        logger.warning(f"Story service initialization failed: {e}")
+        story_service = None
+
+    # Initialize Unified Audio Player
+    unified_audio_player = UnifiedAudioPlayer()
+    logger.info("🔊 Unified audio player created")
+
+    # Initialize Google Search Service
+    google_search_service = GoogleSearchService()
+    logger.info("🔍 Google search service created")
+
+    # Initialize Question Generator Service
+    question_generator_service = QuestionGeneratorService()
+    try:
+        await question_generator_service.initialize()
+        logger.info("🧮 Question generator service initialized")
+    except Exception as e:
+        logger.warning(f"Question generator service initialization failed: {e}")
+        question_generator_service = None
+
+    # Initialize Riddle Generator Service
+    riddle_generator_service = RiddleGeneratorService()
+    try:
+        await riddle_generator_service.initialize()
+        logger.info("🤔 Riddle generator service initialized")
+    except Exception as e:
+        logger.warning(f"Riddle generator service initialization failed: {e}")
+        riddle_generator_service = None
+
+    # Initialize Analytics Service
+    analytics_service = None
+    if device_mac and agent_id:
+        try:
+            analytics_service = AnalyticsService(
+                manager_api_url=os.getenv("MANAGER_API_URL"),
+                secret=os.getenv("MANAGER_API_SECRET"),
+                device_mac=device_mac,
+                session_id=room_name,
+                agent_id=agent_id
+            )
+            logger.info("📊 Analytics service initialized")
+        except Exception as e:
+            logger.warning(f"Analytics service initialization failed: {e}")
 
     # ============================================================================
     # CHAT HISTORY & MEM0 SERVICES
@@ -531,19 +578,39 @@ async def entrypoint(ctx: JobContext):
     conversation_messages = []
 
     try:
-        from src.memory.mem0_provider import Mem0Provider
-        mem0_provider = Mem0Provider()
-        logger.info("💭 Mem0 provider initialized")
+        from src.memory.mem0_provider import Mem0MemoryProvider
+        mem0_api_key = os.getenv("MEM0_API_KEY")
+        if mem0_api_key and device_mac:
+            mem0_provider = Mem0MemoryProvider(api_key=mem0_api_key, role_id=device_mac)
+            logger.info(f"💭 Mem0 provider initialized for device: {device_mac}")
+        else:
+            logger.warning(f"💭 Mem0 provider not initialized - missing API key or device MAC")
     except Exception as e:
         logger.warning(f"Mem0 provider not available: {e}")
 
     # ============================================================================
-    # CREATE ASSISTANT
+    # CREATE ASSISTANT WITH ALL FUNCTION TOOLS
     # ============================================================================
 
-    assistant = Assistant(instructions=agent_prompt)
-    assistant.set_services(device_control_service, mcp_executor)
+    # Pass LLM to Assistant constructor - this enables @function_tool decorators to work with Realtime models
+    assistant = Assistant(instructions=agent_prompt, llm=realtime_model)
+
+    # Set all services for function tools (music, story, games, device control, etc.)
+    assistant.set_services(
+        music_service=music_service,
+        story_service=story_service,
+        audio_player=None,  # Legacy audio player - not used
+        unified_audio_player=unified_audio_player,
+        device_control_service=device_control_service,
+        mcp_executor=mcp_executor,
+        google_search_service=google_search_service,
+        question_generator_service=question_generator_service,
+        riddle_generator_service=riddle_generator_service,
+        analytics_service=analytics_service
+    )
+
     assistant.set_room_info(room_name=room_name, device_mac=device_mac)
+    logger.info("🔧 Assistant created with ALL function tools (update_agent_mode, games, music, story, device control)")
     # Log session info (responses will be captured via conversation_item_added event)
     if chat_history_service:
         logger.debug(
@@ -691,6 +758,12 @@ async def entrypoint(ctx: JobContext):
     # Pass references to assistant
     assistant.set_agent_session(session)
     assistant._session_context = ctx
+
+    # Set session and context on unified audio player (needed for music/story playback)
+    if unified_audio_player:
+        unified_audio_player.set_session(session)
+        unified_audio_player.set_context(ctx)
+        logger.info("🔊 Unified audio player connected to session")
 
     # Start session
     await session.start(

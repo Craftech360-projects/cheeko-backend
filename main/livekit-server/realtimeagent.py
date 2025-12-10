@@ -20,24 +20,24 @@ from google.genai import types
 
 # Load environment variables first, before importing modules
 # Load environment variables first, before importing modules
-# load_dotenv(".env")
-
-# HARDCODED CREDENTIALS (Temporary for debugging)
-os.environ["LIVEKIT_URL"] = "wss://cheekotest-cw0h23qc.livekit.cloud"
-os.environ["LIVEKIT_API_KEY"] = "APIH7cPNdCWbjXf"
-os.environ["LIVEKIT_API_SECRET"] = "RyfUil3IY1k1eKtOOnbSi0n06p4cTkayOeUVOJVewhXD"
-
-load_dotenv(
-    ".env", override=True
-)  # Load other env vars, but keep hardcoded ones if we set them after?
-# Actually, load_dotenv won't override existing env vars by default.
-# But to be safe, let's set them AFTER load_dotenv to ensure they overwrite anything in .env
 load_dotenv(".env")
-os.environ["LIVEKIT_URL"] = "wss://cheekotest-cw0h23qc.livekit.cloud"
-os.environ["LIVEKIT_API_KEY"] = "APIH7cPNdCWbjXf"
-os.environ["LIVEKIT_API_SECRET"] = "RyfUil3IY1k1eKtOOnbSi0n06p4cTkayOeUVOJVewhXD"
 
-# Import our organized modules
+# # HARDCODED CREDENTIALS (Temporary for debugging)
+# os.environ["LIVEKIT_URL"] = "wss://cheekotest-cw0h23qc.livekit.cloud"
+# os.environ["LIVEKIT_API_KEY"] = "APIH7cPNdCWbjXf"
+# os.environ["LIVEKIT_API_SECRET"] = "RyfUil3IY1k1eKtOOnbSi0n06p4cTkayOeUVOJVewhXD"
+
+# load_dotenv(
+#     ".env", override=True
+# )  # Load other env vars, but keep hardcoded ones if we set them after?
+# # Actually, load_dotenv won't override existing env vars by default.
+# # But to be safe, let's set them AFTER load_dotenv to ensure they overwrite anything in .env
+# load_dotenv(".env")
+# os.environ["LIVEKIT_URL"] = "wss://cheekotest-cw0h23qc.livekit.cloud"
+# os.environ["LIVEKIT_API_KEY"] = "APIH7cPNdCWbjXf"
+# os.environ["LIVEKIT_API_SECRET"] = "RyfUil3IY1k1eKtOOnbSi0n06p4cTkayOeUVOJVewhXD"
+
+# # Import our organized modules
 
 
 logger = logging.getLogger("agent")

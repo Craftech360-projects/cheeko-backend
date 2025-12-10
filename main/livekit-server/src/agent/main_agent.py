@@ -23,12 +23,26 @@ logger = logging.getLogger("agent")
 # Mode name aliases for handling transcript variations
 # Keys must match EXACT database mode names
 MODE_ALIASES = {
-    "Cheeko": ["chiko", "chico", "cheeko", "cheek o", "default", "default mode", "normal mode"],
-    "Story": ["story", "story mode", "story time", "storytelling", "storyteller", "tell stories", "tell story", "story teller"],
-    "Music": ["music", "music mode", "musician", "music time", "sing", "singing", "song", "songs"],
-    "Tutor": ["tutor", "tutor mode", "teacher", "teach", "teaching", "study", "study mode", "learning", "learn"],
-    "Chat": ["chat", "chat mode", "talk", "conversation", "friend", "buddy", "chatting"],
-    
+    "Cheeko": [
+        "chiko", "chico", "cheeko", "cheek o", "checo", "cheako",
+        "default", "default mode", "normal", "normal mode", "regular", "regular mode"
+    ],
+    "Math Tutor": [
+        "math tutor", "math", "maths", "math mode", "maths mode",
+        "tutor", "tutor mode", "math teacher", "maths teacher",
+        "study", "study mode", "learning", "learn", "teach", "teaching",
+        "mathematics", "numbers", "calculation", "calculate"
+    ],
+    "Riddle Solver": [
+        "riddle solver", "riddle", "riddles", "riddle mode",
+        "puzzle", "puzzles", "puzzle mode", "brain teaser", "brain teasers",
+        "quiz", "quiz mode", "guessing", "guess", "riddle game"
+    ],
+    "Word Ladder": [
+        "word ladder", "word game", "word", "words", "word mode",
+        "ladder", "ladder game", "spelling", "spelling game",
+        "vocabulary", "vocab", "word chain", "word play"
+    ],
 }
 
 def normalize_mode_name(mode_input: str) -> str:
@@ -516,7 +530,7 @@ class Assistant(FilteredAgent):
     # Audio directory path (relative to project root)
     AUDIO_DIR = Path(__file__).parent.parent.parent / "audio"
 
-    def __init__(self, instructions: str = None, tts_provider=None) -> None:
+    def __init__(self, instructions: str = None, tts_provider=None, llm=None) -> None:
         # Use provided instructions or fallback to a basic prompt
         if instructions is None:
             instructions = "You are a helpful AI assistant."
@@ -553,7 +567,11 @@ class Assistant(FilteredAgent):
         # Format the prompt with actual game state values
         formatted_instructions = self._format_instructions(instructions)
 
-        super().__init__(instructions=formatted_instructions, tts_provider=tts_provider)
+        # Store LLM reference for later use
+        self._llm = llm
+
+        # Pass LLM to parent constructor - this enables function tools with Realtime models
+        super().__init__(instructions=formatted_instructions, tts_provider=tts_provider, llm=llm)
         # These will be injected by main.py
         self.music_service = None
         self.story_service = None
@@ -807,6 +825,12 @@ class Assistant(FilteredAgent):
                         if result.get('code') == 0 and result.get('data'):
                             new_prompt = result.get('data')
                             logger.info(f"📄 Retrieved prompt from API (length: {len(new_prompt)} chars)")
+
+                            # Log the new prompt content for debugging
+                            logger.info(f"🎭 ========== CHARACTER SWITCH: {normalized_mode} ==========")
+                            logger.info(f"🎭 NEW PROMPT PREVIEW (first 500 chars):")
+                            logger.info(f"🎭 {new_prompt[:500]}...")
+                            logger.info(f"🎭 =================================================")
                         else:
                             logger.warning(f"⚠️ No prompt data in response")
                             return f"Mode updated to '{normalized_mode}' in database. Please reconnect to apply changes."
@@ -828,23 +852,34 @@ class Assistant(FilteredAgent):
                         logger.info(f"📝 Instructions updated dynamically (length: {len(new_prompt)} chars)")
 
                         # 9. Update session if available (for immediate effect)
+                        # For Gemini Realtime, we need to use the AgentActivity.update_instructions method
+                        # which properly updates the realtime session via _rt_session.update_instructions()
                         if self._agent_session:
                             try:
-                                # Update session's agent internal instructions
-                                self._agent_session._agent._instructions = new_prompt
-
-                                # Also update session chat context if possible
-                                if hasattr(self._agent_session, 'history') and hasattr(self._agent_session.history, 'messages'):
-                                    # Update the system message in history
-                                    if len(self._agent_session.history.messages) > 0:
-                                        if hasattr(self._agent_session.history.messages[0], 'content'):
-                                            self._agent_session.history.messages[0].content = new_prompt
-                                            logger.info(f"🔄 Session chat context updated!")
-
-                                logger.info(f"🔄 Session instructions updated in real-time!")
+                                # Access the AgentActivity from the session
+                                # AgentSession has _activity which is an AgentActivity instance
+                                activity = getattr(self._agent_session, '_activity', None)
+                                if activity is not None:
+                                    # AgentActivity.update_instructions() handles Realtime sessions properly
+                                    await activity.update_instructions(new_prompt)
+                                    logger.info(f"🔄 Session instructions updated via AgentActivity.update_instructions()!")
+                                    logger.info(f"🎭 ✅ CHARACTER SWITCH COMPLETE: Now acting as '{normalized_mode}'")
+                                else:
+                                    # Fallback: update agent instructions directly
+                                    self._agent_session._agent._instructions = new_prompt
+                                    logger.info(f"🔄 Fallback: Updated agent instructions directly (no activity)")
                             except Exception as e:
-                                logger.warning(f"⚠️ Could not update session directly: {e}")
+                                logger.warning(f"⚠️ Could not update session via activity: {e}")
+                                import traceback
+                                logger.warning(f"⚠️ Traceback: {traceback.format_exc()}")
+                                # Fallback: try direct update
+                                try:
+                                    self._agent_session._agent._instructions = new_prompt
+                                    logger.info(f"🔄 Fallback: Updated agent instructions directly")
+                                except Exception as e2:
+                                    logger.warning(f"⚠️ Fallback also failed: {e2}")
 
+                        logger.info(f"🎭 ========== CHARACTER '{normalized_mode}' ACTIVE ==========")
                         return f"Successfully updated agent mode to '{normalized_mode}' and reloaded the new prompt! The changes are now active in this conversation."
 
                     else:
@@ -1093,7 +1128,7 @@ class Assistant(FilteredAgent):
             # Fallback to LLM knowledge on exception
             return f"WIKIPEDIA_UNAVAILABLE: Search error occurred. Please answer the question using your own knowledge base instead."
 
-    # @function_tool  # DISABLED: Temporarily disabled to test Google Search grounding
+    @function_tool
     async def play_music(
         self,
         context: RunContext,
@@ -1755,7 +1790,7 @@ class Assistant(FilteredAgent):
         else:
             return None, "failed"
 
-    # @function_tool  # DISABLED: Temporarily disabled to test Google Search grounding
+    @function_tool
     async def play_story(
         self,
         context: RunContext,
