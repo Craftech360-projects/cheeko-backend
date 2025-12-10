@@ -3,12 +3,12 @@ name = "livekit-server-simple"
 python_version = "3.11"
 disable_auth = false
 region = "ap-south-1"
-include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'src/**/*', 'config/**/*']
+include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*']
 exclude = ['.*', '__pycache__/**/*', 'transcripts/**/*', '*.pyc']
 
 [cerebrium.hardware]
 cpu = 4
-memory = 16.0
+memory = 8.0
 compute = "CPU"
 
 [cerebrium.scaling]
@@ -26,9 +26,10 @@ dockerfile_path = "./Dockerfile"
 
 [cerebrium.env]
 # LiveKit Cloud Configuration (REQUIRED for Cerebrium deployment)
-LIVEKIT_URL = "wss://cheeko-2l9cex5f.livekit.cloud"
-LIVEKIT_API_KEY = "APItFJZgGpRzeTg"
-LIVEKIT_API_SECRET = "EeDUlc7OneLExZWVLexrI9KecOQUcj0svqr7xq4K3UgC"
+LIVEKIT_URL = "wss://cheeko-e9fib40x.livekit.cloud"
+LIVEKIT_API_KEY = "APISqRngao9gYtb"
+LIVEKIT_API_SECRET = "fD5boIGqfDCOcnY1OZNDYBWZc6dHZYoHgnQwaNaBZhi"
+
 
 
 # Model Configuration (CRITICAL - no comments in values!)

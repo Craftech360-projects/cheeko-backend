@@ -2,6 +2,7 @@ livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
+livekit-plugins-google
 python-dotenv
 pydub
 aiohttp

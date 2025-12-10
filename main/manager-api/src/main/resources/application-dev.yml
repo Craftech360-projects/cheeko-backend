@@ -29,11 +29,7 @@ spring:
     druid:
       # Local Azure database (same as Azure VM configuration)
       driver-class-name: com.mysql.cj.jdbc.Driver
-<<<<<<< HEAD
       url: jdbc:mysql://10.219.149.124:3307/manager_api?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
-=======
-      url: jdbc:mysql://192.168.1.166:3307/manager_api?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
->>>>>>> f2ffa5ae (added metrics and showed it in dashboard)
       username: manager
       password: managerpassword
 
@@ -63,11 +59,7 @@ spring:
   data:
     redis:
       # Local Azure Redis (same as Azure VM configuration)
-<<<<<<< HEAD
       host: 10.219.149.124
-=======
-      host: 192.168.1.166
->>>>>>> f2ffa5ae (added metrics and showed it in dashboard)
       port: 6380
       password: redispassword
       database: 0
