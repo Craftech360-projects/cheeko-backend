@@ -12,6 +12,9 @@ from dotenv import load_dotenv
 from livekit.agents import (
     Agent,
     AgentSession,
+    AudioConfig,
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
     JobContext,
     WorkerOptions,
     cli,
@@ -97,8 +100,22 @@ async def entrypoint(ctx: JobContext):
     
     # Start the agent session
     await session.start(agent=ESP32VoiceAgent(), room=ctx.room)
-    
-    logger.info("ESP32 Voice Agent session started successfully")
+
+    # Setup background audio for more realistic experience
+    background_audio = BackgroundAudioPlayer(
+        # Play soft ambient sound looping in the background
+        ambient_sound=AudioConfig(BuiltinAudioClip.OFFICE_AMBIENCE, volume=0.5),
+        # Play keyboard typing sound when the agent is thinking/processing
+        thinking_sound=[
+            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=0.6),
+            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=0.5),
+        ],
+    )
+
+    # Start background audio player
+    await background_audio.start(room=ctx.room, agent_session=session)
+
+    logger.info("ESP32 Voice Agent session started successfully with background audio")
 
 
 if __name__ == "__main__":
