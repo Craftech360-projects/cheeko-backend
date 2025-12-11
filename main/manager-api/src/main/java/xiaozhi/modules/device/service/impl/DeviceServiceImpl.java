@@ -665,4 +665,35 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
         return response;
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String updateDeviceControlMode(String macAddress, String deviceMode) {
+        // 1. Get device by MAC address
+        DeviceEntity device = this.getDeviceByMacAddress(macAddress);
+        if (device == null) {
+            throw new RenException("Device not found for MAC address: " + macAddress);
+        }
+
+        // 2. Store previous mode
+        String previousMode = device.getDeviceMode();
+        if (previousMode == null || previousMode.isEmpty()) {
+            previousMode = "manual"; // Default if null
+        }
+
+        // 3. Validate new mode
+        if (!deviceMode.equals("manual") && !deviceMode.equals("auto")) {
+            throw new RenException("Invalid device mode. Must be 'manual' or 'auto'");
+        }
+
+        // 4. Update device control mode
+        device.setDeviceMode(deviceMode);
+        device.setUpdateDate(new Date());
+        this.updateById(device);
+
+        // 5. Log the change
+        log.info("🔧 [DEVICE-MODE] MAC: {} | {} → {}", macAddress, previousMode, deviceMode);
+
+        return previousMode;
+    }
 }

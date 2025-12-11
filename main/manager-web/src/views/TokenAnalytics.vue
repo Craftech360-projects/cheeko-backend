@@ -15,13 +15,14 @@
           <el-date-picker
             v-model="dateRange"
             type="daterange"
+            unlink-panels
             range-separator="to"
             start-placeholder="Start date"
             end-placeholder="End date"
             format="yyyy-MM-dd"
             value-format="yyyy-MM-dd"
-            @change="fetchData"
             :picker-options="datePickerOptions"
+            @change="onDateChange"
           />
           <el-button type="primary" @click="fetchData" :loading="isLoading">
             <i class="el-icon-refresh"></i> Refresh
@@ -167,6 +168,11 @@
               {{ formatTokens(scope.row.output_tokens) }}
             </template>
           </el-table-column>
+          <el-table-column label="Total Tokens" min-width="120" align="right">
+            <template slot-scope="scope">
+              <span class="total-tokens">{{ formatTokens((scope.row.input_tokens || 0) + (scope.row.output_tokens || 0)) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="Avg Duration" min-width="100" align="center">
             <template slot-scope="scope">
               {{ formatDuration(scope.row.avg_duration_seconds) }}
@@ -223,6 +229,11 @@
               {{ formatTokens(scope.row.output_tokens) }}
             </template>
           </el-table-column>
+          <el-table-column label="Total Tokens" min-width="110" align="right">
+            <template slot-scope="scope">
+              <span class="total-tokens">{{ formatTokens((scope.row.input_tokens || 0) + (scope.row.output_tokens || 0)) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="Duration" min-width="90" align="center">
             <template slot-scope="scope">
               {{ formatDuration(scope.row.total_duration_seconds) }}
@@ -261,6 +272,23 @@ export default {
       datePickerOptions: {
         shortcuts: [
           {
+            text: 'Today',
+            onClick(picker) {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              picker.$emit('pick', [today, today]);
+            }
+          },
+          {
+            text: 'Yesterday',
+            onClick(picker) {
+              const yesterday = new Date();
+              yesterday.setTime(yesterday.getTime() - 3600 * 1000 * 24);
+              yesterday.setHours(0, 0, 0, 0);
+              picker.$emit('pick', [yesterday, yesterday]);
+            }
+          },
+          {
             text: 'Last 7 days',
             onClick(picker) {
               const end = new Date();
@@ -295,10 +323,28 @@ export default {
       return (this.overallTotals.input_tokens || 0) + (this.overallTotals.output_tokens || 0);
     }
   },
+  watch: {
+    dateRange(newVal) {
+      // Fetch data whenever dateRange changes
+      if (newVal && newVal.length === 2) {
+        console.log('📅 [DATE-CHANGE] Date range changed:', newVal[0], 'to', newVal[1]);
+        this.fetchData();
+      }
+    }
+  },
   mounted() {
     this.fetchData();
   },
   methods: {
+    onDateChange(val) {
+      console.log('📅 [DATE-PICKER] @change event fired:', val);
+      if (val && val.length === 2) {
+        // Use nextTick to ensure v-model is updated
+        this.$nextTick(() => {
+          this.fetchData();
+        });
+      }
+    },
     getDefaultDateRange() {
       const end = new Date();
       const start = new Date();
@@ -310,53 +356,84 @@ export default {
     },
     formatDateForApi(date) {
       const d = new Date(date);
-      return d.toISOString().split('T')[0];
+      // Use local timezone instead of UTC to avoid date shifting
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     },
     fetchData() {
       this.isLoading = true;
+
+      // Clear existing data first to force UI update
+      this.overallTotals = {};
+      this.dailySummary = [];
+      this.perDeviceUsage = [];
+
       const params = {};
       if (this.dateRange && this.dateRange.length === 2) {
-        params.startDate = this.dateRange[0];
-        params.endDate = this.dateRange[1];
+        // Ensure dates are formatted as strings (yyyy-MM-dd)
+        params.startDate = this.formatDateForApi(this.dateRange[0]);
+        params.endDate = this.formatDateForApi(this.dateRange[1]);
       }
+
+      // Add cache-busting parameter
+      params._t = Date.now();
+
+      console.log('📊 [ANALYTICS] Fetching data with params:', params);
 
       // Fetch all data in parallel
       Promise.all([
-        this.fetchOverallTotals(),
+        this.fetchOverallTotals(params),
         this.fetchDailySummary(params),
         this.fetchPerDeviceUsage(params)
       ]).finally(() => {
         this.isLoading = false;
       });
     },
-    fetchOverallTotals() {
+    fetchOverallTotals(params) {
       return new Promise((resolve) => {
-        Api.analytics.getOverallTotals((res) => {
+        Api.analytics.getOverallTotals(params, (res) => {
+          console.log('📊 [TOTALS] Response:', res.data);
           if (res.data && res.data.code === 0) {
             this.overallTotals = res.data.data || {};
+            console.log('📊 [TOTALS] Data set:', this.overallTotals);
           }
           resolve();
-        }, () => resolve());
+        }, (err) => {
+          console.error('❌ [TOTALS] Error:', err);
+          resolve();
+        });
       });
     },
     fetchDailySummary(params) {
       return new Promise((resolve) => {
         Api.analytics.getDailySummary(params, (res) => {
+          console.log('📊 [DAILY] Response:', res.data);
           if (res.data && res.data.code === 0) {
             this.dailySummary = res.data.data || [];
+            console.log('📊 [DAILY] Data set:', this.dailySummary.length, 'rows');
           }
           resolve();
-        }, () => resolve());
+        }, (err) => {
+          console.error('❌ [DAILY] Error:', err);
+          resolve();
+        });
       });
     },
     fetchPerDeviceUsage(params) {
       return new Promise((resolve) => {
         Api.analytics.getPerDeviceDailyUsage(params, (res) => {
+          console.log('📊 [PER-DEVICE] Response:', res.data);
           if (res.data && res.data.code === 0) {
             this.perDeviceUsage = res.data.data || [];
+            console.log('📊 [PER-DEVICE] Data set:', this.perDeviceUsage.length, 'rows');
           }
           resolve();
-        }, () => resolve());
+        }, (err) => {
+          console.error('❌ [PER-DEVICE] Error:', err);
+          resolve();
+        });
       });
     },
     formatNumber(num) {
@@ -596,6 +673,11 @@ export default {
 .cost-cell {
   color: #fa8c16;
   font-weight: 500;
+}
+
+.total-tokens {
+  color: #722ed1;
+  font-weight: 600;
 }
 
 ::v-deep .el-table {

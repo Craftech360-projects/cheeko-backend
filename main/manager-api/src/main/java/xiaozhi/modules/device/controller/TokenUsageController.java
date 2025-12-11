@@ -157,9 +157,26 @@ public class TokenUsageController {
     }
 
     @GetMapping("/analytics/totals")
-    @Operation(summary = "Get overall totals across all devices and time")
-    public Result<Map<String, Object>> getOverallTotals() {
-        Map<String, Object> totals = deviceTokenUsageService.getOverallTotals();
-        return new Result<Map<String, Object>>().ok(totals);
+    @Operation(summary = "Get overall totals across all devices (optionally filtered by date range)")
+    public Result<Map<String, Object>> getOverallTotals(
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        try {
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+            Date start = null, end = null;
+
+            if (StringUtils.isNotBlank(startDate)) {
+                start = sdf.parse(startDate);
+            }
+            if (StringUtils.isNotBlank(endDate)) {
+                end = sdf.parse(endDate);
+            }
+
+            Map<String, Object> totals = deviceTokenUsageService.getOverallTotals(start, end);
+            return new Result<Map<String, Object>>().ok(totals);
+        } catch (Exception e) {
+            log.error("Failed to get overall totals: {}", e.getMessage());
+            return new Result<Map<String, Object>>().error("Failed to get overall totals");
+        }
     }
 }

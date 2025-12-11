@@ -113,4 +113,13 @@ public interface DeviceService extends BaseService<DeviceEntity> {
      */
     ModeCycleResponse cycleDeviceMode(String macAddress);
 
+    /**
+     * 更新设备控制模式 (manual/auto)
+     *
+     * @param macAddress 设备MAC地址
+     * @param deviceMode 设备控制模式 (manual 或 auto)
+     * @return 更新前的模式
+     */
+    String updateDeviceControlMode(String macAddress, String deviceMode);
+
 }

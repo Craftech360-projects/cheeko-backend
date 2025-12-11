@@ -6,6 +6,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.shiro.authz.annotation.RequiresPermissions;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -30,6 +31,8 @@ import xiaozhi.modules.device.dto.AssignKidToDeviceDTO;
 import xiaozhi.modules.device.dto.AssignKidByMacDTO;
 import xiaozhi.modules.device.dto.DeviceResponseDTO;
 import xiaozhi.modules.device.dto.ModeCycleResponse;
+import xiaozhi.modules.device.dto.UpdateDeviceModeDTO;
+import xiaozhi.modules.device.dto.DeviceModeResponse;
 import xiaozhi.modules.device.entity.DeviceEntity;
 import xiaozhi.modules.device.service.DeviceService;
 import xiaozhi.modules.security.user.SecurityUser;
@@ -261,6 +264,63 @@ public class DeviceController {
 
         } catch (Exception e) {
             log.error("❌ [GET-MODE] Error getting mode for MAC {}: {}", macAddress, e.getMessage());
+            return new Result<String>().error(e.getMessage());
+        }
+    }
+
+    @PatchMapping("/device-mode")
+    @Operation(summary = "Update device control mode (manual/auto) by MAC address")
+    public Result<DeviceModeResponse> updateDeviceControlMode(@RequestBody @Valid UpdateDeviceModeDTO dto) {
+        try {
+            // Clean MAC address
+            String cleanMac = dto.getMacAddress().replace(":", "").replace("-", "").toLowerCase();
+
+            log.info("🔧 [UPDATE-DEVICE-MODE] Update requested for MAC: {} to mode: {}", cleanMac, dto.getDeviceMode());
+
+            // Update device control mode
+            String previousMode = deviceService.updateDeviceControlMode(cleanMac, dto.getDeviceMode());
+
+            // Build response
+            DeviceModeResponse response = new DeviceModeResponse();
+            response.setMacAddress(cleanMac);
+            response.setDeviceMode(dto.getDeviceMode());
+            response.setPreviousMode(previousMode);
+            response.setSuccess(true);
+
+            log.info("✅ [UPDATE-DEVICE-MODE] Device {} mode updated: {} → {}", cleanMac, previousMode, dto.getDeviceMode());
+
+            return new Result<DeviceModeResponse>().ok(response);
+
+        } catch (Exception e) {
+            log.error("❌ [UPDATE-DEVICE-MODE] Error updating device mode for MAC {}: {}", dto.getMacAddress(), e.getMessage());
+            return new Result<DeviceModeResponse>().error(e.getMessage());
+        }
+    }
+
+    @GetMapping("/{macAddress}/device-mode")
+    @Operation(summary = "Get device control mode (manual/auto) by MAC address")
+    public Result<String> getDeviceControlMode(@PathVariable("macAddress") String macAddress) {
+        try {
+            // Clean MAC address
+            String cleanMac = macAddress.replace(":", "").replace("-", "").toLowerCase();
+
+            log.info("📋 [GET-DEVICE-MODE] Device mode query for MAC: {}", cleanMac);
+
+            // Get device
+            DeviceEntity device = deviceService.getDeviceByMacAddress(cleanMac);
+            if (device == null) {
+                log.warn("⚠️ [GET-DEVICE-MODE] Device not found for MAC: {}", cleanMac);
+                return new Result<String>().error("Device not found");
+            }
+
+            // Get device mode, default to manual if null
+            String deviceMode = device.getDeviceMode() != null ? device.getDeviceMode() : "manual";
+            log.info("✅ [GET-DEVICE-MODE] Device {} control mode: {}", cleanMac, deviceMode);
+
+            return new Result<String>().ok(deviceMode);
+
+        } catch (Exception e) {
+            log.error("❌ [GET-DEVICE-MODE] Error getting device mode for MAC {}: {}", macAddress, e.getMessage());
             return new Result<String>().error(e.getMessage());
         }
     }

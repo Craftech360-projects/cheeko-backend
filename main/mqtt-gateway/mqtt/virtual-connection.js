@@ -360,6 +360,10 @@ class VirtualMQTTConnection {
       console.log(`🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`);
     }
 
+    // Fetch device listening mode (manual/auto) from backend
+    this.listeningMode = await this.fetchDeviceListeningMode(macAddress);
+    console.log(`🎧 [LISTENING-MODE] Device listening mode: ${this.listeningMode}`);
+
     this.udp = {
       ...this.udp,
       key: crypto.randomBytes(16),
@@ -461,12 +465,13 @@ class VirtualMQTTConnection {
       const modeUpdateMsg = {
         type: "mode_update",
         mode: this.roomType,
+        listening_mode: this.listeningMode || "manual",
         ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
         session_id: futureSessionId,
         timestamp: Date.now(),
       };
       this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
+      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}, listening: ${this.listeningMode}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
 
       // ADD: Room type-specific initialization
       if (this.roomType === "conversation") {
@@ -644,6 +649,30 @@ class VirtualMQTTConnection {
     } catch (error) {
       console.error(`❌ [CHARACTER] Failed to fetch character: ${error.message}`);
       return "Cheeko"; // Default fallback
+    }
+  }
+
+  async fetchDeviceListeningMode(macAddress) {
+    try {
+      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
+      const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
+      const apiUrl = `${baseUrl}/toy/device/${cleanMac}/device-mode`;
+
+      console.log(`🎧 [LISTENING-MODE] Fetching device listening mode from: ${apiUrl}`);
+
+      const response = await axios.get(apiUrl, { timeout: 5000 });
+
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const listeningMode = response.data.data;
+        console.log(`✅ [LISTENING-MODE] Device ${cleanMac} listening mode: ${listeningMode}`);
+        return listeningMode;
+      } else {
+        console.log(`ℹ️ [LISTENING-MODE] No listening mode found in response, using default: manual`);
+        return "manual";
+      }
+    } catch (error) {
+      console.error(`❌ [LISTENING-MODE] Failed to fetch listening mode: ${error.message}`);
+      return "manual"; // Default fallback
     }
   }
 

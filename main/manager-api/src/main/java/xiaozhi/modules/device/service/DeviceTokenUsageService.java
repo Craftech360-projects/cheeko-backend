@@ -48,9 +48,14 @@ public interface DeviceTokenUsageService extends BaseService<DeviceTokenUsageEnt
     List<Map<String, Object>> getPerDeviceDailyUsage(Date startDate, Date endDate);
 
     /**
-     * Get overall totals
+     * Get overall totals (all time)
      */
     Map<String, Object> getOverallTotals();
+
+    /**
+     * Get overall totals (filtered by date range)
+     */
+    Map<String, Object> getOverallTotals(Date startDate, Date endDate);
 
     /**
      * Calculate cost in INR for given token counts

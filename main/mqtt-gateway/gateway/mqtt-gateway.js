@@ -321,6 +321,9 @@ class MQTTGateway {
         } else if (originalPayload.type === "mode-change") {
           // logger.info(`🔄 [MODE-CHANGE] Processing mode change: ${deviceId}`);
           this.handleDeviceModeChange(deviceId, enhancedPayload);
+        } else if (originalPayload.type === "set_listening_mode") {
+          // logger.info(`🎧 [SET-LISTENING-MODE] Processing listening mode change: ${deviceId}`);
+          this.handleSetListeningMode(deviceId, enhancedPayload);
         } else if (originalPayload.type === "abort") {
           // Special handling for abort messages - send to virtual device
           // logger.info(`🛑 [ABORT] Processing abort message: ${deviceId}`);
@@ -1277,10 +1280,18 @@ class MQTTGateway {
           connection.currentCharacter = currentCharacter;
         }
 
+        // Fetch listening mode (manual/auto) from backend
+        let listeningMode = "manual";
+        if (connection.fetchDeviceListeningMode) {
+          listeningMode = await connection.fetchDeviceListeningMode(macAddress);
+          connection.listeningMode = listeningMode;
+        }
+
         // Send mode_update to device firmware
         const modeUpdateMsg = {
           type: "mode_update",
           mode: newMode,
+          listening_mode: listeningMode,
           ...(newMode === "conversation" && currentCharacter ? { character: currentCharacter } : {}),
           session_id: newRoomName,
           timestamp: Date.now(),

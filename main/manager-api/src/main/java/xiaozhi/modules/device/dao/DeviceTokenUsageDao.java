@@ -131,7 +131,7 @@ public interface DeviceTokenUsageDao extends BaseMapper<DeviceTokenUsageEntity> 
             "COALESCE(SUM(session_duration_seconds), 0) as total_duration_seconds, " +
             "COALESCE(AVG(session_duration_seconds), 0) as avg_duration_seconds " +
             "FROM device_token_usage " +
-            "WHERE usage_date >= #{startDate} AND usage_date <= #{endDate} " +
+            "WHERE usage_date >= DATE(#{startDate}) AND usage_date <= DATE(#{endDate}) " +
             "GROUP BY usage_date " +
             "ORDER BY usage_date DESC")
     List<Map<String, Object>> getDailySummary(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
@@ -157,7 +157,7 @@ public interface DeviceTokenUsageDao extends BaseMapper<DeviceTokenUsageEntity> 
             "FROM device_token_usage dtu " +
             "LEFT JOIN ai_device ad ON dtu.mac_address = ad.mac_address COLLATE utf8mb4_unicode_ci " +
             "LEFT JOIN sys_user su ON ad.user_id = su.id " +
-            "WHERE dtu.usage_date >= #{startDate} AND dtu.usage_date <= #{endDate} " +
+            "WHERE dtu.usage_date >= DATE(#{startDate}) AND dtu.usage_date <= DATE(#{endDate}) " +
             "GROUP BY dtu.mac_address, dtu.usage_date, su.username " +
             "ORDER BY dtu.usage_date DESC, dtu.mac_address")
     List<Map<String, Object>> getPerDeviceDailyUsage(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
@@ -179,4 +179,23 @@ public interface DeviceTokenUsageDao extends BaseMapper<DeviceTokenUsageEntity> 
             "COALESCE(SUM(session_duration_seconds), 0) as total_duration_seconds " +
             "FROM device_token_usage")
     Map<String, Object> getOverallTotals();
+
+    /**
+     * Get overall totals with date range filter
+     */
+    @Select("SELECT " +
+            "COUNT(DISTINCT mac_address) as unique_devices, " +
+            "COUNT(*) as total_sessions, " +
+            "COALESCE(SUM(input_audio_tokens), 0) as input_audio_tokens, " +
+            "COALESCE(SUM(input_text_tokens), 0) as input_text_tokens, " +
+            "COALESCE(SUM(input_tokens), 0) as input_tokens, " +
+            "COALESCE(SUM(output_audio_tokens), 0) as output_audio_tokens, " +
+            "COALESCE(SUM(output_text_tokens), 0) as output_text_tokens, " +
+            "COALESCE(SUM(output_tokens), 0) as output_tokens, " +
+            "COALESCE(SUM(message_count), 0) as total_messages, " +
+            "COALESCE(AVG(avg_ttft_seconds), 0) as avg_ttft_seconds, " +
+            "COALESCE(SUM(session_duration_seconds), 0) as total_duration_seconds " +
+            "FROM device_token_usage " +
+            "WHERE usage_date >= DATE(#{startDate}) AND usage_date <= DATE(#{endDate})")
+    Map<String, Object> getOverallTotalsWithDateRange(@Param("startDate") Date startDate, @Param("endDate") Date endDate);
 }

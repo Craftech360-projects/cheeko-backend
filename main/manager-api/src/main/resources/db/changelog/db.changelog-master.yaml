@@ -721,3 +721,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202512081300_add_analytics_columns.sql
+
+  - changeSet:
+      id: 202512111500
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512111500_add_device_control_mode.sql

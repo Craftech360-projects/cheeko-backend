@@ -43,10 +43,11 @@ export default {
     },
 
     // Get overall totals
-    getOverallTotals(callback, errorCallback) {
+    getOverallTotals(params, callback, errorCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/usage/analytics/totals`)
             .method('GET')
+            .data(params)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
@@ -55,7 +56,7 @@ export default {
                 if (errorCallback) errorCallback(err);
                 else {
                     RequestService.reAjaxFun(() => {
-                        this.getOverallTotals(callback, errorCallback);
+                        this.getOverallTotals(params, callback, errorCallback);
                     });
                 }
             }).send();

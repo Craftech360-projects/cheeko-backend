@@ -179,7 +179,17 @@ public class DeviceTokenUsageServiceImpl extends BaseServiceImpl<DeviceTokenUsag
 
     @Override
     public Map<String, Object> getOverallTotals() {
-        Map<String, Object> totals = baseDao.getOverallTotals();
+        return getOverallTotals(null, null);
+    }
+
+    @Override
+    public Map<String, Object> getOverallTotals(Date startDate, Date endDate) {
+        Map<String, Object> totals;
+        if (startDate != null && endDate != null) {
+            totals = baseDao.getOverallTotalsWithDateRange(startDate, endDate);
+        } else {
+            totals = baseDao.getOverallTotals();
+        }
         if (totals != null) {
             long inputTextTokens = getLongValue(totals, "input_text_tokens");
             long inputAudioTokens = getLongValue(totals, "input_audio_tokens");
