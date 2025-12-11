@@ -4,6 +4,7 @@ import os
 import time
 import httpx
 from livekit.agents import metrics, MetricsCollectedEvent, AgentSession
+from livekit.agents.metrics import RealtimeModelMetrics
 
 logger = logging.getLogger("livekit_agent")
 
@@ -44,16 +45,12 @@ class UsageManager:
         self.session_id = session_id
 
     def log_turn_metrics(self, ev: MetricsCollectedEvent):
-        """Log metrics for each interaction (LLM/STT/TTS/Realtime)"""
+        """Log metrics for Gemini Realtime model"""
         m = ev.metrics
-        metric_type = type(m).__name__
 
-        # Handle RealtimeModelMetrics (Gemini Realtime)
-        if hasattr(m, 'input_tokens') and hasattr(m, 'output_tokens') and hasattr(m, 'input_token_details'):
+        if isinstance(m, RealtimeModelMetrics):
             # Get cached tokens count
-            cached_tokens = 0
-            if m.input_token_details:
-                cached_tokens = getattr(m.input_token_details, 'cached_tokens', 0) or 0
+            cached_tokens = m.input_token_details.cached_tokens
 
             # Billable input tokens = total input - cached (cached tokens are free/discounted)
             billable_input = m.input_tokens - cached_tokens
@@ -61,99 +58,34 @@ class UsageManager:
             self.total_output_tokens += m.output_tokens
 
             # Detailed breakdown from input_token_details
-            if m.input_token_details:
-                self.input_audio_tokens += getattr(m.input_token_details, 'audio_tokens', 0) or 0
-                self.input_text_tokens += getattr(m.input_token_details, 'text_tokens', 0) or 0
-                self.input_cached_tokens += cached_tokens
+            self.input_audio_tokens += m.input_token_details.audio_tokens
+            self.input_text_tokens += m.input_token_details.text_tokens
+            self.input_cached_tokens += cached_tokens
 
             # Detailed breakdown from output_token_details
-            if m.output_token_details:
-                self.output_audio_tokens += getattr(m.output_token_details, 'audio_tokens', 0) or 0
-                self.output_text_tokens += getattr(m.output_token_details, 'text_tokens', 0) or 0
+            self.output_audio_tokens += m.output_token_details.audio_tokens
+            self.output_text_tokens += m.output_token_details.text_tokens
 
-            # Track TTFT and duration for analytics
-            if hasattr(m, 'ttft') and m.ttft is not None:
+            # Track TTFT and duration for analytics (ttft = -1 means no audio token was sent)
+            if m.ttft is not None and m.ttft != -1:
                 self.total_ttft += m.ttft
-            if hasattr(m, 'duration') and m.duration is not None:
+            if m.duration is not None:
                 self.total_response_duration += m.duration
 
             # Count this as a message/turn
             self.message_count += 1
 
             logger.info(
-                f"📊 [METRICS-REALTIME] input={m.input_tokens} (billable={billable_input}, audio={getattr(m.input_token_details, 'audio_tokens', 0)}, "
-                f"text={getattr(m.input_token_details, 'text_tokens', 0)}, cached={cached_tokens}), "
-                f"output={m.output_tokens} (audio={getattr(m.output_token_details, 'audio_tokens', 0)}, "
-                f"text={getattr(m.output_token_details, 'text_tokens', 0)}), "
-                f"total={m.total_tokens}, ttft={m.ttft:.2f}s, duration={m.duration:.2f}s, tokens/s={m.tokens_per_second:.1f}"
-            )
-        elif hasattr(m, 'input_tokens') and hasattr(m, 'output_tokens'):
-            # Realtime metrics without detailed breakdown
-            self.total_input_tokens += m.input_tokens
-            self.total_output_tokens += m.output_tokens
-
-            # Track TTFT and duration
-            if hasattr(m, 'ttft') and m.ttft is not None:
-                self.total_ttft += m.ttft
-            if hasattr(m, 'duration') and m.duration is not None:
-                self.total_response_duration += m.duration
-
-            self.message_count += 1
-
-            logger.info(
-                f"📊 [METRICS-REALTIME] input={m.input_tokens}, "
-                f"output={m.output_tokens}, "
-                f"total={m.total_tokens}, "
-                f"ttft={m.ttft:.2f}s, "
-                f"duration={m.duration:.2f}s, "
+                f"[METRICS-REALTIME] input={m.input_tokens} (billable={billable_input}, "
+                f"audio={m.input_token_details.audio_tokens}, text={m.input_token_details.text_tokens}, "
+                f"cached={cached_tokens}), output={m.output_tokens} "
+                f"(audio={m.output_token_details.audio_tokens}, text={m.output_token_details.text_tokens}), "
+                f"total={m.total_tokens}, ttft={m.ttft:.2f}s, duration={m.duration:.2f}s, "
                 f"tokens/s={m.tokens_per_second:.1f}"
             )
-        elif hasattr(m, 'prompt_tokens'):
-            # Traditional LLM metrics
-            self.total_input_tokens += m.prompt_tokens
-            self.total_output_tokens += m.completion_tokens
-            # For traditional LLM, treat all tokens as text tokens
-            self.input_text_tokens += m.prompt_tokens
-            self.output_text_tokens += m.completion_tokens
 
-            # Track TTFT and duration
-            if hasattr(m, 'ttft') and m.ttft is not None:
-                self.total_ttft += m.ttft
-            if hasattr(m, 'duration') and m.duration is not None:
-                self.total_response_duration += m.duration
-
-            self.message_count += 1
-
-            logger.info(
-                f"📊 [METRICS-LLM] prompt_tokens={m.prompt_tokens}, "
-                f"completion_tokens={m.completion_tokens}, "
-                f"total_tokens={m.total_tokens}, "
-                f"ttft={m.ttft:.3f}s, "
-                f"duration={m.duration:.3f}s, "
-                f"tokens_per_second={m.tokens_per_second:.1f}"
-            )
-        elif hasattr(m, 'characters_count'):
-            # TTS metrics
-            logger.info(
-                f"📊 [METRICS-TTS] characters={m.characters_count}, "
-                f"audio_duration={m.audio_duration:.2f}s, "
-                f"ttfb={m.ttfb:.3f}s, "
-                f"duration={m.duration:.3f}s, "
-                f"streamed={m.streamed}"
-            )
-        elif hasattr(m, 'audio_duration') and not hasattr(m, 'characters_count'):
-            # STT metrics
-            logger.info(
-                f"📊 [METRICS-STT] audio_duration={m.audio_duration:.2f}s, "
-                f"duration={m.duration:.3f}s, "
-                f"streamed={m.streamed}"
-            )
-        else:
-            # Other metrics (VAD, EOU, etc.) - skip logging
-            pass
-
-        # Collect for session summary
-        self.usage_collector.collect(m)
+            # Collect for session summary
+            self.usage_collector.collect(m)
 
     async def log_session_summary(self):
         """Log session usage summary on shutdown and send to Manager API"""
