@@ -694,3 +694,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202512061832_update_cheeko_prompt_with_personalization.sql
+
+  - changeSet:
+      id: 202512111340
+      author: cheeko
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512111340_update_cheeko_prompt_phonics.sql

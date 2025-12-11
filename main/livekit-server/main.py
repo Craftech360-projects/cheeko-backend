@@ -410,11 +410,11 @@ async def entrypoint(ctx: JobContext):
     # GEMINI REALTIME MODEL SETUP
     # ============================================================================
 
-    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
+    # logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
 
     # Google Search grounding
-    google_search_grounding = types.GoogleSearch()
-    logger.info("🔍 Google Search grounding enabled")
+    # google_search_grounding = types.GoogleSearch()
+    # logger.info("🔍 Google Search grounding enabled")
 
     # Create Gemini Realtime model - NO custom VAD config (use Gemini's default for faster response)
     # This matches the fast test project (gemini_live-api-livekit/agent.py)
@@ -423,7 +423,16 @@ async def entrypoint(ctx: JobContext):
         voice=gemini_voice,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
-        _gemini_tools=[google_search_grounding],
+        _gemini_tools=[types.GoogleSearch()],
+        # realtime_input_config={
+        #     "automatic_activity_detection": {
+        #         "disabled": False,
+        #         "start_of_speech_sensitivity": types.StartSensitivity.START_SENSITIVITY_HIGH,
+        #         "end_of_speech_sensitivity": types.EndSensitivity.END_SENSITIVITY_HIGH,
+        #         "prefix_padding_ms": 100, # Increased for a softer start
+        #         "silence_duration_ms": 300, # Increased to allow for longer pauses
+        #     }
+        # }
     )
 
     logger.info(f"✅ Gemini Realtime model created")
