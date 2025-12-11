@@ -1104,17 +1104,43 @@ class VirtualMQTTConnection {
       return;
     }
 
-    // Handle push-to-talk messages (ESP32 format: listen with mode=manual)
-    // NOTE: With simplified agent using default Gemini VAD, PTT works automatically
-    // without RPC calls. The agent detects speech/silence naturally.
-    // We just log the PTT state for debugging purposes.
+    // Handle push-to-talk messages and forward to LiveKit agent for custom turn detection
     if (json.type === "listen") {
-      const state = json.state;
-      const mode = json.mode;
-      console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode} (Gemini VAD handles turn detection)`);
+      const state = json.state;  // "start" or "stop"
+      const mode = json.mode;    // "manual"
 
-      // No RPC calls needed - Gemini's built-in VAD handles turn detection
-      // Audio streaming is controlled by ESP32 (sends audio only while button held)
+      console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode}`);
+
+      // Forward PTT event to LiveKit agent for custom turn detection
+      const pttMessage = {
+        type: "ptt_event",
+        action: state === "start" ? "press" : "release",
+        state: state,
+        mode: mode,
+        device_id: this.macAddress,
+        session_id: this.udp?.session_id || "unknown",
+        timestamp: Date.now(),
+        source: "device_firmware"
+      };
+
+      try {
+        if (this.bridge?.room?.localParticipant) {
+          const messageData = new Uint8Array(
+            Buffer.from(JSON.stringify(pttMessage), "utf8")
+          );
+
+          await this.bridge.room.localParticipant.publishData(messageData, {
+            reliable: true,
+          });
+
+          console.log(`✅ [PTT] Forwarded ${state} event to LiveKit agent`);
+        } else {
+          console.warn(`⚠️ [PTT] Cannot forward - no LiveKit connection`);
+        }
+      } catch (error) {
+        console.error(`❌ [PTT] Failed to forward event:`, error);
+      }
+
       return;
     }
 

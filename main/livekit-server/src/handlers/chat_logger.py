@@ -247,6 +247,7 @@ class ChatEventHandler:
             import traceback
             logger.error(f"❌ [MCP] Traceback: {traceback.format_exc()}")
 
+
     @staticmethod
     def setup_session_handlers(session, ctx):
         """Setup all event handlers for the agent session"""
@@ -256,9 +257,10 @@ class ChatEventHandler:
 
         @session.on("agent_false_interruption")
         def _on_agent_false_interruption(ev: AgentFalseInterruptionEvent):
-            logger.info("False positive interruption, resuming")
-            session.generate_reply(
-                instructions=ev.extra_instructions or NOT_GIVEN)
+            logger.info("False positive interruption detected")
+            # DISABLED: Auto-response interferes with PTT
+            # session.generate_reply(
+            #     instructions=ev.extra_instructions or NOT_GIVEN)
             payload = json.dumps({
                 "type": "agent_false_interruption",
                 "data": ev.model_dump()
@@ -355,7 +357,7 @@ class ChatEventHandler:
             else:
                 if not user_text:
                     logger.warning(
-                        f"📝⚠️ Empty transcript detected - triggering clarification response")
+                        f"📝⚠️ Empty transcript detected")
                     # Also log the event dict for debugging
                     try:
                         event_dict = ev.dict() if hasattr(ev, 'dict') else {}
@@ -363,17 +365,18 @@ class ChatEventHandler:
                     except Exception as e:
                         logger.debug(f"📝⚠️ Could not get event dict: {e}")
 
+                    # DISABLED: Auto-clarification interferes with PTT
                     # Generate a user-friendly clarification message
-                    clarification_messages = [
-                        "Sorry, I couldn't hear you properly. Could you please repeat that?",
-                        "I didn't catch that. Could you say it again?",
-                        "Sorry, I couldn't understand. Can you repeat what you said?",
-                        "I couldn't hear you clearly. Could you please try again?"
-                    ]
-                    import random
-                    clarification = random.choice(clarification_messages)
-                    logger.info(f"🔊 Asking for clarification: '{clarification}'")
-                    session.generate_reply(instructions=f"Say this exact message to the user: '{clarification}'. Do not add anything else, just say this message naturally.")
+                    # clarification_messages = [
+                    #     "Sorry, I couldn't hear you properly. Could you please repeat that?",
+                    #     "I didn't catch that. Could you say it again?",
+                    #     "Sorry, I couldn't understand. Can you repeat what you said?",
+                    #     "I couldn't hear you clearly. Could you please try again?"
+                    # ]
+                    # import random
+                    # clarification = random.choice(clarification_messages)
+                    # logger.info(f"🔊 Asking for clarification: '{clarification}'")
+                    # session.generate_reply(instructions=f"Say this exact message to the user: '{clarification}'. Do not add anything else, just say this message naturally.")
 
             payload = json.dumps({
                 "type": "user_input_transcribed",
@@ -486,7 +489,9 @@ class ChatEventHandler:
         @session.on("speech_created")
         def _on_speech_created(ev: SpeechCreatedEvent):
             try:
-                logger.info(f"🤖 Speech created event received")
+                # Check if this is a user-initiated event
+                user_initiated = getattr(ev, 'user_initiated', True)  # Default to True for safety
+                logger.info(f"🤖 Speech created event received (user_initiated={user_initiated})")
                 logger.debug(f"🤖 Event type: {type(ev).__name__}")
 
                 # Safely get available attributes
@@ -758,6 +763,13 @@ class ChatEventHandler:
                     logger.info("🔋 Processing MCP response from MQTT gateway")
                     asyncio.create_task(ChatEventHandler._handle_mcp_response(
                         session, ctx, message))
+
+                # Handle PTT button events for custom turn detection
+                # DISABLED: This interferes with natural PTT behavior
+                # elif message.get('type') == 'ptt_event':
+                #     logger.info("🎤 Processing PTT button event for custom turn detection")
+                #     asyncio.create_task(ChatEventHandler._handle_ptt_event(
+                #         session, ctx, message))
 
             except Exception as e:
                 logger.error(f"Error processing data channel message: {e}")

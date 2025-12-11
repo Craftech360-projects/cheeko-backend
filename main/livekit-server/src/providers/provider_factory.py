@@ -397,7 +397,7 @@ class ProviderFactory:
 
                 vad_config = types.RealtimeInputConfig(
                     automatic_activity_detection=types.AutomaticActivityDetection(
-                        disabled=config.get('vad_disabled', False),
+                        disabled=config.get('vad_disabled', True),  # Disable by default for PTT
                         start_of_speech_sensitivity=start_sensitivity,
                         end_of_speech_sensitivity=end_sensitivity,
                         prefix_padding_ms=config.get('prefix_padding_ms', 10),

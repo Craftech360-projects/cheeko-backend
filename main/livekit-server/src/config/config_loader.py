@@ -187,7 +187,7 @@ class ConfigLoader:
             'temperature': float(os.getenv('GEMINI_REALTIME_TEMPERATURE', gemini_config.get('temperature', 0.6))),
             'prompt': gemini_config.get('prompt', 'You are a helpful voice assistant.'),
             # VAD configuration for Gemini Realtime
-            'vad_disabled': os.getenv('GEMINI_VAD_DISABLED', 'false').lower() == 'true',
+            'vad_disabled': os.getenv('GEMINI_VAD_DISABLED', 'true').lower() == 'true',  # Default to disabled for PTT mode
             'start_sensitivity': os.getenv('GEMINI_START_SENSITIVITY', 'high').lower(),  # high, medium, low
             'end_sensitivity': os.getenv('GEMINI_END_SENSITIVITY', 'high').lower(),
             'prefix_padding_ms': int(os.getenv('GEMINI_PREFIX_PADDING_MS', '10')),

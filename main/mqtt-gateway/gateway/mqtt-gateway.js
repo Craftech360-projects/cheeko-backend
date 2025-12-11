@@ -1072,7 +1072,22 @@ class MQTTGateway {
 
       if (response.data.code === 0 && response.data.data.success) {
         const { newModeName } = response.data.data;
-        logger.info(`✅ [CHARACTER-CHANGE] ${deviceId}: Changed to ${newModeName}`);
+
+        const fs = require("fs");
+        const path = require("path");
+        const audioMapPath = path.join(__dirname, "audio", "character_change", "audio_map.json");
+        const audioMap = JSON.parse(fs.readFileSync(audioMapPath, "utf8"));
+
+        const audioFileName = audioMap.modes[newModeName] || audioMap.default;
+        const pcmFileName = audioFileName.replace(".opus", ".pcm");
+        const audioFilePath = path.join(__dirname, "audio", "character_change", pcmFileName);
+
+        if (!fs.existsSync(audioFilePath)) {
+          logger.error(`❌ [CHARACTER-CHANGE] Audio file not found: ${audioFilePath}`);
+          return;
+        }
+
+        await this.streamAudioViaUdp(deviceId, audioFilePath, newModeName, true);
       } else {
         logger.error(`❌ [CHARACTER-CHANGE] API error:`, response.data);
       }
