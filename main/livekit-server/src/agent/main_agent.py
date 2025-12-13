@@ -9,6 +9,8 @@ import random
 import inspect
 import asyncio
 import os
+import re
+import sqlite3
 from pathlib import Path
 from livekit.agents import (
     Agent,
@@ -18,7 +20,69 @@ from livekit.agents import (
 from .filtered_agent import FilteredAgent
 from src.utils.database_helper import DatabaseHelper
 from src.services.google_search_service import GoogleSearchService
+
+# ChromaDB for storytelling RAG
+try:
+    import chromadb
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+
 logger = logging.getLogger("agent")
+
+# ============================================================================
+# STORYTELLER DATABASE SETUP (shared with storyteller folder)
+# ============================================================================
+STORYTELLER_DIR = Path(__file__).parent.parent.parent / "storyteller"
+STORY_DB_PATH = STORYTELLER_DIR / "stories.db"
+STORY_CHROMA_PATH = STORYTELLER_DIR / "chroma_db"
+
+# Initialize ChromaDB for storytelling RAG (if available)
+story_rag_collection = None
+if CHROMADB_AVAILABLE and STORY_CHROMA_PATH.exists():
+    try:
+        story_chroma_client = chromadb.PersistentClient(path=str(STORY_CHROMA_PATH))
+        story_rag_collection = story_chroma_client.get_or_create_collection(name="story_pages")
+        logger.info(f"📚 Storyteller RAG initialized from {STORY_CHROMA_PATH}")
+    except Exception as e:
+        logger.warning(f"📚 Could not initialize storyteller RAG: {e}")
+
+def get_story_db_connection():
+    """Get SQLite connection to storyteller database."""
+    if not STORY_DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(STORY_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def get_all_story_titles_from_db():
+    """Get all story titles from the storyteller database."""
+    conn = get_story_db_connection()
+    if not conn:
+        return []
+    cursor = conn.cursor()
+    cursor.execute("SELECT title FROM stories")
+    titles = [row['title'] for row in cursor.fetchall()]
+    conn.close()
+    return titles
+
+def get_story_by_name_from_db(name: str):
+    """Get a story by name (fuzzy match) from the storyteller database."""
+    conn = get_story_db_connection()
+    if not conn:
+        return None
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM stories WHERE title LIKE ?", (f"%{name}%",))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
+def split_story_into_pages(content: str):
+    """Split story content into pages by PAGE markers."""
+    pages = re.split(r'===\s*PAGE\s*\d+\s*===', content)
+    return [p.strip() for p in pages if p.strip()]
 
 # Mode name aliases for handling transcript variations
 # Keys must match EXACT database mode names
@@ -586,6 +650,11 @@ class Assistant(FilteredAgent):
         self.room_name = None
         self.device_mac = None
 
+        # Storytelling state (for reading stories from PDF library)
+        self._current_story_data = None
+        self._current_story_page = 0
+        logger.info(f"📚 Storytelling initialized (DB: {STORY_DB_PATH.exists()}, RAG: {story_rag_collection is not None})")
+
         # Session reference for dynamic updates
         self._agent_session = None
 
@@ -761,6 +830,106 @@ class Assistant(FilteredAgent):
             if word1[-1].lower() != word2[0].lower():
                 logger.info(f"🎮 Generated word pair: {word1} → {word2}")
                 return word1, word2
+
+    # ============================================================================
+    # STORYTELLING TOOLS (read stories from PDF library via SQLite + ChromaDB RAG)
+    # ============================================================================
+
+    @function_tool
+    async def list_story_books(self, context: RunContext) -> str:
+        """Lists all available story books in the library that can be read to children.
+        Use this when the child asks what stories are available or wants to hear a story.
+        """
+        titles = get_all_story_titles_from_db()
+        if not titles:
+            return "No story books available in the library. Please ask an adult to upload stories first."
+        story_list = "\n".join([f"- {title}" for title in titles])
+        logger.info(f"📚 Listed {len(titles)} available story books")
+        return f"Available story books in the library:\n{story_list}\n\nWhich story would you like me to read?"
+
+    @function_tool
+    async def start_reading_story(self, context: RunContext, story_name: str) -> str:
+        """Starts reading a story from the library and returns the FIRST PAGE only.
+        After reading the first page, call get_next_story_page() to continue.
+
+        Args:
+            story_name: The name of the story to read (can be partial match)
+        """
+        story = get_story_by_name_from_db(story_name)
+        if not story:
+            available = get_all_story_titles_from_db()
+            logger.warning(f"📚 Story '{story_name}' not found")
+            return f"Story '{story_name}' not found. Available stories: {', '.join(available)}"
+
+        self._current_story_data = story
+        self._current_story_page = 0
+
+        pages = split_story_into_pages(story['content'])
+        if not pages:
+            return "This story appears to be empty."
+
+        first_page = pages[0]
+        logger.info(f"📚 Started reading '{story['title']}' - Page 1 of {len(pages)}")
+        return f"STORY: {story['title']}\nPage 1 of {len(pages)}\n\n{first_page}"
+
+    @function_tool
+    async def get_next_story_page(self, context: RunContext) -> str:
+        """Gets the next page of the current story being read.
+        Call this after finishing each page to continue reading the story.
+        """
+        if not self._current_story_data:
+            return "No story is being read. Use start_reading_story() first to begin a story."
+
+        pages = split_story_into_pages(self._current_story_data['content'])
+        self._current_story_page += 1
+
+        if self._current_story_page >= len(pages):
+            story_title = self._current_story_data['title']
+            self._current_story_data = None
+            self._current_story_page = 0
+            logger.info(f"📚 Finished reading '{story_title}'")
+            return f"THE END! You've finished '{story_title}'. Would you like to hear another story?"
+
+        logger.info(f"📚 Reading page {self._current_story_page + 1} of {len(pages)}")
+        return f"Page {self._current_story_page + 1} of {len(pages)}\n\n{pages[self._current_story_page]}"
+
+    @function_tool
+    async def ask_about_current_story(self, context: RunContext, question: str) -> str:
+        """Answer questions about the current story using RAG (Retrieval Augmented Generation).
+        Use this when the child asks about characters, events, or details in the story being read.
+
+        Args:
+            question: The child's question about the story (e.g., "Who is the prince?", "What happened to the flower?")
+        """
+        if not self._current_story_data:
+            return "No story is being read yet. Start a story first with start_reading_story()!"
+
+        if not story_rag_collection:
+            return "Story search is not available right now. Let me continue reading the story."
+
+        story_title = self._current_story_data['title']
+        logger.info(f"📚 RAG query for '{story_title}': {question}")
+
+        try:
+            results = story_rag_collection.query(
+                query_texts=[question],
+                n_results=3,
+                where={"story_title": story_title}
+            )
+
+            if results['documents'] and results['documents'][0]:
+                context_text = "\n\n".join(results['documents'][0])
+                logger.info(f"📚 RAG found {len(results['documents'][0])} relevant passages")
+                return f"Based on the story:\n{context_text}"
+            else:
+                return "I couldn't find specific information about that in the story. Would you like me to continue reading?"
+        except Exception as e:
+            logger.error(f"📚 RAG query error: {e}")
+            return "Let me continue with the story - I couldn't search for that right now."
+
+    # ============================================================================
+    # OTHER FUNCTION TOOLS
+    # ============================================================================
 
     @function_tool
     async def update_agent_mode(self, context: RunContext, mode_name: str) -> str:
