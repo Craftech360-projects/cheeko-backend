@@ -43,9 +43,27 @@ if CHROMADB_AVAILABLE and STORY_CHROMA_PATH.exists():
     try:
         story_chroma_client = chromadb.PersistentClient(path=str(STORY_CHROMA_PATH))
         story_rag_collection = story_chroma_client.get_or_create_collection(name="story_pages")
-        logger.info(f"📚 Storyteller RAG initialized from {STORY_CHROMA_PATH}")
+        # Log ChromaDB stats
+        collection_count = story_rag_collection.count()
+        logger.info(f"📚 ======== CHROMADB INITIALIZED ========")
+        logger.info(f"📚 Path: {STORY_CHROMA_PATH}")
+        logger.info(f"📚 Collection: 'story_pages'")
+        logger.info(f"📚 Total documents: {collection_count}")
+        # Try to get unique story titles in the collection
+        try:
+            sample = story_rag_collection.get(limit=1, include=["metadatas"])
+            if sample['metadatas']:
+                logger.info(f"📚 Sample metadata: {sample['metadatas'][0]}")
+        except:
+            pass
+        logger.info(f"📚 ======================================")
     except Exception as e:
         logger.warning(f"📚 Could not initialize storyteller RAG: {e}")
+else:
+    if not CHROMADB_AVAILABLE:
+        logger.warning(f"📚 ChromaDB not installed - RAG disabled")
+    elif not STORY_CHROMA_PATH.exists():
+        logger.warning(f"📚 ChromaDB path not found: {STORY_CHROMA_PATH}")
 
 def get_story_db_connection():
     """Get SQLite connection to storyteller database."""
@@ -840,11 +858,21 @@ class Assistant(FilteredAgent):
         """Lists all available story books in the library that can be read to children.
         Use this when the child asks what stories are available or wants to hear a story.
         """
+        logger.info(f"📚 ======== LIST STORY BOOKS ========")
+        logger.info(f"📚 DB Path: {STORY_DB_PATH}")
+        logger.info(f"📚 DB Exists: {STORY_DB_PATH.exists()}")
+
         titles = get_all_story_titles_from_db()
         if not titles:
+            logger.warning(f"📚 No stories found in database!")
             return "No story books available in the library. Please ask an adult to upload stories first."
+
+        logger.info(f"📚 Found {len(titles)} stories:")
+        for title in titles:
+            logger.info(f"📚   - {title}")
+        logger.info(f"📚 ===================================")
+
         story_list = "\n".join([f"- {title}" for title in titles])
-        logger.info(f"📚 Listed {len(titles)} available story books")
         return f"Available story books in the library:\n{story_list}\n\nWhich story would you like me to read?"
 
     @function_tool
@@ -855,21 +883,32 @@ class Assistant(FilteredAgent):
         Args:
             story_name: The name of the story to read (can be partial match)
         """
+        logger.info(f"📚 ======== START READING STORY ========")
+        logger.info(f"📚 Requested story: '{story_name}'")
+
         story = get_story_by_name_from_db(story_name)
         if not story:
             available = get_all_story_titles_from_db()
-            logger.warning(f"📚 Story '{story_name}' not found")
+            logger.warning(f"📚 Story '{story_name}' NOT FOUND in database!")
+            logger.warning(f"📚 Available: {available}")
             return f"Story '{story_name}' not found. Available stories: {', '.join(available)}"
+
+        logger.info(f"📚 Found story: '{story['title']}'")
+        logger.info(f"📚 Content length: {len(story['content'])} chars")
 
         self._current_story_data = story
         self._current_story_page = 0
 
         pages = split_story_into_pages(story['content'])
         if not pages:
+            logger.warning(f"📚 Story has no pages!")
             return "This story appears to be empty."
 
+        logger.info(f"📚 Total pages: {len(pages)}")
+        logger.info(f"📚 First page preview: {pages[0][:200]}...")
+        logger.info(f"📚 ======================================")
+
         first_page = pages[0]
-        logger.info(f"📚 Started reading '{story['title']}' - Page 1 of {len(pages)}")
         return f"STORY: {story['title']}\nPage 1 of {len(pages)}\n\n{first_page}"
 
     @function_tool
@@ -905,10 +944,13 @@ class Assistant(FilteredAgent):
             return "No story is being read yet. Start a story first with start_reading_story()!"
 
         if not story_rag_collection:
+            logger.warning("📚 ChromaDB RAG collection not available")
             return "Story search is not available right now. Let me continue reading the story."
 
         story_title = self._current_story_data['title']
-        logger.info(f"📚 RAG query for '{story_title}': {question}")
+        logger.info(f"📚 ======== RAG QUERY ========")
+        logger.info(f"📚 Story: '{story_title}'")
+        logger.info(f"📚 Question: '{question}'")
 
         try:
             results = story_rag_collection.query(
@@ -917,14 +959,34 @@ class Assistant(FilteredAgent):
                 where={"story_title": story_title}
             )
 
+            logger.info(f"📚 ======== RAG RESULTS ========")
+            logger.info(f"📚 Documents found: {len(results['documents'][0]) if results['documents'] and results['documents'][0] else 0}")
+
             if results['documents'] and results['documents'][0]:
+                # Log each retrieved passage
+                for i, doc in enumerate(results['documents'][0]):
+                    logger.info(f"📚 --- Passage {i+1} ---")
+                    logger.info(f"📚 {doc[:300]}..." if len(doc) > 300 else f"📚 {doc}")
+
+                # Log distances/scores if available
+                if results.get('distances') and results['distances'][0]:
+                    logger.info(f"📚 Distances (lower=better): {results['distances'][0]}")
+
+                # Log metadata if available
+                if results.get('metadatas') and results['metadatas'][0]:
+                    logger.info(f"📚 Metadata: {results['metadatas'][0]}")
+
                 context_text = "\n\n".join(results['documents'][0])
-                logger.info(f"📚 RAG found {len(results['documents'][0])} relevant passages")
+                logger.info(f"📚 ======== END RAG ========")
                 return f"Based on the story:\n{context_text}"
             else:
+                logger.info(f"📚 No matching passages found in ChromaDB")
+                logger.info(f"📚 ======== END RAG ========")
                 return "I couldn't find specific information about that in the story. Would you like me to continue reading?"
         except Exception as e:
             logger.error(f"📚 RAG query error: {e}")
+            import traceback
+            logger.error(f"📚 Traceback: {traceback.format_exc()}")
             return "Let me continue with the story - I couldn't search for that right now."
 
     # ============================================================================

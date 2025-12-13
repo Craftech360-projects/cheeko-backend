@@ -172,12 +172,23 @@ TEXT EXTRACTION:
 - Preserve paragraph structure
 
 IMAGE/ILLUSTRATION DESCRIPTION:
-If there are illustrations, describe them for the narrator:
-[SCENE: Detailed description - characters, expressions, actions, setting, colors, mood]
+If there are illustrations, add a BRIEF scene description that CONNECTS to the story text on this page:
+[SCENE: Brief description linking the illustration to what's happening in the story]
+
+IMPORTANT:
+- Keep scene descriptions SHORT (under 15 words)
+- The scene MUST relate to the story text on this page - what moment is being illustrated?
+- Write as a natural transition: "As the prince entered the forest..." or "Meanwhile, the monkey watched from above..."
+- DON'T just describe the image - connect it to the story action
+- Place [SCENE] right before the related story text
+
+Example:
+BAD: [SCENE: A boy with brown hair standing near colorful trees with birds flying]
+GOOD: [SCENE: The prince discovers the magical garden]
 
 Format your response as:
 === PAGE {page_number} ===
-[SCENE: description if there's an illustration]
+[SCENE: brief description connected to story] (only if illustration exists)
 
 (story text here)"""
 
