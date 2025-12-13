@@ -10,8 +10,8 @@
     "connectTimeout": 30000
   },
   "livekit": {
-    "url": "wss://cheeko-e9fib40x.livekit.cloud",
-    "api_key": "APISqRngao9gYtb",
-    "api_secret": "fD5boIGqfDCOcnY1OZNDYBWZc6dHZYoHgnQwaNaBZhi"
+    "url": "wss://altio-4owjwzb3.livekit.cloud",
+    "api_key": "APIa8QRtc2JWGxV",
+    "api_secret": "wT96ehM9DdCF2WziAU3yd0t5LDoTRoOjGWW1SiwMo7N"
   }
 }

@@ -1,0 +1,31 @@
+# This file specifies files that are *not* uploaded to Google Cloud Build
+# using gcloud run deploy --source
+
+# If this file is absent, .gitignore and .dockerignore are used
+
+# Include everything from .dockerignore
+#!include:.dockerignore
+
+# Large folders not needed for build
+model_cache/
+logs/
+transcripts/
+.git/
+.github/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+uv.lock
+
+# Environment files (secrets handled via --set-env-vars)
+.env
+.env.*
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store

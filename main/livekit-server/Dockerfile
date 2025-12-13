@@ -1,24 +1,23 @@
-# Dockerfile for LiveKit Server Simple on Cerebrium
+# Dockerfile.cloudrun - Optimized for Google Cloud Run asia-south1
+# Key differences from Cerebrium:
+# - Uses PORT env var for health checks
+# - Runs agent in dev mode with health server
+# - No CPU throttling required (set via gcloud deploy flag)
 # syntax=docker/dockerfile:1
 ARG PYTHON_VERSION=3.11.6
 FROM python:${PYTHON_VERSION}-slim
 
-# Keeps Python from buffering stdout and stderr
+# Prevent Python from buffering stdout/stderr (crucial for Cloud Run logs)
 ENV PYTHONUNBUFFERED=1
 
-# Create a non-privileged user that the app will run under.
-ARG UID=10001
-RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/home/appuser" \
-    --shell "/sbin/nologin" \
-    --uid "${UID}" \
-    appuser
+# Cloud Run will pass the PORT env var, default to 8080 for health checks
+ENV PORT=8080
+
+WORKDIR /app
 
 # Install system dependencies for audio processing and compilation
 RUN apt-get update && \
-    apt-get install -y \
+    apt-get install -y --no-install-recommends \
     bash \
     gcc \
     g++ \
@@ -28,31 +27,23 @@ RUN apt-get update && \
     libffi-dev \
     libssl-dev \
     ffmpeg \
+    dos2unix \
     && rm -rf /var/lib/apt/lists/*
-
-# Switch to non-root user
-USER appuser
-
-RUN mkdir -p /home/appuser/.cache
-RUN chown -R appuser /home/appuser/.cache
-
-WORKDIR /home/appuser
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN python -m pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy pyproject.toml and install its dependencies
-COPY pyproject.toml .
-RUN python -m pip install --user --no-cache-dir \
-    'livekit-agents[openai,turn-detector,silero,cartesia,deepgram]~=1.2' \
+# Install LiveKit agents with Google plugin (required for Gemini)
+RUN pip install --no-cache-dir \
+    'livekit-agents[openai,turn-detector,silero]~=1.2' \
+    'livekit-plugins-google' \
+    'google-genai' \
     'livekit-plugins-noise-cancellation~=0.2' \
     'livekit-plugins-groq' \
-    'livekit.plugins.deepgram' \
+    'livekit-plugins-deepgram' \
     'livekit-plugins-elevenlabs' \
-    'livekit-plugins-inworld' \
     'python-dotenv' \
-    'paho-mqtt' \
     'aiohttp' \
     'pydub' \
     'edge-tts==7.0.2' \
@@ -63,27 +54,21 @@ RUN python -m pip install --user --no-cache-dir \
     'pytz' \
     'qdrant-client>=1.7.0' \
     'sentence-transformers>=2.2.0' \
-    'uvicorn[standard]'
+    'uvicorn[standard]' \
+    'fastapi>=0.104.0'
 
-# Copy the entire application (including start.sh, main.py, media_api, etc.)
+# Copy the entire application
 COPY . .
 
-# Temporarily become root to fix ownership and ensure start.sh is executable
-USER root
-RUN apt-get update && apt-get install -y dos2unix && \
-    dos2unix /home/appuser/start.sh && \
-    chown -R appuser:appuser /home/appuser && \
-    chmod +x /home/appuser/start.sh && \
-    rm -rf /var/lib/apt/lists/*
+# Ensure start script is executable
+RUN dos2unix /app/start-cloudrun.sh 2>/dev/null || true && \
+    chmod +x /app/start-cloudrun.sh
 
-# Back to app user
-USER appuser
+# Download any required model files at build-time
+RUN python main.py download-files 2>/dev/null || echo "No download-files command available"
 
-# Ensure that any dependent models are downloaded at build-time
-RUN python main.py download-files || echo "No download-files command available"
+# Expose the health check port (Cloud Run requirement)
+EXPOSE 8080
 
-# Expose healthcheck / main service port and media_api port
-EXPOSE 8081 8003
-
-# Run the start script which launches both main.py and media_api
-CMD ["bash", "start.sh"]
+# Run the Cloud Run start script
+CMD ["bash", "start-cloudrun.sh"]

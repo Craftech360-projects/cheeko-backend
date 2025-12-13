@@ -1,0 +1,33 @@
+# fly.toml app configuration file for Manager API
+app = "cheeko-manager-live"
+primary_region = "bom"
+
+[build]
+  dockerfile = "Dockerfile.flyio"
+
+[env]
+  PORT = "8080"
+  SPRING_PROFILES_ACTIVE = "cloudrun"
+  # DB Configuration (To be set via secrets or Fly MySQL)
+  # SPRING_DATASOURCE_URL = "jdbc:mysql://cheeko-mysql-live.internal:3306/manager_api"
+  # SPRING_DATASOURCE_USERNAME = "root"
+  # REDIS_HOST = "cheeko-redis-live.internal"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "30s" # Java takes longer to start

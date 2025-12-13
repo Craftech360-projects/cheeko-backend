@@ -1,8 +1,10 @@
+livekit-agents
 livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
 livekit-plugins-google
+google-genai
 python-dotenv
 pydub
 aiohttp

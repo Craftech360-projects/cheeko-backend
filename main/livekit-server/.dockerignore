@@ -90,3 +90,9 @@ config.yaml.local
 # Ignore OS files
 .DS_Store
 Thumbs.db
+
+# Ignore large cache folders (not needed in Cloud Run)
+model_cache/
+logs/
+uv.lock
+*.lock

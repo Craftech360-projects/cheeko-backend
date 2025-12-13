@@ -1,12 +1,12 @@
 /**
  * LiveKit Bridge
- * 
+ *
  * Manages LiveKit room connections for each device.
  * Handles audio resampling, frame buffering, and agent communication.
  */
 
-const { EventEmitter } = require('events');
-const JSON5 = require('json5');
+const { EventEmitter } = require("events");
+const JSON5 = require("json5");
 const {
   Room,
   RoomEvent,
@@ -19,10 +19,14 @@ const {
   TrackKind,
   AudioResampler,
   AudioResamplerQuality,
-} = require('@livekit/rtc-node');
-const { AccessToken } = require('livekit-server-sdk');
-const { WorkerPoolManager } = require('../core/worker-pool-manager');
-const { OUTGOING_SAMPLE_RATE, INCOMING_SAMPLE_RATE, CHANNELS } = require('../constants/audio');
+} = require("@livekit/rtc-node");
+const { AccessToken } = require("livekit-server-sdk");
+const { WorkerPoolManager } = require("../core/worker-pool-manager");
+const {
+  OUTGOING_SAMPLE_RATE,
+  INCOMING_SAMPLE_RATE,
+  CHANNELS,
+} = require("../constants/audio");
 
 // Global config manager reference (injected by app.js)
 let configManager = null;
@@ -49,7 +53,7 @@ class LiveKitBridge extends EventEmitter {
 
     // Add agent join tracking
     this.agentJoined = false;
-    this.greetingSent = false;  // Track if greeting has been sent
+    this.greetingSent = false; // Track if greeting has been sent
     this.agentJoinPromise = null;
     this.agentJoinResolve = null;
     this.agentJoinTimeout = null;
@@ -141,7 +145,7 @@ class LiveKitBridge extends EventEmitter {
       // Reject all pending requests to prevent callbacks from firing
       for (const [requestId, request] of this.workerPool.pendingRequests) {
         if (request && request.reject) {
-          request.reject(new Error('Audio buffer cleared due to mode change'));
+          request.reject(new Error("Audio buffer cleared due to mode change"));
         }
         // Clear timeout if any
         if (request && request.timeout) {
@@ -150,7 +154,8 @@ class LiveKitBridge extends EventEmitter {
       }
       this.workerPool.pendingRequests.clear();
       // Reset pending counts per worker
-      this.workerPool.workerPendingCount = this.workerPool.workerPendingCount.map(() => 0);
+      this.workerPool.workerPendingCount =
+        this.workerPool.workerPendingCount.map(() => 0);
       // console.log(`🧹 [AUDIO-CLEAR] Cleared ${pendingCount} pending worker requests`);
     }
 
@@ -239,7 +244,9 @@ class LiveKitBridge extends EventEmitter {
     this.roomService = roomService;
     this.roomName = roomName;
 
-    console.log(`🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`);
+    console.log(
+      `🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`
+    );
 
     // Pre-create room with emptyTimeout setting
     if (roomService) {
@@ -312,7 +319,11 @@ class LiveKitBridge extends EventEmitter {
           try {
             data = JSON5.parse(str);
             // Simplified LiveKit message log
-            console.log(`📨 [LIVEKIT-IN] Type: ${data?.type} from ${participant?.identity || 'unknown'}`);
+            console.log(
+              `📨 [LIVEKIT-IN] Type: ${data?.type} from ${
+                participant?.identity || "unknown"
+              }`
+            );
           } catch (err) {
             console.error("❌ [PARSE ERROR] Invalid JSON5:", err.message);
             // console.error("Full raw payload:", str);
@@ -331,7 +342,6 @@ class LiveKitBridge extends EventEmitter {
                 setTimeout(() => {
                   this.sendTtsStopMessage();
                 }, 1000);
-                
 
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (
@@ -351,7 +361,9 @@ class LiveKitBridge extends EventEmitter {
                       timestamp: Date.now(),
                     })
                   );
-                  console.log(`📤 [MQTT-OUT] Sent goodbye message: ${this.macAddress}`);
+                  console.log(
+                    `📤 [MQTT-OUT] Sent goodbye message: ${this.macAddress}`
+                  );
 
                   // Close connection shortly after goodbye message
                   setTimeout(() => {
@@ -365,7 +377,9 @@ class LiveKitBridge extends EventEmitter {
                 data.data.new_state === "thinking"
               ) {
                 // DISABLED: Skip forwarding thinking message to ESP32
-                console.log(`🤔 [LLM] Thinking message received, forwarding to MQTT is skipped`);
+                console.log(
+                  `🤔 [LLM] Thinking message received, forwarding to MQTT is skipped`
+                );
                 // this.sendLLMThinkMessage();
               }
               break;
@@ -445,7 +459,9 @@ class LiveKitBridge extends EventEmitter {
 
         // Store the current mode in deviceInfo for function_call validation
         if (this.connection && this.connection.gateway) {
-          const deviceInfo = this.connection.gateway.deviceConnections.get(this.macAddress);
+          const deviceInfo = this.connection.gateway.deviceConnections.get(
+            this.macAddress
+          );
           if (deviceInfo) {
             deviceInfo.currentMode = this.roomType;
             deviceInfo.currentRoomName = roomName;
@@ -589,10 +605,15 @@ class LiveKitBridge extends EventEmitter {
                       }
 
                       const timestamp =
-                        (Date.now() - this.connection.udp.startTime) & 0xffffffff;
+                        (Date.now() - this.connection.udp.startTime) &
+                        0xffffffff;
 
                       // Process any complete frames from the buffer
-                      this.processBufferedFrames(timestamp, frameCount, participant.identity);
+                      this.processBufferedFrames(
+                        timestamp,
+                        frameCount,
+                        participant.identity
+                      );
 
                       // Log every 50 frames or every 5 seconds
                       // const now = Date.now();
@@ -602,15 +623,16 @@ class LiveKitBridge extends EventEmitter {
                       //   );
                       //   lastLogTime = now;
                       // }
-
                     } catch (audioProcessError) {
                       // console.error(`❌ [AUDIO] Frame processing error:`, audioProcessError.message);
                       // Continue processing other frames
                     }
-
                   }
                 } catch (error) {
-                  console.error(`❌ [AUDIO STREAM] Error reading audio stream:`, error.message);
+                  console.error(
+                    `❌ [AUDIO STREAM] Error reading audio stream:`,
+                    error.message
+                  );
                 } finally {
                   // console.log(`🔒 [AUDIO STREAM] Releasing reader lock for ${participant.identity}`);
                   reader.releaseLock();
@@ -661,26 +683,33 @@ class LiveKitBridge extends EventEmitter {
                 // Wait for UDP connection to be ready (max 10 seconds)
                 let waitCount = 0;
                 const maxWait = 100; // 100 * 100ms = 10 seconds
-                while (!this.connection?.udp?.remoteAddress && waitCount < maxWait) {
-                  await new Promise(resolve => setTimeout(resolve, 100));
+                while (
+                  !this.connection?.udp?.remoteAddress &&
+                  waitCount < maxWait
+                ) {
+                  await new Promise((resolve) => setTimeout(resolve, 100));
                   waitCount++;
                 }
 
                 if (!this.connection?.udp?.remoteAddress) {
-                  console.log(`⚠️ [AGENT-READY] UDP not ready after 10s, sending greeting anyway`);
+                  console.log(
+                    `⚠️ [AGENT-READY] UDP not ready after 10s, sending greeting anyway`
+                  );
                 }
 
                 // Additional delay for stability after UDP is ready
-                await new Promise(resolve => setTimeout(resolve, 500));
+                await new Promise((resolve) => setTimeout(resolve, 500));
 
                 if (!this.greetingSent) {
                   this.greetingSent = true;
-                  console.log(`👋 [AGENT-READY] UDP ready, sending start_greeting to agent...`);
+                  console.log(
+                    `👋 [AGENT-READY] UDP ready, sending start_greeting to agent...`
+                  );
                   const startGreetingMsg = {
                     type: "start_greeting",
                     session_id: this.connection?.udp?.session_id || null,
                     is_mode_switch: false,
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
                   };
                   await this.room.localParticipant.publishData(
                     Buffer.from(JSON.stringify(startGreetingMsg)),
@@ -689,7 +718,10 @@ class LiveKitBridge extends EventEmitter {
                   console.log(`✅ [AGENT-READY] start_greeting sent to agent`);
                 }
               } catch (err) {
-                console.error(`❌ [AGENT-READY] Failed to send greeting:`, err.message);
+                console.error(
+                  `❌ [AGENT-READY] Failed to send greeting:`,
+                  err.message
+                );
               }
             };
             waitForUdpAndGreet();
@@ -737,7 +769,10 @@ class LiveKitBridge extends EventEmitter {
           },
         });
       } catch (error) {
-        console.error("[LiveKitBridge] Error connecting to LiveKit:", error.message);
+        console.error(
+          "[LiveKitBridge] Error connecting to LiveKit:",
+          error.message
+        );
         // console.error("[LiveKitBridge] Error name:", error.name);
         // console.error("[LiveKitBridge] Error message:", error.message);
         reject(error);
@@ -750,6 +785,32 @@ class LiveKitBridge extends EventEmitter {
     if (!this.audioSource || !this.room || !this.room.isConnected) {
       // console.warn(`⚠️ [AUDIO] Cannot send audio - audioSource or room not ready. Room connected: ${this.room?.isConnected}`);
       return;
+    }
+
+    // FRAME DURATION VERIFICATION - Log first few frames to verify 40ms from ESP32
+    if (!this.frameCountLogged) {
+      this.frameCountLogged = 0;
+    }
+    if (this.frameCountLogged < 5) {
+      const expectedOpusSize40ms = 80; // ~80 bytes for 40ms Opus at 16kHz
+      const expectedOpusSize60ms = 120; // ~120 bytes for 60ms Opus at 16kHz
+      const frameDurationGuess =
+        opusData.length <= 100
+          ? "40ms"
+          : opusData.length <= 150
+          ? "60ms"
+          : "unknown";
+      console.log(
+        `🎵 [FRAME-VERIFY] Incoming audio frame #${
+          this.frameCountLogged + 1
+        }: ${opusData.length}B (likely ${frameDurationGuess})`
+      );
+      this.frameCountLogged++;
+      if (this.frameCountLogged === 5) {
+        console.log(
+          `🎵 [FRAME-VERIFY] Expected: ~80B for 40ms, ~120B for 60ms Opus frames`
+        );
+      }
     }
 
     try {
@@ -840,7 +901,6 @@ class LiveKitBridge extends EventEmitter {
       await this.audioSource.captureFrame(frame);
     } catch (error) {
       // console.error(`❌ [AUDIO] Failed to capture frame: ${error.message}`);
-
       // If we get InvalidState error, it's likely the peer connection is disconnecting
       // if (error.message.includes("InvalidState")) {
       //   console.warn(`⚠️ [AUDIO] InvalidState error - peer connection may be disconnecting`);
@@ -1230,7 +1290,10 @@ class LiveKitBridge extends EventEmitter {
     }
 
     // Handle volume up/down with adjust logic (get current + calculate + set)
-    if (functionCall.name === "self_volume_up" || functionCall.name === "self_volume_down") {
+    if (
+      functionCall.name === "self_volume_up" ||
+      functionCall.name === "self_volume_down"
+    ) {
       // console.log(`🎛️ [VOICE-MCP] Volume control detected from voice command, using adjust logic`);
 
       try {
@@ -1354,7 +1417,9 @@ class LiveKitBridge extends EventEmitter {
       // console.log(`   🎯 Function: ${functionName}`);
       // console.log(`   📝 Arguments: ${JSON.stringify(functionArguments)}`);
     } catch (error) {
-      console.error(`❌ [MOBILE] Failed to forward music request: ${error.message}`);
+      console.error(
+        `❌ [MOBILE] Failed to forward music request: ${error.message}`
+      );
       // console.error(`   Stack: ${error.stack}`);
     }
   }
@@ -1543,7 +1608,10 @@ class LiveKitBridge extends EventEmitter {
       // console.log(`✅ [MCP-FORWARD] Request ID: ${requestId}`);
       return true;
     } catch (error) {
-      console.error(`❌ [MCP-FORWARD] Error forwarding MCP response:`, error.message);
+      console.error(
+        `❌ [MCP-FORWARD] Error forwarding MCP response:`,
+        error.message
+      );
       return false;
     }
   }
@@ -1606,7 +1674,10 @@ class LiveKitBridge extends EventEmitter {
       }
 
       // Accumulate steps if same action
-      if (this.pendingVolumeAction && this.pendingVolumeAction.action === action) {
+      if (
+        this.pendingVolumeAction &&
+        this.pendingVolumeAction.action === action
+      ) {
         this.pendingVolumeAction.step += step;
         this.pendingVolumeAction.resolvers.push(resolve);
         // console.log(`📊 [VOLUME-DEBOUNCE] Accumulated ${action} (total step: ${this.pendingVolumeAction.step})`);
@@ -1622,7 +1693,11 @@ class LiveKitBridge extends EventEmitter {
 
       // Set new debounce timer
       this.volumeDebounceTimer = setTimeout(async () => {
-        const { action: finalAction, step: finalStep, resolvers } = this.pendingVolumeAction;
+        const {
+          action: finalAction,
+          step: finalStep,
+          resolvers,
+        } = this.pendingVolumeAction;
         this.pendingVolumeAction = null;
         this.volumeDebounceTimer = null;
 
@@ -1682,7 +1757,11 @@ class LiveKitBridge extends EventEmitter {
       } else {
         // First time or after error - query device
         // console.log(`🔊 [VOLUME-QUERY] Querying device for current volume...`);
-        const statusResult = await this.sendMcpAndWait("self.get_device_status", {}, 3000);
+        const statusResult = await this.sendMcpAndWait(
+          "self.get_device_status",
+          {},
+          3000
+        );
 
         let deviceStatus;
         if (typeof statusResult === "string") {
@@ -1707,7 +1786,11 @@ class LiveKitBridge extends EventEmitter {
       // console.log(`🔧 [VOLUME-ADJUST] Calculating new volume: ${currentVolume} ${action === "up" ? "+" : "-"} ${step} = ${newVolume}`);
 
       // Set new volume (reduced timeout for faster failure detection)
-      await this.sendMcpAndWait("self.audio_speaker.set_volume", { volume: newVolume }, 3000);
+      await this.sendMcpAndWait(
+        "self.audio_speaker.set_volume",
+        { volume: newVolume },
+        3000
+      );
 
       // Update cached volume
       this.lastKnownVolume = newVolume;
@@ -1779,7 +1862,10 @@ class LiveKitBridge extends EventEmitter {
       this.connection.sendMqttMessage(JSON.stringify(readyMessage));
       // console.log(`✅ [READY] Sent ready_for_greeting notification to client ${this.macAddress}. Waiting for 's' key press...`);
     } catch (error) {
-      console.error(`❌ [READY] Error sending ready notification:`, error.message);
+      console.error(
+        `❌ [READY] Error sending ready notification:`,
+        error.message
+      );
     }
   }
 
@@ -1827,7 +1913,10 @@ class LiveKitBridge extends EventEmitter {
         // console.warn(`⚠️ [AGENT READY] Cannot send messages - room not ready for device: ${this.macAddress}`);
       }
     } catch (error) {
-      console.error(`❌ [AGENT READY] Error sending messages to agent:`, error.message);
+      console.error(
+        `❌ [AGENT READY] Error sending messages to agent:`,
+        error.message
+      );
     }
   }
 
@@ -1893,7 +1982,10 @@ class LiveKitBridge extends EventEmitter {
       this.audioPlayingStartTime = null;
       // console.log(`🎵 [ABORT-CLEAR] Cleared audio playing flag for device: ${this.macAddress}`);
     } catch (error) {
-      console.error(`[LiveKitBridge] Failed to send abort signal:`, error.message);
+      console.error(
+        `[LiveKitBridge] Failed to send abort signal:`,
+        error.message
+      );
       throw error;
     }
   }
@@ -1933,7 +2025,10 @@ class LiveKitBridge extends EventEmitter {
 
       // console.log(`👋 [END-PROMPT] Sent end prompt to LiveKit agent via data channel`);
     } catch (error) {
-      console.error(`[LiveKitBridge] Failed to send end prompt:`, error.message);
+      console.error(
+        `[LiveKitBridge] Failed to send end prompt:`,
+        error.message
+      );
       // Don't throw the error - just log it and continue with cleanup
       // console.log(`👋 [END-PROMPT] Continuing with connection cleanup despite end prompt failure`);
     }
@@ -1980,20 +2075,28 @@ class LiveKitBridge extends EventEmitter {
         await this.room.disconnect();
         console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
       } catch (error) {
-        console.log(`⚠️ [CLEANUP] Error disconnecting from room: ${error.message}`);
+        console.log(
+          `⚠️ [CLEANUP] Error disconnecting from room: ${error.message}`
+        );
       }
 
       // Step 3: Force delete the room from LiveKit server to remove all participants
       if (this.roomService && this.roomName) {
         try {
           await this.roomService.deleteRoom(this.roomName);
-          console.log(`✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`);
+          console.log(
+            `✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`
+          );
         } catch (error) {
           // Room might already be gone, that's okay
-          console.log(`⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`);
+          console.log(
+            `⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`
+          );
         }
       } else {
-        console.log(`⚠️ [CLEANUP] No roomService or roomName available for room deletion`);
+        console.log(
+          `⚠️ [CLEANUP] No roomService or roomName available for room deletion`
+        );
       }
 
       this.room = null;
@@ -2063,7 +2166,8 @@ class LiveKitBridge extends EventEmitter {
           const roomCreationTime = Number(room.creationTime);
           const roomAge = now - roomCreationTime;
           console.log(
-            `   - Deleting room: ${room.name} (${room.numParticipants
+            `   - Deleting room: ${room.name} (${
+              room.numParticipants
             } participants, age: ${roomAge.toFixed(0)}s)`
           );
           try {
@@ -2095,6 +2199,4 @@ class LiveKitBridge extends EventEmitter {
   }
 }
 
-
 module.exports = { LiveKitBridge, setConfigManager };
-

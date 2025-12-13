@@ -14,13 +14,7 @@ import aiohttp
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Resource monitoring imports
-try:
-    import psutil
-    PSUTIL_AVAILABLE = True
-except ImportError:
-    PSUTIL_AVAILABLE = False
-    logging.warning("psutil not available - install with: pip install psutil")
+# Note: ResourceMonitor removed for faster startup and lower overhead
 
 from livekit.agents import (
     AgentSession,
@@ -37,7 +31,9 @@ from livekit.plugins import google
 from google.genai import types
 
 # Load environment variables first
+# Debug: List files
 load_dotenv(".env")
+print(f"🔍 DEBUG: LIVEKIT_URL={os.getenv('LIVEKIT_URL')}")
 
 # Initialize Datadog logging (must be done before logger usage)
 from src.config.datadog_config import DatadogConfig
@@ -59,90 +55,10 @@ from src.utils.loki_agent_logger import logger
 
 
 # ============================================================================
-# RESOURCE MONITOR
+# RESOURCE MONITOR - REMOVED
 # ============================================================================
-
-class ResourceMonitor:
-    """Monitor system resources and log performance metrics"""
-
-    def __init__(self, log_interval=10):
-        self.log_interval = log_interval
-        self.monitoring = False
-        self.monitor_thread = None
-        self.start_time = time.time()
-        self.client_count = 0
-
-    def start_monitoring(self):
-        """Start resource monitoring in background thread"""
-        if not PSUTIL_AVAILABLE:
-            logger.warning("📊 Resource monitoring disabled - psutil not available")
-            return
-
-        if self.monitoring:
-            return
-
-        self.monitoring = True
-        self.monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self.monitor_thread.start()
-        logger.info(f"📊 Resource monitoring started (interval: {self.log_interval}s)")
-
-    def stop_monitoring(self):
-        """Stop resource monitoring"""
-        self.monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=1)
-        logger.info("📊 Resource monitoring stopped")
-
-    def increment_clients(self):
-        """Increment active client count"""
-        self.client_count += 1
-        logger.info(f"📊 Active clients: {self.client_count}")
-
-    def decrement_clients(self):
-        """Decrement active client count"""
-        self.client_count = max(0, self.client_count - 1)
-        logger.info(f"📊 Active clients: {self.client_count}")
-
-    def _monitor_loop(self):
-        """Main monitoring loop"""
-        while self.monitoring:
-            try:
-                self._log_resources()
-                time.sleep(self.log_interval)
-            except Exception as e:
-                logger.error(f"📊 Resource monitoring error: {e}")
-                time.sleep(self.log_interval)
-
-    def _log_resources(self):
-        """Log current resource usage"""
-        if not PSUTIL_AVAILABLE:
-            return
-
-        try:
-            cpu_percent = psutil.cpu_percent(interval=1)
-            memory = psutil.virtual_memory()
-            process = psutil.Process()
-            process_cpu = process.cpu_percent()
-            process_memory = process.memory_info()
-            process_threads = process.num_threads()
-            net_io = psutil.net_io_counters()
-            uptime = time.time() - self.start_time
-
-            logger.info(
-                f"📊 RESOURCES | "
-                f"Clients: {self.client_count} | "
-                f"Uptime: {uptime:.1f}s | "
-                f"CPU: {cpu_percent:.1f}% (proc: {process_cpu:.1f}%) | "
-                f"RAM: {memory.percent:.1f}% (proc: {process_memory.rss/1024/1024:.1f}MB) | "
-                f"Threads: {process_threads} | "
-                f"Net: ↓{net_io.bytes_recv/1024/1024:.1f}MB ↑{net_io.bytes_sent/1024/1024:.1f}MB"
-            )
-        except Exception as e:
-            logger.error(f"📊 Failed to log resources: {e}")
-
-
-# Global resource monitor
-resource_monitor = ResourceMonitor(log_interval=10)
+# ResourceMonitor removed for faster startup and lower CPU overhead
+# Use external monitoring (Datadog, Cloud Run metrics) instead
 
 
 # ============================================================================
@@ -236,9 +152,7 @@ async def entrypoint(ctx: JobContext):
     # Track initialization time
     init_start_time = asyncio.get_event_loop().time()
 
-    # Start resource monitoring
-    resource_monitor.start_monitoring()
-    resource_monitor.increment_clients()
+    # Resource monitoring removed - use Cloud Run metrics instead
 
     # Load configuration
     realtime_config = ConfigLoader.get_gemini_realtime_config()
@@ -275,6 +189,7 @@ async def entrypoint(ctx: JobContext):
     prompt_service = PromptService()
     agent_prompt = ConfigLoader.get_default_prompt()
     child_profile = None
+    agent_id = None  # Initialize here to avoid UnboundLocalError
 
     if device_mac:
         try:
@@ -639,9 +554,7 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.warning(f"Room deletion error: {e}")
 
-            # Stop resource monitoring
-            resource_monitor.decrement_clients()
-            resource_monitor.stop_monitoring()
+            # Resource monitoring removed
 
             logger.info("✅ Cleanup completed")
         except Exception as e:
@@ -699,10 +612,17 @@ async def entrypoint(ctx: JobContext):
 # ============================================================================
 
 if __name__ == "__main__":
+    # Cloud Run requires listening on the PORT env var (default 8080)
+    # LiveKit agents use this port for health checks
+    # Local dev can use 8081 as default
+    health_check_port = int(os.environ.get("PORT", "8081"))
+    logger.info(f"🏥 Health check port: {health_check_port}")
+    
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,
+        port=health_check_port,  # Cloud Run health check port
     ))

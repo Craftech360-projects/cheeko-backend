@@ -1,0 +1,50 @@
+# fly.toml app configuration file
+app = "cheeko-agent-live"
+primary_region = "bom"  # Mumbai - closest to India
+
+[build]
+  dockerfile = "Dockerfile.flyio"
+
+[env]
+  PORT = "8080"
+  GEMINI_REALTIME_MODEL = "gemini-2.5-flash-native-audio-preview-09-2025"
+  PTT_MODE = "manual"
+  GEMINI_VAD_DISABLED = "true"
+  AUTO_PRELOAD_MODELS = "false"
+
+# 🚀 LATENCY OPTIMIZATION: HTTP Service & Health Checks
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  # Keep the machine alive! (The Cold Start Killer)
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Health check to ensure agent is responsive
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+
+# � VOLUME MOUNT: Store models outside rootfs
+[mounts]
+  source = "cheeko_data"
+  destination = "/data"
+
+# �🚀 PERFORMANCE TUNING: VM Size (shared-cpu now that image is optimized)
+[vm]
+  size = "shared-cpu-2x"
+  memory = "4gb"
+

@@ -1,0 +1,26 @@
+# Files to exclude from Cloud Build source upload
+.git/
+.github/
+.idea/
+.vscode/
+target/
+logs/
+uploadfile/
+*.log
+*.jar
+*.gz
+
+# Docker files (not needed for Cloud Build)
+docker/
+docker-compose*.yml
+
+# Test data
+*.csv
+*.txt
+!pom.xml
+
+# IDE files
+*.iml
+.classpath
+.project
+.settings/

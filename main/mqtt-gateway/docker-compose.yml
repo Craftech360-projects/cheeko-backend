@@ -20,8 +20,7 @@ services:
     # Additional environment variables
     environment:
       NODE_ENV: production
-      # Override LiveKit URL to use container name
-      LIVEKIT_URL: ws://livekit-server:7880
+      # LIVEKIT_URL now comes from .env file
 
     # Mount volumes
     volumes:

@@ -2,7 +2,7 @@
 name = "livekit-server-simple"
 python_version = "3.11"
 disable_auth = false
-region = "ap-south-1"
+region = "eu-west-2"
 include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*']
 exclude = ['.*', '__pycache__/**/*', 'transcripts/**/*', '*.pyc']
 
@@ -21,17 +21,21 @@ scaling_metric = "cpu_utilization"
 scaling_target = 60
 
 [cerebrium.runtime.custom]
-port = 8003
-dockerfile_path = "./Dockerfile"
+port = 8080
+dockerfile_path = "./Dockerfile.flyio"
 
 [cerebrium.env]
-# LiveKit Cloud Configuration (REQUIRED for Cerebrium deployment)
-LIVEKIT_URL = "wss://cheeko-e9fib40x.livekit.cloud"
-LIVEKIT_API_KEY = "APISqRngao9gYtb"
-LIVEKIT_API_SECRET = "fD5boIGqfDCOcnY1OZNDYBWZc6dHZYoHgnQwaNaBZhi"
-
+# LiveKit Cloud Configuration (Updated for production)
+LIVEKIT_URL = "wss://altio-4owjwzb3.livekit.cloud"
+LIVEKIT_API_KEY = "APIa8QRtc2JWGxV"
+LIVEKIT_API_SECRET = "wT96ehM9DdCF2WziAU3yd0t5LDoTRoOjGWW1SiwMo7N"
+GOOGLE_API_KEY = "AIzaSyDQnuv8reaFvyUO68OE750MwOdGzSptuZw"
+MANAGER_API_URL = "https://manager-api-production-e079.up.railway.app"
+MANAGER_API_SECRET = "da11d988-f105-4e71-b095-da62ada82189"
 
 
 # Model Configuration (CRITICAL - no comments in values!)
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 AUTO_PRELOAD_MODELS = "true"
+
+

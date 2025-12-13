@@ -182,8 +182,9 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
 
         response.setWebsocket(websocket);
-        
-        // Always include MQTT credentials for all devices (both registered and unregistered)
+
+        // Always include MQTT credentials for all devices (both registered and
+        // unregistered)
         DeviceReportRespDTO.Mqtt mqttCredentials = buildMqttCredentials(macAddress);
         if (mqttCredentials != null) {
             response.setMqtt(mqttCredentials);
@@ -231,7 +232,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         // Get current user to check if super admin
         UserDetail currentUser = SecurityUser.getUser();
         boolean isSuperAdmin = (currentUser.getSuperAdmin() != null &&
-                               currentUser.getSuperAdmin() == 1);
+                currentUser.getSuperAdmin() == 1);
 
         // Build delete query
         UpdateWrapper<DeviceEntity> wrapper = new UpdateWrapper<>();
@@ -246,11 +247,11 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
         // Log the unbind action for audit purposes
         log.info("🔓 Device unbind - DeviceId: {}, DeviceOwner: {}, RequestedBy: {} ({}), Action: {}",
-                 deviceId,
-                 device.getUserId(),
-                 currentUser.getId(),
-                 isSuperAdmin ? "SuperAdmin" : "User",
-                 isSuperAdmin && !device.getUserId().equals(currentUser.getId()) ? "ADMIN_UNBIND" : "SELF_UNBIND");
+                deviceId,
+                device.getUserId(),
+                currentUser.getId(),
+                isSuperAdmin ? "SuperAdmin" : "User",
+                isSuperAdmin && !device.getUserId().equals(currentUser.getId()) ? "ADMIN_UNBIND" : "SELF_UNBIND");
 
         baseDao.delete(wrapper);
     }
@@ -312,7 +313,8 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         wrapper.eq("mac_address", macAddress);
         DeviceEntity device = baseDao.selectOne(wrapper);
 
-        // If not found and MAC doesn't have colons, try with colons (format: 00:11:22:33:44:55)
+        // If not found and MAC doesn't have colons, try with colons (format:
+        // 00:11:22:33:44:55)
         if (device == null && !macAddress.contains(":")) {
             String macWithColons = macAddress.replaceAll("(.{2})", "$1:").replaceAll(":$", "");
             wrapper = new QueryWrapper<>();
@@ -413,16 +415,16 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
         return code;
     }
-    
+
     private DeviceReportRespDTO.Mqtt buildMqttCredentials(String deviceId) {
         try {
             DeviceReportRespDTO.Mqtt mqtt = new DeviceReportRespDTO.Mqtt();
-            
-            // Get MQTT configuration from system parameters
-            String mqttBroker = sysParamsService.getValue("mqtt.broker", true);
-            String mqttPort = sysParamsService.getValue("mqtt.port", true);
-            String mqttSignatureKey = sysParamsService.getValue("mqtt.signature_key", true);
-            
+
+            // Get MQTT configuration from system parameters (bypass cache for fresh values)
+            String mqttBroker = sysParamsService.getValue("mqtt.broker", false);
+            String mqttPort = sysParamsService.getValue("mqtt.port", false);
+            String mqttSignatureKey = sysParamsService.getValue("mqtt.signature_key", false);
+
             // Use defaults if not configured
             if (StringUtils.isBlank(mqttBroker)) {
                 mqttBroker = "192.168.1.236"; // Default to local IP
@@ -433,21 +435,22 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             if (StringUtils.isBlank(mqttSignatureKey)) {
                 mqttSignatureKey = "test-signature-key-12345";
             }
-            
+
             // Convert MAC address format (remove colons, use underscores)
             String macAddress = deviceId.replace(":", "_");
-            
+
             // Generate UUID for this session
             String clientUuid = UUID.randomUUID().toString();
-            
+
             // Create client ID in format: GID_test@@@mac_address@@@uuid
             String groupId = "GID_test";
             String clientId = groupId + "@@@" + macAddress + "@@@" + clientUuid;
-            
+
             // Get client IP from request
             String clientIp = "127.0.0.1";
             try {
-                ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+                ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder
+                        .getRequestAttributes();
                 if (attributes != null) {
                     HttpServletRequest request = attributes.getRequest();
                     clientIp = request.getRemoteAddr();
@@ -464,21 +467,22 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             } catch (Exception e) {
                 log.warn("Failed to get client IP: {}", e.getMessage());
             }
-            
+
             // Create user data and encode as base64 JSON
             Map<String, String> userData = new HashMap<>();
             userData.put("ip", clientIp);
             String userDataJson = "{\"ip\":\"" + clientIp + "\"}";
             String username = Base64.getEncoder().encodeToString(userDataJson.getBytes(StandardCharsets.UTF_8));
-            
+
             // Generate password signature using HMAC-SHA256
             String content = clientId + "|" + username;
             Mac mac = Mac.getInstance("HmacSHA256");
-            SecretKeySpec secretKeySpec = new SecretKeySpec(mqttSignatureKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+            SecretKeySpec secretKeySpec = new SecretKeySpec(mqttSignatureKey.getBytes(StandardCharsets.UTF_8),
+                    "HmacSHA256");
             mac.init(secretKeySpec);
             byte[] signature = mac.doFinal(content.getBytes(StandardCharsets.UTF_8));
             String password = Base64.getEncoder().encodeToString(signature);
-            
+
             // Set MQTT credentials
             mqtt.setBroker(mqttBroker);
             mqtt.setPort(Integer.parseInt(mqttPort));
