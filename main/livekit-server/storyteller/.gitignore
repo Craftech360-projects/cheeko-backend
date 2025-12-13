@@ -1,0 +1,9 @@
+# Story PDFs (too large for GitHub, processed locally)
+stories/*.pdf
+
+# Databases (local data, regenerated from PDFs)
+stories.db
+chroma_db/
+
+# Environment
+.env
