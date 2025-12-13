@@ -445,7 +445,7 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("agent_state_changed")
     def on_agent_state_changed_for_tts(ev):
-        """Emit speech_created when agent starts speaking"""
+        """Emit speech_created when agent starts speaking, auto-continue story when done"""
         try:
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
@@ -455,8 +455,29 @@ async def entrypoint(ctx: JobContext):
                 logger.info(f"📢 Emitting speech_created (state: {old_state} → speaking)")
                 asyncio.create_task(emit_speech_created())
 
+            # Auto-continue story reading when agent finishes speaking
+            if old_state == 'speaking' and new_state == 'listening':
+                # Check if there's an active story being read
+                if hasattr(assistant, '_current_story_data') and assistant._current_story_data:
+                    logger.info(f"📚 Story active - auto-triggering next page...")
+                    # Small delay to let the current response complete
+                    asyncio.create_task(auto_continue_story())
+
         except Exception as e:
             logger.error(f"❌ Error in agent_state_changed handler: {e}")
+
+    async def auto_continue_story():
+        """Automatically continue reading the story"""
+        try:
+            await asyncio.sleep(0.5)  # Brief pause before continuing
+            # Check again if story is still active (might have ended)
+            if hasattr(assistant, '_current_story_data') and assistant._current_story_data:
+                logger.info(f"📚 Auto-continuing story with generate_reply...")
+                await session.generate_reply(
+                    instructions="Continue reading the story. Call get_next_story_page() now."
+                )
+        except Exception as e:
+            logger.error(f"📚 Error auto-continuing story: {e}")
 
     logger.info("📊 State management registered")
 

@@ -875,10 +875,13 @@ class Assistant(FilteredAgent):
         story_list = "\n".join([f"- {title}" for title in titles])
         return f"Available story books in the library:\n{story_list}\n\nWhich story would you like me to read?"
 
+    # How many pages to return per tool call (for continuous reading)
+    PAGES_PER_CALL = 3
+
     @function_tool
     async def start_reading_story(self, context: RunContext, story_name: str) -> str:
-        """Starts reading a story from the library and returns the FIRST PAGE only.
-        After reading the first page, call get_next_story_page() to continue.
+        """Starts reading a story from the library. Returns first few pages.
+        IMPORTANT: After reading these pages, IMMEDIATELY call get_next_story_page() to continue!
 
         Args:
             story_name: The name of the story to read (can be partial match)
@@ -904,33 +907,62 @@ class Assistant(FilteredAgent):
             logger.warning(f"📚 Story has no pages!")
             return "This story appears to be empty."
 
-        logger.info(f"📚 Total pages: {len(pages)}")
-        logger.info(f"📚 First page preview: {pages[0][:200]}...")
+        total_pages = len(pages)
+        logger.info(f"📚 Total pages: {total_pages}")
+
+        # Return multiple pages at once for continuous reading
+        pages_to_return = pages[:self.PAGES_PER_CALL]
+        self._current_story_page = len(pages_to_return) - 1  # Track last page returned
+
+        combined_content = "\n\n".join(pages_to_return)
+        logger.info(f"📚 Returning pages 1-{len(pages_to_return)} of {total_pages}")
         logger.info(f"📚 ======================================")
 
-        first_page = pages[0]
-        return f"STORY: {story['title']}\nPage 1 of {len(pages)}\n\n{first_page}"
+        if len(pages_to_return) >= total_pages:
+            # Story is short, all pages returned
+            self._current_story_data = None
+            self._current_story_page = 0
+            return f"[PAGE 1 of {total_pages}]\n\n{combined_content}\n\n[THE END]"
+        else:
+            # Include page info for natural book-reading feel
+            return f"[PAGE 1 of {total_pages}]\n\n{combined_content}"
 
     @function_tool
     async def get_next_story_page(self, context: RunContext) -> str:
-        """Gets the next page of the current story being read.
-        Call this after finishing each page to continue reading the story.
-        """
+        """Gets the next pages of the current story. Just read the returned content naturally."""
         if not self._current_story_data:
             return "No story is being read. Use start_reading_story() first to begin a story."
 
         pages = split_story_into_pages(self._current_story_data['content'])
-        self._current_story_page += 1
+        total_pages = len(pages)
 
-        if self._current_story_page >= len(pages):
+        # Move to next page
+        self._current_story_page += 1
+        start_page = self._current_story_page
+
+        if start_page >= total_pages:
             story_title = self._current_story_data['title']
             self._current_story_data = None
             self._current_story_page = 0
             logger.info(f"📚 Finished reading '{story_title}'")
-            return f"THE END! You've finished '{story_title}'. Would you like to hear another story?"
+            return "The End."
 
-        logger.info(f"📚 Reading page {self._current_story_page + 1} of {len(pages)}")
-        return f"Page {self._current_story_page + 1} of {len(pages)}\n\n{pages[self._current_story_page]}"
+        # Get multiple pages
+        end_page = min(start_page + self.PAGES_PER_CALL, total_pages)
+        pages_to_return = pages[start_page:end_page]
+        self._current_story_page = end_page - 1  # Track last page returned
+
+        combined_content = "\n\n".join(pages_to_return)
+        logger.info(f"📚 Returning pages {start_page + 1}-{end_page} of {total_pages}")
+
+        if end_page >= total_pages:
+            # This is the last batch
+            self._current_story_data = None
+            self._current_story_page = 0
+            return f"[PAGE {start_page + 1} of {total_pages}]\n\n{combined_content}\n\n[THE END]"
+        else:
+            # Include page info for natural book-reading feel
+            return f"[PAGE {start_page + 1} of {total_pages}]\n\n{combined_content}"
 
     @function_tool
     async def ask_about_current_story(self, context: RunContext, question: str) -> str:

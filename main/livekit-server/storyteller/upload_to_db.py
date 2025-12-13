@@ -164,33 +164,24 @@ async def extract_pdf_content(pdf_path: Path) -> str:
         # Call Gemini Vision OCR
         try:
             page_number = page_num + 1  # Capture for closure
-            prompt = f"""Extract ALL content from this children's story page (Page {page_number}).
+            prompt = f"""Extract ALL text content from this children's story page (Page {page_number}).
 
-TEXT EXTRACTION:
-- Include EVERY word exactly as written
+TEXT EXTRACTION ONLY:
+- Include EVERY word of the story text exactly as written
 - Preserve all dialogue with quotation marks
 - Preserve paragraph structure
+- IGNORE any illustrations/images - only extract the TEXT
 
-IMAGE/ILLUSTRATION DESCRIPTION:
-If there are illustrations, add a BRIEF scene description that CONNECTS to the story text on this page:
-[SCENE: Brief description linking the illustration to what's happening in the story]
-
-IMPORTANT:
-- Keep scene descriptions SHORT (under 15 words)
-- The scene MUST relate to the story text on this page - what moment is being illustrated?
-- Write as a natural transition: "As the prince entered the forest..." or "Meanwhile, the monkey watched from above..."
-- DON'T just describe the image - connect it to the story action
-- Place [SCENE] right before the related story text
-
-Example:
-BAD: [SCENE: A boy with brown hair standing near colorful trees with birds flying]
-GOOD: [SCENE: The prince discovers the magical garden]
+DO NOT:
+- Do NOT describe images or illustrations
+- Do NOT add [SCENE: ...] tags
+- Do NOT add any commentary about pictures
+- Just extract the pure story text
 
 Format your response as:
 === PAGE {page_number} ===
-[SCENE: brief description connected to story] (only if illustration exists)
 
-(story text here)"""
+(story text here - nothing else)"""
 
             response = await asyncio.to_thread(
                 lambda p=prompt, i=img: model.generate_content([p, i]).text
