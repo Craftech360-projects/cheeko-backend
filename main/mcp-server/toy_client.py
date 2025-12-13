@@ -29,9 +29,9 @@ except ImportError:
 load_dotenv()
 
 # Configuration
-MQTT_HOST = os.getenv("EMQX_HOST", "192.168.1.98")
+MQTT_HOST = os.getenv("EMQX_HOST", "192.168.1.166")
 MQTT_PORT = int(os.getenv("EMQX_PORT", "1883"))
-DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "aa:bb:cc:dd:ee:ff")
+DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "84:1f:e8:16:e5:4c")
 
 # Setup logging with colors
 logging.basicConfig(
@@ -100,6 +100,9 @@ class ToyESP32Client:
         """Process incoming command and update device state."""
         action = payload.get("action", "unknown")
         value = payload.get("value")
+        duration = payload.get("duration")
+        speed = payload.get("speed")
+        count = payload.get("count")
         timestamp = payload.get("timestamp", 0)
 
         # Format timestamp
@@ -111,14 +114,23 @@ class ToyESP32Client:
         print(f"\n{'='*60}")
         print(f"📨 COMMAND RECEIVED at {ts}")
         print(f"{'='*60}")
-        print(f"   Action: {action}")
-        print(f"   Value:  {value}")
+        print(f"   Action:   {action}")
+        print(f"   Value:    {value}")
+        if duration:
+            print(f"   Duration: {duration}ms ({duration/1000}s)")
+        if speed:
+            print(f"   Speed:    {speed}ms interval")
+        if count:
+            print(f"   Count:    {count} times")
         print(f"{'='*60}")
 
         # Handle different actions
         if action == "led_on":
             self.led_on = True
-            print("   💡 LED: ON")
+            if duration:
+                print(f"   💡 LED: ON (will turn off in {duration/1000}s)")
+            else:
+                print("   💡 LED: ON")
             self.show_led_visual()
 
         elif action == "led_off":
@@ -140,6 +152,30 @@ class ToyESP32Client:
             self.volume = value or 50
             print(f"   🔊 Volume: {self.volume}%")
             self.show_volume_bar()
+
+        elif action == "led_blink":
+            blink_info = []
+            if count:
+                blink_info.append(f"{count} times")
+            if speed:
+                speed_name = "fast" if speed <= 200 else "slow" if speed >= 800 else "medium"
+                blink_info.append(f"{speed_name} ({speed}ms)")
+            if duration:
+                blink_info.append(f"for {duration/1000}s")
+
+            info_str = " - " + ", ".join(blink_info) if blink_info else ""
+            print(f"   ✨ LED: BLINKING{info_str}")
+            print("   🔴 [ BLINK ] 💡 💡 💡")
+
+        elif action == "led_fade_in":
+            duration_str = f" over {duration/1000}s" if duration else ""
+            print(f"   🌅 LED: FADE IN{duration_str}")
+            print("   ░░░░████████████████████ (fading in...)")
+
+        elif action == "led_fade_out":
+            duration_str = f" over {duration/1000}s" if duration else ""
+            print(f"   🌆 LED: FADE OUT{duration_str}")
+            print("   ████████████████████░░░░ (fading out...)")
 
         else:
             print(f"   ❓ Unknown action: {action}")

@@ -20,7 +20,8 @@ from livekit.agents import (
     cli,
     mcp
 )
-from livekit.plugins import deepgram, openai, silero
+from livekit.plugins import deepgram, groq, silero
+from src.providers.edge_tts_provider import EdgeTTS
 
 # Load environment variables
 load_dotenv()
@@ -83,11 +84,11 @@ async def entrypoint(ctx: JobContext):
         # Speech-to-Text
         stt=deepgram.STT(),
         
-        # Language Model
-        llm=openai.LLM(model="gpt-4o"),
-        
-        # Text-to-Speech
-        tts=openai.TTS(),
+        # Language Model (using Groq)
+        llm=groq.LLM(model="llama-3.3-70b-versatile"),
+
+        # Text-to-Speech (using Edge TTS)
+        tts=EdgeTTS(),
         
         # ✅ Official MCP Integration via HTTP
         # Connect to the manually running MCP server via HTTP/SSE

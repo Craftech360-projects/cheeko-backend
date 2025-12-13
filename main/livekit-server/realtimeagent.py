@@ -85,8 +85,8 @@ async def entrypoint(ctx: JobContext):
     from src.services.music_service import MusicService
     from src.services.unified_audio_player import UnifiedAudioPlayer
     from src.services.story_service import StoryService
-    from src.mcp.device_control_service import DeviceControlService
-    from src.mcp.mcp_executor import LiveKitMCPExecutor
+    from src.device_mcp.device_control_service import DeviceControlService
+    from src.device_mcp.mcp_executor import LiveKitMCPExecutor
     from src.services.google_search_service import GoogleSearchService
     from src.services.question_generator_service import QuestionGeneratorService
     from src.services.riddle_generator_service import RiddleGeneratorService

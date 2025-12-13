@@ -25,7 +25,7 @@ load_dotenv()
 # Configuration
 MQTT_GATEWAY_URL = os.getenv("MQTT_GATEWAY_URL", "http://localhost:8081")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "aa:bb:cc:dd:ee:ff") # Fallback ID
+DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "84:1f:e8:16:e5:4c") # Fallback ID
 
 # Device Aliases Mapping
 DEVICE_ALIASES = {
@@ -33,7 +33,11 @@ DEVICE_ALIASES = {
     "my toy": DEFAULT_DEVICE_ID,
     "the toy": DEFAULT_DEVICE_ID,
     "esp32": DEFAULT_DEVICE_ID,
-    "device": DEFAULT_DEVICE_ID
+    "device": DEFAULT_DEVICE_ID,
+    "unknown": DEFAULT_DEVICE_ID,
+    "default": DEFAULT_DEVICE_ID,
+    "light": DEFAULT_DEVICE_ID,
+    "the light": DEFAULT_DEVICE_ID,
 }
 
 # Setup logging
@@ -71,13 +75,30 @@ async def list_tools() -> list[Tool]:
                     },
                     "action": {
                         "type": "string",
-                        "enum": ["on", "off", "brightness"],
-                        "description": "Action to perform: 'on' to turn on, 'off' to turn off, 'brightness' to set level"
+                        "enum": ["on", "off", "brightness", "blink", "fade_in", "fade_out"],
+                        "description": "Action to perform: 'on' to turn on, 'off' to turn off, 'brightness' to set level, 'blink' to blink, 'fade_in' to fade in, 'fade_out' to fade out"
                     },
                     "brightness": {
                         "type": "integer",
                         "description": "Brightness level (0-100), only used when action is 'brightness'",
                         "minimum": 0,
+                        "maximum": 100
+                    },
+                    "duration": {
+                        "type": "integer",
+                        "description": "Duration in milliseconds (e.g., 2000 = 2 seconds). For 'on' action: auto turn off after duration. For 'blink': how long to blink.",
+                        "minimum": 100,
+                        "maximum": 60000
+                    },
+                    "speed": {
+                        "type": "string",
+                        "enum": ["fast", "medium", "slow"],
+                        "description": "Blink speed: 'fast' (100ms), 'medium' (500ms), 'slow' (1000ms). Only used with 'blink' action."
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of times to blink. Only used with 'blink' action.",
+                        "minimum": 1,
                         "maximum": 100
                     }
                 },
@@ -172,18 +193,31 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> list[TextContent]:
 async def control_esp32_light(
     device_id: str,
     action: str,
-    brightness: Optional[int] = None
+    brightness: Optional[int] = None,
+    duration: Optional[int] = None,
+    speed: Optional[str] = None,
+    count: Optional[int] = None
 ) -> list[TextContent]:
     """Control ESP32 LED light."""
-    
+
+    # Speed presets (in milliseconds)
+    speed_map = {
+        "fast": 100,
+        "medium": 500,
+        "slow": 1000
+    }
+
     # Resolve alias if possible
     resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
-    
+
     try:
         # Prepare command payload
         command = {
             "action": f"led_{action}",
-            "value": brightness if action == "brightness" else None
+            "value": brightness if action == "brightness" else None,
+            "duration": duration,
+            "speed": speed_map.get(speed) if speed else None,
+            "count": count
         }
         
         # Call MQTT Gateway API
@@ -196,12 +230,22 @@ async def control_esp32_light(
         result = response.json()
         
         # Format response message
+        duration_str = f" for {duration/1000} seconds" if duration else ""
+        speed_str = f" at {speed} speed" if speed else ""
+        count_str = f" {count} times" if count else ""
+
         if action == "on":
-            message = f"✅ Turned on the light for device {device_id}"
+            message = f"✅ Turned on the light{duration_str} for device {device_id}"
         elif action == "off":
             message = f"✅ Turned off the light for device {device_id}"
         elif action == "brightness":
-            message = f"✅ Set brightness to {brightness}% for device {device_id}"
+            message = f"✅ Set brightness to {brightness}%{duration_str} for device {device_id}"
+        elif action == "blink":
+            message = f"✅ Started blinking{count_str}{speed_str}{duration_str} for device {device_id}"
+        elif action == "fade_in":
+            message = f"✅ Started fade in effect{duration_str} for device {device_id}"
+        elif action == "fade_out":
+            message = f"✅ Started fade out effect{duration_str} for device {device_id}"
         else:
             message = f"✅ Light control command sent to {device_id}"
         

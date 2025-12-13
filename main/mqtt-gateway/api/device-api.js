@@ -16,10 +16,10 @@ function initDeviceAPI(mqttGateway) {
     // ============ Device Control Endpoint ============
     router.post('/device/:deviceId/control', async (req, res) => {
         const { deviceId } = req.params;
-        const { action, value } = req.body;
+        const { action, value, duration, speed, count } = req.body;
 
         try {
-            console.log(`[API] Control request: ${deviceId} - ${action} - ${value}`);
+            console.log(`[API] Control request: ${deviceId} - ${action} - value:${value} duration:${duration} speed:${speed} count:${count}`);
 
             // Prepare MQTT message
             const topic = `devices/p2p/${deviceId}`;
@@ -27,6 +27,9 @@ function initDeviceAPI(mqttGateway) {
                 type: 'control',
                 action: action,
                 value: value,
+                duration: duration || null,
+                speed: speed || null,
+                count: count || null,
                 timestamp: Date.now()
             });
 
