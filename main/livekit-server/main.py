@@ -37,6 +37,7 @@ from livekit.agents import (
     RoomInputOptions,
     RoomOutputOptions,
     AutoSubscribe,
+    mcp,  # Official MCP integration
 )
 from livekit.agents.llm import ChatContext
 from livekit import rtc
@@ -45,6 +46,10 @@ from google.genai import types
 
 # Load environment variables first
 load_dotenv(".env")
+
+# MCP Server Configuration
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "http://localhost:8080/sse")
+MCP_ENABLED = os.getenv("MCP_ENABLED", "true").lower() == "true"
 
 # Initialize Datadog logging (must be done before logger usage)
 from src.config.datadog_config import DatadogConfig
@@ -64,8 +69,8 @@ from src.services.foreground_audio_player import ForegroundAudioPlayer
 from src.services.story_service import StoryService
 from src.services.music_service import MusicService
 from src.services.google_search_service import GoogleSearchService
-from src.mcp.device_control_service import DeviceControlService
-from src.mcp.mcp_executor import LiveKitMCPExecutor
+from src.device_mcp.device_control_service import DeviceControlService
+from src.device_mcp.mcp_executor import LiveKitMCPExecutor
 from src.utils.helpers import UsageManager
 from src.handlers.chat_logger import ChatEventHandler
 from src.agent.main_agent import Assistant
@@ -622,18 +627,38 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
 
     logger.info(f"✅ Gemini Realtime model created with voice: {gemini_voice}")
 
+    # ============================================================================
+    # MCP SERVER CONFIGURATION
+    # ============================================================================
+    # Build MCP servers list if enabled - connects to external MCP server for IoT control
+    mcp_servers = []
+    if MCP_ENABLED:
+        try:
+            mcp_servers = [
+                mcp.MCPServerHTTP(url=MCP_SERVER_URL)
+            ]
+            logger.info(f"🔌 MCP Server configured: {MCP_SERVER_URL}")
+            logger.info(f"🔌 MCP Tools will be auto-loaded from server (LED, car control, etc.)")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to configure MCP server: {e}")
+            logger.warning(f"⚠️ IoT device control via MCP will not be available")
+    else:
+        logger.info("🔌 MCP Server disabled (MCP_ENABLED=false)")
+
     # Set up voice AI pipeline with Gemini Realtime
     if ptt_mode:
         # PTT Mode: Use manual turn detection
         session = AgentSession(
             llm=realtime_model,
             turn_detection="manual",  # Manual turn control for PTT
+            mcp_servers=mcp_servers if mcp_servers else None,
         )
         logger.info("🎤 [PTT] AgentSession created with turn_detection='manual'")
     else:
         # Auto Mode: Use Gemini's built-in turn detection
         session = AgentSession(
             llm=realtime_model,
+            mcp_servers=mcp_servers if mcp_servers else None,
         )
 
     # ============================================================================
@@ -769,6 +794,76 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
         logger.info("📚 Wikipedia search service initialized and ready")
     else:
         logger.info("📚 Wikipedia search service disabled (check .env: GOOGLE_SEARCH_ENABLED, GOOGLE_API_KEY, GOOGLE_SEARCH_ENGINE_ID)")
+
+    # Add MCP tool instructions to prompt if MCP is enabled
+    if MCP_ENABLED and mcp_servers:
+        # Get normalized toy MAC for MCP instructions (remove colons)
+        toy_mac_for_mcp = device_mac.replace(":", "").lower() if device_mac else "unknown"
+
+        mcp_instructions = f"""
+
+<mcp_iot_tools>
+## IoT Device Control Tools (MCP)
+
+You have access to special MCP tools for controlling physical IoT devices. USE THESE TOOLS when the user wants to control hardware:
+
+### 1. control_esp32_light - Control LED lights
+USE THIS WHEN: User says "turn on/off the light", "blink", "fade", "set brightness"
+Parameters:
+- device_id: Use "toy" (default device)
+- action: "on", "off", "brightness", "blink", "fade_in", "fade_out"
+- brightness: 0-100 (only for action="brightness")
+- duration: milliseconds (optional, for timed actions)
+- count: number of blinks (only for action="blink")
+
+Examples:
+- "Turn on the light" → control_esp32_light(device_id="toy", action="on")
+- "Blink 3 times" → control_esp32_light(device_id="toy", action="blink", count=3)
+- "Set brightness to 50%" → control_esp32_light(device_id="toy", action="brightness", brightness=50)
+
+### 2. set_esp32_led_color - Change LED color
+USE THIS WHEN: User says "change color to red", "make it blue", "set color"
+Parameters:
+- device_id: Use "toy" (default device)
+- color: "red", "green", "blue", "yellow", "purple", "white", "cyan", "orange" or hex "#RRGGBB"
+
+Examples:
+- "Make it red" → set_esp32_led_color(device_id="toy", color="red")
+- "Change to purple" → set_esp32_led_color(device_id="toy", color="purple")
+
+### 3. control_car - Control RC car accessory
+USE THIS WHEN: User says "go forward", "turn left", "move the car", "drive", "stop the car"
+The RC car is an accessory that must be paired to this toy via QR code in the mobile app.
+Parameters:
+- toy_mac: "{toy_mac_for_mcp}" (THIS TOY's MAC address - ALWAYS USE THIS EXACT VALUE)
+- command: "forward", "backward", "left", "right", "stop"
+
+IMPORTANT: Always use toy_mac="{toy_mac_for_mcp}" - this identifies which toy's car to control.
+
+Examples:
+- "Go forward" → control_car(toy_mac="{toy_mac_for_mcp}", command="forward")
+- "Turn left" → control_car(toy_mac="{toy_mac_for_mcp}", command="left")
+- "Stop" → control_car(toy_mac="{toy_mac_for_mcp}", command="stop")
+- "Go back" → control_car(toy_mac="{toy_mac_for_mcp}", command="backward")
+
+If the response says "No RC car is paired", tell the user: "You need to pair an RC car first using the Cheeko mobile app!"
+
+### 4. get_esp32_status - Check device status
+USE THIS WHEN: User asks "is the device connected?", "check status"
+Parameters:
+- device_id: Use "toy" (default device)
+
+### 5. set_esp32_volume - Set device volume (alternative to self_set_volume)
+USE THIS WHEN: User says "set volume" and you want to use MCP
+Parameters:
+- device_id: Use "toy" (default device)
+- volume: 0-100
+
+IMPORTANT: Always use device_id="toy" as the default. These are REAL hardware controls - confirm actions to the user after executing.
+</mcp_iot_tools>
+"""
+        agent_prompt = agent_prompt + mcp_instructions
+        logger.info(f"🔌 MCP tool instructions added to agent prompt (toy_mac={toy_mac_for_mcp})")
 
     # Create enhanced assistant with dynamic prompt and inject services
     # Note: tts_provider not needed for Gemini Realtime (TTS is built-in)

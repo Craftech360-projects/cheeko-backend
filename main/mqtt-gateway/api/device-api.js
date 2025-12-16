@@ -25,11 +25,11 @@ function initDeviceAPI(mqttGateway) {
             const topic = `devices/p2p/${deviceId}`;
             const payload = JSON.stringify({
                 type: 'control',
-                action: action,
+                action: action,  // Changed from 'cmd' to 'action' to match firmware
                 value: value,
-                duration: duration || null,
-                speed: speed || null,
-                count: count || null,
+                duration: duration,
+                speed: speed,
+                count: count,
                 timestamp: Date.now()
             });
 
@@ -137,7 +137,7 @@ function initDeviceAPI(mqttGateway) {
         });
     });
 
-    // ============ Car Control Endpoint ============
+    // ============ Car Control Endpoint (Legacy - global topic) ============
     router.post('/car/control', async (req, res) => {
         const { cmd } = req.body;
 
@@ -151,7 +151,7 @@ function initDeviceAPI(mqttGateway) {
         }
 
         try {
-            console.log(`[API] Car control: ${cmd}`);
+            console.log(`[API] Car control (legacy): ${cmd}`);
 
             // MQTT topic for car control (matches ESP32 car code)
             const topic = 'esp32/car_control';
@@ -177,6 +177,100 @@ function initDeviceAPI(mqttGateway) {
 
         } catch (error) {
             console.error(`[API] Error in car control endpoint:`, error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+    // ============ Accessory Control Endpoint (NEW - per-toy binding) ============
+    // POST /api/device/:toyMac/accessory/:type/control
+    // Looks up accessory MAC from Manager API and sends command to accessory's topic
+    router.post('/device/:toyMac/accessory/:type/control', async (req, res) => {
+        const { toyMac, type } = req.params;
+        const { action, value } = req.body;
+
+        try {
+            console.log(`[API] Accessory control: toy=${toyMac}, type=${type}, action=${action}`);
+
+            // Normalize toy MAC (remove colons, lowercase)
+            const normalizedToyMac = toyMac.replace(/:/g, '').replace(/-/g, '').toLowerCase();
+
+            // 1. Look up accessory MAC from Manager API
+            const managerApiUrl = process.env.MANAGER_API_URL || 'http://localhost:8002';
+            const managerApiSecret = process.env.MANAGER_API_SECRET || '';
+
+            const lookupUrl = `${managerApiUrl}/device/${normalizedToyMac}/accessory/${type}`;
+            console.log(`[API] Looking up accessory from: ${lookupUrl}`);
+
+            const fetch = (await import('node-fetch')).default;
+            const accessoryResponse = await fetch(lookupUrl, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'secret': managerApiSecret  // Manager API uses 'secret' header
+                }
+            });
+
+            const accessoryData = await accessoryResponse.json();
+            console.log(`[API] Manager API response:`, accessoryData);
+
+            // Manager API returns { code: 0, msg: "success", data: {...} }
+            if (accessoryData.code !== 0 || !accessoryData.data) {
+                const errorMsg = accessoryData.msg || `No ${type} accessory bound to toy ${toyMac}`;
+                console.warn(`[API] Accessory lookup failed: ${errorMsg}`);
+                return res.status(404).json({
+                    success: false,
+                    error: errorMsg
+                });
+            }
+
+            const accessoryMac = accessoryData.data.accessoryMac;
+            if (!accessoryMac) {
+                return res.status(404).json({
+                    success: false,
+                    error: `No ${type} accessory MAC found for toy ${toyMac}`
+                });
+            }
+
+            // 2. Format accessory MAC with colons for MQTT topic
+            // Manager API returns: 841fe816e54c
+            // Firmware expects topic: devices/p2p/84:1f:e8:16:e5:4c
+            const cleanMac = accessoryMac.replace(/:/g, '').replace(/-/g, '').toLowerCase();
+            const formattedAccessoryMac = cleanMac.match(/.{1,2}/g).join(':');
+
+            console.log(`[API] Formatted accessory MAC: ${accessoryMac} -> ${formattedAccessoryMac}`);
+
+            // 3. Send command to accessory's topic
+            const topic = `devices/p2p/${formattedAccessoryMac}`;
+
+            const payload = JSON.stringify({
+                type: 'control',
+                action: action,  // Changed from 'cmd' to 'action' to match firmware
+                value: value,
+                timestamp: Date.now()
+            });
+
+            console.log(`[API] Publishing to ${topic}: ${payload}`);
+
+            mqttGateway.mqttPublish(topic, payload, {}, (err) => {
+                if (err) {
+                    console.error(`[API] Failed to publish to accessory: ${err.message}`);
+                }
+            });
+
+            // Return success response
+            res.json({
+                success: true,
+                message: `Command '${action}' sent to ${type}`,
+                toy_mac: normalizedToyMac,
+                accessory_mac: formattedAccessoryMac,
+                action: action
+            });
+
+        } catch (error) {
+            console.error(`[API] Error in accessory control:`, error);
             res.status(500).json({
                 success: false,
                 error: error.message

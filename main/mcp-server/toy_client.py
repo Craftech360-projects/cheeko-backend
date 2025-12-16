@@ -33,7 +33,7 @@ except ImportError:
 load_dotenv()
 
 # Configuration
-MQTT_HOST = os.getenv("EMQX_HOST", "192.168.1.99")
+MQTT_HOST = os.getenv("EMQX_HOST", "192.168.1.168")
 MQTT_PORT = int(os.getenv("EMQX_PORT", "1883"))
 DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "84:1f:e8:16:e5:4c")
 CAR_CONTROL_TOPIC = "esp32/car_control"

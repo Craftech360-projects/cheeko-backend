@@ -694,3 +694,11 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202512081200_add_total_tokens_column.sql
+
+  - changeSet:
+      id: 202512161630
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512161630_create_toy_accessories.sql

@@ -110,6 +110,10 @@ public class ShiroConfig {
         filterMap.put("/agent/play/**", "anon");
         filterMap.put("/content/items/**", "anon");
         filterMap.put("/device/**/playlist/**", "anon"); // Allow anonymous access to playlist APIs
+        // Accessory endpoints
+        filterMap.put("/device/**/accessory/*", "server"); // GET by type - MQTT Gateway lookup (requires server secret)
+        filterMap.put("/device/**/accessory", "oauth2"); // POST bind accessory (requires login)
+        filterMap.put("/device/**/accessories", "oauth2"); // GET all accessories (requires login)
         filterMap.put("/**", "oauth2");
         shiroFilter.setFilterChainDefinitionMap(filterMap);
 

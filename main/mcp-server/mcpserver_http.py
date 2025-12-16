@@ -36,6 +36,9 @@ DEVICE_ALIASES = {
     "toy": DEFAULT_DEVICE_ID,
     "my toy": DEFAULT_DEVICE_ID,
     "the toy": DEFAULT_DEVICE_ID,
+    "car": DEFAULT_DEVICE_ID,
+    "my car": DEFAULT_DEVICE_ID,
+    "the car": DEFAULT_DEVICE_ID,
     "esp32": DEFAULT_DEVICE_ID,
     "device": DEFAULT_DEVICE_ID,
     "unknown": DEFAULT_DEVICE_ID,
@@ -76,7 +79,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "device_id": {
                         "type": "string",
-                        "description": "Device MAC address or alias like 'toy' (e.g., 'aa:bb:cc:dd:ee:ff' or 'toy')"
+                        "description": "Device MAC address or alias like 'car' (e.g., 'aa:bb:cc:dd:ee:ff' or 'car')"
                     },
                     "action": {
                         "type": "string",
@@ -118,7 +121,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "device_id": {
                         "type": "string",
-                        "description": "Device MAC address or alias like 'toy'"
+                        "description": "Device MAC address or alias like 'car'"
                     },
                     "color": {
                         "type": "string",
@@ -128,53 +131,24 @@ async def list_tools() -> list[Tool]:
                 "required": ["device_id", "color"]
             }
         ),
-        Tool(
-            name="get_esp32_status",
-            description="Get the current status of an ESP32 device including connection state, mode, and settings.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "device_id": {
-                        "type": "string",
-                        "description": "Device MAC address or alias like 'toy'"
-                    }
-                },
-                "required": ["device_id"]
-            }
-        ),
-        Tool(
-            name="set_esp32_volume",
-            description="Set the audio volume on an ESP32 device.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "device_id": {
-                        "type": "string",
-                        "description": "Device MAC address or alias like 'toy'"
-                    },
-                    "volume": {
-                        "type": "integer",
-                        "description": "Volume level (0-100)",
-                        "minimum": 0,
-                        "maximum": 100
-                    }
-                },
-                "required": ["device_id", "volume"]
-            }
-        ),
+
         Tool(
             name="control_car",
-            description="Control an ESP32-based RC car. Can move forward, backward, turn left/right, or stop.",
+            description="Control an RC car accessory. The car is paired to a specific toy via QR code.",
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "toy_mac": {
+                        "type": "string",
+                        "description": "The toy's MAC address that the car is bound to (e.g., '841fe816e54c'). The system will look up the paired car."
+                    },
                     "command": {
                         "type": "string",
                         "enum": ["forward", "backward", "left", "right", "stop"],
                         "description": "Movement command: 'forward' to move forward, 'backward' to reverse, 'left' to turn left, 'right' to turn right, 'stop' to stop"
                     }
                 },
-                "required": ["command"]
+                "required": ["toy_mac", "command"]
             }
         )
     ]
@@ -191,10 +165,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> list[TextContent]:
             return await control_esp32_light(**arguments)
         elif name == "set_esp32_led_color":
             return await set_esp32_led_color(**arguments)
-        elif name == "get_esp32_status":
-            return await get_esp32_status(**arguments)
-        elif name == "set_esp32_volume":
-            return await set_esp32_volume(**arguments)
+
         elif name == "control_car":
             return await control_car(**arguments)
         else:
@@ -337,80 +308,14 @@ async def set_esp32_led_color(
         return [TextContent(type="text", text=f"❌ {error_msg}")]
 
 
-async def get_esp32_status(device_id: str) -> list[TextContent]:
-    """Get ESP32 device status."""
-    
-    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
-    logger.info(f"📊 Getting status: {device_id} -> {resolved_id}")
-    
-    try:
-        response = await http_client.get(f"/api/device/{resolved_id}/status")
-        response.raise_for_status()
 
-        
-        status = response.json()
-        
-        # Format status message
-        message = f"""📊 Device Status for {device_id}:
-- Connected: {status.get('connected', 'Unknown')}
-- Mode: {status.get('mode', 'Unknown')}
-- Character: {status.get('character', 'Unknown')}
-- Battery: {status.get('battery', 'Unknown')}%
-- Signal: {status.get('signal', 'Unknown')}"""
-        
-        logger.info(f"Retrieved status for {device_id}")
-        
-        return [TextContent(type="text", text=message)]
-        
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            message = f"❌ Device {device_id} not found or not connected"
-        else:
-            message = f"❌ Failed to get status: HTTP {e.response.status_code}"
-        logger.error(message)
-        return [TextContent(type="text", text=message)]
-    except Exception as e:
-        error_msg = f"Failed to get device status: {str(e)}"
-        logger.error(error_msg)
-        return [TextContent(type="text", text=f"❌ {error_msg}")]
+async def control_car(toy_mac: str, command: str) -> list[TextContent]:
+    """Control RC car accessory bound to a toy via MQTT Gateway."""
 
+    logger.info(f"🚗 Car control: toy_mac={toy_mac}, command={command}")
 
-async def set_esp32_volume(
-    device_id: str,
-    volume: int
-) -> list[TextContent]:
-    """Set ESP32 audio volume."""
-
-    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
-    logger.info(f"🔊 Setting volume: {device_id} -> {resolved_id}, volume={volume}")
-
-    try:
-        command = {
-            "action": "set_volume",
-            "value": volume
-        }
-
-        response = await http_client.post(
-            f"/api/device/{resolved_id}/control",
-            json=command
-        )
-        response.raise_for_status()
-
-        message = f"✅ Set volume to {volume}% for device {device_id}"
-        logger.info(message)
-
-        return [TextContent(type="text", text=message)]
-
-    except Exception as e:
-        error_msg = f"Failed to set volume: {str(e)}"
-        logger.error(error_msg)
-        return [TextContent(type="text", text=f"❌ {error_msg}")]
-
-
-async def control_car(command: str) -> list[TextContent]:
-    """Control ESP32 RC car via MQTT."""
-
-    logger.info(f"🚗 Car control: command={command}")
+    # Normalize toy MAC (remove colons, lowercase)
+    normalized_toy_mac = toy_mac.replace(":", "").replace("-", "").lower()
 
     # Command descriptions for response
     command_descriptions = {
@@ -421,19 +326,37 @@ async def control_car(command: str) -> list[TextContent]:
         "stop": "stopped"
     }
 
+    # Use command directly (e.g., "forward", "backward", "left", "right", "stop")
+    cmd = command.lower()
+
     try:
-        # Call the car control endpoint on MQTT Gateway
+        # Call the accessory control endpoint on MQTT Gateway
+        # This endpoint looks up the car MAC from Manager API and sends command
+        logger.info(f"📤 Calling MQTT Gateway: POST /api/device/{normalized_toy_mac}/accessory/car/control")
+
         response = await http_client.post(
-            "/api/car/control",
-            json={"cmd": command}
+            f"/api/device/{normalized_toy_mac}/accessory/car/control",
+            json={"action": cmd}
         )
-        response.raise_for_status()
 
         result = response.json()
-        logger.info(f"✅ Car control response: {result}")
+        logger.info(f"📥 MQTT Gateway response: {result}")
 
-        description = command_descriptions.get(command, command)
+        if response.status_code == 404:
+            # No car bound to this toy
+            error_msg = result.get('error', 'No RC car is paired with this toy')
+            logger.warning(f"⚠️ {error_msg}")
+            return [TextContent(
+                type="text",
+                text=f"❌ {error_msg}. Please pair an RC car first using the mobile app!"
+            )]
+
+        response.raise_for_status()
+
+        description = command_descriptions.get(command.lower(), command)
         message = f"✅ Car is {description}"
+
+        logger.info(f"✅ Car control successful: {message}")
 
         return [TextContent(type="text", text=message)]
 
