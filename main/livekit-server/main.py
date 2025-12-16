@@ -455,26 +455,23 @@ async def entrypoint(ctx: JobContext):
                 logger.info(f"📢 Emitting speech_created (state: {old_state} → speaking)")
                 asyncio.create_task(emit_speech_created())
 
-            # Auto-continue story reading when agent finishes speaking
+            # Auto-continue story when agent finishes speaking
             if old_state == 'speaking' and new_state == 'listening':
-                # Check if there's an active story being read
                 if hasattr(assistant, '_current_story_data') and assistant._current_story_data:
-                    logger.info(f"📚 Story active - auto-triggering next page...")
-                    # Small delay to let the current response complete
+                    logger.info(f"📚 Story active - auto-continuing to next page...")
                     asyncio.create_task(auto_continue_story())
 
         except Exception as e:
             logger.error(f"❌ Error in agent_state_changed handler: {e}")
 
     async def auto_continue_story():
-        """Automatically continue reading the story"""
+        """Automatically continue reading the next page"""
         try:
-            await asyncio.sleep(0.5)  # Brief pause before continuing
-            # Check again if story is still active (might have ended)
+            await asyncio.sleep(1.5)  # Brief pause between pages
             if hasattr(assistant, '_current_story_data') and assistant._current_story_data:
-                logger.info(f"📚 Auto-continuing story with generate_reply...")
+                logger.info(f"📚 Calling get_next_page()...")
                 await session.generate_reply(
-                    instructions="Continue reading the story. Call get_next_story_page() now."
+                    instructions="Call get_next_page() silently and read the returned content expressively. Do NOT say 'calling function' or 'continuing' - just read the story text."
                 )
         except Exception as e:
             logger.error(f"📚 Error auto-continuing story: {e}")
@@ -796,6 +793,15 @@ async def entrypoint(ctx: JobContext):
     init_elapsed_time = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"⚡ Total initialization: {init_elapsed_time:.0f}ms")
     logger.info("✅ Gemini Realtime agent is LIVE!")
+
+    # Agent speaks first - simple greeting and ask what story they want
+    await asyncio.sleep(1.5)
+    logger.info("🎤 Agent initiating conversation...")
+    await session.generate_reply(
+        instructions="""Greet the child warmly and ask what story they would like to hear today.
+Keep it simple and friendly, like: "Hello! I'm your storyteller! What story would you like to hear today?"
+Be enthusiastic and expressive!"""
+    )
 
 
 # ============================================================================
