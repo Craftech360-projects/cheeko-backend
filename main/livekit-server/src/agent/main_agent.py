@@ -75,26 +75,55 @@ def get_story_db_connection():
 
 def get_all_story_titles_from_db():
     """Get all story titles from the storyteller database."""
+    logger.info(f"📚 [DB] Checking stories at: {STORY_DB_PATH}")
+    logger.info(f"📚 [DB] Path exists: {STORY_DB_PATH.exists()}")
     conn = get_story_db_connection()
     if not conn:
+        logger.warning(f"📚 [DB] Could not connect to database!")
         return []
     cursor = conn.cursor()
     cursor.execute("SELECT title FROM stories")
     titles = [row['title'] for row in cursor.fetchall()]
     conn.close()
+    logger.info(f"📚 [DB] Found {len(titles)} stories: {titles}")
     return titles
 
 def get_story_by_name_from_db(name: str):
     """Get a story by name (fuzzy match) from the storyteller database."""
+    logger.info(f"📚 [DB] Searching for story: '{name}'")
     conn = get_story_db_connection()
     if not conn:
+        logger.warning(f"📚 [DB] No database connection!")
         return None
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM stories WHERE title LIKE ?", (f"%{name}%",))
+
+    # Try exact match first
+    cursor.execute("SELECT * FROM stories WHERE LOWER(title) = LOWER(?)", (name,))
     row = cursor.fetchone()
+
+    if not row:
+        # Try contains match
+        cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(?)", (f"%{name}%",))
+        row = cursor.fetchone()
+
+    if not row:
+        # Try matching any word from the search term
+        words = name.lower().split()
+        for word in words:
+            if len(word) > 2:  # Skip short words
+                cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(?)", (f"%{word}%",))
+                row = cursor.fetchone()
+                if row:
+                    break
+
     conn.close()
+
     if row:
-        return dict(row)
+        result = dict(row)
+        logger.info(f"📚 [DB] Found story: '{result['title']}'")
+        return result
+
+    logger.warning(f"📚 [DB] No story found matching '{name}'")
     return None
 
 def split_story_into_pages(content: str):
@@ -875,13 +904,10 @@ class Assistant(FilteredAgent):
         story_list = "\n".join([f"- {title}" for title in titles])
         return f"Available story books in the library:\n{story_list}\n\nWhich story would you like me to read?"
 
-    # How many pages to return per tool call (for continuous reading)
-    PAGES_PER_CALL = 3
-
     @function_tool
     async def start_reading_story(self, context: RunContext, story_name: str) -> str:
-        """Starts reading a story from the library. Returns first few pages.
-        IMPORTANT: After reading these pages, IMMEDIATELY call get_next_story_page() to continue!
+        """Starts reading a story from the library. Returns the FIRST PAGE only.
+        After reading this page, call get_next_page() to continue.
 
         Args:
             story_name: The name of the story to read (can be partial match)
@@ -889,80 +915,117 @@ class Assistant(FilteredAgent):
         logger.info(f"📚 ======== START READING STORY ========")
         logger.info(f"📚 Requested story: '{story_name}'")
 
+        # Clear any previous story state first
+        self._current_story_data = None
+        self._current_story_page = 0
+
         story = get_story_by_name_from_db(story_name)
         if not story:
             available = get_all_story_titles_from_db()
             logger.warning(f"📚 Story '{story_name}' NOT FOUND in database!")
             logger.warning(f"📚 Available: {available}")
-            return f"Story '{story_name}' not found. Available stories: {', '.join(available)}"
+            return f"Sorry, I couldn't find '{story_name}'. I have these stories: {', '.join(available)}. Which one would you like?"
 
         logger.info(f"📚 Found story: '{story['title']}'")
         logger.info(f"📚 Content length: {len(story['content'])} chars")
 
+        # Store story data
         self._current_story_data = story
         self._current_story_page = 0
 
+        # Get pages
         pages = split_story_into_pages(story['content'])
         if not pages:
             logger.warning(f"📚 Story has no pages!")
+            self._current_story_data = None
             return "This story appears to be empty."
 
         total_pages = len(pages)
         logger.info(f"📚 Total pages: {total_pages}")
 
-        # Return multiple pages at once for continuous reading
-        pages_to_return = pages[:self.PAGES_PER_CALL]
-        self._current_story_page = len(pages_to_return) - 1  # Track last page returned
-
-        combined_content = "\n\n".join(pages_to_return)
-        logger.info(f"📚 Returning pages 1-{len(pages_to_return)} of {total_pages}")
+        # Return first page (cover)
+        first_page = pages[0]
+        logger.info(f"📚 Returning page 1 of {total_pages}")
         logger.info(f"📚 ======================================")
 
-        if len(pages_to_return) >= total_pages:
-            # Story is short, all pages returned
-            self._current_story_data = None
-            self._current_story_page = 0
-            return f"[PAGE 1 of {total_pages}]\n\n{combined_content}\n\n[THE END]"
-        else:
-            # Include page info for natural book-reading feel
-            return f"[PAGE 1 of {total_pages}]\n\n{combined_content}"
+        return f"""Okay! Let me read "{story['title']}" for you!
+
+*Opens the book* Page 1, the cover...
+
+{first_page}
+
+[CONTINUE_STORY]"""
 
     @function_tool
-    async def get_next_story_page(self, context: RunContext) -> str:
-        """Gets the next pages of the current story. Just read the returned content naturally."""
+    async def get_next_page(self, context: RunContext) -> str:
+        """Gets the next page of the current story. Called automatically to continue reading."""
         if not self._current_story_data:
-            return "No story is being read. Use start_reading_story() first to begin a story."
+            return "No story is being read right now. Tell me which story you'd like to hear!"
 
         pages = split_story_into_pages(self._current_story_data['content'])
         total_pages = len(pages)
 
         # Move to next page
         self._current_story_page += 1
-        start_page = self._current_story_page
+        current_page = self._current_story_page
+        page_num = current_page + 1  # 1-indexed for display
 
-        if start_page >= total_pages:
+        logger.info(f"📚 Getting page {page_num} of {total_pages}")
+
+        if current_page >= total_pages:
+            # Story finished
             story_title = self._current_story_data['title']
             self._current_story_data = None
             self._current_story_page = 0
             logger.info(f"📚 Finished reading '{story_title}'")
-            return "The End."
+            return "*Closes the book* And that's the end of our story! Wasn't that wonderful? Would you like to hear another story?"
 
-        # Get multiple pages
-        end_page = min(start_page + self.PAGES_PER_CALL, total_pages)
-        pages_to_return = pages[start_page:end_page]
-        self._current_story_page = end_page - 1  # Track last page returned
+        # Get current page content
+        page_content = pages[current_page]
 
-        combined_content = "\n\n".join(pages_to_return)
-        logger.info(f"📚 Returning pages {start_page + 1}-{end_page} of {total_pages}")
-
-        if end_page >= total_pages:
-            # This is the last batch
+        # Check if this is the last page
+        if current_page == total_pages - 1:
+            # Last page - story will end after this
             self._current_story_data = None
             self._current_story_page = 0
-            return f"[PAGE {start_page + 1} of {total_pages}]\n\n{combined_content}\n\n[THE END]"
+            return f"""Now the last page, page {page_num}...
+
+{page_content}
+
+*Closes the book gently* And that's the end of our story! Wasn't that wonderful? Would you like to hear another story?"""
         else:
-            # Include page info for natural book-reading feel
-            return f"[PAGE {start_page + 1} of {total_pages}]\n\n{combined_content}"
+            # More pages to come - add marker for auto-continue
+            return f"""Page {page_num}...
+
+{page_content}
+
+[CONTINUE_STORY]"""
+
+    @function_tool
+    async def restart_story(self, context: RunContext) -> str:
+        """Restart the current story from the beginning (page 1)."""
+        if not self._current_story_data:
+            return "No story is being read right now. Tell me which story you'd like to hear!"
+
+        story = self._current_story_data
+        logger.info(f"📚 ======== RESTARTING STORY ========")
+        logger.info(f"📚 Restarting: '{story['title']}'")
+
+        # Reset page counter to 0 (will show page 1)
+        self._current_story_page = 0
+
+        pages = split_story_into_pages(story['content'])
+        total_pages = len(pages)
+        first_page = pages[0]
+
+        logger.info(f"📚 Restarting from page 1 of {total_pages}")
+        logger.info(f"📚 ======================================")
+
+        return f"""Okay, let's start over! Back to page 1...
+
+{first_page}
+
+[CONTINUE_STORY]"""
 
     @function_tool
     async def ask_about_current_story(self, context: RunContext, question: str) -> str:

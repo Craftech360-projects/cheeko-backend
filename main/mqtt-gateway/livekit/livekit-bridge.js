@@ -319,6 +319,9 @@ class LiveKitBridge extends EventEmitter {
           }
           switch (data.type) {
             case "agent_state_changed":
+              // console.log(`🔄 [BRIDGE-DEBUG] agent_state_changed received: ${JSON.stringify(data.data)}`);
+              console.log(`🔄 [BRIDGE-DEBUG] State change: ${data.data.old_state} -> ${data.data.new_state}`);
+
               if (
                 data.data.old_state === "speaking" &&
                 data.data.new_state === "listening"
@@ -331,7 +334,7 @@ class LiveKitBridge extends EventEmitter {
                 setTimeout(() => {
                   this.sendTtsStopMessage();
                 }, 1000);
-                
+
 
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (
