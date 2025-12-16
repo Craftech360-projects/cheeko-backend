@@ -764,137 +764,61 @@ class Assistant(FilteredAgent):
 
     @function_tool
     async def update_agent_mode(self, context: RunContext, mode_name: str) -> str:
-        """Update agent configuration mode by applying a template
+        """Update agent configuration mode by applying a template.
+        This triggers a full session reset via MQTT gateway - new room, new agent with fresh prompt.
 
         Args:
-            mode_name: Template mode name (e.g., "Cheeko", "StudyHelper")
+            mode_name: Template mode name (e.g., "Cheeko", "StudyHelper", "Math Tutor")
 
         Returns:
             Success or error message
         """
         try:
-            import os
-            import aiohttp
-            from src.services.prompt_service import PromptService
+            import json
 
             # 1. Validate device MAC
             if not self.device_mac:
                 return "Device MAC address is not available"
 
-            # 2. Get Manager API configuration
-            manager_api_url = os.getenv("MANAGER_API_URL")
-            manager_api_secret = os.getenv("MANAGER_API_SECRET")
-
-            if not manager_api_url or not manager_api_secret:
-                return "Manager API is not configured"
-
-            # 3. Fetch agent_id using DatabaseHelper
-            db_helper = DatabaseHelper(manager_api_url, manager_api_secret)
-            agent_id = await db_helper.get_agent_id(self.device_mac)
-
-            if not agent_id:
-                return f"No agent found for device MAC: {self.device_mac}"
-
-            # Normalize mode name to handle transcript variations
+            # 2. Normalize mode name to handle transcript variations
             normalized_mode = normalize_mode_name(mode_name)
             if normalized_mode != mode_name:
                 logger.info(f"🔄 Mode name normalized: '{mode_name}' → '{normalized_mode}'")
 
-            logger.info(f"🔄 Updating agent {agent_id} to mode: {normalized_mode}")
+            logger.info(f"🎭 [CHARACTER-CHANGE] Voice command to switch to: {normalized_mode}")
 
-            # 4. Call update-mode API (updates template_id in database)
-            url = f"{manager_api_url}/agent/update-mode"
-            headers = {
-                "Authorization": f"Bearer {manager_api_secret}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "agentId": agent_id,
-                "modeName": normalized_mode
-            }
+            # 3. Send character_change_request via data channel to MQTT gateway
+            # The gateway will: update DB, delete old room, create new room, dispatch new agent
+            if self._session_context and hasattr(self._session_context, 'room'):
+                room = self._session_context.room
+                if room and room.local_participant:
+                    character_change_message = {
+                        "type": "character_change_request",
+                        "character_name": normalized_mode,
+                        "device_mac": self.device_mac,
+                        "timestamp": int(asyncio.get_event_loop().time() * 1000)
+                    }
 
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.put(url, json=payload, headers=headers) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        logger.info(f"✅ Agent mode updated in database to '{normalized_mode}' for agent: {agent_id}")
+                    message_data = json.dumps(character_change_message).encode('utf-8')
+                    await room.local_participant.publish_data(message_data, reliable=True)
 
-                        # 5. Get prompt from API response
-                        logger.info("📄 Using prompt from API response")
-                        if result.get('code') == 0 and result.get('data'):
-                            new_prompt = result.get('data')
-                            logger.info(f"📄 Retrieved prompt from API (length: {len(new_prompt)} chars)")
+                    logger.info(f"🎭 [CHARACTER-CHANGE] Sent character_change_request to MQTT gateway")
+                    logger.info(f"🎭 [CHARACTER-CHANGE] New character: {normalized_mode}")
 
-                            # Log the new prompt content for debugging
-                            logger.info(f"🎭 ========== CHARACTER SWITCH: {normalized_mode} ==========")
-                            logger.info(f"🎭 NEW PROMPT PREVIEW (first 500 chars):")
-                            logger.info(f"🎭 {new_prompt[:500]}...")
-                            logger.info(f"🎭 =================================================")
-                        else:
-                            logger.warning(f"⚠️ No prompt data in response")
-                            return f"Mode updated to '{normalized_mode}' in database. Please reconnect to apply changes."
+                    # Return brief message - new agent will greet as new character
+                    return f"Switching to {normalized_mode}. One moment please."
+                else:
+                    logger.error("❌ [CHARACTER-CHANGE] Room or local_participant not available")
+                    return "Unable to switch character - room not connected"
+            else:
+                logger.error("❌ [CHARACTER-CHANGE] Session context not available")
+                return "Unable to switch character - session not available"
 
-                        # 7. Inject memory into new prompt (if available)
-                        try:
-                            if self._agent_session and hasattr(self._agent_session, '_memory_provider'):
-                                memory_provider = self._agent_session._memory_provider
-                                if memory_provider:
-                                    memories = await memory_provider.query_memory("conversation history")
-                                    if memories:
-                                        new_prompt = new_prompt.replace("<memory>", f"<memory>\n{memories}")
-                                        logger.info(f"💭 Injected memories into new prompt ({len(memories)} chars)")
-                        except Exception as e:
-                            logger.warning(f"Could not inject memories: {e}")
-
-                        # 8. Update the agent's instructions dynamically
-                        self._instructions = new_prompt
-                        logger.info(f"📝 Instructions updated dynamically (length: {len(new_prompt)} chars)")
-
-                        # 9. Update session if available (for immediate effect)
-                        # For Gemini Realtime, we need to use the AgentActivity.update_instructions method
-                        # which properly updates the realtime session via _rt_session.update_instructions()
-                        if self._agent_session:
-                            try:
-                                # Access the AgentActivity from the session
-                                # AgentSession has _activity which is an AgentActivity instance
-                                activity = getattr(self._agent_session, '_activity', None)
-                                if activity is not None:
-                                    # AgentActivity.update_instructions() handles Realtime sessions properly
-                                    await activity.update_instructions(new_prompt)
-                                    logger.info(f"🔄 Session instructions updated via AgentActivity.update_instructions()!")
-                                    logger.info(f"🎭 ✅ CHARACTER SWITCH COMPLETE: Now acting as '{normalized_mode}'")
-                                else:
-                                    # Fallback: update agent instructions directly
-                                    self._agent_session._agent._instructions = new_prompt
-                                    logger.info(f"🔄 Fallback: Updated agent instructions directly (no activity)")
-                            except Exception as e:
-                                logger.warning(f"⚠️ Could not update session via activity: {e}")
-                                import traceback
-                                logger.warning(f"⚠️ Traceback: {traceback.format_exc()}")
-                                # Fallback: try direct update
-                                try:
-                                    self._agent_session._agent._instructions = new_prompt
-                                    logger.info(f"🔄 Fallback: Updated agent instructions directly")
-                                except Exception as e2:
-                                    logger.warning(f"⚠️ Fallback also failed: {e2}")
-
-                        logger.info(f"🎭 ========== CHARACTER '{normalized_mode}' ACTIVE ==========")
-                        return f"Successfully updated agent mode to '{normalized_mode}' and reloaded the new prompt! The changes are now active in this conversation."
-
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ Failed to update mode: {response.status} - {error_text}")
-                        return f"Failed to update mode: {error_text}"
-
-        except aiohttp.ClientError as e:
-            logger.error(f"Network error updating agent mode: {e}")
-            return f"Network error: Unable to connect to server"
         except Exception as e:
-            logger.error(f"Error updating agent mode: {e}")
+            logger.error(f"❌ [CHARACTER-CHANGE] Error: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return f"Error updating agent mode: {str(e)}"
+            return f"Error switching character: {str(e)}"
 
     @function_tool
     async def lookup_weather(self, context: RunContext, location: str):

@@ -31,6 +31,7 @@ from livekit.agents import (
     Agent,
     AutoSubscribe,
     RoomInputOptions,
+    JobExecutorType
 )
 from livekit import rtc, api
 from livekit.plugins import google
@@ -788,4 +789,6 @@ if __name__ == "__main__":
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,
+        job_executor_type=JobExecutorType.THREAD
+
     ))
