@@ -449,7 +449,10 @@ async def entrypoint(ctx: JobContext):
         try:
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
-            logger.info(f"🔊 EVENT: agent_state_changed - {old_state} → {new_state}")
+            logger.info(f"🔊 [DEBUG] AGENT STATE CHANGE DETECTED: {old_state} -> {new_state}")
+            
+            # Helper to emit state change to client (useful for bridge)
+            asyncio.create_task(emit_agent_state(new_state))
 
             if new_state == 'speaking' and old_state != 'speaking':
                 logger.info(f"📢 Emitting speech_created (state: {old_state} → speaking)")
@@ -457,6 +460,7 @@ async def entrypoint(ctx: JobContext):
 
             # Auto-continue story when agent finishes speaking
             if old_state == 'speaking' and new_state == 'listening':
+                logger.info(f"👂 Agent finished speaking, now listening (old: {old_state}, new: {new_state})")
                 if hasattr(assistant, '_current_story_data') and assistant._current_story_data:
                     logger.info(f"📚 Story active - auto-continuing to next page...")
                     asyncio.create_task(auto_continue_story())
@@ -795,7 +799,7 @@ async def entrypoint(ctx: JobContext):
     logger.info("✅ Gemini Realtime agent is LIVE!")
 
     # Agent speaks first - simple greeting and ask what story they want
-#     await asyncio.sleep(1.5)
+#     await asyncio.sleep(2)
 #     logger.info("🎤 Agent initiating conversation...")
 #     await session.generate_reply(
 #         instructions="""Greet the child warmly and ask what story they would like to hear today.
