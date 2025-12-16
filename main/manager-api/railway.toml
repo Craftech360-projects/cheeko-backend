@@ -1,0 +1,10 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "java -jar -Dspring.profiles.active=railway -Dserver.port=${PORT:-8002} -Dserver.address=0.0.0.0 /app/app.jar"
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+healthcheckPath = "/toy/actuator/health"
+healthcheckTimeout = 300

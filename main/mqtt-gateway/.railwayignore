@@ -1,0 +1,5 @@
+# Railway ignore file - minimal ignores to ensure config is included
+node_modules
+.git
+.env
+logs

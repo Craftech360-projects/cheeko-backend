@@ -8,15 +8,49 @@ knife4j:
   setting:
     enableFooter: false
 
+# Server configuration for Railway
+server:
+  port: ${PORT:8002}
+  address: 0.0.0.0
+  secret: ${SERVER_SECRET:b14a6715-2139-47b0-bc2b-327314005320}
+  tomcat:
+    uri-encoding: UTF-8
+    threads:
+      max: 1000
+      min-spare: 30
+  servlet:
+    context-path: /toy
+    session:
+      cookie:
+        http-only: true
+
+# Management endpoints for health checks
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO
+    org.springframework.web: INFO
+    xiaozhi: DEBUG
+
 spring:
   datasource:
     druid:
       #Railway MySQL Configuration
       driver-class-name: com.mysql.cj.jdbc.Driver
-      # Railway database connection
-      url: jdbc:mysql://nozomi.proxy.rlwy.net:25037/railway?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Kolkata&nullCatalogMeansCurrent=true&useSSL=true&allowPublicKeyRetrieval=true
-      username: root
-      password: OcaVNLKcwNdyElfaeUPqvvfYZiiEHgdm
+      # Railway database connection - using environment variables
+      url: jdbc:mysql://${MYSQLHOST}:${MYSQLPORT}/${MYSQLDATABASE}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Kolkata&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true
+      username: ${MYSQLUSER}
+      password: ${MYSQLPASSWORD}
       initial-size: 10
       max-active: 100
       min-idle: 10
@@ -40,11 +74,11 @@ spring:
             multi-statement-allow: true
   data:
     redis:
-      # Railway Redis Configuration
-      host: maglev.proxy.rlwy.net
-      port: 16780
-      password: beVfOKcZjMUCBiZIQnvSMivhpSeijpKP
-      username: default
+      # Railway Redis Configuration - using environment variables
+      host: ${REDISHOST}
+      port: ${REDISPORT}
+      password: ${REDISPASSWORD}
+      username: ${REDISUSER:default}
       database: 0
       timeout: 10000ms
       lettuce:

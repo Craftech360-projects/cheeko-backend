@@ -38,15 +38,14 @@ RUN chown -R appuser:appgroup /app /uploadfile
 # Switch to non-root user
 USER appuser
 
-# Cloud Run uses PORT env var
-ENV PORT=8080
+# Railway uses PORT env var - Railway will inject PORT automatically
+# ENV PORT=8002  # Commented out to allow Railway to set PORT dynamically
 
 # Health check - Cloud Run handles this automatically
 # HEALTHCHECK removed for Cloud Run compatibility
 
-# Expose port (Cloud Run uses PORT env var)
-EXPOSE 8080
+# Expose port
+EXPOSE 8002
 
-# Run with cloudrun profile
-# Cloud Run sets PORT env var automatically
-CMD java -jar -Dspring.profiles.active=cloudrun -Dserver.port=$PORT app.jar
+# Run with railway profile - explicitly bind to all interfaces
+CMD java -jar -Dspring.profiles.active=railway -Dserver.port=${PORT:-8002} -Dserver.address=0.0.0.0 app.jar

@@ -70,6 +70,21 @@ class MQTTGateway {
         !livekitConfig.api_secret
       ) {
         this.agentDispatchClient = null;
+        this.roomService = null;
+        logger.warn("⚠️ [INIT] LiveKit credentials incomplete, clients not initialized");
+      } else {
+        // Initialize LiveKit clients with valid credentials
+        this.roomService = new RoomServiceClient(
+          livekitConfig.url,
+          livekitConfig.api_key,
+          livekitConfig.api_secret
+        );
+        this.agentDispatchClient = new AgentDispatchClient(
+          livekitConfig.url,
+          livekitConfig.api_key,
+          livekitConfig.api_secret
+        );
+        logger.info("✅ [INIT] LiveKit clients initialized successfully");
       }
     } catch (error) {
       logger.error(
@@ -202,7 +217,7 @@ class MQTTGateway {
 
       if (topic === "internal/server-ingest") {
         // Handle messages republished by EMQX with client ID info
-        
+
         // Extract client ID and original payload from EMQX republish rule
         const clientId = payload.sender_client_id;
         const originalPayload = payload.orginal_payload;
@@ -222,10 +237,9 @@ class MQTTGateway {
         }
 
         logger.info(`📨 [MQTT-IN] ${deviceId}: ${originalPayload.type}`);
-        
+
         // Use the common processing logic
         await this.processIngestLogic(deviceId, originalPayload, clientId);
-
       } else if (topicParts.length >= 3 && topicParts[0] === "devices") {
         const deviceId = topicParts[1];
         const messageType = topicParts[2]; // 'hello' or 'data' or others
@@ -238,12 +252,15 @@ class MQTTGateway {
           this.handleDeviceHello(deviceId, payload);
           return;
         }
-        
+
         // For other messages (data, etc), we treat them as potential control messages too.
         // Synthesize a client ID for compatibility with older logic
         // Format: mock_client@@@68_25_dd_bb_f3_a0@@@uuid
-        const synthezisedClientId = `mock_client@@@${deviceId.replace(/:/g, "_")}@@@uuid`;
-        
+        const synthezisedClientId = `mock_client@@@${deviceId.replace(
+          /:/g,
+          "_"
+        )}@@@uuid`;
+
         // Process through the main logic
         await this.processIngestLogic(deviceId, payload, synthezisedClientId);
       } else {
@@ -287,11 +304,7 @@ class MQTTGateway {
         originalPayload.type === "playback_control" &&
         originalPayload.action === "start_agent"
       ) {
-        await this.handleStartAgentControl(
-          deviceId,
-          originalPayload,
-          clientId
-        );
+        await this.handleStartAgentControl(deviceId, originalPayload, clientId);
         return;
       }
 
@@ -330,14 +343,12 @@ class MQTTGateway {
           // Check if there's a pending promise for this request (volume adjust logic)
           const bridge = deviceInfo.connection.bridge;
           if (bridge && bridge.pendingMcpRequests) {
-            const pendingRequest =
-              bridge.pendingMcpRequests.get(mcpRequestId);
+            const pendingRequest = bridge.pendingMcpRequests.get(mcpRequestId);
             if (pendingRequest) {
               // Resolve or reject the promise
               if (originalPayload.payload.error) {
                 const errorMsg =
-                  originalPayload.payload.error.message ||
-                  "Unknown MCP error";
+                  originalPayload.payload.error.message || "Unknown MCP error";
                 pendingRequest.reject(new Error(errorMsg));
               } else {
                 // Extract the actual result from MCP response format

@@ -4,9 +4,9 @@ knife4j:
   setting:
     enableFooter: false
 
-# Server configuration for Cloud Run
+# Server configuration for Railway/Cloud Run
 server:
-  port: ${PORT:8080}
+  port: 8002
   address: 0.0.0.0
   secret: ${SERVER_SECRET:b14a6715-2139-47b0-bc2b-327314005320}
 

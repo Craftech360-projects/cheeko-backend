@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
   && ln -sf /usr/lib/x86_64-linux-gnu/libasound.so.2 /usr/lib/libasound.so.2 \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy source code
+# Copy source code (includes config directory)
 COPY . .
 
 # Downgrade @discordjs/opus to 0.9.0 to avoid prebuild issues with node 18
@@ -31,8 +31,8 @@ RUN rm -f package-lock.json
 # Install dependencies
 RUN npm install --production --unsafe-perm
 
-# Create necessary directories
-RUN mkdir -p logs config
+# Create necessary directories (config is already copied from source)
+RUN mkdir -p logs
 
 # Expose ports
 EXPOSE 8004

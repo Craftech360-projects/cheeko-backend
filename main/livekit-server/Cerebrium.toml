@@ -25,17 +25,72 @@ port = 8080
 dockerfile_path = "./Dockerfile.flyio"
 
 [cerebrium.env]
-# LiveKit Cloud Configuration (Updated for production)
+# LiveKit Cloud Configuration
 LIVEKIT_URL = "wss://altio-4owjwzb3.livekit.cloud"
 LIVEKIT_API_KEY = "APIa8QRtc2JWGxV"
 LIVEKIT_API_SECRET = "wT96ehM9DdCF2WziAU3yd0t5LDoTRoOjGWW1SiwMo7N"
+
+# Google API
 GOOGLE_API_KEY = "AIzaSyDQnuv8reaFvyUO68OE750MwOdGzSptuZw"
-MANAGER_API_URL = "https://manager-api-production-e079.up.railway.app"
+
+# Manager API Configuration (Railway production - NOTE: /toy context path required!)
+MANAGER_API_URL = "https://manager-api-production-e079.up.railway.app/toy"
 MANAGER_API_SECRET = "da11d988-f105-4e71-b095-da62ada82189"
 
+# STT Configuration
+STT_PROVIDER = "deepgram"
+DEEPGRAM_API_KEY = "67fce91aacb256de550f2a7f765746dd39c60c5c"
+DEEPGRAM_MODEL = "nova-3"
+GROQ_API_KEY = "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"
 
-# Model Configuration (CRITICAL - no comments in values!)
+# TTS Configuration
+TTS_PROVIDER = "edge"
+ELEVEN_API_KEY = "sk_52c940fe01587efe7247074e1229bef0d81d32194ab3bb42"
+ELEVENLABS_VOICE_ID = "ecp3DWciuUyW7BYM7II1"
+ELEVENLABS_MODEL_ID = "eleven_turbo_v2_5"
+EDGE_TTS_VOICE = "en-US-AnaNeural"
+EDGE_TTS_RATE = "+0%"
+EDGE_TTS_VOLUME = "+0%"
+EDGE_TTS_PITCH = "+0Hz"
+EDGE_TTS_SAMPLE_RATE = "24000"
+EDGE_TTS_CHANNELS = "1"
+
+# Gemini Configuration
+GEMINI_VAD_DISABLED = "true"
+GEMINI_PTT_MODE = "true"
+
+# AWS Configuration
+AWS_ACCESS_KEY_ID = "AKIAXKPUZWFKJ7NHSSWW"
+AWS_SECRET_ACCESS_KEY = "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"
+AWS_DEFAULT_REGION = "us-east-1"
+
+# S3 and CDN Configuration
+S3_BUCKET_NAME = "cheeko-audio-files"
+USE_CDN = "true"
+CLOUDFRONT_DOMAIN = "dbtnllz9fcr1z.cloudfront.net"
+S3_BASE_URL = "https://cheeko-audio-files.s3.us-east-1.amazonaws.com"
+
+# Weather API
+WEATHER_API = "12dd0eea5789636262549c9ec7f4f7d8"
+
+# Qdrant Configuration
+QDRANT_URL = "https://a2482b9f-2c29-476e-9ff0-741aaaaf632e.eu-west-1-0.aws.cloud.qdrant.io"
+QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.zPBGAqVGy-edbbgfNOJsPWV496BsnQ4ELOFvsLNyjsk"
+
+# Model Configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 AUTO_PRELOAD_MODELS = "true"
 
+# Fallback Configuration
+FALLBACK_ENABLED = "true"
+FALLBACK_LLM_MODEL = "llama-3.1-8b-instant"
+TTS_FALLBACK_ENABLED = "true"
 
+# Mem0 Configuration
+MEM0_ENABLED = "false"
+MEM0_API_KEY = "m0-tNiOs5lPRZMUGeNglTt9np3GBHt7EOIBZr3FbUtC"
+
+# Agent Settings
+PREEMPTIVE_GENERATION = "false"
+NOISE_CANCELLATION = "false"
+PTT_MODE = "manual"
