@@ -161,6 +161,21 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": ["device_id", "volume"]
             }
+        ),
+        Tool(
+            name="control_car",
+            description="Control an ESP32-based RC car. Can move forward, backward, turn left/right, or stop.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "enum": ["forward", "backward", "left", "right", "stop"],
+                        "description": "Movement command: 'forward' to move forward, 'backward' to reverse, 'left' to turn left, 'right' to turn right, 'stop' to stop"
+                    }
+                },
+                "required": ["command"]
+            }
         )
     ]
 
@@ -180,6 +195,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> list[TextContent]:
             return await get_esp32_status(**arguments)
         elif name == "set_esp32_volume":
             return await set_esp32_volume(**arguments)
+        elif name == "control_car":
+            return await control_car(**arguments)
         else:
             return [TextContent(
                 type="text",
@@ -363,29 +380,69 @@ async def set_esp32_volume(
     volume: int
 ) -> list[TextContent]:
     """Set ESP32 audio volume."""
-    
+
     resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
     logger.info(f"🔊 Setting volume: {device_id} -> {resolved_id}, volume={volume}")
-    
+
     try:
         command = {
             "action": "set_volume",
             "value": volume
         }
-        
+
         response = await http_client.post(
             f"/api/device/{resolved_id}/control",
             json=command
         )
         response.raise_for_status()
-        
+
         message = f"✅ Set volume to {volume}% for device {device_id}"
         logger.info(message)
-        
+
         return [TextContent(type="text", text=message)]
-        
+
     except Exception as e:
         error_msg = f"Failed to set volume: {str(e)}"
+        logger.error(error_msg)
+        return [TextContent(type="text", text=f"❌ {error_msg}")]
+
+
+async def control_car(command: str) -> list[TextContent]:
+    """Control ESP32 RC car via MQTT."""
+
+    logger.info(f"🚗 Car control: command={command}")
+
+    # Command descriptions for response
+    command_descriptions = {
+        "forward": "moving forward",
+        "backward": "reversing",
+        "left": "turning left",
+        "right": "turning right",
+        "stop": "stopped"
+    }
+
+    try:
+        # Call the car control endpoint on MQTT Gateway
+        response = await http_client.post(
+            "/api/car/control",
+            json={"cmd": command}
+        )
+        response.raise_for_status()
+
+        result = response.json()
+        logger.info(f"✅ Car control response: {result}")
+
+        description = command_descriptions.get(command, command)
+        message = f"✅ Car is {description}"
+
+        return [TextContent(type="text", text=message)]
+
+    except httpx.HTTPStatusError as e:
+        error_msg = f"Failed to control car: HTTP {e.response.status_code}"
+        logger.error(error_msg)
+        return [TextContent(type="text", text=f"❌ {error_msg}")]
+    except Exception as e:
+        error_msg = f"Failed to control car: {str(e)}"
         logger.error(error_msg)
         return [TextContent(type="text", text=f"❌ {error_msg}")]
 

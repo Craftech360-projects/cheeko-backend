@@ -20,8 +20,7 @@ from livekit.agents import (
     cli,
     mcp
 )
-from livekit.plugins import deepgram, groq, silero
-from src.providers.edge_tts_provider import EdgeTTS
+from livekit.plugins import deepgram, groq, silero, cartesia
 
 # Load environment variables
 load_dotenv()
@@ -43,17 +42,21 @@ class ESP32VoiceAgent(Agent):
         super().__init__(
             instructions="""
                 You are a helpful voice assistant that can control ESP32 IoT devices.
-                
+
                 You have access to the following capabilities:
                 - Turn lights on/off on ESP32 devices
                 - Set LED brightness (0-100%)
                 - Change LED colors (red, green, blue, yellow, purple, white, etc.)
                 - Adjust device volume
                 - Check device status
-                
-                When the user asks to control a device, use the appropriate tool.
+                - Control an RC car: move forward, backward, turn left, turn right, or stop
+
+                When the user asks to control a device or car, use the appropriate tool.
+                For car control commands like "go forward", "turn left", "reverse", "stop",
+                use the control_car tool with the appropriate command.
+
                 Always confirm the action after executing it.
-                
+
                 Be conversational and friendly. If you're not sure which device to control,
                 ask the user for clarification.
             """,
@@ -87,8 +90,8 @@ async def entrypoint(ctx: JobContext):
         # Language Model (using Groq)
         llm=groq.LLM(model="llama-3.3-70b-versatile"),
 
-        # Text-to-Speech (using Edge TTS)
-        tts=EdgeTTS(),
+        # Text-to-Speech (using Cartesia - fast and high quality)
+        tts=cartesia.TTS(voice="79a125e8-cd45-4c13-8a67-188112f4dd22"),  # Default English voice
         
         # ✅ Official MCP Integration via HTTP
         # Connect to the manually running MCP server via HTTP/SSE

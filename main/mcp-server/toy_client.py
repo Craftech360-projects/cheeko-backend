@@ -4,6 +4,10 @@ Toy MQTT Client - Simulates an ESP32 device to test MCP tool calls
 This client subscribes to MQTT topics and displays commands received
 from the MCP Server -> MQTT Gateway -> MQTT Broker flow.
 
+Supports:
+- LED/Light control on devices/p2p/{device_id}
+- Car control on esp32/car_control
+
 Usage:
     python toy_client.py [device_id]
 
@@ -29,9 +33,10 @@ except ImportError:
 load_dotenv()
 
 # Configuration
-MQTT_HOST = os.getenv("EMQX_HOST", "192.168.1.166")
+MQTT_HOST = os.getenv("EMQX_HOST", "192.168.1.99")
 MQTT_PORT = int(os.getenv("EMQX_PORT", "1883"))
 DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "84:1f:e8:16:e5:4c")
+CAR_CONTROL_TOPIC = "esp32/car_control"
 
 # Setup logging with colors
 logging.basicConfig(
@@ -47,7 +52,8 @@ class ToyESP32Client:
 
     def __init__(self, device_id: str):
         self.device_id = device_id
-        self.topic = f"devices/p2p/{device_id}"
+        self.device_topic = f"devices/p2p/{device_id}"
+        self.car_topic = CAR_CONTROL_TOPIC
         self.client = mqtt.Client(client_id=f"toy-{device_id[:8]}")
 
         # Set callbacks
@@ -61,24 +67,36 @@ class ToyESP32Client:
         self.brightness = 100
         self.volume = 50
 
+        # Car state
+        self.car_moving = False
+        self.car_direction = "stopped"
+
     def on_connect(self, client, userdata, flags, rc):
         """Called when connected to MQTT broker."""
         if rc == 0:
             print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║           🎮 TOY ESP32 CLIENT CONNECTED                      ║
+║        🎮 TOY ESP32 CLIENT CONNECTED                         ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Device ID: {self.device_id:<43}  ║
 ║  MQTT Broker: {MQTT_HOST}:{MQTT_PORT:<36}  ║
-║  Subscribed to: {self.topic:<40}  ║
+╠══════════════════════════════════════════════════════════════╣
+║  📡 Subscribed Topics:                                       ║
+║     💡 {self.device_topic:<52} ║
+║     🚗 {self.car_topic:<52} ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Waiting for commands from voice assistant...                ║
-║  Try saying: "Turn on the light on my toy"                   ║
+║  Try saying:                                                 ║
+║     "Turn on the light on my toy"                            ║
+║     "Move the car forward"                                   ║
+║     "Turn the car left"                                      ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
-            # Subscribe to device topic
-            client.subscribe(self.topic)
-            logger.info(f"✅ Subscribed to: {self.topic}")
+            # Subscribe to device topic and car control topic
+            client.subscribe(self.device_topic)
+            client.subscribe(self.car_topic)
+            logger.info(f"✅ Subscribed to: {self.device_topic}")
+            logger.info(f"✅ Subscribed to: {self.car_topic}")
         else:
             logger.error(f"❌ Connection failed with code: {rc}")
 
@@ -90,7 +108,12 @@ class ToyESP32Client:
         """Called when a message is received."""
         try:
             payload = json.loads(msg.payload.decode())
-            self.handle_command(payload)
+
+            # Route to appropriate handler based on topic
+            if msg.topic == self.car_topic:
+                self.handle_car_command(payload)
+            else:
+                self.handle_command(payload)
         except json.JSONDecodeError:
             logger.error(f"❌ Invalid JSON: {msg.payload}")
         except Exception as e:
@@ -216,6 +239,71 @@ class ToyESP32Client:
         color_name = color_names.get(self.led_color.upper(), f"🎨 {self.led_color}")
         print(f"   {color_name}")
 
+    def handle_car_command(self, payload: dict):
+        """Process incoming car control command."""
+        cmd = payload.get("cmd", "unknown")
+        ts = datetime.now().strftime("%H:%M:%S")
+
+        print(f"\n{'='*60}")
+        print(f"🚗 CAR COMMAND RECEIVED at {ts}")
+        print(f"{'='*60}")
+        print(f"   Command: {cmd}")
+        print(f"{'='*60}")
+
+        # Car ASCII art for different directions
+        car_visuals = {
+            "forward": """
+       ⬆️  FORWARD
+      ┌─────┐
+      │ 🚗  │
+      └─────┘
+        ║║
+        ▼▼
+   Moving forward...""",
+            "backward": """
+       ⬇️  BACKWARD
+        ▲▲
+        ║║
+      ┌─────┐
+      │ 🚗  │
+      └─────┘
+   Reversing...""",
+            "left": """
+       ⬅️  LEFT
+    ◄══╗
+       ║  ┌─────┐
+       ╚══│ 🚗  │
+          └─────┘
+   Turning left...""",
+            "right": """
+       ➡️  RIGHT
+          ╔══►
+  ┌─────┐ ║
+  │ 🚗  │══╝
+  └─────┘
+   Turning right...""",
+            "stop": """
+       🛑 STOP
+      ┌─────┐
+      │ 🚗  │
+      └─────┘
+       ████
+   Car stopped.""",
+        }
+
+        # Update car state
+        if cmd == "stop":
+            self.car_moving = False
+            self.car_direction = "stopped"
+        else:
+            self.car_moving = True
+            self.car_direction = cmd
+
+        # Show visual
+        visual = car_visuals.get(cmd.lower(), f"   ❓ Unknown command: {cmd}")
+        print(visual)
+        print()
+
     def connect(self):
         """Connect to MQTT broker."""
         logger.info(f"🔌 Connecting to MQTT broker at {MQTT_HOST}:{MQTT_PORT}...")
@@ -244,11 +332,15 @@ def main():
 
     print(f"""
 ┌──────────────────────────────────────────────────────────────┐
-│              🧸 TOY ESP32 MQTT CLIENT                        │
+│         🧸 TOY ESP32 MQTT CLIENT + 🚗 CAR SIMULATOR          │
 │                                                              │
-│  This simulates an ESP32 device to test the MCP tool flow:   │
+│  This simulates ESP32 devices to test the MCP tool flow:     │
 │                                                              │
 │  Voice -> LiveKit -> MCP Server -> MQTT Gateway -> HERE      │
+│                                                              │
+│  Supports:                                                   │
+│    💡 LED/Light control (devices/p2p/{{device_id}})           │
+│    🚗 Car control (esp32/car_control)                        │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 """)

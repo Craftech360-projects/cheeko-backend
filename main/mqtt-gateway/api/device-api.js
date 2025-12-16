@@ -137,6 +137,53 @@ function initDeviceAPI(mqttGateway) {
         });
     });
 
+    // ============ Car Control Endpoint ============
+    router.post('/car/control', async (req, res) => {
+        const { cmd } = req.body;
+
+        // Validate command
+        const validCommands = ['forward', 'backward', 'reverse', 'left', 'right', 'stop'];
+        if (!cmd || !validCommands.includes(cmd.toLowerCase())) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid command. Must be one of: ${validCommands.join(', ')}`
+            });
+        }
+
+        try {
+            console.log(`[API] Car control: ${cmd}`);
+
+            // MQTT topic for car control (matches ESP32 car code)
+            const topic = 'esp32/car_control';
+            const payload = JSON.stringify({ cmd: cmd.toLowerCase() });
+
+            // Publish to MQTT broker via gateway
+            mqttGateway.mqttPublish(topic, payload, {}, (err) => {
+                if (err) {
+                    console.error(`[API] Failed to publish car command: ${err.message}`);
+                    return res.status(500).json({
+                        success: false,
+                        error: err.message
+                    });
+                }
+            });
+
+            // Return success response
+            res.json({
+                success: true,
+                message: `Car command '${cmd}' sent`,
+                command: cmd.toLowerCase()
+            });
+
+        } catch (error) {
+            console.error(`[API] Error in car control endpoint:`, error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
     return router;
 }
 
