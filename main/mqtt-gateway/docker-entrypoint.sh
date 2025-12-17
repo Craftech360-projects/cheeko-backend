@@ -98,9 +98,19 @@ fi
 
 echo ""
 echo "================================================"
-echo "🎯 Starting approom.js..."
+echo "🎯 Starting services..."
 echo "================================================"
 echo ""
 
-# Start the application with proper signal handling
+# Start UDP HTTP Bridge in the background
+echo "🌉 Starting UDP HTTP Bridge..."
+node udp-http-bridge.js &
+BRIDGE_PID=$!
+echo "   Bridge PID: $BRIDGE_PID"
+
+# Give bridge a moment to start
+sleep 2
+
+# Start the main application with proper signal handling
+echo "🎯 Starting main application..."
 exec node approom.js
