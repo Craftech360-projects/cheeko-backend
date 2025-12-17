@@ -426,9 +426,10 @@ Call the `update_agent_mode` function with the character name:
 
     logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
 
-    # Google Search grounding
-    google_search_grounding = types.GoogleSearch()
-    logger.info("🔍 Google Search grounding enabled")
+    # Google Search grounding - DISABLED to allow function tools (update_agent_mode, play_music, etc.)
+    # Gemini Realtime only supports ONE type of tool - either Google Search OR function tools
+    # google_search_grounding = types.GoogleSearch()
+    # logger.info("🔍 Google Search grounding enabled")
 
     # Create Gemini Realtime model - NO custom VAD config (use Gemini's default for faster response)
     # This matches the fast test project (gemini_live-api-livekit/agent.py)
@@ -437,7 +438,7 @@ Call the `update_agent_mode` function with the character name:
         voice=gemini_voice,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
-        _gemini_tools=[google_search_grounding],
+        # _gemini_tools=[google_search_grounding],  # DISABLED - using function tools instead
     )
 
     logger.info(f"✅ Gemini Realtime model created")
@@ -668,15 +669,17 @@ Call the `update_agent_mode` function with the character name:
         logger.debug(
             "🎯 Chat history service ready - will capture via conversation_item_added and session.history")
 
-    # Setup event handlers and pass assistant reference for abort handling
-    ChatEventHandler.set_assistant(assistant)
-    if chat_history_service:
-        ChatEventHandler.set_chat_history_service(chat_history_service)
-        logger.info(f"📝🔗 Chat history service connected to event handlers")
-    else:
-        logger.warning(
-            f"📝⚠️ No chat history service available - events will not be captured")
-    ChatEventHandler.setup_session_handlers(session, ctx)
+    # DISABLED: ChatEventHandler event handlers interfere with PTT even without generate_reply()
+    # The event handlers themselves seem to be causing state changes during speech
+    # ChatEventHandler.set_assistant(assistant)
+    # if chat_history_service:
+    #     ChatEventHandler.set_chat_history_service(chat_history_service)
+    #     logger.info(f"📝🔗 Chat history service connected to event handlers")
+    # else:
+    #     logger.warning(
+    #         f"📝⚠️ No chat history service available - events will not be captured")
+    # ChatEventHandler.setup_session_handlers(session, ctx)
+    # logger.info("💬 ChatEventHandler configured (PTT-safe mode)")
 
     # Add mem0 conversation capture event handler
     if mem0_provider:
