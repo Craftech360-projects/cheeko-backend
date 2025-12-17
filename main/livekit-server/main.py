@@ -433,12 +433,13 @@ Call the `update_agent_mode` function with the character name:
 
     # Create Gemini Realtime model - NO custom VAD config (use Gemini's default for faster response)
     # This matches the fast test project (gemini_live-api-livekit/agent.py)
+    # Note: _gemini_tools=[] (empty) allows generate_reply to work while using LiveKit function tools
     realtime_model = google.realtime.RealtimeModel(
         model=gemini_model,
         voice=gemini_voice,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
-        # _gemini_tools=[google_search_grounding],  # DISABLED - using function tools instead
+        _gemini_tools=[],  # Empty list - no native Gemini tools, using LiveKit @function_tool instead
     )
 
     logger.info(f"✅ Gemini Realtime model created")
@@ -830,6 +831,15 @@ Call the `update_agent_mode` function with the character name:
     init_elapsed_time = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"⚡ Total initialization: {init_elapsed_time:.0f}ms")
     logger.info("✅ Gemini Realtime agent is LIVE!")
+
+    # Agent speaks first - greet the child (like Story_teller branch)
+    await asyncio.sleep(1.5)
+    logger.info("🎤 Agent initiating conversation...")
+    await session.generate_reply(
+        instructions="""Greet the child warmly and introduce yourself.
+Keep it simple and friendly,
+Be enthusiastic and expressive!"""
+    )
 
 
 # ============================================================================
