@@ -499,14 +499,36 @@ Call the `update_agent_mode` function with the character name:
 
     @session.on("agent_state_changed")
     def on_agent_state_changed_for_tts(ev):
-        """Emit speech_created when agent starts speaking"""
+        """Emit speech_created when agent starts speaking and notify livekit-bridge of state changes"""
         try:
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
-            logger.info(f"🔊 EVENT: agent_state_changed - {old_state} → {new_state}")
 
-            if new_state == 'speaking' and old_state != 'speaking':
-                logger.info(f"📢 Emitting speech_created (state: {old_state} → speaking)")
+            # Convert states to strings for data channel
+            old_state_str = str(old_state).split('.')[-1] if old_state else "unknown"
+            new_state_str = str(new_state).split('.')[-1] if new_state else "unknown"
+
+            logger.info(f"🔊 EVENT: agent_state_changed - {old_state_str} → {new_state_str}")
+
+            # Send state change to livekit-bridge via data channel
+            async def send_state_change():
+                try:
+                    payload = json.dumps({
+                        "type": "agent_state_changed",
+                        "data": {"old_state": old_state_str, "new_state": new_state_str}
+                    })
+                    await ctx.room.local_participant.publish_data(
+                        payload.encode("utf-8"), reliable=True
+                    )
+                    logger.info(f"📢 Sent agent_state_changed to livekit-bridge: {old_state_str} → {new_state_str}")
+                except Exception as e:
+                    logger.error(f"Failed to send state change: {e}")
+
+            asyncio.create_task(send_state_change())
+
+            # Also emit speech_created when agent starts speaking
+            if new_state_str == 'speaking' and old_state_str != 'speaking':
+                logger.info(f"📢 Emitting speech_created (state: {old_state_str} → speaking)")
                 asyncio.create_task(emit_speech_created())
 
         except Exception as e:
@@ -833,13 +855,29 @@ Call the `update_agent_mode` function with the character name:
     logger.info("✅ Gemini Realtime agent is LIVE!")
 
     # Agent speaks first - greet the child (like Story_teller branch)
+    # Retry logic for generate_reply which can timeout initially
+    max_retries = 3
+    retry_delay = 2.0  # seconds between retries
+
     await asyncio.sleep(1.5)
-    logger.info("🎤 Agent initiating conversation...")
-    await session.generate_reply(
-        instructions="""Greet the child warmly and introduce yourself.
+
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"🎤 Agent initiating conversation... (attempt {attempt + 1}/{max_retries})")
+            await session.generate_reply(
+                instructions="""Greet the child warmly and introduce yourself.
 Keep it simple and friendly,
 Be enthusiastic and expressive!"""
-    )
+            )
+            logger.info("✅ Greeting sent successfully!")
+            break  # Success, exit retry loop
+        except Exception as e:
+            logger.warning(f"⚠️ Greeting attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                logger.info(f"🔄 Retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error("❌ All greeting attempts failed, continuing without greeting")
 
 
 # ============================================================================
