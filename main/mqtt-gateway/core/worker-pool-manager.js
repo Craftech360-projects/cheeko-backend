@@ -412,13 +412,13 @@ class WorkerPoolManager {
         try {
             await Promise.all(
                 workersToInit.map((w) =>
-                    this.sendMessage(w.worker, { type: "init_encoder", data: { sampleRate: 24000, channels: 1 } }, 500)
+                    this.sendMessage(w.worker, { type: "init_encoder", data: { sampleRate: 24000, channels: 1 } }, 3000)
                 )
             );
 
             await Promise.all(
                 workersToInit.map((w) =>
-                    this.sendMessage(w.worker, { type: "init_decoder", data: { sampleRate: 16000, channels: 1 } }, 500)
+                    this.sendMessage(w.worker, { type: "init_decoder", data: { sampleRate: 16000, channels: 1 } }, 3000)
                 )
             );
 
