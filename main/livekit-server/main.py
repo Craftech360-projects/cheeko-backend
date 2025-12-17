@@ -795,13 +795,13 @@ async def entrypoint(ctx: JobContext):
     logger.info("✅ Gemini Realtime agent is LIVE!")
 
     # Agent speaks first - simple greeting and ask what story they want
-    await asyncio.sleep(1.5)
-    logger.info("🎤 Agent initiating conversation...")
-    await session.generate_reply(
-        instructions="""Greet the child warmly and ask what story they would like to hear today.
-Keep it simple and friendly, like: "Hello! I'm your storyteller! What story would you like to hear today?"
-Be enthusiastic and expressive!"""
-    )
+#     await asyncio.sleep(1.5)
+#     logger.info("🎤 Agent initiating conversation...")
+#     await session.generate_reply(
+#         instructions="""Greet the child warmly and ask what story they would like to hear today.
+# Keep it simple and friendly, like: "Hello! I'm Cheeko, your storyteller! What story would you like to hear today?"
+# Be enthusiastic and expressive!"""
+#     )
 
 
 # ============================================================================
