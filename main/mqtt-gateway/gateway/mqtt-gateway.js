@@ -1084,6 +1084,170 @@ class MQTTGateway {
     }
   }
 
+  /**
+   * Handle character change request from LiveKit agent (voice command)
+   * This does a FULL session reset - delete room, create new room, dispatch new agent
+   * The new agent will load fresh prompt from database
+   */
+  async handleCharacterChangeFromAgent(deviceId, characterName, existingConnection) {
+    try {
+      logger.info(`🎭 [VOICE-CHARACTER-CHANGE] Device ${deviceId} changing to character: ${characterName}`);
+
+      const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+      const crypto = require("crypto");
+
+      // 1. Update character in database via API
+      const apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/set-character`;
+      const response = await axios.post(apiUrl, { characterName: characterName }, { timeout: 10000 });
+
+      if (response.data.code !== 0 || !response.data.data.success) {
+        logger.error(`❌ [VOICE-CHARACTER-CHANGE] API error:`, response.data);
+        return;
+      }
+
+      const { newModeName } = response.data.data;
+      logger.info(`✅ [VOICE-CHARACTER-CHANGE] DB updated to character: ${newModeName}`);
+
+      // 2. Get device info
+      const deviceInfo = this.deviceConnections.get(deviceId);
+      if (!deviceInfo) {
+        logger.error(`❌ [VOICE-CHARACTER-CHANGE] Device not found: ${deviceId}`);
+        return;
+      }
+
+      const connection = existingConnection || deviceInfo.connection;
+      if (!connection) {
+        logger.error(`❌ [VOICE-CHARACTER-CHANGE] No connection for device: ${deviceId}`);
+        return;
+      }
+
+      // 3. Clear audio buffers to prevent old audio bleeding into new session
+      if (connection.bridge) {
+        connection.bridge.clearAudioBuffers();
+      }
+
+      // 4. Delete existing room
+      if (connection.bridge) {
+        const oldBridge = connection.bridge;
+        const oldRoomName = oldBridge.room?.name;
+
+        if (oldRoomName && this.roomService) {
+          try {
+            await this.roomService.deleteRoom(oldRoomName);
+            logger.info(`🗑️ [VOICE-CHARACTER-CHANGE] Deleted old room: ${oldRoomName}`);
+          } catch (error) {
+            logger.error(`❌ [VOICE-CHARACTER-CHANGE] Failed to delete old room: ${error.message}`);
+          }
+        }
+
+        // Disconnect and cleanup old bridge
+        if (oldBridge) {
+          oldBridge.stopAudioForwarding = true;
+          if (oldBridge.room) {
+            try {
+              await oldBridge.room.disconnect();
+            } catch (error) {
+              // Ignore disconnect errors
+            }
+          }
+          connection.bridge = null;
+        }
+      }
+
+      // 5. Generate new session UUID (keep same room type - conversation)
+      const newSessionUuid = crypto.randomUUID();
+      const macForRoom = deviceId.replace(/:/g, "");
+      const roomType = connection.roomType || "conversation";
+      const newRoomName = `${newSessionUuid}_${macForRoom}_${roomType}`;
+
+      // Update connection session
+      connection.udp.session_id = newRoomName;
+      connection.isEnding = false;
+      connection.endPromptSentTime = null;
+      connection.goodbyeSent = false;
+      connection.lastActivityTime = Date.now();
+
+      // 6. Create new LiveKitBridge
+      const newBridge = new LiveKitBridge(
+        connection,
+        connection.protocolVersion || 1,
+        deviceId,
+        newSessionUuid,
+        connection.userData || {}
+      );
+      connection.bridge = newBridge;
+
+      newBridge.on("close", () => {
+        connection.bridge = null;
+      });
+
+      // 7. Connect to new room
+      await newBridge.connect(
+        connection.audio_params || { sample_rate: 24000, channels: 1 },
+        connection.features || {},
+        this.roomService
+      );
+
+      // 8. Fetch current character info for the mode_update message
+      let currentCharacter = null;
+      if (connection.fetchCurrentCharacter) {
+        currentCharacter = await connection.fetchCurrentCharacter(macAddress);
+        connection.currentCharacter = currentCharacter;
+      }
+
+      // 9. Fetch listening mode
+      let listeningMode = "manual";
+      if (connection.fetchDeviceListeningMode) {
+        listeningMode = await connection.fetchDeviceListeningMode(macAddress);
+        connection.listeningMode = listeningMode;
+      }
+
+      // 10. Send mode_update to device firmware (informs device of new session)
+      const modeUpdateMsg = {
+        type: "mode_update",
+        mode: roomType,
+        listening_mode: listeningMode,
+        character: currentCharacter || { name: newModeName },
+        session_id: newRoomName,
+        timestamp: Date.now(),
+        transport: "udp",
+        udp: {
+          server: this.publicIp,
+          port: this.udpPort,
+          encryption: connection.udp.encryption,
+          key: connection.udp.key.toString("hex"),
+          nonce: connection.udp.nonce.toString("hex"),
+        },
+        audio_params: { sample_rate: 24000, channels: 1, frame_duration: 60, format: "opus" },
+      };
+      connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+
+      // 11. Dispatch new agent (will load fresh prompt from DB)
+      if (this.agentDispatchClient) {
+        try {
+          await this.agentDispatchClient.createDispatch(newRoomName, "cheeko-agent", {
+            metadata: JSON.stringify({
+              device_mac: connection.macAddress,
+              device_uuid: deviceId,
+              character_change: true,
+              new_character: newModeName,
+              timestamp: Date.now()
+            })
+          });
+          newBridge.agentDeployed = true;
+          logger.info(`✅ [VOICE-CHARACTER-CHANGE] New agent dispatched for character: ${newModeName}`);
+        } catch (error) {
+          logger.error(`❌ [VOICE-CHARACTER-CHANGE] Failed to dispatch agent:`, error.message);
+        }
+      }
+
+      logger.info(`✅ [VOICE-CHARACTER-CHANGE] Complete: Now using character '${newModeName}'`);
+
+    } catch (error) {
+      logger.error(`❌ [VOICE-CHARACTER-CHANGE] Error:`, error.message);
+    }
+  }
+
   async streamAudioViaUdp(deviceId, audioFilePath, modeName, sendGoodbye = false) {
     try {
       const fs = require("fs");

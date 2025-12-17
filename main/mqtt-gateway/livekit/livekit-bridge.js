@@ -418,6 +418,12 @@ class LiveKitBridge extends EventEmitter {
               this.sendEmotionMessage(data.text, data.emotion);
               break;
 
+            case "character_change_request":
+              // Handle character change request from LiveKit agent (voice command)
+              console.log(`🎭 [CHARACTER-CHANGE] Voice command request received: ${data.character_name}`);
+              this.handleCharacterChangeRequest(data);
+              break;
+
             // case "metrics_collected":
             //   console.log(`Metrics: ${JSON.stringify(data.data)}`);
             //   break;
@@ -1859,6 +1865,33 @@ class LiveKitBridge extends EventEmitter {
     ]);
 
     return result;
+  }
+
+  /**
+   * Handle character change request from LiveKit agent (triggered by voice command)
+   * This triggers a full session reset with new character's prompt
+   */
+  async handleCharacterChangeRequest(data) {
+    try {
+      const characterName = data.character_name;
+      const macAddress = this.macAddress;
+
+      console.log(`🎭 [CHARACTER-CHANGE] Processing voice command character change to: ${characterName}`);
+      console.log(`🎭 [CHARACTER-CHANGE] Device MAC: ${macAddress}`);
+
+      // Call the gateway's character change handler which will do the full reset
+      if (this.connection && this.connection.gateway) {
+        await this.connection.gateway.handleCharacterChangeFromAgent(
+          macAddress,
+          characterName,
+          this.connection
+        );
+      } else {
+        console.error(`❌ [CHARACTER-CHANGE] No gateway reference available`);
+      }
+    } catch (error) {
+      console.error(`❌ [CHARACTER-CHANGE] Error handling character change request:`, error.message);
+    }
   }
 
   async sendAbortSignal(sessionId) {
