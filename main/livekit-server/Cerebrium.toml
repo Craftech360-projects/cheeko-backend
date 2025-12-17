@@ -22,7 +22,7 @@ scaling_target = 60
 
 [cerebrium.runtime.custom]
 port = 8080
-dockerfile_path = "./Dockerfile.flyio"
+dockerfile_path = "./Dockerfile.cerebrium"
 
 [cerebrium.env]
 # LiveKit Cloud Configuration

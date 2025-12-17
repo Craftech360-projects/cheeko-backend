@@ -97,7 +97,7 @@ class TestClient:
     def __init__(self):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = "00:16:3e:ac:b5:38"
+        self.device_mac_formatted = "28:56:2f:00:10:58"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # MQTT credentials will be set from OTA response
@@ -521,29 +521,44 @@ class TestClient:
         }
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
-            response = mqtt_message_queue.get(timeout=30)
-            if response.get("type") == "hello" and "udp" in response:
-                global udp_session_details
-                udp_session_details = response
-                self.udp_socket = socket.socket(
-                    socket.AF_INET, socket.SOCK_DGRAM)
-                # Increase UDP receive buffer to handle burst traffic
-                self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
-                self.udp_socket.settimeout(1.0)
-                ping_payload = f"ping:{udp_session_details['session_id']}".encode(
-                )
-                ping_packet = self.create_packet(ping_payload)
-                server_udp_addr = (
-                    udp_session_details['udp']['server'], udp_session_details['udp']['port'])
-                logger.info(f"[RETRY] Sending UDP Ping to {server_udp_addr} with session ID {udp_session_details['session_id']}"
-                            f" and key {udp_session_details['udp']['key']}"
-                            f" (local sequence: {self.udp_local_sequence})"
-                            )
-                if ping_packet:
-                    self.udp_socket.sendto(ping_packet, server_udp_addr)
-                    logger.info(f"[OK] UDP Ping sent. Session configured.")
-                    return True
-            logger.error(f"[ERROR] Received unexpected message: {response}")
+            # Keep polling for messages until we receive the hello response
+            # The server may send mode_update before hello, so we need to handle multiple messages
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                response = mqtt_message_queue.get(timeout=30)
+
+                # Handle mode_update message (sent before hello)
+                if response.get("type") == "mode_update":
+                    logger.info(f"[INFO] Received mode_update: mode={response.get('mode')}, character={response.get('character')}")
+                    continue  # Wait for the actual hello response
+
+                # Handle hello response
+                if response.get("type") == "hello" and "udp" in response:
+                    global udp_session_details
+                    udp_session_details = response
+                    self.udp_socket = socket.socket(
+                        socket.AF_INET, socket.SOCK_DGRAM)
+                    # Increase UDP receive buffer to handle burst traffic
+                    self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
+                    self.udp_socket.settimeout(1.0)
+                    ping_payload = f"ping:{udp_session_details['session_id']}".encode(
+                    )
+                    ping_packet = self.create_packet(ping_payload)
+                    server_udp_addr = (
+                        udp_session_details['udp']['server'], udp_session_details['udp']['port'])
+                    logger.info(f"[RETRY] Sending UDP Ping to {server_udp_addr} with session ID {udp_session_details['session_id']}"
+                                f" and key {udp_session_details['udp']['key']}"
+                                f" (local sequence: {self.udp_local_sequence})"
+                                )
+                    if ping_packet:
+                        self.udp_socket.sendto(ping_packet, server_udp_addr)
+                        logger.info(f"[OK] UDP Ping sent. Session configured.")
+                        return True
+
+                # Handle other unexpected messages
+                logger.warning(f"[WARN] Received unexpected message type: {response.get('type')}")
+
+            logger.error(f"[ERROR] Did not receive hello response after {max_attempts} messages")
             return False
         except Empty:
             logger.error("[ERROR] Timed out waiting for 'hello' response.")
