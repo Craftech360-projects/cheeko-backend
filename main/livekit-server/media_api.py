@@ -133,6 +133,8 @@ class MediaBot:
         self.audio_source = None
         self.audio_track = None
         self.should_stop = False
+        self.task = None  # Reference to the running task for proper cleanup
+        self._disconnected = False  # Track if already disconnected
 
     async def connect_to_room(self) -> bool:
         """Connect to LiveKit room and publish audio track"""
@@ -392,7 +394,14 @@ class MediaBot:
             raise
 
     async def disconnect(self):
-        """Disconnect from LiveKit room"""
+        """Disconnect from LiveKit room (idempotent - safe to call multiple times)"""
+        # Check if already disconnected to avoid double-disconnect issues
+        if self._disconnected:
+            logger.debug(f"👋 {self.bot_type} bot already disconnected, skipping")
+            return
+
+        self._disconnected = True
+
         try:
             self.should_stop = True
 
@@ -415,6 +424,8 @@ class MediaBot:
                     logger.warning(f"⚠️ Room disconnect timed out")
                 except Exception as e:
                     logger.error(f"❌ Error disconnecting from room: {e}")
+                finally:
+                    self.room = None  # Clear room reference to prevent re-use
 
         except Exception as e:
             logger.error(f"❌ Unexpected error during disconnect: {e}")
@@ -1922,8 +1933,8 @@ async def start_music_bot(req: StartMusicBotRequest):
         # Store bot reference
         active_bots[req.room_name] = bot
 
-        # Run bot in background
-        asyncio.create_task(bot.run())
+        # Run bot in background and store task reference for proper cleanup
+        bot.task = asyncio.create_task(bot.run())
 
         logger.info(f"✅ Music bot started for room: {req.room_name}")
 
@@ -1983,7 +1994,8 @@ async def start_story_bot(req: StartStoryBotRequest):
         bot = StoryBot(req.room_name, token, req.age_group, req.playlist, analytics_service)
         active_bots[req.room_name] = bot
 
-        asyncio.create_task(bot.run())
+        # Run bot in background and store task reference for proper cleanup
+        bot.task = asyncio.create_task(bot.run())
 
         logger.info(f"✅ Story bot started for room: {req.room_name}")
 
@@ -2014,11 +2026,28 @@ async def stop_bot(req: StopBotRequest):
         # Signal bot to stop
         bot.should_stop = True
 
-        # Disconnect bot
-        await bot.disconnect()
+        # If bot has a start_event that might be waiting, set it to unblock
+        if hasattr(bot, 'start_event') and bot.start_event:
+            bot.start_event.set()
+
+        # Cancel the task and wait for it to complete properly
+        if bot.task and not bot.task.done():
+            bot.task.cancel()
+            try:
+                # Wait for task to handle cancellation (disconnect happens in finally block)
+                await asyncio.wait_for(bot.task, timeout=10.0)
+            except asyncio.CancelledError:
+                logger.info(f"✅ Bot task cancelled successfully")
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ Bot task cancellation timed out, forcing disconnect")
+                await bot.disconnect()
+        else:
+            # Task already done, just disconnect
+            await bot.disconnect()
 
         # Remove from active bots
-        del active_bots[req.room_name]
+        if req.room_name in active_bots:
+            del active_bots[req.room_name]
 
         logger.info(f"✅ Bot stopped for room: {req.room_name}")
 
