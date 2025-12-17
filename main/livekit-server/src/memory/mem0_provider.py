@@ -138,7 +138,7 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
             logger.info(f"💭 Getting all memories for user: {self.role_id}")
             # Mem0 API v1.0.1+ requires filters parameter (not user_id directly)
             results = self.client.get_all(
-                filters={"user_id": self.role_id}
+                filters={"user_id":self.role_id}
             )
 
             # Handle both list response and dict with "results" key
@@ -182,7 +182,7 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
             logger.info(f"💭 Deleting all memories for user: {self.role_id}")
             # Mem0 API v1.0.1+ requires filters parameter
             self.client.delete_all(
-                filters={"user_id": self.role_id}
+                filters={"user_id":self.role_id}
             )
             logger.info(f"💭✅ All memories deleted for user: {self.role_id}")
             return True
