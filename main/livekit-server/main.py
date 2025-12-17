@@ -774,6 +774,18 @@ Call the `update_agent_mode` function with the character name:
             except Exception as e:
                 logger.warning(f"Could not get error stats: {e}")
 
+            # Save conversation to mem0 for long-term memory
+            if mem0_provider and conversation_messages:
+                try:
+                    child_name = child_profile.get('name', '') if child_profile else None
+                    history_dict = {'messages': conversation_messages}
+                    await mem0_provider.save_memory(history_dict, child_name=child_name)
+                    logger.info(f"💭 Saved {len(conversation_messages)} messages to mem0 (child: {child_name or 'unknown'})")
+                except Exception as e:
+                    logger.warning(f"💭 Failed to save to mem0: {e}")
+            elif mem0_provider:
+                logger.info("💭 No conversation messages to save to mem0")
+
             # Close agent session
             try:
                 if session and hasattr(session, 'aclose'):
@@ -854,30 +866,46 @@ Call the `update_agent_mode` function with the character name:
     logger.info(f"⚡ Total initialization: {init_elapsed_time:.0f}ms")
     logger.info("✅ Gemini Realtime agent is LIVE!")
 
-    # Agent speaks first - greet the child (like Story_teller branch)
-    # Retry logic for generate_reply which can timeout initially
-    max_retries = 3
-    retry_delay = 2.0  # seconds between retries
+    # Agent speaks first - greet the child
+    # Wait for Gemini Realtime session to be fully ready before greeting
+    async def trigger_greeting():
+        """Trigger greeting with state verification"""
+        greeting_audio_started = asyncio.Event()
 
-    await asyncio.sleep(1.5)
+        # Listen for agent starting to speak (confirms audio is being generated)
+        def on_state_for_greeting(ev):
+            new_state = str(getattr(ev, 'new_state', '')).split('.')[-1]
+            if new_state == 'speaking':
+                greeting_audio_started.set()
 
-    for attempt in range(max_retries):
+        # Temporarily add listener
+        session.on("agent_state_changed", on_state_for_greeting)
+
         try:
-            logger.info(f"🎤 Agent initiating conversation... (attempt {attempt + 1}/{max_retries})")
+            # Wait longer for Gemini to be fully connected
+            await asyncio.sleep(2.5)
+
+            logger.info("🎤 Agent initiating greeting...")
             await session.generate_reply(
                 instructions="""Greet the child warmly and introduce yourself.
 Keep it simple and friendly,
 Be enthusiastic and expressive!"""
             )
-            logger.info("✅ Greeting sent successfully!")
-            break  # Success, exit retry loop
+
+            # Wait up to 3 seconds for audio to actually start
+            try:
+                await asyncio.wait_for(greeting_audio_started.wait(), timeout=3.0)
+                logger.info("✅ Greeting audio confirmed!")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ Greeting sent but no audio detected - Gemini may not have responded")
+
         except Exception as e:
-            logger.warning(f"⚠️ Greeting attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                logger.info(f"🔄 Retrying in {retry_delay}s...")
-                await asyncio.sleep(retry_delay)
-            else:
-                logger.error("❌ All greeting attempts failed, continuing without greeting")
+            logger.warning(f"⚠️ Greeting failed: {e}")
+        finally:
+            # Remove temporary listener (can't easily remove, but it's harmless)
+            pass
+
+    asyncio.create_task(trigger_greeting())
 
 
 # ============================================================================
