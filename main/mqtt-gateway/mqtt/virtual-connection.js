@@ -353,11 +353,19 @@ class VirtualMQTTConnection {
       this.roomType = "conversation";
     }
 
-    // Fetch current character for conversation mode
+    // Fetch current character and child profile for conversation mode
     this.currentCharacter = null;
+    this.childProfile = null;
     if (this.roomType === "conversation") {
-      this.currentCharacter = await this.fetchCurrentCharacter(this.deviceId);
+      // Fetch character and child profile in parallel for faster startup
+      const [character, childProfile] = await Promise.all([
+        this.fetchCurrentCharacter(this.deviceId),
+        this.fetchChildProfile(this.deviceId)
+      ]);
+      this.currentCharacter = character;
+      this.childProfile = childProfile;
       console.log(`🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`);
+      console.log(`👶 [CHILD-PROFILE] Child profile loaded: ${this.childProfile ? 'Yes' : 'No'}`);
     }
 
     // Fetch device listening mode (manual/auto) from backend
@@ -423,12 +431,14 @@ class VirtualMQTTConnection {
     }
 
     // Create bridge immediately (this creates room and gateway joins)
+    // Pass childProfile for room metadata (agent uses this for personalization)
     this.bridge = new LiveKitBridge(
       this,
       json.version,
       this.deviceId,
       newSessionUuid,
-      this.userData
+      this.userData,
+      this.childProfile  // Child profile for room metadata
     );
 
     // Mark bridge as waiting for agent deployment
@@ -673,6 +683,57 @@ class VirtualMQTTConnection {
     } catch (error) {
       console.error(`❌ [LISTENING-MODE] Failed to fetch listening mode: ${error.message}`);
       return "manual"; // Default fallback
+    }
+  }
+
+  /**
+   * Fetch child profile from Manager API by MAC address
+   * This data will be set as room metadata for the agent to use
+   * Uses authenticated POST endpoint: /config/child-profile-by-mac
+   * @param {string} macAddress - Device MAC address
+   * @returns {Promise<object|null>} Child profile object or null
+   */
+  async fetchChildProfile(macAddress) {
+    try {
+      const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
+      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
+      const apiUrl = `${baseUrl}/toy/config/child-profile-by-mac`;
+      const apiSecret = process.env.MANAGER_API_SECRET;
+
+      console.log(`👶 [CHILD-PROFILE] Fetching child profile from: ${apiUrl}`);
+      console.log(`👶 [CHILD-PROFILE] MAC address: ${cleanMac}`);
+
+      const response = await axios.post(
+        apiUrl,
+        { macAddress: cleanMac },
+        {
+          timeout: 5000,
+          headers: {
+            'Authorization': `Bearer ${apiSecret}`,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const profile = response.data.data;
+        console.log(`✅ [CHILD-PROFILE] Found profile for ${cleanMac}:`);
+        console.log(`   - Name: ${profile.name || 'N/A'}`);
+        console.log(`   - Age: ${profile.age || 'N/A'}`);
+        console.log(`   - Gender: ${profile.gender || 'N/A'}`);
+        console.log(`   - Interests: ${profile.interests || 'N/A'}`);
+        return profile;
+      }
+
+      console.log(`ℹ️ [CHILD-PROFILE] No profile found for device ${cleanMac}`);
+      return null;
+    } catch (error) {
+      console.error(`❌ [CHILD-PROFILE] Failed to fetch child profile: ${error.message}`);
+      if (error.response) {
+        console.error(`❌ [CHILD-PROFILE] Response status: ${error.response.status}`);
+        console.error(`❌ [CHILD-PROFILE] Response data: ${JSON.stringify(error.response.data)}`);
+      }
+      return null; // Return null on error - agent will work without personalization
     }
   }
 

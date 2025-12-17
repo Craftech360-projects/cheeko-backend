@@ -31,12 +31,13 @@ function setConfigManager(cm) {
   configManager = cm;
 }
 class LiveKitBridge extends EventEmitter {
-  constructor(connection, protocolVersion, macAddress, uuid, userData) {
+  constructor(connection, protocolVersion, macAddress, uuid, userData, childProfile = null) {
     super();
     this.connection = connection;
     this.macAddress = macAddress;
     this.uuid = uuid;
     this.userData = userData;
+    this.childProfile = childProfile; // Child profile for room metadata (agent personalization)
     this.roomType = connection.roomType || "conversation"; // ADD: Store room type from connection
     this.room = null;
     this.roomService = null; // Store roomService for cleanup on disconnect
@@ -241,15 +242,37 @@ class LiveKitBridge extends EventEmitter {
 
     console.log(`🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`);
 
-    // Pre-create room with emptyTimeout setting
+    // Pre-create room with emptyTimeout setting and child profile metadata
     if (roomService) {
       try {
+        // Build room metadata with child profile for agent personalization
+        let roomMetadata = null;
+        if (this.childProfile) {
+          roomMetadata = JSON.stringify({
+            child_name: this.childProfile.name || '',
+            child_age: this.childProfile.age || '',
+            age_group: this.childProfile.ageGroup || '',
+            child_gender: this.childProfile.gender || '',
+            child_interests: this.childProfile.interests || '',
+            primary_language: this.childProfile.primaryLanguage || 'English',
+            additional_notes: this.childProfile.additionalNotes || '',
+            device_mac: this.macAddress,
+            room_type: this.roomType,
+            created_at: Date.now()
+          });
+          console.log(`👶 [ROOM-METADATA] Setting child profile metadata for room: ${roomName}`);
+        }
+
         await roomService.createRoom({
           name: roomName,
           empty_timeout: 60, // Auto-close room if empty for 60 seconds (snake_case for LiveKit API)
           max_participants: 2,
+          metadata: roomMetadata, // Child profile metadata for agent personalization
         });
-        // console.log(`✅ [ROOM] Pre-created room with 60-second empty_timeout: ${roomName}`);
+        console.log(`✅ [ROOM] Pre-created room with metadata: ${roomName}`);
+        if (this.childProfile) {
+          console.log(`   👶 Child: ${this.childProfile.name || 'N/A'}, Age: ${this.childProfile.age || 'N/A'}`);
+        }
       } catch (error) {
         // Log the actual error for debugging
         console.error(`❌ [ROOM] Error pre-creating room: ${error.message}`);

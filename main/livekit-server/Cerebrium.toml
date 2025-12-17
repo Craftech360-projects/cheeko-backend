@@ -3,7 +3,7 @@ name = "livekit-server-simple"
 python_version = "3.11"
 disable_auth = false
 region = "ap-south-1"
-include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'src/**/*', 'config/**/*']
+include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*']
 exclude = ['.*', '__pycache__/**/*', 'transcripts/**/*', '*.pyc']
 
 [cerebrium.hardware]

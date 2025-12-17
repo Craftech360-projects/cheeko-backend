@@ -17,16 +17,24 @@ logger = logging.getLogger(__name__)
 class MusicService:
     """Service for handling music playback and search"""
 
-    def __init__(self, preloaded_model=None, preloaded_client=None):
+    def __init__(self, preloaded_model=None, preloaded_client=None, shared_semantic_search=None):
         self.cloudfront_domain = os.getenv("CLOUDFRONT_DOMAIN", "")
         self.s3_base_url = os.getenv("S3_BASE_URL", "")
         self.use_cdn = os.getenv("USE_CDN", "true").lower() == "true"
         self.is_initialized = False
-        self.semantic_search = QdrantSemanticSearch(preloaded_model, preloaded_client)
+        # Use shared semantic search if provided, otherwise create new
+        self.semantic_search = shared_semantic_search if shared_semantic_search else QdrantSemanticSearch(preloaded_model, preloaded_client)
+        self._owns_semantic_search = shared_semantic_search is None
 
     async def initialize(self) -> bool:
         """Initialize music service using Qdrant cloud API"""
         try:
+            # If using shared semantic search that's already initialized, skip
+            if self.semantic_search.is_initialized:
+                logger.info("[MUSIC] Music service using pre-initialized semantic search")
+                self.is_initialized = True
+                return True
+
             initialized = await self.semantic_search.initialize()
             if initialized:
                 logger.info("[MUSIC] Music service initialized with Qdrant cloud API")

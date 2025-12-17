@@ -609,6 +609,7 @@ databaseChangeLog:
   - changeSet:
       id: 202511071504
       author: claude
+      validCheckSum: ANY
       changes:
         - sqlFile:
             encoding: utf8
@@ -696,6 +697,14 @@ databaseChangeLog:
             path: classpath:db/changelog/202512061832_update_cheeko_prompt_with_personalization.sql
 
   - changeSet:
+      id: 202512061200
+      author: claude
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512061200_create_device_token_usage.sql
+
+  - changeSet:
       id: 202512081200
       author: claude
       validCheckSum: ANY
@@ -725,6 +734,7 @@ databaseChangeLog:
   - changeSet:
       id: 202512111500
       author: claude
+      validCheckSum: ANY
       changes:
         - sqlFile:
             encoding: utf8

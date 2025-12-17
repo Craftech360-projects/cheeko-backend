@@ -192,9 +192,25 @@ logger.info("✅ Imported Assistant from main_agent.py with all function tools (
 # ============================================================================
 
 def prewarm(proc: JobProcess):
-    """Minimal prewarm for Gemini Realtime"""
-    logger.info("[PREWARM] Prewarm: Ready for Gemini Realtime")
+    """Prewarm: Load heavy models before agents connect"""
+    logger.info("[PREWARM] Starting model preloading...")
+
+    # Preload embedding model and Qdrant client during prewarm
+    # This ensures first agent connection is fast
+    from src.utils.model_cache import model_cache
+
+    # Load embedding model (takes ~2-3s)
+    embedding_model = model_cache.get_embedding_model()
+    if embedding_model:
+        logger.info("[PREWARM] ✅ Embedding model preloaded")
+
+    # Load Qdrant client
+    qdrant_client = model_cache.get_qdrant_client()
+    if qdrant_client:
+        logger.info("[PREWARM] ✅ Qdrant client preloaded")
+
     proc.userdata["ready"] = True
+    logger.info("[PREWARM] ✅ Prewarm complete - models ready")
 
 
 # ============================================================================
@@ -258,6 +274,42 @@ async def entrypoint(ctx: JobContext):
     child_profile = None
     agent_id = None
 
+    # =========================================================================
+    # CONNECT TO ROOM FIRST (required to access room metadata)
+    # =========================================================================
+    logger.info("🔌 Connecting to room to access metadata...")
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    logger.info("✅ Connected to room")
+
+    # =========================================================================
+    # READ CHILD PROFILE FROM ROOM METADATA (set by mqtt-gateway during room creation)
+    # This is faster and more reliable than making an API call
+    # =========================================================================
+    if ctx.room.metadata:
+        try:
+            child_profile = json.loads(ctx.room.metadata)
+            logger.info(f"👶 Child profile from room metadata:")
+            logger.info(f"   - Name: {child_profile.get('child_name', 'N/A')}")
+            logger.info(f"   - Age: {child_profile.get('child_age', 'N/A')}")
+            logger.info(f"   - Gender: {child_profile.get('child_gender', 'N/A')}")
+            logger.info(f"   - Interests: {child_profile.get('child_interests', 'N/A')}")
+
+            # Normalize field names to match expected format (metadata uses snake_case)
+            child_profile = {
+                'name': child_profile.get('child_name', ''),
+                'age': child_profile.get('child_age', ''),
+                'ageGroup': child_profile.get('age_group', ''),
+                'gender': child_profile.get('child_gender', ''),
+                'interests': child_profile.get('child_interests', ''),
+                'primaryLanguage': child_profile.get('primary_language', 'English'),
+                'additionalNotes': child_profile.get('additional_notes', ''),
+            }
+        except json.JSONDecodeError as e:
+            logger.warning(f"⚠️ Failed to parse room metadata as JSON: {e}")
+            child_profile = None
+    else:
+        logger.info("ℹ️ No room metadata available (child profile not set)")
+
     if device_mac:
         try:
             logger.info("⚡ Starting parallel API calls...")
@@ -271,19 +323,18 @@ async def entrypoint(ctx: JobContext):
             prompt_service.clear_cache()
             prompt_service.clear_enhanced_cache(device_mac)
 
-            # Parallel API calls (reduced from 5 to 3)
+            # Parallel API calls (reduced to 2 - child_profile now comes from room metadata)
             results = await asyncio.gather(
                 db_helper.get_agent_id(device_mac),
                 prompt_service.get_prompt_and_config(room_name, device_mac),
-                db_helper.get_child_profile_by_mac(device_mac),
                 return_exceptions=True
             )
 
             elapsed_time = (asyncio.get_event_loop().time() - start_time) * 1000
             logger.info(f"⚡✅ Parallel API calls completed in {elapsed_time:.0f}ms")
 
-            # Unpack results
-            agent_id_result, prompt_config_result, child_profile_result = results
+            # Unpack results (now only 2 results)
+            agent_id_result, prompt_config_result = results
 
             # Process agent_id
             if isinstance(agent_id_result, Exception):
@@ -299,14 +350,6 @@ async def entrypoint(ctx: JobContext):
             else:
                 agent_prompt, _ = prompt_config_result  # Ignore TTS config (Gemini has built-in TTS)
                 logger.info(f"🎯 Using device-specific prompt (length: {len(agent_prompt)} chars)")
-
-            # Process child profile
-            if isinstance(child_profile_result, Exception):
-                logger.warning(f"Failed to fetch child profile: {child_profile_result}")
-            else:
-                child_profile = child_profile_result
-                if child_profile:
-                    logger.info(f"👶 Child profile: {child_profile.get('name')}, age {child_profile.get('age')}")
 
         except Exception as e:
             logger.error(f"❌ Error in API calls: {e}")
@@ -369,6 +412,16 @@ async def entrypoint(ctx: JobContext):
     else:
         logger.info("✅ Prompt fully rendered (no template variables remaining)")
 
+    # Check if child's name appears in the prompt (for debugging)
+    if child_profile and child_profile.get('name'):
+        child_name = child_profile.get('name')
+        if child_name.lower() in agent_prompt.lower():
+            logger.info(f"✅ Child's name '{child_name}' found in prompt")
+        else:
+            logger.warning(f"⚠️ Child's name '{child_name}' NOT found in prompt - template may not include child name!")
+            # Log first 500 chars of prompt to debug
+            logger.info(f"📝 Prompt preview (first 500 chars): {agent_prompt[:500]}...")
+
     # ============================================================================
     # APPEND CHARACTER CHANGE INSTRUCTIONS
     # ============================================================================
@@ -377,9 +430,9 @@ async def entrypoint(ctx: JobContext):
     CHARACTER_CHANGE_INSTRUCTIONS = """
 
 <character_switching>
-【IMPORTANT: Character/Mode Switching Capability】
+【Character/Mode Switching - USE WITH EXTREME CAUTION】
 
-You have the ability to switch to different character modes when the child requests it.
+You can switch to different character modes, but ONLY when EXPLICITLY requested.
 
 **Available Characters:**
 - "Cheeko" - Default fun, playful friend
@@ -387,32 +440,38 @@ You have the ability to switch to different character modes when the child reque
 - "Riddle Solver" - Riddle and puzzle games
 - "Word Ladder" - Word and vocabulary games
 
-**When to Switch Characters:**
-When the child says things like:
-- "Change to [character name]"
-- "Switch to [mode name]"
-- "I want to play [math/riddles/word games]"
-- "Can we do [math/riddles/word ladder]?"
-- "Let's play [game type]"
-- "Change character"
+**⚠️ CRITICAL: When to Switch (ONLY these exact situations):**
+ONLY call update_agent_mode when the child EXPLICITLY says:
+- "Change to [character name]" or "Switch to [character name]"
+- "I want to talk to Math Tutor" or "I want to talk to Riddle Solver"
+- "Change character to [name]"
+- "Switch mode to [name]"
+- "Can you become [character name]?"
 
-**How to Switch:**
-Call the `update_agent_mode` function with the character name:
-- update_agent_mode(mode_name="Math Tutor") - For math games
-- update_agent_mode(mode_name="Riddle Solver") - For riddles
-- update_agent_mode(mode_name="Word Ladder") - For word games
-- update_agent_mode(mode_name="Cheeko") - For general fun conversation
+**🚫 DO NOT SWITCH for these situations:**
+- Greetings like "Hi", "Hello", "Hey", "Good morning" → Just greet back normally
+- General questions like "How are you?", "What's your name?" → Just answer normally
+- "Let's play" or "I want to play" WITHOUT mentioning a character → Play games as current character
+- "Tell me a joke", "Tell me a story" → Do it as current character
+- Any conversation that doesn't EXPLICITLY mention changing/switching character
 
-**CRITICAL RULES:**
-1. When asked to switch characters, ALWAYS call update_agent_mode - do NOT just say you are that character
-2. If already in the requested mode, acknowledge it and continue the game
-3. After calling update_agent_mode, say a brief "Switching to [mode]..." message
-4. The function will handle the actual transition - a new session will start with the new character
+**How to Switch (ONLY when conditions above are met):**
+- update_agent_mode(mode_name="Math Tutor") - For explicit request to switch to Math Tutor
+- update_agent_mode(mode_name="Riddle Solver") - For explicit request to switch to Riddle Solver
+- update_agent_mode(mode_name="Word Ladder") - For explicit request to switch to Word Ladder
+- update_agent_mode(mode_name="Cheeko") - For explicit request to switch to Cheeko
 
-**Example Interactions:**
-- Child: "Let's play math!" → Call update_agent_mode(mode_name="Math Tutor")
-- Child: "Change to riddle mode" → Call update_agent_mode(mode_name="Riddle Solver")
-- Child: "I want Cheeko back" → Call update_agent_mode(mode_name="Cheeko")
+**RULES:**
+1. NEVER call update_agent_mode for greetings or general conversation
+2. When switching, say "Switching to [mode]..." then call the function
+3. If already in the requested mode, just continue as that character
+
+**Correct Examples:**
+- Child: "Hi!" → Greet them warmly, DO NOT call update_agent_mode
+- Child: "Hello, how are you?" → Answer the question, DO NOT call update_agent_mode
+- Child: "Let's play a game" → Play a game as current character, DO NOT switch
+- Child: "Change to Math Tutor" → Call update_agent_mode(mode_name="Math Tutor")
+- Child: "I want to talk to Riddle Solver" → Call update_agent_mode(mode_name="Riddle Solver")
 </character_switching>
 """
 
@@ -555,6 +614,7 @@ Call the `update_agent_mode` function with the character name:
     # Import additional services needed by Assistant's function tools
     from src.services.music_service import MusicService
     from src.services.story_service import StoryService
+    from src.services.semantic_search import QdrantSemanticSearch
     from src.services.unified_audio_player import UnifiedAudioPlayer
     from src.services.google_search_service import GoogleSearchService
     from src.services.question_generator_service import QuestionGeneratorService
@@ -566,20 +626,35 @@ Call the `update_agent_mode` function with the character name:
     mcp_executor = LiveKitMCPExecutor()
     logger.info("🎛️ Device control service created")
 
-    # Initialize Music Service
-    music_service = MusicService()
+    # Get preloaded models from cache (loaded during prewarm)
+    from src.utils.model_cache import model_cache
+    preloaded_embedding = model_cache.get_embedding_model()
+    preloaded_qdrant = model_cache.get_qdrant_client()
+    logger.info(f"📦 Using preloaded models - Embedding: {preloaded_embedding is not None}, Qdrant: {preloaded_qdrant is not None}")
+
+    # Create ONE shared semantic search instance for both Music and Story services
+    shared_semantic_search = QdrantSemanticSearch(preloaded_embedding, preloaded_qdrant)
+    try:
+        await shared_semantic_search.initialize()
+        logger.info("🔍 Shared semantic search initialized (Qdrant + Embedding)")
+    except Exception as e:
+        logger.warning(f"Shared semantic search initialization failed: {e}")
+        shared_semantic_search = None
+
+    # Initialize Music Service with shared semantic search (no duplicate initialization)
+    music_service = MusicService(shared_semantic_search=shared_semantic_search)
     try:
         await music_service.initialize()
-        logger.info("🎵 Music service initialized")
+        logger.info("🎵 Music service initialized (using shared semantic search)")
     except Exception as e:
         logger.warning(f"Music service initialization failed: {e}")
         music_service = None
 
-    # Initialize Story Service
-    story_service = StoryService()
+    # Initialize Story Service with SAME shared semantic search (no duplicate initialization)
+    story_service = StoryService(shared_semantic_search=shared_semantic_search)
     try:
         await story_service.initialize()
-        logger.info("📖 Story service initialized")
+        logger.info("📖 Story service initialized (using shared semantic search)")
     except Exception as e:
         logger.warning(f"Story service initialization failed: {e}")
         story_service = None
@@ -838,10 +913,10 @@ Call the `update_agent_mode` function with the character name:
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
     # ============================================================================
-    # CONNECT AND START SESSION
+    # WAIT FOR PARTICIPANT AND START SESSION
+    # (Already connected earlier to access room metadata)
     # ============================================================================
 
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     participant = await ctx.wait_for_participant()
     logger.info(f"👤 Participant joined: {participant.identity}")
 
