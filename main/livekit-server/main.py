@@ -869,7 +869,7 @@ Call the `update_agent_mode` function with the character name:
     # Agent speaks first - greet the child
     # Wait for Gemini Realtime session to be fully ready before greeting
     async def trigger_greeting():
-        """Trigger greeting with state verification"""
+        """Trigger greeting with state verification and fallback"""
         greeting_audio_started = asyncio.Event()
 
         # Listen for agent starting to speak (confirms audio is being generated)
@@ -882,28 +882,43 @@ Call the `update_agent_mode` function with the character name:
         session.on("agent_state_changed", on_state_for_greeting)
 
         try:
-            # Wait longer for Gemini to be fully connected
+            # Wait for Gemini to be fully connected
             await asyncio.sleep(2.5)
 
-            logger.info("🎤 Agent initiating greeting...")
-            await session.generate_reply(
-                instructions="""Greet the child warmly and introduce yourself.
-Keep it simple and friendly,
-Be enthusiastic and expressive!"""
-            )
+            # Get child's name for personalized greeting
+            child_name = child_profile.get('name', '') if child_profile else ''
 
-            # Wait up to 3 seconds for audio to actually start
+            logger.info("🎤 Agent initiating greeting...")
+
+            # Try generate_reply first (uses Gemini's native voice)
             try:
-                await asyncio.wait_for(greeting_audio_started.wait(), timeout=3.0)
-                logger.info("✅ Greeting audio confirmed!")
-            except asyncio.TimeoutError:
-                logger.warning("⚠️ Greeting sent but no audio detected - Gemini may not have responded")
+                await session.generate_reply(
+                    instructions=f"""Start the conversation now! Say hello to {child_name or 'the child'}.
+Introduce yourself briefly and ask how they're doing today.
+Be warm, friendly and enthusiastic! Speak naturally."""
+                )
+
+                # Wait up to 3 seconds for audio to actually start
+                try:
+                    await asyncio.wait_for(greeting_audio_started.wait(), timeout=3.0)
+                    logger.info("✅ Greeting audio confirmed!")
+                    return  # Success, exit
+                except asyncio.TimeoutError:
+                    logger.warning("⚠️ generate_reply completed but no audio - trying fallback...")
+
+            except Exception as e:
+                logger.warning(f"⚠️ generate_reply failed: {e} - trying fallback...")
+
+            # Fallback: Use session.say() with Edge TTS
+            fallback_greeting = f"Hey {child_name}! " if child_name else "Hey there! "
+            fallback_greeting += "I'm so happy to see you! How are you doing today?"
+
+            logger.info("🎤 Using fallback greeting with session.say()...")
+            await session.say(fallback_greeting, allow_interruptions=True)
+            logger.info("✅ Fallback greeting sent!")
 
         except Exception as e:
-            logger.warning(f"⚠️ Greeting failed: {e}")
-        finally:
-            # Remove temporary listener (can't easily remove, but it's harmless)
-            pass
+            logger.warning(f"⚠️ All greeting attempts failed: {e}")
 
     asyncio.create_task(trigger_greeting())
 
