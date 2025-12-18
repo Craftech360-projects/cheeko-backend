@@ -77,7 +77,7 @@ public class AgentController {
     public Result<List<AgentDTO>> getAgentsList() {
         UserDetail user = SecurityUser.getUser();
         List<AgentDTO> agents;
-        
+
         // Check if user is super admin
         if (user.getSuperAdmin() != null && user.getSuperAdmin() == 1) {
             // Admin sees all agents from all users with owner information
@@ -86,7 +86,7 @@ public class AgentController {
             // Regular user sees only their own agents
             agents = agentService.getUserAgents(user.getId());
         }
-        
+
         return new Result<List<AgentDTO>>().ok(agents);
     }
 
@@ -216,6 +216,7 @@ public class AgentController {
         List<AgentChatHistoryDTO> result = agentChatHistoryService.getChatHistoryBySessionId(id, sessionId);
         return new Result<List<AgentChatHistoryDTO>>().ok(result);
     }
+
     @GetMapping("/{id}/chat-history/user")
     @Operation(summary = "Get agent chat history (user)")
     @RequiresPermissions("sys:role:normal")
@@ -417,28 +418,35 @@ public class AgentController {
         try {
             // Clean MAC address
             String cleanMac = macAddress.replace(":", "").replace("-", "").toLowerCase();
-            
+
             log.info("🔍 Getting current character for device MAC: {}", cleanMac);
-            
+
             // Get agent by MAC address
             AgentEntity agent = agentService.getDefaultAgentByMacAddress(cleanMac);
-            
+
             if (agent == null) {
                 log.warn("⚠️ No agent found for MAC address: {}", cleanMac);
                 return new Result<String>().ok("Cheeko"); // Default fallback
             }
-            
+
             String currentCharacter = agent.getAgentName();
             if (currentCharacter == null || currentCharacter.trim().isEmpty()) {
                 currentCharacter = "Cheeko"; // Default fallback
             }
-            
+
             log.info("✅ Current character for MAC {}: {}", cleanMac, currentCharacter);
             return new Result<String>().ok(currentCharacter);
-            
+
         } catch (Exception e) {
             log.error("❌ Error getting current character for MAC {}: {}", macAddress, e.getMessage());
             return new Result<String>().ok("Cheeko"); // Default fallback on error
         }
+    }
+
+    @GetMapping("/device/{macAddress}/agent-name")
+    @Operation(summary = "Get agent name by device MAC address (for game mode detection)")
+    public Result<String> getAgentNameByMac(@PathVariable("macAddress") String macAddress) {
+        // Alias to current-character endpoint
+        return getCurrentCharacterByMac(macAddress);
     }
 }

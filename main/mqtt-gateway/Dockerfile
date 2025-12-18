@@ -42,5 +42,8 @@ EXPOSE 8884/udp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD node -e "require('http').get('http://localhost:8004/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))" || exit 1
 
-# Start the service
-CMD ["node", "app.js"]
+# Make entrypoint executable
+RUN chmod +x docker-entrypoint.sh
+
+# Start the service using entrypoint
+ENTRYPOINT ["./docker-entrypoint.sh"]

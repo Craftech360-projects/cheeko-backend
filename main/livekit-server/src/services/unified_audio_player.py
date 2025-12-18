@@ -214,6 +214,23 @@ class UnifiedAudioPlayer:
 
             # Send agent state change to listening mode (like normal TTS does)
             await self._send_agent_state_to_listening()
+            
+            # AUTO-LOOP: Play next song automatically
+            try:
+                logger.info(f"🎵 UNIFIED: Auto-loop - fetching next song...")
+                from src.features.music_tools import play_next_in_playlist
+                next_song = await play_next_in_playlist()
+                
+                if next_song:
+                    logger.info(f"🔁 UNIFIED: Auto-playing next song: {next_song['title']}")
+                    # Small delay to ensure clean transition
+                    await asyncio.sleep(0.5)
+                    # Play next song
+                    await self.play_from_url(next_song['url'], next_song['title'])
+                else:
+                    logger.warning("🎵 UNIFIED: No next song available for auto-loop")
+            except Exception as e:
+                logger.error(f"❌ UNIFIED: Auto-loop error: {e}")
 
             # NOTE: Removed completion message to prevent race condition
             # The completion message was causing the agent to go back to "speaking" state

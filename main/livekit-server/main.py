@@ -31,28 +31,99 @@ from livekit.plugins import google
 from google.genai import types
 
 # Load environment variables first
-# Debug: List files
 load_dotenv(".env")
 print(f"🔍 DEBUG: LIVEKIT_URL={os.getenv('LIVEKIT_URL')}")
 
-# Initialize Datadog logging (must be done before logger usage)
-from src.config.datadog_config import DatadogConfig
-DatadogConfig.setup_logging()
+# Datadog removed for faster startup - using Loki instead
 
 # Import required components
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
-from src.mcp.device_control_service import DeviceControlService
-from src.mcp.mcp_executor import LiveKitMCPExecutor
-from src.handlers.chat_logger import ChatEventHandler
-from src.utils.helpers import UsageManager
-from src.services.chat_history_service import ChatHistoryService
+from src.services.music_service import MusicService
+# Device control services moved to lazy imports for faster startup
+# from src.mcp.device_control_service import DeviceControlService
+# from src.mcp.mcp_executor import LiveKitMCPExecutor
+# ChatEventHandler removed - disabled and not used
+# from src.handlers.chat_logger import ChatEventHandler
+# Usage tracking moved to lazy import
+# from src.utils.helpers import UsageManager
+# Chat history moved to lazy import
+# from src.services.chat_history_service import ChatHistoryService
 # FilteredAgent removed for faster response time - using built-in Agent
 
-# Logger
+# Logger (Loki only - Datadog removed for faster startup)
 from src.utils.loki_agent_logger import logger
 
+# Global Jinja2 template cache for faster rendering
+_jinja_template_cache = {}
+
+# Game prompt file mapping
+_GAME_PROMPT_FILES = {
+    "Math Tutor": "math_tutor.yaml",
+    "Riddle Solver": "riddle_solver.yaml",
+    "Word Ladder": "word_ladder.yaml"
+}
+
+def _load_game_prompt(agent_name: str, child_profile: dict = None) -> str:
+    """
+    Load game-specific prompt from YAML file and render with child profile.
+    
+    Args:
+        agent_name: The game name ("Math Tutor", "Riddle Solver", "Word Ladder")
+        child_profile: Optional child profile for personalization
+        
+    Returns:
+        str: Rendered prompt or None if file not found
+    """
+    import os
+    import yaml
+    from jinja2 import Template
+    
+    if agent_name not in _GAME_PROMPT_FILES:
+        logger.warning(f"⚠️ Unknown game: {agent_name}")
+        return None
+    
+    # Get the prompt file path
+    prompt_file = os.path.join(
+        os.path.dirname(__file__), 
+        "src", "prompts", 
+        _GAME_PROMPT_FILES[agent_name]
+    )
+    
+    try:
+        if not os.path.exists(prompt_file):
+            logger.error(f"❌ Game prompt file not found: {prompt_file}")
+            return None
+            
+        with open(prompt_file, 'r') as f:
+            prompt_data = yaml.safe_load(f)
+        
+        prompt_template = prompt_data.get('prompt', '')
+        
+        if not prompt_template:
+            logger.error(f"❌ No 'prompt' key in {prompt_file}")
+            return None
+        
+        # Render with child profile if available
+        if child_profile and ('{{' in prompt_template or '{%' in prompt_template):
+            template = Template(prompt_template)
+            template_vars = {
+                'child_name': child_profile.get('name', ''),
+                'child_age': child_profile.get('age', ''),
+                'child_interests': child_profile.get('interests', ''),
+                'age_group': child_profile.get('ageGroup', ''),
+            }
+            prompt_template = template.render(**template_vars)
+        
+        logger.info(f"✅ Loaded game prompt: {agent_name} ({len(prompt_template)} chars)")
+        return prompt_template
+        
+    except Exception as e:
+        logger.error(f"❌ Error loading game prompt: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
 
 # ============================================================================
 # RESOURCE MONITOR - REMOVED
@@ -93,33 +164,10 @@ async def delete_livekit_room(room_name: str):
 
 
 # ============================================================================
-# SIMPLIFIED ASSISTANT
+# ASSISTANT - Now using refactored modular architecture
 # ============================================================================
 
-class Assistant(Agent):
-    """Simplified Assistant for conversation mode - using built-in Agent for faster response"""
-
-    def __init__(self, instructions: str = None) -> None:
-        super().__init__(instructions=instructions or "You are a helpful AI assistant.")
-        self.room_name = None
-        self.device_mac = None
-        self.device_control_service = None
-        self.mcp_executor = None
-        self._agent_session = None
-
-    def set_services(self, device_control_service, mcp_executor):
-        """Inject services"""
-        self.device_control_service = device_control_service
-        self.mcp_executor = mcp_executor
-
-    def set_room_info(self, room_name: str, device_mac: str):
-        """Set room information"""
-        self.room_name = room_name
-        self.device_mac = device_mac
-
-    def set_agent_session(self, session):
-        """Set agent session reference"""
-        self._agent_session = session
+from src.agent.assistant import Assistant
 
 
 # ============================================================================
@@ -156,7 +204,8 @@ async def entrypoint(ctx: JobContext):
 
     # Load configuration
     realtime_config = ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')
+    gemini_model = realtime_config.get('model', 'gemini-live-2.5-flash-native-audio')   
+    # gemini-2.5-flash-native-audio-preview-09-2025
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.8)
 
@@ -180,10 +229,10 @@ async def entrypoint(ctx: JobContext):
                 room_type = "conversation"
                 logger.info(f"📱 Extracted MAC from legacy room: {device_mac}")
 
-    # Guard: Only proceed for conversation rooms
-    if room_type and room_type != "conversation":
-        logger.warning(f"⚠️ Agent dispatched to '{room_type}' room - exiting (agents only join conversation rooms)")
-        return
+    # Extract room type for mode-specific handling
+    # Music mode will trigger auto-play, conversation mode uses standard agent
+    if room_type:
+        logger.info(f"🎯 Room mode detected: {room_type}")
 
     # Initialize services
     prompt_service = PromptService()
@@ -204,19 +253,20 @@ async def entrypoint(ctx: JobContext):
             prompt_service.clear_cache()
             prompt_service.clear_enhanced_cache(device_mac)
 
-            # Parallel API calls (reduced from 5 to 3)
+            # Parallel API calls (4 calls including agent_name for game detection)
             results = await asyncio.gather(
                 db_helper.get_agent_id(device_mac),
                 prompt_service.get_prompt_and_config(room_name, device_mac),
                 db_helper.get_child_profile_by_mac(device_mac),
+                db_helper.get_agent_name(device_mac),  # For game mode detection
                 return_exceptions=True
             )
 
             elapsed_time = (asyncio.get_event_loop().time() - start_time) * 1000
             logger.info(f"⚡✅ Parallel API calls completed in {elapsed_time:.0f}ms")
 
-            # Unpack results
-            agent_id_result, prompt_config_result, child_profile_result = results
+            # Unpack results (4 results now)
+            agent_id_result, prompt_config_result, child_profile_result, agent_name_result = results
 
             # Process agent_id
             agent_id = None
@@ -226,13 +276,39 @@ async def entrypoint(ctx: JobContext):
                 agent_id = agent_id_result
                 logger.info(f"📝 Agent ID: {agent_id}")
 
-            # Process prompt
-            if isinstance(prompt_config_result, Exception):
-                logger.warning(f"Failed to fetch config: {prompt_config_result}")
-                agent_prompt = ConfigLoader.get_default_prompt()
+            # Process agent_name (for game mode detection)
+            agent_name = "Cheeko"  # Default
+            if isinstance(agent_name_result, Exception):
+                logger.warning(f"Failed to get agent_name: {agent_name_result}")
             else:
-                agent_prompt, _ = prompt_config_result  # Ignore TTS config (Gemini has built-in TTS)
-                logger.info(f"🎯 Using device-specific prompt (length: {len(agent_prompt)} chars)")
+                agent_name = agent_name_result or "Cheeko"
+                logger.info(f"🎮 Agent name: {agent_name}")
+            
+            # Store agent_name in ctx for later use
+            ctx.agent_name = agent_name
+
+            # Process prompt - check if we need game-specific prompt
+            if agent_name in ["Math Tutor", "Riddle Solver", "Word Ladder"]:
+                # Load game-specific prompt from YAML file
+                game_prompt = _load_game_prompt(agent_name, child_profile_result)
+                if game_prompt:
+                    agent_prompt = game_prompt
+                    logger.info(f"🎮 Loaded {agent_name} game prompt ({len(agent_prompt)} chars)")
+                else:
+                    # Fallback to default if game prompt not found
+                    logger.warning(f"⚠️ Failed to load {agent_name} prompt, using default")
+                    if isinstance(prompt_config_result, Exception):
+                        agent_prompt = ConfigLoader.get_default_prompt()
+                    else:
+                        agent_prompt, _ = prompt_config_result
+            else:
+                # Normal Cheeko mode - use regular prompt
+                if isinstance(prompt_config_result, Exception):
+                    logger.warning(f"Failed to fetch config: {prompt_config_result}")
+                    agent_prompt = ConfigLoader.get_default_prompt()
+                else:
+                    agent_prompt, _ = prompt_config_result  # Ignore TTS config (Gemini has built-in TTS)
+                    logger.info(f"🎯 Using device-specific prompt (length: {len(agent_prompt)} chars)")
 
             # Process child profile
             if isinstance(child_profile_result, Exception):
@@ -246,32 +322,26 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"❌ Error in API calls: {e}")
             agent_prompt = ConfigLoader.get_default_prompt()
 
-        # Initialize chat history service if agent_id available
-        if agent_id:
-            try:
-                manager_api_url = os.getenv("MANAGER_API_URL")
-                manager_api_secret = os.getenv("MANAGER_API_SECRET")
+        # Chat history service will be initialized in background after session starts
 
-                chat_history_service = ChatHistoryService(
-                    manager_api_url=manager_api_url,
-                    secret=manager_api_secret,
-                    device_mac=device_mac,
-                    session_id=room_name,
-                    agent_id=agent_id
-                )
-                chat_history_service.start_periodic_sending()
-                logger.info(f"📝 Chat history service initialized for agent_id: {agent_id}")
-            except Exception as e:
-                logger.warning(f"Failed to initialize chat history service: {e}")
-
-    # Build prompt with child profile using Jinja2 templates
+    # Build prompt with child profile using cached Jinja2 templates
     if child_profile:
         logger.info(f"👶 Child profile data: {json.dumps(child_profile, indent=2)}")
 
         # Check if prompt uses Jinja2 templates ({{ or {%)
         if '{{' in agent_prompt or '{%' in agent_prompt:
             try:
-                from jinja2 import Template, Undefined
+                from jinja2 import Template
+
+                # Use cached template if available
+                template_cache_key = hash(agent_prompt)
+                if template_cache_key not in _jinja_template_cache:
+                    _jinja_template_cache[template_cache_key] = Template(agent_prompt)
+                    logger.info("📝 Compiled and cached Jinja2 template")
+                else:
+                    logger.info("⚡ Using cached Jinja2 template")
+
+                template = _jinja_template_cache[template_cache_key]
 
                 # Build template variables from child profile
                 # Parse interests if it's a JSON string
@@ -293,23 +363,17 @@ async def entrypoint(ctx: JobContext):
                     'additional_notes': child_profile.get('additionalNotes', ''),
                 }
 
-                logger.info(f"👶 Template variables: {json.dumps(template_vars, indent=2)}")
-
-                template = Template(agent_prompt)
                 agent_prompt = template.render(**template_vars)
-                logger.info(f"✅ Rendered Jinja2 template for: {child_profile.get('name')}")
+                logger.info(f"✅ Rendered template for: {child_profile.get('name')}")
 
             except Exception as e:
                 logger.error(f"❌ Jinja2 template error: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
                 # Fallback to simple string replacement
                 agent_prompt = agent_prompt.replace("{{ child_name }}", child_profile.get('name', ''))
                 agent_prompt = agent_prompt.replace("{{child_name}}", child_profile.get('name', ''))
                 agent_prompt = agent_prompt.replace("{{ child_age }}", str(child_profile.get('age', '')))
                 agent_prompt = agent_prompt.replace("{{child_age}}", str(child_profile.get('age', '')))
         else:
-            # No template variables found - prompt might already be personalized from API
             logger.info(f"📝 Prompt has no template variables - using as-is")
     else:
         logger.warning("⚠️ No child profile available - prompt will not be personalized")
@@ -336,9 +400,9 @@ async def entrypoint(ctx: JobContext):
     realtime_model = google.realtime.RealtimeModel(
         model=gemini_model,
         voice=gemini_voice,
+        instructions=agent_prompt,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
-        _gemini_tools=[types.GoogleSearch()],
         # realtime_input_config={
         #     "automatic_activity_detection": {
         #         "disabled": False,
@@ -352,10 +416,51 @@ async def entrypoint(ctx: JobContext):
 
     logger.info(f"✅ Gemini Realtime model created")
 
-    # Create AgentSession
-    session = AgentSession(
-        llm=realtime_model,
-    )
+    # ============================================================================
+    # DETERMINE GAME TOOLS BEFORE SESSION CREATION
+    # ============================================================================
+    
+    # Determine game tools based on agent_name (we need these for AgentSession)
+    game_tools_list = []
+    if hasattr(ctx, 'agent_name') and ctx.agent_name:
+        active_game = ctx.agent_name
+    else:
+        active_game = "Cheeko"  # Default
+    
+    # Store active_game back to ctx for later use
+    ctx.active_game = active_game
+        
+    if active_game in ["Math Tutor", "Riddle Solver", "Word Ladder"]:
+        # Import game tools
+        from src.features.game_tools import (
+            check_math_answer,
+            check_riddle_answer,
+            validate_word_ladder_move,
+            set_math_game_state,
+            set_riddle_game_state,
+            set_word_ladder_state
+        )
+        
+        if active_game == "Math Tutor":
+            game_tools_list = [check_math_answer]
+            logger.info("🧮 Math Tutor tool prepared for session")
+        elif active_game == "Riddle Solver":
+            game_tools_list = [check_riddle_answer]
+            logger.info("🤔 Riddle Solver tool prepared for session")
+        elif active_game == "Word Ladder":
+            game_tools_list = [validate_word_ladder_move]
+            logger.info("🎮 Word Ladder tool prepared for session")
+
+    # Create AgentSession with game tools if applicable
+    session_kwargs = {
+        "llm": realtime_model,
+    }
+    
+    if game_tools_list:
+        session_kwargs["tools"] = game_tools_list
+        logger.info(f"🎮 Creating AgentSession with {len(game_tools_list)} game tools")
+    
+    session = AgentSession(**session_kwargs)
 
     # ============================================================================
     # STATE MANAGEMENT FOR LED FEEDBACK
@@ -425,47 +530,103 @@ async def entrypoint(ctx: JobContext):
     logger.info("📊 State management registered")
 
     # ============================================================================
-    # ERROR HANDLING
+    # ERROR HANDLING (Simplified)
     # ============================================================================
 
-    from src.agent.error_handler import setup_error_handling
-    error_manager = setup_error_handling(
-        session=session,
-        max_retries=3,
-        custom_audio_path=None
-    )
-    logger.info("🛡️ Error handling enabled")
-
-    # ============================================================================
-    # MEM0 PROVIDER
-    # ============================================================================
-
-    # Initialize mem0 provider and conversation messages
-    mem0_provider = None
-    conversation_messages = []
-
+    # Error handling will be lazy-loaded when needed
+    # Gemini Live API has built-in error handling
+    error_manager = None
     try:
-        from src.memory.mem0_provider import Mem0Provider
-        mem0_provider = Mem0Provider()
-        logger.info("💭 Mem0 provider initialized")
+        from src.agent.error_handler import setup_error_handling
+        error_manager = setup_error_handling(
+            session=session,
+            max_retries=3,
+            custom_audio_path=None
+        )
+        logger.info("🛡️ Error handling enabled")
     except Exception as e:
-        logger.warning(f"Mem0 provider not available: {e}")
+        logger.warning(f"⚠️ Error handler not available: {e} - using default error handling")
 
     # ============================================================================
-    # DEVICE CONTROL SERVICE
+    # MEM0 PROVIDER - REMOVED (unused in current implementation)
+    # ============================================================================
+    # Removed for faster startup - was initialized but never used
+
+    # ============================================================================
+    # DEVICE CONTROL SERVICE (Lazy-loaded)
     # ============================================================================
 
-    device_control_service = DeviceControlService()
-    mcp_executor = LiveKitMCPExecutor()
-    logger.info("🎛️ Device control service created")
+    # Device control services are now lazy-loaded via Assistant properties
+    # They will be initialized only when first accessed
+    logger.info("🎛️ Device control services set to lazy-load on first use")
 
+    # ============================================================================
+    # MUSIC SERVICE (Async initialization)
+    # ============================================================================
+    
+    music_service = MusicService()
+    asyncio.create_task(music_service.initialize())
+    logger.info("🎵 Music service initialized (async)")
+    
     # ============================================================================
     # CREATE ASSISTANT
     # ============================================================================
 
     assistant = Assistant(instructions=agent_prompt)
-    assistant.set_services(device_control_service, mcp_executor)
-    assistant.set_room_info(room_name=room_name, device_mac=device_mac)
+    assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
+    logger.info("✅ Lightweight Assistant initialized")
+    
+    # Initialize UnifiedAudioPlayer for music/story playback
+    from src.services.unified_audio_player import UnifiedAudioPlayer
+    audio_player = UnifiedAudioPlayer()
+    audio_player.set_context(ctx)
+    assistant.audio_player = audio_player
+    logger.info("🎵 UnifiedAudioPlayer initialized and attached to Assistant")
+    # ============================================================================
+    # ENABLE FEATURES (Lazy-loaded modules)
+    # ============================================================================
+    
+    # Enable device control features
+    assistant.enable_battery_tools()
+    assistant.enable_volume_tools()
+    logger.info("🎛️ Device control features enabled")
+    
+    # Enable mode switching
+    assistant.enable_mode_switching()
+    logger.info("🔄 Mode switching feature enabled")
+    
+    # Initialize game states based on active_game (tools already passed to AgentSession)
+    active_game = getattr(ctx, 'active_game', 'Cheeko')
+        
+    if active_game in ["Math Tutor", "Riddle Solver", "Word Ladder"]:
+        # Initialize the appropriate game state and connect to tools
+        if active_game == "Math Tutor":
+            assistant.enable_math_game()
+            from src.features.game_tools import set_math_game_state
+            set_math_game_state(assistant.math_game_state)
+            logger.info("🧮 Math Tutor state initialized and connected to tools")
+        elif active_game == "Riddle Solver":
+            assistant.enable_riddle_game()
+            from src.features.game_tools import set_riddle_game_state
+            set_riddle_game_state(assistant.riddle_game_state)
+            logger.info("🤔 Riddle Solver state initialized and connected to tools")
+        elif active_game == "Word Ladder":
+            assistant.enable_word_ladder_game()
+            from src.features.game_tools import set_word_ladder_state
+            set_word_ladder_state(assistant.word_ladder_state)
+            logger.info("🎮 Word Ladder state initialized and connected to tools")
+        
+        logger.info(f"🎮 Game mode active: {active_game}")
+    else:
+        # Not a game mode, just initialize states for potential later use
+        assistant.enable_math_game()
+        assistant.enable_riddle_game()
+        assistant.enable_word_ladder_game()
+        logger.info("🎮 Game state modules initialized (Cheeko mode)")
+    
+    # Enable music playback tools
+    assistant.enable_music_tools(music_service)
+    logger.info("🎵 Music playback tools enabled")
 
     # ============================================================================
     # CHAT EVENT HANDLER SETUP
@@ -478,20 +639,30 @@ async def entrypoint(ctx: JobContext):
     # logger.info("💬 ChatEventHandler configured (PTT-safe mode)")
 
     # ============================================================================
-    # USAGE TRACKING
+    # USAGE TRACKING (Async initialization)
     # ============================================================================
 
-    # Setup usage tracking
-    usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
-    usage_manager.setup_metrics_collection(session)
+    # Usage tracking will be initialized in background after session starts
+    usage_manager = None
+
+    async def initialize_usage_tracking():
+        """Initialize usage tracking in background"""
+        nonlocal usage_manager
+        try:
+            from src.utils.helpers import UsageManager
+            usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
+            usage_manager.setup_metrics_collection(session)
+            logger.info("📊 Usage tracking initialized (async)")
+        except Exception as e:
+            logger.warning(f"Failed to initialize usage tracking: {e}")
 
     async def log_usage():
         """Log usage summary on shutdown"""
-        await usage_manager.log_usage()
-        logger.info("Sent usage_summary via data channel")
+        if usage_manager:
+            await usage_manager.log_usage()
+            logger.info("Sent usage_summary via data channel")
 
     ctx.add_shutdown_callback(log_usage)
-    logger.info("📊 Usage tracking configured")
 
     # ============================================================================
     # ROOM INPUT OPTIONS
@@ -524,13 +695,14 @@ async def entrypoint(ctx: JobContext):
 
             # Log error statistics
             try:
-                error_stats = error_manager.get_error_stats()
-                if error_stats:
-                    total_errors = sum(error_stats.values())
-                    if total_errors > 0:
-                        logger.warning(f"⚠️ Total errors: {total_errors}")
-                    else:
-                        logger.info("✅ No errors during session")
+                if error_manager:
+                    error_stats = error_manager.get_error_stats()
+                    if error_stats:
+                        total_errors = sum(error_stats.values())
+                        if total_errors > 0:
+                            logger.warning(f"⚠️ Total errors: {total_errors}")
+                        else:
+                            logger.info("✅ No errors during session")
             except Exception as e:
                 logger.warning(f"Could not get error stats: {e}")
 
@@ -580,6 +752,68 @@ async def entrypoint(ctx: JobContext):
     def on_room_disconnected():
         logger.info("🔴 Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
+    
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        """Handle data channel messages from firmware/mqtt-gateway"""
+        try:
+            import json
+            message = json.loads(data_packet.data.decode('utf-8'))
+            logger.info(f"📨 Data channel message: {message}")
+            
+            # Handle playback control messages
+            if message.get('type') == 'playback_control':
+                action = message.get('action')
+                
+                if action == 'next':
+                    logger.info("⏭️ Skip to next song requested")
+                    # Stop current song and play next
+                    asyncio.create_task(handle_skip_next())
+                elif action == 'previous':
+                    logger.info("⏮️ Skip to previous song requested")
+                    # Stop current song and play previous
+                    asyncio.create_task(handle_skip_previous())
+        except Exception as e:
+            logger.error(f"❌ Error handling data channel message: {e}")
+    
+    async def handle_skip_next():
+        """Handle skip to next song"""
+        try:
+            # Stop current playback
+            if hasattr(assistant, 'audio_player') and assistant.audio_player:
+                await assistant.audio_player.stop()
+                logger.info("🛑 Stopped current song for skip")
+            
+            # Get next song
+            from src.features.music_tools import play_next_in_playlist
+            next_song = await play_next_in_playlist()
+            
+            if next_song and hasattr(assistant, 'audio_player'):
+                logger.info(f"⏭️ Playing next song: {next_song['title']}")
+                await asyncio.sleep(0.3)  # Small delay for clean transition
+                await assistant.audio_player.play_from_url(next_song['url'], next_song['title'])
+        except Exception as e:
+            logger.error(f"❌ Error in handle_skip_next: {e}")
+    
+    async def handle_skip_previous():
+        """Handle skip to previous song"""
+        try:
+            # Stop current playback
+            if hasattr(assistant, 'audio_player') and assistant.audio_player:
+                await assistant.audio_player.stop()
+                logger.info("🛑 Stopped current song for skip")
+            
+            # Get previous song (currently not implemented - would need playlist history)
+            logger.warning("⏮️ Previous song not yet implemented - playing next song instead")
+            from src.features.music_tools import play_next_in_playlist
+            song = await play_next_in_playlist()
+            
+            if song and hasattr(assistant, 'audio_player'):
+                logger.info(f"⏭️ Playing song: {song['title']}")
+                await asyncio.sleep(0.3)
+                await assistant.audio_player.play_from_url(song['url'], song['title'])
+        except Exception as e:
+            logger.error(f"❌ Error in handle_skip_previous: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
@@ -594,8 +828,11 @@ async def entrypoint(ctx: JobContext):
     # Pass references to assistant
     assistant.set_agent_session(session)
     assistant._session_context = ctx
+    
+    # Set session on audio_player for playback
+    audio_player.set_session(session)
 
-    # Start session
+    # Start session (tools already passed to AgentSession constructor)
     await session.start(
         room=ctx.room,
         agent=assistant,
@@ -605,6 +842,49 @@ async def entrypoint(ctx: JobContext):
     init_elapsed_time = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"⚡ Total initialization: {init_elapsed_time:.0f}ms")
     logger.info("✅ Gemini Realtime agent is LIVE!")
+
+    # Auto-start music if in Music Mode
+    if room_type == "music":
+        logger.info("🎵 [MUSIC MODE] Auto-starting music playback")
+        try:
+            from src.features.music_tools import start_music_mode
+            song = await start_music_mode()
+            if song:
+                logger.info(f"🎵 [MUSIC MODE] Now playing: {song['title']}")
+            else:
+                logger.warning("⚠️ [MUSIC MODE] No song available to play")
+        except Exception as e:
+            logger.error(f"❌ [MUSIC MODE] Failed to start music: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+
+    # Initialize background services asynchronously (non-blocking)
+    async def init_background_services():
+        """Initialize non-critical services in background"""
+        # Start usage tracking
+        await initialize_usage_tracking()
+
+        # Start chat history service
+        if agent_id and device_mac:
+            try:
+                from src.services.chat_history_service import ChatHistoryService
+                manager_api_url = os.getenv("MANAGER_API_URL")
+                manager_api_secret = os.getenv("MANAGER_API_SECRET")
+
+                chat_history_service = ChatHistoryService(
+                    manager_api_url=manager_api_url,
+                    secret=manager_api_secret,
+                    device_mac=device_mac,
+                    session_id=room_name,
+                    agent_id=agent_id
+                )
+                chat_history_service.start_periodic_sending()
+                logger.info(f"📝 Chat history service initialized (async) for agent_id: {agent_id}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize chat history service: {e}")
+
+    # Start background initialization (fire and forget)
+    asyncio.create_task(init_background_services())
 
 
 # ============================================================================

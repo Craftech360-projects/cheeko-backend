@@ -45,7 +45,8 @@ module.exports = defineConfig({
     port: 8001, // 指定端口为 8886 (matches production)
     proxy: {
       "/toy": {
-        target: "https://manager-api-production-e079.up.railway.app",
+        // target: "https://manager-api-production-e079.up.railway.app",
+        target: 'http://127.0.0.1:8002',
         changeOrigin: true,
       },
     },

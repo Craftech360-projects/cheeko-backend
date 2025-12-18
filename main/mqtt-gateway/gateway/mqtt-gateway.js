@@ -71,7 +71,9 @@ class MQTTGateway {
       ) {
         this.agentDispatchClient = null;
         this.roomService = null;
-        logger.warn("⚠️ [INIT] LiveKit credentials incomplete, clients not initialized");
+        logger.warn(
+          "⚠️ [INIT] LiveKit credentials incomplete, clients not initialized"
+        );
       } else {
         // Initialize LiveKit clients with valid credentials
         this.roomService = new RoomServiceClient(
@@ -573,7 +575,7 @@ class MQTTGateway {
       macAddress = topicParts[1];
     }
 
-    // logger.info(`⏭️ [CONTROL] Next requested for device: ${macAddress}`);
+    logger.info(`⏭️ [CONTROL] Next requested for device: ${macAddress}`);
 
     // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
@@ -592,52 +594,56 @@ class MQTTGateway {
       return;
     }
 
-    let apiUrl = null;
-
     try {
       if (mode === "music") {
-        apiUrl = `${MEDIA_API_BASE}/music-bot/${roomName}/next`;
-      } else if (mode === "story") {
-        apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/next`;
+        // Send data channel message to LiveKit agent
+        const room = deviceInfo.connection?.bridge?.room;
+        if (!room) {
+          logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
+          return;
+        }
+
+        // Send TTS stop message first
+        if (clientId) {
+          const controlTopic = `devices/p2p/${clientId}`;
+          const ttsStopMsg = {
+            type: "tts",
+            state: "stop",
+            timestamp: Date.now(),
+          };
+          this.mqttPublish(controlTopic, ttsStopMsg);
+        }
+
+        // Send playback control via LiveKit data channel
+        const playbackMessage = JSON.stringify({
+          type: "playback_control",
+          action: "next",
+        });
+        await room.localParticipant.publishData(
+          new TextEncoder().encode(playbackMessage),
+          { reliable: true }
+        );
+        logger.info(
+          `✅ [CONTROL] Sent 'next' command via data channel to ${roomName}`
+        );
+
+        // Send TTS start message
+        if (clientId) {
+          const controlTopic = `devices/p2p/${clientId}`;
+          const ttsStartMsg = {
+            type: "tts",
+            state: "start",
+            text: "Skipping to next song",
+            session_id: deviceInfo.connection?.udp?.session_id || null,
+          };
+          this.mqttPublish(controlTopic, ttsStartMsg);
+        }
       } else {
-        // logger.warn(`⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}`);
+        // Other modes not supported
+        logger.warn(
+          `⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}`
+        );
         return;
-      }
-
-      // Send TTS stop message first
-      if (clientId) {
-        const controlTopic = `devices/p2p/${clientId}`;
-        const ttsStopMsg = {
-          type: "tts",
-          state: "stop",
-          timestamp: Date.now(),
-        };
-
-        this.mqttPublish(controlTopic, ttsStopMsg);
-      }
-
-      // logger.info(`⏭️ [CONTROL] Sending next skip request to: ${apiUrl}`);
-      const response = await axios.post(
-        apiUrl,
-        {},
-        mediaAxiosConfig({ timeout: 5000 })
-      );
-      // logger.info(`✅ [CONTROL] Next skip successful`);
-
-      // Send TTS start message after successful skip
-      if (clientId) {
-        const controlTopic = `devices/p2p/${clientId}`;
-        const ttsStartMsg = {
-          type: "tts",
-          state: "start",
-          text:
-            mode === "music"
-              ? "Skipping to next song"
-              : "Skipping to next story",
-          session_id: deviceInfo.connection?.udp?.session_id || null,
-        };
-
-        this.mqttPublish(controlTopic, ttsStartMsg);
       }
     } catch (error) {
       logger.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
@@ -671,7 +677,7 @@ class MQTTGateway {
       macAddress = topicParts[1];
     }
 
-    // logger.info(`⏮️ [CONTROL] Previous requested for device: ${macAddress}`);
+    logger.info(`⏮️ [CONTROL] Previous requested for device: ${macAddress}`);
 
     // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
@@ -690,48 +696,54 @@ class MQTTGateway {
       return;
     }
 
-    let apiUrl = null;
-
     try {
       if (mode === "music") {
-        apiUrl = `${MEDIA_API_BASE}/music-bot/${roomName}/previous`;
-      } else if (mode === "story") {
-        apiUrl = `${MEDIA_API_BASE}/story-bot/${roomName}/previous`;
+        // Send data channel message to LiveKit agent
+        const room = deviceInfo.connection?.bridge?.room;
+        if (!room) {
+          logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
+          return;
+        }
+
+        // Send TTS stop message first
+        if (clientId) {
+          const controlTopic = `devices/p2p/${clientId}`;
+          const ttsStopMsg = {
+            type: "tts",
+            state: "stop",
+            timestamp: Date.now(),
+          };
+          this.mqttPublish(controlTopic, ttsStopMsg);
+        }
+
+        // Send playback control via LiveKit data channel
+        const playbackMessage = JSON.stringify({
+          type: "playback_control",
+          action: "previous",
+        });
+        await room.localParticipant.publishData(
+          new TextEncoder().encode(playbackMessage),
+          { reliable: true }
+        );
+        logger.info(
+          `✅ [CONTROL] Sent 'previous' command via data channel to ${roomName}`
+        );
+
+        // Send TTS start message
+        if (clientId) {
+          const controlTopic = `devices/p2p/${clientId}`;
+          const ttsStartMsg = {
+            type: "tts",
+            state: "start",
+            text: "Going to previous song",
+            session_id: deviceInfo.connection?.udp?.session_id || null,
+          };
+          this.mqttPublish(controlTopic, ttsStartMsg);
+        }
       } else {
-        // logger.warn(`⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}`);
+        // Other modes not supported
+        logger.warn(`⚠️ [CONTROL] Previous not supported for mode: ${mode}`);
         return;
-      }
-
-      // Send TTS stop message first
-      if (clientId) {
-        const controlTopic = `devices/p2p/${clientId}`;
-        const ttsStopMsg = {
-          type: "tts",
-          state: "stop",
-          timestamp: Date.now(),
-        };
-
-        this.mqttPublish(controlTopic, ttsStopMsg);
-      }
-
-      // logger.info(`⏮️ [CONTROL] Sending previous skip request to: ${apiUrl}`);
-      const response = await axios.post(apiUrl, {}, mediaAxiosConfig());
-      // logger.info(`✅ [CONTROL] Previous skip successful`);
-
-      // Send TTS start message after successful skip
-      if (clientId) {
-        const controlTopic = `devices/p2p/${clientId}`;
-        const ttsStartMsg = {
-          type: "tts",
-          state: "start",
-          text:
-            mode === "music"
-              ? "Going to previous song"
-              : "Going to previous story",
-          session_id: deviceInfo.connection?.udp?.session_id || null,
-        };
-
-        this.mqttPublish(controlTopic, ttsStartMsg);
       }
     } catch (error) {
       logger.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);

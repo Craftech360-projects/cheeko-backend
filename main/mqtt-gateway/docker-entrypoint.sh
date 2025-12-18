@@ -66,51 +66,18 @@ echo "   Manager API: $MANAGER_API_URL"
 echo "   Media API: ${MEDIA_API_BASE:-http://localhost:8003}"
 echo ""
 
-# Wait for external services
-echo "🔌 Checking external service connectivity..."
-
-# Check EMQX broker
-if ! check_service "$EMQX_HOST" "$EMQX_PORT" "EMQX Broker"; then
-    echo "⚠️  Warning: EMQX broker not available, but continuing anyway..."
-fi
-
-# Check LiveKit server (extract host and port from URL)
-LIVEKIT_HOST=$(echo "${LIVEKIT_URL:-ws://localhost:7880}" | sed -E 's|^ws://([^:]+):.*|\1|')
-LIVEKIT_PORT=$(echo "${LIVEKIT_URL:-ws://localhost:7880}" | sed -E 's|^ws://[^:]+:([0-9]+).*|\1|')
-
-if ! check_service "$LIVEKIT_HOST" "$LIVEKIT_PORT" "LiveKit Server"; then
-    echo "❌ Error: LiveKit server is required but not available"
-    echo "   Make sure LiveKit is running: cd ../livekit-server && docker-compose up -d"
-    exit 1
-fi
+# Skip connectivity checks - the Node.js app handles connections
+echo "🔌 Skipping external service checks (app will connect on startup)..."
 
 # Run ldconfig to ensure shared libraries are found
 echo "🔧 Configuring shared libraries..."
 ldconfig 2>/dev/null || true
 
-# Display Opus library info
-echo ""
-echo "🎵 Opus Library Information:"
-if [ -f "/app/node_modules/@discordjs/opus/prebuild" ]; then
-    echo "   Native Opus bindings:"
-    ls -lh /app/node_modules/@discordjs/opus/prebuild/ 2>/dev/null || echo "   (bindings directory not found)"
-fi
-
 echo ""
 echo "================================================"
-echo "🎯 Starting services..."
+echo "🎯 Starting mqtt-gateway..."
 echo "================================================"
 echo ""
 
-# Start UDP HTTP Bridge in the background
-echo "🌉 Starting UDP HTTP Bridge..."
-node udp-http-bridge.js &
-BRIDGE_PID=$!
-echo "   Bridge PID: $BRIDGE_PID"
-
-# Give bridge a moment to start
-sleep 2
-
-# Start the main application with proper signal handling
-echo "🎯 Starting main application..."
-exec node approom.js
+# Start the application with proper signal handling
+exec node app.js

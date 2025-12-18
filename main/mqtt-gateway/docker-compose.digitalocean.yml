@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # EMQX MQTT Broker
+  emqx:
+    image: emqx/emqx:5.3.0
+    container_name: emqx-broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"      # MQTT
+      - "8083:8083"      # WebSocket
+      - "18083:18083"    # Dashboard
+    environment:
+      - EMQX_NAME=emqx
+      - EMQX_HOST=0.0.0.0
+      - EMQX_ALLOW_ANONYMOUS=true
+      - EMQX_LISTENER__TCP__EXTERNAL=1883
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    networks:
+      - mqtt-network
+    healthcheck:
+      test: ["CMD", "emqx_ctl", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # MQTT Gateway
+  mqtt-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mqtt-gateway
+    restart: unless-stopped
+    ports:
+      - "8884:8884/udp"  # UDP Audio
+      - "8000:8000"      # HTTP/WebSocket (if needed)
+    environment:
+      - NODE_ENV=production
+      # EMQX Configuration (local connection)
+      - EMQX_HOST=emqx
+      - EMQX_PORT=1883
+      - EMQX_PROTOCOL=mqtt
+      # UDP Configuration
+      - UDP_PORT=8884
+      - PUBLIC_IP=139.59.11.236
+      # LiveKit Configuration
+      - LIVEKIT_URL=wss://altio-4owjwzb3.livekit.cloud
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      # Manager API Configuration
+      - MANAGER_API_URL=https://manager-api-production-e079.up.railway.app
+      # Cerebrium Configuration
+      - CEREBRIUM_API_TOKEN=${CEREBRIUM_API_TOKEN}
+      - MEDIA_API_BASE=https://api.aws.us-east-1.cerebrium.ai/v4/p-869f80aa/livekit-server-simple
+      # MQTT Signature Key
+      - MQTT_SIGNATURE_KEY=test-signature-key-12345
+    volumes:
+      - ./config:/app/config:ro
+      - ./audio:/app/audio:ro
+      - ./logs:/app/logs
+    networks:
+      - mqtt-network
+    depends_on:
+      emqx:
+        condition: service_healthy
+
+volumes:
+  emqx_data:
+  emqx_log:
+
+networks:
+  mqtt-network:
+    driver: bridge

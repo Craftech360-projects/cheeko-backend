@@ -629,16 +629,17 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             currentMode = "conversation"; // Default if null
         }
 
-        // 2. Cycle through modes: conversation → music → story → conversation
+        // 2. Cycle through modes: conversation ⟷ music (Story Mode removed)
         String newMode;
         switch (currentMode.toLowerCase()) {
             case "conversation":
                 newMode = "music";
                 break;
             case "music":
-                newMode = "story";
+                newMode = "conversation";
                 break;
             case "story":
+                // Legacy: If device was in story mode, move to conversation
                 newMode = "conversation";
                 break;
             default:

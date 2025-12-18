@@ -348,13 +348,7 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202501230005_translate_sys_params.sql
-  - changeSet:
-      id: 202508291530
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202508291530_add_amazon_transcribe_streaming.sql
+
   - changeSet:
       id: 202508291545
       author: claude
@@ -370,27 +364,7 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202508291600_add_play_story.sql
-  - changeSet:
-      id: 202509020001
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202509020001_add_openai_gemini_tts_fixed.sql
-  - changeSet:
-      id: 202509020002
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202509020002_add_openai_gemini_voices_fixed.sql
-  - changeSet:
-      id: 202509020003
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202509020003_add_openai_gemini_tts_providers.sql
+
   - changeSet:
       id: 202509020004
       author: claude
@@ -443,14 +417,14 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202509261500_final_cheeko_fix.sql
-  - changeSet:
-      id: 202510091545
-      author: claude
-      validCheckSum: ANY
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202510091545_add_cheeko_mode_templates.sql
+  #  - changeSet:
+  #      id: 202510091545
+  #      author: claude
+  #      validCheckSum: ANY
+  #      changes:
+  #        - sqlFile:
+  #            encoding: utf8
+  #            path: classpath:db/changelog/202510091545_add_cheeko_mode_templates.sql
   - changeSet:
       id: 202510091620
       author: claude
@@ -459,14 +433,14 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202510091620_add_cheeko_mode_templates_fixed.sql
-  - changeSet:
-      id: 202510091700
-      author: claude
-      validCheckSum: ANY
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202510091700_add_cheeko_modes_final.sql
+  #  - changeSet:
+  #      id: 202510091700
+  #      author: claude
+  #      validCheckSum: ANY
+  #      changes:
+  #        - sqlFile:
+  #            encoding: utf8
+  #            path: classpath:db/changelog/202510091700_add_cheeko_modes_final.sql
   - changeSet:
       id: 202510091430
       author: claude
@@ -489,93 +463,7 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202510101800_add_cheeko_mode_templates_v2.sql
-  - changeSet:
-      id: 202510111600
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202510111600.sql
-  - changeSet:
-      id: 202510111800
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202510111800_add_arabic_template.sql
-  - changeSet:
-      id: 202510162000
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202510162000_update_edgetts_to_english.sql
-  - changeSet:
-      id: 202510301400
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202510301400.sql
-  - changeSet:
-      id: 202511031400
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511031400_cleanup_templates_keep_cheeko.sql
-  - changeSet:
-      id: 202511031401
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511031401_add_new_game_templates.sql
-  - changeSet:
-      id: 202511041600
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511041600_update_math_tutor_tool.sql
-  - changeSet:
-      id: 202511052130
-      author: claude
-      validCheckSum: ANY
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511052130_update_math_tutor_prompt.sql
-  - changeSet:
-      id: 202511052200
-      author: claude
-      validCheckSum: ANY
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511052200_math_tutor_question_bank_retry.sql
-  - changeSet:
-      id: 202511052230
-      author: claude
-      validCheckSum: ANY
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511052230_riddle_solver_prompt.sql
-  - changeSet:
-      id: 202511061400
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511061400_word_ladder_prompt_fix.sql
-  - changeSet:
-      id: 202511071501
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511071501_word_ladder_function_call_fix.sql
+
   - changeSet:
       id: 202511101500
       author: claude
@@ -599,16 +487,9 @@ databaseChangeLog:
             path: classpath:db/changelog/202511121400_create_playlist_tables.sql
 
   - changeSet:
-      id: 202511071505
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511071505_cheeko_prompt_fixed.sql
-
-  - changeSet:
       id: 202511071504
       author: claude
+      validCheckSum: ANY
       changes:
         - sqlFile:
             encoding: utf8
@@ -638,22 +519,6 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/202511211400_analytics_remove_text_add_streaks.sql
 
-  - changeSet:
-      id: 202511221138
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511221138_update_streak_to_5_full.sql
-
-  - changeSet:
-      id: 202511261230
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202511261230_word_ladder_initial_greeting_fix.sql
-
   #   - changeSet:
   #       id: 202511271500
   #       author: claude
@@ -665,6 +530,8 @@ databaseChangeLog:
   - changeSet:
       id: 202511291430
       author: claude
+      validCheckSum: ANY
+      runOnChange: true
       changes:
         - sqlFile:
             encoding: utf8
@@ -677,36 +544,3 @@ databaseChangeLog:
   #        - sqlFile:
   #            encoding: utf8
   #            path: classpath:db/changelog/202511291434.sql
-
-  - changeSet:
-      id: 202512061830
-      author: claude
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202512061830_add_personalization_to_kid_profile.sql
-
-  - changeSet:
-      id: 202512061832
-      author: claude
-      validCheckSum: ANY
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202512061832_update_cheeko_prompt_with_personalization.sql
-
-  - changeSet:
-      id: 202512111340
-      author: cheeko
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202512111340_update_cheeko_prompt_phonics.sql
-
-  - changeSet:
-      id: 202512121200
-      author: cheeko
-      changes:
-        - sqlFile:
-            encoding: utf8
-            path: classpath:db/changelog/202512121200_update_cheeko_prompt_spelling.sql

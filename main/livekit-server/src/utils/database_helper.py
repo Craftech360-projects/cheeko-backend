@@ -166,6 +166,75 @@ class DatabaseHelper:
         logger.error(f"Failed to get character after {self.retry_attempts} attempts, using default Conversation")
         return "Conversation"  # Default fallback
 
+    async def get_agent_name(self, device_mac: str) -> Optional[str]:
+        """
+        Get agent_name from database using device MAC address.
+        Returns the game/mode name: "Cheeko", "Math Tutor", "Riddle Solver", "Word Ladder"
+        
+        Args:
+            device_mac: Device MAC address
+            
+        Returns:
+            str: Agent name if found, "Cheeko" as default
+        """
+        # Normalize MAC address
+        normalized_mac = self._normalize_mac_address(device_mac)
+        logger.info(f"🎮 [DB HELPER] get_agent_name - MAC: {device_mac} -> normalized: {normalized_mac}")
+        
+        # Use existing current-character endpoint (returns agent_name)
+        url = f"{self.manager_api_url}/agent/device/{normalized_mac}/current-character"
+        headers = {
+            "Authorization": f"Bearer {self.secret}",
+            "Content-Type": "application/json"
+        }
+        
+        for attempt in range(self.retry_attempts):
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            # Check for Result<String> format: {code: 0, data: "agent_name"}
+                            if isinstance(data, dict) and data.get('code') == 0:
+                                agent_name = data.get('data')
+                                if agent_name:
+                                    logger.info(f"🎮✅ [DB HELPER] Agent name: {agent_name}")
+                                    return agent_name
+                                else:
+                                    logger.warning(f"⚠️ [DB HELPER] API returned success but no agent name")
+                                    return "Cheeko"  # Default
+                            else:
+                                logger.warning(f"⚠️ [DB HELPER] Unexpected API response format: {data}")
+                                return "Cheeko"  # Default
+                        elif response.status == 404:
+                            logger.warning(f"No agent found for MAC: {device_mac}, using default Cheeko")
+                            return "Cheeko"
+                        else:
+                            error_text = await response.text()
+                            logger.warning(f"API request failed: {response.status} - {error_text}")
+                            
+                            # Don't retry client errors (4xx)
+                            if 400 <= response.status < 500:
+                                logger.error(f"Client error, not retrying: {response.status}")
+                                return "Cheeko"  # Default
+                                
+            except asyncio.TimeoutError:
+                logger.warning(f"API request timeout (attempt {attempt + 1}/{self.retry_attempts})")
+            except aiohttp.ClientError as e:
+                logger.warning(f"API client error (attempt {attempt + 1}/{self.retry_attempts}): {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error getting agent_name (attempt {attempt + 1}/{self.retry_attempts}): {e}")
+                
+            # Wait before retry with exponential backoff
+            if attempt < self.retry_attempts - 1:
+                wait_time = 2 ** attempt  # 1s, 2s, 4s
+                await asyncio.sleep(wait_time)
+                
+        logger.error(f"Failed to get agent_name after {self.retry_attempts} attempts, using default Cheeko")
+        return "Cheeko"  # Default fallback
+
+
     async def get_child_profile_by_mac(self, device_mac: str) -> Optional[dict]:
         """
         Get child profile assigned to device by MAC address
