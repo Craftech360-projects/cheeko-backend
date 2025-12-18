@@ -116,10 +116,11 @@ class QdrantSemanticSearch:
             try:
                 collections = self.client.get_collections()
                 logger.info("✅ Connected to Qdrant cloud successfully")
-                
-                # Check if collections exist and have data
-                await self._ensure_collections_exist()
-                
+
+                # Skip collection verification - collections are known to exist
+                # This saves ~340ms on initialization
+                # await self._ensure_collections_exist()
+
                 self.is_initialized = True
                 return True
                 
@@ -588,7 +589,10 @@ class QdrantSemanticSearch:
 
     async def get_random_music(self, language_filter: Optional[str] = None) -> Optional[QdrantSearchResult]:
         """Get a random song from Qdrant collection"""
+        logger.info(f"🎵 get_random_music called - language_filter: {language_filter}, is_initialized: {self.is_initialized}")
+
         if not self.is_initialized:
+            logger.warning("🎵 get_random_music: NOT INITIALIZED - returning None")
             return None
 
         try:
@@ -599,22 +603,39 @@ class QdrantSemanticSearch:
                 with_payload=True
             )
 
+            logger.info(f"🎵 Qdrant scroll returned {len(scroll_result[0]) if scroll_result[0] else 0} points")
+
             if scroll_result[0]:  # Check if we have any points
                 import random
                 # Filter by language if specified
                 valid_points = scroll_result[0]
 
+                # Log available languages in the results
+                available_langs = set(p.payload.get('language') for p in valid_points)
+                logger.info(f"🎵 Available languages in results: {available_langs}")
+
                 # First apply allowed languages filter if configured
                 if self.config["allowed_music_languages"]:
                     valid_points = [p for p in valid_points if p.payload.get('language') in self.config["allowed_music_languages"]]
-                    logger.info(f"🔒 Random music restricted to allowed languages: {', '.join(self.config['allowed_music_languages'])}")
+                    logger.info(f"🔒 Random music restricted to allowed languages: {', '.join(self.config['allowed_music_languages'])} - {len(valid_points)} songs remain")
 
                 # Then apply specific language filter if requested
+                fallback_points = valid_points  # Keep unfiltered list for fallback
                 if language_filter:
-                    valid_points = [p for p in valid_points if p.payload.get('language') == language_filter]
+                    before_count = len(valid_points)
+                    filtered_points = [p for p in valid_points if p.payload.get('language') == language_filter]
+                    logger.info(f"🎵 Language filter '{language_filter}': {before_count} -> {len(filtered_points)} songs")
+
+                    if filtered_points:
+                        valid_points = filtered_points
+                    else:
+                        # Fallback to any available language
+                        logger.info(f"🎵 No '{language_filter}' songs found, falling back to random from available languages")
+                        valid_points = fallback_points
 
                 if valid_points:
                     random_point = random.choice(valid_points)
+                    logger.info(f"🎵 Selected random song: {random_point.payload['title']} ({random_point.payload['language']})")
                     return QdrantSearchResult(
                         title=random_point.payload['title'],
                         filename=random_point.payload['filename'],
@@ -624,7 +645,10 @@ class QdrantSemanticSearch:
                         alternatives=random_point.payload.get('alternatives', []),
                         romanized=random_point.payload.get('romanized', '')
                     )
+                else:
+                    logger.warning(f"🎵 No valid songs after filtering - language_filter: {language_filter}")
 
+            logger.warning("🎵 get_random_music: No results from Qdrant scroll")
             return None
 
         except Exception as e:
