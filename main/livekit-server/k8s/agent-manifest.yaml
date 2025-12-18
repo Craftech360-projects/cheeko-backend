@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cheeko-livekit-agent
+  namespace: livekit
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cheeko-livekit-agent
+  template:
+    metadata:
+      labels:
+        app: cheeko-livekit-agent
+    spec:
+      # Allow 10 minutes for graceful shutdown (complete active conversations)
+      terminationGracePeriodSeconds: 600
+      containers:
+      - name: agent
+        # Replace with your Docker image
+        image: your-docker-registry/cheeko-livekit-agent:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8081
+          name: healthcheck
+        - containerPort: 8003
+          name: media-api
+        resources:
+          # Supports ~30 concurrent 1:1 AI conversations
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        env:
+        # LiveKit credentials from secret
+        - name: LIVEKIT_URL
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: LIVEKIT_URL
+        - name: LIVEKIT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: LIVEKIT_API_KEY
+        - name: LIVEKIT_API_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: LIVEKIT_API_SECRET
+        # Google/Gemini API
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: GOOGLE_API_KEY
+        # Mem0 for memory
+        - name: MEM0_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: MEM0_API_KEY
+        # Qdrant for semantic search
+        - name: QDRANT_URL
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: QDRANT_URL
+        - name: QDRANT_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: cheeko-livekit-secrets
+              key: QDRANT_API_KEY
+        # Add other env vars as needed
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8081
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cheeko-livekit-agent
+  namespace: livekit
+spec:
+  selector:
+    app: cheeko-livekit-agent
+  ports:
+  - name: healthcheck
+    port: 8081
+    targetPort: 8081
+  - name: media-api
+    port: 8003
+    targetPort: 8003
+  type: ClusterIP
