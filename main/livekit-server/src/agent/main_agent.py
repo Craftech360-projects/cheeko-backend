@@ -9,6 +9,8 @@ import random
 import inspect
 import asyncio
 import os
+import re
+import pymysql
 from pathlib import Path
 from livekit.agents import (
     Agent,
@@ -18,7 +20,140 @@ from livekit.agents import (
 from .filtered_agent import FilteredAgent
 from src.utils.database_helper import DatabaseHelper
 from src.services.google_search_service import GoogleSearchService
+
+# ChromaDB for storytelling RAG
+try:
+    import chromadb
+    CHROMADB_AVAILABLE = True
+except ImportError:
+    CHROMADB_AVAILABLE = False
+
 logger = logging.getLogger("agent")
+
+# ============================================================================
+# STORYTELLER DATABASE SETUP (shared with storyteller folder)
+# ============================================================================
+STORYTELLER_DIR = Path(__file__).parent.parent.parent / "storyteller"
+STORY_DB_PATH = STORYTELLER_DIR / "stories.db"
+
+# ChromaDB Cloud Configuration - Read from environment variables
+CHROMA_TENANT = os.getenv("CHROMA_CLOUD_TENANT")
+CHROMA_DATABASE = os.getenv("CHROMA_CLOUD_DATABASE")
+CHROMA_API_KEY = os.getenv("CHROMA_API_KEY")
+
+# Initialize ChromaDB Cloud for storytelling RAG (if available)
+story_rag_collection = None
+if CHROMADB_AVAILABLE:
+    try:
+        story_chroma_client = chromadb.CloudClient(
+            tenant=CHROMA_TENANT,
+            database=CHROMA_DATABASE,
+            api_key=CHROMA_API_KEY
+        )
+        story_rag_collection = story_chroma_client.get_or_create_collection(name="story_pages")
+        # Log ChromaDB stats
+        collection_count = story_rag_collection.count()
+        logger.info(f"📚 ======== CHROMADB CLOUD INITIALIZED ========")
+        logger.info(f"📚 Tenant: {CHROMA_TENANT}")
+        logger.info(f"📚 Database: {CHROMA_DATABASE}")
+        logger.info(f"📚 Collection: 'story_pages'")
+        logger.info(f"📚 Total documents: {collection_count}")
+        # Try to get unique story titles in the collection
+        try:
+            sample = story_rag_collection.get(limit=1, include=["metadatas"])
+            if sample['metadatas']:
+                logger.info(f"📚 Sample metadata: {sample['metadatas'][0]}")
+        except:
+            pass
+        logger.info(f"📚 ============================================")
+    except Exception as e:
+        logger.warning(f"📚 Could not initialize ChromaDB Cloud RAG: {e}")
+else:
+    logger.warning(f"📚 ChromaDB not installed - RAG disabled")
+
+def get_story_db_connection():
+    """Get MySQL connection to storyteller database."""
+    try:
+        conn = pymysql.connect(
+            host=os.getenv('MYSQL_HOST', 'localhost'),
+            port=int(os.getenv('MYSQL_PORT', '3307')),
+            user=os.getenv('MYSQL_USER', 'manager'),
+            password=os.getenv('MYSQL_PASSWORD', 'managerpassword'),
+            database=os.getenv('MYSQL_DATABASE', 'manager_api'),
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"📚 [DB] Failed to connect to MySQL: {e}")
+        return None
+
+def get_all_story_titles_from_db():
+    """Get all story titles from the storyteller MySQL database."""
+    logger.info(f"📚 [DB] Connecting to MySQL stories database...")
+    conn = get_story_db_connection()
+    if not conn:
+        logger.warning(f"📚 [DB] Could not connect to MySQL database!")
+        return []
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT title FROM stories ORDER BY title")
+        titles = [row['title'] for row in cursor.fetchall()]
+        logger.info(f"📚 [DB] Found {len(titles)} stories: {titles}")
+        return titles
+    except Exception as e:
+        logger.error(f"📚 [DB] Error fetching stories: {e}")
+        return []
+    finally:
+        conn.close()
+
+def get_story_by_name_from_db(name: str):
+    """Get a story by name (fuzzy match) from the storyteller MySQL database."""
+    logger.info(f"📚 [DB] Searching for story: '{name}'")
+    conn = get_story_db_connection()
+    if not conn:
+        logger.warning(f"📚 [DB] No database connection!")
+        return None
+    
+    try:
+        cursor = conn.cursor()
+
+        # Try exact match first
+        cursor.execute("SELECT * FROM stories WHERE LOWER(title) = LOWER(%s)", (name,))
+        row = cursor.fetchone()
+
+        if not row:
+            # Try contains match
+            cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(%s)", (f"%{name}%",))
+            row = cursor.fetchone()
+
+        if not row:
+            # Try matching any word from the search term
+            words = name.lower().split()
+            for word in words:
+                if len(word) > 2:  # Skip short words
+                    cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(%s)", (f"%{word}%",))
+                    row = cursor.fetchone()
+                    if row:
+                        break
+
+        if row:
+            result = dict(row)
+            logger.info(f"📚 [DB] Found story: '{result['title']}'")
+            return result
+
+        logger.warning(f"📚 [DB] No story found matching '{name}'")
+        return None
+    except Exception as e:
+        logger.error(f"📚 [DB] Error searching for story: {e}")
+        return None
+    finally:
+        conn.close()
+
+def split_story_into_pages(content: str):
+    """Split story content into pages by PAGE markers."""
+    pages = re.split(r'===\s*PAGE\s*\d+\s*===', content)
+    return [p.strip() for p in pages if p.strip()]
 
 # Mode name aliases for handling transcript variations
 # Keys must match EXACT database mode names
@@ -580,6 +715,11 @@ class Assistant(FilteredAgent):
         self.room_name = None
         self.device_mac = None
 
+        # Storytelling state (for reading stories from PDF library)
+        self._current_story_data = None
+        self._current_story_page = 0
+        logger.info(f"📚 Storytelling initialized (DB: {STORY_DB_PATH.exists()}, RAG: {story_rag_collection is not None})")
+
         # Session reference for dynamic updates
         self._agent_session = None
 
@@ -721,63 +861,391 @@ class Assistant(FilteredAgent):
                 logger.info(f"🎮 Generated word pair: {word1} → {word2}")
                 return word1, word2
 
+    # ============================================================================
+    # STORYTELLING TOOLS (read stories from PDF library via SQLite + ChromaDB RAG)
+    # ============================================================================
+
     @function_tool
-    async def update_agent_mode(self, context: RunContext, mode_name: str) -> str:
-        """Update agent configuration mode by applying a template.
-        This triggers a full session reset via MQTT gateway - new room, new agent with fresh prompt.
+    async def list_story_books(self, context: RunContext) -> str:
+        """Lists all available content in the library - stories, shlokas, mantras, and wisdom.
+        Use this when the child asks what's available to read or hear.
+        """
+        logger.info(f"📚 ======== LIST STORY BOOKS ========")
+        logger.info(f"📚 DB Path: {STORY_DB_PATH}")
+        logger.info(f"📚 DB Exists: {STORY_DB_PATH.exists()}")
+
+        titles = get_all_story_titles_from_db()
+        if not titles:
+            logger.warning(f"📚 No content found in database!")
+            return "No content available in the library. Please ask an adult to upload stories first."
+
+        # Categorize content
+        stories = []
+        shlokas_mantras = []
+        wisdom = []
+
+        for title in titles:
+            title_lower = title.lower()
+            if 'shloka' in title_lower or 'mantra' in title_lower:
+                shlokas_mantras.append(title)
+            elif 'wisdom' in title_lower or 'nugget' in title_lower:
+                wisdom.append(title)
+            else:
+                stories.append(title)
+
+        logger.info(f"📚 Found {len(titles)} items: {len(stories)} stories, {len(shlokas_mantras)} shlokas/mantras, {len(wisdom)} wisdom")
+        logger.info(f"📚 ===================================")
+
+        result = "Here's what I can read for you:\n\n"
+
+        if stories:
+            result += "📖 STORIES:\n" + "\n".join([f"  - {t}" for t in stories]) + "\n\n"
+        if shlokas_mantras:
+            result += "🙏 SHLOKAS & MANTRAS:\n" + "\n".join([f"  - {t}" for t in shlokas_mantras]) + "\n\n"
+        if wisdom:
+            result += "💡 WISDOM:\n" + "\n".join([f"  - {t}" for t in wisdom]) + "\n\n"
+
+        result += "What would you like to hear?"
+        return result
+
+    @function_tool
+    async def start_reading_story(self, context: RunContext, story_name: str) -> str:
+        """Starts reading a story from the library. Returns the FIRST PAGE only.
+        After reading this page, call get_next_page() to continue.
 
         Args:
-            mode_name: Template mode name (e.g., "Cheeko", "StudyHelper", "Math Tutor")
+            story_name: The name of the story to read (can be partial match)
+        """
+        logger.info(f"📚 ======== START READING STORY ========")
+        logger.info(f"📚 Requested story: '{story_name}'")
+
+        # Clear any previous story state first
+        self._current_story_data = None
+        self._current_story_page = 0
+
+        story = get_story_by_name_from_db(story_name)
+        if not story:
+            available = get_all_story_titles_from_db()
+            logger.warning(f"📚 Story '{story_name}' NOT FOUND in database!")
+            logger.warning(f"📚 Available: {available}")
+            return f"Sorry, I couldn't find '{story_name}'. I have these stories: {', '.join(available)}. Which one would you like?"
+
+        logger.info(f"📚 Found story: '{story['title']}'")
+        logger.info(f"📚 Content length: {len(story['content'])} chars")
+
+        # Store story data
+        self._current_story_data = story
+        self._current_story_page = 0
+
+        # Get pages
+        pages = split_story_into_pages(story['content'])
+        if not pages:
+            logger.warning(f"📚 Story has no pages!")
+            self._current_story_data = None
+            return "This story appears to be empty."
+
+        total_pages = len(pages)
+        logger.info(f"📚 Total pages: {total_pages}")
+
+        # Return first page (cover)
+        first_page = pages[0]
+        logger.info(f"📚 Returning page 1 of {total_pages}")
+        logger.info(f"📚 ======================================")
+
+        return f"""Okay! Let me read "{story['title']}" for you!
+
+*Opens the book* Page 1...
+
+{first_page}"""
+
+    @function_tool
+    async def get_next_page(self, context: RunContext) -> str:
+        """Gets the next page of the current story. Called automatically to continue reading."""
+        if not self._current_story_data:
+            return "No story is being read right now. Tell me which story you'd like to hear!"
+
+        pages = split_story_into_pages(self._current_story_data['content'])
+        total_pages = len(pages)
+
+        # Move to next page
+        self._current_story_page += 1
+        current_page = self._current_story_page
+        page_num = current_page + 1  # 1-indexed for display
+
+        logger.info(f"📚 Getting page {page_num} of {total_pages}")
+
+        if current_page >= total_pages:
+            # Story finished
+            story_title = self._current_story_data['title']
+            self._current_story_data = None
+            self._current_story_page = 0
+            logger.info(f"📚 Finished reading '{story_title}'")
+            return "*Closes the book* And that's the end of our story! Wasn't that wonderful? Would you like to hear another story?"
+
+        # Get current page content
+        page_content = pages[current_page]
+
+        # Check if this is the last page
+        if current_page == total_pages - 1:
+            # Last page - story will end after this
+            self._current_story_data = None
+            self._current_story_page = 0
+            return f"""Now the last page, page {page_num}...
+
+{page_content}
+
+*Closes the book gently* And that's the end of our story! Wasn't that wonderful? Would you like to hear another story?"""
+        else:
+            # More pages to come - auto-continue will handle next page
+            return f"""Page {page_num}...
+
+{page_content}"""
+
+    @function_tool
+    async def restart_story(self, context: RunContext) -> str:
+        """Restart the current story from the beginning (page 1)."""
+        if not self._current_story_data:
+            return "No story is being read right now. Tell me which story you'd like to hear!"
+
+        story = self._current_story_data
+        logger.info(f"📚 ======== RESTARTING STORY ========")
+        logger.info(f"📚 Restarting: '{story['title']}'")
+
+        # Reset page counter to 0 (will show page 1)
+        self._current_story_page = 0
+
+        pages = split_story_into_pages(story['content'])
+        total_pages = len(pages)
+        first_page = pages[0]
+
+        logger.info(f"📚 Restarting from page 1 of {total_pages}")
+        logger.info(f"📚 ======================================")
+
+        return f"""Okay, let's start over! Back to page 1...
+
+{first_page}"""
+
+    @function_tool
+    async def ask_about_current_story(self, context: RunContext, question: str) -> str:
+        """Answer questions about the current story using RAG (Retrieval Augmented Generation).
+        Use this when the child asks about characters, events, or details in the story being read.
+
+        Args:
+            question: The child's question about the story (e.g., "Who is the prince?", "What happened to the flower?")
+        """
+        if not self._current_story_data:
+            return "No story is being read yet. Start a story first with start_reading_story()!"
+
+        if not story_rag_collection:
+            logger.warning("📚 ChromaDB RAG collection not available")
+            return "Story search is not available right now. Let me continue reading the story."
+
+        story_title = self._current_story_data['title']
+        logger.info(f"📚 ======== RAG QUERY ========")
+        logger.info(f"📚 Story: '{story_title}'")
+        logger.info(f"📚 Question: '{question}'")
+
+        try:
+            results = story_rag_collection.query(
+                query_texts=[question],
+                n_results=3,
+                where={"story_title": story_title}
+            )
+
+            logger.info(f"📚 ======== RAG RESULTS ========")
+            logger.info(f"📚 Documents found: {len(results['documents'][0]) if results['documents'] and results['documents'][0] else 0}")
+
+            if results['documents'] and results['documents'][0]:
+                # Log each retrieved passage
+                for i, doc in enumerate(results['documents'][0]):
+                    logger.info(f"📚 --- Passage {i+1} ---")
+                    logger.info(f"📚 {doc[:300]}..." if len(doc) > 300 else f"📚 {doc}")
+
+                # Log distances/scores if available
+                if results.get('distances') and results['distances'][0]:
+                    logger.info(f"📚 Distances (lower=better): {results['distances'][0]}")
+
+                # Log metadata if available
+                if results.get('metadatas') and results['metadatas'][0]:
+                    logger.info(f"📚 Metadata: {results['metadatas'][0]}")
+
+                context_text = "\n\n".join(results['documents'][0])
+                logger.info(f"📚 ======== END RAG ========")
+                return f"Based on the story:\n{context_text}"
+            else:
+                logger.info(f"📚 No matching passages found in ChromaDB")
+                logger.info(f"📚 ======== END RAG ========")
+                return "I couldn't find specific information about that in the story. Would you like me to continue reading?"
+        except Exception as e:
+            logger.error(f"📚 RAG query error: {e}")
+            import traceback
+            logger.error(f"📚 Traceback: {traceback.format_exc()}")
+            return "Let me continue with the story - I couldn't search for that right now."
+
+    @function_tool
+    async def list_story_books(self, context: RunContext) -> str:
+        """List all available stories in the library.
+        
+        Returns a formatted list of all story titles available for reading.
+        """
+        logger.info(f"📚 ======== LISTING ALL STORIES ========")
+        
+        titles = get_all_story_titles_from_db()
+        
+        if not titles:
+            logger.warning(f"📚 No stories found in database!")
+            return "I don't have any stories in my library right now."
+        
+        logger.info(f"📚 Found {len(titles)} stories")
+        logger.info(f"📚 ======================================")
+        
+        # Format as a nice list
+        story_list = "\n".join([f"- {title}" for title in titles])
+        
+        return f"""I have {len(titles)} wonderful stories in my library:
+
+{story_list}
+
+Which one would you like to hear?"""
+
+
+    # ============================================================================
+    # OTHER FUNCTION TOOLS
+    # ============================================================================
+
+    @function_tool
+    async def update_agent_mode(self, context: RunContext, mode_name: str) -> str:
+        """Update agent configuration mode by applying a template
+
+        Args:
+            mode_name: Template mode name (e.g., "Cheeko", "StudyHelper")
 
         Returns:
             Success or error message
         """
         try:
-            import json
+            import os
+            import aiohttp
+            from src.services.prompt_service import PromptService
 
             # 1. Validate device MAC
             if not self.device_mac:
                 return "Device MAC address is not available"
 
-            # 2. Normalize mode name to handle transcript variations
+            # 2. Get Manager API configuration
+            manager_api_url = os.getenv("MANAGER_API_URL")
+            manager_api_secret = os.getenv("MANAGER_API_SECRET")
+
+            if not manager_api_url or not manager_api_secret:
+                return "Manager API is not configured"
+
+            # 3. Fetch agent_id using DatabaseHelper
+            db_helper = DatabaseHelper(manager_api_url, manager_api_secret)
+            agent_id = await db_helper.get_agent_id(self.device_mac)
+
+            if not agent_id:
+                return f"No agent found for device MAC: {self.device_mac}"
+
+            # Normalize mode name to handle transcript variations
             normalized_mode = normalize_mode_name(mode_name)
             if normalized_mode != mode_name:
                 logger.info(f"🔄 Mode name normalized: '{mode_name}' → '{normalized_mode}'")
 
-            logger.info(f"🎭 [CHARACTER-CHANGE] Voice command to switch to: {normalized_mode}")
+            logger.info(f"🔄 Updating agent {agent_id} to mode: {normalized_mode}")
 
-            # 3. Send character_change_request via data channel to MQTT gateway
-            # The gateway will: update DB, delete old room, create new room, dispatch new agent
-            if self._session_context and hasattr(self._session_context, 'room'):
-                room = self._session_context.room
-                if room and room.local_participant:
-                    character_change_message = {
-                        "type": "character_change_request",
-                        "character_name": normalized_mode,
-                        "device_mac": self.device_mac,
-                        "timestamp": int(asyncio.get_event_loop().time() * 1000)
-                    }
+            # 4. Call update-mode API (updates template_id in database)
+            url = f"{manager_api_url}/agent/update-mode"
+            headers = {
+                "Authorization": f"Bearer {manager_api_secret}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "agentId": agent_id,
+                "modeName": normalized_mode
+            }
 
-                    message_data = json.dumps(character_change_message).encode('utf-8')
-                    await room.local_participant.publish_data(message_data, reliable=True)
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.put(url, json=payload, headers=headers) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        logger.info(f"✅ Agent mode updated in database to '{normalized_mode}' for agent: {agent_id}")
 
-                    logger.info(f"🎭 [CHARACTER-CHANGE] Sent character_change_request to MQTT gateway")
-                    logger.info(f"🎭 [CHARACTER-CHANGE] New character: {normalized_mode}")
+                        # 5. Get prompt from API response
+                        logger.info("📄 Using prompt from API response")
+                        if result.get('code') == 0 and result.get('data'):
+                            new_prompt = result.get('data')
+                            logger.info(f"📄 Retrieved prompt from API (length: {len(new_prompt)} chars)")
 
-                    # Return brief message - new agent will greet as new character
-                    return f"Switching to {normalized_mode}. One moment please."
-                else:
-                    logger.error("❌ [CHARACTER-CHANGE] Room or local_participant not available")
-                    return "Unable to switch character - room not connected"
-            else:
-                logger.error("❌ [CHARACTER-CHANGE] Session context not available")
-                return "Unable to switch character - session not available"
+                            # Log the new prompt content for debugging
+                            logger.info(f"🎭 ========== CHARACTER SWITCH: {normalized_mode} ==========")
+                            logger.info(f"🎭 NEW PROMPT PREVIEW (first 500 chars):")
+                            logger.info(f"🎭 {new_prompt[:500]}...")
+                            logger.info(f"🎭 =================================================")
+                        else:
+                            logger.warning(f"⚠️ No prompt data in response")
+                            return f"Mode updated to '{normalized_mode}' in database. Please reconnect to apply changes."
 
+                        # 7. Inject memory into new prompt (if available)
+                        try:
+                            if self._agent_session and hasattr(self._agent_session, '_memory_provider'):
+                                memory_provider = self._agent_session._memory_provider
+                                if memory_provider:
+                                    memories = await memory_provider.query_memory("conversation history")
+                                    if memories:
+                                        new_prompt = new_prompt.replace("<memory>", f"<memory>\n{memories}")
+                                        logger.info(f"💭 Injected memories into new prompt ({len(memories)} chars)")
+                        except Exception as e:
+                            logger.warning(f"Could not inject memories: {e}")
+
+                        # 8. Update the agent's instructions dynamically
+                        self._instructions = new_prompt
+                        logger.info(f"📝 Instructions updated dynamically (length: {len(new_prompt)} chars)")
+
+                        # 9. Update session if available (for immediate effect)
+                        # For Gemini Realtime, we need to use the AgentActivity.update_instructions method
+                        # which properly updates the realtime session via _rt_session.update_instructions()
+                        if self._agent_session:
+                            try:
+                                # Access the AgentActivity from the session
+                                # AgentSession has _activity which is an AgentActivity instance
+                                activity = getattr(self._agent_session, '_activity', None)
+                                if activity is not None:
+                                    # AgentActivity.update_instructions() handles Realtime sessions properly
+                                    await activity.update_instructions(new_prompt)
+                                    logger.info(f"🔄 Session instructions updated via AgentActivity.update_instructions()!")
+                                    logger.info(f"🎭 ✅ CHARACTER SWITCH COMPLETE: Now acting as '{normalized_mode}'")
+                                else:
+                                    # Fallback: update agent instructions directly
+                                    self._agent_session._agent._instructions = new_prompt
+                                    logger.info(f"🔄 Fallback: Updated agent instructions directly (no activity)")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Could not update session via activity: {e}")
+                                import traceback
+                                logger.warning(f"⚠️ Traceback: {traceback.format_exc()}")
+                                # Fallback: try direct update
+                                try:
+                                    self._agent_session._agent._instructions = new_prompt
+                                    logger.info(f"🔄 Fallback: Updated agent instructions directly")
+                                except Exception as e2:
+                                    logger.warning(f"⚠️ Fallback also failed: {e2}")
+
+                        logger.info(f"🎭 ========== CHARACTER '{normalized_mode}' ACTIVE ==========")
+                        return f"Successfully updated agent mode to '{normalized_mode}' and reloaded the new prompt! The changes are now active in this conversation."
+
+                    else:
+                        error_text = await response.text()
+                        logger.error(f"❌ Failed to update mode: {response.status} - {error_text}")
+                        return f"Failed to update mode: {error_text}"
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Network error updating agent mode: {e}")
+            return f"Network error: Unable to connect to server"
         except Exception as e:
-            logger.error(f"❌ [CHARACTER-CHANGE] Error: {e}")
+            logger.error(f"Error updating agent mode: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
-            return f"Error switching character: {str(e)}"
+            return f"Error updating agent mode: {str(e)}"
 
     @function_tool
     async def lookup_weather(self, context: RunContext, location: str):

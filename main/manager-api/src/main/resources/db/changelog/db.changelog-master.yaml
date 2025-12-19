@@ -739,3 +739,28 @@ databaseChangeLog:
         - sqlFile:
             encoding: utf8
             path: classpath:db/changelog/202512111500_add_device_control_mode.sql
+
+  - changeSet:
+      id: 202512191200
+      author: claude
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512191200_update_all_template_prompts.sql
+
+  - changeSet:
+      id: 202512191838
+      author: antigravity
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512191838_create_stories_table.sql
+
+  - changeSet:
+      id: 202512191953
+      author: antigravity
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202512191953_add_storyteller_template.sql

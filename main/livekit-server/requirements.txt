@@ -2,9 +2,6 @@ livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
-livekit-plugins-google
-google-genai>=1.0.0
-psutil
 python-dotenv
 pydub
 aiohttp
@@ -30,7 +27,7 @@ livekit-api
 PyJWT
 
 # Memory provider (optional - comment out if using local memory)
-mem0ai>=1.0.1
+mem0ai==1.0.0
 
 jinja2
 gtts
@@ -44,3 +41,12 @@ ddtrace
 
 # Grafana Loki logging
 python-logging-loki>=0.3.1
+
+# MySQL database support for storyteller
+pymysql>=1.1.0
+
+# PDF processing for storyteller
+PyMuPDF>=1.23.0
+
+# ChromaDB Cloud for storyteller RAG
+chromadb>=0.4.0
