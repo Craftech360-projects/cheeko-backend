@@ -34,7 +34,6 @@ class ModelCache:
         if not self._initialized:
             self._initialized = True
             self._ensure_cache_dir()
-            logger.info("[CACHE] ModelCache singleton initialized")
 
     def _ensure_cache_dir(self):
         """Ensure cache directory exists"""
@@ -55,13 +54,10 @@ class ModelCache:
         """
         # Check if model is already in memory
         if model_key in self._models:
-            logger.info(f"[CACHE] Using cached model: {model_key}")
             return self._models[model_key]
 
         # Check if another thread is loading this model
         if model_key in self._loading_status:
-            logger.info(
-                f"[CACHE] Waiting for model to finish loading: {model_key}")
             # Wait for loading to complete (with timeout)
             start_time = time.time()
             while model_key in self._loading_status and time.time() - start_time < 30:
@@ -75,7 +71,6 @@ class ModelCache:
         cached_model = self._load_from_disk(model_key)
         if cached_model is not None:
             self._models[model_key] = cached_model
-            logger.info(f"[CACHE] Loaded model from disk cache: {model_key}")
             return cached_model
 
         # Load model using provided function
@@ -93,14 +88,7 @@ class ModelCache:
             self._loading_status[model_key] = True
 
             try:
-                logger.info(f"[CACHE] Loading model: {model_key}")
-                start_time = time.time()
-
                 model = loader_func(*args, **kwargs)
-
-                load_time = time.time() - start_time
-                logger.info(
-                    f"[CACHE] Model loaded in {load_time:.2f}s: {model_key}")
 
                 # Cache in memory
                 self._models[model_key] = model
@@ -126,31 +114,24 @@ class ModelCache:
         try:
             cache_path = self._get_cache_path(model_key)
             if cache_path.exists():
-                logger.info(
-                    f"[CACHE] Loading model from disk cache: {model_key}")
                 with open(cache_path, 'rb') as f:
                     return pickle.load(f)
-        except Exception as e:
-            logger.warning(
-                f"Failed to load model from disk cache {model_key}: {e}")
+        except Exception:
+            pass
         return None
 
     def _save_to_disk(self, model_key: str, model: Any):
         """Save model to disk cache (background thread)"""
         # Skip certain models that can't be pickled
         if model_key in ['qdrant_client', 'vad_model']:
-            logger.debug(
-                f"[CACHE] Skipping disk cache for {model_key} (not serializable)")
             return
 
         try:
             cache_path = self._get_cache_path(model_key)
-            logger.info(f"[CACHE] Saving model to disk cache: {model_key}")
             with open(cache_path, 'wb') as f:
                 pickle.dump(model, f)
-            logger.info(f"[CACHE] Model saved to disk: {model_key}")
-        except Exception as e:
-            logger.warning(f"Failed to save model to disk {model_key}: {e}")
+        except Exception:
+            pass
 
     def preload_models(self):
         """Preload all required models in background"""

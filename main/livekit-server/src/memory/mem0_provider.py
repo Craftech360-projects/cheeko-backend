@@ -14,7 +14,6 @@ class Mem0MemoryProvider:
         self.api_key = api_key
         self.role_id = role_id
         self.client = MemoryClient(api_key=api_key)
-        logger.info(f"💭 Mem0 initialized for user: {role_id}")
 
     async def save_memory(self, history_dict: dict, child_name: str = None):
         """Save session history to mem0
@@ -128,14 +127,16 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
             logger.error(f"💭 Traceback: {traceback.format_exc()}")
             return ""
 
-    async def get_all_memories(self) -> str:
-        """Get all memories for the user (for session startup)
+    async def get_all_memories(self, limit: int = 20) -> str:
+        """Get memories for the user (for session startup)
+
+        Args:
+            limit: Maximum number of memories to return (default 20 for faster startup)
 
         Returns:
-            Formatted memory string with all known facts about the user
+            Formatted memory string with known facts about the user
         """
         try:
-            logger.info(f"💭 Getting all memories for user: {self.role_id}")
             # Mem0 API v1.0.1+ requires filters parameter (not user_id directly)
             results = self.client.get_all(
                 filters={"user_id": self.role_id}
@@ -147,24 +148,21 @@ Focus on: favorite things, hobbies, pets, family members, friends, interests, an
             elif isinstance(results, dict) and "results" in results:
                 results_list = results["results"]
             else:
-                logger.info(f"💭 No memories found for user (unexpected format: {type(results)})")
                 return ""
 
             if not results_list:
-                logger.info(f"💭 No memories found for user")
                 return ""
 
-            logger.info(f"💭 Retrieved {len(results_list)} memories")
+            # Limit memories to reduce prompt size and processing time
+            results_list = results_list[:limit]
 
             # Format memories
             memories = []
-            for i, entry in enumerate(results_list):
+            for entry in results_list:
                 memory = entry.get("memory", "")
                 if memory:
                     memories.append(memory)
-                    logger.debug(f"💭 Memory {i}: {memory[:50]}...")
 
-            logger.info(f"💭 Formatted {len(memories)} memories for injection")
             return "\n".join(f"- {m}" for m in memories)
         except Exception as e:
             logger.error(f"💭 Error getting all memories: {e}")

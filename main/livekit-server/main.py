@@ -193,6 +193,8 @@ logger.info("✅ Imported Assistant from main_agent.py with all function tools (
 
 def prewarm(proc: JobProcess):
     """Prewarm: Load heavy models before agents connect"""
+    # Load environment variables in worker process (critical for LIVEKIT_URL)
+    load_dotenv(".env")
     logger.info("[PREWARM] Starting model preloading...")
 
     # Preload embedding model and Qdrant client during prewarm
@@ -288,11 +290,7 @@ async def entrypoint(ctx: JobContext):
     if ctx.room.metadata:
         try:
             child_profile = json.loads(ctx.room.metadata)
-            logger.info(f"👶 Child profile from room metadata:")
-            logger.info(f"   - Name: {child_profile.get('child_name', 'N/A')}")
-            logger.info(f"   - Age: {child_profile.get('child_age', 'N/A')}")
-            logger.info(f"   - Gender: {child_profile.get('child_gender', 'N/A')}")
-            logger.info(f"   - Interests: {child_profile.get('child_interests', 'N/A')}")
+            logger.info(f"👶 Child: {child_profile.get('child_name', 'N/A')}, Age: {child_profile.get('child_age', 'N/A')}")
 
             # Normalize field names to match expected format (metadata uses snake_case)
             child_profile = {
@@ -305,14 +303,29 @@ async def entrypoint(ctx: JobContext):
                 'additionalNotes': child_profile.get('additional_notes', ''),
             }
         except json.JSONDecodeError as e:
-            logger.warning(f"⚠️ Failed to parse room metadata as JSON: {e}")
+            logger.warning(f"⚠️ Failed to parse room metadata: {e}")
             child_profile = None
-    else:
-        logger.info("ℹ️ No room metadata available (child profile not set)")
+
+    # =========================================================================
+    # EARLY MEM0 INITIALIZATION (start memory retrieval in background)
+    # =========================================================================
+    mem0_provider = None
+    mem0_task = None  # Background task for memory retrieval
+    conversation_messages = []
 
     if device_mac:
         try:
-            logger.info("⚡ Starting parallel API calls...")
+            from src.memory.mem0_provider import Mem0MemoryProvider
+            mem0_api_key = os.getenv("MEM0_API_KEY")
+            if mem0_api_key:
+                mem0_provider = Mem0MemoryProvider(api_key=mem0_api_key, role_id=device_mac)
+                # Start memory retrieval as background task (runs in parallel with API calls)
+                mem0_task = asyncio.create_task(mem0_provider.get_all_memories(limit=15))
+        except Exception as e:
+            logger.warning(f"💭 Mem0 init failed: {e}")
+
+    if device_mac:
+        try:
             start_time = asyncio.get_event_loop().time()
 
             manager_api_url = os.getenv("MANAGER_API_URL")
@@ -331,7 +344,7 @@ async def entrypoint(ctx: JobContext):
             )
 
             elapsed_time = (asyncio.get_event_loop().time() - start_time) * 1000
-            logger.info(f"⚡✅ Parallel API calls completed in {elapsed_time:.0f}ms")
+            logger.info(f"⚡ API calls: {elapsed_time:.0f}ms")
 
             # Unpack results (now only 2 results)
             agent_id_result, prompt_config_result = results
@@ -341,7 +354,6 @@ async def entrypoint(ctx: JobContext):
                 logger.error(f"Failed to get agent_id: {agent_id_result}")
             else:
                 agent_id = agent_id_result
-                logger.info(f"📝 Agent ID: {agent_id}")
 
             # Process prompt
             if isinstance(prompt_config_result, Exception):
@@ -349,23 +361,19 @@ async def entrypoint(ctx: JobContext):
                 agent_prompt = ConfigLoader.get_default_prompt()
             else:
                 agent_prompt, _ = prompt_config_result  # Ignore TTS config (Gemini has built-in TTS)
-                logger.info(f"🎯 Using device-specific prompt (length: {len(agent_prompt)} chars)")
 
         except Exception as e:
-            logger.error(f"❌ Error in API calls: {e}")
+            logger.error(f"❌ API calls error: {e}")
             agent_prompt = ConfigLoader.get_default_prompt()
 
     # Build prompt with child profile using Jinja2 templates
     if child_profile:
-        logger.info(f"👶 Child profile data: {json.dumps(child_profile, indent=2)}")
-
         # Check if prompt uses Jinja2 templates ({{ or {%)
         if '{{' in agent_prompt or '{%' in agent_prompt:
             try:
                 from jinja2 import Template, Undefined
 
                 # Build template variables from child profile
-                # Parse interests if it's a JSON string
                 interests = child_profile.get('interests', '')
                 if isinstance(interests, str) and interests.startswith('['):
                     try:
@@ -384,43 +392,16 @@ async def entrypoint(ctx: JobContext):
                     'additional_notes': child_profile.get('additionalNotes', ''),
                 }
 
-                logger.info(f"👶 Template variables: {json.dumps(template_vars, indent=2)}")
-
                 template = Template(agent_prompt)
                 agent_prompt = template.render(**template_vars)
-                logger.info(f"✅ Rendered Jinja2 template for: {child_profile.get('name')}")
 
             except Exception as e:
                 logger.error(f"❌ Jinja2 template error: {e}")
-                import traceback
-                logger.error(traceback.format_exc())
                 # Fallback to simple string replacement
                 agent_prompt = agent_prompt.replace("{{ child_name }}", child_profile.get('name', ''))
                 agent_prompt = agent_prompt.replace("{{child_name}}", child_profile.get('name', ''))
                 agent_prompt = agent_prompt.replace("{{ child_age }}", str(child_profile.get('age', '')))
                 agent_prompt = agent_prompt.replace("{{child_age}}", str(child_profile.get('age', '')))
-        else:
-            # No template variables found - prompt might already be personalized from API
-            logger.info(f"📝 Prompt has no template variables - using as-is")
-    else:
-        logger.warning("⚠️ No child profile available - prompt will not be personalized")
-
-    # Log prompt info for debugging
-    logger.info(f"📝 Final prompt length: {len(agent_prompt)} chars")
-    if '{{' in agent_prompt or '{%' in agent_prompt:
-        logger.warning("⚠️ Prompt still contains unrendered template variables!")
-    else:
-        logger.info("✅ Prompt fully rendered (no template variables remaining)")
-
-    # Check if child's name appears in the prompt (for debugging)
-    if child_profile and child_profile.get('name'):
-        child_name = child_profile.get('name')
-        if child_name.lower() in agent_prompt.lower():
-            logger.info(f"✅ Child's name '{child_name}' found in prompt")
-        else:
-            logger.warning(f"⚠️ Child's name '{child_name}' NOT found in prompt - template may not include child name!")
-            # Log first 500 chars of prompt to debug
-            logger.info(f"📝 Prompt preview (first 500 chars): {agent_prompt[:500]}...")
 
     # ============================================================================
     # APPEND CHARACTER CHANGE INSTRUCTIONS
@@ -477,13 +458,10 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
 
     # Append character change instructions to the prompt
     agent_prompt = agent_prompt + CHARACTER_CHANGE_INSTRUCTIONS
-    logger.info(f"📝 Added character change instructions. New prompt length: {len(agent_prompt)} chars")
 
     # ============================================================================
     # GEMINI REALTIME MODEL SETUP
     # ============================================================================
-
-    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
 
     # Google Search grounding - DISABLED to allow function tools (update_agent_mode, play_music, etc.)
     # Gemini Realtime only supports ONE type of tool - either Google Search OR function tools
@@ -500,8 +478,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
         modalities=["AUDIO"],
         _gemini_tools=[],  # Empty list - no native Gemini tools, using LiveKit @function_tool instead
     )
-
-    logger.info(f"✅ Gemini Realtime model created")
 
     # Create AgentSession - LLM is now passed to Agent constructor for function tools to work
     session = AgentSession()
@@ -538,7 +514,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
             await ctx.room.local_participant.publish_data(
                 payload.encode("utf-8"), reliable=True
             )
-            logger.info(f"📊 State: {old_state} → {new_state}")
         except Exception as e:
             logger.error(f"Failed to emit state: {e}")
 
@@ -552,7 +527,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
             await ctx.room.local_participant.publish_data(
                 payload.encode("utf-8"), reliable=True
             )
-            logger.info("📢 speech_created event emitted")
         except Exception as e:
             logger.error(f"Failed to emit speech_created: {e}")
 
@@ -567,8 +541,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
             old_state_str = str(old_state).split('.')[-1] if old_state else "unknown"
             new_state_str = str(new_state).split('.')[-1] if new_state else "unknown"
 
-            logger.info(f"🔊 EVENT: agent_state_changed - {old_state_str} → {new_state_str}")
-
             # Send state change to livekit-bridge via data channel
             async def send_state_change():
                 try:
@@ -579,7 +551,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
                     await ctx.room.local_participant.publish_data(
                         payload.encode("utf-8"), reliable=True
                     )
-                    logger.info(f"📢 Sent agent_state_changed to livekit-bridge: {old_state_str} → {new_state_str}")
                 except Exception as e:
                     logger.error(f"Failed to send state change: {e}")
 
@@ -587,13 +558,10 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
 
             # Also emit speech_created when agent starts speaking
             if new_state_str == 'speaking' and old_state_str != 'speaking':
-                logger.info(f"📢 Emitting speech_created (state: {old_state_str} → speaking)")
                 asyncio.create_task(emit_speech_created())
 
         except Exception as e:
             logger.error(f"❌ Error in agent_state_changed handler: {e}")
-
-    logger.info("📊 State management registered")
 
     # ============================================================================
     # ERROR HANDLING
@@ -605,7 +573,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
         max_retries=3,
         custom_audio_path=None
     )
-    logger.info("🛡️ Error handling enabled")
 
     # ============================================================================
     # INITIALIZE ALL SERVICES FOR FUNCTION TOOLS
@@ -621,71 +588,28 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     from src.services.riddle_generator_service import RiddleGeneratorService
     from src.services.analytics_service import AnalyticsService
 
-    # Device control services
+    # Device control services (instant - no async init needed)
     device_control_service = DeviceControlService()
     mcp_executor = LiveKitMCPExecutor()
-    logger.info("🎛️ Device control service created")
 
     # Get preloaded models from cache (loaded during prewarm)
     from src.utils.model_cache import model_cache
     preloaded_embedding = model_cache.get_embedding_model()
     preloaded_qdrant = model_cache.get_qdrant_client()
-    logger.info(f"📦 Using preloaded models - Embedding: {preloaded_embedding is not None}, Qdrant: {preloaded_qdrant is not None}")
 
-    # Create ONE shared semantic search instance for both Music and Story services
+    # =========================================================================
+    # PARALLEL SERVICE INITIALIZATION (optimized for speed)
+    # =========================================================================
+    parallel_init_start = asyncio.get_event_loop().time()
+
+    # Create service instances (instant)
     shared_semantic_search = QdrantSemanticSearch(preloaded_embedding, preloaded_qdrant)
-    try:
-        await shared_semantic_search.initialize()
-        logger.info("🔍 Shared semantic search initialized (Qdrant + Embedding)")
-    except Exception as e:
-        logger.warning(f"Shared semantic search initialization failed: {e}")
-        shared_semantic_search = None
-
-    # Initialize Music Service with shared semantic search (no duplicate initialization)
-    music_service = MusicService(shared_semantic_search=shared_semantic_search)
-    try:
-        await music_service.initialize()
-        logger.info("🎵 Music service initialized (using shared semantic search)")
-    except Exception as e:
-        logger.warning(f"Music service initialization failed: {e}")
-        music_service = None
-
-    # Initialize Story Service with SAME shared semantic search (no duplicate initialization)
-    story_service = StoryService(shared_semantic_search=shared_semantic_search)
-    try:
-        await story_service.initialize()
-        logger.info("📖 Story service initialized (using shared semantic search)")
-    except Exception as e:
-        logger.warning(f"Story service initialization failed: {e}")
-        story_service = None
-
-    # Initialize Unified Audio Player
     unified_audio_player = UnifiedAudioPlayer()
-    logger.info("🔊 Unified audio player created")
-
-    # Initialize Google Search Service
     google_search_service = GoogleSearchService()
-    logger.info("🔍 Google search service created")
-
-    # Initialize Question Generator Service
     question_generator_service = QuestionGeneratorService()
-    try:
-        await question_generator_service.initialize()
-        logger.info("🧮 Question generator service initialized")
-    except Exception as e:
-        logger.warning(f"Question generator service initialization failed: {e}")
-        question_generator_service = None
-
-    # Initialize Riddle Generator Service
     riddle_generator_service = RiddleGeneratorService()
-    try:
-        await riddle_generator_service.initialize()
-        logger.info("🤔 Riddle generator service initialized")
-    except Exception as e:
-        logger.warning(f"Riddle generator service initialization failed: {e}")
-        riddle_generator_service = None
 
-    # Initialize Analytics Service
+    # Analytics service (instant - no async init)
     analytics_service = None
     if device_mac and agent_id:
         try:
@@ -696,22 +620,86 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
                 session_id=room_name,
                 agent_id=agent_id
             )
-            logger.info("📊 Analytics service initialized")
         except Exception as e:
             logger.warning(f"Analytics service initialization failed: {e}")
 
-    # ============================================================================
-    # CHAT HISTORY & MEM0 SERVICES
-    # ============================================================================
+    # Define async init functions
+    async def init_semantic_search():
+        try:
+            await shared_semantic_search.initialize()
+            return shared_semantic_search
+        except Exception as e:
+            logger.warning(f"Semantic search init failed: {e}")
+            return None
 
-    # Initialize chat history service if agent_id is available
+    async def init_question_generator():
+        try:
+            await question_generator_service.initialize()
+            return question_generator_service
+        except Exception as e:
+            logger.warning(f"Question generator init failed: {e}")
+            return None
+
+    async def init_riddle_generator():
+        try:
+            await riddle_generator_service.initialize()
+            return riddle_generator_service
+        except Exception as e:
+            logger.warning(f"Riddle generator init failed: {e}")
+            return None
+
+    # Run all async initializations in parallel
+    init_results = await asyncio.gather(
+        init_semantic_search(),
+        init_question_generator(),
+        init_riddle_generator(),
+        return_exceptions=True
+    )
+
+    # Unpack results
+    shared_semantic_search = init_results[0] if not isinstance(init_results[0], Exception) else None
+    question_generator_service = init_results[1] if not isinstance(init_results[1], Exception) else None
+    riddle_generator_service = init_results[2] if not isinstance(init_results[2], Exception) else None
+
+    parallel_init_elapsed = (asyncio.get_event_loop().time() - parallel_init_start) * 1000
+    logger.info(f"⚡ Services init: {parallel_init_elapsed:.0f}ms")
+
+    # Initialize Music and Story services (depend on semantic search)
+    music_service = None
+    story_service = None
+    if shared_semantic_search:
+        music_service = MusicService(shared_semantic_search=shared_semantic_search)
+        story_service = StoryService(shared_semantic_search=shared_semantic_search)
+
+        # Parallel init for music and story
+        async def init_music():
+            try:
+                await music_service.initialize()
+                return music_service
+            except Exception as e:
+                logger.warning(f"Music service init failed: {e}")
+                return None
+
+        async def init_story():
+            try:
+                await story_service.initialize()
+                return story_service
+            except Exception as e:
+                logger.warning(f"Story service init failed: {e}")
+                return None
+
+        music_story_results = await asyncio.gather(init_music(), init_story(), return_exceptions=True)
+        music_service = music_story_results[0] if not isinstance(music_story_results[0], Exception) else None
+        story_service = music_story_results[1] if not isinstance(music_story_results[1], Exception) else None
+
+    # ============================================================================
+    # CHAT HISTORY SERVICE (instant initialization)
+    # ============================================================================
     chat_history_service = None
-
     if device_mac and agent_id:
         try:
             manager_api_url = os.getenv("MANAGER_API_URL")
             manager_api_secret = os.getenv("MANAGER_API_SECRET")
-
             chat_history_service = ChatHistoryService(
                 manager_api_url=manager_api_url,
                 secret=manager_api_secret,
@@ -720,24 +708,31 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
                 agent_id=agent_id
             )
             chat_history_service.start_periodic_sending()
-            logger.info(f"📝 Chat history service initialized for agent_id: {agent_id}")
         except Exception as e:
-            logger.warning(f"Failed to initialize chat history service: {e}")
+            logger.warning(f"Chat history service init failed: {e}")
 
-    # Initialize mem0 provider and conversation messages
-    mem0_provider = None
-    conversation_messages = []
+    # ============================================================================
+    # AWAIT MEM0 MEMORIES (background task started earlier)
+    # ============================================================================
+    retrieved_memories = ""
+    if mem0_task:
+        try:
+            retrieved_memories = await mem0_task
+        except Exception as e:
+            logger.warning(f"💭 Mem0 retrieval failed: {e}")
 
-    try:
-        from src.memory.mem0_provider import Mem0MemoryProvider
-        mem0_api_key = os.getenv("MEM0_API_KEY")
-        if mem0_api_key and device_mac:
-            mem0_provider = Mem0MemoryProvider(api_key=mem0_api_key, role_id=device_mac)
-            logger.info(f"💭 Mem0 provider initialized for device: {device_mac}")
-        else:
-            logger.warning(f"💭 Mem0 provider not initialized - missing API key or device MAC")
-    except Exception as e:
-        logger.warning(f"Mem0 provider not available: {e}")
+    # Inject memories into agent prompt if available
+    if retrieved_memories:
+        memory_block = f"""
+<long_term_memory>
+You remember these things about this child from previous conversations:
+{retrieved_memories}
+
+Use these memories naturally in conversation - reference their interests, remember their name,
+recall previous topics you discussed. This helps build a personal connection with the child.
+</long_term_memory>
+"""
+        agent_prompt = memory_block + "\n" + agent_prompt
 
     # ============================================================================
     # CREATE ASSISTANT WITH ALL FUNCTION TOOLS
@@ -761,11 +756,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     )
 
     assistant.set_room_info(room_name=room_name, device_mac=device_mac)
-    logger.info("🔧 Assistant created with ALL function tools (update_agent_mode, games, music, story, device control)")
-    # Log session info (responses will be captured via conversation_item_added event)
-    if chat_history_service:
-        logger.debug(
-            "🎯 Chat history service ready - will capture via conversation_item_added and session.history")
 
     # DISABLED: ChatEventHandler event handlers interfere with PTT even without generate_reply()
     # The event handlers themselves seem to be causing state changes during speech
@@ -797,12 +787,8 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
                             'role': role,
                             'content': content
                         })
-                        logger.debug(
-                            f"💭 Captured {role} message for mem0 (buffer size: {len(conversation_messages)})")
             except Exception as e:
                 logger.error(f"💭 Failed to capture message for mem0: {e}")
-
-        logger.info("💭 Mem0 conversation capture enabled")
 
     # Setup usage tracking
     usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
@@ -811,17 +797,14 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     async def log_usage():
         """Log usage summary on shutdown"""
         await usage_manager.log_usage()
-        logger.info("Sent usage_summary via data channel")
 
     ctx.add_shutdown_callback(log_usage)
 
     # Create room options with 16kHz sample rate to match MQTT gateway
-    # This ensures audio from ESP32 devices (16kHz) is not resampled unnecessarily
     room_input_options = RoomInputOptions(
         audio_sample_rate=16000,  # Match MQTT gateway's 16kHz audio
         audio_num_channels=1,     # Mono audio from ESP32
     )
-    logger.info("Room input configured: 16kHz mono audio to match MQTT gateway")
 
     # Track participants and manage room lifecycle
     participant_count = len(ctx.room.remote_participants)
@@ -835,57 +818,38 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
         cleanup_completed = True
 
         try:
-            logger.info("🔴 Initiating cleanup")
-
-            # Log error statistics
-            try:
-                error_stats = error_manager.get_error_stats()
-                if error_stats:
-                    total_errors = sum(error_stats.values())
-                    if total_errors > 0:
-                        logger.warning(f"⚠️ Total errors: {total_errors}")
-                    else:
-                        logger.info("✅ No errors during session")
-            except Exception as e:
-                logger.warning(f"Could not get error stats: {e}")
-
             # Save conversation to mem0 for long-term memory
             if mem0_provider and conversation_messages:
                 try:
                     child_name = child_profile.get('name', '') if child_profile else None
                     history_dict = {'messages': conversation_messages}
                     await mem0_provider.save_memory(history_dict, child_name=child_name)
-                    logger.info(f"💭 Saved {len(conversation_messages)} messages to mem0 (child: {child_name or 'unknown'})")
                 except Exception as e:
                     logger.warning(f"💭 Failed to save to mem0: {e}")
-            elif mem0_provider:
-                logger.info("💭 No conversation messages to save to mem0")
 
             # Close agent session
             try:
                 if session and hasattr(session, 'aclose'):
                     await session.aclose()
             except Exception as e:
-                logger.warning(f"Session close error: {e}")
+                pass
 
             # Disconnect from room
             try:
                 if ctx.room and hasattr(ctx.room, 'disconnect'):
                     await ctx.room.disconnect()
             except Exception as e:
-                logger.warning(f"Room disconnect error: {e}")
+                pass
 
             # Delete room
             try:
                 await delete_livekit_room(ctx.room.name if ctx.room else "unknown")
             except Exception as e:
-                logger.warning(f"Room deletion error: {e}")
+                pass
 
             # Stop resource monitoring
             resource_monitor.decrement_clients()
             resource_monitor.stop_monitoring()
-
-            logger.info("✅ Cleanup completed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 
@@ -893,21 +857,16 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     def on_participant_disconnected(participant: rtc.RemoteParticipant):
         nonlocal participant_count
         participant_count -= 1
-        logger.info(f"👤 Participant disconnected: {participant.identity}, remaining: {participant_count}")
-
         if participant_count == 0:
-            logger.info("🔴 No participants remaining, initiating cleanup")
             asyncio.create_task(cleanup_room_and_session())
 
     @ctx.room.on("participant_connected")
     def on_participant_connected(participant: rtc.RemoteParticipant):
         nonlocal participant_count
         participant_count += 1
-        logger.info(f"👤 Participant connected: {participant.identity}, total: {participant_count}")
 
     @ctx.room.on("disconnected")
     def on_room_disconnected():
-        logger.info("🔴 Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
@@ -918,7 +877,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     # ============================================================================
 
     participant = await ctx.wait_for_participant()
-    logger.info(f"👤 Participant joined: {participant.identity}")
 
     # Pass references to assistant
     assistant.set_agent_session(session)
@@ -928,7 +886,6 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     if unified_audio_player:
         unified_audio_player.set_session(session)
         unified_audio_player.set_context(ctx)
-        logger.info("🔊 Unified audio player connected to session")
 
     # Start session
     await session.start(
@@ -938,32 +895,42 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
 
     # Log initialization time
     init_elapsed_time = (asyncio.get_event_loop().time() - init_start_time) * 1000
-    logger.info(f"⚡ Total initialization: {init_elapsed_time:.0f}ms")
-    logger.info("✅ Gemini Realtime agent is LIVE!")
+    logger.info(f"✅ Agent LIVE in {init_elapsed_time:.0f}ms")
 
     # Agent speaks first - greet the child
-    # Wait for Gemini Realtime session to be fully ready before greeting
+    # Optimized: No fixed sleep, uses event-based readiness check
     async def trigger_greeting():
-        """Trigger greeting with state verification and fallback"""
+        """Trigger greeting with minimal delay using session readiness check"""
         greeting_audio_started = asyncio.Event()
+        session_ready = asyncio.Event()
 
-        # Listen for agent starting to speak (confirms audio is being generated)
+        # Listen for agent state changes
         def on_state_for_greeting(ev):
             new_state = str(getattr(ev, 'new_state', '')).split('.')[-1]
+            old_state = str(getattr(ev, 'old_state', '')).split('.')[-1]
+
+            # Session is ready when we see first state transition (usually initializing -> listening)
+            if old_state == 'initializing' and new_state == 'listening':
+                session_ready.set()
+
             if new_state == 'speaking':
                 greeting_audio_started.set()
 
-        # Temporarily add listener
+        # Add listener
         session.on("agent_state_changed", on_state_for_greeting)
 
         try:
-            # Wait for Gemini to be fully connected
-            await asyncio.sleep(2.5)
+            # Wait for session to be ready (max 500ms, usually instant since session.start() already completed)
+            try:
+                await asyncio.wait_for(session_ready.wait(), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass  # Session might already be past initializing state
+
+            # Small buffer for WebSocket stability (reduced from 2.5s to 200ms)
+            await asyncio.sleep(0.2)
 
             # Get child's name for personalized greeting
             child_name = child_profile.get('name', '') if child_profile else ''
-
-            logger.info("🎤 Agent initiating greeting...")
 
             # Try generate_reply first (uses Gemini's native voice)
             try:
@@ -973,27 +940,23 @@ Introduce yourself briefly and ask how they're doing today.
 Be warm, friendly and enthusiastic! Speak naturally."""
                 )
 
-                # Wait up to 3 seconds for audio to actually start
+                # Wait up to 2 seconds for audio to actually start
                 try:
-                    await asyncio.wait_for(greeting_audio_started.wait(), timeout=3.0)
-                    logger.info("✅ Greeting audio confirmed!")
+                    await asyncio.wait_for(greeting_audio_started.wait(), timeout=2.0)
                     return  # Success, exit
                 except asyncio.TimeoutError:
-                    logger.warning("⚠️ generate_reply completed but no audio - trying fallback...")
+                    pass  # Try fallback
 
             except Exception as e:
-                logger.warning(f"⚠️ generate_reply failed: {e} - trying fallback...")
+                pass  # Try fallback
 
             # Fallback: Use session.say() with Edge TTS
             fallback_greeting = f"Hey {child_name}! " if child_name else "Hey there! "
             fallback_greeting += "I'm so happy to see you! How are you doing today?"
-
-            logger.info("🎤 Using fallback greeting with session.say()...")
             await session.say(fallback_greeting, allow_interruptions=True)
-            logger.info("✅ Fallback greeting sent!")
 
         except Exception as e:
-            logger.warning(f"⚠️ All greeting attempts failed: {e}")
+            logger.warning(f"⚠️ Greeting failed: {e}")
 
     asyncio.create_task(trigger_greeting())
 

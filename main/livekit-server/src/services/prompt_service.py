@@ -265,7 +265,6 @@ class PromptService:
     def clear_cache(self):
         """Clear prompt cache"""
         self.prompt_cache.clear()
-        logger.info("Prompt cache cleared")
 
     async def fetch_model_config_from_api(self, mac_address: str, room_name: str) -> Optional[dict]:
         """
@@ -316,15 +315,6 @@ class PromptService:
 
                         if data.get('code') == 0 and 'data' in data:
                             model_config = data['data']
-                            logger.info(f"✅ Successfully fetched model config from API for MAC: {mac_address}")
-                            # DEBUG: Log response structure
-                            logger.info(f"🔍 DEBUG - Response keys: {list(model_config.keys())}")
-                            if 'selected_module' in model_config:
-                                logger.info(f"🔍 DEBUG - selected_module: {model_config['selected_module']}")
-                            if 'TTS' in model_config:
-                                logger.info(f"🔍 DEBUG - TTS keys: {list(model_config['TTS'].keys())}")
-                            else:
-                                logger.warning(f"🔍 DEBUG - TTS key NOT FOUND in response!")
                             return model_config
                         else:
                             logger.warning(f"API returned error: {data}")
@@ -433,7 +423,6 @@ class PromptService:
         # DISABLED CACHE - Always fetch fresh prompt from API
         # This ensures we always get the latest prompt without stale data
         cache_key = mac_address
-        logger.info(f"🔄 Fetching fresh prompt from API (cache disabled)")
 
         # Fetch prompt
         prompt = await self.fetch_prompt_from_api(mac_address)

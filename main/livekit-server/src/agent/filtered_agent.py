@@ -49,8 +49,6 @@ class FilteredAgent(Agent):
         self._filtering_enabled = True  # Enable filtering at LLM output level
         self._tts_provider = tts_provider
         self._session_context = None  # Store session context for data publishing
-        logger.info(
-            "FilteredAgent initialized with LLM response filtering (ENABLED)")
 
     async def llm_output_filter(self, text: str, preserve_boundaries: bool = True) -> str:
         """

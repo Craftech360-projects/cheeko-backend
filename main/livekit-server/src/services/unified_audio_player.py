@@ -41,12 +41,10 @@ class UnifiedAudioPlayer:
     def set_session(self, session):
         """Set the LiveKit agent session"""
         self.session = session
-        logger.info("Unified audio player integrated with session")
 
     def set_context(self, context):
         """Set the job context"""
         self.context = context
-        logger.info("Unified audio player integrated with context")
 
     async def stop(self):
         """Stop current playback and interrupt session.say() IMMEDIATELY with FULL cancellation"""

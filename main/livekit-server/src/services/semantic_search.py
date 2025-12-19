@@ -81,8 +81,12 @@ class QdrantSemanticSearch:
             logger.info("🎵 Music search enabled for ALL languages (no restrictions)")
             return []
 
-    async def initialize(self) -> bool:
-        """Initialize Qdrant client and embedding model with fallback support"""
+    async def initialize(self, skip_collection_check: bool = True) -> bool:
+        """Initialize Qdrant client and embedding model with fallback support
+
+        Args:
+            skip_collection_check: Skip checking if collections exist (faster startup)
+        """
         if not self.is_available:
             logger.warning("Qdrant dependencies not available, semantic search will be limited")
             return False
@@ -112,21 +116,27 @@ class QdrantSemanticSearch:
             else:
                 logger.info("✅ Using preloaded Qdrant client from prewarm")
 
-            # Test connection with timeout
+            # Skip collection check for faster startup (collections are assumed to exist)
+            if skip_collection_check:
+                logger.info("⚡ Skipping collection check for faster startup")
+                self.is_initialized = True
+                return True
+
+            # Test connection with timeout (only if not skipping)
             try:
                 collections = self.client.get_collections()
                 logger.info("✅ Connected to Qdrant cloud successfully")
-                
+
                 # Check if collections exist and have data
                 await self._ensure_collections_exist()
-                
+
                 self.is_initialized = True
                 return True
-                
+
             except Exception as conn_error:
                 logger.error(f"❌ Qdrant connection failed: {conn_error}")
                 logger.info("🔄 Semantic search will work with local embeddings only")
-                
+
                 # Still mark as initialized if we have the embedding model
                 # This allows for local similarity calculations
                 self.is_initialized = True

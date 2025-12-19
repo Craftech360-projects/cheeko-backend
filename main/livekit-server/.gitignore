@@ -13,3 +13,6 @@ KMS
 venv
 # Local media files (music and stories)
 local_media/
+
+# Kubernetes config
+k8s/

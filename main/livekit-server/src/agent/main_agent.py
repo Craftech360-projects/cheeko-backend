@@ -70,7 +70,6 @@ def normalize_mode_name(mode_input: str) -> str:
     # Check aliases
     for canonical_name, aliases in MODE_ALIASES.items():
         if normalized in [alias.lower() for alias in aliases]:
-            logger.info(f"🔍 Matched '{mode_input}' → '{canonical_name}' via alias")
             return canonical_name
 
     # Check if input matches canonical name when spaces are removed
@@ -78,7 +77,6 @@ def normalize_mode_name(mode_input: str) -> str:
     normalized_no_space = normalized.replace(" ", "")
     for canonical_name in MODE_ALIASES.keys():
         if normalized_no_space == canonical_name.lower():
-            logger.info(f"🔍 Matched '{mode_input}' → '{canonical_name}' via space removal")
             return canonical_name
 
     # No match found - return original for backend to handle
@@ -109,7 +107,6 @@ class MathGameState:
         self.max_attempts = 2          # Max retry attempts per question
         self.streak = 0                # Consecutive correct answers
         self.total_questions = 0       # Total questions answered
-        logger.info("🔄 Math game state reset")
 
     def load_question_bank(self, questions: list):
         """
@@ -547,7 +544,6 @@ class Assistant(FilteredAgent):
         self.word_history = [start]
         self.failure_count = 0
         self.max_failures = 3
-        logger.info(f"🎮 Word Ladder initialized: {start} → {target}")
 
         # Math Tutor game state (using clean MathGameState structure)
         self.math_game_state = MathGameState()
@@ -555,11 +551,9 @@ class Assistant(FilteredAgent):
         self.current_riddle = ""
         self.current_answer = None
         self.correct_streak = 0
-        logger.info(f"🧮 Math Tutor initialized with MathGameState")
 
         # Riddle Solver game state (using clean RiddleGameState structure)
         self.riddle_game_state = RiddleGameState()
-        logger.info(f"🤔 Riddle Solver initialized with RiddleGameState")
 
         # Store original instructions template for later re-formatting
         self._original_instructions = instructions
@@ -588,39 +582,6 @@ class Assistant(FilteredAgent):
 
         # Session reference for dynamic updates
         self._agent_session = None
-
-        # Log registered function tools (for debugging)
-        logger.info("🔧 Assistant initialized, checking function tools...")
-        try:
-            # Log check_battery_level function signature specifically
-            if hasattr(self, 'check_battery_level'):
-                battery_func = getattr(self, 'check_battery_level')
-                sig = inspect.signature(battery_func)
-                logger.info(f"🔋 check_battery_level signature: {sig}")
-                logger.info(f"🔋 check_battery_level parameters: {sig.parameters}")
-                for param_name, param in sig.parameters.items():
-                    if param_name not in ['self', 'context']:
-                        logger.info(f"🔋   - {param_name}: default={param.default}, annotation={param.annotation}")
-                logger.info(f"🔋 check_battery_level return annotation: {sig.return_annotation}")
-                logger.info(f"🔋 check_battery_level docstring: {battery_func.__doc__}")
-
-            # Try to access function tools from the agent's internal attributes
-            if hasattr(self, '_function_tools'):
-                logger.info(f"🔧 Found {len(self._function_tools)} function tools")
-                for tool_name, tool in self._function_tools.items():
-                    logger.info(f"🔧   - {tool_name}: {tool}")
-                    if tool_name == 'check_battery_level':
-                        logger.info(f"🔋 DETAILED check_battery_level tool info: {dir(tool)}")
-                        if hasattr(tool, 'schema'):
-                            logger.info(f"🔋 check_battery_level schema: {tool.schema}")
-                        if hasattr(tool, 'parameters'):
-                            logger.info(f"🔋 check_battery_level parameters: {tool.parameters}")
-            else:
-                logger.info("🔧 No _function_tools attribute found")
-        except Exception as e:
-            logger.warning(f"🔧 Error inspecting function tools: {e}")
-            import traceback
-            logger.warning(f"🔧 Traceback: {traceback.format_exc()}")
 
     def _format_instructions(self, prompt: str) -> str:
         """
@@ -733,12 +694,10 @@ class Assistant(FilteredAgent):
         """Set room name and device MAC address"""
         self.room_name = room_name
         self.device_mac = device_mac
-        logger.info(f"📍 Room info set - Room: {room_name}, MAC: {device_mac}")
 
     def set_agent_session(self, session):
         """Set session reference for dynamic updates"""
         self._agent_session = session
-        logger.info(f"🔗 Session reference stored for dynamic updates")
 
     def _pick_valid_word_pair(self):
         """
