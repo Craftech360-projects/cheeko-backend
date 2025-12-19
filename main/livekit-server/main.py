@@ -757,18 +757,7 @@ recall previous topics you discussed. This helps build a personal connection wit
 
     assistant.set_room_info(room_name=room_name, device_mac=device_mac)
 
-    # DISABLED: ChatEventHandler event handlers interfere with PTT even without generate_reply()
-    # The event handlers themselves seem to be causing state changes during speech
-    # ChatEventHandler.set_assistant(assistant)
-    # if chat_history_service:
-    #     ChatEventHandler.set_chat_history_service(chat_history_service)
-    #     logger.info(f"📝🔗 Chat history service connected to event handlers")
-    # else:
-    #     logger.warning(
-    #         f"📝⚠️ No chat history service available - events will not be captured")
-    # ChatEventHandler.setup_session_handlers(session, ctx)
-    # logger.info("💬 ChatEventHandler configured (PTT-safe mode)")
-
+   
     # Add mem0 conversation capture event handler
     if mem0_provider:
         @session.on("conversation_item_added")

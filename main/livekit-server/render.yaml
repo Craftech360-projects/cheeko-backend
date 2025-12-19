@@ -1,0 +1,30 @@
+services:
+- type: web
+  # Your GitHub repo - update this to your repo URL
+  repo: https://github.com/Craftech360-projects/cheeko-backend
+
+  # Path to the livekit-server directory containing Dockerfile
+  rootDir: main/livekit-server
+
+  name: cheeko-livekit-agent
+  runtime: image
+
+  # Starter plan required for private services (no free tier)
+  plan: free
+
+  # Environment variables from Render dashboard group
+  envVars:
+  - fromGroup: cheeko-agent-env
+
+  region: singapore  # or virginia, oregon, frankfurt, ohio
+
+  # Maximum shutdown delay (300s is standard max)
+  maxShutdownDelaySeconds: 300
+
+  # Auto-scaling configuration
+  scaling:
+    minInstances: 1
+    maxInstances: 4
+    targetCPUPercent: 60
+    targetMemoryPercent: 60
+version: "1"
