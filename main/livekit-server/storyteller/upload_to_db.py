@@ -1,8 +1,8 @@
 """
-Upload all story PDFs to local SQLite database + ChromaDB (RAG) using Gemini OCR.
+Upload all story PDFs to MySQL database + ChromaDB Cloud (RAG) using Gemini OCR.
 Run this ONCE when you add/update stories.
 
-Uses page-by-page approach: PDF → Image → Gemini Vision OCR → SQLite + ChromaDB
+Uses page-by-page approach: PDF → Image → Gemini Vision OCR → MySQL + ChromaDB Cloud
 
 Usage:
     python upload_to_db.py
@@ -11,7 +11,7 @@ Usage:
 import asyncio
 import logging
 import os
-import sqlite3
+import pymysql
 import hashlib
 import io
 import re
@@ -24,7 +24,8 @@ import chromadb
 
 # Load environment
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+# Load .env from parent livekit-server directory
+load_dotenv(ROOT_DIR.parent / '.env')
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,9 +33,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("upload_stories")
 
-# Database paths
-DB_PATH = ROOT_DIR / "stories.db"
-CHROMA_PATH = ROOT_DIR / "chroma_db"
+# MySQL Database Configuration
+MYSQL_HOST = os.getenv("MYSQL_HOST", "localhost")
+MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3307"))
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "manager_api")
+MYSQL_USER = os.getenv("MYSQL_USER", "manager")
+MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "managerpassword")
+
+# Paths
 STORIES_DIR = ROOT_DIR / "stories"
 
 # Configure Gemini
@@ -43,31 +49,44 @@ if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY not found in .env")
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Initialize ChromaDB for RAG
-chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
-story_collection = chroma_client.get_or_create_collection(
-    name="story_pages",
-    metadata={"hnsw:space": "cosine"}
-)
+# Initialize ChromaDB Cloud for RAG
+CHROMA_API_KEY = os.getenv("CHROMA_API_KEY")
+CHROMA_TENANT = os.getenv("CHROMA_TENANT")
+CHROMA_DATABASE = os.getenv("CHROMA_DATABASE")
+
+# DISABLED: Only uploading to MySQL for now
+story_collection = None
+logger.info("⚠️ ChromaDB upload disabled - MySQL only mode")
+
+# if not all([CHROMA_API_KEY, CHROMA_TENANT, CHROMA_DATABASE]):
+#     logger.warning("ChromaDB Cloud credentials not found - RAG will be disabled")
+#     story_collection = None
+# else:
+#     try:
+#         chroma_client = chromadb.CloudClient(
+#             tenant=CHROMA_TENANT,
+#             database=CHROMA_DATABASE,
+#             api_key=CHROMA_API_KEY
+#         )
+#         story_collection = chroma_client.get_or_create_collection(name="story_pages")
+#         logger.info(f"✅ ChromaDB Cloud connected - Collection: story_pages")
+#     except Exception as e:
+#         logger.warning(f"⚠️ ChromaDB Cloud connection failed: {e}")
+#         story_collection = None
 
 
 def init_database():
-    """Initialize SQLite database with stories table."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS stories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT UNIQUE NOT NULL,
-            title TEXT NOT NULL,
-            content TEXT NOT NULL,
-            file_hash TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    conn.commit()
+    """Initialize MySQL database connection."""
+    conn = pymysql.connect(
+        host=MYSQL_HOST,
+        port=MYSQL_PORT,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        database=MYSQL_DATABASE,
+        charset='utf8mb4',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+    logger.info(f"✅ Connected to MySQL: {MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}")
     return conn
 
 
@@ -80,24 +99,28 @@ def get_file_hash(filepath: Path) -> str:
     return hash_md5.hexdigest()
 
 
-def story_needs_update(conn: sqlite3.Connection, filename: str, file_hash: str) -> bool:
+def story_needs_update(conn: pymysql.connections.Connection, filename: str, file_hash: str) -> bool:
     """Check if story needs to be uploaded/updated."""
     cursor = conn.cursor()
-    cursor.execute("SELECT file_hash FROM stories WHERE filename = ?", (filename,))
+    cursor.execute("SELECT file_hash FROM stories WHERE filename = %s", (filename,))
     result = cursor.fetchone()
 
     if result is None:
         return True  # New file
-    return result[0] != file_hash  # Changed file
+    return result['file_hash'] != file_hash  # Changed file
 
 
 def store_pages_in_chromadb(title: str, content: str):
-    """Split content into pages and store each page in ChromaDB for RAG."""
+    """Split content into pages and store each page in ChromaDB Cloud for RAG."""
+    if not story_collection:
+        logger.warning("  ChromaDB not available - skipping RAG storage")
+        return
+    
     # Split by page markers
     pages = re.split(r'===\s*PAGE\s*\d+\s*===', content)
     pages = [p.strip() for p in pages if p.strip()]
 
-    logger.info(f"  Storing {len(pages)} pages in ChromaDB for RAG...")
+    logger.info(f"  Storing {len(pages)} pages in ChromaDB Cloud for RAG...")
 
     # Delete existing pages for this story
     try:
@@ -225,7 +248,7 @@ Format your response as:
     return full_content
 
 
-async def upload_story(conn: sqlite3.Connection, pdf_path: Path):
+async def upload_story(conn: pymysql.connections.Connection, pdf_path: Path):
     """Upload a single story to database."""
     filename = pdf_path.name
     title = pdf_path.stem  # Filename without extension
@@ -239,25 +262,25 @@ async def upload_story(conn: sqlite3.Connection, pdf_path: Path):
     # Extract content
     content = await extract_pdf_content(pdf_path)
 
-    # Upsert to SQLite database
+    # Upsert to MySQL database
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO stories (filename, title, content, file_hash)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(filename) DO UPDATE SET
-            title = excluded.title,
-            content = excluded.content,
-            file_hash = excluded.file_hash,
-            created_at = CURRENT_TIMESTAMP
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            content = VALUES(content),
+            file_hash = VALUES(file_hash),
+            updated_at = CURRENT_TIMESTAMP
     """, (filename, title, content, file_hash))
 
     conn.commit()
-    logger.info(f"Saved {filename} to SQLite")
+    logger.info(f"Saved {filename} to MySQL")
 
-    # Store pages in ChromaDB for RAG
-    store_pages_in_chromadb(title, content)
+    # Store pages in ChromaDB Cloud for RAG
+    # store_pages_in_chromadb(title, content)  # Skip ChromaDB - already uploaded
 
-    logger.info(f"Completed {filename} (SQLite + ChromaDB)")
+    logger.info(f"Completed {filename} (MySQL only)")
     return True
 
 
@@ -335,10 +358,10 @@ async def main():
     print(f"\n  Uploaded: {uploaded}")
     print(f"  Skipped (unchanged): {skipped}")
     print(f"  Failed: {failed}")
-    print(f"\n  SQLite DB: {DB_PATH}")
-    print(f"  ChromaDB (RAG): {CHROMA_PATH}")
+    print(f"\n  MySQL DB: {MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}")
+    print(f"  ChromaDB: Cloud ({CHROMA_TENANT}/{CHROMA_DATABASE})\" if story_collection else \"  ChromaDB: Disabled\")")
     print("\n" + "=" * 60)
-    print("You can now run: python main.py dev")
+    print("Stories are now available in MySQL for the storyteller agent!")
     print("=" * 60 + "\n")
 
 

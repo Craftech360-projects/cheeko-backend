@@ -63,6 +63,9 @@ RUN python -m pip install --user --no-cache-dir \
     'pytz' \
     'qdrant-client>=1.7.0' \
     'sentence-transformers>=2.2.0' \
+    'pymysql>=1.1.0' \
+    'PyMuPDF>=1.23.0' \
+    'chromadb>=0.4.0' \
     'uvicorn[standard]'
 
 # Copy the entire application (including start.sh, main.py, media_api, etc.)

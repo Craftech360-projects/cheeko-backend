@@ -475,7 +475,7 @@ async def entrypoint(ctx: JobContext):
             if hasattr(assistant, '_current_story_data') and assistant._current_story_data:
                 logger.info(f"📚 Calling get_next_page()...")
                 await session.generate_reply(
-                    instructions="Call get_next_page() silently and read the returned content expressively. Do NOT say 'calling function' or 'continuing' - just read the story text."
+                    instructions="Call get_next_page() to get the next page, then READ the returned story text OUT LOUD in an expressive, engaging voice. Do NOT say 'calling function' - just smoothly continue reading the story."
                 )
         except Exception as e:
             logger.error(f"📚 Error auto-continuing story: {e}")

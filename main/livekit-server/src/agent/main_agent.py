@@ -10,7 +10,7 @@ import inspect
 import asyncio
 import os
 import re
-import sqlite3
+import pymysql
 from pathlib import Path
 from livekit.agents import (
     Agent,
@@ -36,10 +36,10 @@ logger = logging.getLogger("agent")
 STORYTELLER_DIR = Path(__file__).parent.parent.parent / "storyteller"
 STORY_DB_PATH = STORYTELLER_DIR / "stories.db"
 
-# ChromaDB Cloud Configuration
-CHROMA_TENANT = "31fbc2e5-a496-4295-bcbe-1cb2ab98be86"
-CHROMA_DATABASE = "stories"
-CHROMA_API_KEY = os.getenv("CHROMA_API_KEY", "ck-GBBgpVaaxzLKVsPxKiYtmAr3UCSRWAn1bo5CWwL2yqv4")
+# ChromaDB Cloud Configuration - Read from environment variables
+CHROMA_TENANT = os.getenv("CHROMA_CLOUD_TENANT")
+CHROMA_DATABASE = os.getenv("CHROMA_CLOUD_DATABASE")
+CHROMA_API_KEY = os.getenv("CHROMA_API_KEY")
 
 # Initialize ChromaDB Cloud for storytelling RAG (if available)
 story_rag_collection = None
@@ -72,65 +72,83 @@ else:
     logger.warning(f"📚 ChromaDB not installed - RAG disabled")
 
 def get_story_db_connection():
-    """Get SQLite connection to storyteller database."""
-    if not STORY_DB_PATH.exists():
+    """Get MySQL connection to storyteller database."""
+    try:
+        conn = pymysql.connect(
+            host=os.getenv('MYSQL_HOST', 'localhost'),
+            port=int(os.getenv('MYSQL_PORT', '3307')),
+            user=os.getenv('MYSQL_USER', 'manager'),
+            password=os.getenv('MYSQL_PASSWORD', 'managerpassword'),
+            database=os.getenv('MYSQL_DATABASE', 'manager_api'),
+            charset='utf8mb4',
+            cursorclass=pymysql.cursors.DictCursor
+        )
+        return conn
+    except Exception as e:
+        logger.error(f"📚 [DB] Failed to connect to MySQL: {e}")
         return None
-    conn = sqlite3.connect(STORY_DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
 
 def get_all_story_titles_from_db():
-    """Get all story titles from the storyteller database."""
-    logger.info(f"📚 [DB] Checking stories at: {STORY_DB_PATH}")
-    logger.info(f"📚 [DB] Path exists: {STORY_DB_PATH.exists()}")
+    """Get all story titles from the storyteller MySQL database."""
+    logger.info(f"📚 [DB] Connecting to MySQL stories database...")
     conn = get_story_db_connection()
     if not conn:
-        logger.warning(f"📚 [DB] Could not connect to database!")
+        logger.warning(f"📚 [DB] Could not connect to MySQL database!")
         return []
-    cursor = conn.cursor()
-    cursor.execute("SELECT title FROM stories")
-    titles = [row['title'] for row in cursor.fetchall()]
-    conn.close()
-    logger.info(f"📚 [DB] Found {len(titles)} stories: {titles}")
-    return titles
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT title FROM stories ORDER BY title")
+        titles = [row['title'] for row in cursor.fetchall()]
+        logger.info(f"📚 [DB] Found {len(titles)} stories: {titles}")
+        return titles
+    except Exception as e:
+        logger.error(f"📚 [DB] Error fetching stories: {e}")
+        return []
+    finally:
+        conn.close()
 
 def get_story_by_name_from_db(name: str):
-    """Get a story by name (fuzzy match) from the storyteller database."""
+    """Get a story by name (fuzzy match) from the storyteller MySQL database."""
     logger.info(f"📚 [DB] Searching for story: '{name}'")
     conn = get_story_db_connection()
     if not conn:
         logger.warning(f"📚 [DB] No database connection!")
         return None
-    cursor = conn.cursor()
+    
+    try:
+        cursor = conn.cursor()
 
-    # Try exact match first
-    cursor.execute("SELECT * FROM stories WHERE LOWER(title) = LOWER(?)", (name,))
-    row = cursor.fetchone()
-
-    if not row:
-        # Try contains match
-        cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(?)", (f"%{name}%",))
+        # Try exact match first
+        cursor.execute("SELECT * FROM stories WHERE LOWER(title) = LOWER(%s)", (name,))
         row = cursor.fetchone()
 
-    if not row:
-        # Try matching any word from the search term
-        words = name.lower().split()
-        for word in words:
-            if len(word) > 2:  # Skip short words
-                cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(?)", (f"%{word}%",))
-                row = cursor.fetchone()
-                if row:
-                    break
+        if not row:
+            # Try contains match
+            cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(%s)", (f"%{name}%",))
+            row = cursor.fetchone()
 
-    conn.close()
+        if not row:
+            # Try matching any word from the search term
+            words = name.lower().split()
+            for word in words:
+                if len(word) > 2:  # Skip short words
+                    cursor.execute("SELECT * FROM stories WHERE LOWER(title) LIKE LOWER(%s)", (f"%{word}%",))
+                    row = cursor.fetchone()
+                    if row:
+                        break
 
-    if row:
-        result = dict(row)
-        logger.info(f"📚 [DB] Found story: '{result['title']}'")
-        return result
+        if row:
+            result = dict(row)
+            logger.info(f"📚 [DB] Found story: '{result['title']}'")
+            return result
 
-    logger.warning(f"📚 [DB] No story found matching '{name}'")
-    return None
+        logger.warning(f"📚 [DB] No story found matching '{name}'")
+        return None
+    except Exception as e:
+        logger.error(f"📚 [DB] Error searching for story: {e}")
+        return None
+    finally:
+        conn.close()
 
 def split_story_into_pages(content: str):
     """Split story content into pages by PAGE markers."""
@@ -890,8 +908,8 @@ class Assistant(FilteredAgent):
 
     @function_tool
     async def list_story_books(self, context: RunContext) -> str:
-        """Lists all available story books in the library that can be read to children.
-        Use this when the child asks what stories are available or wants to hear a story.
+        """Lists all available content in the library - stories, shlokas, mantras, and wisdom.
+        Use this when the child asks what's available to read or hear.
         """
         logger.info(f"📚 ======== LIST STORY BOOKS ========")
         logger.info(f"📚 DB Path: {STORY_DB_PATH}")
@@ -899,16 +917,37 @@ class Assistant(FilteredAgent):
 
         titles = get_all_story_titles_from_db()
         if not titles:
-            logger.warning(f"📚 No stories found in database!")
-            return "No story books available in the library. Please ask an adult to upload stories first."
+            logger.warning(f"📚 No content found in database!")
+            return "No content available in the library. Please ask an adult to upload stories first."
 
-        logger.info(f"📚 Found {len(titles)} stories:")
+        # Categorize content
+        stories = []
+        shlokas_mantras = []
+        wisdom = []
+
         for title in titles:
-            logger.info(f"📚   - {title}")
+            title_lower = title.lower()
+            if 'shloka' in title_lower or 'mantra' in title_lower:
+                shlokas_mantras.append(title)
+            elif 'wisdom' in title_lower or 'nugget' in title_lower:
+                wisdom.append(title)
+            else:
+                stories.append(title)
+
+        logger.info(f"📚 Found {len(titles)} items: {len(stories)} stories, {len(shlokas_mantras)} shlokas/mantras, {len(wisdom)} wisdom")
         logger.info(f"📚 ===================================")
 
-        story_list = "\n".join([f"- {title}" for title in titles])
-        return f"Available story books in the library:\n{story_list}\n\nWhich story would you like me to read?"
+        result = "Here's what I can read for you:\n\n"
+
+        if stories:
+            result += "📖 STORIES:\n" + "\n".join([f"  - {t}" for t in stories]) + "\n\n"
+        if shlokas_mantras:
+            result += "🙏 SHLOKAS & MANTRAS:\n" + "\n".join([f"  - {t}" for t in shlokas_mantras]) + "\n\n"
+        if wisdom:
+            result += "💡 WISDOM:\n" + "\n".join([f"  - {t}" for t in wisdom]) + "\n\n"
+
+        result += "What would you like to hear?"
+        return result
 
     @function_tool
     async def start_reading_story(self, context: RunContext, story_name: str) -> str:
@@ -956,11 +995,9 @@ class Assistant(FilteredAgent):
 
         return f"""Okay! Let me read "{story['title']}" for you!
 
-*Opens the book* Page 1, the cover...
+*Opens the book* Page 1...
 
-{first_page}
-
-[CONTINUE_STORY]"""
+{first_page}"""
 
     @function_tool
     async def get_next_page(self, context: RunContext) -> str:
@@ -1000,12 +1037,10 @@ class Assistant(FilteredAgent):
 
 *Closes the book gently* And that's the end of our story! Wasn't that wonderful? Would you like to hear another story?"""
         else:
-            # More pages to come - add marker for auto-continue
+            # More pages to come - auto-continue will handle next page
             return f"""Page {page_num}...
 
-{page_content}
-
-[CONTINUE_STORY]"""
+{page_content}"""
 
     @function_tool
     async def restart_story(self, context: RunContext) -> str:
@@ -1029,9 +1064,7 @@ class Assistant(FilteredAgent):
 
         return f"""Okay, let's start over! Back to page 1...
 
-{first_page}
-
-[CONTINUE_STORY]"""
+{first_page}"""
 
     @function_tool
     async def ask_about_current_story(self, context: RunContext, question: str) -> str:
@@ -1089,6 +1122,33 @@ class Assistant(FilteredAgent):
             import traceback
             logger.error(f"📚 Traceback: {traceback.format_exc()}")
             return "Let me continue with the story - I couldn't search for that right now."
+
+    @function_tool
+    async def list_story_books(self, context: RunContext) -> str:
+        """List all available stories in the library.
+        
+        Returns a formatted list of all story titles available for reading.
+        """
+        logger.info(f"📚 ======== LISTING ALL STORIES ========")
+        
+        titles = get_all_story_titles_from_db()
+        
+        if not titles:
+            logger.warning(f"📚 No stories found in database!")
+            return "I don't have any stories in my library right now."
+        
+        logger.info(f"📚 Found {len(titles)} stories")
+        logger.info(f"📚 ======================================")
+        
+        # Format as a nice list
+        story_list = "\n".join([f"- {title}" for title in titles])
+        
+        return f"""I have {len(titles)} wonderful stories in my library:
+
+{story_list}
+
+Which one would you like to hear?"""
+
 
     # ============================================================================
     # OTHER FUNCTION TOOLS
