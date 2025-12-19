@@ -35,18 +35,27 @@ logger = logging.getLogger("agent")
 # ============================================================================
 STORYTELLER_DIR = Path(__file__).parent.parent.parent / "storyteller"
 STORY_DB_PATH = STORYTELLER_DIR / "stories.db"
-STORY_CHROMA_PATH = STORYTELLER_DIR / "chroma_db"
 
-# Initialize ChromaDB for storytelling RAG (if available)
+# ChromaDB Cloud Configuration
+CHROMA_TENANT = "31fbc2e5-a496-4295-bcbe-1cb2ab98be86"
+CHROMA_DATABASE = "stories"
+CHROMA_API_KEY = os.getenv("CHROMA_API_KEY", "ck-GBBgpVaaxzLKVsPxKiYtmAr3UCSRWAn1bo5CWwL2yqv4")
+
+# Initialize ChromaDB Cloud for storytelling RAG (if available)
 story_rag_collection = None
-if CHROMADB_AVAILABLE and STORY_CHROMA_PATH.exists():
+if CHROMADB_AVAILABLE:
     try:
-        story_chroma_client = chromadb.PersistentClient(path=str(STORY_CHROMA_PATH))
+        story_chroma_client = chromadb.CloudClient(
+            tenant=CHROMA_TENANT,
+            database=CHROMA_DATABASE,
+            api_key=CHROMA_API_KEY
+        )
         story_rag_collection = story_chroma_client.get_or_create_collection(name="story_pages")
         # Log ChromaDB stats
         collection_count = story_rag_collection.count()
-        logger.info(f"📚 ======== CHROMADB INITIALIZED ========")
-        logger.info(f"📚 Path: {STORY_CHROMA_PATH}")
+        logger.info(f"📚 ======== CHROMADB CLOUD INITIALIZED ========")
+        logger.info(f"📚 Tenant: {CHROMA_TENANT}")
+        logger.info(f"📚 Database: {CHROMA_DATABASE}")
         logger.info(f"📚 Collection: 'story_pages'")
         logger.info(f"📚 Total documents: {collection_count}")
         # Try to get unique story titles in the collection
@@ -56,14 +65,11 @@ if CHROMADB_AVAILABLE and STORY_CHROMA_PATH.exists():
                 logger.info(f"📚 Sample metadata: {sample['metadatas'][0]}")
         except:
             pass
-        logger.info(f"📚 ======================================")
+        logger.info(f"📚 ============================================")
     except Exception as e:
-        logger.warning(f"📚 Could not initialize storyteller RAG: {e}")
+        logger.warning(f"📚 Could not initialize ChromaDB Cloud RAG: {e}")
 else:
-    if not CHROMADB_AVAILABLE:
-        logger.warning(f"📚 ChromaDB not installed - RAG disabled")
-    elif not STORY_CHROMA_PATH.exists():
-        logger.warning(f"📚 ChromaDB path not found: {STORY_CHROMA_PATH}")
+    logger.warning(f"📚 ChromaDB not installed - RAG disabled")
 
 def get_story_db_connection():
     """Get SQLite connection to storyteller database."""

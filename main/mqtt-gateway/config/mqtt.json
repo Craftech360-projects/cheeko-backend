@@ -9,10 +9,9 @@
     "reconnectPeriod": 1000,
     "connectTimeout": 30000
   },
-  "livekit": {
-    "url": "ws://localhost:7880",
-    "api_key": "key1",
-    "api_secret": "secret1"
+    "livekit": {
+    "url": "wss://testing-2v11rxzd.livekit.cloud",
+    "api_key": "APIGBRFuMb8PbWa",
+    "api_secret": "GpiZnAUJuy91PAb8hXTMEce2zaZmbPLlrC3qfuOvj7V"
   }
 }
-

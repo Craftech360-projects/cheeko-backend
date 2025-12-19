@@ -12,6 +12,7 @@ Usage:
 """
 
 import logging
+import os
 import sqlite3
 from pathlib import Path
 from dotenv import load_dotenv
@@ -41,14 +42,17 @@ logging.basicConfig(level=logging.INFO)
 
 # Database paths
 DB_PATH = ROOT_DIR / "stories.db"
-CHROMA_PATH = ROOT_DIR / "chroma_db"
 
 # Global references
 _audio_controller = None
 _db_connection = None
 
-# Initialize ChromaDB for RAG
-chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+# Initialize ChromaDB Cloud for RAG
+chroma_client = chromadb.CloudClient(
+    tenant="31fbc2e5-a496-4295-bcbe-1cb2ab98be86",
+    database="stories",
+    api_key=os.getenv("CHROMA_API_KEY", "ck-GBBgpVaaxzLKVsPxKiYtmAr3UCSRWAn1bo5CWwL2yqv4")
+)
 story_collection = chroma_client.get_or_create_collection(name="story_pages")
 
 
