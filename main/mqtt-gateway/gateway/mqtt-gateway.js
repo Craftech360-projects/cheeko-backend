@@ -1686,6 +1686,8 @@ class MQTTGateway {
    */
   async cleanupGhostRoomsAndSessions() {
     const startTime = Date.now();
+    const memBefore = process.memoryUsage();
+
     let roomsCleaned = 0;
     let sessionsCleaned = 0;
     let connectionsCleaned = 0;
@@ -1759,13 +1761,22 @@ class MQTTGateway {
 
     // 2. Clean up stale deviceConnections entries
     const staleDevices = [];
+    const now = Date.now();
+    const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+
     for (const [deviceId, deviceInfo] of this.deviceConnections.entries()) {
       const connection = deviceInfo?.connection;
 
       // Check if connection is dead or closing (fixed: proper isAlive check)
-      const isStale = !connection || connection.closing ||
-                      (typeof connection.isAlive === 'function' && !connection.isAlive());
-      if (isStale) {
+      const isDead = !connection || connection.closing ||
+        (typeof connection.isAlive === 'function' && !connection.isAlive());
+
+      // Check for stale activity (connected but silent for too long)
+      const lastActivity = connection?.lastActivityTime || 0;
+      const isInactive = (now - lastActivity) > STALE_THRESHOLD;
+
+      // Clean up if dead OR (inactive and no bridge)
+      if (isDead || (isInactive && connection?.bridge === null)) {
         staleDevices.push(deviceId);
       }
     }
@@ -1796,7 +1807,7 @@ class MQTTGateway {
     const staleConnectionIds = [];
     for (const [connectionId, connection] of this.connections.entries()) {
       const isStaleConn = !connection || connection.closing ||
-                          (typeof connection.isAlive === 'function' && !connection.isAlive());
+        (typeof connection.isAlive === 'function' && !connection.isAlive());
       if (isStaleConn) {
         staleConnectionIds.push(connectionId);
       }
@@ -1835,8 +1846,11 @@ class MQTTGateway {
     }
 
     const duration = Date.now() - startTime;
+    const memAfter = process.memoryUsage();
+    const heapDiff = (memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024;
+
     logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}, ClientConns: ${clientConnectionsCleaned}`);
-    logger.info(`📊 [GHOST-CLEANUP] Current state - Active connections: ${this.connections.size}, Device connections: ${this.deviceConnections.size}, Client connections: ${this.clientConnections.size}`);
+    logger.info(`📊 [GHOST-CLEANUP] Memory: Heap ${(memAfter.heapUsed / 1024 / 1024).toFixed(1)}MB, Released: ${heapDiff.toFixed(1)}MB | Active: ${this.connections.size}, Devices: ${this.deviceConnections.size}`);
   }
 
   addConnection(connection) {

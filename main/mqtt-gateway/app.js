@@ -64,7 +64,7 @@ async function main() {
 
   try {
     // Initialize and start the gateway
-    const gateway = new MQTTGateway();
+    gateway = new MQTTGateway();
     await gateway.start();
 
     logger.info("✅ [MAIN] MQTT Gateway started successfully");

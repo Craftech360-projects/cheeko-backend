@@ -219,7 +219,9 @@ this.headerBuffer = null;
 
 ---
 
-## Phase 5: Buffer Cleanup
+## Phase 5: Buffer Cleanup ✅ COMPLETE
+
+**Status:** ✅ **COMPLETE**
 
 **File:** `mqtt/virtual-connection.js` - `close()` method
 
@@ -249,7 +251,9 @@ if (this.opusDecoder) {
 
 ---
 
-## Phase 6: Ghost Cleanup Enhancements
+## Phase 6: Ghost Cleanup Enhancements ✅ COMPLETE
+
+**Status:** ✅ **COMPLETE**
 
 **File:** `gateway/mqtt-gateway.js` - `cleanupGhostRoomsAndSessions()`
 

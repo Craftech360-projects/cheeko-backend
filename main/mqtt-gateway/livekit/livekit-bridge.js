@@ -366,7 +366,7 @@ class LiveKitBridge extends EventEmitter {
                 setTimeout(() => {
                   this.sendTtsStopMessage();
                 }, 1000);
-                
+
 
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (
@@ -2106,6 +2106,16 @@ class LiveKitBridge extends EventEmitter {
     if (this.volumeDebounceTimer) {
       clearTimeout(this.volumeDebounceTimer);
       this.volumeDebounceTimer = null;
+    }
+
+    // Phase 5: Buffer Cleanup
+    this.audioBufferQueue = [];
+    this.pendingAudioFrames = [];
+    if (this.opusEncoder) {
+      this.opusEncoder = null;
+    }
+    if (this.opusDecoder) {
+      this.opusDecoder = null;
     }
 
     console.log(`🧹 [CLEANUP] Cleared all references for bridge: ${this.macAddress}`);
