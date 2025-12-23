@@ -1391,6 +1391,18 @@ class MQTTGateway {
 
         if (oldBridge) {
           oldBridge.stopAudioForwarding = true;
+
+          // MEMORY LEAK FIX: Terminate worker pool before nullifying bridge
+          if (oldBridge.workerPool) {
+            try {
+              await oldBridge.workerPool.terminate();
+              logger.info(`🔄 [MODE-CHANGE] Worker pool terminated`);
+            } catch (err) {
+              logger.warn(`⚠️ [MODE-CHANGE] Worker pool termination error: ${err.message}`);
+            }
+            oldBridge.workerPool = null;
+          }
+
           if (oldBridge.room) {
             try {
               await oldBridge.room.disconnect();
@@ -1750,8 +1762,10 @@ class MQTTGateway {
     for (const [deviceId, deviceInfo] of this.deviceConnections.entries()) {
       const connection = deviceInfo?.connection;
 
-      // Check if connection is dead or closing
-      if (!connection || connection.closing || !connection.isAlive || !connection.isAlive()) {
+      // Check if connection is dead or closing (fixed: proper isAlive check)
+      const isStale = !connection || connection.closing ||
+                      (typeof connection.isAlive === 'function' && !connection.isAlive());
+      if (isStale) {
         staleDevices.push(deviceId);
       }
     }
@@ -1781,7 +1795,9 @@ class MQTTGateway {
     // 3. Clean up stale connections map entries
     const staleConnectionIds = [];
     for (const [connectionId, connection] of this.connections.entries()) {
-      if (!connection || connection.closing || !connection.isAlive || !connection.isAlive()) {
+      const isStaleConn = !connection || connection.closing ||
+                          (typeof connection.isAlive === 'function' && !connection.isAlive());
+      if (isStaleConn) {
         staleConnectionIds.push(connectionId);
       }
     }
@@ -1804,9 +1820,23 @@ class MQTTGateway {
       }
     }
 
+    // 4. Clean up stale clientConnections entries (these are never cleaned otherwise)
+    let clientConnectionsCleaned = 0;
+    for (const [clientId, info] of this.clientConnections.entries()) {
+      const deviceId = info?.deviceId;
+      // Remove if no deviceId or device no longer exists in deviceConnections
+      if (!deviceId || !this.deviceConnections.has(deviceId)) {
+        this.clientConnections.delete(clientId);
+        clientConnectionsCleaned++;
+      }
+    }
+    if (clientConnectionsCleaned > 0) {
+      logger.info(`🗑️ [GHOST-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
+    }
+
     const duration = Date.now() - startTime;
-    logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}`);
-    logger.info(`📊 [GHOST-CLEANUP] Current state - Active connections: ${this.connections.size}, Device connections: ${this.deviceConnections.size}`);
+    logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}, ClientConns: ${clientConnectionsCleaned}`);
+    logger.info(`📊 [GHOST-CLEANUP] Current state - Active connections: ${this.connections.size}, Device connections: ${this.deviceConnections.size}, Client connections: ${this.clientConnections.size}`);
   }
 
   addConnection(connection) {

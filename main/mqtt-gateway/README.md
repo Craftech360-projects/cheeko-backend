@@ -2,6 +2,41 @@
 
 ## Project Overview
 
+2. Create a virtual environment
+
+python -m venv myenv
+
+
+3. Activate it
+
+Command Prompt
+
+venv\Scripts\activate
+
+
+PowerShell
+
+venv\Scripts\Activate.ps1
+
+
+If PowerShell blocks activation:
+
+Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+
+4. Deactivate
+
+deactivate
+
+
+
+install pacakge
+
+pip install . or pip install -e .
+
+
+
+
 This is a bridge service for IoT device communication that implements conversion from MQTT and UDP protocols to WebSocket. The service allows devices to transmit control messages through MQTT protocol while efficiently transmitting audio data through UDP protocol, bridging this data to WebSocket services.
 
 ## Features

@@ -35,6 +35,7 @@ class WorkerPoolManager {
         this.lastScaleAction = Date.now();
         this.scaleUpCooldown = 30000; // Wait 30s after scaling up
         this.scaleDownCooldown = 60000; // Wait 60s after scaling down
+        this.isTerminating = false; // Flag to prevent worker restarts during termination
 
         this.initializeWorkers();
 
@@ -72,6 +73,12 @@ class WorkerPoolManager {
     }
 
     restartWorker(index) {
+        // Don't restart workers during termination
+        if (this.isTerminating) {
+            console.log(`[WORKER-POOL] Skipping restart of worker ${index} - pool is terminating`);
+            return;
+        }
+
         const workerPath = path.join(__dirname, "../audio-worker.js");
 
         if (this.workers[index]) {
@@ -433,7 +440,8 @@ class WorkerPoolManager {
     // ========================================
 
     async terminate() {
-        // console.log("🛑 [WORKER-POOL] Terminating all workers...");
+        // Prevent worker restarts during termination
+        this.isTerminating = true;
 
         // Stop auto-scaling
         this.stopAutoScaling();
@@ -441,9 +449,32 @@ class WorkerPoolManager {
         // Stop performance monitor
         this.performanceMonitor.stop();
 
-        // Terminate all workers
-        await Promise.all(this.workers.map((w) => w.worker.terminate()));
+        // Gracefully shutdown all workers
+        const shutdownPromises = this.workers.map(async (workerInfo, index) => {
+            try {
+                // Remove event listeners to prevent error logs during shutdown
+                workerInfo.worker.removeAllListeners('error');
+                workerInfo.worker.removeAllListeners('exit');
+
+                // Send graceful shutdown message
+                await this.sendMessage(workerInfo.worker, { type: 'shutdown' }, 1000).catch(() => {
+                    // Ignore timeout - worker might already be dead
+                });
+
+                // Give worker a moment to exit gracefully
+                await new Promise(resolve => setTimeout(resolve, 100));
+
+                // Force terminate if still running
+                await workerInfo.worker.terminate();
+            } catch (error) {
+                // Ignore termination errors - worker might already be dead
+            }
+        });
+
+        await Promise.all(shutdownPromises);
+
         this.workers = [];
+        this.workerPendingCount = [];
     }
 }
 

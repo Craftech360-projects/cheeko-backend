@@ -1,3 +1,4 @@
+livekit-plugins-google
 livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
@@ -5,28 +6,23 @@ livekit-plugins-inworld
 python-dotenv
 pydub
 aiohttp
-google-api-python-client>=2.100.0
 
 # Media API server dependencies
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
-# # Local AI Models (for offline operation)
-# faster-whisper  # Local STT using Whisper
-# TTS  # Coqui TTS for local text-to-speech
-
 # Optional dependencies for enhanced semantic search
 qdrant-client
 sentence-transformers
 
-# EdgeTTS support (uses Microsoft servers but can work offline)
+# EdgeTTS support
 edge-tts==7.0.2
 
 # Room management and JWT for API calls
 livekit-api
 PyJWT
 
-# Memory provider (optional - comment out if using local memory)
+# Memory provider
 mem0ai==1.0.0
 
 jinja2
@@ -44,9 +40,6 @@ python-logging-loki>=0.3.1
 
 # MySQL database support for storyteller
 pymysql>=1.1.0
-
-# PDF processing for storyteller
-PyMuPDF>=1.23.0
 
 # ChromaDB Cloud for storyteller RAG
 chromadb>=0.4.0

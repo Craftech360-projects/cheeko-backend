@@ -8,7 +8,7 @@
 INSERT INTO `ai_agent_template`
 (`id`, `agent_code`, `agent_name`, `asr_model_id`, `vad_model_id`, `llm_model_id`, `vllm_model_id`, `tts_model_id`, `tts_voice_id`, `mem_model_id`, `intent_model_id`, `chat_history_conf`, `system_prompt`, `summary_memory`, `lang_code`, `language`, `sort`, `is_visible`, `creator`, `created_at`, `updater`, `updated_at`)
 VALUES
-('f890abcdef123456789abcdef016d', 'storyteller', 'StoryTeller', 'ASR_FunASR', 'VAD_SileroVAD', 'LLM_ChatGLMLLM', 'VLLM_ChatGLMVLLM', 'TTS_EdgeTTS', 'TTS_EdgeTTS0001', 'Memory_nomem', 'Intent_function_call', 2,
+('f890abcdef123456789abcdef019d', 'storyteller', 'StoryTeller', 'ASR_FunASR', 'VAD_SileroVAD', 'LLM_ChatGLMLLM', 'VLLM_ChatGLMVLLM', 'TTS_EdgeTTS', 'TTS_EdgeTTS0001', 'Memory_nomem', 'Intent_function_call', 2,
 '<identity>
 You are CHEEKO, a warm, loving storyteller who reads stories to children - like a favorite grandparent!
 </identity>

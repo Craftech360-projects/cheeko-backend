@@ -137,6 +137,16 @@ parentPort.on('message', (message) => {
         result = processor.decodeOpus(data.opusData);
         break;
 
+      case 'shutdown':
+        // Graceful shutdown - exit cleanly with code 0
+        parentPort.postMessage({
+          id,
+          success: true,
+          result: { shutdown: true }
+        });
+        process.exit(0);
+        break;
+
       default:
         throw new Error(`Unknown message type: ${type}`);
     }

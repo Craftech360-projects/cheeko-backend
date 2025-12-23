@@ -47,6 +47,7 @@ class LiveKitBridge extends EventEmitter {
     this.isAudioPlaying = false; // Track if audio is actively playing
     this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
     this.stopAudioForwarding = false; // Flag to stop audio forwarding during mode switch
+    this.isClosing = false; // Flag to prevent duplicate close() calls
 
     // Add agent join tracking
     this.agentJoined = false;
@@ -307,6 +308,17 @@ class LiveKitBridge extends EventEmitter {
     const token = await at.toJwt(); // Fixed: Make this async
 
     this.room = new Room();
+
+    // Register transcription text stream handler to capture speech-to-text
+    // this.room.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+    //   try {
+    //     for await (const chunk of reader) {
+    //       console.log(`📝 [TRANSCRIPTION] ${participantInfo?.identity || 'unknown'}: ${chunk}`);
+    //     }
+    //   } catch (err) {
+    //     console.error(`❌ [TRANSCRIPTION ERROR]`, err.message);
+    //   }
+    // });
 
     // Add connection state monitoring
     // this.room.on("connectionStateChanged", (state) => {
@@ -1996,6 +2008,24 @@ class LiveKitBridge extends EventEmitter {
   }
 
   async close() {
+    // Prevent duplicate close() calls
+    if (this.isClosing) {
+      console.log(`⚠️ [CLEANUP] Already closing bridge for ${this.macAddress}, skipping`);
+      return;
+    }
+    this.isClosing = true;
+
+    // MEMORY LEAK FIX: Terminate worker pool FIRST to release worker threads
+    if (this.workerPool) {
+      console.log(`[CLEANUP] Terminating worker pool for ${this.macAddress}`);
+      try {
+        await this.workerPool.terminate();
+      } catch (err) {
+        console.warn(`[CLEANUP] Worker pool termination error: ${err.message}`);
+      }
+      this.workerPool = null;
+    }
+
     if (this.room) {
       console.log("[LiveKitBridge] Disconnecting from LiveKit room");
 
@@ -2031,7 +2061,11 @@ class LiveKitBridge extends EventEmitter {
         );
       }
 
-      // Step 2: Disconnect from the room
+      // Step 2: Remove all event listeners before disconnect to prevent memory leaks
+      this.room.removeAllListeners();
+      console.log(`🧹 [CLEANUP] Removed all room event listeners`);
+
+      // Step 3: Disconnect from the room
       try {
         await this.room.disconnect();
         console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
@@ -2054,6 +2088,27 @@ class LiveKitBridge extends EventEmitter {
 
       this.room = null;
     }
+
+    // Phase 4: Break circular references to allow garbage collection
+    this.connection = null;
+    this.audioSource = null;
+    this.roomService = null;
+    this.frameBuffer = Buffer.alloc(0);
+    this.audioResampler = null;
+
+    // Clear pending MCP requests map
+    if (this.pendingMcpRequests) {
+      this.pendingMcpRequests.clear();
+      this.pendingMcpRequests = null;
+    }
+
+    // Clear volume debounce timer
+    if (this.volumeDebounceTimer) {
+      clearTimeout(this.volumeDebounceTimer);
+      this.volumeDebounceTimer = null;
+    }
+
+    console.log(`🧹 [CLEANUP] Cleared all references for bridge: ${this.macAddress}`);
   }
 
   /**

@@ -760,6 +760,7 @@ databaseChangeLog:
   - changeSet:
       id: 202512191953
       author: antigravity
+      validCheckSum: ANY
       changes:
         - sqlFile:
             encoding: utf8

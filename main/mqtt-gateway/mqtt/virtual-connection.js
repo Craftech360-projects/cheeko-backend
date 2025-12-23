@@ -444,8 +444,8 @@ class VirtualMQTTConnection {
     // Mark bridge as waiting for agent deployment
     this.bridge.agentDeployed = false;
 
-    // Setup bridge close handler
-    this.bridge.on("close", () => {
+    // Setup bridge close handler (use once() to prevent listener accumulation)
+    this.bridge.once("close", () => {
       const seconds = (Date.now() - this.udp.startTime) / 1000;
       console.log(`Call ended: ${this.deviceId} Duration: ${seconds}s`);
       this.sendMqttMessage(
@@ -1461,12 +1461,24 @@ class VirtualMQTTConnection {
     this.gateway.connections.delete(this.connectionId);
     console.log(`🗑️ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`);
 
-    // CRITICAL FIX: Keep connection in deviceConnections map longer during cleanup
-    // This prevents "No connection found" errors when messages arrive during cleanup
-    setTimeout(() => {
-      this.gateway.deviceConnections.delete(this.deviceId);
-      console.log(`🗑️ [CLEANUP] Removed ${this.deviceId} from deviceConnections map`);
-    }, 2000); // Increased from 1s to 2s to handle slower cleanup scenarios
+    // Remove from deviceConnections map immediately (no delay to prevent memory leaks)
+    this.gateway.deviceConnections.delete(this.deviceId);
+    console.log(`🗑️ [CLEANUP] Removed ${this.deviceId} from deviceConnections map`);
+
+    // Phase 4: Break circular references to allow garbage collection
+    // Clear UDP buffers
+    if (this.udp) {
+      this.udp.key = null;
+      this.udp.nonce = null;
+      this.udp = null;
+    }
+
+    // Nullify other references
+    this.headerBuffer = null;
+    this.gateway = null;
+    // Note: this.bridge already set to null above
+
+    console.log(`🧹 [CLEANUP] Cleared all references for connection: ${this.deviceId}`);
   }
 
   isAlive() {
