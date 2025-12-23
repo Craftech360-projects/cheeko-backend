@@ -1200,8 +1200,8 @@ class VirtualMQTTConnection {
     // We just log the PTT state for debugging purposes.
     if (json.type === "listen") {
       const state = json.state;
-      const mode = json.mode;
-      console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode} (Gemini VAD handles turn detection)`);
+      const mode = json.mode || this.listeningMode || 'N/A';
+      console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode}`);
 
       // No RPC calls needed - Gemini's built-in VAD handles turn detection
       // Audio streaming is controlled by ESP32 (sends audio only while button held)

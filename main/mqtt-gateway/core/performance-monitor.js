@@ -26,7 +26,7 @@ class PerformanceMonitor {
         this.lastCpuTime = Date.now();
 
         // Start periodic resource monitoring
-        this.startResourceMonitoring();
+        // this.startResourceMonitoring(); // DISABLED to save CPU
     }
 
     /**
@@ -37,7 +37,7 @@ class PerformanceMonitor {
         this.resourceMonitorInterval = setInterval(() => {
             this.recordCpuUsage();
             this.recordMemoryUsage();
-        }, 1000); // Sample every 1 second
+        }, 10000); // Sample every 10 seconds (optimized from 1s)
     }
 
     /**
