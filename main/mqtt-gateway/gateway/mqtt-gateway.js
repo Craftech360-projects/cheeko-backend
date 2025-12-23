@@ -36,6 +36,8 @@ class MQTTGateway {
     this.connections = new Map(); // clientId -> VirtualMQTTConnection
     this.keepAliveTimer = null;
     this.keepAliveCheckInterval = 15000; // Check every 15 seconds
+    this.ghostCleanupTimer = null;
+    this.ghostCleanupInterval = 5 * 60 * 1000; // Clean up ghost rooms every 5 minutes
     this.headerBuffer = Buffer.alloc(16);
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
@@ -104,6 +106,9 @@ class MQTTGateway {
 
     // Start global heartbeat check timer
     this.setupKeepAliveTimer();
+
+    // Start ghost room/session cleanup timer (every 5 minutes)
+    this.setupGhostCleanupTimer();
   }
 
   connectToEmqxBroker() {
@@ -1333,12 +1338,19 @@ class MQTTGateway {
 
   async handleDeviceModeChange(deviceId, payload) {
     try {
-      // logger.info(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode change`);
+      logger.info(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode change`);
+
+      // Validate environment
+      if (!process.env.MANAGER_API_URL) {
+        logger.error(`❌ [MODE-CHANGE] MANAGER_API_URL environment variable is not set`);
+        return;
+      }
 
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
       const crypto = require("crypto");
 
       const deviceInfo = this.deviceConnections.get(deviceId);
+      logger.info(`🔄 [MODE-CHANGE] Device info exists: ${!!deviceInfo}, has connection: ${!!deviceInfo?.connection}`);
       let existingConnection = deviceInfo?.connection || null;
 
       // Clear audio buffers
@@ -1366,10 +1378,12 @@ class MQTTGateway {
       if (existingConnection && existingConnection.bridge) {
         const oldBridge = existingConnection.bridge;
         const oldRoomName = oldBridge.room?.name;
+        logger.info(`🔄 [MODE-CHANGE] Cleaning up old room: ${oldRoomName || 'none'}`);
 
         if (oldRoomName && this.roomService) {
           try {
             await this.roomService.deleteRoom(oldRoomName);
+            logger.info(`🔄 [MODE-CHANGE] Old room deleted: ${oldRoomName}`);
           } catch (error) {
             logger.error(`❌ [MODE-CHANGE] Failed to delete old room: ${error.message}`);
           }
@@ -1380,12 +1394,15 @@ class MQTTGateway {
           if (oldBridge.room) {
             try {
               await oldBridge.room.disconnect();
+              logger.info(`🔄 [MODE-CHANGE] Old bridge disconnected`);
             } catch (error) {
-              // Ignore disconnect errors
+              logger.warn(`⚠️ [MODE-CHANGE] Bridge disconnect error (ignored): ${error.message}`);
             }
           }
           existingConnection.bridge = null;
         }
+      } else {
+        logger.info(`🔄 [MODE-CHANGE] No existing bridge to clean up`);
       }
 
       // Update mode in DB
@@ -1393,7 +1410,9 @@ class MQTTGateway {
       const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
       const apiUrl = `${baseUrl}/toy/device/${macAddress}/cycle-mode`;
 
+      logger.info(`🔄 [MODE-CHANGE] Calling API: ${apiUrl}`);
       const response = await axios.post(apiUrl, {}, { timeout: 10000 });
+      logger.info(`🔄 [MODE-CHANGE] API response code: ${response.data?.code}, success: ${response.data?.data?.success}`);
 
       if (response.data.code === 0 && response.data.data.success) {
         const { newMode, oldMode } = response.data.data;
@@ -1496,7 +1515,13 @@ class MQTTGateway {
         logger.error(`❌ [MODE-CHANGE] API error:`, response.data);
       }
     } catch (error) {
-      logger.error(`❌ [MODE-CHANGE] Error:`, error.message);
+      logger.error(`❌ [MODE-CHANGE] Error:`, error.message || error);
+      if (error.stack) {
+        logger.error(`❌ [MODE-CHANGE] Stack:`, error.stack);
+      }
+      if (error.response) {
+        logger.error(`❌ [MODE-CHANGE] Response:`, error.response.data);
+      }
     }
   }
 
@@ -1602,6 +1627,188 @@ class MQTTGateway {
     }
   }
 
+  /**
+   * Set up ghost room/session cleanup timer (every 5 minutes)
+   * Cleans up:
+   * - LiveKit rooms with no participants or only stale agents
+   * - Stale entries in deviceConnections and connections maps
+   */
+  setupGhostCleanupTimer() {
+    // Clear existing timer
+    this.clearGhostCleanupTimer();
+
+    logger.info(`🧹 [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
+
+    // Run cleanup immediately on startup (after 30 seconds to let things stabilize)
+    setTimeout(() => {
+      this.cleanupGhostRoomsAndSessions().catch(err => {
+        logger.error(`❌ [GHOST-CLEANUP] Initial cleanup failed:`, err.message);
+      });
+    }, 30000);
+
+    // Set recurring timer
+    this.ghostCleanupTimer = setInterval(async () => {
+      try {
+        await this.cleanupGhostRoomsAndSessions();
+      } catch (error) {
+        logger.error(`❌ [GHOST-CLEANUP] Cleanup cycle failed:`, error.message);
+      }
+    }, this.ghostCleanupInterval);
+  }
+
+  /**
+   * Clear ghost cleanup timer
+   */
+  clearGhostCleanupTimer() {
+    if (this.ghostCleanupTimer) {
+      clearInterval(this.ghostCleanupTimer);
+      this.ghostCleanupTimer = null;
+    }
+  }
+
+  /**
+   * Clean up ghost rooms and stale sessions
+   * - Lists all LiveKit rooms and removes empty/stale ones
+   * - Cleans up deviceConnections entries without active connections
+   * - Cleans up connections map entries that are dead
+   */
+  async cleanupGhostRoomsAndSessions() {
+    const startTime = Date.now();
+    let roomsCleaned = 0;
+    let sessionsCleaned = 0;
+    let connectionsCleaned = 0;
+
+    logger.info(`🧹 [GHOST-CLEANUP] Starting cleanup cycle...`);
+
+    // 1. Clean up ghost LiveKit rooms
+    if (this.roomService) {
+      try {
+        const rooms = await this.roomService.listRooms();
+        logger.info(`🧹 [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
+
+        for (const room of rooms) {
+          try {
+            const roomName = room.name;
+            const numParticipants = room.numParticipants || 0;
+            const creationTime = room.creationTime ? Number(room.creationTime) * 1000 : Date.now();
+            const roomAge = Date.now() - creationTime;
+            const roomAgeMinutes = Math.round(roomAge / 60000);
+
+            // Get detailed participant info
+            let participants = [];
+            try {
+              participants = await this.roomService.listParticipants(roomName);
+            } catch (err) {
+              // Room might have been deleted already
+              logger.warn(`⚠️ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
+            }
+
+            // Check if room should be cleaned up
+            const hasRealDevice = participants.some(p =>
+              p.identity && !p.identity.toLowerCase().includes('agent') && !p.identity.toLowerCase().includes('gateway')
+            );
+            const hasOnlyAgents = participants.length > 0 && !hasRealDevice;
+            const isEmpty = participants.length === 0;
+
+            // Clean up if:
+            // - Room is empty and older than 2 minutes (empty timeout)
+            // - Room only has agents (no device) and older than 5 minutes
+            // - Room is older than 60 minutes (absolute max)
+            const shouldCleanup =
+              (isEmpty && roomAge > 2 * 60 * 1000) ||
+              (hasOnlyAgents && roomAge > 5 * 60 * 1000) ||
+              (roomAge > 60 * 60 * 1000);
+
+            if (shouldCleanup) {
+              const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
+              logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
+
+              // Stop any media bots first
+              if (roomName.includes('_music') || roomName.includes('_story')) {
+                try {
+                  await axios.post(`${MEDIA_API_BASE}/stop-bot`, { room_name: roomName }, mediaAxiosConfig({ timeout: 3000 }));
+                } catch (botErr) {
+                  // Ignore bot stop errors
+                }
+              }
+
+              await this.roomService.deleteRoom(roomName);
+              roomsCleaned++;
+              logger.info(`✅ [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
+            }
+          } catch (roomError) {
+            logger.warn(`⚠️ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
+          }
+        }
+      } catch (error) {
+        logger.error(`❌ [GHOST-CLEANUP] Failed to list/cleanup LiveKit rooms:`, error.message);
+      }
+    }
+
+    // 2. Clean up stale deviceConnections entries
+    const staleDevices = [];
+    for (const [deviceId, deviceInfo] of this.deviceConnections.entries()) {
+      const connection = deviceInfo?.connection;
+
+      // Check if connection is dead or closing
+      if (!connection || connection.closing || !connection.isAlive || !connection.isAlive()) {
+        staleDevices.push(deviceId);
+      }
+    }
+
+    for (const deviceId of staleDevices) {
+      logger.info(`🗑️ [GHOST-CLEANUP] Removing stale deviceConnection: ${deviceId}`);
+      const deviceInfo = this.deviceConnections.get(deviceId);
+
+      // Try to close the connection properly first
+      if (deviceInfo?.connection && !deviceInfo.connection.closing) {
+        try {
+          deviceInfo.connection.closing = true;
+          await deviceInfo.connection.close();
+        } catch (err) {
+          // Ignore close errors
+        }
+      }
+
+      // Remove from map
+      if (deviceInfo?.connectionId) {
+        this.connections.delete(deviceInfo.connectionId);
+      }
+      this.deviceConnections.delete(deviceId);
+      sessionsCleaned++;
+    }
+
+    // 3. Clean up stale connections map entries
+    const staleConnectionIds = [];
+    for (const [connectionId, connection] of this.connections.entries()) {
+      if (!connection || connection.closing || !connection.isAlive || !connection.isAlive()) {
+        staleConnectionIds.push(connectionId);
+      }
+    }
+
+    for (const connectionId of staleConnectionIds) {
+      // Don't double-count if already cleaned via deviceConnections
+      if (!staleDevices.some(d => this.deviceConnections.get(d)?.connectionId === connectionId)) {
+        logger.info(`🗑️ [GHOST-CLEANUP] Removing stale connection: ${connectionId}`);
+        const connection = this.connections.get(connectionId);
+        if (connection && !connection.closing) {
+          try {
+            connection.closing = true;
+            await connection.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+        }
+        this.connections.delete(connectionId);
+        connectionsCleaned++;
+      }
+    }
+
+    const duration = Date.now() - startTime;
+    logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}`);
+    logger.info(`📊 [GHOST-CLEANUP] Current state - Active connections: ${this.connections.size}, Device connections: ${this.deviceConnections.size}`);
+  }
+
   addConnection(connection) {
     // Check if a connection with the same clientId already exists
     for (const [key, value] of this.connections.entries()) {
@@ -1659,6 +1866,8 @@ class MQTTGateway {
     this.stopping = true;
     // Clear heartbeat check timer
     this.clearKeepAliveTimer();
+    // Clear ghost cleanup timer
+    this.clearGhostCleanupTimer();
 
     if (this.connections.size > 0) {
       logger.warn(`Waiting for ${this.connections.size} connections to close`);
