@@ -3,6 +3,8 @@ livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
+livekit-plugins-google
+google-genai
 python-dotenv
 pydub
 aiohttp
@@ -12,7 +14,7 @@ fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 
 # Optional dependencies for enhanced semantic search
-qdrant-client
+qdrant-client>=1.7.0
 sentence-transformers
 
 # EdgeTTS support

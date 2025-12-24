@@ -122,12 +122,16 @@ class UnifiedAudioPlayer:
         async with self._playback_lock:
             logger.info(f"🎵 UNIFIED: Acquired playback lock for: {title}")
 
-            await self.stop()  # Stop any current playback and wait for full cancellation
-
-            # CRITICAL: Small delay to ensure LiveKit session clears its internal audio buffer
-            # Without this, old audio frames may still be in the pipeline
-            await asyncio.sleep(0.2)
-            logger.info(f"🎵 UNIFIED: Audio pipeline cleared, starting playback: {title}")
+            # Only stop if there's actually something playing to avoid unnecessary interruption
+            if self.is_playing or self.current_task or self.session_say_task:
+                logger.info(f"🎵 UNIFIED: Stopping previous playback before starting: {title}")
+                await self.stop()  # Stop any current playback and wait for full cancellation
+                # CRITICAL: Small delay to ensure LiveKit session clears its internal audio buffer
+                # Without this, old audio frames may still be in the pipeline
+                await asyncio.sleep(0.2)
+                logger.info(f"🎵 UNIFIED: Audio pipeline cleared, starting playback: {title}")
+            else:
+                logger.info(f"🎵 UNIFIED: No active playback, starting fresh: {title}")
 
             logger.info(f"🎵 UNIFIED: Starting playback: {title}")
             self.is_playing = True
@@ -151,22 +155,40 @@ class UnifiedAudioPlayer:
                 logger.error("No session available for playback")
                 return
 
-            # Stream and convert audio to frames (NEW: no full download!)
-            audio_frames = await self._stream_download_and_convert(url, title)
-
-            # Fallback to full download if streaming fails
-            if audio_frames is None:
-                logger.warning(f"🎵 UNIFIED: Streaming failed for {title}, falling back to full download")
-                audio_frames = await self._download_and_convert_to_frames_fallback(url, title)
+            # FIXED: Always use full download approach for reliability in K8s
+            # Streaming with async iterators doesn't work reliably with session.say()
+            logger.info(f"🎵 UNIFIED: Downloading full audio for {title}...")
+            audio_frames = await self._download_and_convert_to_frames_fallback(url, title)
 
             if audio_frames is not None:
+                # Pre-buffer all frames into a list for reliable playback
+                logger.info(f"🎵 UNIFIED: Pre-buffering frames for {title}...")
+                frames_list = []
+                async for frame in audio_frames:
+                    if self.stop_event.is_set():
+                        break
+                    frames_list.append(frame)
+
+                if not frames_list:
+                    logger.error(f"🎵 UNIFIED: No frames generated for {title}")
+                    return
+
+                logger.info(f"🎵 UNIFIED: Buffered {len(frames_list)} frames for {title}")
+
+                # Create simple async generator from pre-buffered frames
+                async def buffered_frames():
+                    for frame in frames_list:
+                        if self.stop_event.is_set():
+                            return
+                        yield frame
+
                 logger.info(f"🎵 UNIFIED: Injecting {title} into TTS queue via session.say()")
 
                 try:
-                    # Use session.say() with audio frames - NO TEXT to avoid TTS before music!
+                    # Use session.say() with pre-buffered audio frames
                     speech_handle = self.session.say(
                         text="",  # EMPTY TEXT - no TTS before music!
-                        audio=audio_frames,  # Pre-recorded audio to play
+                        audio=buffered_frames(),  # Pre-buffered audio frames
                         allow_interruptions=True,  # Allow user to interrupt
                         add_to_chat_ctx=False  # Don't add music to chat context
                     )

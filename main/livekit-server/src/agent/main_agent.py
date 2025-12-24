@@ -178,6 +178,11 @@ MODE_ALIASES = {
         "ladder", "ladder game", "spelling", "spelling game",
         "vocabulary", "vocab", "word chain", "word play"
     ],
+    "Storyteller": [
+        "storyteller", "story teller", "story", "stories", "story mode",
+        "storytelling", "story telling", "tell story", "tell me a story",
+        "bedtime story", "bedtime", "narrator", "tale", "tales"
+    ],
 }
 
 def normalize_mode_name(mode_input: str) -> str:

@@ -468,6 +468,15 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
     # google_search_grounding = types.GoogleSearch()
     # logger.info("🔍 Google Search grounding enabled")
 
+    # Context Window Compression - extends session to UNLIMITED duration
+    # Without this: audio-only = 15 min, connection lifetime = ~10 min
+    # Trade-off: older conversation history gets summarized, recent context stays in full detail
+    context_compression = types.ContextWindowCompressionConfig(
+        sliding_window=types.SlidingWindow(
+            target_tokens=10000  # Compress when context exceeds this threshold
+        )
+    )
+
     # Create Gemini Realtime model - NO custom VAD config (use Gemini's default for faster response)
     # This matches the fast test project (gemini_live-api-livekit/agent.py)
     # Note: _gemini_tools=[] (empty) allows generate_reply to work while using LiveKit function tools
@@ -477,6 +486,7 @@ ONLY call update_agent_mode when the child EXPLICITLY says:
         temperature=gemini_temperature,
         modalities=["AUDIO"],
         _gemini_tools=[],  # Empty list - no native Gemini tools, using LiveKit @function_tool instead
+        context_window_compression=context_compression,  # Enables unlimited session duration
     )
 
     # Create AgentSession - LLM is now passed to Agent constructor for function tools to work
@@ -857,6 +867,38 @@ recall previous topics you discussed. This helps build a personal connection wit
     @ctx.room.on("disconnected")
     def on_room_disconnected():
         asyncio.create_task(cleanup_room_and_session())
+
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        """Handle incoming data channel messages for MCP responses"""
+        try:
+            # Decode the data
+            data_str = data_packet.data.decode("utf-8")
+            logger.debug(f"📥 Data channel received: {data_str[:200]}...")  # Log first 200 chars
+
+            data = json.loads(data_str)
+            msg_type = data.get("type", "")
+
+            # Check if this is an MCP response (various possible formats)
+            if msg_type in ["mcp_response", "function_response", "tool_response"] or "result" in data or "battery" in data_str.lower():
+                logger.info(f"📥 Received MCP response: type={msg_type}, keys={list(data.keys())}")
+
+                # Extract request_id and response data
+                request_id = data.get("request_id")
+                response_data = data
+
+                # Forward to MCP client's response handler
+                if mcp_executor and mcp_executor.mcp_client:
+                    mcp_executor.mcp_client.handle_response(request_id, response_data)
+                    logger.info(f"✅ Forwarded response to MCP client handler")
+                else:
+                    logger.warning("MCP executor not available to handle response")
+
+        except json.JSONDecodeError:
+            # Not a JSON message, ignore
+            pass
+        except Exception as e:
+            logger.error(f"Error handling data channel message: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 

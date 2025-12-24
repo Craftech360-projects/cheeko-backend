@@ -194,4 +194,5 @@ main/mqtt-gateway/config/mqtt.json
 
 # LiveKit server configuration (contains API keys)
 main/livekit-server/config.yaml
+main/livekit-server/k8s/secrets.yaml
 nul

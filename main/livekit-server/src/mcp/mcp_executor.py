@@ -238,10 +238,14 @@ class LiveKitMCPExecutor:
                 logger.error(f"Error in battery response: {response.get('error')}")
                 return "Sorry, I couldn't check the battery right now."
 
-            # Parse the response
-            # The response structure is: {"result": {"content": [{"type": "text", "text": "{json_string}"}]}}
-            result = response.get("result", {})
+            # Parse the response - handle nested payload structure from device
+            # Device sends: {"type": "mcp", "payload": {"result": {"content": [...]}}}
+            # Or direct: {"result": {"content": [...]}}
+            payload = response.get("payload", response)  # Use payload if exists, otherwise use response directly
+            result = payload.get("result", {})
             content = result.get("content", [])
+
+            logger.info(f"Parsing battery response - payload keys: {list(payload.keys())}, result keys: {list(result.keys())}, content length: {len(content)}")
 
             if content and len(content) > 0:
                 text_content = content[0].get("text", "{}")

@@ -51,6 +51,8 @@ RUN python -m pip install --user --no-cache-dir \
     'livekit.plugins.deepgram' \
     'livekit-plugins-elevenlabs' \
     'livekit-plugins-inworld' \
+    'livekit-plugins-google' \
+    'google-genai' \
     'python-dotenv' \
     'paho-mqtt' \
     'aiohttp' \
