@@ -27,6 +27,14 @@ const {
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
 
+// Character to Agent name mapping for multi-agent dispatch
+const CHARACTER_AGENT_MAP = {
+  "Cheeko": "cheeko-agent",
+  "Math Tutor": "math-tutor-agent",
+  "Riddle Solver": "riddle-solver-agent",
+  "Word Ladder": "word-ladder-agent",
+};
+
 // Global config manager and debug reference (injected by app.js)
 let configManager = null;
 let debug = null;
@@ -1190,6 +1198,7 @@ class MQTTGateway {
       const characterName =
         payload.characterName || payload.character_name || null;
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+      const crypto = require("crypto");
 
       const axios = require("axios");
       let apiUrl, requestBody;
@@ -1208,7 +1217,113 @@ class MQTTGateway {
 
       if (response.data.code === 0 && response.data.data.success) {
         const { newModeName } = response.data.data;
+        logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
+        // Step 1: Get agent name for the new character
+        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-agent";
+        logger.info(`[CHARACTER-CHANGE] Dispatching agent: ${agentName}`);
+
+        // Step 2: Get device connection
+        const deviceInfo = this.deviceConnections.get(deviceId);
+        const connection = deviceInfo?.connection;
+
+        if (!connection) {
+          logger.error(`[CHARACTER-CHANGE] No connection found for device: ${deviceId}`);
+          return;
+        }
+
+        // Step 3: Delete old room
+        if (connection.bridge) {
+          const oldBridge = connection.bridge;
+          const oldRoomName = oldBridge.room?.name;
+
+          if (oldRoomName && this.roomService) {
+            try {
+              await this.roomService.deleteRoom(oldRoomName);
+              logger.info(`[CHARACTER-CHANGE] Deleted old room: ${oldRoomName}`);
+            } catch (error) {
+              logger.warn(`[CHARACTER-CHANGE] Failed to delete old room: ${error.message}`);
+            }
+          }
+
+          // Disconnect old bridge
+          oldBridge.stopAudioForwarding = true;
+          if (oldBridge.room) {
+            try {
+              await oldBridge.room.disconnect();
+            } catch (error) {
+              // Ignore disconnect errors
+            }
+          }
+          connection.bridge = null;
+        }
+
+        // Step 4: Generate new room name
+        const newSessionUuid = crypto.randomUUID();
+        const macForRoom = deviceId.replace(/:/g, "");
+        const newRoomName = `${newSessionUuid}_${macForRoom}_conversation`;
+
+        // Step 5: Create new room
+        if (this.roomService) {
+          try {
+            await this.roomService.createRoom({
+              name: newRoomName,
+              emptyTimeout: 60,
+              maxParticipants: 3,
+            });
+            logger.info(`[CHARACTER-CHANGE] Created new room: ${newRoomName}`);
+          } catch (error) {
+            logger.error(`[CHARACTER-CHANGE] Failed to create room: ${error.message}`);
+            return;
+          }
+        }
+
+        // Step 6: Dispatch named agent to the new room
+        if (this.agentDispatchClient) {
+          try {
+            await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
+              metadata: JSON.stringify({
+                device_mac: deviceId,
+                character: newModeName,
+                timestamp: Date.now(),
+              }),
+            });
+            logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
+          } catch (error) {
+            logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
+            // Continue anyway - agent might auto-join
+          }
+        }
+
+        // Step 7: Update connection state
+        connection.udp.session_id = newRoomName;
+        connection.currentCharacter = newModeName;
+        connection.isEnding = false;
+        connection.endPromptSentTime = null;
+        connection.goodbyeSent = false;
+        connection.lastActivityTime = Date.now();
+
+        // Step 8: Create new LiveKitBridge and connect
+        const newBridge = new LiveKitBridge(
+          connection,
+          connection.protocolVersion || 1,
+          deviceId,
+          newSessionUuid,
+          connection.userData || {}
+        );
+        connection.bridge = newBridge;
+
+        newBridge.on("close", () => {
+          connection.bridge = null;
+        });
+
+        await newBridge.connect(
+          connection.audio_params || { sample_rate: 24000, channels: 1 },
+          connection.features || {},
+          this.roomService
+        );
+
+        // Step 9: Load and play audio feedback
         const fs = require("fs");
         const path = require("path");
         const audioMapPath = path.join(
@@ -1217,35 +1332,57 @@ class MQTTGateway {
           "character_change",
           "audio_map.json"
         );
-        const audioMap = JSON.parse(fs.readFileSync(audioMapPath, "utf8"));
 
-        const audioFileName = audioMap.modes[newModeName] || audioMap.default;
-        const pcmFileName = audioFileName.replace(".opus", ".pcm");
-        const audioFilePath = path.join(
-          __dirname,
-          "audio",
-          "character_change",
-          pcmFileName
-        );
-
-        if (!fs.existsSync(audioFilePath)) {
-          logger.error(
-            `❌ [CHARACTER-CHANGE] Audio file not found: ${audioFilePath}`
+        if (fs.existsSync(audioMapPath)) {
+          const audioMap = JSON.parse(fs.readFileSync(audioMapPath, "utf8"));
+          const audioFileName = audioMap.modes[newModeName] || audioMap.default;
+          const pcmFileName = audioFileName.replace(".opus", ".pcm");
+          const audioFilePath = path.join(
+            __dirname,
+            "audio",
+            "character_change",
+            pcmFileName
           );
-          return;
+
+          if (fs.existsSync(audioFilePath)) {
+            // Stream audio without sending goodbye (we're staying connected)
+            await this.streamAudioViaUdp(deviceId, audioFilePath, newModeName, false);
+          } else {
+            logger.warn(`[CHARACTER-CHANGE] Audio file not found: ${audioFilePath}`);
+          }
         }
 
-        await this.streamAudioViaUdp(
-          deviceId,
-          audioFilePath,
-          newModeName,
-          true
-        );
+        // Step 10: Send mode_update to device firmware
+        const clientId = connection.clientId;
+        if (clientId) {
+          const modeUpdateMsg = {
+            type: "mode_update",
+            mode: "conversation",
+            character: newModeName,
+            agent: agentName,
+            session_id: newRoomName,
+            timestamp: Date.now(),
+            transport: "udp",
+            udp: {
+              server: this.publicIp,
+              port: this.udpPort,
+              encryption: connection.udp.encryption,
+            },
+          };
+          const controlTopic = `devices/p2p/${clientId}`;
+          this.mqttPublish(controlTopic, modeUpdateMsg);
+          logger.info(`[CHARACTER-CHANGE] Sent mode_update to device`);
+        }
+
+        logger.info(`[CHARACTER-CHANGE] Successfully switched to ${newModeName} (${agentName})`);
       } else {
-        logger.error(`❌ [CHARACTER-CHANGE] API error:`, response.data);
+        logger.error(`[CHARACTER-CHANGE] API error:`, response.data);
       }
     } catch (error) {
-      logger.error(`❌ [CHARACTER-CHANGE] Error:`, error.message);
+      logger.error(`[CHARACTER-CHANGE] Error:`, error.message);
+      if (error.stack) {
+        logger.error(error.stack);
+      }
     }
   }
 
@@ -1610,8 +1747,7 @@ class MQTTGateway {
     const sessionId = payloadObj.session_id || "";
 
     logger.info(
-      `📤 [MQTT-OUT] ${deviceInfo || topic} | type: ${msgType}${
-        msgState ? ` | state: ${msgState}` : ""
+      `📤 [MQTT-OUT] ${deviceInfo || topic} | type: ${msgType}${msgState ? ` | state: ${msgState}` : ""
       }${sessionId ? ` | session: ${sessionId.substring(0, 20)}...` : ""}`
     );
 
