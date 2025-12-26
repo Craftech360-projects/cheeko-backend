@@ -1,0 +1,19 @@
+services:
+  livekit-server:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    restart: unless-stopped
+    ports:
+      - "7880:7880"      # HTTP/WebSocket
+      - "7881:7881"      # RTC TCP
+      - "7882:7882/udp"  # RTC UDP
+      - "50000-50200:50000-50200/udp"  # WebRTC UDP range
+    environment:
+      LIVEKIT_KEYS: "devkey: secret123456789012345678901234567890"
+    command: --dev --bind 0.0.0.0
+    networks:
+      - manager-api_manager-api-network
+
+networks:
+  manager-api_manager-api-network:
+    external: true

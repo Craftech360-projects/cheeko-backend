@@ -16,6 +16,15 @@ const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
 } = require("../core/media-api-client");
+const logger = require("../utils/logger");
+
+// Character to Agent name mapping for multi-agent dispatch
+const CHARACTER_AGENT_MAP = {
+  "Cheeko": "cheeko-agent",
+  "Math Tutor": "math-tutor-agent",
+  "Riddle Solver": "riddle-solver-agent",
+  "Word Ladder": "word-ladder-agent",
+};
 
 // MAC address regex
 const MacAddressRegex = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/;
@@ -370,9 +379,7 @@ class VirtualMQTTConnection {
     this.currentCharacter = null;
     if (this.roomType === "conversation") {
       this.currentCharacter = await this.fetchCurrentCharacter(this.deviceId);
-      console.log(
-        `🎭 [CHARACTER] Conversation mode - character: ${this.currentCharacter}`
-      );
+      logger.info(`🎭 [CHARACTER] Conversation mode - using character: "${this.currentCharacter}"`);
     }
 
     this.udp = {
@@ -547,34 +554,37 @@ class VirtualMQTTConnection {
         this.gateway?.agentDispatchClient
       ) {
         const roomName = this.bridge?.room?.name || this.udp.session_id;
-        console.log(`🚀 [AUTO-DEPLOY] Dispatching agent to room: ${roomName}`);
+
+        // Use currentCharacter (fetched from DB earlier) to dispatch correct agent
+        const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-agent";
+        logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
+        logger.info(`🚀 [AUTO-DEPLOY] Dispatching ${agentName} to room: ${roomName}`);
 
         try {
           await this.gateway.agentDispatchClient.createDispatch(
             roomName,
-            "cheeko-agent",
+            agentName,
             {
               metadata: JSON.stringify({
                 device_mac: this.macAddress,
                 device_uuid: this.deviceId,
+                character: this.currentCharacter || "Cheeko",
                 timestamp: Date.now(),
               }),
             }
           );
-          console.log(`✅ [AUTO-DEPLOY] Agent dispatched to room: ${roomName}`);
+          logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
           this.bridge.agentDeployed = true;
 
           // Wait for agent to join and then trigger initial greeting
-          console.log(`⏳ [AUTO-DEPLOY] Waiting for agent to join...`);
+          logger.info(`⏳ [AUTO-DEPLOY] Waiting for agent to join...`);
           const agentJoinTimeout = 6000; // 6 seconds
           const agentReady = await this.bridge.waitForAgentJoin(
             agentJoinTimeout
           );
 
           if (agentReady) {
-            console.log(
-              `✅ [AUTO-DEPLOY] Agent joined, sending start_greeting...`
-            );
+            logger.info(`✅ [AUTO-DEPLOY] Agent joined, sending start_greeting...`);
 
             // Send start_greeting to agent via data channel
             const startGreetingMsg = {
@@ -592,17 +602,12 @@ class VirtualMQTTConnection {
             await this.bridge.room.localParticipant.publishData(messageData, {
               reliable: true,
             });
-            console.log(`✅ [AUTO-DEPLOY] start_greeting sent to agent`);
+            logger.info(`✅ [AUTO-DEPLOY] start_greeting sent to agent`);
           } else {
-            console.warn(
-              `⚠️ [AUTO-DEPLOY] Agent join timeout, but continuing...`
-            );
+            logger.warn(`⚠️ [AUTO-DEPLOY] Agent join timeout, but continuing...`);
           }
         } catch (dispatchError) {
-          console.error(
-            `❌ [AUTO-DEPLOY] Failed to dispatch agent:`,
-            dispatchError.message
-          );
+          logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
           // Send ready_for_greeting as fallback so user can press 's' manually
           this.sendMqttMessage(
             JSON.stringify({
@@ -673,30 +678,36 @@ class VirtualMQTTConnection {
 
   async fetchCurrentCharacter(macAddress) {
     try {
-      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
       const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
-      const apiUrl = `${baseUrl}/toy/agent/device/${cleanMac}/current-character`;
+      const apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${cleanMac}/current-character`;
 
-      console.log(`🎭 [CHARACTER] Fetching current character from: ${apiUrl}`);
+      logger.info(`🎭 [CHARACTER] Fetching character for device: ${macAddress}`);
+      logger.info(`🎭 [CHARACTER] API URL: ${apiUrl}`);
 
       const response = await axios.get(apiUrl, { timeout: 5000 });
+      logger.info(`🎭 [CHARACTER] API Response: ${JSON.stringify(response.data)}`);
 
+      // Handle both response formats:
+      // Format 1: { code: 0, data: "Math Tutor" }
+      // Format 2: { code: 0, data: { characterName: "Math Tutor" } }
       if (response.data && response.data.code === 0 && response.data.data) {
-        const character = response.data.data;
-        console.log(
-          `✅ [CHARACTER] Current character for ${cleanMac}: ${character}`
-        );
+        let character;
+        if (typeof response.data.data === 'string') {
+          character = response.data.data;
+        } else if (response.data.data.characterName) {
+          character = response.data.data.characterName;
+        } else {
+          character = "Cheeko";
+        }
+        logger.info(`🎭 [CHARACTER] ✅ Got character from DB: "${character}"`);
         return character;
       } else {
-        console.log(
-          `ℹ️ [CHARACTER] No character found in response, using default: Cheeko`
-        );
+        logger.warn(`🎭 [CHARACTER] ⚠️ No character in response, using default: "Cheeko"`);
         return "Cheeko";
       }
     } catch (error) {
-      console.error(
-        `❌ [CHARACTER] Failed to fetch character: ${error.message}`
-      );
+      logger.error(`🎭 [CHARACTER] ❌ Failed to fetch: ${error.message}`);
+      logger.warn(`🎭 [CHARACTER] Using default: "Cheeko"`);
       return "Cheeko"; // Default fallback
     }
   }

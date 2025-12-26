@@ -874,19 +874,46 @@ class MQTTGateway {
               // Fresh boot: dispatch agent now
               if (this.agentDispatchClient) {
                 try {
+                  // Fetch current character from database to dispatch correct agent
+                  const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+                  let characterName = "Cheeko";
+                  const apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/current-character`;
+                  logger.info(`[START-AGENT] Fetching character from DB for device: ${deviceId}`);
+                  logger.info(`[START-AGENT] API URL: ${apiUrl}`);
+
+                  try {
+                    const charResponse = await axios.get(apiUrl, { timeout: 5000 });
+                    logger.info(`[START-AGENT] DB Response: ${JSON.stringify(charResponse.data)}`);
+
+                    if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
+                      characterName = charResponse.data.data.characterName;
+                      logger.info(`[START-AGENT] ✅ Character from DB: "${characterName}"`);
+                    } else {
+                      logger.warn(`[START-AGENT] ⚠️ No character in response, using default: "Cheeko"`);
+                    }
+                  } catch (charError) {
+                    logger.warn(`[START-AGENT] ❌ Failed to fetch character: ${charError.message}`);
+                    logger.warn(`[START-AGENT] Using default character: "Cheeko"`);
+                  }
+
+                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
+                  logger.info(`[START-AGENT] 🚀 Dispatching: Character "${characterName}" → Agent "${agentName}"`);
+
                   const dispatch =
                     await this.agentDispatchClient.createDispatch(
                       roomName,
-                      "cheeko-agent",
+                      agentName,
                       {
                         metadata: JSON.stringify({
                           device_mac: connection.macAddress,
                           device_uuid: deviceId,
+                          character: characterName,
                           timestamp: Date.now(),
                         }),
                       }
                     );
                   connection.bridge.agentDeployed = true;
+                  connection.currentCharacter = characterName;
                 } catch (dispatchError) {
                   logger.error(
                     `❌ [START-AGENT] Failed to dispatch agent:`,
@@ -1664,13 +1691,19 @@ class MQTTGateway {
         } else if (newMode === "conversation") {
           if (this.agentDispatchClient) {
             try {
+              // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
+              logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
+              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-agent";
+              logger.info(`[MODE-CHANGE] 🚀 Dispatching: Character "${currentCharacter || 'Cheeko'}" → Agent "${agentName}"`)
+
               await this.agentDispatchClient.createDispatch(
                 newRoomName,
-                "cheeko-agent",
+                agentName,
                 {
                   metadata: JSON.stringify({
                     device_mac: connection.macAddress,
                     device_uuid: deviceId,
+                    character: currentCharacter || "Cheeko",
                     timestamp: Date.now(),
                   }),
                 }
