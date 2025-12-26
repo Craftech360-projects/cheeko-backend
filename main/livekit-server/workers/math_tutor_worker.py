@@ -50,6 +50,10 @@ GAME_TOOLS = [check_math_answer]
 
 class MathTutorAssistant(BaseAssistant):
     """Math Tutor Assistant"""
+
+    # Custom greeting for Math Tutor
+    GREETING_INSTRUCTION = "Greet the user as a friendly Math Tutor. Introduce yourself briefly and ask if they're ready for a fun math challenge. Keep it encouraging and playful."
+
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
         logger.info("MathTutorAssistant initialized")

@@ -50,6 +50,10 @@ GAME_TOOLS = [validate_word_ladder_move]
 
 class WordLadderAssistant(BaseAssistant):
     """Word Ladder Assistant"""
+
+    # Custom greeting for Word Ladder
+    GREETING_INSTRUCTION = "Greet the user as the Word Ladder game host. Introduce the word ladder game briefly and ask if they're ready to climb the word ladder. Be enthusiastic and encouraging."
+
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
         logger.info("WordLadderAssistant initialized")

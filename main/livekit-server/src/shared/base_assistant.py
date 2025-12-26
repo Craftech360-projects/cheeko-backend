@@ -18,6 +18,9 @@ class BaseAssistant(Agent):
     Specialized workers extend this class for agent-specific behavior.
     """
 
+    # Default greeting instruction - override in subclasses for custom greetings
+    GREETING_INSTRUCTION = "Greet the user warmly. Keep it brief and friendly."
+
     def __init__(self, instructions: str = None) -> None:
         """
         Initialize base assistant
@@ -50,6 +53,22 @@ class BaseAssistant(Agent):
         self.game_tools = []
 
         logger.info("Base Assistant initialized")
+
+    async def on_enter(self):
+        """
+        Lifecycle hook - runs once when agent becomes active.
+        Automatically greets the user using the GREETING_INSTRUCTION.
+        Override GREETING_INSTRUCTION in subclasses for custom greetings.
+        """
+        agent_name = self.__class__.__name__
+        logger.info(f"{agent_name} on_enter triggered - sending greeting")
+        try:
+            await self.session.generate_reply(
+                instructions=self.GREETING_INSTRUCTION
+            )
+            logger.info(f"{agent_name} greeting sent successfully")
+        except Exception as e:
+            logger.error(f"{agent_name} failed to send greeting in on_enter: {e}")
 
     # ============================================================================
     # LAZY-LOADED SERVICES (Properties)

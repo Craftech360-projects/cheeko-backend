@@ -51,6 +51,10 @@ DEFAULT_PORT = 8081
 
 class CheekoAssistant(BaseAssistant):
     """Cheeko Assistant - Main conversational agent"""
+
+    # Custom greeting for Cheeko
+    GREETING_INSTRUCTION = "Greet the user warmly as Cheeko, a friendly AI companion. Keep it brief and playful."
+
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
         logger.info("CheekoAssistant initialized")

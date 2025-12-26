@@ -50,6 +50,10 @@ GAME_TOOLS = [check_riddle_answer]
 
 class RiddleSolverAssistant(BaseAssistant):
     """Riddle Solver Assistant"""
+
+    # Custom greeting for Riddle Solver
+    GREETING_INSTRUCTION = "Greet the user as the Riddle Master. Introduce yourself mysteriously and ask if they're ready to solve some brain-teasing riddles. Be playful and intriguing."
+
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
         logger.info("RiddleSolverAssistant initialized")
