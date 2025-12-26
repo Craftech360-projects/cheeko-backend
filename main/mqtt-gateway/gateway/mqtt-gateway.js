@@ -874,26 +874,34 @@ class MQTTGateway {
               // Fresh boot: dispatch agent now
               if (this.agentDispatchClient) {
                 try {
-                  // Fetch current character from database to dispatch correct agent
+                  // Fetch current character and child profile from database
                   const macAddress = deviceId.replace(/:/g, "").toLowerCase();
                   let characterName = "Cheeko";
-                  const apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/current-character`;
-                  logger.info(`[START-AGENT] Fetching character from DB for device: ${deviceId}`);
-                  logger.info(`[START-AGENT] API URL: ${apiUrl}`);
+                  let childProfile = null;
 
+                  // Fetch character and child profile in parallel
+                  logger.info(`[START-AGENT] Fetching character and child profile for device: ${deviceId}`);
                   try {
-                    const charResponse = await axios.get(apiUrl, { timeout: 5000 });
-                    logger.info(`[START-AGENT] DB Response: ${JSON.stringify(charResponse.data)}`);
+                    const [charResponse, profileResponse] = await Promise.all([
+                      axios.get(`${process.env.MANAGER_API_URL}/agent/device/${macAddress}/current-character`, { timeout: 5000 }),
+                      axios.post(
+                        `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
+                        { macAddress },
+                        { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
+                      )
+                    ]);
 
                     if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
                       characterName = charResponse.data.data.characterName;
                       logger.info(`[START-AGENT] ✅ Character from DB: "${characterName}"`);
-                    } else {
-                      logger.warn(`[START-AGENT] ⚠️ No character in response, using default: "Cheeko"`);
                     }
-                  } catch (charError) {
-                    logger.warn(`[START-AGENT] ❌ Failed to fetch character: ${charError.message}`);
-                    logger.warn(`[START-AGENT] Using default character: "Cheeko"`);
+
+                    if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
+                      childProfile = profileResponse.data.data;
+                      logger.info(`[START-AGENT] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+                    }
+                  } catch (fetchError) {
+                    logger.warn(`[START-AGENT] ⚠️ Fetch error: ${fetchError.message}`);
                   }
 
                   const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
@@ -908,12 +916,14 @@ class MQTTGateway {
                           device_mac: connection.macAddress,
                           device_uuid: deviceId,
                           character: characterName,
+                          child_profile: childProfile,
                           timestamp: Date.now(),
                         }),
                       }
                     );
                   connection.bridge.agentDeployed = true;
                   connection.currentCharacter = characterName;
+                  // Agent will greet via on_enter lifecycle hook
                 } catch (dispatchError) {
                   logger.error(
                     `❌ [START-AGENT] Failed to dispatch agent:`,
@@ -940,30 +950,7 @@ class MQTTGateway {
             connection.bridge.agentJoined = true;
             connection.bridge.agentDeployed = true;
           }
-
-          // Wait for agent to join
-          const maxWaitTime = 10000;
-          const startTime = Date.now();
-          while (Date.now() - startTime < maxWaitTime) {
-            const check = await this.checkAgentInRoom(roomName);
-            if (check.exists) break;
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-
-          // Send greeting trigger to agent
-          const greetingMessage = {
-            type: "start_greeting",
-            session_id: sessionId,
-            is_mode_switch: isModeSwitch,
-            timestamp: Date.now(),
-          };
-          const messageData = new TextEncoder().encode(
-            JSON.stringify(greetingMessage)
-          );
-          await connection.bridge.room.localParticipant.publishData(
-            messageData,
-            { reliable: true }
-          );
+          // Agent will greet user via on_enter lifecycle hook
         } else {
           logger.error(
             `❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`
@@ -1305,17 +1292,35 @@ class MQTTGateway {
           }
         }
 
-        // Step 6: Dispatch named agent to the new room
+        // Step 6: Fetch child profile and dispatch named agent to the new room
+        let childProfile = null;
+        try {
+          const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+          const profileResponse = await axios.post(
+            `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
+            { macAddress },
+            { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
+          );
+          if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
+            childProfile = profileResponse.data.data;
+            logger.info(`[CHARACTER-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+          }
+        } catch (error) {
+          logger.warn(`[CHARACTER-CHANGE] ⚠️ Failed to fetch child profile: ${error.message}`);
+        }
+
         if (this.agentDispatchClient) {
           try {
             await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
               metadata: JSON.stringify({
                 device_mac: deviceId,
                 character: newModeName,
+                child_profile: childProfile,
                 timestamp: Date.now(),
               }),
             });
             logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
+            // Agent will greet via on_enter lifecycle hook
           } catch (error) {
             logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
             // Continue anyway - agent might auto-join
@@ -1650,11 +1655,21 @@ class MQTTGateway {
           this.roomService
         );
 
-        // Fetch character for conversation mode
+        // Fetch character and child profile for conversation mode
         let currentCharacter = null;
+        let childProfile = null;
         if (newMode === "conversation") {
-          currentCharacter = await connection.fetchCurrentCharacter(macAddress);
+          // Fetch character and child profile in parallel
+          const [character, profile] = await Promise.all([
+            connection.fetchCurrentCharacter(macAddress),
+            connection.fetchChildProfile ? connection.fetchChildProfile(macAddress) : Promise.resolve(null)
+          ]);
+          currentCharacter = character;
+          childProfile = profile;
           connection.currentCharacter = currentCharacter;
+          if (childProfile) {
+            logger.info(`[MODE-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+          }
         }
 
         // Send mode_update to device firmware
@@ -1704,11 +1719,13 @@ class MQTTGateway {
                     device_mac: connection.macAddress,
                     device_uuid: deviceId,
                     character: currentCharacter || "Cheeko",
+                    child_profile: childProfile,
                     timestamp: Date.now(),
                   }),
                 }
               );
               newBridge.agentDeployed = true;
+              // Agent will greet via on_enter lifecycle hook
             } catch (error) {
               logger.error(
                 `❌ [MODE-CHANGE] Failed to dispatch agent:`,

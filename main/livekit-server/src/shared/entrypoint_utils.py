@@ -367,6 +367,17 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
         child_profile = None
         agent_id = None
 
+        # Check if child profile is in dispatch metadata (passed from MQTT gateway)
+        dispatch_child_profile = None
+        try:
+            if hasattr(ctx, 'job') and ctx.job and ctx.job.metadata:
+                dispatch_metadata = json.loads(ctx.job.metadata)
+                dispatch_child_profile = dispatch_metadata.get('child_profile')
+                if dispatch_child_profile:
+                    logger.info(f"Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
+        except Exception as e:
+            logger.debug(f"No dispatch metadata or error parsing: {e}")
+
         if device_mac:
             try:
                 logger.info("Starting parallel API calls...")
@@ -380,18 +391,27 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
                 prompt_service.clear_cache()
                 prompt_service.clear_enhanced_cache(device_mac)
 
-                # Parallel API calls
-                results = await asyncio.gather(
-                    db_helper.get_agent_id(device_mac),
-                    prompt_service.get_prompt_and_config(room_name, device_mac),
-                    db_helper.get_child_profile_by_mac(device_mac),
-                    return_exceptions=True
-                )
+                # Parallel API calls - skip child profile fetch if already have from dispatch metadata
+                if dispatch_child_profile:
+                    logger.info("Skipping child profile API call - using dispatch metadata")
+                    results = await asyncio.gather(
+                        db_helper.get_agent_id(device_mac),
+                        prompt_service.get_prompt_and_config(room_name, device_mac),
+                        return_exceptions=True
+                    )
+                    agent_id_result, prompt_config_result = results
+                    child_profile_result = dispatch_child_profile
+                else:
+                    results = await asyncio.gather(
+                        db_helper.get_agent_id(device_mac),
+                        prompt_service.get_prompt_and_config(room_name, device_mac),
+                        db_helper.get_child_profile_by_mac(device_mac),
+                        return_exceptions=True
+                    )
+                    agent_id_result, prompt_config_result, child_profile_result = results
 
                 elapsed_time = (asyncio.get_event_loop().time() - start_time) * 1000
                 logger.info(f"Parallel API calls completed in {elapsed_time:.0f}ms")
-
-                agent_id_result, prompt_config_result, child_profile_result = results
 
                 # Process agent_id
                 if isinstance(agent_id_result, Exception):

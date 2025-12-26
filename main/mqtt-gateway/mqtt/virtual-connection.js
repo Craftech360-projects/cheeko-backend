@@ -71,6 +71,7 @@ class VirtualMQTTConnection {
     this.sessionStartTime = Date.now();
     this.maxSessionDurationMs = 60 * 60 * 1000; // 60 minutes max session duration
     this.maxAudioPlayingDurationMs = 90 * 1000; // 90 seconds max before considering audio stuck
+    this.lastPttMode = "manual"; // Default PTT mode
 
     // Track target toy for mobile-initiated connections
     this.targetToyMac = null; // MAC address of the toy to route audio to
@@ -317,10 +318,9 @@ class VirtualMQTTConnection {
       `🔍 [PARSE-HELLO] Starting parseHelloMessage for ${this.deviceId}`
     );
     console.log(
-      `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${
-        this.udp.remoteAddress
-          ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-          : "null"
+      `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${this.udp.remoteAddress
+        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
+        : "null"
       }`
     );
     console.log(
@@ -362,8 +362,7 @@ class VirtualMQTTConnection {
     // Extract language from hello message
     this.language = json.language || null;
     console.log(
-      `📱 [ROOM-TYPE] Final room type: ${this.roomType}, language: ${
-        this.language || "N/A"
+      `📱 [ROOM-TYPE] Final room type: ${this.roomType}, language: ${this.language || "N/A"
       }`
     );
 
@@ -375,11 +374,21 @@ class VirtualMQTTConnection {
       this.roomType = "conversation";
     }
 
-    // Fetch current character for conversation mode
+    // Fetch current character and child profile for conversation mode
     this.currentCharacter = null;
+    this.childProfile = null;
     if (this.roomType === "conversation") {
-      this.currentCharacter = await this.fetchCurrentCharacter(this.deviceId);
+      // Fetch character and child profile in parallel for faster initialization
+      const [character, childProfile] = await Promise.all([
+        this.fetchCurrentCharacter(this.deviceId),
+        this.fetchChildProfile(this.deviceId)
+      ]);
+      this.currentCharacter = character;
+      this.childProfile = childProfile;
       logger.info(`🎭 [CHARACTER] Conversation mode - using character: "${this.currentCharacter}"`);
+      if (this.childProfile) {
+        logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
+      }
     }
 
     this.udp = {
@@ -392,10 +401,9 @@ class VirtualMQTTConnection {
       startTime: Date.now(),
     };
     console.log(
-      `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${
-        this.udp.remoteAddress
-          ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-          : "null"
+      `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${this.udp.remoteAddress
+        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
+        : "null"
       }`
     );
 
@@ -492,8 +500,7 @@ class VirtualMQTTConnection {
       };
       this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
       console.log(
-        `✅ [HELLO] Sent mode_update (${this.roomType}${
-          this.currentCharacter ? ", character: " + this.currentCharacter : ""
+        `✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ", character: " + this.currentCharacter : ""
         }) to device`
       );
 
@@ -549,6 +556,7 @@ class VirtualMQTTConnection {
       this.sendMqttMessage(JSON.stringify(helloResponseMsg));
 
       // AUTO-DEPLOY AGENT: Dispatch agent immediately for conversation mode
+      // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed
       if (
         this.roomType === "conversation" &&
         this.gateway?.agentDispatchClient
@@ -569,53 +577,16 @@ class VirtualMQTTConnection {
                 device_mac: this.macAddress,
                 device_uuid: this.deviceId,
                 character: this.currentCharacter || "Cheeko",
+                child_profile: this.childProfile || null,
                 timestamp: Date.now(),
               }),
             }
           );
           logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
           this.bridge.agentDeployed = true;
-
-          // Wait for agent to join and then trigger initial greeting
-          logger.info(`⏳ [AUTO-DEPLOY] Waiting for agent to join...`);
-          const agentJoinTimeout = 6000; // 6 seconds
-          const agentReady = await this.bridge.waitForAgentJoin(
-            agentJoinTimeout
-          );
-
-          if (agentReady) {
-            logger.info(`✅ [AUTO-DEPLOY] Agent joined, sending start_greeting...`);
-
-            // Send start_greeting to agent via data channel
-            const startGreetingMsg = {
-              type: "start_greeting",
-              session_id: this.udp.session_id,
-              is_mode_switch: false,
-              timestamp: Date.now(),
-            };
-
-            const messageString = JSON.stringify(startGreetingMsg);
-            const messageData = new Uint8Array(
-              Buffer.from(messageString, "utf8")
-            );
-
-            await this.bridge.room.localParticipant.publishData(messageData, {
-              reliable: true,
-            });
-            logger.info(`✅ [AUTO-DEPLOY] start_greeting sent to agent`);
-          } else {
-            logger.warn(`⚠️ [AUTO-DEPLOY] Agent join timeout, but continuing...`);
-          }
+          // Agent will greet user via on_enter lifecycle hook
         } catch (dispatchError) {
           logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
-          // Send ready_for_greeting as fallback so user can press 's' manually
-          this.sendMqttMessage(
-            JSON.stringify({
-              type: "ready_for_greeting",
-              session_id: this.udp.session_id,
-              timestamp: Date.now(),
-            })
-          );
         }
       } else if (this.roomType !== "conversation") {
         // For music/story modes, no agent needed
@@ -712,6 +683,41 @@ class VirtualMQTTConnection {
     }
   }
 
+  async fetchChildProfile(macAddress) {
+    try {
+      const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
+      const apiUrl = `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`;
+      const serverSecret = process.env.MANAGER_API_SECRET;
+
+      logger.info(`👶 [CHILD-PROFILE] Fetching profile for device: ${macAddress}, secret: ${serverSecret ? 'SET(' + serverSecret.substring(0,8) + '...)' : 'NOT SET'}`);
+
+      const response = await axios.post(
+        apiUrl,
+        { macAddress: cleanMac },
+        {
+          timeout: 5000,
+          headers: {
+            'secret': serverSecret,
+            'Content-Type': 'application/json'
+          }
+        }
+      );
+      logger.info(`👶 [CHILD-PROFILE] API Response: ${JSON.stringify(response.data)}`);
+
+      if (response.data && response.data.code === 0 && response.data.data) {
+        const profile = response.data.data;
+        logger.info(`👶 [CHILD-PROFILE] ✅ Got profile: name="${profile.name}", age=${profile.age}`);
+        return profile;
+      } else {
+        logger.warn(`👶 [CHILD-PROFILE] ⚠️ No profile in response`);
+        return null;
+      }
+    } catch (error) {
+      logger.error(`👶 [CHILD-PROFILE] ❌ Failed to fetch: ${error.message}`);
+      return null;
+    }
+  }
+
   // async spawnMusicBot(roomName, playlist = null) {
   //   try {
   //     console.log(`🎵 [MUSIC-BOT] Calling Python API: ${roomName}`);
@@ -783,8 +789,7 @@ class VirtualMQTTConnection {
           `✅ [MUSIC-BOT] Music bot spawned successfully for room: ${roomName}`
         );
         console.log(
-          `🎵 [MUSIC-BOT] Language: ${
-            response.data.language
+          `🎵 [MUSIC-BOT] Language: ${response.data.language
           }, Playlist items: ${playlist?.length || 0}`
         );
 
@@ -1193,7 +1198,12 @@ class VirtualMQTTConnection {
     // Handle push-to-talk messages and forward to LiveKit agent for custom turn detection
     if (json.type === "listen") {
       const state = json.state; // "start" or "stop"
-      const mode = json.mode; // "manual"
+
+      // Preserve PTT mode (manual/vad) if missing in message (common in stop messages)
+      if (json.mode) {
+        this.lastPttMode = json.mode;
+      }
+      const mode = json.mode || this.lastPttMode || "manual";
 
       console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode}`);
 
@@ -1299,8 +1309,7 @@ class VirtualMQTTConnection {
 
       if (timeSinceEndPrompt > maxEndWaitTime) {
         console.log(
-          `🕒 [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${
-            this.deviceId
+          `🕒 [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${this.deviceId
           } (waited ${Math.round(timeSinceEndPrompt / 1000)}s)`
         );
 
@@ -1352,8 +1361,7 @@ class VirtualMQTTConnection {
       if (audioPlayingDuration < this.maxAudioPlayingDurationMs) {
         // Audio is playing normally - skip timeout check
         console.log(
-          `🎵 [AUDIO-ACTIVE] Audio is playing for virtual device: ${
-            this.deviceId
+          `🎵 [AUDIO-ACTIVE] Audio is playing for virtual device: ${this.deviceId
           } (${Math.round(
             audioPlayingDuration / 1000
           )}s) - skipping timeout check`
@@ -1380,8 +1388,7 @@ class VirtualMQTTConnection {
         this.isEnding = true;
         this.endPromptSentTime = now;
         console.log(
-          `👋 [END-PROMPT] Sending goodbye message before timeout: ${
-            this.deviceId
+          `👋 [END-PROMPT] Sending goodbye message before timeout: ${this.deviceId
           } (inactive for ${Math.round(
             timeSinceLastActivity / 1000
           )}s) - Last activity: ${new Date(
@@ -1406,8 +1413,7 @@ class VirtualMQTTConnection {
       } else {
         // No bridge available, send goodbye message and close immediately
         console.log(
-          `🕒 [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${
-            this.deviceId
+          `🕒 [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${this.deviceId
           } (inactive for ${Math.round(timeSinceLastActivity / 1000)}s)`
         );
 

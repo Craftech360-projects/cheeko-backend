@@ -666,7 +666,6 @@ class LiveKitBridge extends EventEmitter {
             this.agentJoined = true;
             if (this.agentJoinResolve) {
               this.agentJoinResolve();
-              // console.log(`✅ [AGENT-READY] Agent join promise resolved`);
             }
 
             // Clear timeouts if set
@@ -675,56 +674,8 @@ class LiveKitBridge extends EventEmitter {
               this.agentJoinTimeout = null;
             }
 
-            // Send start_greeting to agent when it joins AND UDP is ready
-            const waitForUdpAndGreet = async () => {
-              try {
-                if (this.greetingSent) return;
-
-                // Wait for UDP connection to be ready (max 10 seconds)
-                let waitCount = 0;
-                const maxWait = 100; // 100 * 100ms = 10 seconds
-                while (
-                  !this.connection?.udp?.remoteAddress &&
-                  waitCount < maxWait
-                ) {
-                  await new Promise((resolve) => setTimeout(resolve, 100));
-                  waitCount++;
-                }
-
-                if (!this.connection?.udp?.remoteAddress) {
-                  console.log(
-                    `⚠️ [AGENT-READY] UDP not ready after 10s, sending greeting anyway`
-                  );
-                }
-
-                // Additional delay for stability after UDP is ready
-                await new Promise((resolve) => setTimeout(resolve, 500));
-
-                if (!this.greetingSent) {
-                  this.greetingSent = true;
-                  console.log(
-                    `👋 [AGENT-READY] UDP ready, sending start_greeting to agent...`
-                  );
-                  const startGreetingMsg = {
-                    type: "start_greeting",
-                    session_id: this.connection?.udp?.session_id || null,
-                    is_mode_switch: false,
-                    timestamp: Date.now(),
-                  };
-                  await this.room.localParticipant.publishData(
-                    Buffer.from(JSON.stringify(startGreetingMsg)),
-                    { reliable: true }
-                  );
-                  console.log(`✅ [AGENT-READY] start_greeting sent to agent`);
-                }
-              } catch (err) {
-                console.error(
-                  `❌ [AGENT-READY] Failed to send greeting:`,
-                  err.message
-                );
-              }
-            };
-            waitForUdpAndGreet();
+            // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed
+            console.log(`✅ [AGENT-READY] Agent ready, will greet via on_enter hook`);
           }
         });
 
@@ -1864,57 +1815,6 @@ class LiveKitBridge extends EventEmitter {
     } catch (error) {
       console.error(
         `❌ [READY] Error sending ready notification:`,
-        error.message
-      );
-    }
-  }
-
-  async sendInitialGreeting() {
-    if (!this.connection) return;
-
-    try {
-      // First send device information for prompt loading
-      const deviceInfoMessage = {
-        type: "device_info",
-        device_mac: this.macAddress,
-        device_uuid: this.uuid,
-        timestamp: Date.now(),
-        source: "mqtt_gateway",
-      };
-
-      // Send device info via LiveKit data channel
-      if (this.room && this.room.localParticipant) {
-        const deviceInfoString = JSON.stringify(deviceInfoMessage);
-        const deviceInfoData = new Uint8Array(
-          Buffer.from(deviceInfoString, "utf8")
-        );
-        await this.room.localParticipant.publishData(deviceInfoData, {
-          reliable: true,
-        });
-
-        // console.log(`📱 [DEVICE INFO] Sent device MAC (${this.macAddress}) to agent via data channel`);
-
-        // Then send greeting trigger
-        const initialMessage = {
-          type: "agent_ready",
-          message: "Say hello to the user",
-          timestamp: Date.now(),
-          source: "mqtt_gateway",
-        };
-
-        const messageString = JSON.stringify(initialMessage);
-        const messageData = new Uint8Array(Buffer.from(messageString, "utf8"));
-        await this.room.localParticipant.publishData(messageData, {
-          reliable: true,
-        });
-
-        // console.log(`🤖 [AGENT READY] Sent initial greeting trigger to agent for device: ${this.macAddress}`);
-      } else {
-        // console.warn(`⚠️ [AGENT READY] Cannot send messages - room not ready for device: ${this.macAddress}`);
-      }
-    } catch (error) {
-      console.error(
-        `❌ [AGENT READY] Error sending messages to agent:`,
         error.message
       );
     }
