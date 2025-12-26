@@ -584,14 +584,7 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.6)
 
-    # Check if Push-to-Talk mode is enabled
-    ptt_mode = os.getenv("PTT_MODE", "auto").lower() == "manual"
-    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice}, PTT: {ptt_mode})...")
-
-    # if ptt_mode:
-        # PTT Mode: Keep Gemini's VAD enabled but with longer silence detection
-        # Gemini Realtime needs its VAD to process audio - PTT controls when audio is sent
-    logger.info("🎤 [PTT] Push-to-talk mode enabled - using Gemini's VAD with extended silence")
+    logger.info(f"🎙️ Initializing Gemini Realtime (model: {gemini_model}, voice: {gemini_voice})...")
     vad_config = types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
                 disabled=False,  # Keep VAD enabled for Gemini to process audio
@@ -645,21 +638,11 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     else:
         logger.info("🔌 MCP Server disabled (MCP_ENABLED=false)")
 
-    # Set up voice AI pipeline with Gemini Realtime
-    if ptt_mode:
-        # PTT Mode: Use manual turn detection
-        session = AgentSession(
-            llm=realtime_model,
-            turn_detection="manual",  # Manual turn control for PTT
-            mcp_servers=mcp_servers if mcp_servers else None,
-        )
-        logger.info("🎤 [PTT] AgentSession created with turn_detection='manual'")
-    else:
-        # Auto Mode: Use Gemini's built-in turn detection
-        session = AgentSession(
-            llm=realtime_model,
-            mcp_servers=mcp_servers if mcp_servers else None,
-        )
+    # Set up voice AI pipeline with Gemini Realtime (always auto mode)
+    session = AgentSession(
+        llm=realtime_model,
+        mcp_servers=mcp_servers if mcp_servers else None,
+    )
 
     # ============================================================================
     # STATE MANAGEMENT FOR LED FEEDBACK (same as realtimeagent.py)
@@ -729,12 +712,18 @@ IMPORTANT: Use these facts to personalize the conversation. Ask about their spec
     @session.on("agent_state_changed")
     def on_agent_state_changed_for_tts(ev):
         """Emit speech_created when agent transitions to speaking state"""
+        nonlocal current_state
         try:
             # Get old and new state from the event
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
 
             logger.info(f"🔊 EVENT: agent_state_changed - {old_state} → {new_state}")
+
+            # Update current_state for greeting logic
+            if new_state:
+                current_state = str(new_state)
+                logger.info(f"📊 [STATE] Updated current_state to: {current_state}")
 
             # When transitioning TO speaking, emit speech_created for TTS start
             if new_state == 'speaking' and old_state != 'speaking':
@@ -815,21 +804,23 @@ Parameters:
 - brightness: 0-100 (only for action="brightness")
 - duration: milliseconds (optional, for timed actions)
 - count: number of blinks (only for action="blink")
+- room_name: "{room_name}" (ALWAYS INCLUDE THIS - identifies which device to control)
 
 Examples:
-- "Turn on the light" → control_esp32_light(device_id="toy", action="on")
-- "Blink 3 times" → control_esp32_light(device_id="toy", action="blink", count=3)
-- "Set brightness to 50%" → control_esp32_light(device_id="toy", action="brightness", brightness=50)
+- "Turn on the light" → control_esp32_light(device_id="toy", action="on", room_name="{room_name}")
+- "Blink 3 times" → control_esp32_light(device_id="toy", action="blink", count=3, room_name="{room_name}")
+- "Set brightness to 50%" → control_esp32_light(device_id="toy", action="brightness", brightness=50, room_name="{room_name}")
 
 ### 2. set_esp32_led_color - Change LED color
 USE THIS WHEN: User says "change color to red", "make it blue", "set color"
 Parameters:
 - device_id: Use "toy" (default device)
 - color: "red", "green", "blue", "yellow", "purple", "white", "cyan", "orange" or hex "#RRGGBB"
+- room_name: "{room_name}" (ALWAYS INCLUDE THIS - identifies which device to control)
 
 Examples:
-- "Make it red" → set_esp32_led_color(device_id="toy", color="red")
-- "Change to purple" → set_esp32_led_color(device_id="toy", color="purple")
+- "Make it red" → set_esp32_led_color(device_id="toy", color="red", room_name="{room_name}")
+- "Change to purple" → set_esp32_led_color(device_id="toy", color="purple", room_name="{room_name}")
 
 ### 3. control_car - Control RC car accessory
 USE THIS WHEN: User says "go forward", "turn left", "move the car", "drive", "stop the car"
@@ -859,6 +850,7 @@ Parameters:
 - device_id: Use "toy" (default device)
 - volume: 0-100
 
+CRITICAL: ALWAYS include room_name="{room_name}" in control_esp32_light and set_esp32_led_color calls. This enables the system to identify which specific device to control in multi-device scenarios.
 IMPORTANT: Always use device_id="toy" as the default. These are REAL hardware controls - confirm actions to the user after executing.
 </mcp_iot_tools>
 """
@@ -1229,7 +1221,25 @@ IMPORTANT: Always use device_id="toy" as the default. These are REAL hardware co
 
                 async def send_greeting():
                     try:
-                        await asyncio.sleep(0.3)  # Small delay for stability
+                        # Wait for session to be ready (state = "listening")
+                        max_wait = 30  # Max 30 seconds
+                        wait_interval = 0.5
+                        waited = 0
+
+                        logger.info(f"⏳ [START-GREETING] Waiting for session to be ready (current_state: {current_state})...")
+
+                        while current_state not in ("listening", "speaking") and waited < max_wait:
+                            await asyncio.sleep(wait_interval)
+                            waited += wait_interval
+                            if waited % 5 == 0:  # Log every 5 seconds
+                                logger.info(f"⏳ [START-GREETING] Still waiting... current_state: {current_state}, waited: {waited}s")
+
+                        if current_state not in ("listening", "speaking"):
+                            logger.error(f"❌ [START-GREETING] Timeout waiting for session to be ready (state: {current_state})")
+                            return
+
+                        logger.info(f"✅ [START-GREETING] Session ready (state: {current_state}), sending greeting...")
+                        await asyncio.sleep(0.3)  # Small additional delay for stability
 
                         if is_mode_switch:
                             # Mode switch - user just switched from music/story to conversation
@@ -1292,14 +1302,6 @@ IMPORTANT: Always use device_id="toy" as the default. These are REAL hardware co
         room_input_options=room_input_options,  # Keep room options for ESP32 audio config
     )
 
-    # For PTT mode, disable audio input by default (wait for start_turn RPC)
-    if ptt_mode:
-        try:
-            session.input.set_audio_enabled(False)
-            logger.info("🎤 [PTT] Audio input disabled by default - waiting for start_turn RPC")
-        except Exception as e:
-            logger.warning(f"⚠️ [PTT] Could not disable audio input: {e}")
-
     # Start analytics session tracking
     if analytics_service:
         try:
@@ -1315,85 +1317,6 @@ IMPORTANT: Always use device_id="toy" as the default. These are REAL hardware co
     logger.info(f"⚡ Total room initialization completed in {init_elapsed_time:.0f}ms")
 
     logger.info("✅ Gemini Realtime agent is LIVE!")
-
-    # ============================================================================
-    # PUSH-TO-TALK RPC METHODS
-    # ============================================================================
-    # These methods allow the MQTT gateway to control audio input for PTT mode
-    # Note: For Gemini Realtime, we use session methods if available
-
-    @ctx.room.local_participant.register_rpc_method("start_turn")
-    async def start_turn(data: rtc.RpcInvocationData):
-        """Handle PTT start - enable audio input and prepare for user speech"""
-        logger.info("🎤 [PTT] start_turn RPC received - enabling audio input")
-        try:
-            # Interrupt any current agent speech (if method exists)
-            if hasattr(session, 'interrupt'):
-                session.interrupt()
-                logger.info("🎤 [PTT] Interrupted current speech")
-
-            # Clear any pending user turn (if method exists)
-            if hasattr(session, 'clear_user_turn'):
-                session.clear_user_turn()
-                logger.info("🎤 [PTT] Cleared user turn")
-
-            # Enable audio input for this participant (if method exists)
-            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
-                session.input.set_audio_enabled(True)
-                logger.info("✅ [PTT] Audio input enabled, ready to receive speech")
-            else:
-                logger.warning("⚠️ [PTT] session.input.set_audio_enabled not available")
-
-            return "ok"
-        except Exception as e:
-            logger.error(f"❌ [PTT] start_turn failed: {e}")
-            import traceback
-            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
-            return f"error: {e}"
-
-    @ctx.room.local_participant.register_rpc_method("end_turn")
-    async def end_turn(data: rtc.RpcInvocationData):
-        """Handle PTT end - let Gemini's VAD detect silence and respond naturally."""
-        logger.info("🎤 [PTT] end_turn RPC received - letting Gemini VAD handle turn end")
-        try:
-            # DON'T disable audio immediately - let Gemini's VAD detect the silence
-            # The silence_duration_ms=1500 setting will trigger turn end after 1.5s of silence
-            logger.info("🎤 [PTT] Waiting for Gemini VAD to detect silence...")
-
-            # Optionally disable audio after a longer delay (after Gemini should have responded)
-            async def delayed_disable():
-                await asyncio.sleep(3.0)  # Wait 3 seconds for Gemini to process
-                if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
-                    session.input.set_audio_enabled(False)
-                    logger.info("🎤 [PTT] Audio input disabled after delay")
-
-            asyncio.create_task(delayed_disable())
-
-            return "ok"
-        except Exception as e:
-            logger.error(f"❌ [PTT] end_turn failed: {e}")
-            import traceback
-            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
-            return f"error: {e}"
-
-    @ctx.room.local_participant.register_rpc_method("cancel_turn")
-    async def cancel_turn(data: rtc.RpcInvocationData):
-        """Handle PTT cancel - disable audio and discard user turn"""
-        logger.info("🎤 [PTT] cancel_turn RPC received - canceling turn")
-        try:
-            if hasattr(session, 'input') and hasattr(session.input, 'set_audio_enabled'):
-                session.input.set_audio_enabled(False)
-            if hasattr(session, 'clear_user_turn'):
-                session.clear_user_turn()
-            logger.info("✅ [PTT] Turn canceled")
-            return "ok"
-        except Exception as e:
-            logger.error(f"❌ [PTT] cancel_turn failed: {e}")
-            import traceback
-            logger.error(f"❌ [PTT] Traceback: {traceback.format_exc()}")
-            return f"error: {e}"
-
-    logger.info("🎤 [PTT] Push-to-talk RPC methods registered")
 
     # GREETING: Agent waits for start_greeting signal from MQTT gateway (via data channel)
     # This is triggered when ESP32 sends action: "start_agent" in playback_control message

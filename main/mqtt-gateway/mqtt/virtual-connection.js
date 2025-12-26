@@ -348,6 +348,25 @@ class VirtualMQTTConnection {
       this.roomType = "conversation";
     }
 
+    // Fetch device control mode (manual/auto) from database
+    this.deviceControlMode = "manual"; // default
+    try {
+      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
+      const deviceModeUrl = `${baseUrl}/toy/device/${macAddress}/device-control-mode`;
+
+      console.log(`🔍 [DEVICE-MODE] Querying device control mode for ${this.deviceId}...`);
+      const deviceModeResponse = await axios.get(deviceModeUrl, { timeout: 5000 });
+
+      if (deviceModeResponse.data.code === 0) {
+        this.deviceControlMode = deviceModeResponse.data.data;
+        console.log(`✅ [DEVICE-MODE] Device ${this.deviceId} control mode from DB: ${this.deviceControlMode}`);
+      } else {
+        console.warn(`⚠️ [DEVICE-MODE] API returned error: ${deviceModeResponse.data.msg}, using default 'manual'`);
+      }
+    } catch (error) {
+      console.error(`❌ [DEVICE-MODE] Error querying device control mode: ${error.message}, using default 'manual'`);
+    }
+
     // Fetch current character for conversation mode
     this.currentCharacter = null;
     if (this.roomType === "conversation") {
@@ -456,12 +475,13 @@ class VirtualMQTTConnection {
       const modeUpdateMsg = {
         type: "mode_update",
         mode: this.roomType,
+        device_mode: this.deviceControlMode,
         ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
         session_id: futureSessionId,
         timestamp: Date.now(),
       };
       this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-      console.log(`✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}) to device`);
+      console.log(`✅ [HELLO] Sent mode_update to device - mode: ${this.roomType}, device_mode: ${this.deviceControlMode}${this.currentCharacter ? ', character: ' + this.currentCharacter : ''}`);
 
       // ADD: Room type-specific initialization
       if (this.roomType === "conversation") {
@@ -490,6 +510,7 @@ class VirtualMQTTConnection {
         type: "hello",
         version: json.version,
         mode: this.roomType,
+        device_mode: this.deviceControlMode,
         ...(this.roomType === "conversation" && this.currentCharacter ? { character: this.currentCharacter } : {}),
         session_id: this.udp.session_id,
         timestamp: Date.now(),
@@ -511,6 +532,7 @@ class VirtualMQTTConnection {
         },
       };
       this.sendMqttMessage(JSON.stringify(helloResponseMsg));
+      console.log(`✅ [HELLO] Sent hello response to firmware - mode: ${this.roomType}, device_mode: ${this.deviceControlMode}`);
 
       // AUTO-DEPLOY AGENT: Dispatch agent immediately for conversation mode
       if (this.roomType === "conversation" && this.gateway?.agentDispatchClient) {
@@ -820,57 +842,10 @@ class VirtualMQTTConnection {
     }
 
     if (json.type === "goodbye") {
+      // DISABLED: Don't disconnect agent on goodbye - just ignore
       console.log(
-        `🔌 [DISCONNECT-AGENT] Received goodbye from device: ${this.deviceId} - disconnecting agent but keeping room alive`
+        `📭 [GOODBYE] Received goodbye from device: ${this.deviceId} - ignoring (disconnect disabled)`
       );
-
-      // Disconnect agent participant but keep room alive
-      if (
-        this.bridge &&
-        this.bridge.room &&
-        this.bridge.room.localParticipant
-      ) {
-        try {
-          // Send disconnect message to agent via data channel
-          const disconnectMessage = {
-            type: "disconnect_agent",
-            session_id: json.session_id,
-            timestamp: Date.now(),
-            source: "mqtt_gateway",
-          };
-
-          const messageString = JSON.stringify(disconnectMessage);
-          const messageData = new Uint8Array(
-            Buffer.from(messageString, "utf8")
-          );
-
-          await this.bridge.room.localParticipant.publishData(messageData, {
-            reliable: true,
-          });
-
-          console.log(`✅ [DISCONNECT-AGENT] Sent disconnect signal to agent`);
-
-          // Mark agent as not joined so it can rejoin
-          this.bridge.agentJoined = false;
-          this.bridge.agentDeployed = false;
-
-          // Reset agent join promise for next join
-          this.bridge.agentJoinPromise = new Promise((resolve) => {
-            this.bridge.agentJoinResolve = resolve;
-          });
-
-          console.log(
-            `🏠 [DISCONNECT-AGENT] Room remains alive, agent can rejoin on 's' press`
-          );
-        } catch (error) {
-          console.error(
-            `❌ [DISCONNECT-AGENT] Failed to disconnect agent:`,
-            error
-          );
-        }
-      }
-
-      // Keep bridge and room alive - agent can rejoin with 's'
       return;
     }
 
@@ -1099,62 +1074,8 @@ class VirtualMQTTConnection {
       return;
     }
 
-    // Handle push-to-talk messages (ESP32 format: listen with mode=manual)
+    // Listen messages ignored - Gemini handles VAD automatically
     if (json.type === "listen") {
-      const state = json.state;
-      const mode = json.mode;
-      console.log(`🎤 [PTT] Received listen message - State: ${state}, Mode: ${mode}`);
-
-      if (!this.bridge || !this.bridge.room || !this.bridge.room.localParticipant) {
-        console.error(`❌ [PTT] No bridge/room available for PTT control`);
-        return;
-      }
-
-      // Check if agent has joined the room
-      if (!this.bridge.agentJoined) {
-        console.log(`⏳ [PTT] Agent not yet joined, waiting for agent...`);
-
-        // Wait for agent to join (with timeout)
-        try {
-          if (this.bridge.agentJoinPromise) {
-            const timeout = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Agent join timeout')), 5000)
-            );
-            await Promise.race([this.bridge.agentJoinPromise, timeout]);
-            console.log(`✅ [PTT] Agent joined, proceeding with PTT`);
-          } else {
-            console.error(`❌ [PTT] Agent not deployed yet. Press 's' to deploy agent first.`);
-            return;
-          }
-        } catch (err) {
-          console.error(`❌ [PTT] Agent did not join in time: ${err.message}`);
-          return;
-        }
-      }
-
-      // Find the agent participant
-      const participants = Array.from(this.bridge.room.remoteParticipants.values());
-      const agentParticipant = participants.find(p =>
-        p.identity.includes('agent') || p.identity.includes('cheeko')
-      );
-
-      if (!agentParticipant) {
-        console.error(`❌ [PTT] No agent participant found in room`);
-        // List available participants for debugging
-        console.log(`📋 [PTT] Available participants: ${participants.map(p => p.identity).join(', ')}`);
-        console.log(`💡 [PTT] Hint: Press 's' to deploy the agent first`);
-        return;
-      }
-
-      console.log(`🎤 [PTT] Agent participant found: ${agentParticipant.identity}`);
-
-      // PTT RPC calls removed - Gemini handles VAD automatically
-      // Just log the PTT state changes for debugging
-      if (state === "start" && (mode === "manual" || mode === "auto")) {
-        console.log(`🎤 [PTT] Push-to-talk started (Gemini VAD mode - no RPC needed)`);
-      } else if (state === "stop") {
-        console.log(`🎤 [PTT] Push-to-talk stopped (Gemini VAD mode - no RPC needed)`);
-      }
       return;
     }
 

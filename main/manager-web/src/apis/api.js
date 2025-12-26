@@ -22,10 +22,10 @@ const DEV_API_SERVICE = process.env.VUE_APP_API_BASE_URL
 export function getServiceUrl() {
     // 在生产环境中，如果使用相对路径，需要动态构造完整URL指向后端端口
     if (process.env.NODE_ENV === 'production' && DEV_API_SERVICE === '/toy') {
-        // 获取当前页面的hostname，但使用后端端口8002
+        // 获取当前页面的hostname，但使用后端端口8004
         const currentHost = window.location.hostname;
         const protocol = window.location.protocol;
-        return `${protocol}//${currentHost}:8002/toy`;
+        return `${protocol}//${currentHost}:8004/toy`;
     }
     return DEV_API_SERVICE
 }

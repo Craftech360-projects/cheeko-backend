@@ -3138,65 +3138,8 @@ class VirtualMQTTConnection {
       return;
     }
 
-    // Handle push-to-talk messages (support both ESP32 and client formats)
+    // Listen/PTT messages ignored - Gemini handles VAD automatically
     if (json.type === "listen" || json.type === "start_ptt" || json.type === "end_ptt") {
-      try {
-        let isPttStart = false;
-        let isPttEnd = false;
-
-        // Determine PTT action based on message format
-        if (json.type === "listen") {
-          // ESP32 format: {"type":"listen","state":"start/stop","mode":"manual/auto"}
-          const state = json.state;
-          const mode = json.mode;
-          console.log(`🎤 [PTT] Received listen message - State: ${state}, Mode: ${mode}, Full JSON: ${JSON.stringify(json)}`);
-          // Support both manual and auto modes for PTT start
-          isPttStart = (state === "start" && (mode === "manual" || mode === "auto"));
-          // PTT end works regardless of mode - just check if state is "stop"
-          isPttEnd = (state === "stop");
-          console.log(`🎤 [PTT] Decision - isPttStart: ${isPttStart}, isPttEnd: ${isPttEnd}`);
-        } else if (json.type === "start_ptt") {
-          // Client format: {"type":"start_ptt"}
-          console.log(`🎤 [PTT] Received start_ptt message`);
-          isPttStart = true;
-        } else if (json.type === "end_ptt") {
-          // Client format: {"type":"end_ptt"}
-          console.log(`🎤 [PTT] Received end_ptt message`);
-          isPttEnd = true;
-        }
-
-        console.log(`🎤 [PTT] Final decision - isPttStart: ${isPttStart}, isPttEnd: ${isPttEnd}`);
-
-        // Check if bridge and room are available
-        if (!this.bridge || !this.bridge.room || !this.bridge.room.localParticipant) {
-          console.error(`❌ [PTT] No bridge/room available for PTT control`);
-          return;
-        }
-
-        // Find the agent participant
-        const participants = Array.from(this.bridge.room.remoteParticipants.values());
-        const agentParticipant = participants.find(p => p.identity.includes('agent'));
-
-        if (!agentParticipant) {
-          console.error(`❌ [PTT] No agent participant found in room`);
-          return;
-        }
-
-        console.log(`🎤 [PTT] Agent participant found: ${agentParticipant.identity}`);
-
-        // PTT RPC calls removed - Gemini handles VAD automatically
-        // Just log the PTT state changes for debugging
-        if (isPttStart) {
-          console.log(`🎤 [PTT] Push-to-talk started (Gemini VAD mode - no RPC needed)`);
-        } else if (isPttEnd) {
-          console.log(`🎤 [PTT] Push-to-talk stopped (Gemini VAD mode - no RPC needed)`);
-        } else {
-          console.log(`⚠️ [PTT] Neither start nor end condition met - ignoring message`);
-        }
-
-      } catch (error) {
-        console.error(`❌ [PTT] Failed to handle PTT message:`, error);
-      }
       return;
     }
 

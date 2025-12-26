@@ -28,24 +28,7 @@ load_dotenv()
 # Configuration
 MQTT_GATEWAY_URL = os.getenv("MQTT_GATEWAY_URL", "http://localhost:8081")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "84:1f:e8:16:e5:4c")
 MCP_SERVER_PORT = int(os.getenv("MCP_SERVER_PORT", "8080"))
-
-# Device Aliases Mapping
-DEVICE_ALIASES = {
-    "toy": DEFAULT_DEVICE_ID,
-    "my toy": DEFAULT_DEVICE_ID,
-    "the toy": DEFAULT_DEVICE_ID,
-    "car": DEFAULT_DEVICE_ID,
-    "my car": DEFAULT_DEVICE_ID,
-    "the car": DEFAULT_DEVICE_ID,
-    "esp32": DEFAULT_DEVICE_ID,
-    "device": DEFAULT_DEVICE_ID,
-    "unknown": DEFAULT_DEVICE_ID,
-    "default": DEFAULT_DEVICE_ID,
-    "light": DEFAULT_DEVICE_ID,
-    "the light": DEFAULT_DEVICE_ID,
-}
 
 # Setup logging
 logging.basicConfig(
@@ -62,6 +45,84 @@ http_client = httpx.AsyncClient(
     base_url=MQTT_GATEWAY_URL,
     timeout=30.0
 )
+
+
+# ============ Device Resolution Helpers ============
+
+async def get_devices_in_room(room_name: Optional[str] = None) -> list[Dict[str, Any]]:
+    """
+    Query MQTT Gateway for active devices, optionally filtered by room.
+    
+    Returns:
+        List of device info dicts with keys: device_id, room_name, mode, character
+    """
+    try:
+        response = await http_client.get("/api/devices")
+        response.raise_for_status()
+        result = response.json()
+        
+        devices = result.get("devices", [])
+        
+        # Filter by room if specified
+        if room_name:
+            devices = [d for d in devices if d.get("room_name") == room_name]
+        
+        logger.info(f"📋 Found {len(devices)} device(s) in room '{room_name}'")
+        return devices
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to get devices from MQTT Gateway: {e}")
+        return []
+
+
+async def resolve_device_id(
+    device_id: str,
+    room_name: Optional[str] = None
+) -> Optional[str]:
+    """
+    Resolve device ID from MAC address or room context.
+
+    Priority:
+    1. If device_id is a MAC address (contains ":"), use it directly
+    2. If room_name provided, get device from that room (fallback)
+
+    Returns:
+        Resolved MAC address or None if not found
+    """
+    # Check if it's already a MAC address (contains colons)
+    if ":" in device_id:
+        logger.info(f"🎯 Using direct MAC address: {device_id}")
+        return device_id
+
+    # Check if device_id looks like a MAC without colons (e.g., 781c3c4b4524)
+    if len(device_id) == 12 and all(c in '0123456789abcdefABCDEF' for c in device_id):
+        # Format as MAC with colons
+        formatted_mac = ":".join(device_id[i:i+2] for i in range(0, 12, 2)).lower()
+        logger.info(f"🎯 Formatted MAC address: {device_id} -> {formatted_mac}")
+        return formatted_mac
+
+    # Fallback: Try to get device from room
+    if room_name:
+        devices = await get_devices_in_room(room_name)
+        if devices:
+            # Use first device in room
+            resolved = devices[0]["device_id"]
+            logger.info(f"🎯 Resolved from room '{room_name}': {resolved}")
+            return resolved
+        else:
+            # Try to extract MAC from room name (format: {session}_{mac}_conversation)
+            parts = room_name.split("_")
+            if len(parts) >= 2:
+                potential_mac = parts[-2]  # Second to last part
+                if len(potential_mac) == 12 and all(c in '0123456789abcdefABCDEF' for c in potential_mac):
+                    formatted_mac = ":".join(potential_mac[i:i+2] for i in range(0, 12, 2)).lower()
+                    logger.info(f"🎯 Extracted MAC from room name: {formatted_mac}")
+                    return formatted_mac
+
+            logger.warning(f"⚠️ No devices found in room '{room_name}' and could not extract MAC")
+
+    logger.error(f"❌ Could not resolve device_id '{device_id}' - no MAC address or room provided")
+    return None
 
 
 # ============ MCP Tools ============
@@ -108,6 +169,10 @@ async def list_tools() -> list[Tool]:
                         "description": "Number of times to blink. Only used with 'blink' action.",
                         "minimum": 1,
                         "maximum": 100
+                    },
+                    "room_name": {
+                        "type": "string",
+                        "description": "Optional LiveKit room name to identify which device to control in multi-device scenarios"
                     }
                 },
                 "required": ["device_id", "action"]
@@ -126,6 +191,10 @@ async def list_tools() -> list[Tool]:
                     "color": {
                         "type": "string",
                         "description": "Color name (red, green, blue, yellow, purple, white) or hex code (#RRGGBB)"
+                    },
+                    "room_name": {
+                        "type": "string",
+                        "description": "Optional LiveKit room name to identify which device to control in multi-device scenarios"
                     }
                 },
                 "required": ["device_id", "color"]
@@ -134,13 +203,13 @@ async def list_tools() -> list[Tool]:
 
         Tool(
             name="control_car",
-            description="Control an RC car accessory. The car is paired to a specific toy via QR code.",
+            description="Control an RC car/toy directly. Sends movement commands to the device.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "toy_mac": {
                         "type": "string",
-                        "description": "The toy's MAC address that the car is bound to (e.g., '841fe816e54c'). The system will look up the paired car."
+                        "description": "The device MAC address (e.g., '78:1c:3c:4b:45:24' or '781c3c4b4524')"
                     },
                     "command": {
                         "type": "string",
@@ -189,7 +258,8 @@ async def control_esp32_light(
     brightness: Optional[int] = None,
     duration: Optional[int] = None,
     speed: Optional[str] = None,
-    count: Optional[int] = None
+    count: Optional[int] = None,
+    room_name: Optional[str] = None
 ) -> list[TextContent]:
     """Control ESP32 LED light."""
 
@@ -200,9 +270,15 @@ async def control_esp32_light(
         "slow": 1000
     }
 
-    # Resolve alias if possible
-    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
-    logger.info(f"💡 Controlling light: {device_id} -> {resolved_id}, action={action}, brightness={brightness}, duration={duration}, speed={speed}, count={count}")
+    # Resolve device ID using room context
+    resolved_id = await resolve_device_id(device_id, room_name)
+
+    if not resolved_id:
+        error_msg = f"Could not determine device. Please provide a valid MAC address or ensure the device is connected."
+        logger.error(f"❌ {error_msg}")
+        return [TextContent(type="text", text=f"❌ {error_msg}")]
+
+    logger.info(f"💡 Controlling light: {device_id} -> {resolved_id}, action={action}, brightness={brightness}, duration={duration}, speed={speed}, count={count}, room={room_name}")
 
     try:
         # Prepare command payload
@@ -262,10 +338,11 @@ async def control_esp32_light(
 
 async def set_esp32_led_color(
     device_id: str,
-    color: str
+    color: str,
+    room_name: Optional[str] = None
 ) -> list[TextContent]:
     """Set ESP32 LED color."""
-    
+
     # Color name to RGB mapping
     color_map = {
         "red": "#FF0000",
@@ -277,13 +354,19 @@ async def set_esp32_led_color(
         "cyan": "#00FFFF",
         "orange": "#FF8000"
     }
-    
+
     # Convert color name to hex if needed
     color_value = color_map.get(color.lower(), color)
-    
-    # Resolve alias
-    resolved_id = DEVICE_ALIASES.get(device_id.lower(), device_id)
-    logger.info(f"🎨 Setting color: {device_id} -> {resolved_id}, color={color_value}")
+
+    # Resolve device ID using room context
+    resolved_id = await resolve_device_id(device_id, room_name)
+
+    if not resolved_id:
+        error_msg = f"Could not determine device. Please provide a valid MAC address or ensure the device is connected."
+        logger.error(f"❌ {error_msg}")
+        return [TextContent(type="text", text=f"❌ {error_msg}")]
+
+    logger.info(f"🎨 Setting color: {device_id} -> {resolved_id}, color={color_value}, room={room_name}")
     
     try:
         command = {
@@ -310,12 +393,17 @@ async def set_esp32_led_color(
 
 
 async def control_car(toy_mac: str, command: str) -> list[TextContent]:
-    """Control RC car accessory bound to a toy via MQTT Gateway."""
+    """Control RC car directly via MQTT Gateway (same as light control)."""
 
     logger.info(f"🚗 Car control: toy_mac={toy_mac}, command={command}")
 
-    # Normalize toy MAC (remove colons, lowercase)
-    normalized_toy_mac = toy_mac.replace(":", "").replace("-", "").lower()
+    # Format MAC address with colons if not already formatted
+    if ":" not in toy_mac:
+        # Convert 781c3c4b4524 to 78:1c:3c:4b:45:24
+        clean_mac = toy_mac.replace("-", "").lower()
+        formatted_mac = ":".join(clean_mac[i:i+2] for i in range(0, len(clean_mac), 2))
+    else:
+        formatted_mac = toy_mac.lower()
 
     # Command descriptions for response
     command_descriptions = {
@@ -326,34 +414,32 @@ async def control_car(toy_mac: str, command: str) -> list[TextContent]:
         "stop": "stopped"
     }
 
-    # Use command directly (e.g., "forward", "backward", "left", "right", "stop")
+    # Map command to action (prefix with car_)
     cmd = command.lower()
+    action = f"car_{cmd}"
 
     try:
-        # Call the accessory control endpoint on MQTT Gateway
-        # This endpoint looks up the car MAC from Manager API and sends command
-        logger.info(f"📤 Calling MQTT Gateway: POST /api/device/{normalized_toy_mac}/accessory/car/control")
+        # Use the same control endpoint as light control
+        # This sends directly to the device without needing accessory binding
+        command_payload = {
+            "action": action,
+            "value": None,
+            "timestamp": None
+        }
+
+        logger.info(f"📤 Calling MQTT Gateway: POST /api/device/{formatted_mac}/control with {command_payload}")
 
         response = await http_client.post(
-            f"/api/device/{normalized_toy_mac}/accessory/car/control",
-            json={"action": cmd}
+            f"/api/device/{formatted_mac}/control",
+            json=command_payload
         )
 
         result = response.json()
         logger.info(f"📥 MQTT Gateway response: {result}")
 
-        if response.status_code == 404:
-            # No car bound to this toy
-            error_msg = result.get('error', 'No RC car is paired with this toy')
-            logger.warning(f"⚠️ {error_msg}")
-            return [TextContent(
-                type="text",
-                text=f"❌ {error_msg}. Please pair an RC car first using the mobile app!"
-            )]
-
         response.raise_for_status()
 
-        description = command_descriptions.get(command.lower(), command)
+        description = command_descriptions.get(cmd, cmd)
         message = f"✅ Car is {description}"
 
         logger.info(f"✅ Car control successful: {message}")
@@ -409,10 +495,9 @@ app = Starlette(
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     logger.info(f"🚀 Starting MCP ESP32 Controller Server on port {MCP_SERVER_PORT}")
     logger.info(f"📡 SSE endpoint: http://localhost:{MCP_SERVER_PORT}/sse")
     logger.info(f"🌐 MQTT Gateway URL: {MQTT_GATEWAY_URL}")
-    logger.info(f"🏷️  Default Device ID: {DEFAULT_DEVICE_ID}")
-    
+
     uvicorn.run(app, host="0.0.0.0", port=MCP_SERVER_PORT, log_level="info")
