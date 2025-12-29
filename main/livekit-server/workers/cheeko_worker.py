@@ -244,13 +244,67 @@ async def entrypoint(ctx: JobContext):
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
 
+    # Initialize chat history service (sends on room close)
+    chat_history_service = None
+    if agent_id and device_mac:
+        try:
+            from src.services.chat_history_service import ChatHistoryService
+            chat_history_service = ChatHistoryService(
+                manager_api_url=os.getenv("MANAGER_API_URL"),
+                secret=os.getenv("MANAGER_API_SECRET"),
+                device_mac=device_mac,
+                session_id=room_name,
+                agent_id=agent_id
+            )
+            logger.info(f"Chat history service initialized for agent_id: {agent_id}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize chat history: {e}")
+
     async def cleanup_room_and_session():
-        nonlocal cleanup_completed
+        nonlocal cleanup_completed, chat_history_service
         if cleanup_completed:
             return
         cleanup_completed = True
         try:
             logger.info("Initiating cleanup")
+
+            # Extract chat history from session.history.items before closing
+            if chat_history_service and session:
+                try:
+                    chat_ctx = getattr(session, 'history', None)
+                    items = getattr(chat_ctx, 'items', []) if chat_ctx else []
+
+                    if items:
+                        for item in items:
+                            # Extract role and content from ChatItem
+                            role = getattr(item, 'role', None)
+                            content = getattr(item, 'content', None)
+
+                            # Handle content that might be a list of parts
+                            if isinstance(content, list):
+                                text = "".join(
+                                    part if isinstance(part, str) else getattr(part, "text", "")
+                                    for part in content
+                                )
+                            elif hasattr(content, 'text'):
+                                text = content.text
+                            elif isinstance(content, str):
+                                text = content
+                            else:
+                                text = str(content) if content else ""
+
+                            if text and text.strip():
+                                chat_type = 1 if role == 'user' else 2
+                                chat_history_service.add_message(chat_type, text)
+
+                        logger.info(f"📝 Extracted {len(items)} items from session.history")
+
+                    await chat_history_service.cleanup()
+                except Exception as e:
+                    logger.warning(f"Error extracting chat history: {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
+
             if session and hasattr(session, 'aclose'):
                 await session.aclose()
             if ctx.room and hasattr(ctx.room, 'disconnect'):
@@ -313,6 +367,7 @@ async def entrypoint(ctx: JobContext):
     assistant.set_session_context(ctx)
     audio_player.set_session(session)
 
+
     await session.start(room=ctx.room, agent=assistant)
 
     init_elapsed = (asyncio.get_event_loop().time() - init_start_time) * 1000
@@ -330,21 +385,6 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"[MUSIC MODE] Failed to start music: {e}")
 
-    # Initialize background services
-    if agent_id and device_mac:
-        try:
-            from src.services.chat_history_service import ChatHistoryService
-            chat_history_service = ChatHistoryService(
-                manager_api_url=os.getenv("MANAGER_API_URL"),
-                secret=os.getenv("MANAGER_API_SECRET"),
-                device_mac=device_mac,
-                session_id=room_name,
-                agent_id=agent_id
-            )
-            chat_history_service.start_periodic_sending()
-            logger.info(f"Chat history service initialized for agent_id: {agent_id}")
-        except Exception as e:
-            logger.warning(f"Failed to initialize chat history: {e}")
 
 
 if __name__ == "__main__":
