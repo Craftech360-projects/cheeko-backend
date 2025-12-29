@@ -171,10 +171,19 @@ async def entrypoint(ctx: JobContext):
             agent_prompt = ConfigLoader.get_default_prompt()
 
     # Render prompt with child profile
+    # Debug: Check if prompt template has child_name placeholder
+    has_placeholder = '{{' in agent_prompt or '{%' in agent_prompt
+    has_child_name = 'child_name' in agent_prompt
+    logger.info(f"Template analysis - Has Jinja: {has_placeholder}, Has child_name: {has_child_name}")
+    
     if child_profile:
         agent_prompt = render_prompt_with_profile(agent_prompt, child_profile)
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
+    # Debug: Check if Rahul appears in final prompt
+    logger.info(f"Child name '{child_profile.get('name') if child_profile else 'N/A'}' in prompt: {'Rahul' in agent_prompt}")
+    # Debug: Show first 500 chars of prompt to verify child name
+    logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
     # Create Gemini Realtime model
     realtime_model = google.realtime.RealtimeModel(
