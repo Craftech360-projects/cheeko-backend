@@ -35,12 +35,12 @@ from src.utils.loki_agent_logger import logger
 from src.shared.base_assistant import BaseAssistant
 from src.shared.entrypoint_utils import (
     parse_room_name,
-    render_prompt_with_profile,
     delete_livekit_room,
     create_state_handlers,
     load_game_prompt,
 )
 from src.features.game_tools import validate_word_ladder_move, set_word_ladder_state
+from src.games.word_ladder_game import pick_valid_word_pair
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
@@ -90,6 +90,10 @@ async def entrypoint(ctx: JobContext):
     child_profile = None
     agent_id = None
 
+    # Generate word pair EARLY so we can include it in the prompt
+    start_word, target_word = pick_valid_word_pair()
+    logger.info(f"🎮 Pre-generated word pair: {start_word} → {target_word}")
+
     if device_mac:
         try:
             manager_api_url = os.getenv("MANAGER_API_URL")
@@ -113,17 +117,18 @@ async def entrypoint(ctx: JobContext):
             if not isinstance(child_profile_result, Exception):
                 child_profile = child_profile_result
 
-            # Load game-specific prompt
-            game_prompt = load_game_prompt(CHARACTER_NAME, child_profile)
+            # Load game-specific prompt WITH word pair
+            game_prompt = load_game_prompt(
+                CHARACTER_NAME,
+                child_profile,
+                extra_vars={'start_word': start_word, 'target_word': target_word}
+            )
             if game_prompt:
                 agent_prompt = game_prompt
-                logger.info(f"Loaded {CHARACTER_NAME} prompt ({len(agent_prompt)} chars)")
+                logger.info(f"✅ Loaded {CHARACTER_NAME} prompt with words: {start_word} → {target_word}")
 
         except Exception as e:
             logger.error(f"Error in API calls: {e}")
-
-    if child_profile:
-        agent_prompt = render_prompt_with_profile(agent_prompt, child_profile)
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
@@ -139,6 +144,28 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game tools")
 
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
+
+    # ============================================================================
+    # DEBUG: Track user speech and function calls
+    # ============================================================================
+
+    @session.on("user_speech_committed")
+    def on_user_speech(msg):
+        """Log what the user said (transcription)"""
+        text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
+        logger.info(f"🎤 USER SAID: '{text}'")
+
+    @session.on("function_calls_started")
+    def on_function_calls_started(ev):
+        """Log when function calls are initiated"""
+        logger.info(f"🔧 FUNCTION CALL STARTED: {ev}")
+
+    @session.on("function_calls_finished")
+    def on_function_calls_finished(ev):
+        """Log when function calls complete"""
+        logger.info(f"✅ FUNCTION CALL FINISHED: {ev}")
+
+    logger.info("📊 Debug logging for speech and function calls enabled")
 
     try:
         from src.agent.error_handler import setup_error_handling
@@ -156,7 +183,13 @@ async def entrypoint(ctx: JobContext):
 
     assistant.enable_battery_tools()
     assistant.enable_volume_tools()
+
+    # Enable word ladder game but reset with our pre-generated words
     assistant.enable_word_ladder_game()
+    # Override with the pre-generated word pair (same as in prompt)
+    assistant.word_ladder_state.reset(start_word, target_word)
+    logger.info(f"🎮 Word Ladder state synced with prompt: {start_word} → {target_word}")
+
     set_word_ladder_state(assistant.word_ladder_state)
     logger.info("Word Ladder features enabled")
 

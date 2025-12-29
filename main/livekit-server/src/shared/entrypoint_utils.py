@@ -74,13 +74,14 @@ async def delete_livekit_room(room_name: str):
 # PROMPT LOADING
 # ============================================================================
 
-def load_game_prompt(agent_name: str, child_profile: dict = None) -> Optional[str]:
+def load_game_prompt(agent_name: str, child_profile: dict = None, extra_vars: dict = None) -> Optional[str]:
     """
     Load game-specific prompt from YAML file and render with child profile.
 
     Args:
         agent_name: The game name ("Math Tutor", "Riddle Solver", "Word Ladder")
         child_profile: Optional child profile for personalization
+        extra_vars: Optional extra template variables (e.g., start_word, target_word)
 
     Returns:
         str: Rendered prompt or None if file not found
@@ -113,15 +114,40 @@ def load_game_prompt(agent_name: str, child_profile: dict = None) -> Optional[st
             logger.error(f"No 'prompt' key in {prompt_file}")
             return None
 
-        # Render with child profile if available
-        if child_profile and ('{{' in prompt_template or '{%' in prompt_template):
+        # Render with extra vars and child profile if template has variables
+        if '{{' in prompt_template or '{%' in prompt_template:
             template = Template(prompt_template)
-            template_vars = {
-                'child_name': child_profile.get('name', ''),
-                'child_age': child_profile.get('age', ''),
-                'child_interests': child_profile.get('interests', ''),
-                'age_group': child_profile.get('ageGroup', ''),
-            }
+            template_vars = {}
+
+            # Add extra vars first (e.g., start_word, target_word for Word Ladder)
+            if extra_vars:
+                template_vars.update(extra_vars)
+                logger.info(f"Added extra template vars: {list(extra_vars.keys())}")
+
+            # Add child profile vars
+            if child_profile:
+                # Parse interests if JSON string
+                interests = child_profile.get('interests', '')
+                if isinstance(interests, str) and interests.startswith('['):
+                    try:
+                        interests_list = json.loads(interests)
+                        interests = ', '.join(interests_list)
+                    except json.JSONDecodeError:
+                        pass
+
+                template_vars.update({
+                    'child_name': child_profile.get('name', ''),
+                    'child_age': child_profile.get('age', ''),
+                    'child_interests': interests,
+                    'age_group': child_profile.get('ageGroup', ''),
+                    'child_gender': child_profile.get('gender', ''),
+                    'primary_language': child_profile.get('primaryLanguage', 'English'),
+                    'additional_notes': child_profile.get('additionalNotes', ''),
+                })
+                logger.info(f"Added child profile: {child_profile.get('name')}, age {child_profile.get('age')}")
+            else:
+                logger.warning("No child profile available for prompt rendering")
+
             prompt_template = template.render(**template_vars)
 
         logger.info(f"Loaded game prompt: {agent_name} ({len(prompt_template)} chars)")
