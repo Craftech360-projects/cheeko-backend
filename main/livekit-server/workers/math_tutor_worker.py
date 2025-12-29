@@ -39,6 +39,8 @@ from src.shared.entrypoint_utils import (
     delete_livekit_room,
     create_state_handlers,
     load_game_prompt,
+    init_chat_history_service,
+    extract_and_send_chat_history,
 )
 from src.features.game_tools import check_math_answer, set_math_game_state
 
@@ -183,17 +185,25 @@ async def entrypoint(ctx: JobContext):
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
 
+    # Initialize chat history service
+    chat_history_service = None
+    if agent_id and device_mac:
+        chat_history_service = init_chat_history_service(device_mac, room_name, agent_id)
+
     async def cleanup_room_and_session():
         nonlocal cleanup_completed
         if cleanup_completed:
             return
         cleanup_completed = True
         try:
+            logger.info("Initiating cleanup")
+            await extract_and_send_chat_history(session, chat_history_service)
             if session and hasattr(session, 'aclose'):
                 await session.aclose()
             if ctx.room and hasattr(ctx.room, 'disconnect'):
                 await ctx.room.disconnect()
             await delete_livekit_room(ctx.room.name if ctx.room else "unknown")
+            logger.info("Cleanup completed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 

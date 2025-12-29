@@ -346,6 +346,88 @@ def create_state_handlers(ctx: JobContext, session: AgentSession):
 
 
 # ============================================================================
+# CHAT HISTORY UTILITIES
+# ============================================================================
+
+def init_chat_history_service(device_mac: str, room_name: str, agent_id: str = None):
+    """
+    Initialize chat history service for a session
+
+    Args:
+        device_mac: Device MAC address
+        room_name: Room/session name
+        agent_id: Optional agent ID
+
+    Returns:
+        ChatHistoryService instance or None if initialization fails
+    """
+    try:
+        from src.services.chat_history_service import ChatHistoryService
+        chat_history_service = ChatHistoryService(
+            manager_api_url=os.getenv("MANAGER_API_URL"),
+            secret=os.getenv("MANAGER_API_SECRET"),
+            device_mac=device_mac,
+            session_id=room_name,
+            agent_id=agent_id
+        )
+        logger.info(f"Chat history service initialized for agent_id: {agent_id}")
+        return chat_history_service
+    except Exception as e:
+        logger.warning(f"Failed to initialize chat history: {e}")
+        return None
+
+
+async def extract_and_send_chat_history(session, chat_history_service):
+    """
+    Extract chat history from session and send to API
+
+    Args:
+        session: AgentSession instance
+        chat_history_service: ChatHistoryService instance
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    if not chat_history_service or not session:
+        return False
+
+    try:
+        chat_ctx = getattr(session, 'history', None)
+        items = getattr(chat_ctx, 'items', []) if chat_ctx else []
+
+        if items:
+            for item in items:
+                # Extract role and content from ChatItem
+                role = getattr(item, 'role', None)
+                content = getattr(item, 'content', None)
+
+                # Handle content that might be a list of parts
+                if isinstance(content, list):
+                    text = "".join(
+                        part if isinstance(part, str) else getattr(part, "text", "")
+                        for part in content
+                    )
+                elif hasattr(content, 'text'):
+                    text = content.text
+                elif isinstance(content, str):
+                    text = content
+                else:
+                    text = str(content) if content else ""
+
+                if text and text.strip():
+                    chat_type = 1 if role == 'user' else 2
+                    chat_history_service.add_message(chat_type, text)
+
+            logger.info(f"📝 Extracted {len(items)} items from session.history")
+
+        await chat_history_service.cleanup()
+        return True
+    except Exception as e:
+        logger.warning(f"Error extracting chat history: {e}")
+        return False
+
+
+# ============================================================================
 # ENTRYPOINT FACTORY
 # ============================================================================
 
