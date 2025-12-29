@@ -72,7 +72,7 @@ class BaseAssistant(Agent):
 
         # Wait for the Gemini Realtime connection to fully stabilize
         # The connection starts async and needs time to be ready for generation
-        await asyncio.sleep(4.0)
+        await asyncio.sleep(2.0)
 
         # Retry logic for greeting
         max_retries = 3
@@ -86,11 +86,9 @@ class BaseAssistant(Agent):
                 return  # Success, exit
             except RealtimeError as e:
                 logger.warning(f"{agent_name} greeting attempt {attempt + 1} encountered RealtimeError: {e}")
-                # Handle specific Gemini Realtime timeout which often happens if the model
-                # starts speaking continuously or due to VAD race conditions
-                if "timed out waiting for generation_created" in str(e):
-                    logger.info(f"{agent_name} greeting likely successfully playing despite timeout (race condition)")
-                    return # Assume success to avoid duplicated greetings
+                # Handle specific Gemini Realtime timeout
+                if "timed out" in str(e):
+                    logger.warning(f"{agent_name} greeting timed out - retrying...")
                 
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2.0)

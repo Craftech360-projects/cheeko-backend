@@ -57,11 +57,7 @@ class CheekoAssistant(BaseAssistant):
 
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
-    async def on_enter(self):
-        """Override on_enter to disable manual greeting (avoids race conditions)"""
-        logger.info("CheekoAssistant on_enter - using prompt-based greeting")
-        # We rely on the system prompt to trigger the initial greeting
-        pass
+
 
 
 def prewarm(proc: JobProcess):
@@ -186,7 +182,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
     
     # Add instruction for immediate greeting (replaces on_enter logic)
-    agent_prompt += "\n\nIMPORTANT: Start the conversation immediately by greeting the user warmly as Cheeko. Say something playful! Do not wait for the user to speak first."
+
     # Debug: Check if Rahul appears in final prompt
     logger.info(f"Child name '{child_profile.get('name') if child_profile else 'N/A'}' in prompt: {'Rahul' in agent_prompt}")
     # Debug: Show first 500 chars of prompt to verify child name
@@ -234,16 +230,12 @@ async def entrypoint(ctx: JobContext):
     audio_player.set_context(ctx)
     assistant.audio_player = audio_player
 
-    # Enable Cheeko features
+    # Enable Cheeko features (no games - use mode_switching to dispatch to game workers)
     assistant.enable_battery_tools()
     assistant.enable_volume_tools()
     assistant.enable_mode_switching()
     assistant.enable_music_tools(music_service)
-    # Initialize game states for potential switching
-    assistant.enable_math_game()
-    assistant.enable_riddle_game()
-    assistant.enable_word_ladder_game()
-    logger.info("All Cheeko features enabled")
+    logger.info("Cheeko features enabled (battery, volume, mode switching, music)")
 
     # Room lifecycle management
     participant_count = len(ctx.room.remote_participants)
