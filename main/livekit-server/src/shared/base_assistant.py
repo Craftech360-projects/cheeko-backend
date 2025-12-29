@@ -61,12 +61,18 @@ class BaseAssistant(Agent):
         Override GREETING_INSTRUCTION in subclasses for custom greetings.
         """
         import asyncio
+        # Try to import RealtimeError, fallback to Exception if not available
+        try:
+            from livekit.agents.llm.realtime import RealtimeError
+        except ImportError:
+            RealtimeError = Exception
+
         agent_name = self.__class__.__name__
         logger.info(f"{agent_name} on_enter triggered - waiting for connection...")
 
         # Wait for the Gemini Realtime connection to fully stabilize
         # The connection starts async and needs time to be ready for generation
-        await asyncio.sleep(3.0)
+        await asyncio.sleep(4.0)
 
         # Retry logic for greeting
         max_retries = 3
@@ -78,6 +84,16 @@ class BaseAssistant(Agent):
                 )
                 logger.info(f"{agent_name} greeting sent successfully")
                 return  # Success, exit
+            except RealtimeError as e:
+                logger.warning(f"{agent_name} greeting attempt {attempt + 1} encountered RealtimeError: {e}")
+                # Handle specific Gemini Realtime timeout which often happens if the model
+                # starts speaking continuously or due to VAD race conditions
+                if "timed out waiting for generation_created" in str(e):
+                    logger.info(f"{agent_name} greeting likely successfully playing despite timeout (race condition)")
+                    return # Assume success to avoid duplicated greetings
+                
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2.0)
             except Exception as e:
                 logger.warning(f"{agent_name} greeting attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
