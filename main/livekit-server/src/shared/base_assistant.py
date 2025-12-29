@@ -60,15 +60,30 @@ class BaseAssistant(Agent):
         Automatically greets the user using the GREETING_INSTRUCTION.
         Override GREETING_INSTRUCTION in subclasses for custom greetings.
         """
+        import asyncio
         agent_name = self.__class__.__name__
-        logger.info(f"{agent_name} on_enter triggered - sending greeting")
-        try:
-            await self.session.generate_reply(
-                instructions=self.GREETING_INSTRUCTION
-            )
-            logger.info(f"{agent_name} greeting sent successfully")
-        except Exception as e:
-            logger.error(f"{agent_name} failed to send greeting in on_enter: {e}")
+        logger.info(f"{agent_name} on_enter triggered - waiting for connection...")
+
+        # Wait for the Gemini Realtime connection to fully stabilize
+        # The connection starts async and needs time to be ready for generation
+        await asyncio.sleep(3.0)
+
+        # Retry logic for greeting
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"{agent_name} sending greeting (attempt {attempt + 1}/{max_retries})")
+                await self.session.generate_reply(
+                    instructions=self.GREETING_INSTRUCTION
+                )
+                logger.info(f"{agent_name} greeting sent successfully")
+                return  # Success, exit
+            except Exception as e:
+                logger.warning(f"{agent_name} greeting attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2.0)  # Wait longer before retry
+                else:
+                    logger.error(f"{agent_name} failed to send greeting after {max_retries} attempts")
 
     # ============================================================================
     # LAZY-LOADED SERVICES (Properties)

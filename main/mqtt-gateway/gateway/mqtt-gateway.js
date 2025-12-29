@@ -867,6 +867,12 @@ class MQTTGateway {
           connection.bridge.room &&
           connection.bridge.room.localParticipant
         ) {
+          // Guard: Skip if agent already deployed (prevent duplicate dispatches)
+          if (connection.bridge?.agentDeployed) {
+            logger.info(`[START-AGENT] Agent already deployed, skipping duplicate dispatch`);
+            return;
+          }
+
           const agentCheck = await this.checkAgentInRoom(roomName);
 
           if (!agentCheck.exists) {

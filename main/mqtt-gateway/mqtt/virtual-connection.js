@@ -561,6 +561,12 @@ class VirtualMQTTConnection {
         this.roomType === "conversation" &&
         this.gateway?.agentDispatchClient
       ) {
+        // Guard: Skip if agent already deployed (prevent duplicate dispatches)
+        if (this.bridge?.agentDeployed) {
+          logger.warn(`[AUTO-DEPLOY] Agent already deployed, skipping duplicate dispatch`);
+          return;
+        }
+
         const roomName = this.bridge?.room?.name || this.udp.session_id;
 
         // Use currentCharacter (fetched from DB earlier) to dispatch correct agent
