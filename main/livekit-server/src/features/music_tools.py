@@ -151,10 +151,20 @@ async def play_music(
         except Exception as e:
             logger.warning(f"⚠️ Failed to send music start signal: {e}")
         
-        # Play the song (implementation depends on audio player integration)
-        # This will be called by the main music mode handler
-        logger.info(f"✅ Music playback initiated: {song['title']}")
-        
+        # Actually stream the audio via UnifiedAudioPlayer
+        if _assistant_instance and hasattr(_assistant_instance, 'audio_player'):
+            player = _assistant_instance.audio_player
+            if player and song.get('url'):
+                logger.info(f"🎵 Streaming audio via player: {song['title']} from {song['url']}")
+                await player.play_from_url(song['url'], song['title'])
+                logger.info(f"✅ Started streaming: {song['title']}")
+            else:
+                logger.error(f"❌ Cannot stream - player: {player}, url: {song.get('url')}")
+                return f"Found '{song['title']}' but couldn't play it."
+        else:
+            logger.error(f"❌ Audio player not available - assistant: {_assistant_instance}")
+            return f"Found '{song['title']}' but audio player is not available."
+
         # Return special instruction to suppress agent response
         return "[MUSIC_PLAYING - STAY_SILENT]"
     

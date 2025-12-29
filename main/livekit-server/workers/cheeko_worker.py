@@ -42,11 +42,13 @@ from src.shared.entrypoint_utils import (
     delete_livekit_room,
     create_state_handlers,
 )
+from src.features.music_tools import play_music, stop_music, next_song, previous_song
 
 # Agent configuration
 AGENT_NAME = "cheeko-agent"
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
+MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]
 
 
 class CheekoAssistant(BaseAssistant):
@@ -198,8 +200,9 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info("Gemini Realtime model created")
 
-    # Create AgentSession (Cheeko has no game tools)
-    session = AgentSession(llm=realtime_model)
+    # Create AgentSession with music tools
+    session = AgentSession(llm=realtime_model, tools=MUSIC_TOOLS)
+    logger.info(f"AgentSession created with {len(MUSIC_TOOLS)} music tools")
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
