@@ -213,6 +213,7 @@ async def entrypoint(ctx: JobContext):
     idle_reminder_task = None
     reminder_count = 0
     MAX_REMINDERS = 3  # Max reminders before giving up
+    waiting_for_user_response = False  # Flag to prevent timer restart after reminder
 
     REMINDER_MESSAGES = [
         "Take your time! I'm here whenever you're ready with your word.",
@@ -222,17 +223,19 @@ async def entrypoint(ctx: JobContext):
 
     async def send_idle_reminder():
         """Send a gentle reminder if user hasn't responded"""
-        nonlocal reminder_count
+        nonlocal reminder_count, waiting_for_user_response
         try:
             await asyncio.sleep(IDLE_TIMEOUT_SECONDS)
 
             if reminder_count < MAX_REMINDERS:
+                waiting_for_user_response = True  # Set flag BEFORE sending reminder
                 reminder_msg = REMINDER_MESSAGES[reminder_count % len(REMINDER_MESSAGES)]
                 logger.info(f"⏰ Sending idle reminder #{reminder_count + 1}: {reminder_msg[:50]}...")
                 await session.generate_reply(instructions=reminder_msg)
                 reminder_count += 1
             else:
                 logger.info("⏰ Max reminders reached, stopping idle prompts")
+                waiting_for_user_response = True  # Also stop after max reminders
         except asyncio.CancelledError:
             logger.debug("⏰ Idle reminder cancelled (user responded)")
         except Exception as e:
@@ -265,8 +268,11 @@ async def entrypoint(ctx: JobContext):
         new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
 
         if new_state_str == 'listening':
-            # Agent finished speaking, start idle timer
-            start_idle_timer()
+            # Only start timer if not waiting for user response after a reminder
+            if not waiting_for_user_response:
+                start_idle_timer()
+            else:
+                logger.debug("⏰ Skipping idle timer - waiting for user response")
         else:
             # Agent is speaking/thinking, cancel idle timer
             cancel_idle_timer()
@@ -274,8 +280,11 @@ async def entrypoint(ctx: JobContext):
     @session.on("user_speech_committed")
     def on_user_speech_reset_idle(msg):
         """Reset idle timer and reminder count when user speaks"""
+        nonlocal waiting_for_user_response
         cancel_idle_timer()
         reset_reminder_count()
+        waiting_for_user_response = False  # Reset flag when user speaks
+        start_idle_timer()  # Start fresh timer after user speaks
 
     logger.info(f"⏰ Idle reminder enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
 
