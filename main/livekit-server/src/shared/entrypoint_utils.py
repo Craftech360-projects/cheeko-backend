@@ -326,15 +326,19 @@ def create_state_handlers(ctx: JobContext, session: AgentSession):
         except Exception as e:
             logger.error(f"Failed to emit speech_created: {e}")
 
-    # Register session event handler for TTS start detection
+    # Register session event handler for TTS start/stop detection
     @session.on("agent_state_changed")
     def on_agent_state_changed_for_tts(ev):
-        """Emit speech_created when agent starts speaking"""
+        """Emit agent_state_changed for all transitions and speech_created when speaking"""
         try:
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
             logger.info(f"EVENT: agent_state_changed - {old_state} -> {new_state}")
 
+            # Emit agent_state_changed for ALL state transitions (for TTS stop on speaking -> listening)
+            asyncio.create_task(emit_agent_state(new_state))
+
+            # Also emit speech_created when starting to speak (for TTS start)
             if new_state == 'speaking' and old_state != 'speaking':
                 logger.info(f"Emitting speech_created (state: {old_state} -> speaking)")
                 asyncio.create_task(emit_speech_created())

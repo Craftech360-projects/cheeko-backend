@@ -168,24 +168,15 @@ class MQTTGateway {
 
     this.mqttClient.on("connect", () => {
       logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
-      // Subscribe to gateway control topics
-      this.mqttClient.subscribe("devices/+/hello", (err) => {
-        if (err)
-          logger.error("Failed to subscribe to device hello topic:", err);
-        // else logger.info("📡 Subscribed to devices/+/hello");
-      });
-      this.mqttClient.subscribe("devices/+/data", (err) => {
-        if (err) logger.error("Failed to subscribe to device data topic:", err);
-        // else logger.info("📡 Subscribed to devices/+/data");
-      });
       // Subscribe to the internal topic where EMQX republishes with client info
+      // All device messages (hello, data, etc.) come through this single topic via EMQX republish rule
       this.mqttClient.subscribe("internal/server-ingest", (err) => {
         if (err)
           logger.error(
             "Failed to subscribe to internal/server-ingest topic:",
             err
           );
-        // else logger.info("📡 Subscribed to internal/server-ingest");
+        else logger.info("📡 Subscribed to internal/server-ingest (all device messages)");
       });
     });
 
@@ -207,27 +198,11 @@ class MQTTGateway {
   }
 
   async handleMqttMessage(topic, message) {
-    // Add detailed logging for all incoming MQTT messages
-
     try {
-      // Check if this is a control message first (before parsing)
-      // if (topic.includes('/playback_control/next')) {
-      //   await this.handleNextControl
-      // (topic);
-      //   return;
-      // } else if (topic.includes('/playback_control/previous')) {
-      //   await this.handlePreviousControl(topic);
-      //   return;
-      // }
-
       const payload = JSON.parse(message.toString());
-      const topicParts = topic.split("/");
 
-      // logger.info(`📨 [MQTT IN] Parsed payload:`, JSON.stringify(payload, null, 2));
-
+      // All device messages come through internal/server-ingest via EMQX republish rule
       if (topic === "internal/server-ingest") {
-        // Handle messages republished by EMQX with client ID info
-
         // Extract client ID and original payload from EMQX republish rule
         const clientId = payload.sender_client_id;
         const originalPayload = payload.orginal_payload;
@@ -248,33 +223,8 @@ class MQTTGateway {
 
         logger.info(`📨 [MQTT-IN] ${deviceId}: ${originalPayload.type}`);
 
-        // Use the common processing logic
+        // Process the message
         await this.processIngestLogic(deviceId, originalPayload, clientId);
-      } else if (topicParts.length >= 3 && topicParts[0] === "devices") {
-        const deviceId = topicParts[1];
-        const messageType = topicParts[2]; // 'hello' or 'data' or others
-
-        debug(
-          `📨 Received MQTT message from device ${deviceId}: ${messageType}`
-        );
-
-        if (messageType === "hello") {
-          this.handleDeviceHello(deviceId, payload);
-          return;
-        }
-
-        // For other messages (data, etc), we treat them as potential control messages too.
-        // Synthesize a client ID for compatibility with older logic
-        // Format: mock_client@@@68_25_dd_bb_f3_a0@@@uuid
-        const synthezisedClientId = `mock_client@@@${deviceId.replace(
-          /:/g,
-          "_"
-        )}@@@uuid`;
-
-        // Process through the main logic
-        await this.processIngestLogic(deviceId, payload, synthezisedClientId);
-      } else {
-        // logger.info(`❓ [MQTT IN] Message on unexpected topic format: ${topic}`);
       }
     } catch (error) {
       logger.error(
@@ -1396,6 +1346,7 @@ class MQTTGateway {
           const modeUpdateMsg = {
             type: "mode_update",
             mode: "conversation",
+            listening_mode: connection.deviceMode || "manual",
             character: newModeName,
             agent: agentName,
             session_id: newRoomName,
@@ -1409,7 +1360,7 @@ class MQTTGateway {
           };
           const controlTopic = `devices/p2p/${clientId}`;
           this.mqttPublish(controlTopic, modeUpdateMsg);
-          logger.info(`[CHARACTER-CHANGE] Sent mode_update to device`);
+          logger.info(`[CHARACTER-CHANGE] Sent mode_update to device (listening_mode: ${connection.deviceMode || "manual"})`);
         }
 
         logger.info(`[CHARACTER-CHANGE] Successfully switched to ${newModeName} (${agentName})`);
@@ -1682,6 +1633,7 @@ class MQTTGateway {
         const modeUpdateMsg = {
           type: "mode_update",
           mode: newMode,
+          listening_mode: connection.deviceMode || "manual",
           ...(newMode === "conversation" && currentCharacter
             ? { character: currentCharacter }
             : {}),
@@ -1703,6 +1655,7 @@ class MQTTGateway {
           },
         };
         connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+        logger.info(`[MODE-CHANGE] Sent mode_update (listening_mode: ${connection.deviceMode || "manual"})`);
 
         // Handle mode-specific startup
         if (newMode === "music") {

@@ -49,6 +49,9 @@ public class DeviceEntity {
     @Schema(description = "设备模式(conversation/music/story)")
     private String mode;
 
+    @Schema(description = "设备PTT模式(auto/manual)")
+    private String deviceMode;
+
     @Schema(description = "固件版本号")
     private String appVersion;
 

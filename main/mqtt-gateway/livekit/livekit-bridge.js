@@ -341,7 +341,7 @@ class LiveKitBridge extends EventEmitter {
                 // Send TTS stop message to device
                 setTimeout(() => {
                   this.sendTtsStopMessage();
-                }, 1000);
+                }, 500);
 
                 // If we're in ending phase, send goodbye MQTT message now that TTS finished
                 if (
@@ -506,7 +506,8 @@ class LiveKitBridge extends EventEmitter {
                   while (true) {
                     const { done, value } = await reader.read();
                     if (done) {
-                      this.sendTtsStopMessage();
+                      // TTS stop is handled by agent_state_changed event (speaking -> listening)
+                      // Don't send here as stream can end before agent finishes speaking
                       // console.log(`🏁 [AUDIO STREAM] Stream ended for ${participant.identity}. Total frames: ${frameCount}, Total bytes: ${totalBytes}`);
 
                       // Flush any remaining resampled data

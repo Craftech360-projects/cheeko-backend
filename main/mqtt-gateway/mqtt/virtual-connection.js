@@ -374,6 +374,29 @@ class VirtualMQTTConnection {
       this.roomType = "conversation";
     }
 
+    // Fetch device_mode (PTT mode: auto/manual) from database
+    this.deviceMode = "manual"; // Default to manual (push-to-talk)
+    try {
+      const deviceModeUrl = `${process.env.MANAGER_API_URL.replace("/toy", "")}/toy/device/${macAddress}/device-mode`;
+      console.log(`🔍 [DEVICE-MODE] Querying PTT mode for device ${this.deviceId}...`);
+      const deviceModeResponse = await axios.get(deviceModeUrl, { timeout: 5000 });
+
+      if (deviceModeResponse.data.code === 0) {
+        this.deviceMode = deviceModeResponse.data.data;
+        console.log(`✅ [DEVICE-MODE] Device ${this.deviceId} PTT mode from DB: ${this.deviceMode}`);
+      } else {
+        console.warn(`⚠️ [DEVICE-MODE] API returned error: ${deviceModeResponse.data.msg}, using default 'manual'`);
+      }
+    } catch (error) {
+      console.error(`❌ [DEVICE-MODE] Error querying PTT mode from DB: ${error.message}, using default 'manual'`);
+    }
+
+    // Validate device_mode
+    if (!["auto", "manual"].includes(this.deviceMode)) {
+      console.warn(`⚠️ [DEVICE-MODE] Invalid device_mode: ${this.deviceMode}, using 'manual'`);
+      this.deviceMode = "manual";
+    }
+
     // Fetch current character and child profile for conversation mode
     this.currentCharacter = null;
     this.childProfile = null;
@@ -487,11 +510,12 @@ class VirtualMQTTConnection {
         `✅ [HELLO] Room created and gateway connected in ${roomCreationTime}ms`
       );
 
-      // Send mode_update to device firmware
+      // Send mode_update to device firmware (includes listening_mode for PTT)
       console.log(`📤 [HELLO] Sending mode_update to device...`);
       const modeUpdateMsg = {
         type: "mode_update",
         mode: this.roomType,
+        listening_mode: this.deviceMode,
         ...(this.roomType === "conversation" && this.currentCharacter
           ? { character: this.currentCharacter }
           : {}),
@@ -500,7 +524,7 @@ class VirtualMQTTConnection {
       };
       this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
       console.log(
-        `✅ [HELLO] Sent mode_update (${this.roomType}${this.currentCharacter ? ", character: " + this.currentCharacter : ""
+        `✅ [HELLO] Sent mode_update (${this.roomType}, listening_mode: ${this.deviceMode}${this.currentCharacter ? ", character: " + this.currentCharacter : ""
         }) to device`
       );
 
@@ -554,6 +578,7 @@ class VirtualMQTTConnection {
         },
       };
       this.sendMqttMessage(JSON.stringify(helloResponseMsg));
+      console.log(`📤 [HELLO] Sent hello response with mode: ${this.roomType}`);
 
       // AUTO-DEPLOY AGENT: Dispatch agent immediately for conversation mode
       // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed

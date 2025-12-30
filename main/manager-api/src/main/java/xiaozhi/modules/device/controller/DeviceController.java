@@ -264,4 +264,32 @@ public class DeviceController {
             return new Result<String>().error(e.getMessage());
         }
     }
+
+    @GetMapping("/{macAddress}/device-mode")
+    @Operation(summary = "Get device PTT mode (auto/manual) by MAC address")
+    public Result<String> getDevicePttMode(@PathVariable("macAddress") String macAddress) {
+        try {
+            // Clean MAC address
+            String cleanMac = macAddress.replace(":", "").replace("-", "").toLowerCase();
+
+            log.info("📋 [GET-DEVICE-MODE] PTT mode query requested for device MAC: {}", cleanMac);
+
+            // Get device
+            DeviceEntity device = deviceService.getDeviceByMacAddress(cleanMac);
+            if (device == null) {
+                log.warn("⚠️ [GET-DEVICE-MODE] Device not found for MAC: {}", cleanMac);
+                return new Result<String>().error("Device not found");
+            }
+
+            // Get device_mode, default to manual if null
+            String deviceMode = device.getDeviceMode() != null ? device.getDeviceMode() : "manual";
+            log.info("✅ [GET-DEVICE-MODE] Device {} PTT mode: {}", cleanMac, deviceMode);
+
+            return new Result<String>().ok(deviceMode);
+
+        } catch (Exception e) {
+            log.error("❌ [GET-DEVICE-MODE] Error getting PTT mode for MAC {}: {}", macAddress, e.getMessage());
+            return new Result<String>().error(e.getMessage());
+        }
+    }
 }
