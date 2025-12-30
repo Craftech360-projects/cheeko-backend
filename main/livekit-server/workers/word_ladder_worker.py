@@ -266,10 +266,12 @@ async def entrypoint(ctx: JobContext):
         """Manage idle timer based on agent state"""
         new_state = getattr(ev, 'new_state', None)
         new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
+        logger.debug(f"⏰ State change for idle timer: {new_state_str}, waiting_for_user={waiting_for_user_response}")
 
         if new_state_str == 'listening':
             # Only start timer if not waiting for user response after a reminder
             if not waiting_for_user_response:
+                logger.info("⏰ Starting idle timer (agent now listening)")
                 start_idle_timer()
             else:
                 logger.debug("⏰ Skipping idle timer - waiting for user response")
@@ -283,8 +285,8 @@ async def entrypoint(ctx: JobContext):
         nonlocal waiting_for_user_response
         cancel_idle_timer()
         reset_reminder_count()
-        waiting_for_user_response = False  # Reset flag when user speaks
-        start_idle_timer()  # Start fresh timer after user speaks
+        waiting_for_user_response = False  # Reset flag - timer will start when agent goes to listening
+        logger.debug("⏰ User spoke - reset idle state, timer will start after agent responds")
 
     logger.info(f"⏰ Idle reminder enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
 
