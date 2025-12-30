@@ -1,6 +1,7 @@
 package xiaozhi.modules.agent.service.biz;
 
 import xiaozhi.modules.agent.dto.AgentChatHistoryReportDTO;
+import xiaozhi.modules.agent.dto.AgentChatHistorySessionDTO;
 
 /**
  * 智能体聊天历史业务逻辑层
@@ -19,4 +20,13 @@ public interface AgentChatHistoryBizService {
      * @return 上传结果，true表示成功，false表示失败
      */
     Boolean report(AgentChatHistoryReportDTO agentChatHistoryReportDTO);
+
+    /**
+     * LiveKit Agent session batch upload
+     * Saves entire session chat history at once when room closes
+     *
+     * @param sessionDTO Contains all messages from the session
+     * @return true if successful, false if failed
+     */
+    Boolean reportSession(AgentChatHistorySessionDTO sessionDTO);
 }

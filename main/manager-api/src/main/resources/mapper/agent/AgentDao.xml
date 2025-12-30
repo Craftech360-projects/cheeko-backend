@@ -53,7 +53,7 @@
                                                'id', m.id,
                                                'agentId', m.agent_id,
                                                'pluginId', m.plugin_id,
-                                               'paramInfo', m.param_info
+                                               'paramInfo', CAST(m.param_info AS CHAR)
                                        )
                                )
                         FROM ai_agent_plugin_mapping m

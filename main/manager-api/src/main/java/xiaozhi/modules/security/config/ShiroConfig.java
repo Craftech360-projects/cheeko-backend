@@ -93,6 +93,7 @@ public class ShiroConfig {
         // 将config路径使用server服务过滤器
         filterMap.put("/config/**", "server");
         filterMap.put("/agent/chat-history/report", "server");
+        filterMap.put("/agent/chat-history/session", "server");
         filterMap.put("/agent/saveMemory/**", "server");
         filterMap.put("/agent/prompt/**", "server");
         // Analytics endpoints use dual auth (server secret OR OAuth2)
