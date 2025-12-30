@@ -170,17 +170,19 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
 async def check_riddle_answer(context: RunContext, user_answer: str, expected_answer: str) -> str:
     """
     Validate user's riddle answer against the expected answer.
-    
+
     Args:
         user_answer: The child's spoken answer
         expected_answer: The correct answer to the riddle
-        
+
     Returns:
         JSON string with result: correct, retry, move_next, streak, game_complete, message
     """
     global _riddle_game_state
     import json
-    
+
+    start_time = time.perf_counter()
+
     try:
         logger.info(f"🤔 Checking riddle answer: user='{user_answer}', expected='{expected_answer}'")
         
@@ -206,11 +208,13 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                     'game_complete': _riddle_game_state.streak >= 5,
                     'message': f"Correct! It's a {expected_answer}!"
                 }
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (correct)")
                 return json.dumps(result)
             else:
                 _riddle_game_state.streak = 0
                 _riddle_game_state.current_attempts += 1
-                
+
                 if _riddle_game_state.current_attempts < _riddle_game_state.max_attempts:
                     result = {
                         'correct': False,
@@ -220,6 +224,8 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                         'game_complete': False,
                         'message': "Think harder! Try again!"
                     }
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+                    logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (retry)")
                     return json.dumps(result)
                 else:
                     _riddle_game_state.current_attempts = 0
@@ -232,6 +238,8 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                         'correct_answer': expected_answer,
                         'message': f"It was a {expected_answer}! Let's try another!"
                     }
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+                    logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (move_next)")
                     return json.dumps(result)
         else:
             result = {
@@ -242,8 +250,10 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                 'game_complete': False,
                 'message': f"Correct! It's a {expected_answer}!" if is_correct else "Try again!"
             }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (no state)")
             return json.dumps(result)
-            
+
     except Exception as e:
         logger.error(f"❌ Error in check_riddle_answer: {e}")
         result = {
@@ -254,6 +264,8 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
             'game_complete': False,
             'message': f"Error checking answer: {str(e)}"
         }
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (error)")
         return json.dumps(result)
 
 
@@ -265,16 +277,18 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
 async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
     """
     Validate user's word in the Word Ladder game.
-    
+
     Args:
         user_word: The word spoken by the child
-        
+
     Returns:
         JSON string with result: success, next_letter, expected_letter, game_status, words_used, message
     """
     global _word_ladder_state
     import json
-    
+
+    start_time = time.perf_counter()
+
     try:
         logger.info(f"🎮 Validating word ladder move: '{user_word}'")
         
@@ -288,10 +302,12 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                 'words_used': 0,
                 'message': 'Game not initialized'
             }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (no state)")
             return json.dumps(result)
-        
+
         user_word = user_word.strip().lower()
-        
+
         if len(user_word) < 2:
             result = {
                 'success': False,
@@ -301,6 +317,8 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                 'words_used': len(_word_ladder_state.word_history),
                 'message': 'Word too short!'
             }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (too short)")
             return json.dumps(result)
         
         # Validate letter match
@@ -315,7 +333,7 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                 from src.games.word_ladder_game import pick_valid_word_pair
                 new_start, new_target = pick_valid_word_pair()
                 _word_ladder_state.reset(new_start, new_target)
-                
+
                 result = {
                     'success': False,
                     'expected_letter': new_start[-1],
@@ -326,6 +344,8 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                     'words_used': 1,
                     'message': f'Let\'s restart! New game: {new_start} → {new_target}'
                 }
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (restart)")
                 return json.dumps(result)
             else:
                 result = {
@@ -336,6 +356,8 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                     'words_used': len(_word_ladder_state.word_history),
                     'message': error_msg
                 }
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (invalid)")
                 return json.dumps(result)
         
         # Valid move - add to chain
@@ -351,8 +373,10 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                 'words_used': len(_word_ladder_state.word_history),
                 'message': 'Victory! You built the rope!'
             }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (victory)")
             return json.dumps(result)
-        
+
         result = {
             'success': True,
             'next_letter': _word_ladder_state.get_next_letter(),
@@ -361,8 +385,10 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
             'words_used': len(_word_ladder_state.word_history),
             'message': f'Great! Next letter: {_word_ladder_state.get_next_letter()}'
         }
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (valid)")
         return json.dumps(result)
-        
+
     except Exception as e:
         logger.error(f"❌ Error in validate_word_ladder_move: {e}")
         import traceback
@@ -375,6 +401,8 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
             'words_used': 0,
             'message': f'Error: {str(e)}'
         }
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (error)")
         return json.dumps(result)
 
 
