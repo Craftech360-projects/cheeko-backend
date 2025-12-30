@@ -186,8 +186,20 @@ async def entrypoint(ctx: JobContext):
         agent_prompt = render_prompt_with_profile(agent_prompt, child_profile)
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
-    
-    # Add instruction for immediate greeting (replaces on_enter logic)
+
+    # CRITICAL: Append silence instructions for music/story tools
+    # This prevents the agent from speaking after audio playback starts
+    silence_instructions = """
+
+🔇 AUDIO TOOL RESPONSE RULE:
+When play_music() or play_story() function returns:
+- Do NOT generate any spoken response for THAT specific function call
+- The audio is already playing - speaking would interrupt it
+- Once the user speaks AGAIN with a NEW question or request, respond normally as usual
+This only applies to the immediate response after play_music/play_story - continue normal conversation when user speaks next.
+"""
+    agent_prompt = agent_prompt + silence_instructions
+    logger.info("Added silence instructions for audio tools")
 
     # Debug: Check if Rahul appears in final prompt
     logger.info(f"Child name '{child_profile.get('name') if child_profile else 'N/A'}' in prompt: {'Rahul' in agent_prompt}")

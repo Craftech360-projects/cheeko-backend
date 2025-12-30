@@ -1,7 +1,7 @@
 {
   "debug": false,
   "mqtt_broker": {
-    "host": "192.168.1.98",
+    "host": "10.126.180.132",
     "port": 1883,
     "protocol": "mqtt",
     "keepalive": 60,
@@ -12,6 +12,6 @@
   "livekit": {
     "url": "ws://localhost:7880",
     "api_key": "devkey",
-    "api_secret": "secret123456789012345678901234567890"
+    "api_secret": "secret"
   }
 }

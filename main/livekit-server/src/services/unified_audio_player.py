@@ -37,6 +37,7 @@ class UnifiedAudioPlayer:
         self.stop_event = asyncio.Event()
         self.session_say_task = None
         self._playback_lock = asyncio.Lock()  # Prevent race conditions on rapid requests
+        self.auto_loop_enabled = False  # Only auto-loop when explicitly enabled (e.g., music mode)
 
     def set_session(self, session):
         """Set the LiveKit agent session"""
@@ -215,22 +216,27 @@ class UnifiedAudioPlayer:
             # Send agent state change to listening mode (like normal TTS does)
             await self._send_agent_state_to_listening()
             
-            # AUTO-LOOP: Play next song automatically
-            try:
-                logger.info(f"🎵 UNIFIED: Auto-loop - fetching next song...")
-                from src.features.music_tools import play_next_in_playlist
-                next_song = await play_next_in_playlist()
-                
-                if next_song:
-                    logger.info(f"🔁 UNIFIED: Auto-playing next song: {next_song['title']}")
-                    # Small delay to ensure clean transition
-                    await asyncio.sleep(0.5)
-                    # Play next song
-                    await self.play_from_url(next_song['url'], next_song['title'])
-                else:
-                    logger.warning("🎵 UNIFIED: No next song available for auto-loop")
-            except Exception as e:
-                logger.error(f"❌ UNIFIED: Auto-loop error: {e}")
+            # AUTO-LOOP: Play next song automatically (only if enabled for music mode)
+            if self.auto_loop_enabled:
+                try:
+                    logger.info(f"🎵 UNIFIED: Auto-loop enabled - fetching next song...")
+                    from src.features.music_tools import play_next_in_playlist
+                    next_song = await play_next_in_playlist()
+
+                    if next_song:
+                        logger.info(f"🔁 UNIFIED: Auto-playing next song: {next_song['title']}")
+                        # Small delay to ensure clean transition
+                        await asyncio.sleep(0.5)
+                        # Play next song
+                        await self.play_from_url(next_song['url'], next_song['title'])
+                    else:
+                        logger.warning("🎵 UNIFIED: No next song available for auto-loop")
+                        self.auto_loop_enabled = False  # Disable if no more songs
+                except Exception as e:
+                    logger.error(f"❌ UNIFIED: Auto-loop error: {e}")
+                    self.auto_loop_enabled = False  # Disable on error
+            else:
+                logger.info("🎵 UNIFIED: Auto-loop disabled - single song playback complete")
 
             # NOTE: Removed completion message to prevent race condition
             # The completion message was causing the agent to go back to "speaking" state

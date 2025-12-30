@@ -189,8 +189,7 @@ main/manager-api/src/main/resources/application.yml
 main/manager-api/src/main/resources/application-dev.yml
 main/manager-api/src/main/resources/application-prod.yml
 
-# MQTT Gateway configuration - include mqtt.json for Railway deployment (override *.json)
-!main/mqtt-gateway/config/mqtt.json
+# MQTT Gateway configuration (ignored by *.json rule)
 
 # LiveKit server configuration (contains API keys)
 main/livekit-server/config.yaml

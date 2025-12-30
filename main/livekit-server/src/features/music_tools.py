@@ -165,8 +165,9 @@ async def play_music(
             logger.error(f"❌ Audio player not available - assistant: {_assistant_instance}")
             return f"Found '{song['title']}' but audio player is not available."
 
-        # Return special instruction to suppress agent response
-        return "[MUSIC_PLAYING - STAY_SILENT]"
+        # Return empty string to suppress agent response
+        # The silence instructions in the prompt tell the model not to speak after this
+        return ""
     
     except Exception as e:
         logger.error(f"❌ Error playing music: {e}")
@@ -179,31 +180,38 @@ async def play_music(
 async def stop_music(context: RunContext) -> str:
     """
     Stop current music playback
-    
+
     Returns:
         Status message
     """
     global _current_song, _playlist_mode
-    
+
     logger.info("🛑 [MUSIC] stop_music called")
-    
+
     try:
+        # Disable auto-loop when user explicitly stops music
+        if _assistant_instance and hasattr(_assistant_instance, 'audio_player'):
+            player = _assistant_instance.audio_player
+            player.auto_loop_enabled = False
+            await player.stop()
+            logger.info("🛑 [MUSIC] Auto-loop disabled and playback stopped")
+
         if _current_song:
             logger.info(f"🛑 Stopping music: {_current_song.get('title', 'Unknown')}")
             _current_song = None
             _playlist_mode = "random"
-            
+
             # Send stop signal to device
             try:
                 stop_data = {
                     "type": "music_playback_stopped",
                     "message": "Music stopped"
                 }
-                
+
                 room = None
                 if hasattr(context, 'room'):
                     room = context.room
-                
+
                 if room:
                     await room.local_participant.publish_data(
                         json.dumps(stop_data).encode(),
@@ -212,11 +220,11 @@ async def stop_music(context: RunContext) -> str:
                     logger.info("📡 Sent music_playback_stopped via data channel")
             except Exception as e:
                 logger.warning(f"⚠️ Failed to send stop signal: {e}")
-            
+
             return "Music stopped"
         else:
             return "No music is currently playing"
-    
+
     except Exception as e:
         logger.error(f"❌ Error stopping music: {e}")
         return "Sorry, I encountered an error while trying to stop music."
@@ -324,17 +332,17 @@ async def previous_song(context: RunContext) -> str:
 
 async def start_music_mode():
     """
-    Start Music Mode - auto-play first song
+    Start Music Mode - auto-play first song with auto-loop enabled
     Called when device switches to Music Mode
     """
-    logger.info("🎵 [MUSIC MODE] Starting Music Mode with auto-play")
-    
+    logger.info("🎵 [MUSIC MODE] Starting Music Mode with auto-play and auto-loop")
+
     try:
         # Check for favorites playlist
         favorites = await get_favorites_playlist()
-        
+
         global _current_playlist, _current_playlist_index, _playlist_mode, _current_song
-        
+
         if favorites:
             # Play from favorites
             _current_playlist = favorites
@@ -351,23 +359,25 @@ async def start_music_mode():
             else:
                 logger.error("❌ Music service not available")
                 return None
-        
+
         if song:
             _current_song = song
-            
+
             # CRITICAL: Actually stream the audio via UnifiedAudioPlayer
             if _assistant_instance and hasattr(_assistant_instance, 'audio_player'):
                 player = _assistant_instance.audio_player
-                logger.info(f"🎵 Streaming audio via player: {song['title']} from {song['url']}")
+                # Enable auto-loop for Music Mode
+                player.auto_loop_enabled = True
+                logger.info(f"🎵 Streaming audio via player (auto-loop ON): {song['title']} from {song['url']}")
                 await player.play_from_url(song['url'], song['title'])
                 logger.info(f"✅ Started streaming: {song['title']}")
             else:
                 logger.error("❌ Audio player not available")
-                
+
             return song
-        
+
         return None
-    
+
     except Exception as e:
         logger.error(f"❌ Error starting Music Mode: {e}")
         import traceback
@@ -377,17 +387,23 @@ async def start_music_mode():
 
 async def stop_music_mode():
     """
-    Stop Music Mode - immediately stop all music
+    Stop Music Mode - immediately stop all music and disable auto-loop
     Called when switching from Music to Conversation Mode
     """
     global _current_song, _playlist_mode, _current_playlist
-    
+
     logger.info("🛑 [MUSIC MODE] Stopping Music Mode")
-    
+
     _current_song = None
     _playlist_mode = "random"
     _current_playlist = []
-    
+
+    # Disable auto-loop
+    if _assistant_instance and hasattr(_assistant_instance, 'audio_player'):
+        player = _assistant_instance.audio_player
+        player.auto_loop_enabled = False
+        logger.info("🛑 [MUSIC MODE] Auto-loop disabled")
+
     logger.info("✅ Music Mode stopped")
 
 
