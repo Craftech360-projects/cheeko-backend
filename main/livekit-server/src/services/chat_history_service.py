@@ -74,7 +74,8 @@ class ChatHistoryService:
             logger.info("📝 No chat history to send")
             return True
 
-        logger.info(f"📝📤 Sending {len(self.conversation_history)} messages to Manager API...")
+        url = f"{self.manager_api_url}/agent/chat-history/session"
+        logger.info(f"📝📤 Sending {len(self.conversation_history)} messages to Manager API: {url}")
 
         # Build payload with entire history
         payload = {
@@ -86,7 +87,6 @@ class ChatHistoryService:
             "sessionEnd": int(datetime.now().timestamp())
         }
 
-        url = f"{self.manager_api_url}/agent/chat-history/session"
         headers = {
             "Authorization": f"Bearer {self.secret}",
             "Content-Type": "application/json"

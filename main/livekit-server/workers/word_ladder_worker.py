@@ -62,6 +62,9 @@ class WordLadderAssistant(BaseAssistant):
 
 
 def prewarm(proc: JobProcess):
+    """Prewarm for Gemini Realtime - start model preloading here (not on import)"""
+    from src.utils import start_preloading
+    start_preloading()  # Only runs in worker process, not watcher
     logger.info("[PREWARM] Ready for Gemini Realtime")
     proc.userdata["ready"] = True
 

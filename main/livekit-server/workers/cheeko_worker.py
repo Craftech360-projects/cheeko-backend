@@ -65,7 +65,9 @@ class CheekoAssistant(BaseAssistant):
 
 
 def prewarm(proc: JobProcess):
-    """Minimal prewarm for Gemini Realtime"""
+    """Prewarm for Gemini Realtime - start model preloading here (not on import)"""
+    from src.utils import start_preloading
+    start_preloading()  # Only runs in worker process, not watcher
     logger.info("[PREWARM] Ready for Gemini Realtime")
     proc.userdata["ready"] = True
 
@@ -209,6 +211,28 @@ async def entrypoint(ctx: JobContext):
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
     logger.info("State management registered")
+
+    # ============================================================================
+    # DEBUG: Track user speech and function calls
+    # ============================================================================
+
+    @session.on("user_speech_committed")
+    def on_user_speech(msg):
+        """Log what the user said (transcription)"""
+        text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
+        logger.info(f"🎤 USER SAID: '{text}'")
+
+    @session.on("function_calls_started")
+    def on_function_calls_started(ev):
+        """Log when function calls are initiated"""
+        logger.info(f"🔧 FUNCTION CALL STARTED: {ev}")
+
+    @session.on("function_calls_finished")
+    def on_function_calls_finished(ev):
+        """Log when function calls complete"""
+        logger.info(f"✅ FUNCTION CALL FINISHED: {ev}")
+
+    logger.info("📊 Debug logging for speech and function calls enabled")
 
     # Setup error handling
     error_manager = None
