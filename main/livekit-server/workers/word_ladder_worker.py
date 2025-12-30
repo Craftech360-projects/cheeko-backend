@@ -196,8 +196,15 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("function_calls_started")
     def on_function_calls_started(ev):
-        """Log when function calls are initiated"""
+        """Log when function calls are initiated - also reset idle state"""
+        nonlocal waiting_for_user_response
         logger.info(f"🔧 FUNCTION CALL STARTED: {ev}")
+        # User spoke and triggered a tool - reset idle state
+        if waiting_for_user_response:
+            logger.info("⏰ Function call detected - resetting idle state")
+            waiting_for_user_response = False
+            reset_reminder_count()
+            cancel_idle_timer()
 
     @session.on("function_calls_finished")
     def on_function_calls_finished(ev):
