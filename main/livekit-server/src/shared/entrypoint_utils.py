@@ -326,25 +326,33 @@ def create_state_handlers(ctx: JobContext, session: AgentSession):
         except Exception as e:
             logger.error(f"Failed to emit speech_created: {e}")
 
-    # Register session event handler for TTS start/stop detection
+    # Register session event handler for state changes and TTS start detection
     @session.on("agent_state_changed")
-    def on_agent_state_changed_for_tts(ev):
-        """Emit agent_state_changed for all transitions and speech_created when speaking"""
+    def on_agent_state_changed_handler(ev):
+        """Emit state changes to data channel and speech_created when speaking starts"""
         try:
             old_state = getattr(ev, 'old_state', None)
             new_state = getattr(ev, 'new_state', None)
-            logger.info(f"EVENT: agent_state_changed - {old_state} -> {new_state}")
 
-            # Emit agent_state_changed for ALL state transitions (for TTS stop on speaking -> listening)
-            asyncio.create_task(emit_agent_state(new_state))
+            # Convert enum to string if needed
+            old_state_str = old_state.name.lower() if hasattr(old_state, 'name') else str(old_state)
+            new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
 
-            # Also emit speech_created when starting to speak (for TTS start)
-            if new_state == 'speaking' and old_state != 'speaking':
-                logger.info(f"Emitting speech_created (state: {old_state} -> speaking)")
+            logger.info(f"🔄 EVENT: agent_state_changed - {old_state_str} -> {new_state_str}")
+
+            # Emit state change to data channel for MQTT gateway
+            asyncio.create_task(emit_agent_state(new_state_str))
+            logger.info(f"📤 Emitting agent_state_changed to data channel: {new_state_str}")
+
+            # Emit speech_created when starting to speak
+            if new_state_str == 'speaking' and old_state_str != 'speaking':
+                logger.info(f"🎤 Emitting speech_created (state: {old_state_str} -> speaking)")
                 asyncio.create_task(emit_speech_created())
 
         except Exception as e:
             logger.error(f"Error in agent_state_changed handler: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     return emit_agent_state, emit_speech_created
 

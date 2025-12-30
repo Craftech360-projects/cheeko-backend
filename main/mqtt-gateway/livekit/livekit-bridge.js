@@ -330,6 +330,7 @@ class LiveKitBridge extends EventEmitter {
           }
           switch (data.type) {
             case "agent_state_changed":
+              console.log(`🔄 [STATE] Agent state changed: ${data.data.old_state} → ${data.data.new_state} (device: ${this.macAddress})`);
               if (
                 data.data.old_state === "speaking" &&
                 data.data.new_state === "listening"
@@ -337,9 +338,10 @@ class LiveKitBridge extends EventEmitter {
                 // Set audio playing flag to false
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
-                // console.log(`🎵 [AUDIO-STOP] TTS stopped for device: ${this.macAddress}`);
+                console.log(`🎵 [AUDIO-STOP] TTS stopped, sending tts_stop in 1s (device: ${this.macAddress})`);
                 // Send TTS stop message to device
                 setTimeout(() => {
+                  console.log(`📤 [TTS-STOP] Sending tts stop message now (device: ${this.macAddress})`);
                   this.sendTtsStopMessage();
                 }, 500);
 
@@ -1129,14 +1131,18 @@ class LiveKitBridge extends EventEmitter {
 
   // Send TTS stop message to device
   sendTtsStopMessage() {
-    if (!this.connection) return;
+    if (!this.connection) {
+      console.log(`⚠️ [TTS-STOP] No connection, cannot send tts stop`);
+      return;
+    }
 
     const message = {
       type: "tts",
       state: "stop",
-      session_id: this.connection.udp.session_id,
+      session_id: this.connection.udp?.session_id,
     };
 
+    console.log(`📤 [TTS-STOP] Sending: ${JSON.stringify(message)} (device: ${this.macAddress})`);
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
