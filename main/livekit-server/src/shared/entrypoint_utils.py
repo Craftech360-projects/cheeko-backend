@@ -24,7 +24,8 @@ from livekit.plugins import google
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
-from src.services.music_service import MusicService
+# NOTE: MusicService is imported lazily inside create_entrypoint() to avoid
+# loading the embedding model for game workers that don't need it
 from src.utils.loki_agent_logger import logger
 
 from .agent_configs import GAME_PROMPT_FILES, is_game_mode
@@ -520,7 +521,8 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
         except Exception as e:
             logger.warning(f"Error handler not available: {e}")
 
-        # Initialize music service
+        # Initialize music service (lazy import to avoid loading embedding model for game workers)
+        from src.services.music_service import MusicService
         music_service = MusicService()
         asyncio.create_task(music_service.initialize())
         logger.info("Music service initialized (async)")

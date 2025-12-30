@@ -1,8 +1,8 @@
 [cerebrium.deployment]
-name = "livekit-server-simple"
+name = "multiagent"
 python_version = "3.11"
 disable_auth = false
-include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*']
+include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*', 'workers/**/*']
 exclude = ['__pycache__/**/*', 'transcripts/**/*', '*.pyc', '.git/**/*', '.vscode/**/*']
 
 [cerebrium.hardware]
@@ -27,17 +27,16 @@ dockerfile_path = "./Dockerfile.cerebrium"
 
 [cerebrium.env]
 # LiveKit Cloud Configuration
-LIVEKIT_URL="wss://cheeko-esp32-9gruz4w3.livekit.cloud"
-LIVEKIT_API_KEY="APIrTfGdUYgZtf8"
-LIVEKIT_API_SECRET="6WMwcPM2pjxX26wuBWK5R3ZmIfwJlSuJuKSWqvd4EIM"
-
+LIVEKIT_URL="wss://cheeko-ycahauzs.livekit.cloud"
+LIVEKIT_API_KEY="APIFrjVQFMvUte3"
+LIVEKIT_API_SECRET="GHGRD7WJmUVlfD9KoXTI3C5ZcD1dK9YGoBUbPSYmX5D"
 
 
 # Google API
 GOOGLE_API_KEY = "AIzaSyDQnuv8reaFvyUO68OE750MwOdGzSptuZw"
 
 # Manager API Configuration (Railway production - NOTE: /toy context path required!)
-MANAGER_API_URL = "http://157.245.108.139:8002/toy"
+MANAGER_API_URL = "http://139.59.7.72:8002/toy"
 MANAGER_API_SECRET = "da11d988-f105-4e71-b095-da62ada82189"
 
 # STT Configuration
