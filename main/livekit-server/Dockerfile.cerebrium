@@ -6,6 +6,11 @@ FROM python:${PYTHON_VERSION}-slim
 # Keeps Python from buffering stdout and stderr
 ENV PYTHONUNBUFFERED=1
 
+# Set cache directories to user-writable locations (avoid /persistent-storage permission issues)
+ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
+ENV SENTENCE_TRANSFORMERS_HOME=/home/appuser/.cache/sentence-transformers
+
 # Create a non-privileged user that the app will run under.
 ARG UID=10001
 RUN adduser \
@@ -33,7 +38,7 @@ RUN apt-get update && \
 # Switch to non-root user
 USER appuser
 
-RUN mkdir -p /home/appuser/.cache
+RUN mkdir -p /home/appuser/.cache/huggingface /home/appuser/.cache/sentence-transformers
 RUN chown -R appuser /home/appuser/.cache
 
 WORKDIR /home/appuser
@@ -79,11 +84,14 @@ RUN apt-get update && apt-get install -y dos2unix && \
 # Back to app user
 USER appuser
 
+# Pre-download the sentence-transformers model at build-time
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || echo "Model download skipped"
+
 # Ensure that any dependent models are downloaded at build-time
 RUN python main.py download-files || echo "No download-files command available"
 
-# Expose healthcheck / main service port and media_api port
-EXPOSE 8081 8003
+# Expose health check, agent workers, and media_api ports
+EXPOSE 8080 8081 8082 8083 8084 8003
 
 # Run the start script which launches both main.py and media_api
 CMD ["bash", "start.sh"]
