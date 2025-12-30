@@ -33,7 +33,7 @@ from livekit.plugins import google
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
-from src.services.music_service import MusicService
+# from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
 from src.utils.loki_agent_logger import logger
 from src.shared.base_assistant import BaseAssistant
 from src.shared.entrypoint_utils import (
@@ -44,13 +44,13 @@ from src.shared.entrypoint_utils import (
     init_chat_history_service,
     extract_and_send_chat_history,
 )
-from src.features.music_tools import play_music, stop_music, next_song, previous_song
+# from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
 
 # Agent configuration
 AGENT_NAME = "cheeko-agent"
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
-MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]
+# MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 
 
 class CheekoAssistant(BaseAssistant):
@@ -66,8 +66,9 @@ class CheekoAssistant(BaseAssistant):
 
 def prewarm(proc: JobProcess):
     """Prewarm for Gemini Realtime - start model preloading here (not on import)"""
-    from src.utils import start_preloading
-    start_preloading()  # Only runs in worker process, not watcher
+    # COMMENTED OUT - Music service disabled (saves ~11s startup time)
+    # from src.utils import start_preloading
+    # start_preloading()  # Only runs in worker process, not watcher
     logger.info("[PREWARM] Ready for Gemini Realtime")
     proc.userdata["ready"] = True
 
@@ -187,19 +188,20 @@ async def entrypoint(ctx: JobContext):
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
-    # CRITICAL: Append silence instructions for music/story tools
-    # This prevents the agent from speaking after audio playback starts
-    silence_instructions = """
-
-🔇 AUDIO TOOL RESPONSE RULE:
-When play_music() or play_story() function returns:
-- Do NOT generate any spoken response for THAT specific function call
-- The audio is already playing - speaking would interrupt it
-- Once the user speaks AGAIN with a NEW question or request, respond normally as usual
-This only applies to the immediate response after play_music/play_story - continue normal conversation when user speaks next.
-"""
-    agent_prompt = agent_prompt + silence_instructions
-    logger.info("Added silence instructions for audio tools")
+    # COMMENTED OUT - Music service disabled
+    # # CRITICAL: Append silence instructions for music/story tools
+    # # This prevents the agent from speaking after audio playback starts
+    # silence_instructions = """
+    #
+    # 🔇 AUDIO TOOL RESPONSE RULE:
+    # When play_music() or play_story() function returns:
+    # - Do NOT generate any spoken response for THAT specific function call
+    # - The audio is already playing - speaking would interrupt it
+    # - Once the user speaks AGAIN with a NEW question or request, respond normally as usual
+    # This only applies to the immediate response after play_music/play_story - continue normal conversation when user speaks next.
+    # """
+    # agent_prompt = agent_prompt + silence_instructions
+    # logger.info("Added silence instructions for audio tools")
 
     # Debug: Check if Rahul appears in final prompt
     logger.info(f"Child name '{child_profile.get('name') if child_profile else 'N/A'}' in prompt: {'Rahul' in agent_prompt}")
@@ -216,9 +218,11 @@ This only applies to the immediate response after play_music/play_story - contin
     )
     logger.info("Gemini Realtime model created")
 
-    # Create AgentSession with music tools
-    session = AgentSession(llm=realtime_model, tools=MUSIC_TOOLS)
-    logger.info(f"AgentSession created with {len(MUSIC_TOOLS)} music tools")
+    # Create AgentSession (music tools disabled)
+    # session = AgentSession(llm=realtime_model, tools=MUSIC_TOOLS)  # COMMENTED OUT - Music service disabled
+    # logger.info(f"AgentSession created with {len(MUSIC_TOOLS)} music tools")
+    session = AgentSession(llm=realtime_model)
+    logger.info("AgentSession created (no music tools)")
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
@@ -255,28 +259,30 @@ This only applies to the immediate response after play_music/play_story - contin
     except Exception as e:
         logger.warning(f"Error handler not available: {e}")
 
-    # Initialize music service
-    music_service = MusicService()
-    asyncio.create_task(music_service.initialize())
-    logger.info("Music service initialized (async)")
+    # COMMENTED OUT - Music service disabled
+    # # Initialize music service
+    # music_service = MusicService()
+    # asyncio.create_task(music_service.initialize())
+    # logger.info("Music service initialized (async)")
 
     # Create assistant instance
     assistant = CheekoAssistant(instructions=agent_prompt)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
     logger.info(f"{CHARACTER_NAME} Assistant initialized")
 
-    # Initialize audio player
-    from src.services.unified_audio_player import UnifiedAudioPlayer
-    audio_player = UnifiedAudioPlayer()
-    audio_player.set_context(ctx)
-    assistant.audio_player = audio_player
+    # COMMENTED OUT - Music service disabled
+    # # Initialize audio player
+    # from src.services.unified_audio_player import UnifiedAudioPlayer
+    # audio_player = UnifiedAudioPlayer()
+    # audio_player.set_context(ctx)
+    # assistant.audio_player = audio_player
 
     # Enable Cheeko features (no games - use mode_switching to dispatch to game workers)
     assistant.enable_battery_tools()
     assistant.enable_volume_tools()
     assistant.enable_mode_switching()
-    assistant.enable_music_tools(music_service)
-    logger.info("Cheeko features enabled (battery, volume, mode switching, music)")
+    # assistant.enable_music_tools(music_service)  # COMMENTED OUT - Music service disabled
+    logger.info("Cheeko features enabled (battery, volume, mode switching)")
 
     # Room lifecycle management
     participant_count = len(ctx.room.remote_participants)
@@ -326,28 +332,29 @@ This only applies to the immediate response after play_music/play_story - contin
         logger.info("Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
 
-    @ctx.room.on("data_received")
-    def on_data_received(data_packet: rtc.DataPacket):
-        try:
-            message = json.loads(data_packet.data.decode('utf-8'))
-            if message.get('type') == 'playback_control':
-                action = message.get('action')
-                if action == 'next':
-                    asyncio.create_task(handle_skip())
-        except Exception as e:
-            logger.error(f"Error handling data: {e}")
-
-    async def handle_skip():
-        try:
-            if assistant.audio_player:
-                await assistant.audio_player.stop()
-            from src.features.music_tools import play_next_in_playlist
-            song = await play_next_in_playlist()
-            if song and assistant.audio_player:
-                await asyncio.sleep(0.3)
-                await assistant.audio_player.play_from_url(song['url'], song['title'])
-        except Exception as e:
-            logger.error(f"Error in skip: {e}")
+    # COMMENTED OUT - Music service disabled
+    # @ctx.room.on("data_received")
+    # def on_data_received(data_packet: rtc.DataPacket):
+    #     try:
+    #         message = json.loads(data_packet.data.decode('utf-8'))
+    #         if message.get('type') == 'playback_control':
+    #             action = message.get('action')
+    #             if action == 'next':
+    #                 asyncio.create_task(handle_skip())
+    #     except Exception as e:
+    #         logger.error(f"Error handling data: {e}")
+    #
+    # async def handle_skip():
+    #     try:
+    #         if assistant.audio_player:
+    #             await assistant.audio_player.stop()
+    #         from src.features.music_tools import play_next_in_playlist
+    #         song = await play_next_in_playlist()
+    #         if song and assistant.audio_player:
+    #             await asyncio.sleep(0.3)
+    #             await assistant.audio_player.play_from_url(song['url'], song['title'])
+    #     except Exception as e:
+    #         logger.error(f"Error in skip: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
@@ -358,8 +365,7 @@ This only applies to the immediate response after play_music/play_story - contin
 
     assistant.set_agent_session(session)
     assistant.set_session_context(ctx)
-    audio_player.set_session(session)
-
+    # audio_player.set_session(session)  # COMMENTED OUT - Music service disabled
 
     await session.start(room=ctx.room, agent=assistant)
 
@@ -367,16 +373,17 @@ This only applies to the immediate response after play_music/play_story - contin
     logger.info(f"Total initialization: {init_elapsed:.0f}ms")
     logger.info(f"{CHARACTER_NAME} agent is LIVE!")
 
-    # Auto-start music if in Music Mode
-    if room_type == "music":
-        logger.info("[MUSIC MODE] Auto-starting music playback")
-        try:
-            from src.features.music_tools import start_music_mode
-            song = await start_music_mode()
-            if song:
-                logger.info(f"[MUSIC MODE] Now playing: {song['title']}")
-        except Exception as e:
-            logger.error(f"[MUSIC MODE] Failed to start music: {e}")
+    # COMMENTED OUT - Music service disabled
+    # # Auto-start music if in Music Mode
+    # if room_type == "music":
+    #     logger.info("[MUSIC MODE] Auto-starting music playback")
+    #     try:
+    #         from src.features.music_tools import start_music_mode
+    #         song = await start_music_mode()
+    #         if song:
+    #             logger.info(f"[MUSIC MODE] Now playing: {song['title']}")
+    #     except Exception as e:
+    #         logger.error(f"[MUSIC MODE] Failed to start music: {e}")
 
 
 
