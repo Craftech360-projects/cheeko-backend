@@ -544,3 +544,13 @@ databaseChangeLog:
   #        - sqlFile:
   #            encoding: utf8
   #            path: classpath:db/changelog/202511291434.sql
+
+  - changeSet:
+      id: 202511101501
+      author: claude
+      validCheckSum: ANY
+      runOnChange: true
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/202511101501_add_device_mode_for_device.sql
