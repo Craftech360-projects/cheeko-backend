@@ -72,7 +72,7 @@ class BaseAssistant(Agent):
 
         # Wait for the Gemini Realtime connection to fully stabilize
         # The connection starts async and needs time to be ready for generation
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(0.5)
 
         # Retry logic for greeting
         max_retries = 3
@@ -91,11 +91,11 @@ class BaseAssistant(Agent):
                     logger.warning(f"{agent_name} greeting timed out - retrying...")
                 
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2.0)
+                    await asyncio.sleep(0.5)
             except Exception as e:
                 logger.warning(f"{agent_name} greeting attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2.0)  # Wait longer before retry
+                    await asyncio.sleep(1.0)  # Wait longer before retry
                 else:
                     logger.error(f"{agent_name} failed to send greeting after {max_retries} attempts")
 

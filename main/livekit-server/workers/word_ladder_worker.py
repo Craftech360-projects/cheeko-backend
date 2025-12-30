@@ -24,6 +24,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     AutoSubscribe,
+    RoomInputOptions,
 )
 from livekit import rtc, api
 from livekit.plugins import google
@@ -169,6 +170,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game tools")
 
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
+    logger.info("State management registered")
 
     # ============================================================================
     # DEBUG: Track user speech and function calls
@@ -205,6 +207,7 @@ async def entrypoint(ctx: JobContext):
     audio_player = UnifiedAudioPlayer()
     audio_player.set_context(ctx)
     assistant.audio_player = audio_player
+    logger.info("UnifiedAudioPlayer initialized")
 
     assistant.enable_battery_tools()
     assistant.enable_volume_tools()
@@ -247,12 +250,38 @@ async def entrypoint(ctx: JobContext):
     def on_participant_disconnected(participant: rtc.RemoteParticipant):
         nonlocal participant_count
         participant_count -= 1
+        logger.info(f"Participant disconnected: {participant.identity}, remaining: {participant_count}")
         if participant_count == 0:
             asyncio.create_task(cleanup_room_and_session())
 
+    @ctx.room.on("participant_connected")
+    def on_participant_connected(participant: rtc.RemoteParticipant):
+        nonlocal participant_count
+        participant_count += 1
+        logger.info(f"Participant connected: {participant.identity}, total: {participant_count}")
+
     @ctx.room.on("disconnected")
     def on_room_disconnected():
+        logger.info("Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
+
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        try:
+            message = json.loads(data_packet.data.decode('utf-8'))
+            if message.get('type') == 'playback_control':
+                action = message.get('action')
+                if action == 'next':
+                    asyncio.create_task(handle_skip())
+        except Exception as e:
+            logger.error(f"Error handling data: {e}")
+
+    async def handle_skip():
+        try:
+            if assistant.audio_player:
+                await assistant.audio_player.stop()
+        except Exception as e:
+            logger.error(f"Error in skip: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 

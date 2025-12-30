@@ -4,6 +4,7 @@ Contains function tools for Math Tutor, Riddle Solver, and Word Ladder games
 """
 
 import logging
+import time
 from typing import Optional
 from livekit.agents import function_tool, RunContext
 
@@ -54,7 +55,9 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
     """
     global _math_game_state
     import json
-    
+
+    start_time = time.perf_counter()
+
     try:
         logger.info(f"🧮 Checking math answer: user='{user_answer}', expected='{expected_answer}'")
         
@@ -72,6 +75,8 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                 'game_complete': False,
                 'message': "I couldn't understand that number. Try again!"
             }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (parse failed)")
             return json.dumps(result)
         
         if parsed_expected is None:
@@ -95,6 +100,8 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                     'game_complete': _math_game_state.streak >= 5,
                     'message': f"Correct! Streak: {_math_game_state.streak}"
                 }
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (correct)")
                 return json.dumps(result)
             else:
                 _math_game_state.streak = 0
@@ -109,6 +116,8 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                         'game_complete': False,
                         'message': f"Try again! Attempts left: {_math_game_state.max_attempts - _math_game_state.current_attempts}"
                     }
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+                    logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (retry)")
                     return json.dumps(result)
                 else:
                     _math_game_state.current_attempts = 0
@@ -121,6 +130,8 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                         'correct_answer': str(parsed_expected),
                         'message': f"The answer was {parsed_expected}. Let's try a new one!"
                     }
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+                    logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (move_next)")
                     return json.dumps(result)
         else:
             # No state, simple check
@@ -132,8 +143,10 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                 'game_complete': False,
                 'message': "Correct!" if is_correct else "Try again!"
             }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (no state)")
             return json.dumps(result)
-            
+
     except Exception as e:
         logger.error(f"❌ Error in check_math_answer: {e}")
         result = {
@@ -144,6 +157,8 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
             'game_complete': False,
             'message': f"Error checking answer: {str(e)}"
         }
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (error)")
         return json.dumps(result)
 
 

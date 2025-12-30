@@ -24,6 +24,7 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     AutoSubscribe,
+    RoomInputOptions,
 )
 from livekit import rtc, api
 from livekit.plugins import google
@@ -62,9 +63,19 @@ class MathTutorAssistant(BaseAssistant):
 
 
 def prewarm(proc: JobProcess):
-    """Prewarm for Gemini Realtime - start model preloading here (not on import)"""
-    from src.utils import start_preloading
-    start_preloading()  # Only runs in worker process, not watcher
+    """Prewarm for Gemini Realtime - cache configs and db_helper"""
+    # Cache config once at worker startup (avoids re-parsing YAML per job)
+    yaml_config = ConfigLoader.load_yaml_config()
+    realtime_config = ConfigLoader.get_gemini_realtime_config()
+    proc.userdata["yaml_config"] = yaml_config
+    proc.userdata["realtime_config"] = realtime_config
+
+    # Cache DatabaseHelper instance (avoids creating new instance per job)
+    manager_api_url = os.getenv("MANAGER_API_URL")
+    manager_api_secret = os.getenv("MANAGER_API_SECRET")
+    if manager_api_url and manager_api_secret:
+        proc.userdata["db_helper"] = DatabaseHelper(manager_api_url, manager_api_secret)
+
     logger.info("[PREWARM] Ready for Gemini Realtime")
     proc.userdata["ready"] = True
 
@@ -72,7 +83,8 @@ def prewarm(proc: JobProcess):
 async def entrypoint(ctx: JobContext):
     """Entrypoint for Math Tutor agent worker"""
 
-    yaml_config = ConfigLoader.load_yaml_config()
+    # Use cached config from prewarm (or fallback to loading)
+    yaml_config = ctx.proc.userdata.get("yaml_config") or ConfigLoader.load_yaml_config()
     api_keys = yaml_config.get('api_keys', {})
     if 'google' in api_keys and not os.getenv('GOOGLE_API_KEY'):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
@@ -82,7 +94,8 @@ async def entrypoint(ctx: JobContext):
 
     init_start_time = asyncio.get_event_loop().time()
 
-    realtime_config = ConfigLoader.get_gemini_realtime_config()
+    # Use cached realtime config from prewarm
+    realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
     gemini_model = realtime_config.get('model', 'gemini-live-2.5-flash-native-audio')
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.8)
@@ -108,12 +121,12 @@ async def entrypoint(ctx: JobContext):
 
     if device_mac:
         try:
-            manager_api_url = os.getenv("MANAGER_API_URL")
-            manager_api_secret = os.getenv("MANAGER_API_SECRET")
-            db_helper = DatabaseHelper(manager_api_url, manager_api_secret)
-
-            prompt_service.clear_cache()
-            prompt_service.clear_enhanced_cache(device_mac)
+            # Use cached DatabaseHelper from prewarm (or create new if not available)
+            db_helper = ctx.proc.userdata.get("db_helper")
+            if not db_helper:
+                manager_api_url = os.getenv("MANAGER_API_URL")
+                manager_api_secret = os.getenv("MANAGER_API_SECRET")
+                db_helper = DatabaseHelper(manager_api_url, manager_api_secret)
 
             # Skip child profile fetch if already have from dispatch metadata
             if dispatch_child_profile:
@@ -164,6 +177,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game tools")
 
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
+    logger.info("State management registered")
 
     # ============================================================================
     # DEBUG: Track user speech and function calls
@@ -187,6 +201,79 @@ async def entrypoint(ctx: JobContext):
 
     logger.info("📊 Debug logging for speech and function calls enabled")
 
+    # ============================================================================
+    # IDLE REMINDER: Prompt user if no response for a while
+    # ============================================================================
+    IDLE_TIMEOUT_SECONDS = 15  # Time to wait before reminding
+    idle_reminder_task = None
+    reminder_count = 0
+    MAX_REMINDERS = 3  # Max reminders before giving up
+
+    REMINDER_MESSAGES = [
+        "Take your time! I'm here whenever you're ready with your answer.",
+        "No rush! Would you like me to repeat the question?",
+        "Still thinking? That's okay! Math takes time. Let me know when you're ready.",
+    ]
+
+    async def send_idle_reminder():
+        """Send a gentle reminder if user hasn't responded"""
+        nonlocal reminder_count
+        try:
+            await asyncio.sleep(IDLE_TIMEOUT_SECONDS)
+
+            if reminder_count < MAX_REMINDERS:
+                reminder_msg = REMINDER_MESSAGES[reminder_count % len(REMINDER_MESSAGES)]
+                logger.info(f"⏰ Sending idle reminder #{reminder_count + 1}: {reminder_msg[:50]}...")
+                await session.generate_reply(instructions=reminder_msg)
+                reminder_count += 1
+            else:
+                logger.info("⏰ Max reminders reached, stopping idle prompts")
+        except asyncio.CancelledError:
+            logger.debug("⏰ Idle reminder cancelled (user responded)")
+        except Exception as e:
+            logger.warning(f"⏰ Idle reminder error: {e}")
+
+    def start_idle_timer():
+        """Start the idle reminder timer"""
+        nonlocal idle_reminder_task
+        cancel_idle_timer()
+        idle_reminder_task = asyncio.create_task(send_idle_reminder())
+        logger.debug("⏰ Idle timer started")
+
+    def cancel_idle_timer():
+        """Cancel the idle reminder timer"""
+        nonlocal idle_reminder_task
+        if idle_reminder_task and not idle_reminder_task.done():
+            idle_reminder_task.cancel()
+            logger.debug("⏰ Idle timer cancelled")
+        idle_reminder_task = None
+
+    def reset_reminder_count():
+        """Reset reminder count when user responds"""
+        nonlocal reminder_count
+        reminder_count = 0
+
+    @session.on("agent_state_changed")
+    def on_state_for_idle_timer(ev):
+        """Manage idle timer based on agent state"""
+        new_state = getattr(ev, 'new_state', None)
+        new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
+
+        if new_state_str == 'listening':
+            # Agent finished speaking, start idle timer
+            start_idle_timer()
+        else:
+            # Agent is speaking/thinking, cancel idle timer
+            cancel_idle_timer()
+
+    @session.on("user_speech_committed")
+    def on_user_speech_reset_idle(msg):
+        """Reset idle timer and reminder count when user speaks"""
+        cancel_idle_timer()
+        reset_reminder_count()
+
+    logger.info(f"⏰ Idle reminder enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
+
     try:
         from src.agent.error_handler import setup_error_handling
         setup_error_handling(session=session, max_retries=3, custom_audio_path=None)
@@ -200,6 +287,7 @@ async def entrypoint(ctx: JobContext):
     audio_player = UnifiedAudioPlayer()
     audio_player.set_context(ctx)
     assistant.audio_player = audio_player
+    logger.info("UnifiedAudioPlayer initialized")
 
     assistant.enable_battery_tools()
     assistant.enable_volume_tools()
@@ -222,6 +310,7 @@ async def entrypoint(ctx: JobContext):
         cleanup_completed = True
         try:
             logger.info("Initiating cleanup")
+            cancel_idle_timer()  # Stop any pending idle reminders
             await extract_and_send_chat_history(session, chat_history_service)
             if session and hasattr(session, 'aclose'):
                 await session.aclose()
@@ -236,12 +325,38 @@ async def entrypoint(ctx: JobContext):
     def on_participant_disconnected(participant: rtc.RemoteParticipant):
         nonlocal participant_count
         participant_count -= 1
+        logger.info(f"Participant disconnected: {participant.identity}, remaining: {participant_count}")
         if participant_count == 0:
             asyncio.create_task(cleanup_room_and_session())
 
+    @ctx.room.on("participant_connected")
+    def on_participant_connected(participant: rtc.RemoteParticipant):
+        nonlocal participant_count
+        participant_count += 1
+        logger.info(f"Participant connected: {participant.identity}, total: {participant_count}")
+
     @ctx.room.on("disconnected")
     def on_room_disconnected():
+        logger.info("Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
+
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        try:
+            message = json.loads(data_packet.data.decode('utf-8'))
+            if message.get('type') == 'playback_control':
+                action = message.get('action')
+                if action == 'next':
+                    asyncio.create_task(handle_skip())
+        except Exception as e:
+            logger.error(f"Error handling data: {e}")
+
+    async def handle_skip():
+        try:
+            if assistant.audio_player:
+                await assistant.audio_player.stop()
+        except Exception as e:
+            logger.error(f"Error in skip: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 

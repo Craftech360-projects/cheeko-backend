@@ -169,15 +169,8 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
             return Boolean.FALSE;
         }
 
-        // Check chat history config
-        Integer chatHistoryConf = agentEntity.getChatHistoryConf();
-        log.info("📝 [SESSION] Agent {} chat history config: {}", agentId, chatHistoryConf);
-
-        if (!Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode()) &&
-            !Objects.equals(chatHistoryConf, Constant.ChatHistoryConfEnum.RECORD_TEXT_AUDIO.getCode())) {
-            log.info("📝 [SESSION] Chat history recording disabled for agent: {}", agentId);
-            return Boolean.TRUE;
-        }
+        // Always save chat history regardless of agent config
+        log.info("📝 [SESSION] Saving chat history for agent: {}", agentId);
 
         // Save each message
         int savedCount = 0;

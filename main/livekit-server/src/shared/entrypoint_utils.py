@@ -389,6 +389,51 @@ def init_chat_history_service(device_mac: str, room_name: str, agent_id: str = N
         return None
 
 
+def _is_gemini_thinking(text: str) -> bool:
+    """
+    Check if text is Gemini's internal thinking/reasoning that shouldn't be saved.
+
+    Args:
+        text: Message content to check
+
+    Returns:
+        bool: True if this looks like thinking content
+    """
+    if not text:
+        return False
+
+    # Patterns that indicate Gemini's internal thinking
+    thinking_patterns = [
+        "**Developing",
+        "**Formulating",
+        "**Planning",
+        "**Thinking",
+        "**Analyzing",
+        "**Considering",
+        "**Reasoning",
+        "**Processing",
+        "I'm imagining",
+        "I'm thinking",
+        "My plan is to",
+        "I've now got",
+        "I'm now thinking",
+        "I've crafted",
+    ]
+
+    text_lower = text.strip()
+
+    # Check if starts with markdown bold header (common in thinking)
+    if text_lower.startswith("**") and "**\n" in text_lower[:100]:
+        return True
+
+    # Check for thinking patterns
+    for pattern in thinking_patterns:
+        if pattern.lower() in text_lower.lower()[:200]:
+            return True
+
+    return False
+
+
 async def extract_and_send_chat_history(session, chat_history_service):
     """
     Extract chat history from session and send to API
@@ -408,6 +453,9 @@ async def extract_and_send_chat_history(session, chat_history_service):
         items = getattr(chat_ctx, 'items', []) if chat_ctx else []
 
         if items:
+            saved_count = 0
+            skipped_count = 0
+
             for item in items:
                 # Extract role and content from ChatItem
                 role = getattr(item, 'role', None)
@@ -427,10 +475,17 @@ async def extract_and_send_chat_history(session, chat_history_service):
                     text = str(content) if content else ""
 
                 if text and text.strip():
+                    # Skip Gemini's internal thinking/reasoning
+                    if _is_gemini_thinking(text):
+                        logger.debug(f"📝 Skipping Gemini thinking: '{text[:50]}...'")
+                        skipped_count += 1
+                        continue
+
                     chat_type = 1 if role == 'user' else 2
                     chat_history_service.add_message(chat_type, text)
+                    saved_count += 1
 
-            logger.info(f"📝 Extracted {len(items)} items from session.history")
+            logger.info(f"📝 Extracted {saved_count} messages from session.history (skipped {skipped_count} thinking)")
 
         await chat_history_service.cleanup()
         return True
