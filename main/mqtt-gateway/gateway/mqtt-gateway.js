@@ -278,8 +278,8 @@ class MQTTGateway {
       }
     } catch (error) {
       logger.error(
-        "❌ [MQTT IN] Error processing MQTT message:",
-        error.message
+        `❌ [MQTT IN] Error processing MQTT message: ${error.message}`,
+        { stack: error.stack }
       );
     }
   }
@@ -499,8 +499,8 @@ class MQTTGateway {
       }
     } catch (error) {
       logger.error(
-        "❌ [MQTT IN] Error processing MQTT message:",
-        error.message
+        `❌ [MQTT IN] Error in processIngestLogic: ${error.message}`,
+        { stack: error.stack }
       );
     }
   }

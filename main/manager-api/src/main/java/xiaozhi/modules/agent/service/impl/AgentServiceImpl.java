@@ -51,7 +51,10 @@ import xiaozhi.modules.security.user.SecurityUser;
 import xiaozhi.modules.sys.enums.SuperAdminEnum;
 import xiaozhi.modules.timbre.service.TimbreService;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Service
+@Slf4j
 @AllArgsConstructor
 public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> implements AgentService {
     private final AgentDao agentDao;
@@ -706,19 +709,25 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public AgentModeCycleResponse setAgentCharacterByMac(String macAddress, String characterName) {
+        log.info("🎭 [SET-CHARACTER] Request: MAC={}, character='{}'", macAddress, characterName);
+
         // 1. Get device by MAC address
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
+            log.error("🎭 [SET-CHARACTER] Device not found for MAC: {}", macAddress);
             throw new RenException("Device not found for MAC address: " + macAddress);
         }
+        log.info("🎭 [SET-CHARACTER] Found device: {}, agentId: {}", device.getId(), device.getAgentId());
 
         // 2. Get current agent
         AgentEntity agent = this.selectById(device.getAgentId());
         if (agent == null) {
+            log.error("🎭 [SET-CHARACTER] No agent for device");
             throw new RenException("No agent associated with device");
         }
 
         String oldModeName = agent.getAgentName();
+        log.info("🎭 [SET-CHARACTER] Current agent: '{}', switching to: '{}'", oldModeName, characterName);
 
         // 3. Find template by character name (case-insensitive)
         AgentTemplateEntity targetTemplate = agentTemplateService.getOne(
@@ -726,23 +735,29 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 .eq("is_visible", 1)
                 .eq("agent_name", characterName)
         );
+        log.info("🎭 [SET-CHARACTER] Exact match template: {}", targetTemplate != null ? targetTemplate.getAgentName() : "NOT FOUND");
 
         if (targetTemplate == null) {
             // Try case-insensitive search
+            log.info("🎭 [SET-CHARACTER] Trying case-insensitive search...");
             List<AgentTemplateEntity> allTemplates = agentTemplateService.list(
                 new QueryWrapper<AgentTemplateEntity>()
                     .eq("is_visible", 1)
             );
+            log.info("🎭 [SET-CHARACTER] Found {} visible templates", allTemplates.size());
 
             for (AgentTemplateEntity template : allTemplates) {
+                log.debug("🎭 [SET-CHARACTER] Comparing '{}' with '{}'", template.getAgentName(), characterName);
                 if (template.getAgentName().equalsIgnoreCase(characterName)) {
                     targetTemplate = template;
+                    log.info("🎭 [SET-CHARACTER] Case-insensitive match found: '{}'", template.getAgentName());
                     break;
                 }
             }
         }
 
         if (targetTemplate == null) {
+            log.error("🎭 [SET-CHARACTER] Template NOT FOUND for character: '{}'", characterName);
             AgentModeCycleResponse response = new AgentModeCycleResponse();
             response.setSuccess(false);
             response.setAgentId(agent.getId());
@@ -751,6 +766,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             response.setMessage("Character not found: " + characterName);
             return response;
         }
+        log.info("🎭 [SET-CHARACTER] Using template: '{}' (id: {})", targetTemplate.getAgentName(), targetTemplate.getId());
 
         // 4. Check if already on this character
         if (oldModeName.equalsIgnoreCase(characterName)) {
