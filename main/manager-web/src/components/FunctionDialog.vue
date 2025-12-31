@@ -1,6 +1,6 @@
 <template>
   <el-drawer :visible.sync="dialogVisible" direction="rtl" size="80%" :wrapperClosable="false" :withHeader="false">
-    <!-- 自定义标题区域 -->
+    <!-- Custom title area -->
     <div class="custom-header">
       <div class="header-left">
         <h3 class="bold-title">Function Management</h3>
@@ -9,7 +9,7 @@
     </div>
 
     <div class="function-manager">
-      <!-- 左侧：未选功能 -->
+      <!-- Left: Unselected functions -->
       <div class="function-column">
         <div class="column-header">
           <h4 class="column-title">Unselected Functions</h4>
@@ -32,7 +32,7 @@
         </div>
       </div>
 
-      <!-- 中间：已选功能 -->
+      <!-- Center: Selected functions -->
       <div class="function-column">
         <div class="column-header">
           <h4 class="column-title">Selected Functions</h4>
@@ -55,12 +55,12 @@
         </div>
       </div>
 
-      <!-- 右侧：参数配置 -->
+      <!-- Right: Parameter configuration -->
       <div class="params-column">
         <h4 v-if="currentFunction" class="column-title">Parameter Configuration - {{ currentFunction.name }}</h4>
         <div v-if="currentFunction" class="params-container">
           <el-form :model="currentFunction" class="param-form">
-            <!-- 遍历 fieldsMeta，而不是 params 的 keys -->
+            <!-- Iterate over fieldsMeta instead of params keys -->
             <div v-if="currentFunction.fieldsMeta.length == 0">
               <el-empty :description="currentFunction.name + ' No parameters required'" />
             </div>
@@ -99,10 +99,10 @@
       </div>
     </div>
 
-    <!-- MCP区域 -->
+    <!-- MCP section -->
     <div class="mcp-access-point">
       <div class="mcp-container">
-        <!-- 左侧区域 -->
+        <!-- Left area -->
         <div class="mcp-left">
           <div class="mcp-header">
             <h3 class="bold-title">MCP Access Point</h3>
@@ -110,9 +110,9 @@
           <div class="url-header">
             <div class="address-desc">
               <span>Below is the MCP access point address for the agent.</span>
-              <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/mcp-endpoint-enable.md"
+              <a href="https://github.com/cheeko-ai/cheeko-esp32-server/blob/main/docs/mcp-endpoint-enable.md"
                 target="_blank" class="doc-link">How to deploy MCP access point</a> &nbsp;&nbsp;|&nbsp;&nbsp;
-              <a href="https://github.com/xinnan-tech/xiaozhi-esp32-server/blob/main/docs/mcp-endpoint-integration.md"
+              <a href="https://github.com/cheeko-ai/cheeko-esp32-server/blob/main/docs/mcp-endpoint-integration.md"
                 target="_blank" class="doc-link">How to integrate MCP functions</a> &nbsp;
             </div>
           </div>
@@ -125,7 +125,7 @@
           </el-input>
         </div>
 
-        <!-- 右侧区域 -->
+        <!-- Right area -->
         <div class="mcp-right">
           <div class="mcp-header">
             <h3 class="bold-title">Access Point Status</h3>
@@ -193,7 +193,7 @@ export default {
         '#96CEB4', '#FFEEAD', '#D4A5A5', '#A2836E'
       ],
       tempFunctions: {},
-      // 添加一个标志位来跟踪是否已经保存
+      // Add a flag to track if saved
       hasSaved: false,
       loading: false,
 
@@ -269,7 +269,7 @@ export default {
           this.$message.error('Copy failed, please copy manually');
         }
       } catch (err) {
-        this.$message.error('复制失败，请手动复制');
+        this.$message.error('Copy failed, please copy manually');
         console.error('Copy failed:', err);
       } finally {
         document.body.removeChild(textarea);
@@ -281,29 +281,29 @@ export default {
       this.loadMcpTools();
     },
 
-    // 加载MCP接入点地址
+    // Load MCP access point address
     loadMcpAddress() {
       Api.agent.getAgentMcpAccessAddress(this.agentId, (res) => {
         if (res.data.code === 0) {
           this.mcpUrl = res.data.data || "";
         } else {
           this.mcpUrl = "";
-          console.error('获取MCP地址失败:', res.data.msg);
+          console.error('Failed to get MCP address:', res.data.msg);
         }
       });
     },
 
-    // 加载MCP工具列表
+    // Load MCP tools list
     loadMcpTools() {
       Api.agent.getAgentMcpToolsList(this.agentId, (res) => {
         if (res.data.code === 0) {
           this.mcpTools = res.data.data || [];
-          // 根据工具列表更新状态
+          // Update status based on tools list
           this.mcpStatus = this.mcpTools.length > 0 ? "connected" : "disconnected";
         } else {
           this.mcpTools = [];
           this.mcpStatus = "disconnected";
-          console.error('获取MCP工具列表失败:', res.data.msg);
+          console.error('Failed to get MCP tools list:', res.data.msg);
         }
       });
     },
@@ -409,7 +409,7 @@ export default {
     fieldRemark(field) {
       let description = (field && field.label) ? field.label : '';
       if (field.default) {
-        description += `（默认值：${field.default}）`;
+        description += ` (Default: ${field.default})`;
       }
       return description;
     },
@@ -748,17 +748,17 @@ export default {
 
     &.disconnected {
       background-color: #909399;
-      /* 灰色 - 未连接 */
+      /* Gray - Not connected */
     }
 
     &.connected {
       background-color: #67C23A;
-      /* 绿色 - 已连接 */
+      /* Green - Connected */
     }
 
     &.loading {
       background-color: #E6A23C;
-      /* 橙色 - 加载中 */
+      /* Orange - Loading */
       animation: pulse 1.5s infinite;
     }
   }

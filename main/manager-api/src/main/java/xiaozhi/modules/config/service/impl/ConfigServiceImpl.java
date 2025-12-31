@@ -62,24 +62,24 @@ public class ConfigServiceImpl implements ConfigService {
     @Override
     public Object getConfig(Boolean isCache) {
         if (isCache) {
-            // 先从Redis获取配置
+            // First get config from Redis
             Object cachedConfig = redisUtils.get(RedisKeys.getServerConfigKey());
             if (cachedConfig != null) {
                 return cachedConfig;
             }
         }
 
-        // 构建配置信息
+        // Build configuration info
         Map<String, Object> result = new HashMap<>();
         buildConfig(result);
 
-        // 查询默认智能体
+        // Query default agent
         AgentTemplateEntity agent = agentTemplateService.getDefaultTemplate();
         if (agent == null) {
-            throw new RenException("默认智能体未找到");
+            throw new RenException("Default agent not found");
         }
 
-        // 构建模块配置
+        // Build module configuration
         buildModuleConfig(
                 null,
                 null,
@@ -97,7 +97,7 @@ public class ConfigServiceImpl implements ConfigService {
                 result,
                 isCache);
 
-        // 将配置存入Redis
+        // Store config in Redis
         redisUtils.set(RedisKeys.getServerConfigKey(), result);
 
         return result;
@@ -105,10 +105,10 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public Map<String, Object> getAgentModels(String macAddress, Map<String, String> selectedModule) {
-        // 根据MAC地址查找设备
+        // Find device by MAC address
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
-            // 如果设备，去redis里看看有没有需要连接的设备
+            // If device not found, check redis for devices that need binding
             String cachedCode = deviceService.geCodeByDeviceId(macAddress);
             if (StringUtils.isNotBlank(cachedCode)) {
                 throw new RenException(ErrorCode.OTA_DEVICE_NEED_BIND, cachedCode);
@@ -116,12 +116,12 @@ public class ConfigServiceImpl implements ConfigService {
             throw new RenException(ErrorCode.OTA_DEVICE_NOT_FOUND, "not found device");
         }
 
-        // 获取智能体信息
+        // Get agent info
         AgentEntity agent = agentService.getAgentById(device.getAgentId());
         if (agent == null) {
-            throw new RenException("智能体未找到");
+            throw new RenException("Agent not found");
         }
-        // 获取音色信息
+        // Get voice info
         String voice = null;
         String referenceAudio = null;
         String referenceText = null;
@@ -131,13 +131,13 @@ public class ConfigServiceImpl implements ConfigService {
             referenceAudio = timbre.getReferenceAudio();
             referenceText = timbre.getReferenceText();
         }
-        // 构建返回数据
+        // Build return data
         Map<String, Object> result = new HashMap<>();
-        // 获取单台设备每天最多输出字数
+        // Get max output characters per device per day
         String deviceMaxOutputSize = sysParamsService.getValue("device_max_output_size", true);
         result.put("device_max_output_size", deviceMaxOutputSize);
 
-        // 获取聊天记录配置
+        // Get chat history config
         Integer chatHistoryConf = agent.getChatHistoryConf();
         if (agent.getMemModelId() != null && agent.getMemModelId().equals(Constant.MEMORY_NO_MEM)) {
             chatHistoryConf = Constant.ChatHistoryConfEnum.IGNORE.getCode();
@@ -147,7 +147,7 @@ public class ConfigServiceImpl implements ConfigService {
             chatHistoryConf = Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode();
         }
         result.put("chat_history_conf", chatHistoryConf);
-        // 如果客户端已实例化模型，则不返回
+        // If client already has model instantiated, don't return
         String alreadySelectedVadModelId = (String) selectedModule.get("VAD");
         if (alreadySelectedVadModelId != null && alreadySelectedVadModelId.equals(agent.getVadModelId())) {
             agent.setVadModelId(null);
@@ -157,7 +157,7 @@ public class ConfigServiceImpl implements ConfigService {
             agent.setAsrModelId(null);
         }
 
-        // 添加函数调用参数信息
+        // Add function call parameter info
         if (!Objects.equals(agent.getIntentModelId(), "Intent_nointent")) {
             String agentId = agent.getId();
             List<AgentPluginMapping> pluginMappings = agentPluginMappingService.agentPluginParamsByAgentId(agentId);
@@ -169,16 +169,16 @@ public class ConfigServiceImpl implements ConfigService {
                 result.put("plugins", pluginParams);
             }
         }
-        // 获取mcp接入点地址
+        // Get MCP endpoint address
         String mcpEndpoint = agentMcpAccessPointService.getAgentMcpAccessAddress(agent.getId());
         if (StringUtils.isNotBlank(mcpEndpoint) && mcpEndpoint.startsWith("ws")) {
             mcpEndpoint = mcpEndpoint.replace("/mcp/", "/call/");
             result.put("mcp_endpoint", mcpEndpoint);
         }
-        // 获取声纹信息
+        // Get voiceprint info
         buildVoiceprintConfig(agent.getId(), result);
 
-        // 构建模块配置
+        // Build module configuration
         buildModuleConfig(
                 agent.getAgentName(),
                 agent.getSystemPrompt(),
@@ -200,21 +200,21 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     /**
-     * 构建配置信息
-     * 
-     * @param config 系统参数列表
-     * @return 配置信息
+     * Build configuration info
+     *
+     * @param config System parameter list
+     * @return Configuration info
      */
     private Object buildConfig(Map<String, Object> config) {
 
-        // 查询所有系统参数
+        // Query all system parameters
         List<SysParamsDTO> paramsList = sysParamsService.list(new HashMap<>());
 
         for (SysParamsDTO param : paramsList) {
             String[] keys = param.getParamCode().split("\\.");
             Map<String, Object> current = config;
 
-            // 遍历除最后一个key之外的所有key
+            // Iterate through all keys except the last one
             for (int i = 0; i < keys.length - 1; i++) {
                 String key = keys[i];
                 if (!current.containsKey(key)) {
@@ -223,16 +223,16 @@ public class ConfigServiceImpl implements ConfigService {
                 current = (Map<String, Object>) current.get(key);
             }
 
-            // 处理最后一个key
+            // Handle the last key
             String lastKey = keys[keys.length - 1];
             String value = param.getParamValue();
 
-            // 根据valueType转换值
+            // Convert value based on valueType
             switch (param.getValueType().toLowerCase()) {
                 case "number":
                     try {
                         double doubleValue = Double.parseDouble(value);
-                        // 如果数值是整数形式，则转换为Integer
+                        // If value is integer form, convert to Integer
                         if (doubleValue == (int) doubleValue) {
                             current.put(lastKey, (int) doubleValue);
                         } else {
@@ -246,7 +246,7 @@ public class ConfigServiceImpl implements ConfigService {
                     current.put(lastKey, Boolean.parseBoolean(value));
                     break;
                 case "array":
-                    // 将分号分隔的字符串转换为数字数组
+                    // Convert semicolon-separated string to array
                     List<String> list = new ArrayList<>();
                     for (String num : value.split(";")) {
                         if (StringUtils.isNotBlank(num)) {
@@ -271,26 +271,26 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     /**
-     * 构建声纹配置信息
-     * 
-     * @param agentId 智能体ID
-     * @param result  结果Map
+     * Build voiceprint configuration info
+     *
+     * @param agentId Agent ID
+     * @param result  Result Map
      */
     private void buildVoiceprintConfig(String agentId, Map<String, Object> result) {
         try {
-            // 获取声纹接口地址
+            // Get voiceprint API URL
             String voiceprintUrl = sysParamsService.getValue("server.voice_print", true);
             if (StringUtils.isBlank(voiceprintUrl) || "null".equals(voiceprintUrl)) {
                 return;
             }
 
-            // 获取智能体关联的声纹信息（不需要用户权限验证）
+            // Get voiceprint info associated with agent (no user auth required)
             List<AgentVoicePrintVO> voiceprints = getVoiceprintsByAgentId(agentId);
             if (voiceprints == null || voiceprints.isEmpty()) {
                 return;
             }
 
-            // 构建speakers列表
+            // Build speakers list
             List<String> speakers = new ArrayList<>();
             for (AgentVoicePrintVO voiceprint : voiceprints) {
                 String speakerStr = String.format("%s,%s,%s",
@@ -300,23 +300,23 @@ public class ConfigServiceImpl implements ConfigService {
                 speakers.add(speakerStr);
             }
 
-            // 构建声纹配置
+            // Build voiceprint configuration
             Map<String, Object> voiceprintConfig = new HashMap<>();
             voiceprintConfig.put("url", voiceprintUrl);
             voiceprintConfig.put("speakers", speakers);
 
             result.put("voiceprint", voiceprintConfig);
         } catch (Exception e) {
-            // 声纹配置获取失败时不影响其他功能
-            System.err.println("获取声纹配置失败: " + e.getMessage());
+            // Don't affect other functions if voiceprint config fails
+            System.err.println("Failed to get voiceprint config: " + e.getMessage());
         }
     }
 
     /**
-     * 获取智能体关联的声纹信息
-     * 
-     * @param agentId 智能体ID
-     * @return 声纹信息列表
+     * Get voiceprint info associated with agent
+     *
+     * @param agentId Agent ID
+     * @return Voiceprint info list
      */
     private List<AgentVoicePrintVO> getVoiceprintsByAgentId(String agentId) {
         LambdaQueryWrapper<AgentVoicePrintEntity> queryWrapper = new LambdaQueryWrapper<>();
@@ -327,19 +327,19 @@ public class ConfigServiceImpl implements ConfigService {
     }
 
     /**
-     * 构建模块配置
-     * 
-     * @param prompt         提示词
-     * @param voice          音色
-     * @param referenceAudio 参考音频路径
-     * @param referenceText  参考文本
-     * @param vadModelId     VAD模型ID
-     * @param asrModelId     ASR模型ID
-     * @param llmModelId     LLM模型ID
-     * @param ttsModelId     TTS模型ID
-     * @param memModelId     记忆模型ID
-     * @param intentModelId  意图模型ID
-     * @param result         结果Map
+     * Build module configuration
+     *
+     * @param prompt         System prompt
+     * @param voice          Voice
+     * @param referenceAudio Reference audio path
+     * @param referenceText  Reference text
+     * @param vadModelId     VAD model ID
+     * @param asrModelId     ASR model ID
+     * @param llmModelId     LLM model ID
+     * @param ttsModelId     TTS model ID
+     * @param memModelId     Memory model ID
+     * @param intentModelId  Intent model ID
+     * @param result         Result Map
      */
     private void buildModuleConfig(
             String assistantName,
@@ -375,7 +375,7 @@ public class ConfigServiceImpl implements ConfigService {
             Map<String, Object> typeConfig = new HashMap<>();
             if (model.getConfigJson() != null) {
                 typeConfig.put(model.getId(), model.getConfigJson());
-                // 如果是TTS类型，添加private_voice属性
+                // If TTS type, add private_voice attribute
                 if ("TTS".equals(modelTypes[i])) {
                     if (voice != null)
                         ((Map<String, Object>) model.getConfigJson()).put("private_voice", voice);
@@ -384,7 +384,7 @@ public class ConfigServiceImpl implements ConfigService {
                     if (referenceText != null)
                         ((Map<String, Object>) model.getConfigJson()).put("ref_text", referenceText);
                 }
-                // 如果是Intent类型，且type=intent_llm，则给他添加附加模型
+                // If Intent type and type=intent_llm, add additional model
                 if ("Intent".equals(modelTypes[i])) {
                     Map<String, Object> map = (Map<String, Object>) model.getConfigJson();
                     if ("intent_llm".equals(map.get("type"))) {
@@ -428,7 +428,7 @@ public class ConfigServiceImpl implements ConfigService {
                         }
                     }
                 }
-                // 如果是LLM类型，且intentLLMModelId不为空，则添加附加模型
+                // If LLM type and intentLLMModelId is not empty, add additional model
                 if ("LLM".equals(modelTypes[i])) {
                     if (StringUtils.isNotBlank(intentLLMModelId)) {
                         if (!typeConfig.containsKey(intentLLMModelId)) {
@@ -456,7 +456,7 @@ public class ConfigServiceImpl implements ConfigService {
 
         result.put("selected_module", selectedModule);
         if (StringUtils.isNotBlank(prompt)) {
-            prompt = prompt.replace("{{assistant_name}}", StringUtils.isBlank(assistantName) ? "小智" : assistantName);
+            prompt = prompt.replace("{{assistant_name}}", StringUtils.isBlank(assistantName) ? "Cheeko" : assistantName);
         }
         result.put("prompt", prompt);
         result.put("summaryMemory", summaryMemory);
@@ -466,7 +466,7 @@ public class ConfigServiceImpl implements ConfigService {
     public String getAgentPrompt(String macAddress) {
         log.info("📡 [PROMPT SERVICE] Fetching prompt from database for MAC: {}", macAddress);
 
-        // 根据MAC地址查找设备
+        // Find device by MAC address
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
             log.error("❌ [PROMPT SERVICE] Device not found for MAC: {}", macAddress);
@@ -474,7 +474,7 @@ public class ConfigServiceImpl implements ConfigService {
         }
         log.debug("✓ [PROMPT SERVICE] Found device ID: {} for MAC: {}", device.getId(), macAddress);
 
-        // 获取智能体信息
+        // Get agent info
         AgentEntity agent = agentService.selectById(device.getAgentId());
         if (agent == null) {
             log.error("❌ [PROMPT SERVICE] Agent not found for device: {}, agentId: {}",
@@ -484,7 +484,7 @@ public class ConfigServiceImpl implements ConfigService {
         log.debug("✓ [PROMPT SERVICE] Found agent: {} (ID: {}) for MAC: {}",
             agent.getAgentName(), agent.getId(), macAddress);
 
-        // 返回系统提示词 (now contains Jinja2 templates directly in database)
+        // Return system prompt (now contains Jinja2 templates directly in database)
         String systemPrompt = agent.getSystemPrompt();
         if (StringUtils.isBlank(systemPrompt)) {
             log.error("❌ [PROMPT SERVICE] No system prompt configured for agent: {} (MAC: {})",
@@ -501,25 +501,25 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public ChildProfileDTO getChildProfileByMac(String macAddress) {
-        // 根据MAC地址查找设备
+        // Find device by MAC address
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
             throw new RenException(ErrorCode.OTA_DEVICE_NOT_FOUND, "Device not found for MAC: " + macAddress);
         }
 
-        // 获取设备关联的孩子ID
+        // Get child ID associated with device
         Long kidId = device.getKidId();
         if (kidId == null) {
             throw new RenException("No child assigned to this device");
         }
 
-        // 获取孩子资料
+        // Get child profile
         KidProfileDTO kid = kidProfileService.get(kidId);
         if (kid == null) {
             throw new RenException("Child profile not found");
         }
 
-        // 转换为LiveKit使用的ChildProfileDTO
+        // Convert to ChildProfileDTO for LiveKit
         ChildProfileDTO childProfile = new ChildProfileDTO();
         childProfile.setName(kid.getName());
         childProfile.setAge(kid.getAge());
@@ -527,7 +527,7 @@ public class ConfigServiceImpl implements ConfigService {
         childProfile.setGender(kid.getGender());
         childProfile.setInterests(kid.getInterests());
 
-        // 添加个性化字段
+        // Add personalization fields
         childProfile.setPrimaryLanguage(kid.getPrimaryLanguage() != null ? kid.getPrimaryLanguage() : "English");
         childProfile.setAdditionalNotes(kid.getAdditionalNotes());
 
@@ -536,31 +536,31 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public String getAgentTemplateId(String macAddress) {
-        // 根据MAC地址查找设备
+        // Find device by MAC address
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
             throw new RenException(ErrorCode.OTA_DEVICE_NOT_FOUND, "Device not found for MAC: " + macAddress);
         }
 
-        // 获取智能体信息
+        // Get agent info
         AgentEntity agent = agentService.selectById(device.getAgentId());
         if (agent == null) {
             throw new RenException("Agent not found for device: " + macAddress);
         }
 
-        // 返回智能体ID（不再使用模板ID）
+        // Return agent ID (no longer using template ID)
         return agent.getId();
     }
 
     @Override
     public String getTemplateContent(String templateId) {
-        // templateId 现在实际上是 agentId，直接获取智能体的system_prompt
+        // templateId is now actually agentId, directly get agent's system_prompt
         AgentEntity agent = agentService.selectById(templateId);
         if (agent == null) {
             throw new RenException("Agent not found for ID: " + templateId);
         }
 
-        // 返回智能体的system_prompt
+        // Return agent's system_prompt
         String systemPrompt = agent.getSystemPrompt();
         if (StringUtils.isBlank(systemPrompt)) {
             throw new RenException("No system_prompt configured for agent: " + agent.getAgentName());
@@ -571,26 +571,26 @@ public class ConfigServiceImpl implements ConfigService {
 
     @Override
     public String getDeviceLocation(String macAddress) {
-        // 根据MAC地址查找设备
+        // Find device by MAC address
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device == null) {
             throw new RenException(ErrorCode.OTA_DEVICE_NOT_FOUND, "Device not found for MAC: " + macAddress);
         }
 
-        // TODO: 实现位置获取逻辑（可以调用第三方IP定位服务）
-        // 目前返回默认值
-        return "Mumbai";  // 默认印度孟买
+        // TODO: Implement location retrieval logic (can call third-party IP geolocation service)
+        // Currently returns default value
+        return "Mumbai";  // Default to Mumbai, India
     }
 
     @Override
     public String getWeatherForecast(String location) {
-        // TODO: 集成天气API (如OpenWeatherMap, WeatherAPI.com等)
-        // 目前返回模拟数据
+        // TODO: Integrate weather API (e.g., OpenWeatherMap, WeatherAPI.com, etc.)
+        // Currently returns mock data
         if (StringUtils.isBlank(location)) {
             return "Weather information not available";
         }
 
-        // 返回模拟的7天天气预报
+        // Return mock 7-day weather forecast
         return String.format(
             "7-Day Weather Forecast for %s:\n" +
             "Today: Sunny, 28°C\n" +

@@ -84,27 +84,27 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     @Override
     public DeviceEntity deviceActivation(String agentId, String activationCode) {
         if (StringUtils.isBlank(activationCode)) {
-            throw new RenException("激活码不能为空");
+            throw new RenException("Activation code cannot be empty");
         }
         String deviceKey = "ota:activation:code:" + activationCode;
         Object cacheDeviceId = redisUtils.get(deviceKey);
         if (cacheDeviceId == null) {
-            throw new RenException("激活码错误");
+            throw new RenException("Invalid activation code");
         }
         String deviceId = (String) cacheDeviceId;
         String safeDeviceId = deviceId.replace(":", "_").toLowerCase();
         String cacheDeviceKey = String.format("ota:activation:data:%s", safeDeviceId);
         Map<String, Object> cacheMap = (Map<String, Object>) redisUtils.get(cacheDeviceKey);
         if (cacheMap == null) {
-            throw new RenException("激活码错误");
+            throw new RenException("Invalid activation code");
         }
         String cachedCode = (String) cacheMap.get("activation_code");
         if (!activationCode.equals(cachedCode)) {
-            throw new RenException("激活码错误");
+            throw new RenException("Invalid activation code");
         }
-        // 检查设备有没有被激活
+        // Check if device is already activated
         if (selectById(deviceId) != null) {
-            throw new RenException("设备已激活");
+            throw new RenException("Device is already activated");
         }
 
         String macAddress = (String) cacheMap.get("mac_address");
@@ -112,7 +112,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         String appVersion = (String) cacheMap.get("app_version");
         UserDetail user = SecurityUser.getUser();
         if (user.getId() == null) {
-            throw new RenException("用户未登录");
+            throw new RenException("User not logged in");
         }
 
         Date currentTime = new Date();
@@ -226,7 +226,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         // First, verify the device exists
         DeviceEntity device = baseDao.selectById(deviceId);
         if (device == null) {
-            throw new RenException("设备不存在");
+            throw new RenException("Device does not exist");
         }
 
         // Get current user to check if super admin
@@ -591,12 +591,12 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public void manualAddDevice(Long userId, DeviceManualAddDTO dto) {
-        // 检查mac是否已存在
+        // Check if MAC address already exists
         QueryWrapper<DeviceEntity> wrapper = new QueryWrapper<>();
         wrapper.eq("mac_address", dto.getMacAddress());
         DeviceEntity exist = baseDao.selectOne(wrapper);
         if (exist != null) {
-            throw new RenException("该Mac地址已存在");
+            throw new RenException("This MAC address already exists");
         }
         Date now = new Date();
         DeviceEntity entity = new DeviceEntity();

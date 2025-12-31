@@ -3,7 +3,7 @@ import router from '../router'
 import Constant from '../utils/constant'
 
 /**
- * 判断用户是否登录
+ * Check if user is logged in
  */
 export function checkUserLogin(fn) {
     let token = localStorage.getItem(Constant.STORAGE_KEY.TOKEN)
@@ -18,7 +18,7 @@ export function checkUserLogin(fn) {
 }
 
 /**
- * 判断是否为空
+ * Check if value is null/empty
  * @param data
  * @returns {boolean}
  */
@@ -36,7 +36,7 @@ export function isNull(data) {
 }
 
 /**
- * 判断不为空
+ * Check if value is not null/empty
  * @param data
  * @returns {boolean}
  */
@@ -45,7 +45,7 @@ export function isNotNull(data) {
 }
 
 /**
- * 显示顶部红色通知
+ * Show top red notification (error)
  * @param msg
  */
 export function showDanger(msg) {
@@ -60,7 +60,7 @@ export function showDanger(msg) {
 }
 
 /**
- * 显示顶部橙色通知
+ * Show top orange notification (warning)
  * @param msg
  */
 export function showWarning(msg) {
@@ -77,7 +77,7 @@ export function showWarning(msg) {
 
 
 /**
- * 显示顶部绿色通知
+ * Show top green notification (success)
  * @param msg
  */
 export function showSuccess(msg) {
@@ -91,7 +91,7 @@ export function showSuccess(msg) {
 
 
 /**
- * 页面跳转
+ * Navigate to page
  * @param path
  * @param isRepalce
  */
@@ -104,7 +104,7 @@ export function goToPage(path, isRepalce) {
 }
 
 /**
- * 获取当前vue页面名称
+ * Get current vue page name
  * @param path
  * @param isRepalce
  */
@@ -117,7 +117,7 @@ export function getCurrentPage() {
 }
 
 /**
- * 生成从[min,max]的随机数
+ * Generate random number from [min, max]
  * @param min
  * @param max
  * @returns {number}
@@ -128,7 +128,7 @@ export function randomNum(min, max) {
 
 
 /**
- * 获取uuid
+ * Get UUID
  */
 export function getUUID() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -137,65 +137,65 @@ export function getUUID() {
 }
 
 /**
- * 验证手机号格式
- * @param {string} mobile 手机号
- * @param {string} areaCode 区号
+ * Validate mobile phone number format
+ * @param {string} mobile Phone number
+ * @param {string} areaCode Area code
  * @returns {boolean}
  */
 export function validateMobile(mobile, areaCode) {
-    // 移除所有非数字字符
+    // Remove all non-digit characters
     const cleanMobile = mobile.replace(/\D/g, '');
 
-    // 根据不同区号使用不同的验证规则
+    // Use different validation rules based on area code
     switch (areaCode) {
-        case '+86': // 中国大陆
+        case '+86': // China Mainland
             return /^1[3-9]\d{9}$/.test(cleanMobile);
-        case '+852': // 中国香港
+        case '+852': // Hong Kong
             return /^[569]\d{7}$/.test(cleanMobile);
-        case '+853': // 中国澳门
+        case '+853': // Macau
             return /^6\d{7}$/.test(cleanMobile);
-        case '+886': // 中国台湾
+        case '+886': // Taiwan
             return /^9\d{8}$/.test(cleanMobile);
-        case '+1': // 美国/加拿大
+        case '+1': // USA/Canada
             return /^[2-9]\d{9}$/.test(cleanMobile);
-        case '+44': // 英国
+        case '+44': // UK
             return /^7[1-9]\d{8}$/.test(cleanMobile);
-        case '+81': // 日本
+        case '+81': // Japan
             return /^[7890]\d{8}$/.test(cleanMobile);
-        case '+82': // 韩国
+        case '+82': // South Korea
             return /^1[0-9]\d{7}$/.test(cleanMobile);
-        case '+65': // 新加坡
+        case '+65': // Singapore
             return /^[89]\d{7}$/.test(cleanMobile);
-        case '+61': // 澳大利亚
+        case '+61': // Australia
             return /^[4578]\d{8}$/.test(cleanMobile);
-        case '+49': // 德国
+        case '+49': // Germany
             return /^1[5-7]\d{8}$/.test(cleanMobile);
-        case '+33': // 法国
+        case '+33': // France
             return /^[67]\d{8}$/.test(cleanMobile);
-        case '+39': // 意大利
+        case '+39': // Italy
             return /^3[0-9]\d{8}$/.test(cleanMobile);
-        case '+34': // 西班牙
+        case '+34': // Spain
             return /^[6-9]\d{8}$/.test(cleanMobile);
-        case '+55': // 巴西
+        case '+55': // Brazil
             return /^[1-9]\d{10}$/.test(cleanMobile);
-        case '+91': // 印度
+        case '+91': // India
             return /^[6-9]\d{9}$/.test(cleanMobile);
-        case '+971': // 阿联酋
+        case '+971': // UAE
             return /^[5]\d{8}$/.test(cleanMobile);
-        case '+966': // 沙特阿拉伯
+        case '+966': // Saudi Arabia
             return /^[5]\d{8}$/.test(cleanMobile);
-        case '+880': // 孟加拉国
+        case '+880': // Bangladesh
             return /^1[3-9]\d{8}$/.test(cleanMobile);
-        case '+234': // 尼日利亚
+        case '+234': // Nigeria
             return /^[789]\d{9}$/.test(cleanMobile);
-        case '+254': // 肯尼亚
+        case '+254': // Kenya
             return /^[17]\d{8}$/.test(cleanMobile);
-        case '+255': // 坦桑尼亚
+        case '+255': // Tanzania
             return /^[67]\d{8}$/.test(cleanMobile);
-        case '+7': // 哈萨克斯坦
+        case '+7': // Kazakhstan
             return /^[67]\d{9}$/.test(cleanMobile);
         default:
-            // 其他国际号码：至少5位，最多15位
+            // Other international numbers: at least 5 digits, max 15 digits
             return /^\d{5,15}$/.test(cleanMobile);
     }
 }

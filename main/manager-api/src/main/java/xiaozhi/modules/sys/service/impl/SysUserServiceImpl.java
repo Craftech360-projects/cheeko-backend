@@ -113,12 +113,12 @@ public class SysUserServiceImpl extends BaseServiceImpl<SysUserDao, SysUserEntit
             throw new RenException(ErrorCode.TOKEN_INVALID);
         }
 
-        // 判断旧密码是否正确
+        // Check if old password is correct
         if (!PasswordUtils.matches(passwordDTO.getPassword(), sysUserEntity.getPassword())) {
-            throw new RenException("旧密码输入错误");
+            throw new RenException("Incorrect old password");
         }
 
-        // 新密码强度
+        // New password strength
         if (!isStrongPassword(passwordDTO.getNewPassword())) {
             throw new RenException(ErrorCode.PASSWORD_WEAK_ERROR);
         }

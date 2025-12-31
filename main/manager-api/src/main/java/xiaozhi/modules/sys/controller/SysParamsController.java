@@ -218,61 +218,61 @@ public class SysParamsController {
             return;
         }
         if (StringUtils.isBlank(url) || url.equals("null")) {
-            throw new RenException("MCP地址不能为空");
+            throw new RenException("MCP address cannot be empty");
         }
         if (url.contains("localhost") || url.contains("127.0.0.1")) {
-            throw new RenException("MCP地址不能使用localhost或127.0.0.1");
+            throw new RenException("MCP address cannot use localhost or 127.0.0.1");
         }
         if (!url.toLowerCase().contains("key")) {
-            throw new RenException("不是正确的MCP地址");
+            throw new RenException("Invalid MCP address");
         }
 
         try {
-            // 发送GET请求
+            // Send GET request
             ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
             if (response.getStatusCode() != HttpStatus.OK) {
-                throw new RenException("MCP接口访问失败，状态码：" + response.getStatusCode());
+                throw new RenException("MCP API access failed, status code: " + response.getStatusCode());
             }
-            // 检查响应内容是否包含mcp相关信息
+            // Check if response contains MCP related info
             String body = response.getBody();
             if (body == null || !body.contains("success")) {
-                throw new RenException("MCP接口返回内容格式不正确，可能不是一个真实的MCP接口");
+                throw new RenException("MCP API response format incorrect, may not be a valid MCP API");
             }
         } catch (Exception e) {
-            throw new RenException("MCP接口验证失败：" + e.getMessage());
+            throw new RenException("MCP API validation failed: " + e.getMessage());
         }
     }
-    // 验证声纹接口地址是否正常
+    // Validate voiceprint API address
     private void validateVoicePrint(String paramCode, String url) {
         if (!paramCode.equals(Constant.SERVER_VOICE_PRINT)) {
             return;
         }
         if (StringUtils.isBlank(url) || url.equals("null")) {
-            throw new RenException("声纹接口地址不能为空");
+            throw new RenException("Voiceprint API address cannot be empty");
         }
         if (url.contains("localhost") || url.contains("127.0.0.1")) {
-            throw new RenException("声纹接口地址不能使用localhost或127.0.0.1");
+            throw new RenException("Voiceprint API address cannot use localhost or 127.0.0.1");
         }
         if (!url.toLowerCase().contains("key")) {
-            throw new RenException("不是正确的声纹接口地址");
+            throw new RenException("Invalid voiceprint API address");
         }
-        // 验证URL格式
+        // Validate URL format
         if (!url.toLowerCase().startsWith("http")) {
-            throw new RenException("声纹接口地址必须以http或https开头");
+            throw new RenException("Voiceprint API address must start with http or https");
         }
         try {
-            // 发送GET请求
+            // Send GET request
             ResponseEntity<String> response = restTemplate.getForEntity(url, String.class);
             if (response.getStatusCode() != HttpStatus.OK) {
-                throw new RenException("声纹接口访问失败，状态码：" + response.getStatusCode());
+                throw new RenException("Voiceprint API access failed, status code: " + response.getStatusCode());
             }
-            // 检查响应内容
+            // Check response content
             String body = response.getBody();
             if (body == null || !body.contains("healthy")) {
-                throw new RenException("声纹接口返回内容格式不正确，可能不是一个真实的MCP接口");
+                throw new RenException("Voiceprint API response format incorrect, may not be a valid API");
             }
         } catch (Exception e) {
-            throw new RenException("声纹接口验证失败：" + e.getMessage());
+            throw new RenException("Voiceprint API validation failed: " + e.getMessage());
         }
     }
 }

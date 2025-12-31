@@ -3,8 +3,8 @@
     <div class="header-container">
       <!-- Left elements -->
       <div class="header-left" @click="goHome">
-        <img loading="lazy" alt="" src="@/assets/xiaozhi-logo.svg" class="logo-img" />
-        <!-- <img loading="lazy" alt="" src="@/assets/xiaozhi-ai.png" class="brand-img" /> -->
+        <img loading="lazy" alt="" src="@/assets/cheeko-logo.svg" class="logo-img" />
+        <!-- <img loading="lazy" alt="" src="@/assets/cheeko-ai.png" class="brand-img" /> -->
       </div>
 
       <!-- Center navigation menu -->
