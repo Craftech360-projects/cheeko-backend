@@ -16,8 +16,8 @@ BROKER_PORT = 1883
 TOPIC = "internal/server-ingest"
 
 # Device details - UPDATE THIS IF NEEDED
-MAC_ADDRESS = "28_56_2f_06_a2_90" 
-CHARACTER_NAME = "Math Tutor"  # Options: "Cheeko", "Math Tutor", "Riddle Solver", "Word Ladder"
+MAC_ADDRESS = "68_25_dd_bb_23_a4" 
+CHARACTER_NAME = "Riddle Solver"  # Options: "Cheeko", "Math Tutor", "Riddle Solver", "Word Ladder"
 
 # Construct the special payload acting as EMQX republish
 # equivalent to: "sender_client_id":"GID_test@@@<MAC>@@@uuid"

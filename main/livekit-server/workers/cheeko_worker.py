@@ -332,8 +332,48 @@ async def entrypoint(ctx: JobContext):
         logger.info("Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
 
+    async def send_shutdown_ack(session_id: str):
+        """Send shutdown acknowledgment back to gateway"""
+        try:
+            import time
+            ack_message = {
+                "type": "shutdown_ack",
+                "session_id": session_id,
+                "timestamp": int(time.time() * 1000),
+                "source": "livekit_agent"
+            }
+            await ctx.room.local_participant.publish_data(
+                json.dumps(ack_message).encode("utf-8"),
+                reliable=True
+            )
+            logger.info("Sent shutdown_ack to gateway")
+        except Exception as e:
+            logger.error(f"Failed to send shutdown_ack: {e}")
+
+    @ctx.room.on("data_received")
+    def on_data_received(data_packet: rtc.DataPacket):
+        """Handle data channel messages from gateway"""
+        try:
+            message = json.loads(data_packet.data.decode('utf-8'))
+            msg_type = message.get('type')
+
+            # Handle shutdown request from gateway
+            if msg_type == 'shutdown_request':
+                logger.info("Received shutdown_request from gateway, initiating cleanup...")
+
+                # Send ack if requested
+                if message.get('require_ack'):
+                    asyncio.create_task(send_shutdown_ack(message.get('session_id', '')))
+
+                # Trigger cleanup
+                asyncio.create_task(cleanup_room_and_session())
+                return
+
+        except Exception as e:
+            logger.error(f"Error handling data channel message: {e}")
+
     # COMMENTED OUT - Music service disabled
-    # @ctx.room.on("data_received")
+    # @ctx.room.on("data_received") - OLD HANDLER
     # def on_data_received(data_packet: rtc.DataPacket):
     #     try:
     #         message = json.loads(data_packet.data.decode('utf-8'))

@@ -1952,28 +1952,32 @@ class LiveKitBridge extends EventEmitter {
         `🎵 [CLEANUP] Cleared audio flag on bridge close for device: ${this.macAddress}`
       );
 
-      // Step 1: Send cleanup signal to agent BEFORE disconnecting (while still connected)
+      // Step 1: Send shutdown signal to agent BEFORE disconnecting (while still connected)
       try {
-        const cleanupMessage = {
-          type: "cleanup_request",
-          session_id: this.connection.udp.session_id,
+        const shutdownMessage = {
+          type: "shutdown_request",
+          session_id: this.connection?.udp?.session_id,
           timestamp: Date.now(),
           source: "mqtt_gateway",
+          require_ack: false  // Don't wait for ack in close()
         };
 
-        if (this.room.localParticipant && this.room.isConnected) {
-          const messageString = JSON.stringify(cleanupMessage);
+        if (this.room.localParticipant && this.room.state === 'connected') {
+          const messageString = JSON.stringify(shutdownMessage);
           const messageData = new Uint8Array(
             Buffer.from(messageString, "utf8")
           );
           await this.room.localParticipant.publishData(messageData, {
             reliable: true,
           });
-          console.log("🧹 Sent cleanup signal to agent before disconnect");
+          console.log("🧹 Sent shutdown signal to agent before disconnect");
+
+          // Small delay to allow message to be delivered
+          await new Promise(resolve => setTimeout(resolve, 100));
         }
       } catch (error) {
         console.log(
-          "Note: Could not send cleanup signal (room may already be disconnecting)"
+          "Note: Could not send shutdown signal (room may already be disconnecting)"
         );
       }
 

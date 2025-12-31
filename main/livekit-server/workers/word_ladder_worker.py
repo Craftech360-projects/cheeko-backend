@@ -47,7 +47,7 @@ from src.games.word_ladder_game import pick_valid_word_pair
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
-DEFAULT_PORT = 8084
+DEFAULT_PORT = 8086  # Changed from 8084 (EMQX uses 8084)
 GAME_TOOLS = [validate_word_ladder_move]
 
 
@@ -400,11 +400,40 @@ async def entrypoint(ctx: JobContext):
         logger.info("Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
 
+    async def send_shutdown_ack(session_id: str):
+        """Send shutdown acknowledgment back to gateway"""
+        try:
+            import time
+            ack_message = {
+                "type": "shutdown_ack",
+                "session_id": session_id,
+                "timestamp": int(time.time() * 1000),
+                "source": "livekit_agent"
+            }
+            await ctx.room.local_participant.publish_data(
+                json.dumps(ack_message).encode("utf-8"),
+                reliable=True
+            )
+            logger.info("Sent shutdown_ack to gateway")
+        except Exception as e:
+            logger.error(f"Failed to send shutdown_ack: {e}")
+
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):
         try:
             message = json.loads(data_packet.data.decode('utf-8'))
-            if message.get('type') == 'playback_control':
+            msg_type = message.get('type')
+
+            # Handle shutdown request from gateway
+            if msg_type == 'shutdown_request':
+                logger.info("Received shutdown_request from gateway, initiating cleanup...")
+                if message.get('require_ack'):
+                    asyncio.create_task(send_shutdown_ack(message.get('session_id', '')))
+                asyncio.create_task(cleanup_room_and_session())
+                return
+
+            # Handle playback control
+            if msg_type == 'playback_control':
                 action = message.get('action')
                 if action == 'next':
                     asyncio.create_task(handle_skip())
