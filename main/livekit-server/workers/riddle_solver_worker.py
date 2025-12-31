@@ -96,7 +96,7 @@ async def entrypoint(ctx: JobContext):
 
     # Use cached realtime config from prewarm
     realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-live-2.5-flash-native-audio')
+    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.8)
 
