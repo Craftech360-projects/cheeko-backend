@@ -56,6 +56,8 @@ class MQTTGateway {
     this.connections = new Map(); // clientId -> VirtualMQTTConnection
     this.keepAliveTimer = null;
     this.keepAliveCheckInterval = 15000; // Check every 15 seconds
+    this.ghostCleanupTimer = null;
+    this.ghostCleanupInterval = 5 * 60 * 1000; // Clean up ghost rooms every 5 minutes
     this.headerBuffer = Buffer.alloc(16);
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
@@ -134,6 +136,223 @@ class MQTTGateway {
 
     // Start global heartbeat check timer
     this.setupKeepAliveTimer();
+
+    // Start ghost room/session cleanup timer (every 5 minutes)
+    this.setupGhostCleanupTimer();
+  }
+
+  /**
+   * Set up ghost room/session cleanup timer (every 5 minutes)
+   * Cleans up:
+   * - LiveKit rooms with no participants or only stale agents
+   * - Stale entries in deviceConnections and connections maps
+   */
+  setupGhostCleanupTimer() {
+    // Clear existing timer
+    this.clearGhostCleanupTimer();
+
+    logger.info(`🧹 [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
+
+    // Run cleanup immediately on startup (after 30 seconds to let things stabilize)
+    setTimeout(() => {
+      this.cleanupGhostRoomsAndSessions().catch(err => {
+        logger.error(`❌ [GHOST-CLEANUP] Initial cleanup failed:`, err.message);
+      });
+    }, 30000);
+
+    // Set recurring timer
+    this.ghostCleanupTimer = setInterval(async () => {
+      try {
+        await this.cleanupGhostRoomsAndSessions();
+      } catch (error) {
+        logger.error(`❌ [GHOST-CLEANUP] Cleanup cycle failed:`, error.message);
+      }
+    }, this.ghostCleanupInterval);
+  }
+
+  /**
+   * Clear ghost cleanup timer
+   */
+  clearGhostCleanupTimer() {
+    if (this.ghostCleanupTimer) {
+      clearInterval(this.ghostCleanupTimer);
+      this.ghostCleanupTimer = null;
+    }
+  }
+
+  /**
+   * Clean up ghost rooms and stale sessions
+   * - Lists all LiveKit rooms and removes empty/stale ones
+   * - Cleans up deviceConnections entries without active connections
+   * - Cleans up connections map entries that are dead
+   */
+  async cleanupGhostRoomsAndSessions() {
+    const startTime = Date.now();
+    const memBefore = process.memoryUsage();
+
+    let roomsCleaned = 0;
+    let sessionsCleaned = 0;
+    let connectionsCleaned = 0;
+
+    logger.info(`🧹 [GHOST-CLEANUP] Starting cleanup cycle...`);
+
+    // 1. Clean up ghost LiveKit rooms
+    if (this.roomService) {
+      try {
+        const rooms = await this.roomService.listRooms();
+        logger.info(`🧹 [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
+
+        for (const room of rooms) {
+          try {
+            const roomName = room.name;
+            const numParticipants = room.numParticipants || 0;
+            const creationTime = room.creationTime ? Number(room.creationTime) * 1000 : Date.now();
+            const roomAge = Date.now() - creationTime;
+            const roomAgeMinutes = Math.round(roomAge / 60000);
+
+            // Get detailed participant info
+            let participants = [];
+            try {
+              participants = await this.roomService.listParticipants(roomName);
+            } catch (err) {
+              // Room might have been deleted already
+              logger.warn(`⚠️ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
+            }
+
+            // Check if room should be cleaned up
+            const hasRealDevice = participants.some(p =>
+              p.identity && !p.identity.toLowerCase().includes('agent') && !p.identity.toLowerCase().includes('gateway')
+            );
+            const hasOnlyAgents = participants.length > 0 && !hasRealDevice;
+            const isEmpty = participants.length === 0;
+
+            // Clean up if:
+            // - Room is empty and older than 2 minutes (empty timeout)
+            // - Room only has agents (no device) and older than 5 minutes
+            // - Room is older than 60 minutes (absolute max)
+            const shouldCleanup =
+              (isEmpty && roomAge > 2 * 60 * 1000) ||
+              (hasOnlyAgents && roomAge > 5 * 60 * 1000) ||
+              (roomAge > 60 * 60 * 1000);
+
+            if (shouldCleanup) {
+              const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
+              logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
+
+              // Stop any media bots first
+              if (roomName.includes('_music') || roomName.includes('_story')) {
+                try {
+                  await axios.post(`${MEDIA_API_BASE}/stop-bot`, { room_name: roomName }, mediaAxiosConfig({ timeout: 3000 }));
+                } catch (botErr) {
+                  // Ignore bot stop errors
+                }
+              }
+
+              await this.roomService.deleteRoom(roomName);
+              roomsCleaned++;
+              logger.info(`✅ [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
+            }
+          } catch (roomError) {
+            logger.warn(`⚠️ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
+          }
+        }
+      } catch (error) {
+        logger.error(`❌ [GHOST-CLEANUP] Failed to list/cleanup LiveKit rooms:`, error.message);
+      }
+    }
+
+    // 2. Clean up stale deviceConnections entries
+    const staleDevices = [];
+    const now = Date.now();
+    const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+
+    for (const [deviceId, deviceInfo] of this.deviceConnections.entries()) {
+      const connection = deviceInfo?.connection;
+
+      // Check if connection is dead or closing (fixed: proper isAlive check)
+      const isDead = !connection || connection.closing ||
+        (typeof connection.isAlive === 'function' && !connection.isAlive());
+
+      // Check for stale activity (connected but silent for too long)
+      const lastActivity = connection?.lastActivityTime || 0;
+      const isInactive = (now - lastActivity) > STALE_THRESHOLD;
+
+      // Clean up if dead OR (inactive and no bridge)
+      if (isDead || (isInactive && connection?.bridge === null)) {
+        staleDevices.push(deviceId);
+      }
+    }
+
+    for (const deviceId of staleDevices) {
+      logger.info(`🗑️ [GHOST-CLEANUP] Removing stale deviceConnection: ${deviceId}`);
+      const deviceInfo = this.deviceConnections.get(deviceId);
+
+      // Try to close the connection properly first
+      if (deviceInfo?.connection && !deviceInfo.connection.closing) {
+        try {
+          deviceInfo.connection.closing = true;
+          await deviceInfo.connection.close();
+        } catch (err) {
+          // Ignore close errors
+        }
+      }
+
+      // Remove from map
+      if (deviceInfo?.connectionId) {
+        this.connections.delete(deviceInfo.connectionId);
+      }
+      this.deviceConnections.delete(deviceId);
+      sessionsCleaned++;
+    }
+
+    // 3. Clean up stale connections map entries
+    const staleConnectionIds = [];
+    for (const [connectionId, connection] of this.connections.entries()) {
+      const isStaleConn = !connection || connection.closing ||
+        (typeof connection.isAlive === 'function' && !connection.isAlive());
+      if (isStaleConn) {
+        staleConnectionIds.push(connectionId);
+      }
+    }
+
+    for (const connectionId of staleConnectionIds) {
+      // Don't double-count if already cleaned via deviceConnections
+      if (!staleDevices.some(d => this.deviceConnections.get(d)?.connectionId === connectionId)) {
+        logger.info(`🗑️ [GHOST-CLEANUP] Removing stale connection: ${connectionId}`);
+        const connection = this.connections.get(connectionId);
+        if (connection && !connection.closing) {
+          try {
+            connection.closing = true;
+            await connection.close();
+          } catch (err) {
+            // Ignore close errors
+          }
+        }
+        this.connections.delete(connectionId);
+        connectionsCleaned++;
+      }
+    }
+
+    // 4. Clean up stale clientConnections entries (these are never cleaned otherwise)
+    let clientConnectionsCleaned = 0;
+    for (const [clientId, info] of this.clientConnections.entries()) {
+      const deviceId = info?.deviceId;
+      // Remove if no deviceId or device no longer exists in deviceConnections
+      if (!deviceId || !this.deviceConnections.has(deviceId)) {
+        this.clientConnections.delete(clientId);
+        clientConnectionsCleaned++;
+      }
+    }
+    if (clientConnectionsCleaned > 0) {
+      logger.info(`🗑️ [GHOST-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
+    }
+
+    const duration = Date.now() - startTime;
+    const memAfter = process.memoryUsage();
+    const heapDiff = (memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024;
+
+    logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}, ClientConns: ${clientConnectionsCleaned}`);
+    logger.info(`📊 [GHOST-CLEANUP] Memory: Heap ${(memAfter.heapUsed / 1024 / 1024).toFixed(1)}MB, Released: ${heapDiff.toFixed(1)}MB | Active: ${this.connections.size}, Devices: ${this.deviceConnections.size}`);
   }
 
   connectToEmqxBroker() {
@@ -1414,7 +1633,7 @@ class MQTTGateway {
         type: "tts",
         state: "start",
         text: `Switched to ${modeName} mode`,
-        timestamp: Date.now(),
+        timestamp: Date.Now(),
       };
       this.mqttPublish(controlTopic, ttsStartMsg);
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1887,6 +2106,10 @@ class MQTTGateway {
     this.stopping = true;
     // Clear heartbeat check timer
     this.clearKeepAliveTimer();
+
+    // Clear ghost cleanup timer
+    this.clearGhostCleanupTimer();
+    logger.info("🧹 [GHOST-CLEANUP] Stopped periodic cleanup");
 
     if (this.connections.size > 0) {
       logger.warn(`Waiting for ${this.connections.size} connections to close`);
