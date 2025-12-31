@@ -47,7 +47,7 @@ from src.features.game_tools import check_riddle_answer, set_riddle_game_state
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
-DEFAULT_PORT = 8085  # Changed from 8083 (EMQX uses 8083)
+DEFAULT_PORT = 8083
 GAME_TOOLS = [check_riddle_answer]
 
 

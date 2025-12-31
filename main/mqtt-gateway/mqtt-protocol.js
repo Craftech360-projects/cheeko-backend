@@ -85,6 +85,10 @@ class MQTTProtocol extends EventEmitter {
           return;
         }
 
+        // Log all incoming messages
+        const packetTypeName = Object.keys(PacketType).find(key => PacketType[key] === type) || `UNKNOWN(${type})`;
+        console.log(`[MQTT INCOMING] Type: ${packetTypeName}, Length: ${messageLength} bytes, Raw: ${message.toString('hex').substring(0, 100)}${message.length > 50 ? '...' : ''}`);
+
         // Process based on message type
         switch (type) {
           case PacketType.CONNECT:
@@ -256,6 +260,9 @@ class MQTTProtocol extends EventEmitter {
     // Mark as connected
     this.isConnected = true;
 
+    // Log the connect message details
+    console.log(`[MQTT CONNECT] ClientId: ${clientId}, Username: ${username}, Protocol: ${protocol}, KeepAlive: ${keepAlive}s`);
+
     // Emit connection event
     this.emit("connect", {
       clientId,
@@ -304,6 +311,9 @@ class MQTTProtocol extends EventEmitter {
     // Parse payload
     const payload = message.slice(payloadStart).toString("utf8");
 
+    // Log the publish message details
+    console.log(`[MQTT PUBLISH] Topic: ${topic}, QoS: ${qos}, Payload: ${payload.substring(0, 500)}${payload.length > 500 ? '...' : ''}`);
+
     // Emit publish event
     this.emit("publish", {
       topic,
@@ -324,6 +334,9 @@ class MQTTProtocol extends EventEmitter {
     const topicLength = message.readUInt16BE(4);
     const topic = message.toString("utf8", 6, 6 + topicLength);
     const qos = message[6 + topicLength]; // QoS value
+
+    // Log the subscribe message details
+    console.log(`[MQTT SUBSCRIBE] Topic: ${topic}, QoS: ${qos}, PacketId: ${packetId}`);
 
     // Emit subscribe event
     this.emit("subscribe", {
@@ -349,6 +362,8 @@ class MQTTProtocol extends EventEmitter {
    * @param {Buffer} message - Complete DISCONNECT message
    */
   parseDisconnect(message) {
+    // Log disconnect
+    console.log(`[MQTT DISCONNECT] Client disconnecting`);
     // Mark as disconnected
     this.isConnected = false;
     // Emit disconnect event

@@ -47,7 +47,7 @@ from src.games.word_ladder_game import pick_valid_word_pair
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
-DEFAULT_PORT = 8086  # Changed from 8084 (EMQX uses 8084)
+DEFAULT_PORT = 8084
 GAME_TOOLS = [validate_word_ladder_move]
 
 
