@@ -194,3 +194,4 @@ main/manager-api/src/main/resources/application-prod.yml
 # LiveKit server configuration (contains API keys)
 main/livekit-server/config.yaml
 nul
+main/manager-api/src/main/resources/application-dev.yml

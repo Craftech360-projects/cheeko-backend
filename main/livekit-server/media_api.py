@@ -190,6 +190,9 @@ class MediaBot:
             # Check if this is a specific content request
             elif data_json.get('type') == 'specific_content_request':
                 await self._handle_specific_content_request(data_json)
+            # Check if this is a playback control request (next/previous)
+            elif data_json.get('type') == 'playback_control':
+                await self._handle_playback_control(data_json)
             else:
                 logger.debug(f"📡 [DATA-CHANNEL] Ignoring message type: {data_json.get('type')}")
 
@@ -305,6 +308,22 @@ class MediaBot:
     async def _handle_specific_story_request(self, request_data: Dict):
         """Handle specific story request - implemented by StoryBot subclass"""
         logger.warning(f"⚠️ [SPECIFIC-STORY] Base class method called - should be overridden by StoryBot")
+
+    async def _handle_playback_control(self, request_data: Dict):
+        """Handle playback control (next/previous) from data channel"""
+        try:
+            action = request_data.get('action')
+            logger.info(f"⏯️ [CONTROL] Received playback action: {action}")
+
+            if action == 'next':
+                await self.skip_to_next()
+            elif action == 'previous':
+                await self.skip_to_previous()
+            else:
+                logger.warning(f"⚠️ [CONTROL] Unknown action: {action}")
+
+        except Exception as e:
+            logger.error(f"❌ [CONTROL] Error handling playback control: {e}")
 
     async def download_from_cdn(self, url: str) -> bytes:
         """Download MP3 file from CDN"""
