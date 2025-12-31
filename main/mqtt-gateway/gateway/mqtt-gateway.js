@@ -1382,6 +1382,203 @@ class MQTTGateway {
     }
   }
 
+  /**
+   * Send shutdown signal to agent and wait for acknowledgment
+   * @param {Room} room - LiveKit room instance
+   * @param {string} sessionId - Session ID
+   * @param {number} timeoutMs - Timeout in milliseconds (default: 3000)
+   * @returns {Promise<boolean>} - True if acknowledged, false if timeout
+   */
+  async sendAgentShutdownWithAck(room, sessionId, timeoutMs = 3000) {
+    return new Promise(async (resolve) => {
+      let ackReceived = false;
+      let timeoutId = null;
+      let ackHandler = null;
+
+      // Setup listener for acknowledgment
+      ackHandler = (data_packet) => {
+        try {
+          const message = JSON.parse(Buffer.from(data_packet.data).toString('utf-8'));
+          if (message.type === 'shutdown_ack' && message.session_id === sessionId) {
+            ackReceived = true;
+            if (timeoutId) clearTimeout(timeoutId);
+            room.off('data_received', ackHandler);
+            logger.info(`[CLEANUP] Received shutdown_ack from agent`);
+            resolve(true);
+          }
+        } catch (e) {
+          // Ignore parse errors
+        }
+      };
+
+      room.on('data_received', ackHandler);
+
+      // Send shutdown signal
+      try {
+        const shutdownMessage = {
+          type: 'shutdown_request',
+          session_id: sessionId,
+          timestamp: Date.now(),
+          source: 'mqtt_gateway',
+          require_ack: true
+        };
+
+        const messageData = new Uint8Array(Buffer.from(JSON.stringify(shutdownMessage), 'utf8'));
+        await room.localParticipant.publishData(messageData, { reliable: true });
+        logger.info(`[CLEANUP] Sent shutdown_request, waiting for ack...`);
+      } catch (e) {
+        logger.warn(`[CLEANUP] Failed to send shutdown_request: ${e.message}`);
+        room.off('data_received', ackHandler);
+        resolve(false);
+        return;
+      }
+
+      // Set timeout
+      timeoutId = setTimeout(() => {
+        if (!ackReceived) {
+          logger.warn(`[CLEANUP] Shutdown ack timeout after ${timeoutMs}ms`);
+          room.off('data_received', ackHandler);
+          resolve(false);
+        }
+      }, timeoutMs);
+    });
+  }
+
+  /**
+   * Remove agent participant explicitly using LiveKit API
+   * @param {string} roomName - Room name
+   * @returns {Promise<boolean>} - True if removed, false otherwise
+   */
+  async removeAgentParticipant(roomName) {
+    try {
+      if (!this.roomService) {
+        logger.warn(`[CLEANUP] RoomService not available`);
+        return false;
+      }
+
+      const participants = await this.roomService.listParticipants(roomName);
+
+      for (const participant of participants) {
+        // Identify agent participants (identity contains 'agent')
+        const identity = participant.identity || '';
+        if (identity.toLowerCase().includes('agent') ||
+            identity.startsWith('agent-')) {
+          logger.info(`[CLEANUP] Removing agent participant: ${identity}`);
+          try {
+            await this.roomService.removeParticipant(roomName, identity);
+            logger.info(`[CLEANUP] Successfully removed: ${identity}`);
+          } catch (removeErr) {
+            logger.warn(`[CLEANUP] Failed to remove ${identity}: ${removeErr.message}`);
+          }
+        }
+      }
+
+      return true;
+    } catch (error) {
+      logger.warn(`[CLEANUP] Error listing/removing agents: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Verify room has no agents remaining
+   * @param {string} roomName - Room name
+   * @param {number} maxWaitMs - Max wait time (default: 2000)
+   * @param {number} pollIntervalMs - Poll interval (default: 200)
+   * @returns {Promise<boolean>} - True if room is agent-free
+   */
+  async verifyRoomAgentFree(roomName, maxWaitMs = 2000, pollIntervalMs = 200) {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      try {
+        const agentCheck = await this.checkAgentInRoom(roomName);
+        if (!agentCheck.exists) {
+          logger.info(`[CLEANUP] Room ${roomName} is agent-free`);
+          return true;
+        }
+        logger.info(`[CLEANUP] Agent still in room, waiting...`);
+      } catch (error) {
+        // Room might be deleted already, that's okay
+        logger.info(`[CLEANUP] Room check error (may be deleted): ${error.message}`);
+        return true;
+      }
+
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+    }
+
+    logger.warn(`[CLEANUP] Room ${roomName} still has agent after ${maxWaitMs}ms`);
+    return false;
+  }
+
+  /**
+   * Complete cleanup sequence with fallbacks
+   * @param {Object} connection - VirtualMQTTConnection instance
+   * @param {string} reason - Cleanup reason (character_change, mode_change)
+   * @returns {Promise<void>}
+   */
+  async performRobustAgentCleanup(connection, reason = 'cleanup') {
+    const bridge = connection?.bridge;
+    if (!bridge) {
+      logger.info(`[CLEANUP] No bridge to clean up`);
+      return;
+    }
+
+    const roomName = bridge.room?.name || bridge.roomName;
+    const sessionId = connection.udp?.session_id;
+
+    logger.info(`[CLEANUP] Starting robust cleanup for ${roomName} (reason: ${reason})`);
+
+    // Step 1: Stop audio forwarding immediately
+    bridge.stopAudioForwarding = true;
+    if (typeof bridge.clearAudioBuffers === 'function') {
+      bridge.clearAudioBuffers();
+    }
+
+    // Step 2: Send shutdown signal with acknowledgment (wait up to 3s)
+    let shutdownAcked = false;
+    if (bridge.room?.localParticipant && bridge.room.state === 'connected') {
+      shutdownAcked = await this.sendAgentShutdownWithAck(bridge.room, sessionId, 3000);
+      logger.info(`[CLEANUP] Shutdown ack result: ${shutdownAcked}`);
+    }
+
+    // Step 3: If no ack, forcefully remove agent via API
+    if (!shutdownAcked && roomName) {
+      logger.info(`[CLEANUP] No ack received, removing agent via API`);
+      await this.removeAgentParticipant(roomName);
+    }
+
+    // Step 4: Verify room is agent-free (poll for up to 2s)
+    if (roomName) {
+      await this.verifyRoomAgentFree(roomName, 2000, 200);
+    }
+
+    // Step 5: Disconnect gateway from room
+    if (bridge.room) {
+      try {
+        await bridge.room.disconnect();
+        logger.info(`[CLEANUP] Disconnected from room: ${roomName}`);
+      } catch (error) {
+        logger.warn(`[CLEANUP] Disconnect error: ${error.message}`);
+      }
+    }
+
+    // Step 6: Delete room from LiveKit server
+    if (roomName && this.roomService) {
+      try {
+        await this.roomService.deleteRoom(roomName);
+        logger.info(`[CLEANUP] Deleted room: ${roomName}`);
+      } catch (error) {
+        logger.warn(`[CLEANUP] Delete room error: ${error.message}`);
+      }
+    }
+
+    // Step 7: Clear bridge reference
+    connection.bridge = null;
+
+    logger.info(`[CLEANUP] Robust cleanup complete for ${roomName}`);
+  }
+
   async handleDeviceCharacterChange(deviceId, payload) {
     try {
       const characterName =
@@ -1421,31 +1618,8 @@ class MQTTGateway {
           return;
         }
 
-        // Step 3: Delete old room
-        if (connection.bridge) {
-          const oldBridge = connection.bridge;
-          const oldRoomName = oldBridge.room?.name;
-
-          if (oldRoomName && this.roomService) {
-            try {
-              await this.roomService.deleteRoom(oldRoomName);
-              logger.info(`[CHARACTER-CHANGE] Deleted old room: ${oldRoomName}`);
-            } catch (error) {
-              logger.warn(`[CHARACTER-CHANGE] Failed to delete old room: ${error.message}`);
-            }
-          }
-
-          // Disconnect old bridge
-          oldBridge.stopAudioForwarding = true;
-          if (oldBridge.room) {
-            try {
-              await oldBridge.room.disconnect();
-            } catch (error) {
-              // Ignore disconnect errors
-            }
-          }
-          connection.bridge = null;
-        }
+        // Step 3: Robust cleanup of old room and agent
+        await this.performRobustAgentCleanup(connection, 'character_change');
 
         // Step 4: Generate new room name
         const newSessionUuid = crypto.randomUUID();
@@ -1529,6 +1703,10 @@ class MQTTGateway {
           connection.features || {},
           this.roomService
         );
+
+        // Mark agent as deployed to prevent duplicate dispatch from handleStartAgentControl
+        newBridge.agentDeployed = true;
+        logger.info(`[CHARACTER-CHANGE] Marked agentDeployed=true for new bridge`);
 
         // Step 9: Load and play audio feedback
         const fs = require("fs");
@@ -1712,12 +1890,7 @@ class MQTTGateway {
       const deviceInfo = this.deviceConnections.get(deviceId);
       let existingConnection = deviceInfo?.connection || null;
 
-      // Clear audio buffers
-      if (existingConnection && existingConnection.bridge) {
-        existingConnection.bridge.clearAudioBuffers();
-      }
-
-      // Stop old bot (if music/story mode)
+      // Stop old media bot (if music/story mode) before cleanup
       if (existingConnection?.roomType && existingConnection?.bridge) {
         const oldMode = existingConnection.roomType;
         const oldRoomName = existingConnection.bridge.room?.name;
@@ -1737,32 +1910,9 @@ class MQTTGateway {
         }
       }
 
-      // Delete existing room
-      if (existingConnection && existingConnection.bridge) {
-        const oldBridge = existingConnection.bridge;
-        const oldRoomName = oldBridge.room?.name;
-
-        if (oldRoomName && this.roomService) {
-          try {
-            await this.roomService.deleteRoom(oldRoomName);
-          } catch (error) {
-            logger.error(
-              `❌ [MODE-CHANGE] Failed to delete old room: ${error.message}`
-            );
-          }
-        }
-
-        if (oldBridge) {
-          oldBridge.stopAudioForwarding = true;
-          if (oldBridge.room) {
-            try {
-              await oldBridge.room.disconnect();
-            } catch (error) {
-              // Ignore disconnect errors
-            }
-          }
-          existingConnection.bridge = null;
-        }
+      // Robust cleanup of old room and agent/bot
+      if (existingConnection) {
+        await this.performRobustAgentCleanup(existingConnection, 'mode_change');
       }
 
       // Update mode in DB
