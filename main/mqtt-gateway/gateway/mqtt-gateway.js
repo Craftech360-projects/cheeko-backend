@@ -1082,6 +1082,9 @@ class MQTTGateway {
                   const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
                   logger.info(`[START-AGENT] 🚀 Dispatching: Character "${characterName}" → Agent "${agentName}"`);
 
+                  // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
+                  connection.bridge.agentDeployed = true;
+
                   const dispatch =
                     await this.agentDispatchClient.createDispatch(
                       roomName,
@@ -1096,7 +1099,6 @@ class MQTTGateway {
                         }),
                       }
                     );
-                  connection.bridge.agentDeployed = true;
                   connection.currentCharacter = characterName;
                   // Agent will greet via on_enter lifecycle hook
                 } catch (dispatchError) {
@@ -1660,6 +1662,9 @@ class MQTTGateway {
 
         if (this.agentDispatchClient) {
           try {
+            // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
+            newBridge.agentDeployed = true;
+
             await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
               metadata: JSON.stringify({
                 device_mac: deviceId,
@@ -1704,9 +1709,7 @@ class MQTTGateway {
           this.roomService
         );
 
-        // Mark agent as deployed to prevent duplicate dispatch from handleStartAgentControl
-        newBridge.agentDeployed = true;
-        logger.info(`[CHARACTER-CHANGE] Marked agentDeployed=true for new bridge`);
+        // agentDeployed flag already set before dispatch call
 
         // Step 9: Load and play audio feedback
         const fs = require("fs");
@@ -2039,6 +2042,9 @@ class MQTTGateway {
               const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-agent";
               logger.info(`[MODE-CHANGE] 🚀 Dispatching: Character "${currentCharacter || 'Cheeko'}" → Agent "${agentName}"`)
 
+              // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
+              newBridge.agentDeployed = true;
+
               await this.agentDispatchClient.createDispatch(
                 newRoomName,
                 agentName,
@@ -2052,7 +2058,6 @@ class MQTTGateway {
                   }),
                 }
               );
-              newBridge.agentDeployed = true;
               // Agent will greet via on_enter lifecycle hook
             } catch (error) {
               logger.error(
