@@ -44,11 +44,12 @@ from src.shared.entrypoint_utils import (
 )
 from src.features.game_tools import validate_word_ladder_move, set_word_ladder_state
 from src.games.word_ladder_game import pick_valid_word_pair
+from src.features.mode_switching import update_agent_mode
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
 DEFAULT_PORT = 8084
-GAME_TOOLS = [validate_word_ladder_move]
+GAME_TOOLS = [validate_word_ladder_move, update_agent_mode]
 
 
 class WordLadderAssistant(BaseAssistant):
@@ -348,12 +349,13 @@ async def entrypoint(ctx: JobContext):
 
     # Enable word ladder game but reset with our pre-generated words
     assistant.enable_word_ladder_game()
+    assistant.enable_mode_switching()
     # Override with the pre-generated word pair (same as in prompt)
     assistant.word_ladder_state.reset(start_word, target_word)
     logger.info(f"🎮 Word Ladder state synced with prompt: {start_word} → {target_word}")
 
     set_word_ladder_state(assistant.word_ladder_state)
-    logger.info("Word Ladder features enabled")
+    logger.info("Word Ladder features enabled (with mode switching)")
 
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
