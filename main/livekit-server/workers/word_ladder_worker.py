@@ -48,7 +48,7 @@ from src.features.mode_switching import update_agent_mode
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
-DEFAULT_PORT = 8086
+DEFAULT_PORT = 8084
 GAME_TOOLS = [validate_word_ladder_move, update_agent_mode]
 
 
@@ -507,8 +507,8 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Read port from environment (set by PM2) or use default
-    port = int(os.getenv("PORT", DEFAULT_PORT))
+    # Use worker-specific port (ignore global PORT env var from Cerebrium)
+    port = int(os.getenv("WORD_LADDER_PORT", DEFAULT_PORT))
     logger.info(f"Starting {AGENT_NAME} on port {port}")
 
     cli.run_app(WorkerOptions(

@@ -48,7 +48,7 @@ from src.features.mode_switching import update_agent_mode
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
-DEFAULT_PORT = 8085
+DEFAULT_PORT = 8083
 GAME_TOOLS = [check_riddle_answer, update_agent_mode]
 
 
@@ -493,8 +493,8 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Read port from environment (set by PM2) or use default
-    port = int(os.getenv("PORT", DEFAULT_PORT))
+    # Use worker-specific port (ignore global PORT env var from Cerebrium)
+    port = int(os.getenv("RIDDLE_SOLVER_PORT", DEFAULT_PORT))
     logger.info(f"Starting {AGENT_NAME} on port {port}")
 
     cli.run_app(WorkerOptions(

@@ -475,8 +475,8 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Read port from environment (set by PM2) or use default
-    port = int(os.getenv("PORT", DEFAULT_PORT))
+    # Use worker-specific port (ignore global PORT env var from Cerebrium)
+    port = int(os.getenv("CHEEKO_PORT", DEFAULT_PORT))
     logger.info(f"Starting {AGENT_NAME} on port {port}")
 
     cli.run_app(WorkerOptions(
