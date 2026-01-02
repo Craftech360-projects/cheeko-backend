@@ -450,6 +450,22 @@ async def entrypoint(ctx: JobContext):
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
+    # DUPLICATE AGENT CHECK: Prevent multiple agents in same room
+    my_identity = ctx.room.local_participant.identity if ctx.room.local_participant else None
+    existing_agents = [
+        p for p in ctx.room.remote_participants.values()
+        if p.identity and 'agent' in p.identity.lower() and p.identity != my_identity
+    ]
+    if existing_agents:
+        logger.warning(f"⚠️ [DUPLICATE-AGENT] Another agent already in room: {[a.identity for a in existing_agents]}")
+        logger.warning(f"⚠️ [DUPLICATE-AGENT] Exiting to prevent duplicate. Room: {ctx.room.name}")
+        try:
+            await ctx.room.disconnect()
+        except Exception:
+            pass
+        return
+
     participant = await ctx.wait_for_participant()
     logger.info(f"Participant joined: {participant.identity}")
 

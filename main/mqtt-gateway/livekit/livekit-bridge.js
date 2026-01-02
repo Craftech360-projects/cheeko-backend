@@ -2049,10 +2049,11 @@ class LiveKitBridge extends EventEmitter {
       const allRooms = await roomService.listRooms();
       console.log(`📊 [CLEANUP] Found ${allRooms.length} total active rooms`);
 
-      // Filter rooms belonging to this device (pattern: *_28562f07c6ec)
-      // BUT exclude the current room being created
+      // Filter rooms belonging to this device
+      // Room name format: {uuid}_{macForRoom}_{roomType} e.g. abc123_28562f07c6ec_conversation
+      // We match rooms that contain _{macForRoom}_ in the name
       const deviceRooms = allRooms.filter((room) => {
-        if (!room.name || !room.name.endsWith(`_${macForRoom}`)) {
+        if (!room.name || !room.name.includes(`_${macForRoom}_`)) {
           return false;
         }
 
@@ -2072,10 +2073,12 @@ class LiveKitBridge extends EventEmitter {
           `🗑️ [CLEANUP] Found ${deviceRooms.length} old session(s) for MAC ${macAddress}:`
         );
 
+        const now = Date.now();
+
         // Delete each old room
         for (const room of deviceRooms) {
-          const roomCreationTime = Number(room.creationTime);
-          const roomAge = now - roomCreationTime;
+          const roomCreationTime = Number(room.creationTime) * 1000; // Convert seconds to ms
+          const roomAge = (now - roomCreationTime) / 1000; // Convert to seconds for display
           console.log(
             `   - Deleting room: ${room.name} (${
               room.numParticipants

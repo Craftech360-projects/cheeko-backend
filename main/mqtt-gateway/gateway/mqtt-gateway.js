@@ -1102,6 +1102,8 @@ class MQTTGateway {
                   connection.currentCharacter = characterName;
                   // Agent will greet via on_enter lifecycle hook
                 } catch (dispatchError) {
+                  // Reset flag on failure so retry can work
+                  connection.bridge.agentDeployed = false;
                   logger.error(
                     `❌ [START-AGENT] Failed to dispatch agent:`,
                     dispatchError.message
@@ -1628,6 +1630,20 @@ class MQTTGateway {
         const macForRoom = deviceId.replace(/:/g, "");
         const newRoomName = `${newSessionUuid}_${macForRoom}_conversation`;
 
+        // Step 4.5: Clean up ALL old sessions for this device (prevents ghost rooms)
+        if (this.roomService) {
+          try {
+            await LiveKitBridge.cleanupOldSessionsForDevice(
+              deviceId,
+              this.roomService,
+              newRoomName
+            );
+            logger.info(`[CHARACTER-CHANGE] Cleaned up old sessions for device`);
+          } catch (err) {
+            logger.warn(`[CHARACTER-CHANGE] Cleanup error (non-fatal): ${err.message}`);
+          }
+        }
+
         // Step 5: Create new room
         if (this.roomService) {
           try {
@@ -1676,6 +1692,8 @@ class MQTTGateway {
             logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
             // Agent will greet via on_enter lifecycle hook
           } catch (error) {
+            // Reset flag on failure so retry can work
+            newBridge.agentDeployed = false;
             logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
             // Continue anyway - agent might auto-join
           }
@@ -1958,6 +1976,20 @@ class MQTTGateway {
         const macForRoom = deviceId.replace(/:/g, "");
         const newRoomName = `${newSessionUuid}_${macForRoom}_${newMode}`;
 
+        // Clean up ALL old sessions for this device (prevents ghost rooms)
+        if (this.roomService) {
+          try {
+            await LiveKitBridge.cleanupOldSessionsForDevice(
+              deviceId,
+              this.roomService,
+              newRoomName
+            );
+            logger.info(`[MODE-CHANGE] Cleaned up old sessions for device`);
+          } catch (err) {
+            logger.warn(`[MODE-CHANGE] Cleanup error (non-fatal): ${err.message}`);
+          }
+        }
+
         connection.udp.session_id = newRoomName;
         connection.isEnding = false;
         connection.endPromptSentTime = null;
@@ -2060,6 +2092,8 @@ class MQTTGateway {
               );
               // Agent will greet via on_enter lifecycle hook
             } catch (error) {
+              // Reset flag on failure so retry can work
+              newBridge.agentDeployed = false;
               logger.error(
                 `❌ [MODE-CHANGE] Failed to dispatch agent:`,
                 error.message

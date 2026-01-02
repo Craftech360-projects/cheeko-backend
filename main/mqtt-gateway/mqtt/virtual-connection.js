@@ -453,26 +453,27 @@ class VirtualMQTTConnection {
       `🏗️ [HELLO] Creating LiveKit room and connecting gateway (NO agent deployment yet)`
     );
 
-    // Clean up old sessions
+    // Clean up ALL old sessions for this device BEFORE creating new room
+    // This prevents ghost rooms with agents from causing duplicate joins
     if (this.gateway.roomService) {
       const newRoomName = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
       console.log(
         `🧹 [CLEANUP] Cleaning up old sessions for device: ${this.deviceId}`
       );
-      LiveKitBridge.cleanupOldSessionsForDevice(
-        this.deviceId,
-        this.gateway.roomService,
-        newRoomName
-      )
-        .then(() => {
-          console.log(`✅ [CLEANUP] Old sessions cleaned up`);
-        })
-        .catch((err) => {
-          console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err);
-        });
+      try {
+        await LiveKitBridge.cleanupOldSessionsForDevice(
+          this.deviceId,
+          this.gateway.roomService,
+          newRoomName
+        );
+        console.log(`✅ [CLEANUP] Old sessions cleaned up`);
+      } catch (err) {
+        console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err.message);
+        // Continue anyway - don't block room creation
+      }
     }
 
-    // Create bridge immediately (this creates room and gateway joins)
+    // Create bridge after cleanup completes
     this.bridge = new LiveKitBridge(
       this,
       json.version,
@@ -600,6 +601,9 @@ class VirtualMQTTConnection {
         logger.info(`🚀 [AUTO-DEPLOY] Dispatching ${agentName} to room: ${roomName}`);
 
         try {
+          // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
+          this.bridge.agentDeployed = true;
+
           await this.gateway.agentDispatchClient.createDispatch(
             roomName,
             agentName,
@@ -614,9 +618,10 @@ class VirtualMQTTConnection {
             }
           );
           logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
-          this.bridge.agentDeployed = true;
           // Agent will greet user via on_enter lifecycle hook
         } catch (dispatchError) {
+          // Reset flag on failure so retry can work
+          this.bridge.agentDeployed = false;
           logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
         }
       } else if (this.roomType !== "conversation") {
