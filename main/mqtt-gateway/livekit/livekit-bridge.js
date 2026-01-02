@@ -58,6 +58,10 @@ class LiveKitBridge extends EventEmitter {
     this.agentJoinResolve = null;
     this.agentJoinTimeout = null;
 
+    // PRIMARY AGENT TRACKING: Only subscribe to ONE agent's audio
+    // This prevents audio from duplicate agents if they somehow join
+    this.primaryAgentIdentity = null;
+
     // Create a promise that resolves when agent joins
     this.agentJoinPromise = new Promise((resolve) => {
       this.agentJoinResolve = resolve;
@@ -492,6 +496,25 @@ class LiveKitBridge extends EventEmitter {
             // Handle audio track from agent (TTS audio)
             // Check for both string "audio" and TrackKind.KIND_AUDIO constant
             if (track.kind === "audio" || track.kind === TrackKind.KIND_AUDIO) {
+              // PRIMARY AGENT CHECK: Only accept audio from the primary agent
+              // If no primary agent set yet, this participant becomes the primary
+              if (!this.primaryAgentIdentity) {
+                this.primaryAgentIdentity = participant.identity;
+                console.log(`🎯 [PRIMARY-AGENT] Set primary agent: ${participant.identity}`);
+              } else if (this.primaryAgentIdentity !== participant.identity) {
+                // Another agent is trying to send audio - IGNORE IT
+                console.warn(`⚠️ [DUPLICATE-AGENT] Ignoring audio from non-primary agent: ${participant.identity} (primary: ${this.primaryAgentIdentity})`);
+
+                // Optionally unsubscribe from this track to save resources
+                try {
+                  publication.setSubscribed(false);
+                  console.log(`🔇 [DUPLICATE-AGENT] Unsubscribed from duplicate agent's track: ${participant.identity}`);
+                } catch (unsubErr) {
+                  console.warn(`⚠️ [DUPLICATE-AGENT] Failed to unsubscribe: ${unsubErr.message}`);
+                }
+                return; // Don't process this audio
+              }
+
               // console.log(`🔊 [AUDIO TRACK] Starting audio stream processing for ${participant.identity}`);
 
               const stream = new AudioStream(track);
@@ -663,7 +686,33 @@ class LiveKitBridge extends EventEmitter {
 
           // Check if this is an agent joining (agent identity typically contains "agent")
           if (participant.identity.includes("agent")) {
+            // DUPLICATE AGENT CHECK: If we already have a primary agent, this is a duplicate
+            if (this.primaryAgentIdentity && this.primaryAgentIdentity !== participant.identity) {
+              console.error(`🚨 [DUPLICATE-AGENT] DUPLICATE AGENT DETECTED!`);
+              console.error(`   Primary agent: ${this.primaryAgentIdentity}`);
+              console.error(`   Duplicate agent: ${participant.identity}`);
+              console.error(`   Room: ${this.room?.name || 'unknown'}`);
+
+              // Try to kick the duplicate agent via room service
+              if (this.roomService && this.room?.name) {
+                this.roomService.removeParticipant(this.room.name, participant.identity)
+                  .then(() => {
+                    console.log(`✅ [DUPLICATE-AGENT] Kicked duplicate agent: ${participant.identity}`);
+                  })
+                  .catch((err) => {
+                    console.warn(`⚠️ [DUPLICATE-AGENT] Failed to kick duplicate: ${err.message}`);
+                  });
+              }
+              return; // Don't process this agent further
+            }
+
             console.log(`🤖 [LIVEKIT] Agent joined: ${participant.identity}`);
+
+            // Set this as the primary agent if not already set
+            if (!this.primaryAgentIdentity) {
+              this.primaryAgentIdentity = participant.identity;
+              console.log(`🎯 [PRIMARY-AGENT] Set primary agent on join: ${participant.identity}`);
+            }
 
             // Set agent joined flag and resolve promise
             this.agentJoined = true;
@@ -684,6 +733,13 @@ class LiveKitBridge extends EventEmitter {
 
         this.room.on(RoomEvent.ParticipantDisconnected, (participant) => {
           // console.log(`👤 [PARTICIPANT] Disconnected: ${participant.identity} (${participant.sid})`);
+
+          // If the primary agent disconnected, clear the primary agent identity
+          if (this.primaryAgentIdentity === participant.identity) {
+            console.log(`🔄 [PRIMARY-AGENT] Primary agent disconnected: ${participant.identity}`);
+            this.primaryAgentIdentity = null;
+            this.agentJoined = false;
+          }
         });
 
         // Fixed: Use proper track publishing method (simplified to match dev branch)
