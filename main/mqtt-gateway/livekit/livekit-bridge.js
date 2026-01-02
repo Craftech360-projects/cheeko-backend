@@ -437,6 +437,18 @@ class LiveKitBridge extends EventEmitter {
               // console.log(`😊 [EMOTION] Received: ${data.emotion} (${data.text})`);
               this.sendEmotionMessage(data.text, data.emotion);
               break;
+            case "character-change":
+              // Handle character change request from agent (voice command)
+              console.log(`🎭 [CHARACTER-CHANGE] Received from agent: ${data.characterName || data.character_name || "cycle"}`);
+              if (this.connection && this.connection.gateway) {
+                const payload = {
+                  characterName: data.characterName || data.character_name || null,
+                };
+                this.connection.gateway.handleDeviceCharacterChange(this.macAddress, payload);
+              } else {
+                console.error(`❌ [CHARACTER-CHANGE] No gateway reference available`);
+              }
+              break;
 
             // case "metrics_collected":
             //   console.log(`Metrics: ${JSON.stringify(data.data)}`);

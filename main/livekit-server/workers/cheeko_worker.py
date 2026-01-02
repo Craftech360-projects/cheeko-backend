@@ -45,12 +45,14 @@ from src.shared.entrypoint_utils import (
     extract_and_send_chat_history,
 )
 # from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
+from src.features.mode_switching import update_agent_mode
 
 # Agent configuration
 AGENT_NAME = "cheeko-agent"
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
+MODE_SWITCH_TOOLS = [update_agent_mode]
 
 
 class CheekoAssistant(BaseAssistant):
@@ -218,11 +220,9 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info("Gemini Realtime model created")
 
-    # Create AgentSession (music tools disabled)
-    # session = AgentSession(llm=realtime_model, tools=MUSIC_TOOLS)  # COMMENTED OUT - Music service disabled
-    # logger.info(f"AgentSession created with {len(MUSIC_TOOLS)} music tools")
-    session = AgentSession(llm=realtime_model)
-    logger.info("AgentSession created (no music tools)")
+    # Create AgentSession with mode switching tools
+    session = AgentSession(llm=realtime_model, tools=MODE_SWITCH_TOOLS)
+    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools")
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
@@ -278,11 +278,11 @@ async def entrypoint(ctx: JobContext):
     # assistant.audio_player = audio_player
 
     # Enable Cheeko features (no games - use mode_switching to dispatch to game workers)
-    assistant.enable_battery_tools()
-    assistant.enable_volume_tools()
+    # assistant.enable_battery_tools()  # COMMENTED OUT - Battery tools disabled
+    # assistant.enable_volume_tools()  # COMMENTED OUT - Volume tools disabled
     assistant.enable_mode_switching()
     # assistant.enable_music_tools(music_service)  # COMMENTED OUT - Music service disabled
-    logger.info("Cheeko features enabled (battery, volume, mode switching)")
+    logger.info("Cheeko features enabled (mode switching only)")
 
     # Room lifecycle management
     participant_count = len(ctx.room.remote_participants)
@@ -475,8 +475,9 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Use fixed port (ignore PORT env var to avoid conflicts with other workers)
-    logger.info(f"Starting {AGENT_NAME} on port {DEFAULT_PORT}")
+    # Read port from environment (set by PM2) or use default
+    port = int(os.getenv("PORT", DEFAULT_PORT))
+    logger.info(f"Starting {AGENT_NAME} on port {port}")
 
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
@@ -485,5 +486,5 @@ if __name__ == "__main__":
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,
-        port=DEFAULT_PORT,
+        port=port,
     ))

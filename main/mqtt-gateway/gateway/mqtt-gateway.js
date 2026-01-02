@@ -1659,47 +1659,7 @@ class MQTTGateway {
           }
         }
 
-        // Step 6: Fetch child profile and dispatch named agent to the new room
-        let childProfile = null;
-        try {
-          const macAddress = deviceId.replace(/:/g, "").toLowerCase();
-          const profileResponse = await axios.post(
-            `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
-            { macAddress },
-            { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
-          );
-          if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
-            childProfile = profileResponse.data.data;
-            logger.info(`[CHARACTER-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
-          }
-        } catch (error) {
-          logger.warn(`[CHARACTER-CHANGE] ⚠️ Failed to fetch child profile: ${error.message}`);
-        }
-
-        if (this.agentDispatchClient) {
-          try {
-            // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
-            newBridge.agentDeployed = true;
-
-            await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
-              metadata: JSON.stringify({
-                device_mac: deviceId,
-                character: newModeName,
-                child_profile: childProfile,
-                timestamp: Date.now(),
-              }),
-            });
-            logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
-            // Agent will greet via on_enter lifecycle hook
-          } catch (error) {
-            // Reset flag on failure so retry can work
-            newBridge.agentDeployed = false;
-            logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
-            // Continue anyway - agent might auto-join
-          }
-        }
-
-        // Step 7: Update connection state
+        // Step 6: Update connection state
         connection.udp.session_id = newRoomName;
         connection.currentCharacter = newModeName;
         connection.isEnding = false;
@@ -1707,7 +1667,7 @@ class MQTTGateway {
         connection.goodbyeSent = false;
         connection.lastActivityTime = Date.now();
 
-        // Step 8: Create new LiveKitBridge and connect
+        // Step 7: Create new LiveKitBridge and connect (MUST be before dispatch)
         const newBridge = new LiveKitBridge(
           connection,
           connection.protocolVersion || 1,
@@ -1726,8 +1686,46 @@ class MQTTGateway {
           connection.features || {},
           this.roomService
         );
+        logger.info(`[CHARACTER-CHANGE] New bridge connected to room: ${newRoomName}`);
 
-        // agentDeployed flag already set before dispatch call
+        // Step 8: Fetch child profile and dispatch named agent to the new room
+        let childProfile = null;
+        try {
+          const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+          const profileResponse = await axios.post(
+            `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
+            { macAddress },
+            { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
+          );
+          if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
+            childProfile = profileResponse.data.data;
+            logger.info(`[CHARACTER-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+          }
+        } catch (error) {
+          logger.warn(`[CHARACTER-CHANGE] ⚠️ Failed to fetch child profile: ${error.message}`);
+        }
+
+        // Step 9: Dispatch agent to new room
+        if (this.agentDispatchClient) {
+          try {
+            // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
+            newBridge.agentDeployed = true;
+
+            await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
+              metadata: JSON.stringify({
+                device_mac: deviceId,
+                character: newModeName,
+                child_profile: childProfile,
+                timestamp: Date.now(),
+              }),
+            });
+            logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
+          } catch (error) {
+            // Reset flag on failure so retry can work
+            newBridge.agentDeployed = false;
+            logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
+          }
+        }
 
         // Step 9: Load and play audio feedback
         const fs = require("fs");

@@ -44,11 +44,12 @@ from src.shared.entrypoint_utils import (
     extract_and_send_chat_history,
 )
 from src.features.game_tools import check_riddle_answer, set_riddle_game_state
+from src.features.mode_switching import update_agent_mode
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
-DEFAULT_PORT = 8083
-GAME_TOOLS = [check_riddle_answer]
+DEFAULT_PORT = 8085
+GAME_TOOLS = [check_riddle_answer, update_agent_mode]
 
 
 class RiddleSolverAssistant(BaseAssistant):
@@ -338,8 +339,9 @@ async def entrypoint(ctx: JobContext):
     assistant.enable_battery_tools()
     assistant.enable_volume_tools()
     assistant.enable_riddle_game()
+    assistant.enable_mode_switching()
     set_riddle_game_state(assistant.riddle_game_state)
-    logger.info("Riddle Solver features enabled")
+    logger.info("Riddle Solver features enabled (with mode switching)")
 
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
@@ -491,8 +493,9 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Use fixed port (ignore PORT env var to avoid conflicts with other workers)
-    logger.info(f"Starting {AGENT_NAME} on port {DEFAULT_PORT}")
+    # Read port from environment (set by PM2) or use default
+    port = int(os.getenv("PORT", DEFAULT_PORT))
+    logger.info(f"Starting {AGENT_NAME} on port {port}")
 
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
@@ -501,5 +504,5 @@ if __name__ == "__main__":
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,
-        port=DEFAULT_PORT,
+        port=port,
     ))
