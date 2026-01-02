@@ -27,7 +27,7 @@ AGENT_CONFIGS = {
         "tools": ["check_riddle_answer"],
         "features": ["battery", "volume"],
         "game_state_class": "RiddleGameState",
-        "port": 8083,
+        "port": 8085,
     },
     "Word Ladder": {
         "agent_name": "word-ladder-agent",
@@ -35,7 +35,7 @@ AGENT_CONFIGS = {
         "tools": ["validate_word_ladder_move"],
         "features": ["battery", "volume"],
         "game_state_class": "WordLadderGameState",
-        "port": 8084,
+        "port": 8086,
     },
 }
 
