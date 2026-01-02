@@ -404,11 +404,35 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"Failed to send shutdown_ack: {e}")
 
+    async def handle_end_prompt(prompt_text: str):
+        """Handle end prompt - say goodbye message before cleanup using Gemini Realtime"""
+        try:
+            logger.info(f"👋 [END-PROMPT] Saying goodbye: {prompt_text[:50]}...")
+            try:
+                await asyncio.wait_for(
+                    session.generate_reply(instructions=prompt_text),
+                    timeout=10.0
+                )
+                logger.info("👋 [END-PROMPT] Goodbye message completed")
+            except asyncio.TimeoutError:
+                logger.warning("👋 [END-PROMPT] Goodbye timed out - session may be busy")
+            except Exception as gen_error:
+                logger.warning(f"👋 [END-PROMPT] Could not generate goodbye: {gen_error}")
+        except Exception as e:
+            logger.error(f"👋 [END-PROMPT] Error in goodbye handler: {e}")
+
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):
         try:
             message = json.loads(data_packet.data.decode('utf-8'))
             msg_type = message.get('type')
+
+            # Handle end prompt - say goodbye message
+            if msg_type == 'end_prompt':
+                prompt_text = message.get('prompt', "Time flies so fast! It was wonderful solving riddles with you. Goodbye!")
+                logger.info(f"👋 [END-PROMPT] Received end_prompt from gateway")
+                asyncio.create_task(handle_end_prompt(prompt_text))
+                return
 
             # Handle shutdown request from gateway
             if msg_type == 'shutdown_request':
