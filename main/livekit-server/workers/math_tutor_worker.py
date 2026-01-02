@@ -493,8 +493,9 @@ async def entrypoint(ctx: JobContext):
 
 
 if __name__ == "__main__":
-    # Use fixed port (ignore PORT env var to avoid conflicts with other workers)
-    logger.info(f"Starting {AGENT_NAME} on port {DEFAULT_PORT}")
+    # Read port from environment (set by PM2) or use default
+    port = int(os.getenv("PORT", DEFAULT_PORT))
+    logger.info(f"Starting {AGENT_NAME} on port {port}")
 
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
@@ -503,5 +504,5 @@ if __name__ == "__main__":
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,
-        port=DEFAULT_PORT,
+        port=port,
     ))
