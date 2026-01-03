@@ -1,0 +1,63 @@
+package cheeko.common.utils;
+
+import java.io.Serializable;
+
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Data;
+import cheeko.common.exception.ErrorCode;
+
+/**
+ * ResponseData
+ * Copyright (c) RenRen Open Source All rights reserved.
+ * Website: https://www.renren.io
+ */
+@Data
+@Schema(description = "Response")
+public class Result<T> implements Serializable {
+
+    /**
+     * Code：0Table示Success，Other值Table示Failure
+     */
+    @Schema(description = "Code：0Table示Success，Other值Table示Failure")
+    private int code = 0;
+    /**
+     * MessageContent
+     */
+    @Schema(description = "MessageContent")
+    private String msg = "success";
+    /**
+     * ResponseData
+     */
+    @Schema(description = "ResponseData")
+    private T data;
+
+    public Result<T> ok(T data) {
+        this.setData(data);
+        return this;
+    }
+
+    public Result<T> error() {
+        this.code = ErrorCode.INTERNAL_SERVER_ERROR;
+        this.msg = MessageUtils.getMessage(this.code);
+        return this;
+    }
+
+    public Result<T> error(int code) {
+        this.code = code;
+        this.msg = MessageUtils.getMessage(this.code);
+        return this;
+    }
+
+    public Result<T> error(int code, String msg) {
+        this.code = code;
+        this.msg = msg;
+        return this;
+    }
+
+    public Result<T> error(String msg) {
+        this.code = ErrorCode.INTERNAL_SERVER_ERROR;
+        this.msg = msg;
+        return this;
+    }
+
+}

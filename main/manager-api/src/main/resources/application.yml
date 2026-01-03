@@ -13,7 +13,7 @@ server:
         http-only: true
 
 spring:
-  # 环境 dev|test|prod
+  # Environment: dev|test|prod
   # Profile will be set by SPRING_PROFILES_ACTIVE environment variable
   # Default to 'dev' if not specified
   profiles:
@@ -48,13 +48,13 @@ renren:
 # Textbook RAG Configuration
 textbook:
   upload:
-    directory: D:/cheekofinal/xiaozhi-esp32-server/main/manager-api/uploadfile/textbooks
+    directory: D:/cheekofinal/cheeko-esp32-server/main/manager-api/uploadfile/textbooks
   chunk:
     size: 512
     overlap: 50
 
 # External Services
-xiaozhi:
+cheeko:
   python:
     server:
       url: http://localhost:8003
@@ -71,15 +71,15 @@ voyage:
 #mybatis
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
-  #实体扫描，多个package用逗号或者分号分隔
-  typeAliasesPackage: xiaozhi.modules.*.entity
+  # Entity scanning, multiple packages separated by comma or semicolon
+  typeAliasesPackage: cheeko.modules.*.entity
   global-config:
-    #数据库相关配置
+    # Database related configuration
     db-config:
-      #主键类型
+      # Primary key type
       id-type: ASSIGN_ID
     banner: false
-  #原生配置
+  # Native configuration
   configuration:
     map-underscore-to-camel-case: true
     cache-enabled: false

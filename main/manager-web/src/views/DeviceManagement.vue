@@ -161,7 +161,7 @@ export default {
     pageCount() {
       return Math.ceil(this.filteredDeviceList.length / this.pageSize);
     },
-    // 计算当前页是否全选
+    // Calculate if current page is fully selected
     isCurrentPageAllSelected() {
       return this.paginatedDeviceList.length > 0 && 
              this.paginatedDeviceList.every(device => device.selected);
@@ -293,14 +293,14 @@ export default {
         row._submitting = false;
       });
     },
-    // 备注输入框：失焦时提交
+    // Remark input: Submit on blur
     onRemarkBlur(row) {
       row.isEdit = false;
       setTimeout(() => {
         this.submitRemark(row);
-      }, 100); // 延迟 100ms，避开 enter+blur 同时触发的窗口
+      }, 100); // Delay 100ms to avoid enter+blur simultaneous trigger
     },
-    // 备注输入框：按回车时提交
+    // Remark input: Submit on Enter key
     onRemarkEnter(row) {
       row.isEdit = false;
       this.submitRemark(row);

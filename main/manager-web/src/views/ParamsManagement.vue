@@ -83,7 +83,7 @@
             </div>
         </div>
 
-        <!-- 新增/编辑参数对话框 -->
+        <!-- Add/Edit Parameter Dialog -->
         <param-dialog :title="dialogTitle" :visible.sync="dialogVisible" :form="paramForm" @submit="handleSubmit"
             @cancel="dialogVisible = false" />
         <el-footer>
@@ -205,7 +205,7 @@ export default {
 
         handleSubmit({ form, done }) {
             if (form.id) {
-                // 编辑
+                // Edit
                 Api.admin.updateParam(form, ({ data }) => {
                     if (data.code === 0) {
                         this.$message.success({
@@ -218,7 +218,7 @@ export default {
                     done && done();
                 });
             } else {
-                // 新增
+                // Add new
                 Api.admin.addParam(form, ({ data }) => {
                     if (data.code === 0) {
                         this.$message.success({
@@ -245,7 +245,7 @@ export default {
             this.deleteParam(selectedRows);
         },
         deleteParam(row) {
-            // 处理单个参数或参数数组
+            // Handle single parameter or parameter array
             const params = Array.isArray(row) ? row : [row];
 
             if (Array.isArray(row) && row.length === 0) {

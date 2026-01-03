@@ -2,12 +2,12 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <groupId>xiaozhi</groupId>
-    <artifactId>xiaozhi-esp32-api</artifactId>
+    <groupId>cheeko</groupId>
+    <artifactId>cheeko-esp32-api</artifactId>
     <packaging>jar</packaging>
     <version>0.0.1</version>
-    <name>xiaozhi-esp32-api</name>
-    <description>小智后台管理系统</description>
+    <name>cheeko-esp32-api</name>
+    <description>Cheeko ESP32 Backend Management System</description>
 
 	<parent>
 		<groupId>org.springframework.boot</groupId>
@@ -74,7 +74,7 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        <!-- 验证码工具包 -->
+        <!-- Captcha toolkit -->
         <dependency>
             <groupId>com.github.whvcse</groupId>
             <artifactId>easy-captcha</artifactId>
@@ -161,7 +161,7 @@
             <artifactId>spring-boot-configuration-processor</artifactId>
             <optional>true</optional>
         </dependency>
-        <!-- mysql驱动 -->
+        <!-- MySQL driver -->
         <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
@@ -208,7 +208,7 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>${springdoc.version}</version>
         </dependency>
-        <!-- 日常工具包 -->
+        <!-- Common utility toolkit -->
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
@@ -223,13 +223,13 @@
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>
         </dependency>
-        <!-- 阿里云短信sdk -->
+        <!-- Alibaba Cloud SMS SDK -->
         <dependency>
             <groupId>com.aliyun</groupId>
             <artifactId>dysmsapi20170525</artifactId>
             <version>${aliyun-sms-version}</version>
         </dependency>
-        <!-- 阿里云短信sdk使用的okio:1.15.0版本有安全漏洞：GHSA-w33c-445m-f8w7 现在升级成3.4.0安全版本-->
+        <!-- okio:1.15.0 used by Alibaba Cloud SMS SDK has security vulnerability: GHSA-w33c-445m-f8w7, upgraded to 3.4.0 secure version -->
         <dependency>
             <groupId>com.squareup.okio</groupId>
             <artifactId>okio</artifactId>
@@ -237,7 +237,7 @@
         </dependency>
     </dependencies>
 
-    <!-- 阿里云maven仓库 -->
+    <!-- Alibaba Cloud Maven repository -->
     <repositories>
         <repository>
             <id>public</id>
@@ -284,7 +284,7 @@
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <version>3.4.3</version>
                 <configuration>
-                    <mainClass>xiaozhi.AdminApplication</mainClass>
+                    <mainClass>cheeko.AdminApplication</mainClass>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>

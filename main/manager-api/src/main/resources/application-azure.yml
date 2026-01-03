@@ -21,9 +21,9 @@ spring:
     druid:
       # AZURE VM LOCAL DATABASE ONLY
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/xiaozhi_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
-      username: xiaozhi_user
-      password: xiaozhi_password123
+      url: jdbc:mysql://localhost:3306/cheeko_db?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&nullCatalogMeansCurrent=true&useSSL=false&allowPublicKeyRetrieval=true&createDatabaseIfNotExist=true
+      username: cheeko_user
+      password: cheeko_password123
 
       initial-size: 5
       max-active: 20

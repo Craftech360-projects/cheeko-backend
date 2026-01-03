@@ -1,8 +1,8 @@
-This is a development document. If you need to deploy the Xiaozhi server, [click here to view the deployment tutorial](../../README.md#deployment-documentation)
+This is a development document. If you need to deploy the Cheeko server, [click here to view the deployment tutorial](../../README.md#deployment-documentation)
 
-# XiaoZhi ESP32 Manager API
+# Cheeko ESP32 Manager API
 
-This project is developed based on the SpringBoot framework and serves as the backend API for the XiaoZhi ESP32 management system.
+This project is developed based on the SpringBoot framework and serves as the backend API for the Cheeko ESP32 management system.
 
 ## Development Environment Requirements
 
@@ -32,7 +32,7 @@ First, start the required MySQL and Redis containers:
 
 ```bash
 # Navigate to the manager-api directory
-cd D:\cheekofinal\xiaozhi-esp32-server\main\manager-api
+cd D:\cheekofinal\cheeko-esp32-server\main\manager-api
 
 # Start Docker containers (MySQL, Redis, phpMyAdmin, Redis Commander)
 docker-compose up -d

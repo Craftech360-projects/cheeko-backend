@@ -5,7 +5,7 @@
 
 spring:
   application:
-    name: XiaoZhi Content Library Migration
+    name: Cheeko Content Library Migration
   
   # Database configuration (inherits from main application.yml)
   datasource:
@@ -30,8 +30,8 @@ spring:
 # Logging configuration for migration
 logging:
   level:
-    xiaozhi.migration: DEBUG
-    xiaozhi.modules.content: DEBUG
+    cheeko.migration: DEBUG
+    cheeko.modules.content: DEBUG
     org.springframework.transaction: DEBUG
   pattern:
     console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%logger{50}] - %msg%n"
@@ -43,12 +43,12 @@ logging:
 # Migration specific configuration
 migration:
   content-library:
-    # Base path for xiaozhi-server directory (relative to working directory)
-    base-path: "${user.dir}/xiaozhi-server"
+    # Base path for cheeko-server directory (relative to working directory)
+    base-path: "${user.dir}/cheeko-server"
     
     # Alternative absolute paths for different deployment scenarios
-    # base-path: "/opt/xiaozhi/xiaozhi-server"  # Production path
-    # base-path: "/home/user/xiaozhi-server"    # Development path
+    # base-path: "/opt/cheeko/cheeko-server"  # Production path
+    # base-path: "/home/user/cheeko-server"    # Development path
     
     # Batch size for database operations
     batch-size: 100

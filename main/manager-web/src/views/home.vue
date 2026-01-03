@@ -1,10 +1,10 @@
 <template>
   <div class="welcome">
-    <!-- 公共头部 -->
+    <!-- Common Header -->
     <HeaderBar :devices="devices" @search="handleSearch" @search-reset="handleSearchReset" />
     <el-main style="padding: 20px;display: flex;flex-direction: column;">
       <div>
-        <!-- 首页内容 -->
+        <!-- Home Page Content -->
         <div class="add-device">
           <div class="add-device-bg">
             <div class="hellow-text" style="margin-top: 30px;">
@@ -311,7 +311,7 @@ export default {
       });
     },
     goToRoleConfig() {
-      // 点击配置角色后跳转到角色配置页
+      // Navigate to role config page after clicking configure role
       this.$router.push('/role-config')
     },
     handleWisdomBodyAdded(res) {
@@ -343,11 +343,11 @@ export default {
         return this.searchRegex.test(device.agentName);
       });
     },
-    // 搜索更新智能体列表
+    // Search and update agent list
     handleSearchResult(filteredList) {
-      this.devices = filteredList; // 更新设备列表
+      this.devices = filteredList; // Update device list
     },
-    // 获取智能体列表
+    // Get agent list
     fetchAgentList() {
       this.isLoading = true;
       console.log('Starting to fetch agent list...'); // Debug log
@@ -364,7 +364,7 @@ export default {
       });
     },
 
-    // 处理智能体列表响应
+    // Handle agent list response
     handleAgentListResponse(data) {
       console.log('Raw API Response:', data); // Debug log
       
@@ -399,15 +399,15 @@ export default {
 
         console.log('Agent list before processing:', agentList); // Debug log
 
-        // 处理agent数据并获取模型名称
+        // Process agent data and get model names
         this.processAgentListWithModelNames(agentList);
 
         console.log('Final processed devices:', this.originalDevices); // Debug log
 
-        // 动态设置骨架屏数量（可选）
+        // Dynamically set skeleton count (optional)
         this.skeletonCount = Math.min(
-          Math.max(this.originalDevices.length, 3), // 最少3个
-          10 // 最多10个
+          Math.max(this.originalDevices.length, 3), // Minimum 3
+          10 // Maximum 10
         );
 
         this.handleSearchReset();
@@ -441,9 +441,9 @@ export default {
       }).catch(() => { });
     },
 
-    // 处理agent列表
+    // Process agent list
     async processAgentListWithModelNames(agentList) {
-      // 创建基本的设备列表
+      // Create basic device list
       const basicDevices = agentList
         .filter(item => item && (item.id || item.agentId))
         .map(item => ({
@@ -461,15 +461,15 @@ export default {
 
       console.log('Basic devices processed:', basicDevices); // Debug log
 
-      // 设置基本数据先显示
+      // Set basic data for initial display
       this.originalDevices = basicDevices;
       this.handleSearchReset();
 
-      // 异步获取设备数量和MAC地址
+      // Asynchronously fetch device count and MAC addresses
       this.fetchDeviceDataForAgents();
     },
 
-    // 获取所有智能体的设备数量和MAC地址
+    // Get device count and MAC addresses for all agents
     fetchDeviceDataForAgents() {
       console.log('Fetching device data for agents...');
 
@@ -487,7 +487,7 @@ export default {
                 ? devices.map(d => d.macAddress).filter(Boolean)
                 : [];
 
-              // 更新设备数量和MAC地址
+              // Update device count and MAC addresses
               this.updateDeviceInfo(device.agentId, 'deviceCount', deviceCount);
               this.updateDeviceInfo(device.agentId, 'macAddresses', macAddresses);
               console.log(`Updated device data for ${device.agentName}: count=${deviceCount}, macs=${macAddresses.join(', ')}`);
@@ -497,7 +497,7 @@ export default {
       });
     },
 
-    // 更新设备信息（通用方法）
+    // Update device info (generic method)
     updateDeviceInfo(agentId, field, value) {
       this.originalDevices = this.originalDevices.map(device => {
         if (device.agentId === agentId) {
@@ -506,7 +506,7 @@ export default {
         return device;
       });
 
-      // 同时更新搜索结果
+      // Also update search results
       this.devices = this.devices.map(device => {
         if (device.agentId === agentId) {
           return { ...device, [field]: value };
@@ -599,13 +599,13 @@ export default {
   flex-direction: column;
   background: linear-gradient(145deg, #fff5eb, #fff7f0);
   background-size: cover;
-  /* 确保背景图像覆盖整个元素 */
+  /* Ensure background image covers entire element */
   background-position: center;
-  /* 从顶部中心对齐 */
+  /* Align from top center */
   -webkit-background-size: cover;
-  /* 兼容老版本WebKit浏览器 */
+  /* Compatible with older WebKit browsers */
   -o-background-size: cover;
-  /* 兼容老版本Opera浏览器 */
+  /* Compatible with older Opera browsers */
 }
 
 .add-device {
@@ -626,15 +626,15 @@ export default {
   background-image: url("@/assets/home/main-top-bg.png");
   overflow: hidden;
   background-size: cover;
-  /* 确保背景图像覆盖整个元素 */
+  /* Ensure background image covers entire element */
   background-position: center;
-  /* 从顶部中心对齐 */
+  /* Align from top center */
   -webkit-background-size: cover;
-  /* 兼容老版本WebKit浏览器 */
+  /* Compatible with older WebKit browsers */
   -o-background-size: cover;
   box-sizing: border-box;
 
-  /* 兼容老版本Opera浏览器 */
+  /* Compatible with older Opera browsers */
   .hellow-text {
     margin-left: 75px;
     color: #3d4566;

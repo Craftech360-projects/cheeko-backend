@@ -78,7 +78,7 @@
         </el-table>
       </div>
 
-      <!-- 自定义滚动条 -->
+      <!-- Custom scrollbar -->
       <div class="custom-scrollbar" ref="scrollbar">
         <div class="custom-scrollbar-track" ref="scrollbarTrack" @click="handleTrackClick">
           <div class="custom-scrollbar-thumb" ref="scrollbarThumb" @mousedown="startDrag"></div>
@@ -135,7 +135,7 @@ export default {
       selectAll: false,
       selectedRows: [],
       loading: false,
-      showReferenceColumns: false, // 控制是否显示参考列
+      showReferenceColumns: false, // Control whether to show reference columns
     };
   },
   watch: {
@@ -143,8 +143,8 @@ export default {
       this.localVisible = newVal;
       if (newVal) {
         this.currentPage = 1;
-        this.updateShowReferenceColumns(); // 更新显示状态
-        this.loadData(); // 对话框显示时加载数据
+        this.updateShowReferenceColumns(); // Update display status
+        this.loadData(); // Load data when dialog is shown
         this.$nextTick(() => {
           this.updateScrollbar();
         });
@@ -181,7 +181,7 @@ export default {
     window.removeEventListener('mousemove', this.handleDrag);
   },
   methods: {
-    // 更新是否显示参考列
+    // Update whether to show reference columns
     updateShowReferenceColumns() {
       if (this.modelConfig && this.modelConfig.configJson) {
         const providerType = this.modelConfig.configJson.type;
@@ -205,7 +205,7 @@ export default {
             .map(item => ({
               id: item.id || '',
               voiceCode: item.ttsVoice || '',
-              voiceName: item.name || '未命名音色',
+              voiceName: item.name || 'Unnamed Voice',
               languageType: item.languages || '',
               remark: item.remark || '',
               referenceAudio: item.referenceAudio || '',
@@ -219,15 +219,15 @@ export default {
           this.total = data.total;
         } else {
           this.$message.error({
-            message: data.msg || '获取音色列表失败',
+            message: data.msg || 'Failed to get voice list',
             showClose: true
           });
         }
         this.loading = false;
       }, (err) => {
-        console.error('加载失败:', err);
+        console.error('Loading failed:', err);
         this.$message.error({
-          message: '加载音色数据失败',
+          message: 'Failed to load voice data',
           showClose: true
         });
         this.loading = false;
@@ -235,7 +235,7 @@ export default {
     },
 
     handleClose() {
-      // 重置状态
+      // Reset state
       this.ttsModels = [];
       this.currentPage = 1;
       this.total = 0;
@@ -343,7 +343,7 @@ export default {
     saveEdit(row) {
       if (!row.voiceCode || !row.voiceName || !row.languageType) {
         this.$message.error({
-          message: '音色编码、音色名称和语言类型不能为空',
+          message: 'Voice code, voice name, and language type cannot be empty',
           showClose: true
         });
         return;
@@ -361,7 +361,7 @@ export default {
           sort: row.sort
         };
 
-        // 只有在显示参考列的情况下才添加参考字段
+        // Only add reference fields when showing reference columns
         if (this.showReferenceColumns) {
           params.referenceAudio = row.referenceAudio;
           params.referenceText = row.referenceText;
@@ -369,28 +369,28 @@ export default {
 
         let res;
         if (row.id) {
-          // 已有ID，执行更新操作
+          // Has ID, perform update operation
           Api.timbre.updateVoice(params, (response) => {
             res = response;
             this.handleResponse(res, row);
           });
         } else {
-          // 没有ID，执行新增操作
+          // No ID, perform add operation
           Api.timbre.saveVoice(params, (response) => {
             res = response;
             this.handleResponse(res, row);
           });
         }
       } catch (error) {
-        console.error('操作失败:', error);
-        // 异常情况下也恢复原始数据
+        console.error('Operation failed:', error);
+        // Restore original data in case of exception
         if (row.originalData) {
           Object.assign(row, row.originalData);
           row.editing = false;
           delete row.originalData;
         }
         this.$message.error({
-          message: '操作失败，请重试',
+          message: 'Operation failed, please try again',
           showClose: true
         });
       }
@@ -399,21 +399,21 @@ export default {
     handleResponse(res, row) {
       if (res.code === 0) {
         this.$message.success({
-          message: row.id ? '修改成功' : '保存成功',
+          message: row.id ? 'Modified successfully' : 'Saved successfully',
           showClose: true
         });
         row.editing = false;
         delete row.originalData;
-        this.loadData(); // 刷新数据
+        this.loadData(); // Refresh data
       } else {
-        // 保存失败时恢复原始数据
+        // Restore original data on save failure
         if (row.originalData) {
           Object.assign(row, row.originalData);
           row.editing = false;
           delete row.originalData;
         }
         this.$message.error({
-          message: res.msg || (row.id ? '修改失败' : '保存失败'),
+          message: res.msg || (row.id ? 'Modification failed' : 'Save failed'),
           showClose: true
         });
       }
@@ -429,7 +429,7 @@ export default {
     addNew() {
       const hasEditing = this.ttsModels.some(row => row.editing);
       if (hasEditing) {
-        this.$message.warning('请先完成当前编辑再新增');
+        this.$message.warning('Please complete current edit before adding new');
         return;
       }
 
@@ -440,7 +440,7 @@ export default {
       const newRow = {
         voiceCode: '',
         voiceName: '',
-        languageType: '中文',
+        languageType: 'Chinese',
         voiceDemo: '',
         remark: '',
         referenceAudio: '',
@@ -454,38 +454,38 @@ export default {
     },
 
     deleteRow(row) {
-      // 处理单个音色或音色数组
+      // Handle single voice or voice array
       const voices = Array.isArray(row) ? row : [row];
 
       if (Array.isArray(row) && row.length === 0) {
-        this.$message.warning("请先选择需要删除的音色");
+        this.$message.warning("Please select voices to delete first");
         return;
       }
 
 
       const voiceCount = voices.length;
-      this.$confirm(`确定要删除选中的${voiceCount}个音色吗？`, "警告", {
-        confirmButtonText: "确定",
-        cancelButtonText: "取消",
+      this.$confirm(`Are you sure you want to delete ${voiceCount} selected voice(s)?`, "Warning", {
+        confirmButtonText: "Confirm",
+        cancelButtonText: "Cancel",
         type: "warning",
         distinguishCancelAndClose: true
       }).then(() => {
         const ids = voices.map(voice => voice.id);
         if (ids.some(id => !id)) {
-          this.$message.error("存在无效的音色ID");
+          this.$message.error("Invalid voice ID exists");
           return;
         }
 
         Api.timbre.deleteVoice(ids, ({ data }) => {
           if (data.code === 0) {
             this.$message.success({
-              message: `成功删除${voiceCount}个参数`,
+              message: `Successfully deleted ${voiceCount} parameter(s)`,
               showClose: true
             });
-            this.loadData(); // 刷新参数列表
+            this.loadData(); // Refresh parameter list
           } else {
             this.$message.error({
-              message: data.msg || '删除失败，请重试',
+              message: data.msg || 'Delete failed, please try again',
               showClose: true
             });
           }
@@ -494,13 +494,13 @@ export default {
         if (action === 'cancel') {
           this.$message({
             type: 'info',
-            message: '已取消删除操作',
+            message: 'Delete operation cancelled',
             duration: 1000
           });
         } else {
           this.$message({
             type: 'info',
-            message: '操作已关闭',
+            message: 'Operation closed',
             duration: 1000
           });
         }
@@ -527,7 +527,7 @@ export default {
   margin: 0 !important;
 }
 
-/* 表格样式 */
+/* Table styles */
 ::v-deep .data-table .el-table__header th {
   color: black;
   padding: 6px 0 !important;
@@ -553,7 +553,7 @@ export default {
   border: none !important;
 }
 
-/* 关闭按钮 */
+/* Close button */
 .custom-close-btn {
   position: absolute;
   top: 15px;
@@ -580,7 +580,7 @@ export default {
   border-color: #409EFF;
 }
 
-/* 备注文本 */
+/* Remark text */
 ::v-deep .remark-input .el-textarea__inner {
   border-radius: 4px;
   border: 1px solid #e6e6e6;
@@ -602,7 +602,7 @@ export default {
 }
 
 
-/* 滚动容器 */
+/* Scroll container */
 .scroll-wrapper {
   display: flex;
   max-height: 55vh;
@@ -621,7 +621,7 @@ export default {
   display: none;
 }
 
-/* 自定义滚动条 */
+/* Custom scrollbar */
 .custom-scrollbar {
   width: 8px;
   background: #f1f1f1;
@@ -668,7 +668,7 @@ export default {
   display: none;
 }
 
-/* 音频播放器容器样式 */
+/* Audio player container styles */
 .custom-audio-container {
   width: 90%;
   margin: 0 auto;
@@ -698,7 +698,7 @@ export default {
   color: #5cca8e !important;
 }
 
-/* 表格单元格自适应 */
+/* Table cell adaptive */
 ::v-deep .el-table__body-wrapper {
   overflow-x: hidden !important;
 }
@@ -708,26 +708,26 @@ export default {
   word-break: break-all !important;
 }
 
-/* 按钮组定位调整 */
+/* Button group positioning adjustment */
 .action-buttons {
   position: static;
   padding: 15px 0;
   background: white;
 }
 
-/* 输入框自适应 */
+/* Input box adaptive */
 ::v-deep .el-input__inner,
 ::v-deep .el-textarea__inner {
   width: 100% !important;
   min-width: 120px;
 }
 
-/* 音频输入框特殊处理 */
+/* Audio input box special handling */
 .audio-input ::v-deep .el-input__inner {
   min-width: 200px;
 }
 
-/* 操作按钮弹性布局 */
+/* Action button flex layout */
 ::v-deep .el-table__row .el-button {
   flex-shrink: 0;
   margin: 2px !important;

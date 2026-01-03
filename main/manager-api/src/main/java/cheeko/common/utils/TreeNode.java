@@ -1,0 +1,30 @@
+package cheeko.common.utils;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+
+import lombok.Data;
+
+/**
+ * Tree Node，AllRequiredImplementationTree Nodes ，都RequiredInherit该Class
+ * Copyright (c) RenRen Open Source All rights reserved.
+ * Website: https://www.renren.io
+ */
+@Data
+public class TreeNode<T> implements Serializable {
+
+    /**
+     * Primary Key
+     */
+    private Long id;
+    /**
+     * ParentID
+     */
+    private Long pid;
+    /**
+     * Child NodesList
+     */
+    private List<T> children = new ArrayList<>();
+
+}
