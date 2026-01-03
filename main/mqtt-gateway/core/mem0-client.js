@@ -92,10 +92,11 @@ class Mem0Client {
             const results = response.data;
 
             if (results) {
-                // Extract memories, relations, and entities
-                const memories = results.results?.map(m => m.memory).filter(Boolean) || [];
+                // API returns array directly, not { results: [...] }
+                const memoryArray = Array.isArray(results) ? results : (results.results || []);
+                const memories = memoryArray.map(m => m.memory).filter(Boolean);
                 const relations = results.relations || [];
-                const entities = this._extractEntities(results.results);
+                const entities = this._extractEntities(memoryArray);
 
                 logger.info(`[MEM0] Retrieved ${memories.length} memories, ${relations.length} relations, ${entities.length} entities`);
 
@@ -182,7 +183,9 @@ class Mem0Client {
             const results = response.data;
 
             if (results) {
-                const memories = results.results?.map(m => m.memory).filter(Boolean) || [];
+                // API returns array directly, not { results: [...] }
+                const memoryArray = Array.isArray(results) ? results : (results.results || []);
+                const memories = memoryArray.map(m => m.memory).filter(Boolean);
                 const relations = results.relations || [];
 
                 logger.info(`[MEM0] Retrieved all ${memories.length} memories for ${cleanUserId}`);
