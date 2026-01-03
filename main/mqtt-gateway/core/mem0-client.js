@@ -86,23 +86,53 @@ class Mem0Client {
                 query: "What is known about this person, their family, pets, interests, skills, routines, and feelings?",
                 user_id: cleanUserId,
                 limit: MEM0_MEMORY_LIMIT,
+                output_format: "v1.1",
                 enable_graph: true
             });
 
-            const results = response.data;
+            const data = response.data;
 
-            if (results) {
-                // API returns array directly, not { results: [...] }
-                const memoryArray = Array.isArray(results) ? results : (results.results || []);
-                const memories = memoryArray.map(m => m.memory).filter(Boolean);
-                const relations = results.relations || [];
-                const entities = this._extractEntities(memoryArray);
+            // Handle both array and v1.1 format responses
+            const results = Array.isArray(data) ? data : (data.results || []);
+            const topLevelRelations = data.relations || [];  // Relations at top level in v1.1
 
-                logger.info(`[MEM0] Retrieved ${memories.length} memories, ${relations.length} relations, ${entities.length} entities`);
+            if (results.length > 0) {
+                const memories = [];
+                const allEntities = new Map();
+                const allRelations = [...topLevelRelations];  // Start with top-level relations
+                
+                // Extract memories, entities, and relations from each result
+                results.forEach(item => {
+                    if (item.memory) {
+                        memories.push(item.memory);
+                    }
+                    
+                    // Extract entities from this memory (graph feature)
+                    if (item.entities && Array.isArray(item.entities)) {
+                        item.entities.forEach(e => {
+                            if (e.name) {
+                                allEntities.set(e.id || e.name, {
+                                    id: e.id,
+                                    name: e.name,
+                                    type: e.type || 'unknown'
+                                });
+                            }
+                        });
+                    }
+                    
+                    // Extract relations from this memory (if any)
+                    if (item.relations && Array.isArray(item.relations)) {
+                        allRelations.push(...item.relations);
+                    }
+                });
+
+                const entities = Array.from(allEntities.values());
+
+                logger.info(`[MEM0] Retrieved ${memories.length} memories, ${allRelations.length} relations, ${entities.length} entities`);
 
                 return {
                     memories,
-                    relations,
+                    relations: allRelations,
                     entities
                 };
             }
