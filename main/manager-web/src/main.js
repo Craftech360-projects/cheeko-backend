@@ -12,10 +12,10 @@ Vue.use(ElementUI);
 
 Vue.config.productionTip = false
 
-// 注册Service Worker
+// Register Service Worker
 registerServiceWorker();
 
-// 创建Vue实例
+// Create Vue instance
 new Vue({
   router,
   store,

@@ -9,9 +9,9 @@ Vue.use(Vuex)
 export default new Vuex.Store({
   state: {
     token: '',
-    userInfo: {}, // 添加用户信息存储
-    isSuperAdmin: false, // 添加superAdmin状态
-    pubConfig: { // 添加公共配置存储
+    userInfo: {}, // User info storage
+    isSuperAdmin: false, // SuperAdmin status
+    pubConfig: { // Public config storage
       version: '0.7.5',
       name: 'cheeko-esp32-server',
       year: '©2025',
@@ -70,15 +70,15 @@ export default new Vuex.Store({
     }
   },
   actions: {
-    // 添加 logout action
+    // Logout action
     logout({ commit }) {
       return new Promise((resolve) => {
         commit('clearAuth')
         goToPage(Constant.PAGE.LOGIN, true);
-        window.location.reload(); // 彻底重置状态
+        window.location.reload(); // Completely reset state
       })
     },
-    // 添加获取公共配置的 action
+    // Fetch public config action
     fetchPubConfig({ commit }) {
       return new Promise((resolve) => {
         Api.user.getPubConfig(({ data }) => {

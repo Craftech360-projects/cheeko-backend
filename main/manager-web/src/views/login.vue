@@ -3,8 +3,8 @@
     <el-container style="height: 100%;">
       <el-header>
         <div style="display: flex;align-items: center;margin-top: 15px;margin-left: 10px;gap: 10px;">
-          <img loading="lazy" alt="" src="@/assets/xiaozhi-logo.svg" style="width: 65px;height: 65px;" />
-          <!-- <img loading="lazy" alt="" src="@/assets/xiaozhi-ai.png" style="height: 18px;" /> -->
+          <img loading="lazy" alt="" src="@/assets/cheeko-logo.svg" style="width: 65px;height: 65px;" />
+          <!-- <img loading="lazy" alt="" src="@/assets/cheeko-ai.png" style="height: 18px;" /> -->
         </div>
       </el-header>
       <div class="login-person">
@@ -20,7 +20,7 @@
             </div>
           </div>
           <div style="padding: 0 30px;">
-            <!-- 用户名登录 -->
+            <!-- Username login -->
             <template v-if="!isMobileLogin">
               <div class="input-box">
                 <img loading="lazy" alt="" class="input-icon" src="@/assets/login/username.png" />
@@ -28,7 +28,7 @@
               </div>
             </template>
 
-            <!-- 手机号登录 -->
+            <!-- Mobile login -->
             <template v-else>
               <div class="input-box">
                 <div style="display: flex; align-items: center; width: 100%;">
@@ -61,7 +61,7 @@
           </div>
           <div class="login-btn" @click="login">Login</div>
 
-          <!-- 登录方式切换按钮 -->
+          <!-- Login type switch buttons -->
           <div class="login-type-container" v-if="enableMobileRegister">
             <el-tooltip content="Phone Number Login" placement="bottom">
               <el-button :type="isMobileLogin ? 'primary' : 'default'" icon="el-icon-mobile" circle
@@ -125,7 +125,7 @@ export default {
   mounted() {
     this.fetchCaptcha();
     this.$store.dispatch('fetchPubConfig').then(() => {
-      // 根据配置决定默认登录方式
+      // Determine default login type based on config
       this.isMobileLogin = this.enableMobileRegister;
     });
   },
@@ -149,10 +149,10 @@ export default {
       }
     },
 
-    // 切换登录方式
+    // Switch login type
     switchLoginType(type) {
       this.isMobileLogin = type === 'mobile';
-      // 清空表单
+      // Clear form
       this.form.username = '';
       this.form.mobile = '';
       this.form.password = '';
@@ -160,7 +160,7 @@ export default {
       this.fetchCaptcha();
     },
 
-    // 封装输入验证逻辑
+    // Encapsulate input validation logic
     validateInput(input, message) {
       if (!input.trim()) {
         showDanger(message);
@@ -171,25 +171,25 @@ export default {
 
     async login() {
       if (this.isMobileLogin) {
-        // 手机号登录验证
+        // Mobile login validation
         if (!validateMobile(this.form.mobile, this.form.areaCode)) {
           showDanger('Please enter a valid phone number');
           return;
         }
-        // 拼接手机号作为用户名
+        // Combine phone number as username
         this.form.username = this.form.areaCode + this.form.mobile;
       } else {
-        // 用户名登录验证
+        // Username login validation
         if (!this.validateInput(this.form.username, 'Username cannot be empty')) {
           return;
         }
       }
 
-      // 验证密码
+      // Validate password
       if (!this.validateInput(this.form.password, 'Password cannot be empty')) {
         return;
       }
-      // 验证验证码
+      // Validate captcha
       if (!this.validateInput(this.form.captcha, 'Verification code cannot be empty')) {
         return;
       }
@@ -206,7 +206,7 @@ export default {
         }
       })
 
-      // 重新获取验证码
+      // Refresh captcha
       setTimeout(() => {
         this.fetchCaptcha();
       }, 1000);

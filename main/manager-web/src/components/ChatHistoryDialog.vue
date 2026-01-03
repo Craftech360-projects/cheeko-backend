@@ -21,7 +21,7 @@
                             {{ message.content }}
                         </div>
                         <div v-else class="message-item" :class="{ 'user-message': message.chatType === 1 }">
-                            <img :src="message.chatType === 1 ? getUserAvatar(currentSessionId) : require('@/assets/xiaozhi-logo.svg')"
+                            <img :src="message.chatType === 1 ? getUserAvatar(currentSessionId) : require('@/assets/cheeko-logo.svg')"
                                 class="avatar" />
                             <div class="message-content">
                                 {{ extractContentFromString(message.content) }}

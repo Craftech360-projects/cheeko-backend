@@ -60,21 +60,21 @@ public class ServerSideManageController {
 
     @Operation(summary = "Notify Python server to update configuration")
     @PostMapping("/emit-action")
-    @LogOperation("通知python服务端更新配置")
+    @LogOperation("Notify Python server to update config")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<Boolean> emitServerAction(@RequestBody @Valid EmitSeverActionDTO emitSeverActionDTO) {
         if (emitSeverActionDTO.getAction() == null) {
-            throw new RenException("无效服务端操作");
+            throw new RenException("Invalid server action");
         }
         String wsText = sysParamsService.getValue(Constant.SERVER_WEBSOCKET, true);
         if (StringUtils.isBlank(wsText)) {
-            throw new RenException("未配置服务端WebSocket地址");
+            throw new RenException("Server WebSocket address not configured");
         }
         String targetWs = emitSeverActionDTO.getTargetWs();
         String[] wsList = wsText.split(";");
-        // 找到需要发起的
+        // Find target to call
         if (StringUtils.isBlank(targetWs) || !Arrays.asList(wsList).contains(targetWs)) {
-            throw new RenException("目标WebSocket地址不存在");
+            throw new RenException("Target WebSocket address does not exist");
         }
         return new Result<Boolean>().ok(emitServerActionByWs(targetWs, emitSeverActionDTO.getAction()));
     }

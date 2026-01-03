@@ -153,7 +153,7 @@ public class SysDictDataServiceImpl extends BaseServiceImpl<SysDictDataDao, SysD
         }
         boolean exists = baseDao.exists(queryWrapper);
         if (exists) {
-            throw new RenException("字典标签重复");
+            throw new RenException("Dictionary label already exists");
         }
     }
 

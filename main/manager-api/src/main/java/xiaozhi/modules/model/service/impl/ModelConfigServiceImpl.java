@@ -62,7 +62,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         .eq("is_enabled", 1)
                         .like(StringUtils.isNotBlank(modelName), "model_name", "%" + modelName + "%")
                         .select("id", "model_name", "config_json"));
-        // 处理获取到的内容
+        // Process the retrieved content
         return entities.stream().map(item -> {
             LlmModelBasicInfoDTO dto = new LlmModelBasicInfoDTO();
             dto.setId(item.getId());
@@ -88,16 +88,16 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     @Override
     public ModelConfigDTO add(String modelType, String provideCode, ModelConfigBodyDTO modelConfigBodyDTO) {
-        // 先验证有没有供应器
+        // First verify if provider exists
         if (StringUtils.isBlank(modelType) || StringUtils.isBlank(provideCode)) {
-            throw new RenException("modelType和provideCode不能为空");
+            throw new RenException("modelType and provideCode cannot be empty");
         }
         List<ModelProviderDTO> providerList = modelProviderService.getList(modelType, provideCode);
         if (CollectionUtil.isEmpty(providerList)) {
-            throw new RenException("供应器不存在");
+            throw new RenException("Provider does not exist");
         }
 
-        // 再保存供应器提供的模型
+        // Then save the model provided by provider
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(modelConfigBodyDTO, ModelConfigEntity.class);
         modelConfigEntity.setModelType(modelType);
         modelConfigEntity.setIsDefault(0);
@@ -107,13 +107,13 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
 
     @Override
     public ModelConfigDTO edit(String modelType, String provideCode, String id, ModelConfigBodyDTO modelConfigBodyDTO) {
-        // 先验证有没有供应器
+        // First verify if provider exists
         if (StringUtils.isBlank(modelType) || StringUtils.isBlank(provideCode)) {
-            throw new RenException("modelType和provideCode不能为空");
+            throw new RenException("modelType and provideCode cannot be empty");
         }
         List<ModelProviderDTO> providerList = modelProviderService.getList(modelType, provideCode);
         if (CollectionUtil.isEmpty(providerList)) {
-            throw new RenException("供应器不存在");
+            throw new RenException("Provider does not exist");
         }
         if (modelConfigBodyDTO.getConfigJson().containsKey("llm")) {
             String llm = modelConfigBodyDTO.getConfigJson().get("llm").toString();
@@ -122,33 +122,33 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             String selectModelType = (modelConfigEntity == null || modelConfigEntity.getModelType() == null) ? null
                     : modelConfigEntity.getModelType().toUpperCase();
             if (modelConfigEntity == null || !"LLM".equals(selectModelType)) {
-                throw new RenException("设置的LLM不存在");
+                throw new RenException("The configured LLM does not exist");
             }
             String type = modelConfigEntity.getConfigJson().get("type").toString();
-            // 如果查询大语言模型是openai或者ollama，意图识别选参数都可以
+            // If the LLM is openai or ollama, intent recognition parameters are acceptable
             if (!"openai".equals(type) && !"ollama".equals(type)) {
-                throw new RenException("设置的LLM不是openai和ollama");
+                throw new RenException("The configured LLM is not openai or ollama");
             }
         }
 
-        // 再更新供应器提供的模型
+        // Then update the model provided by provider
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(modelConfigBodyDTO, ModelConfigEntity.class);
         modelConfigEntity.setId(id);
         modelConfigEntity.setModelType(modelType);
         modelConfigDao.updateById(modelConfigEntity);
-        // 清除缓存
+        // Clear cache
         redisUtils.delete(RedisKeys.getModelConfigById(modelConfigEntity.getId()));
         return ConvertUtils.sourceToTarget(modelConfigEntity, ModelConfigDTO.class);
     }
 
     @Override
     public void delete(String id) {
-        // 查看是否是默认
+        // Check if it's the default model
         ModelConfigEntity modelConfig = modelConfigDao.selectById(id);
         if (modelConfig != null && modelConfig.getIsDefault() == 1) {
-            throw new RenException("该模型为默认模型，请先设置其他模型为默认模型");
+            throw new RenException("This is a default model, please set another model as default first");
         }
-        // 验证是否有引用
+        // Verify if there are references
         checkAgentReference(id);
         checkIntentConfigReference(id);
 
@@ -156,9 +156,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
     }
 
     /**
-     * 检查智能体配置是否有引用
-     * 
-     * @param modelId 模型ID
+     * Check if agent configuration has references
+     *
+     * @param modelId Model ID
      */
     private void checkAgentReference(String modelId) {
         List<AgentEntity> agents = agentDao.selectList(
@@ -180,14 +180,14 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
             String agentNames = agents.stream()
                     .map(AgentEntity::getAgentName)
                     .collect(Collectors.joining("、"));
-            throw new RenException(String.format("该模型配置已被智能体[%s]引用，无法删除", agentNames));
+            throw new RenException(String.format("This model configuration is referenced by agent(s) [%s] and cannot be deleted", agentNames));
         }
     }
 
     /**
-     * 检查意图识别配置是否有引用
-     * 
-     * @param modelId 模型ID
+     * Check if intent recognition configuration has references
+     *
+     * @param modelId Model ID
      */
     private void checkIntentConfigReference(String modelId) {
         ModelConfigEntity modelConfig = modelConfigDao.selectById(modelId);
@@ -198,7 +198,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                             .eq("model_type", "Intent")
                             .like("config_json", "%" + modelId + "%"));
             if (!intentConfigs.isEmpty()) {
-                throw new RenException("该LLM模型已被意图识别配置引用，无法删除");
+                throw new RenException("This LLM model is referenced by intent recognition configuration and cannot be deleted");
             }
         }
     }

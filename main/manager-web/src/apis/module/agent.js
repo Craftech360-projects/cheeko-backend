@@ -3,7 +3,7 @@ import RequestService from '../httpRequest';
 
 
 export default {
-    // 获取智能体列表 (Admin - shows all agents from all users)
+    // Get agent list (Admin - shows all agents from all users)
     getAgentList(params, callback) {
         // Support both old callback-only format and new params format
         if (typeof params === 'function') {
@@ -24,7 +24,7 @@ export default {
                 });
             }).send();
     },
-    // 获取用户自己的智能体列表 (User - shows only current user's agents)
+    // Get user's own agent list (User - shows only current user's agents)
     getUserAgentList(callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/list`)
@@ -39,7 +39,7 @@ export default {
                 });
             }).send();
     },
-    // 添加智能体
+    // Add agent
     addAgent(agentName, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent`)
@@ -55,7 +55,7 @@ export default {
                 });
             }).send();
     },
-    // 删除智能体
+    // Delete agent
     deleteAgent(agentId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}`)
@@ -70,7 +70,7 @@ export default {
                 });
             }).send();
     },
-    // 获取智能体配置
+    // Get agent config
     getDeviceConfig(agentId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}`)
@@ -80,13 +80,13 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取配置失败:', err);
+                console.error('Failed to get config:', err);
                 RequestService.reAjaxFun(() => {
                     this.getDeviceConfig(agentId, callback);
                 });
             }).send();
     },
-    // 配置智能体
+    // Configure agent
     updateAgentConfig(agentId, configData, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}`)
@@ -102,8 +102,8 @@ export default {
                 });
             }).send();
     },
-    // 新增方法：获取智能体模板
-    getAgentTemplate(callback) {  // 移除templateName参数
+    // Get agent template
+    getAgentTemplate(callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/template`)
             .method('GET')
@@ -112,13 +112,13 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('获取模板失败:', err);
+                console.error('Failed to get template:', err);
                 RequestService.reAjaxFun(() => {
                     this.getAgentTemplate(callback);
                 });
             }).send();
     },
-    // 更新智能体模板
+    // Update agent template
     updateAgentTemplate(templateId, templateData, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/template/${templateId}`)
@@ -129,13 +129,13 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('更新模板失败:', err);
+                console.error('Failed to update template:', err);
                 RequestService.reAjaxFun(() => {
                     this.updateAgentTemplate(templateId, templateData, callback);
                 });
             }).send();
     },
-    // 创建智能体模板
+    // Create agent template
     createAgentTemplate(templateData, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/template`)
@@ -146,13 +146,13 @@ export default {
                 callback(res);
             })
             .networkFail((err) => {
-                console.error('创建模板失败:', err);
+                console.error('Failed to create template:', err);
                 RequestService.reAjaxFun(() => {
                     this.createAgentTemplate(templateData, callback);
                 });
             }).send();
     },
-    // 获取智能体会话列表
+    // Get agent sessions list
     getAgentSessions(agentId, params, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}/sessions`)
@@ -168,7 +168,7 @@ export default {
                 });
             }).send();
     },
-    // 获取智能体聊天记录
+    // Get agent chat history
     getAgentChatHistory(agentId, sessionId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${agentId}/chat-history/${sessionId}`)
@@ -183,7 +183,7 @@ export default {
                 });
             }).send();
     },
-    // 获取音频下载ID
+    // Get audio download ID
     getAudioId(audioId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/audio/${audioId}`)
@@ -198,7 +198,7 @@ export default {
                 });
             }).send();
     },
-    // 获取智能体的MCP接入点地址
+    // Get agent MCP access point address
     getAgentMcpAccessAddress(agentId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/mcp/address/${agentId}`)
@@ -213,7 +213,7 @@ export default {
                 });
             }).send();
     },
-    // 获取智能体的MCP工具列表
+    // Get agent MCP tools list
     getAgentMcpToolsList(agentId, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/mcp/tools/${agentId}`)
@@ -228,7 +228,7 @@ export default {
                 });
             }).send();
     },
-    // 添加智能体的声纹
+    // Add agent voice print
     addAgentVoicePrint(voicePrintData, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print`)
@@ -244,7 +244,7 @@ export default {
                 });
             }).send();
     },
-    // 获取指定智能体声纹列表
+    // Get agent voice print list
     getAgentVoicePrintList(id,callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print/list/${id}`)
@@ -259,7 +259,7 @@ export default {
                 });
             }).send();
     },
-    // 删除智能体声纹
+    // Delete agent voice print
     deleteAgentVoicePrint(id, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print/${id}`)
@@ -274,7 +274,7 @@ export default {
                 });
             }).send();
     },
-    // 更新智能体声纹
+    // Update agent voice print
     updateAgentVoicePrint(voicePrintData, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/voice-print`)
@@ -290,7 +290,7 @@ export default {
                 });
             }).send();
     },
-    // 获取指定智能体用户类型聊天记录
+    // Get recent 50 user type chat history by agent ID
     getRecentlyFiftyByAgentId(id,callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${id}/chat-history/user`)
@@ -305,7 +305,7 @@ export default {
                 });
             }).send();
     },
-    // 获取指定智能体用户类型聊天记录
+    // Get content by audio ID
     getContentByAudioId(id,callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/${id}/chat-history/audio`)

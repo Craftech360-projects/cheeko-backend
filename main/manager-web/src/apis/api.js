@@ -1,4 +1,4 @@
-// 引入各个模块的请求
+// Import request modules
 import admin from './module/admin.js'
 import agent from './module/agent.js'
 import analytics from './module/analytics.js'
@@ -10,20 +10,20 @@ import timbre from "./module/timbre.js"
 import user from './module/user.js'
 
 /**
- * 接口地址
- * 开发时自动读取使用.env.development文件
- * 编译时自动读取使用.env.production文件
+ * API URL
+ * Development: automatically reads .env.development file
+ * Production: automatically reads .env.production file
  */
 const DEV_API_SERVICE = process.env.VUE_APP_API_BASE_URL
 
 /**
- * 根据开发环境返回接口url
+ * Get API URL based on environment
  * @returns {string}
  */
 export function getServiceUrl() {
-    // 在生产环境中，如果使用相对路径，需要动态构造完整URL指向后端端口
+    // In production, if using relative path, need to dynamically construct full URL pointing to backend port
     if (process.env.NODE_ENV === 'production' && DEV_API_SERVICE === '/toy') {
-        // 获取当前页面的hostname，但使用后端端口8002
+        // Get current page hostname but use backend port 8002
         const currentHost = window.location.hostname;
         const protocol = window.location.protocol;
         return `${protocol}//${currentHost}:8002/toy`;
@@ -31,7 +31,7 @@ export function getServiceUrl() {
     return DEV_API_SERVICE
 }
 
-/** request服务封装 */
+/** Request service wrapper */
 export default {
     getServiceUrl,
     user,

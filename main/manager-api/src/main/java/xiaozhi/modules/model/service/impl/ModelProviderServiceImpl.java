@@ -94,7 +94,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
     public static void main(String[] args) {
         String jsonString = "\"[]\"";
         JSONArray jsonArray = new JSONArray(jsonString);
-        System.out.println("字符串转 JSONArray: " + jsonArray.toString());
+        System.out.println("String to JSONArray: " + jsonArray.toString());
     }
 
     @Override
@@ -104,12 +104,12 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         modelProviderDTO.setUpdater(user.getId());
         modelProviderDTO.setCreateDate(new Date());
         modelProviderDTO.setUpdateDate(new Date());
-        // 去除Fields左右的双引号
+        // Remove quotes from Fields
 
         modelProviderDTO.setFields(modelProviderDTO.getFields());
         ModelProviderEntity entity = ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderEntity.class);
         if (modelProviderDao.insert(entity) == 0) {
-            throw new RenException("新增数据失败");
+            throw new RenException("Failed to add data");
         }
 
         return ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class);
@@ -122,7 +122,7 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
         modelProviderDTO.setUpdateDate(new Date());
         if (modelProviderDao
                 .updateById(ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderEntity.class)) == 0) {
-            throw new RenException("修改数据失败");
+            throw new RenException("Failed to update data");
         }
         return ConvertUtils.sourceToTarget(modelProviderDTO, ModelProviderDTO.class);
     }
@@ -130,14 +130,14 @@ public class ModelProviderServiceImpl extends BaseServiceImpl<ModelProviderDao, 
     @Override
     public void delete(String id) {
         if (modelProviderDao.deleteById(id) == 0) {
-            throw new RenException("删除数据失败");
+            throw new RenException("Failed to delete data");
         }
     }
 
     @Override
     public void delete(List<String> ids) {
         if (modelProviderDao.deleteBatchIds(ids) == 0) {
-            throw new RenException("删除数据失败");
+            throw new RenException("Failed to delete data");
         }
     }
 

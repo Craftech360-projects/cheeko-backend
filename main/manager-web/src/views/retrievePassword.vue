@@ -4,8 +4,8 @@
       <!-- Keep the same header -->
       <el-header>
         <div style="display: flex;align-items: center;margin-top: 15px;margin-left: 10px;gap: 10px;">
-          <img loading="lazy" alt="" src="@/assets/xiaozhi-logo.svg" style="width: 45px;height: 45px;" />
-          <!-- <img loading="lazy" alt="" src="@/assets/xiaozhi-ai.png" style="height: 18px;" /> -->
+          <img loading="lazy" alt="" src="@/assets/cheeko-logo.svg" style="width: 45px;height: 45px;" />
+          <!-- <img loading="lazy" alt="" src="@/assets/cheeko-ai.png" style="height: 18px;" /> -->
         </div>
       </el-header>
       <div class="login-person">
@@ -138,7 +138,7 @@ export default {
     this.fetchCaptcha();
   },
   methods: {
-    // 复用验证码获取方法
+    // Reuse captcha fetch method
     fetchCaptcha() {
       this.form.captchaId = getUUID();
       Api.user.getCaptcha(this.form.captchaId, (res) => {
@@ -147,13 +147,13 @@ export default {
           this.captchaUrl = URL.createObjectURL(blob);
 
         } else {
-          console.error('验证码加载异常:', error);
-          showDanger('验证码加载失败，点击刷新');
+          console.error('Captcha loading error:', error);
+          showDanger('Failed to load captcha, click to refresh');
         }
       });
     },
 
-    // 封装输入验证逻辑
+    // Encapsulate input validation logic
     validateInput(input, message) {
       if (!input.trim()) {
         showDanger(message);
@@ -162,26 +162,26 @@ export default {
       return true;
     },
 
-    // 发送手机验证码
+    // Send mobile verification code
     sendMobileCaptcha() {
       if (!validateMobile(this.form.mobile, this.form.areaCode)) {
-        showDanger('请输入正确的手机号码');
+        showDanger('Please enter a valid phone number');
         return;
       }
 
-      // 验证图形验证码
-      if (!this.validateInput(this.form.captcha, '请输入图形验证码')) {
+      // Validate captcha
+      if (!this.validateInput(this.form.captcha, 'Please enter the captcha')) {
         this.fetchCaptcha();
         return;
       }
 
-      // 清除可能存在的旧定时器
+      // Clear any existing timer
       if (this.timer) {
         clearInterval(this.timer);
         this.timer = null;
       }
 
-      // 开始倒计时
+      // Start countdown
       this.countdown = 60;
       this.timer = setInterval(() => {
         if (this.countdown > 0) {
@@ -192,37 +192,37 @@ export default {
         }
       }, 1000);
 
-      // 调用发送验证码接口
+      // Call send verification code API
       Api.user.sendSmsVerification({
         phone: this.form.areaCode + this.form.mobile,
         captcha: this.form.captcha,
         captchaId: this.form.captchaId
       }, (res) => {
-        showSuccess('验证码发送成功');
+        showSuccess('Verification code sent successfully');
       }, (err) => {
-        showDanger(err.data.msg || '验证码发送失败');
+        showDanger(err.data.msg || 'Failed to send verification code');
         this.countdown = 0;
         this.fetchCaptcha();
       });
     },
 
-    // 修改逻辑
+    // Password reset logic
     retrievePassword() {
-      // 验证逻辑
+      // Validation logic
       if (!validateMobile(this.form.mobile, this.form.areaCode)) {
-        showDanger('请输入正确的手机号码');
+        showDanger('Please enter a valid phone number');
         return;
       }
       if (!this.form.captcha) {
-        showDanger('请输入图形验证码');
+        showDanger('Please enter the captcha');
         return;
       }
       if (!this.form.mobileCaptcha) {
-        showDanger('请输入短信验证码');
+        showDanger('Please enter the SMS verification code');
         return;
       }
       if (this.form.newPassword !== this.form.confirmPassword) {
-        showDanger('两次输入的密码不一致');
+        showDanger('Passwords do not match');
         return;
       }
 
@@ -231,11 +231,11 @@ export default {
         password: this.form.newPassword,
         code: this.form.mobileCaptcha
       }, (res) => {
-        showSuccess('密码重置成功');
+        showSuccess('Password reset successful');
         goToPage('/login');
       }, (err) => {
-        showDanger(err.data.msg || '重置失败');
-        if (err.data != null && err.data.msg != null && err.data.msg.indexOf('图形验证码') > -1) {
+        showDanger(err.data.msg || 'Reset failed');
+        if (err.data != null && err.data.msg != null && err.data.msg.indexOf('captcha') > -1) {
           this.fetchCaptcha()
         }
       });

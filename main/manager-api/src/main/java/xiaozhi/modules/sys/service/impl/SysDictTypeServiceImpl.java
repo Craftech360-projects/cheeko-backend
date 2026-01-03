@@ -66,7 +66,7 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeDao, SysD
     public SysDictTypeVO get(Long id) {
         SysDictTypeEntity entity = baseDao.selectById(id);
         if (entity == null) {
-            throw new RenException("字典类型不存在");
+            throw new RenException("Dictionary type does not exist");
         }
 
         return ConvertUtils.sourceToTarget(entity, SysDictTypeVO.class);
@@ -75,7 +75,7 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeDao, SysD
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void save(SysDictTypeDTO dto) {
-        // 字典类型编码不能重复
+        // Dictionary type code must be unique
         checkDictTypeUnique(dto.getDictType(), null);
 
         SysDictTypeEntity entity = ConvertUtils.sourceToTarget(dto, SysDictTypeEntity.class);
@@ -86,7 +86,7 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeDao, SysD
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void update(SysDictTypeDTO dto) {
-        // 字典类型编码不能重复
+        // Dictionary type code must be unique
         checkDictTypeUnique(dto.getDictType(), String.valueOf(dto.getId()));
 
         SysDictTypeEntity entity = ConvertUtils.sourceToTarget(dto, SysDictTypeEntity.class);
@@ -97,11 +97,11 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeDao, SysD
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void delete(Long[] ids) {
-        // 先删除对应的字典数据
+        // First delete corresponding dictionary data
         for (Long id : ids) {
             sysDictDataService.deleteByTypeId(id);
         }
-        // 再删除字典类型
+        // Then delete dictionary type
         deleteBatchIds(Arrays.asList(ids));
     }
 
@@ -109,26 +109,26 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeDao, SysD
     public List<SysDictTypeVO> list(Map<String, Object> params) {
         List<SysDictTypeEntity> entityList = baseDao.selectList(getWrapper(params));
         List<SysDictTypeVO> sysDictTypeVOList = ConvertUtils.sourceToTarget(entityList, SysDictTypeVO.class);
-        // 设置用户名
+        // Set username
         setUserName(sysDictTypeVOList);
 
         return sysDictTypeVOList;
     }
 
     /**
-     * 设置用户名
+     * Set username
      *
-     * @param sysDictTypeList 字典类型集合
+     * @param sysDictTypeList Dictionary type collection
      */
     private void setUserName(List<SysDictTypeVO> sysDictTypeList) {
-        // 收集所有用户 ID
+        // Collect all user IDs
         Set<Long> userIds = sysDictTypeList.stream().flatMap(vo -> Stream.of(vo.getCreator(), vo.getUpdater()))
                 .filter(Objects::nonNull).collect(Collectors.toSet());
 
-        // 设置更新者和创建者名称
+        // Set creator and updater names
         if (!userIds.isEmpty()) {
             List<SysUserEntity> sysUserEntities = sysUserDao.selectBatchIds(userIds);
-            // 把List转成Map，Map<Long, String>
+            // Convert List to Map<Long, String>
             Map<Long, String> userNameMap = sysUserEntities.stream().collect(Collectors.toMap(SysUserEntity::getId,
                     SysUserEntity::getUsername, (existing, replacement) -> existing));
 
@@ -147,7 +147,7 @@ public class SysDictTypeServiceImpl extends BaseServiceImpl<SysDictTypeDao, SysD
         }
         boolean exists = baseDao.exists(queryWrapper);
         if (exists) {
-            throw new RenException("字典类型编码重复");
+            throw new RenException("Dictionary type code already exists");
         }
     }
 }

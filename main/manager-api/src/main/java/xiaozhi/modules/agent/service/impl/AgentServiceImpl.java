@@ -80,7 +80,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
         AgentInfoVO agent = agentDao.selectAgentInfoById(id);
 
         if (agent == null) {
-            throw new RenException("智能体不存在");
+            throw new RenException("Agent does not exist");
         }
 
         if (agent.getMemModelId() != null && agent.getMemModelId().equals(Constant.MEMORY_NO_MEM)) {
@@ -91,7 +91,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
                 agent.setChatHistoryConf(Constant.ChatHistoryConfEnum.RECORD_TEXT.getCode());
             }
         }
-        // 无需额外查询插件列表，已通过SQL查询出来
+        // No need to query plugin list separately, already fetched via SQL
         return agent;
     }
 
@@ -526,16 +526,16 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public String updateAgentMode(String agentId, String modeName) {
-        // 1. 验证智能体是否存在
+        // 1. Verify agent exists
         AgentEntity agent = this.selectById(agentId);
         if (agent == null) {
-            throw new RenException("智能体不存在");
+            throw new RenException("Agent does not exist");
         }
 
-        // 2. 根据模板名称查询模板
+        // 2. Query template by name
         AgentTemplateEntity template = agentTemplateService.getTemplateByName(modeName);
         if (template == null) {
-            throw new RenException("模板 '" + modeName + "' 不存在");
+            throw new RenException("Template '" + modeName + "' does not exist");
         }
 
         // Log old prompt
@@ -544,7 +544,7 @@ public class AgentServiceImpl extends BaseServiceImpl<AgentDao, AgentEntity> imp
             ? oldPrompt.substring(0, 100) + "..."
             : oldPrompt;
 
-        // 3. 将模板配置复制到智能体（保留智能体的身份信息和审计信息）
+        // 3. Copy template config to agent (preserve agent identity and audit info)
         agent.setAsrModelId(template.getAsrModelId());
         agent.setVadModelId(template.getVadModelId());
         agent.setLlmModelId(template.getLlmModelId());
