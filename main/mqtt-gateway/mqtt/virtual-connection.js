@@ -17,6 +17,7 @@ const {
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
+const { fetchMemoriesWithTimeout, buildDispatchMetadata } = require("../core/mem0-integration");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
@@ -397,20 +398,26 @@ class VirtualMQTTConnection {
       this.deviceMode = "manual";
     }
 
-    // Fetch current character and child profile for conversation mode
+    // Fetch current character, child profile, and Mem0 memories for conversation mode
     this.currentCharacter = null;
     this.childProfile = null;
+    this.mem0Memories = null;
     if (this.roomType === "conversation") {
-      // Fetch character and child profile in parallel for faster initialization
-      const [character, childProfile] = await Promise.all([
+      // Fetch character, child profile, and Mem0 memories in parallel for faster initialization
+      const [character, childProfile, memoryData] = await Promise.all([
         this.fetchCurrentCharacter(this.deviceId),
-        this.fetchChildProfile(this.deviceId)
+        this.fetchChildProfile(this.deviceId),
+        fetchMemoriesWithTimeout(this.deviceId)  // Mem0 memories with 2s timeout
       ]);
       this.currentCharacter = character;
       this.childProfile = childProfile;
+      this.mem0Memories = memoryData;
       logger.info(`🎭 [CHARACTER] Conversation mode - using character: "${this.currentCharacter}"`);
       if (this.childProfile) {
         logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
+      }
+      if (this.mem0Memories && this.mem0Memories.memories && this.mem0Memories.memories.length > 0) {
+        logger.info(`🧠 [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
       }
     }
 
@@ -608,12 +615,12 @@ class VirtualMQTTConnection {
             roomName,
             agentName,
             {
-              metadata: JSON.stringify({
-                device_mac: this.macAddress,
-                device_uuid: this.deviceId,
-                character: this.currentCharacter || "Cheeko",
-                child_profile: this.childProfile || null,
-                timestamp: Date.now(),
+              metadata: buildDispatchMetadata({
+                macAddress: this.macAddress,
+                deviceId: this.deviceId,
+                character: this.currentCharacter,
+                childProfile: this.childProfile,
+                memoryData: this.mem0Memories
               }),
             }
           );

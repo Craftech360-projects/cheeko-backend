@@ -106,14 +106,22 @@ async def entrypoint(ctx: JobContext):
     child_profile = None
     agent_id = None
 
-    # Check if child profile is in dispatch metadata (passed from MQTT gateway)
+    # Check if child profile and memories are in dispatch metadata (passed from MQTT gateway)
     dispatch_child_profile = None
+    dispatch_memories = []
+    dispatch_relations = []
+    dispatch_entities = []
     try:
         if hasattr(ctx, 'job') and ctx.job and ctx.job.metadata:
             dispatch_metadata = json.loads(ctx.job.metadata)
             dispatch_child_profile = dispatch_metadata.get('child_profile')
+            dispatch_memories = dispatch_metadata.get('long_term_memories', [])
+            dispatch_relations = dispatch_metadata.get('memory_relations', [])
+            dispatch_entities = dispatch_metadata.get('memory_entities', [])
             if dispatch_child_profile:
                 logger.info(f"👶 Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
+            if dispatch_memories:
+                logger.info(f"🧠 [MEM0] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
     except Exception as e:
         logger.debug(f"No dispatch metadata or error parsing: {e}")
 
@@ -186,7 +194,9 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Template analysis - Has Jinja: {has_placeholder}, Has child_name: {has_child_name}")
     
     if child_profile:
-        agent_prompt = render_prompt_with_profile(agent_prompt, child_profile)
+        agent_prompt = render_prompt_with_profile(
+            agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
+        )
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
@@ -301,8 +311,14 @@ async def entrypoint(ctx: JobContext):
         try:
             logger.info("Initiating cleanup")
 
-            # Extract and send chat history before closing session
-            await extract_and_send_chat_history(session, chat_history_service)
+            # Extract and send chat history before closing session (also sends to Mem0)
+            # Use asyncio.shield to protect from cancellation during job shutdown
+            try:
+                await asyncio.shield(
+                    extract_and_send_chat_history(session, chat_history_service, device_mac)
+                )
+            except asyncio.CancelledError:
+                logger.warning("Cleanup was cancelled but chat history send should complete")
 
             if session and hasattr(session, 'aclose'):
                 await session.aclose()
@@ -454,7 +470,15 @@ async def entrypoint(ctx: JobContext):
     assistant.set_session_context(ctx)
     # audio_player.set_session(session)  # COMMENTED OUT - Music service disabled
 
-    await session.start(room=ctx.room, agent=assistant)
+    # Start session with 16kHz input audio to match MQTT gateway
+    await session.start(
+        room=ctx.room,
+        agent=assistant,
+        room_input_options=RoomInputOptions(
+            audio_sample_rate=16000,
+            audio_num_channels=1
+        )
+    )
 
     init_elapsed = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"Total initialization: {init_elapsed:.0f}ms")

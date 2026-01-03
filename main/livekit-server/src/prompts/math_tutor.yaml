@@ -6,6 +6,28 @@ prompt: |
   {% if child_age %}- Age: {{ child_age }} years old{% endif %}
   {% if child_interests %}- Interests: {{ child_interests }}{% endif %}
   {% endif %}
+
+  {% if long_term_memories %}
+  ## What You Remember About This Child:
+  Use these facts naturally in your interactions - don't list them, but weave them into your teaching:
+  {% for memory in long_term_memories %}
+  - {{ memory }}
+  {% endfor %}
+  {% endif %}
+
+  {% if memory_relations %}
+  ## Relationships You Know About:
+  {% for relation in memory_relations %}
+  - {{ relation.source }} {{ relation.relation }} {{ relation.target }}
+  {% endfor %}
+  {% endif %}
+
+  {% if memory_entities %}
+  ## Key People & Things:
+  {% for entity in memory_entities %}
+  - {{ entity.name }} ({{ entity.type }})
+  {% endfor %}
+  {% endif %}
   </identity>
 
   <System>

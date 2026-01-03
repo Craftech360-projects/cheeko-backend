@@ -75,7 +75,14 @@ async def delete_livekit_room(room_name: str):
 # PROMPT LOADING
 # ============================================================================
 
-def load_game_prompt(agent_name: str, child_profile: dict = None, extra_vars: dict = None) -> Optional[str]:
+def load_game_prompt(
+    agent_name: str,
+    child_profile: dict = None,
+    extra_vars: dict = None,
+    long_term_memories: list = None,
+    memory_relations: list = None,
+    memory_entities: list = None
+) -> Optional[str]:
     """
     Load game-specific prompt from YAML file and render with child profile.
 
@@ -83,6 +90,9 @@ def load_game_prompt(agent_name: str, child_profile: dict = None, extra_vars: di
         agent_name: The game name ("Math Tutor", "Riddle Solver", "Word Ladder")
         child_profile: Optional child profile for personalization
         extra_vars: Optional extra template variables (e.g., start_word, target_word)
+        long_term_memories: List of memory strings from Mem0
+        memory_relations: List of graph relations from Mem0
+        memory_entities: List of graph entities from Mem0
 
     Returns:
         str: Rendered prompt or None if file not found
@@ -106,7 +116,7 @@ def load_game_prompt(agent_name: str, child_profile: dict = None, extra_vars: di
             logger.error(f"Game prompt file not found: {prompt_file}")
             return None
 
-        with open(prompt_file, 'r') as f:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
             prompt_data = yaml.safe_load(f)
 
         prompt_template = prompt_data.get('prompt', '')
@@ -146,8 +156,18 @@ def load_game_prompt(agent_name: str, child_profile: dict = None, extra_vars: di
                     'additional_notes': child_profile.get('additionalNotes', ''),
                 })
                 logger.info(f"Added child profile: {child_profile.get('name')}, age {child_profile.get('age')}")
+
             else:
                 logger.warning("No child profile available for prompt rendering")
+
+            # Add Mem0 memories and graph data
+            template_vars.update({
+                'long_term_memories': long_term_memories or [],
+                'memory_relations': memory_relations or [],
+                'memory_entities': memory_entities or [],
+            })
+            if long_term_memories:
+                logger.info(f"Added {len(long_term_memories)} memories to template")
 
             prompt_template = template.render(**template_vars)
 
@@ -161,13 +181,22 @@ def load_game_prompt(agent_name: str, child_profile: dict = None, extra_vars: di
         return None
 
 
-def render_prompt_with_profile(agent_prompt: str, child_profile: dict) -> str:
+def render_prompt_with_profile(
+    agent_prompt: str,
+    child_profile: dict,
+    long_term_memories: list = None,
+    memory_relations: list = None,
+    memory_entities: list = None
+) -> str:
     """
-    Render prompt template with child profile using Jinja2
+    Render prompt template with child profile and long-term memories using Jinja2
 
     Args:
         agent_prompt: Prompt template string
         child_profile: Child profile data
+        long_term_memories: List of memory strings from Mem0
+        memory_relations: List of graph relations from Mem0
+        memory_entities: List of graph entities from Mem0
 
     Returns:
         str: Rendered prompt
@@ -208,10 +237,15 @@ def render_prompt_with_profile(agent_prompt: str, child_profile: dict) -> str:
             'child_interests': interests,
             'primary_language': child_profile.get('primaryLanguage', 'English'),
             'additional_notes': child_profile.get('additionalNotes', ''),
+            'long_term_memories': long_term_memories or [],  # Mem0 memories
+            'memory_relations': memory_relations or [],  # Mem0 graph relations
+            'memory_entities': memory_entities or [],  # Mem0 graph entities
         }
 
         rendered = template.render(**template_vars)
         logger.info(f"Rendered template for: {child_profile.get('name')}")
+        if long_term_memories:
+            logger.info(f"Injected {len(long_term_memories)} long-term memories into prompt")
         return rendered
 
     except Exception as e:
@@ -435,13 +469,14 @@ def _is_gemini_thinking(text: str) -> bool:
     return False
 
 
-async def extract_and_send_chat_history(session, chat_history_service):
+async def extract_and_send_chat_history(session, chat_history_service, device_mac: str = None):
     """
-    Extract chat history from session and send to API
+    Extract chat history from session and send to API and Mem0
 
     Args:
         session: AgentSession instance
         chat_history_service: ChatHistoryService instance
+        device_mac: Device MAC address for Mem0 (optional)
 
     Returns:
         bool: True if successful, False otherwise
@@ -488,7 +523,59 @@ async def extract_and_send_chat_history(session, chat_history_service):
 
             logger.info(f"📝 Extracted {saved_count} messages from session.history (skipped {skipped_count} thinking)")
 
-        await chat_history_service.cleanup()
+        # Send to BOTH Manager API and Mem0 in parallel for speed
+        mem0_task = None
+        if device_mac and chat_history_service.conversation_history:
+            try:
+                from src.services.mem0_service import mem0_service
+                if mem0_service.is_ready():
+                    # Copy the history to avoid race conditions
+                    history_copy = list(chat_history_service.conversation_history)
+                    session_id = chat_history_service.session_id
+                    logger.info(f"🧠 [MEM0] Sending {len(history_copy)} messages to Mem0...")
+                    
+                    # Create Mem0 task (don't await yet)
+                    mem0_task = asyncio.create_task(
+                        mem0_service.add_conversation(
+                            user_id=device_mac,
+                            messages=history_copy,
+                            session_id=session_id
+                        )
+                    )
+                else:
+                    logger.warning("🧠 [MEM0] Service not ready - check MEM0_API_KEY")
+            except Exception as e:
+                logger.warning(f"🧠 [MEM0] Failed to prepare task: {e}")
+        else:
+            if not device_mac:
+                logger.debug("🧠 [MEM0] Skipping - no device_mac")
+            elif not chat_history_service.conversation_history:
+                logger.debug("🧠 [MEM0] Skipping - no conversation history")
+
+        # Send to Manager API and Mem0 in parallel
+        tasks = [chat_history_service.cleanup()]
+        if mem0_task:
+            tasks.append(mem0_task)
+        
+        # Wait for both to complete (with timeout)
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=15.0  # 15 second total timeout
+            )
+            
+            # Check Mem0 result if it ran
+            if mem0_task:
+                mem0_result = results[1] if len(results) > 1 else None
+                if isinstance(mem0_result, Exception):
+                    logger.warning(f"🧠 [MEM0] Failed: {mem0_result}")
+                elif mem0_result:
+                    logger.info(f"🧠 [MEM0] ✅ Successfully sent to Mem0")
+                else:
+                    logger.warning(f"🧠 [MEM0] Send returned False")
+        except asyncio.TimeoutError:
+            logger.warning("⏱️ Timeout waiting for Manager API and Mem0 sends")
+
         return True
     except Exception as e:
         logger.warning(f"Error extracting chat history: {e}")
@@ -543,14 +630,22 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
         child_profile = None
         agent_id = None
 
-        # Check if child profile is in dispatch metadata (passed from MQTT gateway)
+        # Check if child profile and memories are in dispatch metadata (passed from MQTT gateway)
         dispatch_child_profile = None
+        dispatch_memories = []
+        dispatch_relations = []
+        dispatch_entities = []
         try:
             if hasattr(ctx, 'job') and ctx.job and ctx.job.metadata:
                 dispatch_metadata = json.loads(ctx.job.metadata)
                 dispatch_child_profile = dispatch_metadata.get('child_profile')
+                dispatch_memories = dispatch_metadata.get('long_term_memories', [])
+                dispatch_relations = dispatch_metadata.get('memory_relations', [])
+                dispatch_entities = dispatch_metadata.get('memory_entities', [])
                 if dispatch_child_profile:
                     logger.info(f"Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
+                if dispatch_memories:
+                    logger.info(f"🧠 [MEM0] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
         except Exception as e:
             logger.debug(f"No dispatch metadata or error parsing: {e}")
 
@@ -628,9 +723,11 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
                 logger.error(f"Error in API calls: {e}")
                 agent_prompt = ConfigLoader.get_default_prompt()
 
-        # Render prompt with child profile
+        # Render prompt with child profile and long-term memories
         if child_profile:
-            agent_prompt = render_prompt_with_profile(agent_prompt, child_profile)
+            agent_prompt = render_prompt_with_profile(
+                agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
+            )
 
         # Log prompt info
         logger.info(f"Final prompt length: {len(agent_prompt)} chars")
