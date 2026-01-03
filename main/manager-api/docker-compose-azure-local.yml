@@ -2,20 +2,20 @@ version: '3.8'
 
 services:
   # MySQL Database on port 3306 (same as Azure)
-  xiaozhi-mysql:
+  cheeko-mysql:
     image: mysql:8.0
-    container_name: xiaozhi-mysql
+    container_name: cheeko-mysql
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: xiaozhi_db
-      MYSQL_USER: xiaozhi_user
-      MYSQL_PASSWORD: xiaozhi_password123
+      MYSQL_DATABASE: cheeko_db
+      MYSQL_USER: cheeko_user
+      MYSQL_PASSWORD: cheeko_password123
       TZ: Asia/Shanghai
     ports:
       - "3306:3306"  # Same port as Azure
     volumes:
-      - xiaozhi_mysql_data:/var/lib/mysql
+      - cheeko_mysql_data:/var/lib/mysql
     command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
@@ -23,19 +23,19 @@ services:
       interval: 10s
       retries: 10
     networks:
-      - xiaozhi-network
+      - cheeko-network
 
   # Redis Cache on port 6379 (same as Azure)
-  xiaozhi-redis:
+  cheeko-redis:
     image: redis:7-alpine
-    container_name: xiaozhi-redis
+    container_name: cheeko-redis
     restart: always
     environment:
       TZ: Asia/Shanghai
     ports:
       - "6379:6379"  # Same port as Azure
     volumes:
-      - xiaozhi_redis_data:/data
+      - cheeko_redis_data:/data
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -43,14 +43,14 @@ services:
       timeout: 5s
       retries: 3
     networks:
-      - xiaozhi-network
+      - cheeko-network
 
 volumes:
-  xiaozhi_mysql_data:
+  cheeko_mysql_data:
     driver: local
-  xiaozhi_redis_data:
+  cheeko_redis_data:
     driver: local
 
 networks:
-  xiaozhi-network:
+  cheeko-network:
     driver: bridge

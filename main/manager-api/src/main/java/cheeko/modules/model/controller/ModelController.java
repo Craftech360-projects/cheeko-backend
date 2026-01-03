@@ -1,0 +1,161 @@
+package cheeko.modules.model.controller;
+
+import java.util.List;
+
+import org.apache.shiro.authz.annotation.RequiresPermissions;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.AllArgsConstructor;
+import cheeko.common.page.PageData;
+import cheeko.common.utils.ConvertUtils;
+import cheeko.common.utils.Result;
+import cheeko.modules.agent.service.AgentTemplateService;
+import cheeko.modules.config.service.ConfigService;
+import cheeko.modules.model.dto.*;
+import cheeko.modules.model.entity.ModelConfigEntity;
+import cheeko.modules.model.service.ModelConfigService;
+import cheeko.modules.model.service.ModelProviderService;
+import cheeko.modules.timbre.service.TimbreService;
+
+@AllArgsConstructor
+@RestController
+@RequestMapping("/models")
+@Tag(name = "Model Configuration")
+public class ModelController {
+
+    private final ModelProviderService modelProviderService;
+    private final TimbreService timbreService;
+    private final ModelConfigService modelConfigService;
+    private final ConfigService configService;
+    private final AgentTemplateService agentTemplateService;
+
+    @GetMapping("/names")
+    @Operation(summary = "Get all model names")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<ModelBasicInfoDTO>> getModelNames(@RequestParam String modelType,
+            @RequestParam(required = false) String modelName) {
+        List<ModelBasicInfoDTO> modelList = modelConfigService.getModelCodeList(modelType, modelName);
+        return new Result<List<ModelBasicInfoDTO>>().ok(modelList);
+    }
+
+    @GetMapping("/llm/names")
+    @Operation(summary = "Get LLM model information")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<LlmModelBasicInfoDTO>> getLlmModelCodeList(@RequestParam(required = false) String modelName) {
+        List<LlmModelBasicInfoDTO> llmModelCodeList = modelConfigService.getLlmModelCodeList(modelName);
+        return new Result<List<LlmModelBasicInfoDTO>>().ok(llmModelCodeList);
+    }
+
+    @GetMapping("/{modelType}/provideTypes")
+    @Operation(summary = "Get model provider list")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<List<ModelProviderDTO>> getModelProviderList(@PathVariable String modelType) {
+        List<ModelProviderDTO> modelProviderDTOS = modelProviderService.getListByModelType(modelType);
+        return new Result<List<ModelProviderDTO>>().ok(modelProviderDTOS);
+    }
+
+    @GetMapping("/list")
+    @Operation(summary = "Get model configuration list")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<PageData<ModelConfigDTO>> getModelConfigList(
+            @RequestParam(required = true) String modelType,
+            @RequestParam(required = false) String modelName,
+            @RequestParam(required = true, defaultValue = "0") String page,
+            @RequestParam(required = true, defaultValue = "10") String limit) {
+        PageData<ModelConfigDTO> pageList = modelConfigService.getPageList(modelType, modelName, page, limit);
+        return new Result<PageData<ModelConfigDTO>>().ok(pageList);
+    }
+
+    @PostMapping("/{modelType}/{provideCode}")
+    @Operation(summary = "Add model configuration")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelConfigDTO> addModelConfig(@PathVariable String modelType,
+            @PathVariable String provideCode,
+            @RequestBody ModelConfigBodyDTO modelConfigBodyDTO) {
+        ModelConfigDTO modelConfigDTO = modelConfigService.add(modelType, provideCode, modelConfigBodyDTO);
+        configService.getConfig(false);
+        return new Result<ModelConfigDTO>().ok(modelConfigDTO);
+    }
+
+    @PutMapping("/{modelType}/{provideCode}/{id}")
+    @Operation(summary = "Edit model configuration")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelConfigDTO> editModelConfig(@PathVariable String modelType,
+            @PathVariable String provideCode,
+            @PathVariable String id,
+            @RequestBody ModelConfigBodyDTO modelConfigBodyDTO) {
+        ModelConfigDTO modelConfigDTO = modelConfigService.edit(modelType, provideCode, id, modelConfigBodyDTO);
+        configService.getConfig(false);
+        return new Result<ModelConfigDTO>().ok(modelConfigDTO);
+    }
+
+    @DeleteMapping("/{id}")
+    @Operation(summary = "Delete model configuration")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> deleteModelConfig(@PathVariable String id) {
+        modelConfigService.delete(id);
+        return new Result<>();
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Get model configuration")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<ModelConfigDTO> getModelConfig(@PathVariable String id) {
+        ModelConfigEntity item = modelConfigService.selectById(id);
+        ModelConfigDTO modelConfigDTO = ConvertUtils.sourceToTarget(item, ModelConfigDTO.class);
+        return new Result<ModelConfigDTO>().ok(modelConfigDTO);
+    }
+
+    @PutMapping("/enable/{id}/{status}")
+    @Operation(summary = "Enable/disable model configuration")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> enableModelConfig(@PathVariable String id, @PathVariable Integer status) {
+        ModelConfigEntity entity = modelConfigService.selectById(id);
+        if (entity == null) {
+            return new Result<Void>().error("ModelConfiguration不Exist");
+        }
+        entity.setIsEnabled(status);
+        modelConfigService.updateById(entity);
+        return new Result<Void>();
+    }
+
+    @PutMapping("/default/{id}")
+    @Operation(summary = "Set default model")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> setDefaultModel(@PathVariable String id) {
+        ModelConfigEntity entity = modelConfigService.selectById(id);
+        if (entity == null) {
+            return new Result<Void>().error("ModelConfiguration不Exist");
+        }
+        // 将OtherModelSetAsNonDefault
+        modelConfigService.setDefaultModel(entity.getModelType(), 0);
+        entity.setIsEnabled(1);
+        entity.setIsDefault(1);
+        modelConfigService.updateById(entity);
+
+        // UpdateTemplateTable中Correspondings ModelID
+        agentTemplateService.updateDefaultTemplateModelId(entity.getModelType(), entity.getId());
+
+        configService.getConfig(false);
+        return new Result<Void>();
+    }
+
+    @GetMapping("/{modelId}/voices")
+    @Operation(summary = "Get model voices")
+    @RequiresPermissions("sys:role:normal")
+    public Result<List<VoiceDTO>> getVoiceList(@PathVariable String modelId,
+            @RequestParam(required = false) String voiceName) {
+        List<VoiceDTO> voiceList = timbreService.getVoiceNames(modelId, voiceName);
+        return new Result<List<VoiceDTO>>().ok(voiceList);
+    }
+}

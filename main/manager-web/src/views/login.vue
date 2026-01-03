@@ -201,7 +201,7 @@ export default {
         goToPage('/home');
       }, (err) => {
         showDanger(err.data.msg || 'Login failed')
-        if (err.data != null && err.data.msg != null && (err.data.msg.indexOf('verification code') > -1 || err.data.msg.indexOf('图形验证码') > -1)) {
+        if (err.data != null && err.data.msg != null && err.data.msg.indexOf('verification code') > -1) {
           this.fetchCaptcha()
         }
       })
