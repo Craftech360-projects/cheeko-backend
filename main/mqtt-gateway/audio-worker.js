@@ -28,81 +28,121 @@ const { OpusEncoder } = require('@discordjs/opus');
  */
 class AudioProcessor {
   constructor() {
-    // Create Opus encoder/decoder instances for this worker
-    // Each worker has its own isolated encoder/decoder
-    this.outgoingEncoder = null; // 24kHz for LiveKit → Device
-    this.incomingDecoder = null; // 16kHz for Device → LiveKit
+    // Per-session encoder/decoder instances for this worker
+    // sessions: sessionId -> { outgoingEncoder, incomingDecoder }
+    this.sessions = new Map();
+
+    // Global codec configs initialized via init_encoder / init_decoder
+    this.encoderConfig = null; // { sampleRate, channels }
+    this.decoderConfig = null; // { sampleRate, channels }
 
     console.log('🧵 [WORKER] AudioProcessor initialized in worker thread');
   }
 
-  /**
-   * Initialize Opus encoder for outgoing audio (LiveKit → Device)
-   * @param {number} sampleRate - Sample rate (e.g., 24000)
-   * @param {number} channels - Number of channels (1 for mono)
-   */
-  initOutgoingEncoder(sampleRate, channels) {
-    if (!this.outgoingEncoder) {
-      this.outgoingEncoder = new OpusEncoder(sampleRate, channels);
-      console.log(`🧵 [WORKER] Outgoing encoder initialized: ${sampleRate}Hz ${channels}ch`);
+  getOrCreateSession(sessionId) {
+    const key = sessionId || 'default';
+    let session = this.sessions.get(key);
+    if (!session) {
+      session = { outgoingEncoder: null, incomingDecoder: null };
+      this.sessions.set(key, session);
     }
+    return session;
   }
 
   /**
-   * Initialize Opus decoder for incoming audio (Device → LiveKit)
-   * @param {number} sampleRate - Sample rate (e.g., 16000)
-   * @param {number} channels - Number of channels (1 for mono)
+   * Initialize Opus encoder config for outgoing audio (LiveKit → Device)
+   * Stores the sampleRate/channels so per-session encoders can be created lazily.
+   */
+  initOutgoingEncoder(sampleRate, channels) {
+    this.encoderConfig = { sampleRate, channels };
+    console.log(`🧵 [WORKER] Outgoing encoder config set: ${sampleRate}Hz ${channels}ch`);
+  }
+
+  /**
+   * Initialize Opus decoder config for incoming audio (Device → LiveKit)
+   * Stores the sampleRate/channels so per-session decoders can be created lazily.
    */
   initIncomingDecoder(sampleRate, channels) {
-    if (!this.incomingDecoder) {
-      this.incomingDecoder = new OpusEncoder(sampleRate, channels); // OpusEncoder handles both encode/decode
-      console.log(`🧵 [WORKER] Incoming decoder initialized: ${sampleRate}Hz ${channels}ch`);
-    }
+    this.decoderConfig = { sampleRate, channels };
+    console.log(`🧵 [WORKER] Incoming decoder config set: ${sampleRate}Hz ${channels}ch`);
   }
 
   /**
    * Encode PCM audio to Opus (for outgoing audio)
-   * @param {Buffer} pcmData - PCM audio data (Int16)
+   * @param {string} sessionId - Logical session identifier
+   * @param {ArrayBuffer} buffer - PCM audio data buffer (Int16 samples)
+   * @param {number} byteOffset - Byte offset into buffer
+   * @param {number} byteLength - Number of bytes to read
    * @param {number} frameSize - Frame size in samples
    * @returns {Buffer} Encoded Opus data
    */
-  encodeOpus(pcmData, frameSize) {
-    if (!this.outgoingEncoder) {
-      throw new Error('Outgoing encoder not initialized');
+  encodeOpus(sessionId, buffer, byteOffset, byteLength, frameSize) {
+    const session = this.getOrCreateSession(sessionId);
+
+    // Lazily create per-session encoder using configured params
+    if (!session.outgoingEncoder) {
+      const cfg = this.encoderConfig || { sampleRate: 24000, channels: 1 };
+      session.outgoingEncoder = new OpusEncoder(cfg.sampleRate, cfg.channels);
+      console.log(`🧵 [WORKER] Created outgoing encoder for session ${sessionId || 'default'}: ${cfg.sampleRate}Hz ${cfg.channels}ch`);
     }
 
+    // Create a Buffer view over the transferred ArrayBuffer (zero-copy in worker)
+    const pcmBuffer = Buffer.from(buffer, byteOffset, byteLength);
+
     const startTime = process.hrtime.bigint();
-    const opusData = this.outgoingEncoder.encode(pcmData, frameSize);
+    const opusData = session.outgoingEncoder.encode(pcmBuffer, frameSize);
     const duration = Number(process.hrtime.bigint() - startTime) / 1000000; // ms
 
     return {
       data: opusData,
       processingTime: duration,
-      inputSize: pcmData.length,
+      inputSize: byteLength,
       outputSize: opusData.length
     };
   }
 
   /**
    * Decode Opus audio to PCM (for incoming audio)
-   * @param {Buffer} opusData - Opus encoded data
+   * @param {string} sessionId - Logical session identifier
+   * @param {ArrayBuffer} buffer - Opus encoded data buffer
+   * @param {number} byteOffset - Byte offset into buffer
+   * @param {number} byteLength - Number of bytes to read
    * @returns {Buffer} Decoded PCM data
    */
-  decodeOpus(opusData) {
-    if (!this.incomingDecoder) {
-      throw new Error('Incoming decoder not initialized');
+  decodeOpus(sessionId, buffer, byteOffset, byteLength) {
+    const session = this.getOrCreateSession(sessionId);
+
+    // Lazily create per-session decoder using configured params
+    if (!session.incomingDecoder) {
+      const cfg = this.decoderConfig || { sampleRate: 16000, channels: 1 };
+      session.incomingDecoder = new OpusEncoder(cfg.sampleRate, cfg.channels);
+      console.log(`🧵 [WORKER] Created incoming decoder for session ${sessionId || 'default'}: ${cfg.sampleRate}Hz ${cfg.channels}ch`);
     }
 
+    // Create a Buffer view over the transferred ArrayBuffer
+    const opusBuffer = Buffer.from(buffer, byteOffset, byteLength);
+
     const startTime = process.hrtime.bigint();
-    const pcmData = this.incomingDecoder.decode(opusData);
+    const pcmData = session.incomingDecoder.decode(opusBuffer);
     const duration = Number(process.hrtime.bigint() - startTime) / 1000000; // ms
 
     return {
       data: pcmData,
       processingTime: duration,
-      inputSize: opusData.length,
+      inputSize: byteLength,
       outputSize: pcmData.length
     };
+  }
+
+  /**
+   * Cleanup per-session codec state
+   */
+  cleanupSession(sessionId) {
+    const key = sessionId || 'default';
+    if (this.sessions.has(key)) {
+      this.sessions.delete(key);
+      console.log(`🧵 [WORKER] Cleaned up codecs for session ${key}`);
+    }
   }
 }
 
@@ -130,11 +170,27 @@ parentPort.on('message', (message) => {
         break;
 
       case 'encode':
-        result = processor.encodeOpus(data.pcmData, data.frameSize);
+        result = processor.encodeOpus(
+          data.sessionId,
+          data.buffer,
+          data.byteOffset || 0,
+          data.byteLength,
+          data.frameSize
+        );
         break;
 
       case 'decode':
-        result = processor.decodeOpus(data.opusData);
+        result = processor.decodeOpus(
+          data.sessionId,
+          data.buffer,
+          data.byteOffset || 0,
+          data.byteLength
+        );
+        break;
+
+      case 'cleanup_session':
+        processor.cleanupSession(data.sessionId);
+        result = { success: true };
         break;
 
       default:

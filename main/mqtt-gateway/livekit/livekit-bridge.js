@@ -35,12 +35,15 @@ function setConfigManager(cm) {
   configManager = cm;
 }
 class LiveKitBridge extends EventEmitter {
-  constructor(connection, protocolVersion, macAddress, uuid, userData) {
+  constructor(connection, protocolVersion, macAddress, uuid, userData, workerPool) {
     super();
     this.connection = connection;
     this.macAddress = macAddress;
     this.uuid = uuid;
     this.userData = userData;
+    // Unique session identifier for shared worker pool
+    this.sessionId = this.uuid;
+    this.workerPool = workerPool; // Shared WorkerPoolManager (global)
     this.roomType = connection.roomType || "conversation"; // ADD: Store room type from connection
     this.room = null;
     this.roomService = null; // Store roomService for cleanup on disconnect
@@ -92,10 +95,9 @@ class LiveKitBridge extends EventEmitter {
     this.targetFrameBytes = this.targetFrameSize * 2; // 2880 bytes for 16-bit PCM
 
     // PHASE 2: Initialize Worker Pool for parallel audio processing
-    this.workerPool = new WorkerPoolManager(4); // Start with minWorkers (4) for proper scaling
-    // console.log(`✅ [PHASE-2] Worker pool initialized for ${this.macAddress}`);
+    // Use shared/global WorkerPoolManager instead of per-bridge pools
 
-    // Initialize workers with encoder/decoder settings
+    // Initialize workers with encoder/decoder settings (idempotent across sessions)
     this.workerPool
       .initializeWorker("init_encoder", {
         sampleRate: OUTGOING_SAMPLE_RATE,
@@ -216,6 +218,7 @@ class LiveKitBridge extends EventEmitter {
         // TEMPORARY: Use synchronous encoding to avoid worker thread issues
         try {
           const opusBuffer = await this.workerPool.encodeOpus(
+            this.sessionId,
             frameData,
             this.targetFrameSize
           );
@@ -842,7 +845,7 @@ class LiveKitBridge extends EventEmitter {
       if (isOpus) {
         // PHASE 2: Use worker thread for decoding (non-blocking)
         try {
-          const pcmBuffer = await this.workerPool.decodeOpus(opusData);
+          const pcmBuffer = await this.workerPool.decodeOpus(this.sessionId, opusData);
 
           // console.log(`✅ [WORKER DECODE] Decoded ${opusData.length}B Opus → ${pcmBuffer.length}B PCM`);
 
@@ -2079,6 +2082,11 @@ class LiveKitBridge extends EventEmitter {
       }
 
       this.room = null;
+    }
+
+    // Tell the shared worker pool to cleanup per-session codec state
+    if (this.workerPool && this.sessionId && this.workerPool.cleanupSession) {
+      this.workerPool.cleanupSession(this.sessionId);
     }
   }
 

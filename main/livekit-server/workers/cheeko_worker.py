@@ -414,6 +414,27 @@ async def entrypoint(ctx: JobContext):
                 asyncio.create_task(cleanup_room_and_session())
                 return
 
+            # Handle text input forwarded from MQTT gateway (RFID text)
+            if msg_type == 'user_text':
+                text = (message.get('text') or '').strip()
+                if not text:
+                    logger.warning("⚠️ user_text message with empty text, ignoring")
+                    return
+
+                logger.info(f"💬 [USER_TEXT] Received from gateway: {text}")
+                logger.info(f"🧾 [USER_TEXT-RAW] Payload: {message}")
+
+                async def handle_user_text():
+                    try:
+                        # Optional: mark agent as listening for LED state
+                        await emit_agent_state("listening")
+                        # Treat this as a normal user request/question for Gemini
+                        await session.generate_reply(instructions=text)
+                    except Exception as e:
+                        logger.error(f"❌ Error handling user_text: {e}")
+
+                asyncio.create_task(handle_user_text())
+
         except Exception as e:
             logger.error(f"Error handling data channel message: {e}")
 

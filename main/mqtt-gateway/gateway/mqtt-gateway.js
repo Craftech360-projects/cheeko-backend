@@ -49,8 +49,75 @@ function setConfigManager(cm) {
   setVirtualConnectionConfigManager(cm);
 }
 
+/**
+ * Lookup RFID question prompt text from Manager API by RFID UID.
+ * Uses the open device-tap endpoint in RfidCardMappingController:
+ *   GET /toy/admin/rfid/card/lookup/{rfidUid}
+ */
+async function fetchRfidPromptTextFromManagerApi(rfidUid) {
+  try {
+    const trimmedUid = (rfidUid || "").trim();
+    if (!trimmedUid) {
+      logger.warn(`⚠️ [RFID-LOOKUP] Empty rfidUid provided`);
+      return null;
+    }
+
+    const baseUrl = process.env.MANAGER_API_URL || "";
+    if (!baseUrl) {
+      logger.warn(
+        `⚠️ [RFID-LOOKUP] MANAGER_API_URL not set, cannot look up RFID question for UID ${trimmedUid}`
+      );
+      return null;
+    }
+
+    const apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/lookup/${encodeURIComponent(
+      trimmedUid
+    )}`;
+
+    logger.info(
+      `🔍 [RFID-LOOKUP] Looking up question for RFID UID ${trimmedUid} via ${apiUrl}`
+    );
+
+    const response = await axios.get(apiUrl, { timeout: 5000 });
+    const body = response.data;
+
+    if (!body || body.code !== 0 || !body.data) {
+      logger.warn(
+        `⚠️ [RFID-LOOKUP] Lookup failed for UID ${trimmedUid}: code=${
+          body && body.code
+        }, msg=${body && body.msg}`
+      );
+      return null;
+    }
+
+    const promptText = (body.data.promptText || "").trim();
+    if (!promptText) {
+      logger.warn(
+        `⚠️ [RFID-LOOKUP] No promptText configured for UID ${trimmedUid}`
+      );
+      return null;
+    }
+
+    logger.info(
+      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} to promptText: "${promptText.slice(
+        0,
+        80
+      )}${promptText.length > 80 ? "..." : ""}"`
+    );
+
+    return promptText;
+  } catch (error) {
+    logger.error(
+      `❌ [RFID-LOOKUP] Error looking up RFID UID ${rfidUid}: ${error.message}`
+    );
+    return null;
+  }
+}
+
 class MQTTGateway {
-  constructor() {
+  constructor(workerPool) {
+    // Shared worker pool for all LiveKit bridges / audio processing
+    this.workerPool = workerPool;
     this.udpPort = parseInt(process.env.UDP_PORT) || 1883;
     this.publicIp = process.env.PUBLIC_IP || "127.0.0.1";
     this.connections = new Map(); // clientId -> VirtualMQTTConnection
@@ -580,7 +647,7 @@ class MQTTGateway {
           });
         }
       } else if (originalPayload.type === "start_greeting") {
-        // Special handling for start_greeting - CREATE ROOM and deploy agent, then trigger greeting
+        // Special handling for start_greeting - legacy path (no-op in new flow)
 
         let greetingSent = false;
 
@@ -589,10 +656,9 @@ class MQTTGateway {
         if (deviceInfo && deviceInfo.connection) {
           const connection = deviceInfo.connection;
 
-          // Room should already exist from parseHelloMessage, explicitly dispatch agent
+          // Room should already exist from parseHelloMessage
           if (connection.bridge) {
             const bridge = connection.bridge;
-            const startTime = Date.now();
             const roomName = bridge.room ? bridge.room.name : null;
 
             if (!roomName) {
@@ -602,7 +668,7 @@ class MQTTGateway {
               return;
             }
 
-            // ADD: ONLY dispatch agent for conversation rooms
+            // ONLY dispatch TTS start for non-conversation rooms
             if (connection.roomType !== "conversation") {
               // For music/story rooms, send TTS start message to trigger UDP connection
               connection.sendMqttMessage(
@@ -615,11 +681,8 @@ class MQTTGateway {
               return; // Don't dispatch agent for music/story rooms
             }
 
-            // For conversation mode, skip sending greeting here
+            // For conversation mode, agent auto-greets via on_enter; nothing to do here
             return;
-
-            // (Old start_greeting logic was here, removed as it was effectively unreachable or commented out/redundant in new flow)
-            // If you need to restore the agent dispatch logic, it should go here if the conversation mode check didn't return.
           } else {
             logger.error(
               `❌ [START-GREETING] No bridge found for device ${deviceId} - room should have been created during hello!`
@@ -629,6 +692,122 @@ class MQTTGateway {
 
         if (!greetingSent) {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
+        }
+      } else if (originalPayload.type === "start_greeting_text") {
+        // Handle RFID-based greeting: resolve question via Manager API then forward to LiveKit agent
+        const rfidUid =
+          originalPayload.rfid_uid ||
+          originalPayload.rfidUid ||
+          null;
+        const legacyText = (originalPayload.text || "").trim();
+
+        let textToSend = null;
+
+        if (rfidUid) {
+          logger.info(
+            `✉️ [TEXT-GREETING] Received RFID UID from device ${deviceId}: "${rfidUid}"`
+          );
+          textToSend = await fetchRfidPromptTextFromManagerApi(rfidUid);
+
+          if (!textToSend && legacyText) {
+            logger.warn(
+              `⚠️ [TEXT-GREETING] No promptText found for UID ${rfidUid}, falling back to legacy text from device ${deviceId}`
+            );
+            textToSend = legacyText;
+          }
+        } else if (legacyText) {
+          // Backward compatibility: old firmware sending text directly
+          logger.info(
+            `✉️ [TEXT-GREETING] No RFID UID, using legacy text from device ${deviceId}`
+          );
+          textToSend = legacyText;
+        }
+
+        if (!textToSend) {
+          logger.warn(
+            `⚠️ [TEXT-GREETING] No RFID UID or usable text payload from device ${deviceId}, ignoring`
+          );
+          return;
+        }
+
+        const deviceInfo = this.deviceConnections.get(deviceId);
+        if (!deviceInfo || !deviceInfo.connection || !deviceInfo.connection.bridge) {
+          logger.warn(
+            `⚠️ [TEXT-GREETING] No active connection/bridge for device ${deviceId}, cannot forward text`
+          );
+          return;
+        }
+
+        const connection = deviceInfo.connection;
+        const bridge = connection.bridge;
+
+        // Only support conversation rooms for now
+        if (connection.roomType !== "conversation") {
+          logger.info(
+            `ℹ️ [TEXT-GREETING] Ignoring text greeting in non-conversation mode for device ${deviceId} (roomType=${connection.roomType})`
+          );
+          return;
+        }
+
+        const room = bridge.room;
+        if (!room || !room.localParticipant) {
+          logger.warn(
+            `⚠️ [TEXT-GREETING] No LiveKit room/localParticipant for device ${deviceId}`
+          );
+          return;
+        }
+
+        try {
+          logger.info(
+            `✉️ [TEXT-GREETING] Prepared prompt for device ${deviceId}: "${textToSend}"`
+          );
+
+          // Guard: if audio is currently playing, abort existing playback before new text
+          if (bridge.isAudioPlaying) {
+            logger.info(
+              `🛑 [TEXT-GREETING] Audio currently playing for device ${deviceId}, sending abort before new text`
+            );
+            try {
+              const currentSessionId = connection.udp?.session_id || null;
+              if (currentSessionId) {
+                await bridge.sendAbortSignal(currentSessionId);
+              }
+              // Notify device to return to listening state
+              bridge.sendTtsStopMessage();
+              // Small delay to let abort/stop propagate
+              await new Promise((resolve) => setTimeout(resolve, 100));
+            } catch (abortErr) {
+              logger.error(
+                `❌ [TEXT-GREETING] Failed to send abort before new text for device ${deviceId}: ${abortErr.message}`
+              );
+            }
+          }
+
+          const userTextMsg = {
+            type: "user_text",
+            text: textToSend,
+            device_id: deviceId,
+            // Prefer gateway-known session; ignore any session_id sent by device
+            session_id: connection.udp?.session_id || null,
+            source: "rfid",
+            timestamp: Date.now(),
+          };
+
+          if (rfidUid) {
+            userTextMsg.rfid_uid = rfidUid;
+          }
+
+          const payloadStr = JSON.stringify(userTextMsg);
+          const data = new Uint8Array(Buffer.from(payloadStr, "utf8"));
+
+          await room.localParticipant.publishData(data, { reliable: true });
+          logger.info(
+            `✅ [TEXT-GREETING] Forwarded RFID question to LiveKit agent for device ${deviceId}`
+          );
+        } catch (err) {
+          logger.error(
+            `❌ [TEXT-GREETING] Error while preparing/sending user_text for device ${deviceId}: ${err.message}`
+          );
         }
       } else {
         // Route to virtual device connection (Default handling for 'data' messages etc)
@@ -1356,7 +1535,8 @@ class MQTTGateway {
       deviceId,
       connectionId,
       this,
-      payload
+      payload,
+      this.workerPool
     );
 
     this.connections.set(connectionId, virtualConnection);
@@ -1579,6 +1759,11 @@ class MQTTGateway {
 
     // Step 7: Clear bridge reference
     connection.bridge = null;
+
+    // Step 8: Cleanup worker-pool session codecs (if any) for this connection
+    if (this.workerPool && sessionId && this.workerPool.cleanupSession) {
+      this.workerPool.cleanupSession(sessionId);
+    }
 
     logger.info(`[CLEANUP] Robust cleanup complete for ${roomName}`);
   }

@@ -109,7 +109,7 @@ class WorkerPoolManager {
         await Promise.all(promises);
     }
 
-    async encodeOpus(pcmData, frameSize) {
+    async encodeOpus(sessionId, pcmData, frameSize) {
         const { worker, index } = this.getNextWorker();
         const startTime = process.hrtime.bigint();
 
@@ -117,11 +117,23 @@ class WorkerPoolManager {
         this.workerPendingCount[index]++;
 
         try {
+            // Create a dedicated ArrayBuffer for this frame so we can transfer it
+            const byteLength = pcmData.byteLength || pcmData.length;
+            const ab = new ArrayBuffer(byteLength);
+            const view = new Uint8Array(ab);
+            view.set(new Uint8Array(pcmData.buffer, pcmData.byteOffset || 0, byteLength));
+
             const result = await this.sendMessage(
                 worker,
                 {
                     type: "encode",
-                    data: { pcmData, frameSize },
+                    data: {
+                        sessionId,
+                        frameSize,
+                        buffer: ab,
+                        byteOffset: 0,
+                        byteLength,
+                    },
                 },
                 150
             ); // 150ms timeout (increased from 50ms to handle load spikes)
@@ -140,7 +152,7 @@ class WorkerPoolManager {
         }
     }
 
-    async decodeOpus(opusData) {
+    async decodeOpus(sessionId, opusData) {
         const { worker, index } = this.getNextWorker();
         const startTime = process.hrtime.bigint();
 
@@ -148,11 +160,21 @@ class WorkerPoolManager {
         this.workerPendingCount[index]++;
 
         try {
+            const byteLength = opusData.byteLength || opusData.length;
+            const ab = new ArrayBuffer(byteLength);
+            const view = new Uint8Array(ab);
+            view.set(new Uint8Array(opusData.buffer, opusData.byteOffset || 0, byteLength));
+
             const result = await this.sendMessage(
                 worker,
                 {
                     type: "decode",
-                    data: { opusData },
+                    data: {
+                        sessionId,
+                        buffer: ab,
+                        byteOffset: 0,
+                        byteLength,
+                    },
                 },
                 150
             ); // 150ms timeout (increased from 50ms to handle load spikes)
@@ -191,11 +213,17 @@ class WorkerPoolManager {
         const requestId = ++this.requestId;
         message.id = requestId;
 
+        // Build transfer list for zero-copy where possible
+        const transferList = [];
+        if (message && message.data && message.data.buffer instanceof ArrayBuffer) {
+            transferList.push(message.data.buffer);
+        }
+
         return new Promise((resolve, reject) => {
             this.pendingRequests.set(requestId, { resolve, reject });
 
-            // Send message to worker
-            worker.postMessage(message);
+            // Send message to worker (with optional transfer list)
+            worker.postMessage(message, transferList);
 
             // Timeout handling
             const timeout = setTimeout(() => {
@@ -431,6 +459,27 @@ class WorkerPoolManager {
     // ========================================
     // END DYNAMIC SCALING METHODS
     // ========================================
+
+    /**
+     * Request all workers to cleanup codec state for a specific session
+     * This helps avoid memory growth when sessions/devices churn.
+     */
+    cleanupSession(sessionId) {
+        if (!sessionId) {
+            return;
+        }
+
+        for (const w of this.workers) {
+            try {
+                w.worker.postMessage({
+                    type: "cleanup_session",
+                    data: { sessionId },
+                });
+            } catch (e) {
+                // Ignore cleanup errors per worker
+            }
+        }
+    }
 
     async terminate() {
         // console.log("🛑 [WORKER-POOL] Terminating all workers...");

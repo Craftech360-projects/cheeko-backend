@@ -41,10 +41,11 @@ function setConfigManager(cm) {
   debug = debugModule("mqtt-server");
 }
 class VirtualMQTTConnection {
-  constructor(deviceId, connectionId, gateway, helloPayload) {
+  constructor(deviceId, connectionId, gateway, helloPayload, workerPool) {
     this.deviceId = deviceId;
     this.connectionId = connectionId;
     this.gateway = gateway;
+    this.workerPool = workerPool; // Shared WorkerPoolManager instance
     this.clientId = helloPayload.clientId || deviceId;
     this.username = helloPayload.username;
     this.password = helloPayload.password;
@@ -486,7 +487,8 @@ class VirtualMQTTConnection {
       json.version,
       this.deviceId,
       newSessionUuid,
-      this.userData
+      this.userData,
+      this.workerPool
     );
 
     // Mark bridge as waiting for agent deployment

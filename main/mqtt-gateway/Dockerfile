@@ -1,8 +1,11 @@
-# Dockerfile for MQTT Gateway Node.js service
-FROM node:18-bullseye
+# Dockerfile for MQTT Gateway
 
-# Set working directory
-WORKDIR /app
+# Use Node.js 20 Bullseye as the base image
+# Bullseye includes build tools like make, g++, and python3 which are required for native modules
+FROM node:20-bullseye
+
+# Create app directory
+WORKDIR /usr/src/app
 
 # Install system dependencies for native modules
 RUN apt-get update && apt-get install -y \

@@ -1,50 +1,29 @@
 services:
   mqtt-gateway:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: mqtt-gateway
-    restart: unless-stopped
-
-    # Use host network mode for UDP compatibility
-    # This allows the container to use the host's network stack directly
-    # network_mode: host
-
+    restart: always
+    # On macOS, network_mode: host is not fully supported. We instead
+    # expose the ports we actually need from the container.
     ports:
+      # HTTP/status/health endpoint (inside container: 8004)
+      - "8004:8004"
+      # UDP audio port used by ESP32 devices (inside container: 8884/udp)
       - "8884:8884/udp"
-
-    # Environment variables from .env file
+    # Allow the container to reach services running on the host (EMQX, LiveKit, etc.)
+    # using the special hostname host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config:/usr/src/app/config
+      - ./logs:/usr/src/app/logs
+      - ./.env:/usr/src/app/.env
+    # Environment variables are loaded from .env automatically if it exists in the same directory
+    # but we explicitly link it for clarity if the user moves the compose file.
     env_file:
       - .env
-
-    # Additional environment variables
-    environment:
-      NODE_ENV: production
-      # LIVEKIT_URL now comes from .env file
-
-    # Mount volumes
-    volumes:
-      # Configuration files (read-only)
-      - ./config:/app/config:ro
-      # Audio files for mode changes (read-only)
-      - ./audio:/app/audio:ro
-      # Logs directory (read-write)
-      - ./logs:/app/logs
-
-    # Connect to the same network as livekit-server
-    networks:
-      - manager-api_manager-api-network
-
-    # Resource limits (optional, adjust as needed)
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 256M
-
-networks:
-  manager-api_manager-api-network:
-    external: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

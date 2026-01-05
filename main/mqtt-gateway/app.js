@@ -17,6 +17,7 @@ const { validateCerebriumToken } = require("./core/media-api-client");
 const { initializeOpus } = require("./core/opus-initializer");
 const { setupDebugLogger } = require("./utils/debug-logger");
 const { ConfigManager } = require("./utils/config-manager");
+const { WorkerPoolManager } = require("./core/worker-pool-manager");
 const logger = require("./utils/logger");
 
 // Validate environment
@@ -63,8 +64,11 @@ async function main() {
   // logger.info("   ✅ Total: 19 modules loaded");
 
   try {
-    // Initialize and start the gateway
-    const gateway = new MQTTGateway();
+    // Initialize global worker pool (shared across all connections)
+    globalWorkerPool = new WorkerPoolManager(4);
+
+    // Initialize and start the gateway with the shared worker pool
+    gateway = new MQTTGateway(globalWorkerPool);
     await gateway.start();
 
     logger.info("✅ [MAIN] MQTT Gateway started successfully");
@@ -79,11 +83,17 @@ async function main() {
 // Signal Handlers
 // ================================
 let gateway = null;
+let globalWorkerPool = null;
 
 process.on("SIGINT", async () => {
   logger.info("\n🛑 [SHUTDOWN] Received SIGINT, shutting down gracefully...");
   if (gateway && gateway.stop) {
     await gateway.stop();
+  }
+
+  // Terminate global worker pool
+  if (globalWorkerPool && globalWorkerPool.terminate) {
+    await globalWorkerPool.terminate();
   }
 
   // Wait for Loki batches to be sent before exiting
@@ -97,6 +107,11 @@ process.on("SIGTERM", async () => {
   logger.info("\n🛑 [SHUTDOWN] Received SIGTERM, shutting down gracefully...");
   if (gateway && gateway.stop) {
     await gateway.stop();
+  }
+
+  // Terminate global worker pool
+  if (globalWorkerPool && globalWorkerPool.terminate) {
+    await globalWorkerPool.terminate();
   }
 
   // Wait for Loki batches to be sent before exiting
