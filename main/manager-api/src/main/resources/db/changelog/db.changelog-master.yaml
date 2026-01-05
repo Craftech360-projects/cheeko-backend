@@ -33,6 +33,15 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_2_0__rfid_pack_and_series_tables.sql
 
+  - changeSet:
+      id: V1_3_0_rfid_seed_data
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_3_0__rfid_seed_data.sql
+
   # - changeSet:
   #     id: 202601032000
   #     author: cheeko
