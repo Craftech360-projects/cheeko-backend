@@ -254,13 +254,13 @@ export default {
 .header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 120px;
+  gap: 8px;
+  min-width: 80px;
 }
 
 .logo-img {
-  width: 90px;
-  height: 90px;
+  width: 70px;
+  height: 70px;
 }
 
 .brand-img {
@@ -270,29 +270,27 @@ export default {
 .header-center {
   display: flex;
   align-items: center;
-  gap: 25px;
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  gap: 12px;
+  margin-left: 20px;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 300px;
+  gap: 8px;
+  min-width: 250px;
   justify-content: flex-end;
 }
 
 .equipment-management {
-  height: 30px;
-  border-radius: 15px;
+  height: 28px;
+  border-radius: 14px;
   background: rgba($primary, 0.15);
   display: flex;
   justify-content: center;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 500;
-  gap: 7px;
+  gap: 5px;
   color: $text-dark;
   margin-left: 1px;
   align-items: center;
@@ -300,7 +298,7 @@ export default {
   cursor: pointer;
   flex-shrink: 0;
   /* 防止导航按钮被压缩 */
-  padding: 0 15px;
+  padding: 0 10px;
   position: relative;
 }
 
@@ -315,10 +313,10 @@ export default {
 }
 
 .search-container {
-  margin-right: 15px;
-  min-width: 150px;
+  margin-right: 10px;
+  min-width: 140px;
   flex-grow: 1;
-  max-width: 220px;
+  max-width: 180px;
 }
 
 .custom-search-input>>>.el-input__inner {

@@ -449,6 +449,12 @@ async def entrypoint(ctx: JobContext):
             message = json.loads(data_packet.data.decode('utf-8'))
             msg_type = message.get('type')
 
+            # Handle greeting trigger from device
+            if msg_type == 'ready_for_greeting':
+                logger.info("🎤 Device ready for greeting - triggering greeting now")
+                asyncio.create_task(assistant.play_greeting())
+                return
+
             # Handle end prompt - say goodbye message
             if msg_type == 'end_prompt':
                 prompt_text = message.get('prompt', "Time flies so fast! It was wonderful solving riddles with you. Goodbye!")

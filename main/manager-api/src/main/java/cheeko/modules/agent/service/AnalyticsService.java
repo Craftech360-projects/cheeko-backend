@@ -247,4 +247,18 @@ public interface AnalyticsService {
      * @return Count of unique devices
      */
     Integer getMonthDeviceCount();
+
+    /**
+     * Get list of active devices today with MAC and agent name
+     *
+     * @return List of device info maps
+     */
+    List<Map<String, Object>> getTodayActiveDevices();
+
+    /**
+     * Get list of active devices this month with MAC and agent name
+     *
+     * @return List of device info maps
+     */
+    List<Map<String, Object>> getMonthActiveDevices();
 }

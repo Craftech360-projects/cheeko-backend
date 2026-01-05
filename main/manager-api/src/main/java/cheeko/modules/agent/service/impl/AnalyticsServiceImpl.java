@@ -906,4 +906,16 @@ public class AnalyticsServiceImpl implements AnalyticsService {
         Integer count = chatHistoryDao.getMonthDeviceCount();
         return count != null ? count : 0;
     }
+
+    @Override
+    public List<Map<String, Object>> getTodayActiveDevices() {
+        log.info("Getting today's active devices list");
+        return chatHistoryDao.getTodayActiveDevices();
+    }
+
+    @Override
+    public List<Map<String, Object>> getMonthActiveDevices() {
+        log.info("Getting this month's active devices list");
+        return chatHistoryDao.getMonthActiveDevices();
+    }
 }

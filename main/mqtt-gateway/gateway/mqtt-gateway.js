@@ -83,8 +83,7 @@ async function fetchRfidPromptTextFromManagerApi(rfidUid) {
 
     if (!body || body.code !== 0 || !body.data) {
       logger.warn(
-        `⚠️ [RFID-LOOKUP] Lookup failed for UID ${trimmedUid}: code=${
-          body && body.code
+        `⚠️ [RFID-LOOKUP] Lookup failed for UID ${trimmedUid}: code=${body && body.code
         }, msg=${body && body.msg}`
       );
       return null;
@@ -1646,7 +1645,7 @@ class MQTTGateway {
         // Identify agent participants (identity contains 'agent')
         const identity = participant.identity || '';
         if (identity.toLowerCase().includes('agent') ||
-            identity.startsWith('agent-')) {
+          identity.startsWith('agent-')) {
           logger.info(`[CLEANUP] Removing agent participant: ${identity}`);
           try {
             await this.roomService.removeParticipant(roomName, identity);
@@ -1858,7 +1857,8 @@ class MQTTGateway {
           connection.protocolVersion || 1,
           deviceId,
           newSessionUuid,
-          connection.userData || {}
+          connection.userData || {},
+          this.workerPool  // Pass workerPool for audio encoding/decoding
         );
         connection.bridge = newBridge;
 
@@ -2086,7 +2086,7 @@ class MQTTGateway {
 
   async handleDeviceModeChange(deviceId, payload) {
     try {
-      // logger.info(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode change`);
+      logger.info(`🔄 [MODE-CHANGE] START - Device ${deviceId} requesting mode change`);
 
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
       const crypto = require("crypto");
@@ -2094,13 +2094,18 @@ class MQTTGateway {
       const deviceInfo = this.deviceConnections.get(deviceId);
       let existingConnection = deviceInfo?.connection || null;
 
+      logger.info(`[MODE-CHANGE] Step 1: Device info found: ${!!deviceInfo}, Connection exists: ${!!existingConnection}`);
+
       // Stop old media bot (if music/story mode) before cleanup
       if (existingConnection?.roomType && existingConnection?.bridge) {
         const oldMode = existingConnection.roomType;
         const oldRoomName = existingConnection.bridge.room?.name;
 
+        logger.info(`[MODE-CHANGE] Step 2: Old mode: ${oldMode}, Old room: ${oldRoomName}`);
+
         if ((oldMode === "music" || oldMode === "story") && oldRoomName) {
           try {
+            logger.info(`[MODE-CHANGE] Stopping ${oldMode} bot for room: ${oldRoomName}`);
             const axios = require("axios");
             await axios.post(
               `${MEDIA_API_BASE}/stop-bot`,
@@ -2108,7 +2113,9 @@ class MQTTGateway {
               mediaAxiosConfig()
             );
             await new Promise((resolve) => setTimeout(resolve, 500));
+            logger.info(`[MODE-CHANGE] ✅ ${oldMode} bot stopped`);
           } catch (error) {
+            logger.warn(`[MODE-CHANGE] ⚠️ Failed to stop ${oldMode} bot: ${error.message}`);
             // Continue anyway
           }
         }
@@ -2116,19 +2123,27 @@ class MQTTGateway {
 
       // Robust cleanup of old room and agent/bot
       if (existingConnection) {
+        logger.info(`[MODE-CHANGE] Step 3: Performing robust cleanup`);
         await this.performRobustAgentCleanup(existingConnection, 'mode_change');
+        logger.info(`[MODE-CHANGE] ✅ Cleanup complete`);
       }
 
       // Update mode in DB
+      logger.info(`[MODE-CHANGE] Step 4: Calling cycle-mode API for MAC: ${macAddress}`);
       const axios = require("axios");
       const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
       const apiUrl = `${baseUrl}/toy/device/${macAddress}/cycle-mode`;
 
+      logger.info(`[MODE-CHANGE] API URL: ${apiUrl}`);
+
       const response = await axios.post(apiUrl, {}, { timeout: 10000 });
+
+      logger.info(`[MODE-CHANGE] API Response - Status: ${response.status}, Code: ${response.data?.code}`);
+      logger.info(`[MODE-CHANGE] API Response Data:`, JSON.stringify(response.data));
 
       if (response.data.code === 0 && response.data.data.success) {
         const { newMode, oldMode } = response.data.data;
-        // logger.info(`✅ [MODE-CHANGE] ${oldMode} → ${newMode}`);
+        logger.info(`[MODE-CHANGE] Step 5: Mode change approved - ${oldMode} → ${newMode}`);
 
         if (deviceInfo) {
           deviceInfo.previousMode = oldMode;
@@ -2159,6 +2174,8 @@ class MQTTGateway {
         const macForRoom = deviceId.replace(/:/g, "");
         const newRoomName = `${newSessionUuid}_${macForRoom}_${newMode}`;
 
+        logger.info(`[MODE-CHANGE] Step 6: New room name: ${newRoomName}`);
+
         // Clean up ALL old sessions for this device (prevents ghost rooms)
         if (this.roomService) {
           try {
@@ -2179,13 +2196,15 @@ class MQTTGateway {
         connection.goodbyeSent = false;
         connection.lastActivityTime = Date.now();
 
-        // Create new LiveKitBridge
+        logger.info(`[MODE-CHANGE] Step 7: Creating new LiveKitBridge`);
+        // Create new LiveKitBridge with workerPool
         const newBridge = new LiveKitBridge(
           connection,
           connection.protocolVersion || 1,
           deviceId,
           newSessionUuid,
-          connection.userData || {}
+          connection.userData || {},
+          this.workerPool  // CRITICAL: Pass workerPool to prevent "Cannot read properties of undefined (reading 'initializeWorker')" error
         );
         connection.bridge = newBridge;
 
@@ -2193,16 +2212,19 @@ class MQTTGateway {
           connection.bridge = null;
         });
 
+        logger.info(`[MODE-CHANGE] Step 8: Connecting to LiveKit room`);
         await newBridge.connect(
           connection.audio_params || { sample_rate: 24000, channels: 1 },
           connection.features || {},
           this.roomService
         );
+        logger.info(`[MODE-CHANGE] ✅ Connected to LiveKit`);
 
         // Fetch character and child profile for conversation mode
         let currentCharacter = null;
         let childProfile = null;
         if (newMode === "conversation") {
+          logger.info(`[MODE-CHANGE] Step 9: Fetching character and child profile`);
           // Fetch character and child profile in parallel
           const [character, profile] = await Promise.all([
             connection.fetchCurrentCharacter(macAddress),
@@ -2214,8 +2236,10 @@ class MQTTGateway {
           if (childProfile) {
             logger.info(`[MODE-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
           }
+          logger.info(`[MODE-CHANGE] ✅ Character: ${currentCharacter || 'null'}`);
         }
 
+        logger.info(`[MODE-CHANGE] Step 10: Sending mode_update to device`);
         // Send mode_update to device firmware
         const modeUpdateMsg = {
           type: "mode_update",
@@ -2245,6 +2269,7 @@ class MQTTGateway {
         logger.info(`[MODE-CHANGE] Sent mode_update (listening_mode: ${connection.deviceMode || "manual"})`);
 
         // Handle mode-specific startup
+        logger.info(`[MODE-CHANGE] Step 11: Starting ${newMode} mode`);
         if (newMode === "music") {
           await connection.spawnMusicBot(newRoomName);
         } else if (newMode === "story") {
@@ -2273,6 +2298,7 @@ class MQTTGateway {
                   }),
                 }
               );
+              logger.info(`[MODE-CHANGE] ✅ Agent dispatched successfully`);
               // Agent will greet via on_enter lifecycle hook
             } catch (error) {
               // Reset flag on failure so retry can work
@@ -2281,6 +2307,7 @@ class MQTTGateway {
                 `❌ [MODE-CHANGE] Failed to dispatch agent:`,
                 error.message
               );
+              logger.error(`[MODE-CHANGE] Agent dispatch error stack:`, error.stack);
             }
           } else {
             logger.error(
@@ -2289,12 +2316,24 @@ class MQTTGateway {
           }
         }
 
-        // logger.info(`✅ [MODE-CHANGE] Complete: ${oldMode} → ${newMode}`);
+        logger.info(`✅ [MODE-CHANGE] Complete: ${oldMode} → ${newMode}`);
       } else {
-        logger.error(`❌ [MODE-CHANGE] API error:`, response.data);
+        logger.error(`❌ [MODE-CHANGE] API error - Code: ${response.data?.code}, Success: ${response.data?.data?.success}`);
+        logger.error(`[MODE-CHANGE] Full API response:`, JSON.stringify(response.data));
       }
     } catch (error) {
-      logger.error(`❌ [MODE-CHANGE] Error:`, error.message);
+      logger.error(`❌ [MODE-CHANGE] Error: ${error.message}`);
+      logger.error(`[MODE-CHANGE] Error stack:`, error.stack);
+      logger.error(`[MODE-CHANGE] Error details:`, {
+        name: error.name,
+        code: error.code,
+        response: error.response?.data,
+        config: error.config ? {
+          url: error.config.url,
+          method: error.config.method,
+          timeout: error.config.timeout
+        } : 'N/A'
+      });
     }
   }
 

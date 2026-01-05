@@ -7,17 +7,12 @@
         <!-- Home Page Content -->
         <div class="add-device">
           <div class="add-device-bg">
-            <div class="hellow-text" style="margin-top: 30px;">
+            <div class="hellow-text" style="margin-top: 18px;">
               Hello, Cheeko
             </div>
             <div class="hellow-text">
               Let's have a
-              <div style="display: inline-block;color: var(--primary);">
-                wonderful day!
-              </div>
-            </div>
-            <div class="hi-hint">
-              Hello, Let's have a wonderful day!
+              <span style="color: var(--primary);">wonderful day!</span>
             </div>
             <div class="add-device-btn">
               <div class="left-add" @click="showAddDialog">
@@ -30,14 +25,44 @@
             </div>
             <!-- Stats Boxes Container -->
             <div class="stats-container">
-              <div class="stats-box">
-                <div class="stats-count">{{ todayDeviceCount }}</div>
-                <div class="stats-label">Active Devices Today</div>
-              </div>
-              <div class="stats-box">
-                <div class="stats-count">{{ monthDeviceCount }}</div>
-                <div class="stats-label">Active Devices This Month</div>
-              </div>
+              <el-popover
+                placement="bottom"
+                width="280"
+                trigger="hover"
+                popper-class="device-popover"
+                @show="fetchTodayActiveDevices">
+                <div class="device-list-popover">
+                  <div class="popover-title">Active Devices Today</div>
+                  <div v-if="todayActiveDevices.length === 0" class="no-devices">No active devices</div>
+                  <div v-else class="device-item" v-for="(device, index) in todayActiveDevices" :key="index">
+                    <div class="device-mac">{{ formatMacAddress(device.macAddress) }}</div>
+                    <div class="device-owner">{{ device.ownerName || 'Unknown' }}</div>
+                  </div>
+                </div>
+                <div slot="reference" class="stats-box hoverable">
+                  <div class="stats-count">{{ todayDeviceCount }}</div>
+                  <div class="stats-label">Active Devices Today</div>
+                </div>
+              </el-popover>
+              <el-popover
+                placement="bottom"
+                width="280"
+                trigger="hover"
+                popper-class="device-popover"
+                @show="fetchMonthActiveDevices">
+                <div class="device-list-popover">
+                  <div class="popover-title">Active Devices This Month</div>
+                  <div v-if="monthActiveDevices.length === 0" class="no-devices">No active devices</div>
+                  <div v-else class="device-item" v-for="(device, index) in monthActiveDevices" :key="index">
+                    <div class="device-mac">{{ formatMacAddress(device.macAddress) }}</div>
+                    <div class="device-owner">{{ device.ownerName || 'Unknown' }}</div>
+                  </div>
+                </div>
+                <div slot="reference" class="stats-box hoverable">
+                  <div class="stats-count">{{ monthDeviceCount }}</div>
+                  <div class="stats-label">Active Devices This Month</div>
+                </div>
+              </el-popover>
             </div>
           </div>
         </div>
@@ -216,7 +241,10 @@ export default {
       todayDeviceCount: 0,
       // Month's device count
       monthDeviceCount: 0,
-      currentMonth: ''
+      currentMonth: '',
+      // Active devices lists for tooltips
+      todayActiveDevices: [],
+      monthActiveDevices: []
     }
   },
 
@@ -309,6 +337,29 @@ export default {
           this.currentMonth = response.data.data.month || '';
         }
       });
+    },
+    // Fetch today's active devices list
+    fetchTodayActiveDevices() {
+      Api.agent.getTodayActiveDevices((response) => {
+        if (response.data && response.data.code === 0) {
+          this.todayActiveDevices = response.data.data || [];
+        }
+      });
+    },
+    // Fetch this month's active devices list
+    fetchMonthActiveDevices() {
+      Api.agent.getMonthActiveDevices((response) => {
+        if (response.data && response.data.code === 0) {
+          this.monthActiveDevices = response.data.data || [];
+        }
+      });
+    },
+    // Format MAC address for display
+    formatMacAddress(mac) {
+      if (!mac) return 'Unknown';
+      // Convert format like "6825ddbb23a4" to "68:25:DD:BB:23:A4"
+      const cleaned = mac.replace(/[:-]/g, '').toUpperCase();
+      return cleaned.match(/.{1,2}/g)?.join(':') || mac;
     },
     goToRoleConfig() {
       // Navigate to role config page after clicking configure role
@@ -609,7 +660,7 @@ export default {
 }
 
 .add-device {
-  height: 195px;
+  height: 155px;
   border-radius: 15px;
   position: relative;
   overflow: hidden;
@@ -636,28 +687,20 @@ export default {
 
   /* Compatible with older Opera browsers */
   .hellow-text {
-    margin-left: 75px;
+    margin-left: 50px;
     color: #3d4566;
-    font-size: 33px;
+    font-size: 26px;
     font-weight: 700;
     letter-spacing: 0;
-  }
-
-  .hi-hint {
-    font-weight: 400;
-    font-size: 12px;
-    text-align: left;
-    color: #818cae;
-    margin-left: 75px;
-    margin-top: 5px;
+    line-height: 1.3;
   }
 }
 
 .add-device-btn {
   display: flex;
   align-items: center;
-  margin-left: 75px;
-  margin-top: 15px;
+  margin-left: 50px;
+  margin-top: 10px;
   cursor: pointer;
 
   .left-add {
@@ -697,21 +740,21 @@ export default {
 /* Stats Box Styles */
 .stats-box {
   background: rgba(255, 255, 255, 0.95);
-  border-radius: 16px;
-  padding: 18px 30px;
-  box-shadow: 0 4px 20px rgba($primary, 0.25);
+  border-radius: 12px;
+  padding: 12px 24px;
+  box-shadow: 0 4px 16px rgba($primary, 0.2);
   text-align: center;
   backdrop-filter: blur(10px);
   border: 1px solid rgba($primary, 0.15);
-  min-width: 120px;
+  min-width: 110px;
 }
 
 .stats-count {
-  font-size: 42px;
+  font-size: 32px;
   font-weight: 700;
   color: $primary;
   line-height: 1;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .stats-label {
@@ -721,17 +764,28 @@ export default {
   white-space: nowrap;
 }
 
+/* Hoverable stats box */
+.stats-box.hoverable {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.stats-box.hoverable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba($primary, 0.3);
+}
+
 /* Responsive Stats */
 @media screen and (max-width: 1200px) {
   .stats-container {
-    gap: 15px;
+    gap: 12px;
   }
   .stats-box {
-    padding: 15px 25px;
+    padding: 10px 20px;
     min-width: 100px;
   }
   .stats-count {
-    font-size: 36px;
+    font-size: 28px;
   }
   .stats-label {
     font-size: 12px;
@@ -741,11 +795,11 @@ export default {
 @media screen and (max-width: 992px) {
   .add-device {
     height: auto;
-    min-height: 195px;
+    min-height: 155px;
   }
   .add-device-bg {
     overflow: visible;
-    padding-bottom: 20px;
+    padding-bottom: 15px;
   }
   .stats-container {
     position: relative;
@@ -753,16 +807,16 @@ export default {
     top: auto;
     transform: none;
     justify-content: center;
-    margin-top: 20px;
-    margin-left: 75px;
-    gap: 12px;
+    margin-top: 15px;
+    margin-left: 50px;
+    gap: 10px;
   }
   .stats-box {
-    padding: 12px 20px;
+    padding: 10px 18px;
     min-width: 90px;
   }
   .stats-count {
-    font-size: 30px;
+    font-size: 26px;
   }
   .stats-label {
     font-size: 11px;
@@ -1035,5 +1089,60 @@ export default {
 
 .mac-tooltip-item:last-child {
   border-bottom: none;
+}
+
+/* Device Popover Styles */
+.device-popover {
+  padding: 0 !important;
+}
+
+.device-list-popover {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.device-list-popover .popover-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #3d4566;
+  padding: 12px 16px;
+  border-bottom: 1px solid #ebeef5;
+  background: #fafbfc;
+}
+
+.device-list-popover .no-devices {
+  padding: 20px 16px;
+  text-align: center;
+  color: #909399;
+  font-size: 13px;
+}
+
+.device-list-popover .device-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.device-list-popover .device-item:last-child {
+  border-bottom: none;
+}
+
+.device-list-popover .device-item:hover {
+  background: #f5f7fa;
+}
+
+.device-list-popover .device-mac {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: #3d4566;
+  font-weight: 500;
+}
+
+.device-list-popover .device-owner {
+  font-size: 12px;
+  color: #FF9100;
+  font-weight: 500;
 }
 </style>

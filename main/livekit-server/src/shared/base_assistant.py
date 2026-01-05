@@ -51,14 +51,26 @@ class BaseAssistant(Agent):
         self.word_ladder_state = None
         self.active_game = None
         self.game_tools = []
+        
+        # Greeting state - wait for device trigger instead of auto-greeting
+        self.greeting_played = False
 
         logger.info("Base Assistant initialized")
 
     async def on_enter(self):
         """
         Lifecycle hook - runs once when agent becomes active.
-        Automatically greets the user using the GREETING_INSTRUCTION.
-        Override GREETING_INSTRUCTION in subclasses for custom greetings.
+        CHANGED: No longer auto-greets. Waits for device to send ready_for_greeting signal.
+        Call play_greeting() when device is ready.
+        """
+        agent_name = self.__class__.__name__
+        logger.info(f"{agent_name} on_enter triggered - ready and waiting for greeting trigger from device")
+        logger.info(f"🎤 Agent will greet when device sends 'ready_for_greeting' message")
+    
+    async def play_greeting(self):
+        """
+        Play greeting when device is ready (triggered by ready_for_greeting message).
+        Uses GREETING_INSTRUCTION defined in subclasses.
         """
         import asyncio
         # Try to import RealtimeError, fallback to Exception if not available
@@ -66,14 +78,16 @@ class BaseAssistant(Agent):
             from livekit.agents.llm.realtime import RealtimeError
         except ImportError:
             RealtimeError = Exception
-
+        
         agent_name = self.__class__.__name__
-        logger.info(f"{agent_name} on_enter triggered - waiting for connection...")
-
-        # Wait for the Gemini Realtime connection to fully stabilize
-        # The connection starts async and needs time to be ready for generation
-        await asyncio.sleep(0.5)
-
+        
+        # Check if greeting already played
+        if self.greeting_played:
+            logger.warning(f"{agent_name} greeting already played, skipping duplicate")
+            return
+        
+        logger.info(f"{agent_name} playing greeting now (device is ready)...")
+        
         # Retry logic for greeting
         max_retries = 3
         for attempt in range(max_retries):
@@ -82,6 +96,7 @@ class BaseAssistant(Agent):
                 await self.session.generate_reply(
                     instructions=self.GREETING_INSTRUCTION
                 )
+                self.greeting_played = True
                 logger.info(f"{agent_name} greeting sent successfully")
                 return  # Success, exit
             except RealtimeError as e:

@@ -350,4 +350,34 @@ export default {
                 });
             }).send();
     },
+    // Get today's active devices list
+    getTodayActiveDevices(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/today/active-devices`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getTodayActiveDevices(callback);
+                });
+            }).send();
+    },
+    // Get this month's active devices list
+    getMonthActiveDevices(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/month/active-devices`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.getMonthActiveDevices(callback);
+                });
+            }).send();
+    },
 }

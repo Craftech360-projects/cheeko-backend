@@ -1017,6 +1017,39 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // Handle ready_for_greeting message - forward to LiveKit agent via data channel
+    if (json.type === "ready_for_greeting") {
+      console.log(
+        `🎤 [GREETING-TRIGGER] Device ${this.deviceId} ready for greeting`
+      );
+
+      try {
+        // Forward to LiveKit agent via data channel
+        const greetingMessage = {
+          type: "ready_for_greeting",
+          session_id: json.session_id,
+          timestamp: Date.now(),
+        };
+
+        const messageString = JSON.stringify(greetingMessage);
+        const messageData = new Uint8Array(
+          Buffer.from(messageString, "utf8")
+        );
+
+        await this.bridge.room.localParticipant.publishData(messageData, {
+          reliable: true,
+        });
+
+        console.log(`✅ [GREETING-TRIGGER] Forwarded to agent`);
+      } catch (error) {
+        console.error(
+          `❌ [GREETING-TRIGGER] Failed to forward to agent:`,
+          error
+        );
+      }
+      return;
+    }
+
     // Handle function_call from mobile app
     if (json.type === "function_call" && json.source === "mobile_app") {
       try {

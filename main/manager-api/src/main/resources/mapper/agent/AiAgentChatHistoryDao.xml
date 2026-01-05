@@ -54,4 +54,25 @@
     WHERE YEAR(created_at) = YEAR(CURDATE())
       AND MONTH(created_at) = MONTH(CURDATE())
   </select>
+
+  <select id="getTodayActiveDevices" resultType="java.util.Map">
+    SELECT DISTINCT h.mac_address as macAddress, u.username as ownerName
+    FROM ai_agent_chat_history h
+    LEFT JOIN ai_device d ON h.mac_address = d.mac_address
+    LEFT JOIN ai_agent a ON d.agent_id = a.id
+    LEFT JOIN sys_user u ON a.user_id = u.id
+    WHERE DATE(h.created_at) = CURDATE()
+    ORDER BY h.mac_address
+  </select>
+
+  <select id="getMonthActiveDevices" resultType="java.util.Map">
+    SELECT DISTINCT h.mac_address as macAddress, u.username as ownerName
+    FROM ai_agent_chat_history h
+    LEFT JOIN ai_device d ON h.mac_address = d.mac_address
+    LEFT JOIN ai_agent a ON d.agent_id = a.id
+    LEFT JOIN sys_user u ON a.user_id = u.id
+    WHERE YEAR(h.created_at) = YEAR(CURDATE())
+      AND MONTH(h.created_at) = MONTH(CURDATE())
+    ORDER BY h.mac_address
+  </select>
 </mapper>

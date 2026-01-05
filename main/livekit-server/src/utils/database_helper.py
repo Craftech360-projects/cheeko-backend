@@ -49,7 +49,7 @@ class DatabaseHelper:
         
         url = f"{self.manager_api_url}/agent/device/{normalized_mac}/agent-id"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
 
@@ -116,7 +116,7 @@ class DatabaseHelper:
 
         url = f"{self.manager_api_url}/agent/device/{normalized_mac}/current-character"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
 
@@ -184,7 +184,7 @@ class DatabaseHelper:
         # Use existing current-character endpoint (returns agent_name)
         url = f"{self.manager_api_url}/agent/device/{normalized_mac}/current-character"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
         
@@ -251,7 +251,7 @@ class DatabaseHelper:
         
         url = f"{self.manager_api_url}/config/child-profile-by-mac"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
         payload = {"macAddress": normalized_mac}
@@ -307,7 +307,7 @@ class DatabaseHelper:
         """
         url = f"{self.manager_api_url}/health"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
 
@@ -341,7 +341,7 @@ class DatabaseHelper:
         
         url = f"{self.manager_api_url}/config/agent-template-id"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
         payload = {"macAddress": normalized_mac}
@@ -400,7 +400,7 @@ class DatabaseHelper:
         """
         url = f"{self.manager_api_url}/config/template/{template_id}"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
 
@@ -462,7 +462,7 @@ class DatabaseHelper:
         
         url = f"{self.manager_api_url}/config/device-location"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
         payload = {"macAddress": normalized_mac}
@@ -518,7 +518,7 @@ class DatabaseHelper:
         """
         url = f"{self.manager_api_url}/config/weather"
         headers = {
-            "Authorization": f"Bearer {self.secret}",
+            "secret": self.secret,
             "Content-Type": "application/json"
         }
         payload = {"location": location}

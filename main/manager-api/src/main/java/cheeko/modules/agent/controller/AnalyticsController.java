@@ -384,4 +384,24 @@ public class AnalyticsController {
 
         return new Result<Map<String, Object>>().ok(result);
     }
+
+    @GetMapping("/today/active-devices")
+    @Operation(summary = "Get list of active devices that interacted today")
+    public Result<List<Map<String, Object>>> getTodayActiveDevices() {
+        log.info("Getting today's active devices list");
+
+        List<Map<String, Object>> devices = analyticsService.getTodayActiveDevices();
+
+        return new Result<List<Map<String, Object>>>().ok(devices);
+    }
+
+    @GetMapping("/month/active-devices")
+    @Operation(summary = "Get list of active devices that interacted this month")
+    public Result<List<Map<String, Object>>> getMonthActiveDevices() {
+        log.info("Getting this month's active devices list");
+
+        List<Map<String, Object>> devices = analyticsService.getMonthActiveDevices();
+
+        return new Result<List<Map<String, Object>>>().ok(devices);
+    }
 }
