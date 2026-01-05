@@ -6,15 +6,6 @@
 # - Use validCheckSum: ANY for changesets that may need to run again
 
 databaseChangeLog:
-  # - changeSet:
-  #     id: V1_0_0_initial_schema
-  #     author: cheeko
-  #     validCheckSum: ANY
-  #     changes:
-  #       - sqlFile:
-  #           encoding: utf8
-  #           path: classpath:db/changelog/V1_0_0__initial_schema.sql
-
   - changeSet:
       id: V1_0_0_initial_schema
       author: cheeko
@@ -22,4 +13,31 @@ databaseChangeLog:
       changes:
         - sqlFile:
             encoding: utf8
-            path: classpath:db/changelog/202601032000__combined_production_data.sql
+            path: classpath:db/changelog/V1_0_0__initial_schema.sql
+
+  - changeSet:
+      id: V1_1_0_rfid_question_tables
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_1_0__rfid_question_tables.sql
+
+  - changeSet:
+      id: V1_2_0_rfid_pack_and_series_tables
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_2_0__rfid_pack_and_series_tables.sql
+
+  # - changeSet:
+  #     id: 202601032000
+  #     author: cheeko
+  #     validCheckSum: ANY
+  #     changes:
+  #       - sqlFile:
+  #           encoding: utf8
+  #           path: classpath:db/changelog/202601032000__combined_production_data.sql
