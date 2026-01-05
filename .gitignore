@@ -195,4 +195,4 @@ main/manager-api/src/main/resources/application-prod.yml
 main/livekit-server/config.yaml
 nul
 main/manager-api/src/main/resources/application-dev.yml
-main/manager-api/src/main/resources/application-dev.yml
+backups/railway_backup_20260103_193209.sql
