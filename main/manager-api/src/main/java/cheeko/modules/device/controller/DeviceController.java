@@ -138,11 +138,11 @@ public class DeviceController {
     public Result<Void> updateDeviceInfo(@PathVariable String id, @Valid @RequestBody DeviceUpdateDTO deviceUpdateDTO) {
         DeviceEntity entity = deviceService.selectById(id);
         if (entity == null) {
-            return new Result<Void>().error("Device不Exist");
+            return new Result<Void>().error("Device does not exist");
         }
         UserDetail user = SecurityUser.getUser();
         if (!entity.getUserId().equals(user.getId())) {
-            return new Result<Void>().error("Device不Exist");
+            return new Result<Void>().error("Device does not exist");
         }
         BeanUtils.copyProperties(deviceUpdateDTO, entity);
         deviceService.updateById(entity);
@@ -150,7 +150,7 @@ public class DeviceController {
     }
 
     @PostMapping("/manual-add")
-    @Operation(summary = "手动添加Device")
+    @Operation(summary = "Manually add device")
     @RequiresPermissions("sys:role:normal")
     public Result<Void> manualAddDevice(@RequestBody @Valid DeviceManualAddDTO dto) {
         UserDetail user = SecurityUser.getUser();

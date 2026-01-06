@@ -8,17 +8,17 @@ import java.util.Map;
 import cheeko.common.validator.AssertUtils;
 
 /**
- * 树形结构Utility Class，如：Menu、Department等
+ * Tree structure utility class, e.g., Menu, Department, etc.
  * Copyright (c) RenRen Open Source All rights reserved.
  * Website: https://www.renren.io
  */
 public class TreeUtils {
 
     /**
-     * Bypid，BuildTree Node
+     * Build tree nodes by pid
      */
     public static <T extends TreeNode<T>> List<T> build(List<T> treeNodes, Long pid) {
-        // pidCannot beEmpty
+        // pid cannot be empty
         AssertUtils.isNull(pid, "pid");
 
         List<T> treeList = new ArrayList<>();
@@ -32,7 +32,7 @@ public class TreeUtils {
     }
 
     /**
-     * QueryChild Nodes
+     * Query child nodes
      */
     private static <T extends TreeNode<T>> T findChildren(List<T> treeNodes, T rootNode) {
         for (T treeNode : treeNodes) {
@@ -44,12 +44,12 @@ public class TreeUtils {
     }
 
     /**
-     * BuildTree Node
+     * Build tree nodes
      */
     public static <T extends TreeNode<T>> List<T> build(List<T> treeNodes) {
         List<T> result = new ArrayList<>();
 
-        // list转map
+        // Convert list to map
         Map<Long, T> nodeMap = new LinkedHashMap<>(treeNodes.size());
         for (T treeNode : treeNodes) {
             nodeMap.put(treeNode.getId(), treeNode);

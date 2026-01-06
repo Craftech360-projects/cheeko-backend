@@ -2,6 +2,7 @@ package cheeko.modules.rfid.dto;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -32,9 +33,11 @@ public class RfidCardMappingDTO implements Serializable {
     @NotBlank(message = "RFID UID is required", groups = DefaultGroup.class)
     private String rfidUid;
 
-    @Schema(description = "FK to rfid_question table")
-    @NotNull(message = "Question ID is required", groups = DefaultGroup.class)
+    @Schema(description = "FK to rfid_question table (legacy single question)")
     private Long questionId;
+
+    @Schema(description = "JSON array of question IDs for multi-question support")
+    private List<Long> questionIds;
 
     @Schema(description = "Product/pack/SKU identifier (e.g., BLINKIT_ANIMALS_PACK_1)")
     private String packCode;

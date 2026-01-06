@@ -39,10 +39,10 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
     private final DeviceService deviceService;
 
     /**
-     * HandleChatRecordReport，包括FileUpload和相关InformationRecord
+     * Handle chat record report, including file upload and related information record
      *
-     * @param report 包含ChatReport所需Informations 输入Object
-     * @return UploadResult，trueTable示Success，falseTable示Failure
+     * @param report Input object containing chat report information
+     * @return Upload result, true indicates success, false indicates failure
      */
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -50,9 +50,9 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
         String macAddress = report.getMacAddress();
         Byte chatType = report.getChatType();
         Long reportTimeMillis = null != report.getReportTime() ? report.getReportTime() * 1000 : System.currentTimeMillis();
-        log.info("小智DeviceChatReportRequest: macAddress={}, type={} reportTime={}", macAddress, chatType, reportTimeMillis);
+        log.info("Cheeko device chat report request: macAddress={}, type={} reportTime={}", macAddress, chatType, reportTimeMillis);
 
-        // ByDeviceMACAddressQueryCorrespondings DefaultAgent，判断WhetherRequiredReport
+        // Query corresponding default agent by device MAC address to determine whether report is required
         AgentEntity agentEntity = agentService.getDefaultAgentByMacAddress(macAddress);
         if (agentEntity == null) {
             return Boolean.FALSE;
@@ -67,25 +67,25 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
             saveChatText(report, agentId, macAddress, null, reportTimeMillis);
         }
 
-        // UpdateDeviceLast对话Time
+        // Update device last conversation time
         redisUtils.set(RedisKeys.getAgentDeviceLastConnectedAtById(agentId), new Date());
 
-        // UpdateDeviceLastConnectionTime
+        // Update device last connection time
         DeviceEntity device = deviceService.getDeviceByMacAddress(macAddress);
         if (device != null) {
             deviceService.updateDeviceConnectionInfo(agentId, device.getId(), null);
         } else {
-            log.warn("ChatRecordReportTime，未找到macAddressAs {} s Device", macAddress);
+            log.warn("During chat record report, device with macAddress {} not found", macAddress);
         }
 
         return Boolean.TRUE;
     }
 
     /**
-     * 组装ReportData
+     * Assemble report data
      */
     private void saveChatText(AgentChatHistoryReportDTO report, String agentId, String macAddress, String audioId, Long reportTime) {
-        // BuildChatRecordEntity
+        // Build chat record entity
         AgentChatHistoryEntity entity = AgentChatHistoryEntity.builder()
                 .macAddress(macAddress)
                 .agentId(agentId)
@@ -94,7 +94,7 @@ public class AgentChatHistoryBizServiceImpl implements AgentChatHistoryBizServic
                 .content(report.getContent())
                 .audioId(audioId)
                 .createdAt(new Date(reportTime))
-                // NOTE(haotian): 2025/5/26 updateAtCan不Set，重点IscreateAt，而且这样Can看到Report延迟
+                // NOTE(haotian): 2025/5/26 updateAt can be left unset, focus is on createdAt, and this way we can see report delay
                 .build();
 
         // SaveData

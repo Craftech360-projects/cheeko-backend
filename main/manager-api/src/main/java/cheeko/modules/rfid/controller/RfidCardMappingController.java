@@ -134,4 +134,12 @@ public class RfidCardMappingController {
         rfidCardMappingService.delete(ids);
         return new Result<>();
     }
+
+    @PostMapping("/delete")
+    @Operation(summary = "Delete card mappings (POST)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> deletePost(@RequestBody Long[] ids) {
+        rfidCardMappingService.delete(ids);
+        return new Result<>();
+    }
 }

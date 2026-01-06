@@ -146,24 +146,24 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
 
     @Override
     public List<AgentChatHistoryUserVO> getRecentlyFiftyByAgentId(String agentId) {
-        // BuildQueryCondition(不添加按照Create TimeSort Order，Data本来就IsPrimary Key越LargeCreate Time越Large
-        // 不添加这样Can减少Sort OrderAllData在Paginations 全盘扫描消耗)
+        // Build query condition (no sorting by create time added since data is already ordered by primary key - larger ID means later create time
+        // Not adding this reduces the full table scan cost during pagination sorting)
         LambdaQueryWrapper<AgentChatHistoryEntity> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(AgentChatHistoryEntity::getContent, AgentChatHistoryEntity::getAudioId)
                 .eq(AgentChatHistoryEntity::getAgentId, agentId)
                 .eq(AgentChatHistoryEntity::getChatType, AgentChatHistoryType.USER.getValue())
                 .isNotNull(AgentChatHistoryEntity::getAudioId)
-                // 添加此行，确保QueryResult按照Create TimeDescending排列
-                // Useids 原因：Data形式，id越Larges Create Time就越晚，所以Useids Result和Create TimeDescending排列Result一样
-                // idAsAsDescending排列s 优势，性能高，HavePrimary Key索引，不用在Sort Orders Time候重新进行排Except扫描比较
-                .orderByDesc(AgentChatHistoryEntity::getId); 
+                // Add this line to ensure query results are sorted by create time in descending order
+                // Using ID because: in data format, larger ID means later create time, so using ID gives the same result as sorting by create time descending
+                // Advantage of sorting by ID in descending order: high performance, has primary key index, no need to re-sort and scan compare during sorting
+                .orderByDesc(AgentChatHistoryEntity::getId);
 
-        // BuildPaginationQuery，Query前50页Data
+        // Build pagination query, query first 50 records
         Page<AgentChatHistoryEntity> pageParam = new Page<>(0, 50);
         IPage<AgentChatHistoryEntity> result = this.baseMapper.selectPage(pageParam, wrapper);
         return result.getRecords().stream().map(item -> {
             AgentChatHistoryUserVO vo = ConvertUtils.sourceToTarget(item, AgentChatHistoryUserVO.class);
-            // Handle content Field，确保OnlyReturnChatContent
+            // Handle content field, ensure only chat content is returned
             if (vo != null && vo.getContent() != null) {
                 vo.setContent(extractContentFromString(vo.getContent()));
             }
@@ -172,20 +172,19 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
     }
 
     /**
-     * from content Field中提取ChatContent
-     * If content Is JSON 格式（如 {"speaker": "未知说话Person", "content": "Current在几点d 。"}），Then提取 content
-     * Field
-     * If content Is普通String，ThenDirectlyReturn
-     * 
-     * @param content 原始Content
-     * @return 提取s ChatContent
+     * Extract chat content from content field
+     * If content is JSON format (e.g., {"speaker": "Unknown speaker", "content": "What time is it now."}), extract the content field
+     * If content is a plain string, return directly
+     *
+     * @param content Original content
+     * @return Extracted chat content
      */
     private String extractContentFromString(String content) {
         if (content == null || content.trim().isEmpty()) {
             return content;
         }
 
-        // 尝试ParseAs JSON
+        // Try to parse as JSON
         try {
             Map<String, Object> jsonMap = JsonUtils.parseObject(content, Map.class);
             if (jsonMap != null && jsonMap.containsKey("content")) {
@@ -193,10 +192,10 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
                 return contentObj != null ? contentObj.toString() : content;
             }
         } catch (Exception e) {
-            // IfNotValids  JSON，DirectlyReturn原Content
+            // If not valid JSON, return original content directly
         }
 
-        // IfNot JSON 格式OrNot Have content Field，DirectlyReturn原Content
+        // If not JSON format or no content field, return original content directly
         return content;
     }
 
@@ -211,7 +210,7 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
 
     @Override
     public boolean isAudioOwnedByAgent(String audioId, String agentId) {
-        // QueryWhetherHavespecifiedAudioid和Agentids Data，IfHave且OnlyHave一条Description此DataProperty此Agent
+        // Query whether data with specified audio ID and agent ID exists. If it exists and there is only one record, it indicates this data belongs to this agent
         Long row = baseMapper.selectCount(new LambdaQueryWrapper<AgentChatHistoryEntity>()
                 .eq(AgentChatHistoryEntity::getAudioId, audioId)
                 .eq(AgentChatHistoryEntity::getAgentId, agentId));

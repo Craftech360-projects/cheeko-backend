@@ -1,7 +1,7 @@
 package cheeko.common.utils;
 
 /**
- * ReturnResponse体Utility Class
+ * Return response body utility class
  */
 public class ResultUtils
 {

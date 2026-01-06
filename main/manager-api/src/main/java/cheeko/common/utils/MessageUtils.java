@@ -4,7 +4,7 @@ import org.springframework.context.MessageSource;
 import org.springframework.context.i18n.LocaleContextHolder;
 
 /**
- * 国际化
+ * Internationalization
  * Copyright (c) RenRen Open Source All rights reserved.
  * Website: https://www.renren.io
  */

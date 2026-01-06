@@ -7,16 +7,16 @@ import java.util.Map;
 
 
 /**
- * 小智MCP JSON-RPC Requestjson
+ * Cheeko MCP JSON-RPC Request json
  */
 public class CheekoMcpJsonRpcJson {
-    //小智InitializemcpRequestjson
+    // Cheeko Initialize MCP Request json
     private static final String INITIALIZE_JSON;
-    //小智mcpInitializeSuccess，ReturnNotificationRequestjson
+    // Cheeko MCP Initialize Success, Return Notification Request json
     private static final String NOTIFICATIONS_INITIALIZED_JSON;
-    //小智mcpGetmcpUtils集合Requestjson
+    // Cheeko MCP Get MCP Tools Collection Request json
     private static final String TOOLS_LIST_REQUEST;
-    // 延迟加载
+    // Lazy loading
     static {
         INITIALIZE_JSON = JsonUtils.toJsonString(new JsonRpcTwo("initialize",
                 Map.of(

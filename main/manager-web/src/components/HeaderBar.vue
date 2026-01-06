@@ -40,6 +40,12 @@
             :style="{ fontSize: '15px', color: $route.path === '/token-analytics' ? '#fff' : '#3d4566' }"></i>
           Token Analytics
         </div>
+        <div v-if="isSuperAdmin" class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/rfid-management' }" @click="goRfidManagement">
+          <i class="el-icon-postcard"
+            :style="{ fontSize: '15px', color: $route.path === '/rfid-management' ? '#fff' : '#3d4566' }"></i>
+          RFID Management
+        </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
           :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' }"
           @visible-change="handleParamDropdownVisibleChange">
@@ -68,11 +74,8 @@
 
       <!-- Right elements -->
       <div class="header-right">
-        <div class="search-container" v-if="$route.path === '/home' && !(isSuperAdmin && isSmallScreen)">
-          <el-input v-model="search" placeholder="Enter name to search.." class="custom-search-input"
-            @keyup.enter.native="handleSearch">
-            <i slot="suffix" class="el-icon-search search-icon" @click="handleSearch"></i>
-          </el-input>
+        <div class="search-container" v-if="!(isSuperAdmin && isSmallScreen)">
+          <GlobalSearchDropdown />
         </div>
         <img loading="lazy" alt="" src="@/assets/home/avatar.png" class="avatar-img" />
         <el-dropdown trigger="click" class="user-dropdown" @visible-change="handleUserDropdownVisibleChange">
@@ -96,12 +99,14 @@
 <script>
 import userApi from '@/apis/module/user';
 import { mapActions, mapGetters } from 'vuex';
-import ChangePasswordDialog from './ChangePasswordDialog.vue'; // Import change password dialog component
+import ChangePasswordDialog from './ChangePasswordDialog.vue';
+import GlobalSearchDropdown from './GlobalSearchDropdown.vue';
 
 export default {
   name: 'HeaderBar',
   components: {
-    ChangePasswordDialog
+    ChangePasswordDialog,
+    GlobalSearchDropdown
   },
   props: ['devices'],  // Receive device list from parent component
   data() {
@@ -157,6 +162,9 @@ export default {
     },
     goServerSideManagement() {
       this.$router.push('/server-side-management')
+    },
+    goRfidManagement() {
+      this.$router.push('/rfid-management')
     },
     goTokenAnalytics() {
       this.$router.push('/token-analytics')
@@ -314,9 +322,9 @@ export default {
 
 .search-container {
   margin-right: 10px;
-  min-width: 140px;
+  min-width: 200px;
   flex-grow: 1;
-  max-width: 180px;
+  max-width: 280px;
 }
 
 .custom-search-input>>>.el-input__inner {

@@ -44,7 +44,7 @@ import cheeko.common.validator.ValidatorUtils;
 import cheeko.modules.device.entity.OtaEntity;
 import cheeko.modules.device.service.OtaService;
 
-@Tag(name = "Device Management", description = "OTA 相关Interface")
+@Tag(name = "Device Management", description = "OTA related interface")
 @Slf4j
 @RestController
 @RequiredArgsConstructor
@@ -89,7 +89,7 @@ public class OTAMagController {
             return new Result<Void>().error("FirmwareTypeCannot beEmpty");
         }
         if (StringUtils.isBlank(entity.getVersion())) {
-            return new Result<Void>().error("Version号Cannot beEmpty");
+            return new Result<Void>().error("Version number cannot be empty");
         }
         try {
             otaService.save(entity);
@@ -127,13 +127,13 @@ public class OTAMagController {
     }
 
     @PutMapping("/forceUpdate/{id}")
-    @Operation(summary = "SetFirmware强制Update")
+    @Operation(summary = "Set firmware force update")
     @RequiresPermissions("sys:role:superAdmin")
     public Result<Void> setForceUpdate(
             @PathVariable("id") String id,
             @RequestBody Map<String, Object> params) {
         if (params == null || !params.containsKey("forceUpdate") || !params.containsKey("type")) {
-            return new Result<Void>().error("Parameter不完整");
+            return new Result<Void>().error("Parameters incomplete");
         }
 
         Integer forceUpdate = (Integer) params.get("forceUpdate");
@@ -164,14 +164,14 @@ public class OTAMagController {
             return ResponseEntity.notFound().build();
         }
 
-        // CheckDownload次count
+        // Check download count
         String downloadCountKey = RedisKeys.getOtaDownloadCountKey(uuid);
         Integer downloadCount = (Integer) redisUtils.get(downloadCountKey);
         if (downloadCount == null) {
             downloadCount = 0;
         }
 
-        // IfDownload次count超过3次，Return404
+        // If download count exceeds 3 times, return 404
         if (downloadCount >= 3) {
             redisUtils.delete(downloadCountKey);
             redisUtils.delete(RedisKeys.getOtaIdKey(uuid));
@@ -198,14 +198,14 @@ public class OTAMagController {
             }
 
             if (!Files.exists(path) || !Files.isRegularFile(path)) {
-                // 尝试fromfirmware目录Query
+                // Try to find in firmware directory
                 String fileName = new File(firmwarePath).getName();
                 Path altPath = Paths.get(System.getProperty("user.dir"), "firmware", fileName);
 
                 if (Files.exists(altPath) && Files.isRegularFile(altPath)) {
                     path = altPath;
                 } else {
-                    logger.error("FirmwareFile未找到: {}", firmwarePath);
+                    logger.error("Firmware file not found: {}", firmwarePath);
                     return ResponseEntity.notFound().build();
                 }
             }
@@ -227,10 +227,10 @@ public class OTAMagController {
                     .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + safeFilename + "\"")
                     .body(fileContent);
         } catch (IOException e) {
-            logger.error("ReadFirmwareFileFailure", e);
+            logger.error("Failed to read firmware file", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         } catch (Exception e) {
-            logger.error("DownloadFirmwareTime发生Error", e);
+            logger.error("Error occurred during firmware download", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
@@ -251,23 +251,23 @@ public class OTAMagController {
 
         String extension = originalFilename.substring(originalFilename.lastIndexOf(".")).toLowerCase();
         if (!extension.equals(".bin") && !extension.equals(".apk")) {
-            return new Result<String>().error("OnlyAllowUpload.bin和.apk格式s File");
+            return new Result<String>().error("Only .bin and .apk format files are allowed");
         }
 
         try {
-            // CalculateFiles MD5值
+            // Calculate file MD5 hash
             String md5 = calculateMD5(file);
 
-            // Set存储Path
+            // Set storage path
             String uploadDir = "uploadfile";
             Path uploadPath = Paths.get(uploadDir);
 
-            // If目录不Exist，Create目录
+            // Create directory if it doesn't exist
             if (!Files.exists(uploadPath)) {
                 Files.createDirectories(uploadPath);
             }
 
-            // UseMD5AsAsFileName，固定Use.binExtensionName
+            // Use MD5 as filename with original extension
             String uniqueFileName = md5 + extension;
             Path filePath = uploadPath.resolve(uniqueFileName);
 

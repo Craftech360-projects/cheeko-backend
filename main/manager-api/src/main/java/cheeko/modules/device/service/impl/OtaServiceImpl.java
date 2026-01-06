@@ -41,14 +41,14 @@ public class OtaServiceImpl extends BaseServiceImpl<OtaDao, OtaEntity> implement
 
     @Override
     public void update(OtaEntity entity) {
-        // CheckWhetherExist相SameType和Versions Firmware（排ExceptCurrentRecord）
+        // Check if firmware with same type and version already exists (excluding current record)
         QueryWrapper<OtaEntity> queryWrapper = new QueryWrapper<OtaEntity>()
                 .eq("type", entity.getType())
                 .eq("version", entity.getVersion())
-                .ne("id", entity.getId()); // 排ExceptCurrentRecord
+                .ne("id", entity.getId()); // Exclude current record
 
         if (baseDao.selectCount(queryWrapper) > 0) {
-            throw new RuntimeException("HaveExist相SameType和Versions Firmware，请Update后Retry");
+            throw new RuntimeException("Firmware with same type and version already exists. Please update and retry");
         }
 
         entity.setUpdateDate(new Date());
@@ -64,7 +64,7 @@ public class OtaServiceImpl extends BaseServiceImpl<OtaDao, OtaEntity> implement
     public boolean save(OtaEntity entity) {
         QueryWrapper<OtaEntity> queryWrapper = new QueryWrapper<OtaEntity>()
                 .eq("type", entity.getType());
-        // SameClassFirmwareOnly保留Latests 一条
+        // Keep only the latest firmware of the same type
         List<OtaEntity> otaList = baseDao.selectList(queryWrapper);
         if (otaList != null && otaList.size() > 0) {
             OtaEntity otaBefore = otaList.get(0);
@@ -97,7 +97,7 @@ public class OtaServiceImpl extends BaseServiceImpl<OtaDao, OtaEntity> implement
     @Transactional(rollbackFor = Exception.class)
     public void setForceUpdate(String id, String type, Integer forceUpdate) {
         if (forceUpdate == null || (forceUpdate != 0 && forceUpdate != 1)) {
-            throw new RuntimeException("force_update值必须As0Or1");
+            throw new RuntimeException("force_update value must be 0 or 1");
         }
 
         // If enabling force update, first disable it for all other firmwares of the same type
@@ -120,10 +120,10 @@ public class OtaServiceImpl extends BaseServiceImpl<OtaDao, OtaEntity> implement
         // Update the target firmware
         OtaEntity entity = baseDao.selectById(id);
         if (entity == null) {
-            throw new RuntimeException("Firmware不Exist");
+            throw new RuntimeException("Firmware does not exist");
         }
         if (!entity.getType().equals(type)) {
-            throw new RuntimeException("FirmwareTypeNot Match");
+            throw new RuntimeException("Firmware type does not match");
         }
         entity.setForceUpdate(forceUpdate);
         entity.setUpdateDate(new Date());

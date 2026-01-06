@@ -136,4 +136,12 @@ public class RfidSeriesController {
         rfidSeriesService.delete(ids);
         return new Result<>();
     }
+
+    @PostMapping("/delete")
+    @Operation(summary = "Delete series (POST)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> deletePost(@RequestBody Long[] ids) {
+        rfidSeriesService.delete(ids);
+        return new Result<>();
+    }
 }

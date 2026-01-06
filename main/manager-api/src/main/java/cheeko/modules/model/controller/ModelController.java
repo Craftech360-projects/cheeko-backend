@@ -122,7 +122,7 @@ public class ModelController {
     public Result<Void> enableModelConfig(@PathVariable String id, @PathVariable Integer status) {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {
-            return new Result<Void>().error("ModelConfiguration不Exist");
+            return new Result<Void>().error("Model configuration does not exist");
         }
         entity.setIsEnabled(status);
         modelConfigService.updateById(entity);
@@ -135,15 +135,15 @@ public class ModelController {
     public Result<Void> setDefaultModel(@PathVariable String id) {
         ModelConfigEntity entity = modelConfigService.selectById(id);
         if (entity == null) {
-            return new Result<Void>().error("ModelConfiguration不Exist");
+            return new Result<Void>().error("Model configuration does not exist");
         }
-        // 将OtherModelSetAsNonDefault
+        // Set other models as non-default
         modelConfigService.setDefaultModel(entity.getModelType(), 0);
         entity.setIsEnabled(1);
         entity.setIsDefault(1);
         modelConfigService.updateById(entity);
 
-        // UpdateTemplateTable中Correspondings ModelID
+        // Update corresponding model ID in template table
         agentTemplateService.updateDefaultTemplateModelId(entity.getModelType(), entity.getId());
 
         configService.getConfig(false);

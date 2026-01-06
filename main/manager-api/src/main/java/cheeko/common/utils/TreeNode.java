@@ -7,7 +7,7 @@ import java.util.List;
 import lombok.Data;
 
 /**
- * Tree Node，AllRequiredImplementationTree Nodes ，都RequiredInherit该Class
+ * Tree node, all classes that need to implement tree nodes must inherit this class
  * Copyright (c) RenRen Open Source All rights reserved.
  * Website: https://www.renren.io
  */

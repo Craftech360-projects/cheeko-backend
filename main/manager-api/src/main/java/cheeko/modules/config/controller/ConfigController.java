@@ -33,16 +33,16 @@ public class ConfigController {
     private final ConfigService configService;
 
     @PostMapping("server-base")
-    @Operation(summary = "Service端GetConfigurationInterface")
+    @Operation(summary = "Server-side configuration interface")
     public Result<Object> getConfig() {
         Object config = configService.getConfig(true);
         return new Result<Object>().ok(config);
     }
 
     @PostMapping("agent-models")
-    @Operation(summary = "GetAgentModel")
+    @Operation(summary = "Get Agent Model")
     public Result<Object> getAgentModels(@Valid @RequestBody AgentModelsDTO dto) {
-        // 效验Data
+        // Validate data
         ValidatorUtils.validateEntity(dto);
         Object models = configService.getAgentModels(dto.getMacAddress(), dto.getSelectedModule());
         return new Result<Object>().ok(models);
@@ -81,7 +81,7 @@ public class ConfigController {
     }
 
     @PostMapping("child-profile-by-mac")
-    @Operation(summary = "GetDevice关联s 孩子资料")
+    @Operation(summary = "Get child profile associated with device")
     public Result<cheeko.modules.config.dto.ChildProfileDTO> getChildProfileByMac(@Valid @RequestBody Map<String, String> request) {
         String macAddress = request.get("macAddress");
         if (macAddress == null || macAddress.trim().isEmpty()) {
@@ -116,7 +116,7 @@ public class ConfigController {
     }
 
     @PostMapping("device-location")
-    @Operation(summary = "GetDevice位置Information")
+    @Operation(summary = "Get device location information")
     public Result<String> getDeviceLocation(@Valid @RequestBody Map<String, String> request) {
         String macAddress = request.get("macAddress");
         if (macAddress == null || macAddress.trim().isEmpty()) {
@@ -128,7 +128,7 @@ public class ConfigController {
     }
 
     @PostMapping("weather")
-    @Operation(summary = "GetWeather预报")
+    @Operation(summary = "Get weather forecast")
     public Result<String> getWeatherForecast(@Valid @RequestBody Map<String, String> request) {
         String location = request.get("location");
         if (location == null || location.trim().isEmpty()) {

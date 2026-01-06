@@ -2,7 +2,7 @@ package cheeko.common.utils;
 
 import lombok.Data;
 /**
- * JSON-RPC2.0 格式StandardizeObject
+ * JSON-RPC 2.0 format standardized object
  */
 @Data
 public class JsonRpcTwo {

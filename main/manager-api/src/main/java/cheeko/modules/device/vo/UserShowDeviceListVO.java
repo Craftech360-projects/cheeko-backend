@@ -19,6 +19,9 @@ public class UserShowDeviceListVO {
     @Schema(description = "Device unique identifier")
     private String id;
 
+    @Schema(description = "Agent ID")
+    private String agentId;
+
     @Schema(description = "macAddress")
     private String macAddress;
 

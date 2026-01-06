@@ -135,6 +135,17 @@ const routes = [
       title: 'Token Analytics'
     }
   },
+  {
+    path: '/rfid-management',
+    name: 'RfidManagement',
+    component: function () {
+      return import('../views/RfidManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'RFID Management'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -156,7 +167,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics', 'RfidManagement']
 
 // Route guard
 router.beforeEach((to, from, next) => {

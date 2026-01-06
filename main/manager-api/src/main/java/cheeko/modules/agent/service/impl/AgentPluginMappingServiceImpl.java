@@ -13,7 +13,7 @@ import cheeko.modules.agent.entity.AgentPluginMapping;
 import cheeko.modules.agent.service.AgentPluginMappingService;
 
 /**
- * @description 针对Table【ai_agent_plugin_mapping(Agent与Plugins 唯一MappingTable)】s Data库OperationServiceImplementation
+ * @description Database operation service implementation for table [ai_agent_plugin_mapping (Agent and Plugin unique mapping table)]
  * @createDate 2025-05-25 22:33:17
  */
 @Service

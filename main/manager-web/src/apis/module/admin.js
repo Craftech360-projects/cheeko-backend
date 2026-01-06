@@ -199,6 +199,28 @@ export default {
                 })
             }).send()
     },
+    // Get all devices (Admin only)
+    getAllDevices(params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page || 1,
+            limit: params.limit || 100,
+            keywords: params.keywords || ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/all?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getAllDevices(params, callback)
+                })
+            }).send()
+    },
     // Get WebSocket server list
     getWsServerList(params, callback) {
         RequestService.sendRequest()

@@ -42,7 +42,7 @@ public class ServerSecretFilter extends AuthenticatingFilter {
 
     @Override
     protected boolean isAccessAllowed(ServletRequest request, ServletResponse response, Object mappedValue) {
-        // 对OPTIONSRequest放行
+        // Allow OPTIONS request to pass through
         if (((HttpServletRequest) request).getMethod().equals(RequestMethod.OPTIONS.name())) {
             return true;
         }
@@ -51,20 +51,20 @@ public class ServerSecretFilter extends AuthenticatingFilter {
 
     @Override
     protected boolean onAccessDenied(ServletRequest servletRequest, ServletResponse servletResponse) throws Exception {
-        // Gettoken并Validate
+        // Get token and validate
         String token = getRequestToken((HttpServletRequest) servletRequest);
         if (StringUtils.isBlank(token)) {
-            // tokenAsEmpty，Return401
-            this.sendUnauthorizedResponse((HttpServletResponse) servletResponse, "ServiceServerSecret KeyCannot beEmpty");
+            // Token is empty, return 401
+            this.sendUnauthorizedResponse((HttpServletResponse) servletResponse, "Service server secret key cannot be empty");
             return false;
         }
 
-        // ValidatetokenWhether匹配
+        // Validate whether token matches
         String serverSecret = getServerSecret();
-        
+
         if (StringUtils.isBlank(serverSecret) || !serverSecret.equals(token)) {
-            // tokenInvalid，Return401
-            this.sendUnauthorizedResponse((HttpServletResponse) servletResponse, "Invalids ServiceServerSecret Key");
+            // Token invalid, return 401
+            this.sendUnauthorizedResponse((HttpServletResponse) servletResponse, "Invalid service server secret key");
             return false;
         }
 
@@ -72,7 +72,7 @@ public class ServerSecretFilter extends AuthenticatingFilter {
     }
 
     /**
-     * Send未AuthorizationResponse
+     * Send unauthorized response
      */
     private void sendUnauthorizedResponse(HttpServletResponse response, String message) {
         response.setContentType("application/json;charset=utf-8");
@@ -83,7 +83,7 @@ public class ServerSecretFilter extends AuthenticatingFilter {
             String json = JsonUtils.toJsonString(new Result<Void>().error(ErrorCode.UNAUTHORIZED, message));
             response.getWriter().print(json);
         } catch (IOException e) {
-            log.error("Response输出Failure", e);
+            log.error("Response output failure", e);
         }
     }
 

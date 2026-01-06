@@ -43,15 +43,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
     @Override
     public void configureMessageConverters(List<HttpMessageConverter<?>> converters) {
-        // 特殊用途s ConvertServer
+        // Special purpose converters
         converters.add(new ByteArrayHttpMessageConverter());
         converters.add(new ResourceHttpMessageConverter());
 
-        // CommonConvertServer
+        // Common converters
         converters.add(new StringHttpMessageConverter());
         converters.add(new AllEncompassingFormHttpMessageConverter());
 
-        // JSON ConvertServer
+        // JSON converter
         converters.add(jackson2HttpMessageConverter());
     }
 
@@ -60,13 +60,13 @@ public class WebMvcConfig implements WebMvcConfigurer {
         MappingJackson2HttpMessageConverter converter = new MappingJackson2HttpMessageConverter();
         ObjectMapper mapper = new ObjectMapper();
 
-        // 忽略未知Property
+        // Ignore unknown properties
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
-        // SetTime区 (IST - India Standard Time)
+        // Set timezone (IST - India Standard Time)
         mapper.setTimeZone(TimeZone.getTimeZone("Asia/Kolkata"));
 
-        // ConfigurationJava8DateTimeSerialize
+        // Configure Java 8 DateTime serialization
         JavaTimeModule javaTimeModule = new JavaTimeModule();
         javaTimeModule.addSerializer(java.time.LocalDateTime.class, new LocalDateTimeSerializer(
                 java.time.format.DateTimeFormatter.ofPattern(DateUtils.DATE_TIME_PATTERN)));
@@ -82,11 +82,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 new LocalTimeDeserializer(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")));
         mapper.registerModule(javaTimeModule);
 
-        // Configurationjava.util.Dates Serialize和反Serialize
+        // Configure java.util.Date serialization and deserialization
         SimpleDateFormat dateFormat = new SimpleDateFormat(DateUtils.DATE_TIME_PATTERN);
         mapper.setDateFormat(dateFormat);
 
-        // LongType转StringType
+        // Convert Long type to String type
         SimpleModule simpleModule = new SimpleModule();
         simpleModule.addSerializer(Long.class, ToStringSerializer.instance);
         simpleModule.addSerializer(Long.TYPE, ToStringSerializer.instance);

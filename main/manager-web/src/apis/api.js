@@ -8,6 +8,7 @@ import model from './module/model.js'
 import ota from './module/ota.js'
 import timbre from "./module/timbre.js"
 import user from './module/user.js'
+import rfid from './module/rfid.js'
 
 /**
  * API URL
@@ -42,5 +43,6 @@ export default {
     model,
     timbre,
     ota,
-    dict
+    dict,
+    rfid
 }

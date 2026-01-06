@@ -118,4 +118,12 @@ public class RfidPackController {
         rfidPackService.delete(ids);
         return new Result<>();
     }
+
+    @PostMapping("/delete")
+    @Operation(summary = "Delete packs (POST)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> deletePost(@RequestBody Long[] ids) {
+        rfidPackService.delete(ids);
+        return new Result<>();
+    }
 }

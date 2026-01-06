@@ -4,7 +4,7 @@ import cheeko.modules.agent.dto.AgentChatHistoryReportDTO;
 import cheeko.modules.agent.dto.AgentChatHistorySessionDTO;
 
 /**
- * AgentChatHistory业务逻辑层
+ * Agent Chat History Business Logic Layer
  *
  * @author Goody
  * @version 1.0, 2025/4/30
@@ -13,11 +13,11 @@ import cheeko.modules.agent.dto.AgentChatHistorySessionDTO;
 public interface AgentChatHistoryBizService {
 
     /**
-     * ChatReportMethod
+     * Chat report method
      *
-     * @param agentChatHistoryReportDTO 包含ChatReport所需Informations 输入Object
-     *                                  For example：DeviceMACAddress、FileType、Content等
-     * @return UploadResult，trueTable示Success，falseTable示Failure
+     * @param agentChatHistoryReportDTO Input object containing chat report information,
+     *                                  e.g., device MAC address, file type, content, etc.
+     * @return Upload result, true indicates success, false indicates failure
      */
     Boolean report(AgentChatHistoryReportDTO agentChatHistoryReportDTO);
 

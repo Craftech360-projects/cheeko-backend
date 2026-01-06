@@ -17,7 +17,7 @@ public class FilterConfig {
     public FilterRegistrationBean<DelegatingFilterProxy> shiroFilterRegistration() {
         FilterRegistrationBean<DelegatingFilterProxy> registration = new FilterRegistrationBean<>();
         registration.setFilter(new DelegatingFilterProxy("shiroFilter"));
-        // 该值缺省Asfalse，Table示生命周期由SpringApplicationContextManagement，SetAstrueThenTable示由ServletContainerManagement
+        // Default value is false, indicating lifecycle is managed by Spring Application Context. Set to true to indicate management by Servlet Container
         registration.addInitParameter("targetFilterLifecycle", "true");
         registration.setEnabled(true);
         registration.setOrder(Integer.MAX_VALUE - 1);

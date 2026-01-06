@@ -6,17 +6,18 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * IPAddress
+ * IP Address Utilities
  * Copyright (c) RenRen Open Source All rights reserved.
  * Website: https://www.renren.io
  */
 @Slf4j
 public class IpUtils {
     /**
-     * GetIPAddress
+     * Get IP Address
      * <p>
-     * UseNginx等反向Proxy软件， Then不能Passrequest.getRemoteAddr()GetIPAddress
-     * IfUsed 多级反向Proxys 话，X-Forwarded-Fors 值并不止一个，而Is一串IPAddress，X-Forwarded-For中第一个Nonunknowns ValidIPString，ThenAs真实IPAddress
+     * When using Nginx or other reverse proxy software, you cannot get IP address through request.getRemoteAddr().
+     * If multiple levels of reverse proxy are used, X-Forwarded-For value is not just one, but a series of IP addresses.
+     * The first non-unknown valid IP string in X-Forwarded-For is the real IP address.
      */
     public static String getIpAddr(HttpServletRequest request) {
         String unknown = "unknown";

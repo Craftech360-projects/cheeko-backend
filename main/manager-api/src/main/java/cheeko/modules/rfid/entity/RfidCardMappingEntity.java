@@ -1,12 +1,14 @@
 package cheeko.modules.rfid.entity;
 
 import java.util.Date;
+import java.util.List;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -19,7 +21,7 @@ import cheeko.common.entity.BaseEntity;
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
-@TableName("rfid_card_mapping")
+@TableName(value = "rfid_card_mapping", autoResultMap = true)
 @Schema(description = "RFID Card to Question Mapping Entity")
 public class RfidCardMappingEntity extends BaseEntity {
 
@@ -30,8 +32,12 @@ public class RfidCardMappingEntity extends BaseEntity {
     @Schema(description = "RFID card UID (hex string format)")
     private String rfidUid;
 
-    @Schema(description = "FK to rfid_question table")
+    @Schema(description = "FK to rfid_question table (legacy single question)")
     private Long questionId;
+
+    @Schema(description = "JSON array of question IDs for multi-question support")
+    @TableField(typeHandler = JacksonTypeHandler.class)
+    private List<Long> questionIds;
 
     @Schema(description = "Product/pack/SKU identifier (e.g., BLINKIT_ANIMALS_PACK_1)")
     private String packCode;

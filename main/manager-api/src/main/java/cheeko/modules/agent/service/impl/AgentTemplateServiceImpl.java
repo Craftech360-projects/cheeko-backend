@@ -12,7 +12,7 @@ import cheeko.modules.agent.service.AgentTemplateService;
 
 /**
  * @author chenerlei
- * @description 针对Table【ai_agent_template(AgentConfigurationTemplateTable)】s Data库OperationServiceImplementation
+ * @description Database operation service implementation for table ai_agent_template (Agent Configuration Template Table)
  * @createDate 2025-03-22 11:48:18
  */
 @Service
@@ -32,10 +32,10 @@ public class AgentTemplateServiceImpl extends ServiceImpl<AgentTemplateDao, Agen
     }
 
     /**
-     * UpdateDefaultTemplate中s ModelID
-     * 
-     * @param modelType ModelType
-     * @param modelId   ModelID
+     * Update Model ID in default template
+     *
+     * @param modelType Model type
+     * @param modelId   Model ID
      */
     @Override
     public void updateDefaultTemplateModelId(String modelType, String modelId) {

@@ -16,9 +16,9 @@ import cheeko.common.exception.ErrorCode;
 public class Result<T> implements Serializable {
 
     /**
-     * Code：0Table示Success，Other值Table示Failure
+     * Code: 0 indicates success, other values indicate failure
      */
-    @Schema(description = "Code：0Table示Success，Other值Table示Failure")
+    @Schema(description = "Code: 0 indicates success, other values indicate failure")
     private int code = 0;
     /**
      * MessageContent

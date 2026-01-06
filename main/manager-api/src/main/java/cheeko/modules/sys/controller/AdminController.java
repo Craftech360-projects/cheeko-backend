@@ -47,9 +47,9 @@ public class AdminController {
     @Operation(summary = "Paginated user search")
     @RequiresPermissions("sys:role:superAdmin")
     @Parameters({
-            @Parameter(name = "mobile", description = "UserMobile号Code", required = false),
-            @Parameter(name = Constant.PAGE, description = "CurrentPage Number，from1Start", required = true),
-            @Parameter(name = Constant.LIMIT, description = "Per PagedisplayRecordcount", required = true),
+            @Parameter(name = "mobile", description = "User mobile number", required = false),
+            @Parameter(name = Constant.PAGE, description = "Current page number, starting from 1", required = true),
+            @Parameter(name = Constant.LIMIT, description = "Records per page to display", required = true),
     })
     public Result<PageData<AdminPageUserVO>> pageUser(
             @Parameter(hidden = true) @RequestParam Map<String, Object> params) {
@@ -92,9 +92,9 @@ public class AdminController {
     @Operation(summary = "Paginated device search")
     @RequiresPermissions("sys:role:superAdmin")
     @Parameters({
-            @Parameter(name = "keywords", description = "Device关键词", required = false),
-            @Parameter(name = Constant.PAGE, description = "CurrentPage Number，from1Start", required = true),
-            @Parameter(name = Constant.LIMIT, description = "Per PagedisplayRecordcount", required = true),
+            @Parameter(name = "keywords", description = "Device keywords", required = false),
+            @Parameter(name = Constant.PAGE, description = "Current page number, starting from 1", required = true),
+            @Parameter(name = Constant.LIMIT, description = "Records per page to display", required = true),
     })
     public Result<PageData<UserShowDeviceListVO>> pageDevice(
             @Parameter(hidden = true) @RequestParam Map<String, Object> params) {

@@ -126,4 +126,12 @@ public class RfidQuestionController {
         rfidQuestionService.delete(ids);
         return new Result<>();
     }
+
+    @PostMapping("/delete")
+    @Operation(summary = "Delete questions (POST)")
+    @RequiresPermissions("sys:role:superAdmin")
+    public Result<Void> deletePost(@RequestBody Long[] ids) {
+        rfidQuestionService.delete(ids);
+        return new Result<>();
+    }
 }

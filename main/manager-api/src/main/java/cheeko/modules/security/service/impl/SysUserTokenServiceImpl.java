@@ -27,7 +27,7 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
 
     private final SysUserService sysUserService;
     /**
-     * 7天后Expired
+     * Expires after 7 days
      */
     private final static int EXPIRE = 3600 * 24 * 7;
 
@@ -41,10 +41,10 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
         // ExpiredTime
         Date expireTime = new Date(now.getTime() + EXPIRE * 1000);
 
-        // 判断WhetherGenerate过token
+        // Check if token was already generated
         SysUserTokenEntity tokenEntity = baseDao.getByUserId(userId);
         if (tokenEntity == null) {
-            // Generate一个token
+            // Generate a new token
             token = TokenGenerator.generateValue();
 
             tokenEntity = new SysUserTokenEntity();
@@ -56,9 +56,9 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
             // Savetoken
             this.insert(tokenEntity);
         } else {
-            // 判断tokenWhetherExpired
+            // Check if token is expired
             if (tokenEntity.getExpireDate().getTime() < System.currentTimeMillis()) {
-                // tokenExpired，重新Generatetoken
+                // Token expired, regenerate token
                 token = TokenGenerator.generateValue();
             } else {
                 token = tokenEntity.getToken();
@@ -109,7 +109,7 @@ public class SysUserTokenServiceImpl extends BaseServiceImpl<SysUserTokenDao, Sy
         // UpdatePassword
         sysUserService.changePassword(userId, passwordDTO);
 
-        // 使 token 失效，后Required重新Login
+        // Invalidate token, user needs to login again
         Date expireDate = DateUtil.offsetMinute(new Date(), -1);
         baseDao.logout(userId, expireDate);
     }

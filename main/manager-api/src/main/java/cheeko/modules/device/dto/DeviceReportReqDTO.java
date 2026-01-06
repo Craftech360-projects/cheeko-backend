@@ -86,7 +86,7 @@ public class DeviceReportReqDTO implements Serializable {
         @JsonProperty("compile_time")
         private String compileTime;
 
-        @Schema(description = "ESP-IDF Version号")
+        @Schema(description = "ESP-IDF Version")
         @JsonProperty("idf_version")
         private String idfVersion;
 

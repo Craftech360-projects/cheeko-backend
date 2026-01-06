@@ -696,7 +696,7 @@ class LiveKitBridge extends EventEmitter {
         // );
 
         // Add participant connection handlers
-        this.room.on(RoomEvent.ParticipantConnected, (participant) => {
+        this.room.on(RoomEvent.ParticipantConnected, async (participant) => {
           // console.log(`👤 [PARTICIPANT] Connected: ${participant.identity} (${participant.sid})`);
 
           // Check if this is an agent joining (agent identity typically contains "agent")
@@ -741,8 +741,22 @@ class LiveKitBridge extends EventEmitter {
               this.agentJoinTimeout = null;
             }
 
-            // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed
-            console.log(`✅ [AGENT-READY] Agent ready, will greet via on_enter hook`);
+            // Send ready_for_greeting to agent via data channel to trigger greeting
+            console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
+            try {
+              const greetingTrigger = JSON.stringify({
+                type: "ready_for_greeting",
+                session_id: this.connection?.udp?.session_id || "unknown",
+                timestamp: Date.now(),
+              });
+              await this.room.localParticipant.publishData(
+                Buffer.from(greetingTrigger),
+                { reliable: true }
+              );
+              console.log(`✅ [GREETING] ready_for_greeting sent to agent`);
+            } catch (greetErr) {
+              console.error(`❌ [GREETING] Failed to send ready_for_greeting: ${greetErr.message}`);
+            }
           }
         });
 

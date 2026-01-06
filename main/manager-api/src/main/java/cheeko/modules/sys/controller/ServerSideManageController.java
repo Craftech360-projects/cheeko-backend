@@ -32,7 +32,7 @@ import cheeko.modules.sys.service.SysParamsService;
 import cheeko.modules.sys.utils.WebSocketClientManager;
 
 /**
- * Service端ManagementController
+ * Server-side management controller
  */
 @RestController
 @RequestMapping("/admin/server")
@@ -43,7 +43,7 @@ public class ServerSideManageController {
     private static final ObjectMapper objectMapper;
     static {
         objectMapper = new ObjectMapper();
-        // 忽略jsonString中Exist，但pojo中不ExistCorrespondingFields 情况
+        // Ignore fields that exist in JSON string but do not exist in corresponding POJO
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
@@ -94,12 +94,12 @@ public class ServerSideManageController {
                 .uri(targetWsUri)
                 .headers(headers)
                 .build()) {
-            // IfConnectionSuccessThenSend一个jsonData包并WaitService端Response
+            // If connection succeeds, send a JSON data packet and wait for server-side response
             client.sendJson(
                     ServerActionPayloadDTO.build(
                             actionEnum,
                             Map.of("secret", serverSK)));
-            // WaitService端Response并持续ListenInformation
+            // Wait for server-side response and continue listening for messages
             client.listener((jsonText) -> {
                 if (StringUtils.isBlank(jsonText)) {
                     return false;
@@ -113,8 +113,8 @@ public class ServerSideManageController {
                 }
             });
         } catch (Exception e) {
-            // 捕获AllError，由全局ExceptionHandleServerReturn
-            throw new RenException("WebSocketConnectionFailureOrConnectionTimeout");
+            // Catch all errors, let global exception handler return
+            throw new RenException("WebSocket connection failure or connection timeout");
         }
         return true;
     }

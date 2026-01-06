@@ -62,17 +62,17 @@ public class ShiroConfig {
         filters.put("oauth2", new Oauth2Filter());
         // ServiceSecret KeyFilter
         filters.put("server", new ServerSecretFilter(sysParamsService));
-        // 双重AuthenticationFilter（支持ServiceSecret Key和OAuth2）
+        // Dual Authentication Filter (supports Service Secret Key and OAuth2)
         filters.put("dual", new DualAuthFilter(sysParamsService));
         shiroFilter.setFilters(filters);
 
-        // 添加Shiros 内置FilterServer
+        // Add Shiro's built-in filter server
         /*
-         * anon：无需Authentication就Can访问
-         * authc：必须Authenticationd Then能让问
-         * user：必须OwnHave，记住我Function，Then能访问
-         * perms：OwnHave对某个资源s PermissionThen能访问
-         * role：OwnHave某个RolePermissionThen能访问
+         * anon: No authentication required, can access
+         * authc: Must be authenticated before access
+         * user: Must have "remember me" function enabled to access
+         * perms: Must have permission for a specific resource to access
+         * role: Must have a specific role permission to access
          */
         Map<String, String> filterMap = new LinkedHashMap<>();
         filterMap.put("/ota/**", "anon");
@@ -90,7 +90,7 @@ public class ShiroConfig {
         filterMap.put("/user/retrieve-password", "anon");
         filterMap.put("/user/update-password", "anon");
         filterMap.put("/user/delete-account", "anon");
-        // 将configPathUseserverServiceFilterServer
+        // Use server service filter for config path
         filterMap.put("/config/**", "server");
         filterMap.put("/agent/chat-history/report", "server");
         filterMap.put("/agent/chat-history/session", "server");

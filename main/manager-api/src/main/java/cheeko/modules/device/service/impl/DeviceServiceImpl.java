@@ -131,7 +131,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         deviceEntity.setLastConnectedAt(currentTime);
         deviceDao.insert(deviceEntity);
 
-        // 清理redisCache
+        // Clean redis cache
         redisUtils.delete(cacheDeviceKey);
         redisUtils.delete(deviceKey);
 
@@ -146,14 +146,14 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
         DeviceEntity deviceById = getDeviceByMacAddress(macAddress);
 
-        // Device未Bind，ThenReturnCurrentUploads FirmwareInformation（不Update）以此兼容旧FirmwareVersion
+        // Device not bound, return current uploaded firmware info (no update) to support old firmware versions
         if (deviceById == null) {
             DeviceReportRespDTO.Firmware firmware = new DeviceReportRespDTO.Firmware();
             firmware.setVersion(deviceReport.getApplication().getVersion());
             firmware.setUrl(Constant.INVALID_FIRMWARE_URL);
             response.setFirmware(firmware);
         } else {
-            // OnlyHave在DeviceHaveBind且autoUpdate不As0s 情况underThenReturnFirmwareUpgradeInformation
+            // Only return firmware upgrade info when device is bound and autoUpdate is not 0
             if (deviceById.getAutoUpdate() != 0) {
                 String type = deviceReport.getBoard() == null ? null : deviceReport.getBoard().getType();
                 DeviceReportRespDTO.Firmware firmware = buildFirmwareInfo(type,
@@ -162,21 +162,21 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             }
         }
 
-        // 添加WebSocketConfiguration
+        // Add WebSocket configuration
         DeviceReportRespDTO.Websocket websocket = new DeviceReportRespDTO.Websocket();
-        // fromSystem ParameterGetWebSocket URL，If未ConfigurationThenUseDefault值
+        // Get WebSocket URL from system parameters, use default if not configured
         String wsUrl = sysParamsService.getValue(Constant.SERVER_WEBSOCKET, true);
         if (StringUtils.isBlank(wsUrl) || wsUrl.equals("null")) {
-            log.error("WebSocketAddress未Configuration，请Login智控台，在Parameter Management找到【server.websocket】Configuration");
+            log.error("WebSocket address not configured. Please login to control panel and configure [server.websocket] in Parameter Management");
             wsUrl = "ws://cheeko.server.com:8000/cheeko/v1/";
             websocket.setUrl(wsUrl);
         } else {
             String[] wsUrls = wsUrl.split("\\;");
             if (wsUrls.length > 0) {
-                // 随机Select一个WebSocket URL
+                // Randomly select a WebSocket URL
                 websocket.setUrl(wsUrls[RandomUtil.randomInt(0, wsUrls.length)]);
             } else {
-                log.error("WebSocketAddress未Configuration，请Login智控台，在Parameter Management找到【server.websocket】Configuration");
+                log.error("WebSocket address not configured. Please login to control panel and configure [server.websocket] in Parameter Management");
                 websocket.setUrl("ws://cheeko.server.com:8000/cheeko/v1/");
             }
         }
@@ -191,14 +191,14 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         }
 
         if (deviceById != null) {
-            // IfDeviceExist，ThenAsyncUpdate上次ConnectionTime和VersionInformation
+            // If device exists, async update last connection time and version info
             String appVersion = deviceReport.getApplication() != null ? deviceReport.getApplication().getVersion()
                     : null;
-            // PassSpringProxyCallAsyncMethod
+            // Call async method through Spring proxy
             ((DeviceServiceImpl) AopContext.currentProxy()).updateDeviceConnectionInfo(deviceById.getAgentId(),
                     deviceById.getId(), appVersion);
         } else {
-            // IfDevice不Exist，ThenGenerateActivateCode
+            // If device doesn't exist, generate activation code
             DeviceReportRespDTO.Activation code = buildActivation(macAddress, deviceReport);
             response.setActivation(code);
         }
@@ -284,21 +284,25 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
         params.put(Constant.LIMIT, dto.getLimit());
         IPage<DeviceEntity> page = baseDao.selectPage(
                 getPage(params, "mac_address", true),
-                // DefinitionQueryCondition
+                // Define query conditions
                 new QueryWrapper<DeviceEntity>()
-                        // 必须Device关键词Query
-                        .like(StringUtils.isNotBlank(dto.getKeywords()), "alias", dto.getKeywords()));
-        // 循环HandlepageGet回来s Data，ReturnRequireds Field
+                        // Search by alias OR mac_address
+                        .and(StringUtils.isNotBlank(dto.getKeywords()), wrapper -> wrapper
+                                .like("alias", dto.getKeywords())
+                                .or()
+                                .like("mac_address", dto.getKeywords())));
+        // Process page data and return required fields
         List<UserShowDeviceListVO> list = page.getRecords().stream().map(device -> {
             UserShowDeviceListVO vo = ConvertUtils.sourceToTarget(device, UserShowDeviceListVO.class);
-            // 把LastUpdates Time，改As简短Descriptions Time
+            // Convert last update time to short description format
             vo.setRecentChatTime(DateUtils.getShortTime(device.getUpdateDate()));
             sysUserUtilService.assignUsername(device.getUserId(),
                     vo::setBindUserName);
             vo.setDeviceType(device.getBoard());
+            vo.setAgentId(device.getAgentId());
             return vo;
         }).toList();
-        // Calculate页count
+        // Calculate page count
         return new PageData<>(list, page.getTotal());
     }
 
@@ -356,7 +360,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
     @Override
     public Date getLatestLastConnectionTime(String agentId) {
-        // QueryWhetherHaveCacheTime，HaveThenReturn
+        // Check if cached time exists, return if found
         Date cachedDate = (Date) redisUtils.get(RedisKeys.getAgentDeviceLastConnectedAtById(agentId));
         if (cachedDate != null) {
             return cachedDate;
@@ -405,11 +409,11 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
             dataMap.put("deviceId", deviceId);
             dataMap.put("activation_code", newCode);
 
-            // Write主Data key
+            // Write main data key
             String dataKey = getDeviceCacheKey(deviceId);
             redisUtils.set(dataKey, dataMap);
 
-            // Write反QueryActivateCode key
+            // Write reverse lookup activation code key
             String codeKey = "ota:activation:code:" + newCode;
             redisUtils.set(codeKey, deviceId);
         }
@@ -495,7 +499,7 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
 
             return mqtt;
         } catch (Exception e) {
-            log.error("GenerateMQTT凭据Failure: {}", e.getMessage());
+            log.error("Failed to generate MQTT credentials: {}", e.getMessage());
             return null;
         }
     }
@@ -561,11 +565,11 @@ public class DeviceServiceImpl extends BaseServiceImpl<DeviceDao, DeviceEntity> 
     }
 
     /**
-     * 比较两个Version号
-     * 
-     * @param version1 Version1
-     * @param version2 Version2
-     * @return Ifversion1 > version2Return1，version1 < version2Return-1，相等Return0
+     * Compare two version numbers
+     *
+     * @param version1 First version
+     * @param version2 Second version
+     * @return 1 if version1 > version2, -1 if version1 < version2, 0 if equal
      */
     private static int compareVersions(String version1, String version2) {
         if (version1 == null || version2 == null) {
