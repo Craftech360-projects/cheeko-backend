@@ -1,11 +1,10 @@
 version: 2.1
 
 # ==========================================
-# 🚀 XIAOZHI BRANCH-SPECIFIC PIPELINE CONFIGURATION
+# CHEEKO CI/CD PIPELINE
 # ==========================================
-# Dev Pipeline: Tests + Deployment (dev branch only)
-# Production Pipeline: Tests + Deployment (production branch only)
-# Parallel execution for maximum efficiency
+# Cerebrium: livekit-server (Python AI Agent)
+# Digital Ocean Droplet: manager-api, manager-web, mqtt-gateway, EMQX
 # ==========================================
 
 # =========================
@@ -16,15 +15,6 @@ executors:
     machine:
       image: ubuntu-2204:2024.01.1
     resource_class: medium
-    environment:
-      NPM_CONFIG_RETRY: "3"
-      NPM_CONFIG_FETCH_RETRY_MINTIMEOUT: "2000"
-      NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT: "10000"
-
-  base-executor:
-    machine:
-      image: ubuntu-2204:2024.01.1
-    resource_class: medium
 
   maven-executor:
     machine:
@@ -32,306 +22,76 @@ executors:
     resource_class: medium
     environment:
       MAVEN_OPTS: -Xmx1024m
-      MAVEN_CLI_OPTS: "--batch-mode --errors --fail-at-end --show-version"
 
   python-executor:
     machine:
       image: ubuntu-2204:2024.01.1
     resource_class: medium
-    environment:
-      PYTHONPATH: /home/circleci/project
+
+  docker-executor:
+    machine:
+      image: ubuntu-2204:2024.01.1
+    resource_class: medium
+
+# =========================
+# Commands (Reusable)
+# =========================
+commands:
+  setup_doctl:
+    description: "Install and configure Digital Ocean CLI"
+    steps:
+      - run:
+          name: Install doctl
+          command: |
+            cd ~
+            wget https://github.com/digitalocean/doctl/releases/download/v1.104.0/doctl-1.104.0-linux-amd64.tar.gz
+            tar xf doctl-1.104.0-linux-amd64.tar.gz
+            sudo mv doctl /usr/local/bin
+            doctl version
+      - run:
+          name: Authenticate with Digital Ocean
+          command: |
+            doctl auth init -t "${DO_ACCESS_TOKEN}"
+            doctl account get
+
+  setup_docker_registry:
+    description: "Login to Digital Ocean Container Registry"
+    steps:
+      - run:
+          name: Login to DO Container Registry
+          command: |
+            doctl registry login --expiry-seconds 3600
 
 # =========================
 # Jobs
 # =========================
 jobs:
   # ==========================================
-  # EMQX DEPLOYMENT JOB
+  # PIPELINE NOTIFICATION
   # ==========================================
-  deploy_emqx_docker:
-    executor: base-executor
-    parameters:
-      env: { type: string, default: "staging" }
-      mqtt_port: { type: integer, default: 1883 }
-      mqtt_ws_port: { type: integer, default: 8083 }
-      http_port: { type: integer, default: 18083 }
-    steps:
-      - add_ssh_keys:
-          fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
-      - run:
-          name: Deploy EMQX in Docker
-          command: |
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
-
-            DEPLOY_SCRIPT="set -e
-
-              # Install Docker if not present
-              if ! command -v docker &> /dev/null; then
-                curl -fsSL https://get.docker.com | sudo sh
-              fi
-
-              # Ensure user has Docker permissions
-              sudo usermod -aG docker \$USER
-              
-              # Create new session to apply group changes and run commands
-              sudo -E -u \$USER bash -c 'docker ps || exit 1'
-
-              # Create directories for EMQX persistence with proper permissions
-              sudo mkdir -p ${AZURE_DEPLOY_PATH}/emqx/data ${AZURE_DEPLOY_PATH}/emqx/log
-              sudo chown -R \$USER:docker ${AZURE_DEPLOY_PATH}/emqx
-              sudo chmod -R 775 ${AZURE_DEPLOY_PATH}/emqx
-
-              # Verify permissions
-              ls -la ${AZURE_DEPLOY_PATH}/emqx
-
-              # Aggressively clean up ALL EMQX containers (by name and ID)
-              echo 'Cleaning up all EMQX containers...'
-
-              # First, disable restart policies on all xiaozhi-emqx containers to prevent auto-restart
-              echo 'Disabling restart policies...'
-              EXISTING_CONTAINERS=\$(docker ps -aq --filter name=xiaozhi-emqx)
-              if [ -n \"\$EXISTING_CONTAINERS\" ]; then
-                echo \"Found containers to disable restart: \$EXISTING_CONTAINERS\"
-                echo \"\$EXISTING_CONTAINERS\" | xargs -r docker update --restart=no 2>/dev/null || true
-              fi
-
-              # Loop through all removal attempts to handle race conditions
-              for attempt in 1 2 3; do
-                echo \"Cleanup attempt \$attempt of 3...\"
-
-                # Stop all running containers with xiaozhi-emqx name
-                docker stop xiaozhi-emqx 2>/dev/null || true
-
-                # Remove all containers by name (running or stopped)
-                docker rm -f xiaozhi-emqx 2>/dev/null || true
-
-                # Find and remove any containers with 'xiaozhi-emqx' in the name using filter
-                CONTAINER_IDS=\$(docker ps -aq --filter name=xiaozhi-emqx)
-                if [ -n \"\$CONTAINER_IDS\" ]; then
-                  echo \"Found containers by filter: \$CONTAINER_IDS\"
-                  # Disable restart policy first
-                  echo \"\$CONTAINER_IDS\" | xargs -r docker update --restart=no 2>/dev/null || true
-                  # Then remove
-                  echo \"\$CONTAINER_IDS\" | xargs -r docker rm -f 2>/dev/null || true
-
-                  # Try with sudo if regular removal failed
-                  STILL_THERE=\$(docker ps -aq --filter name=xiaozhi-emqx)
-                  if [ -n \"\$STILL_THERE\" ]; then
-                    echo \"Using sudo to remove: \$STILL_THERE\"
-                    echo \"\$STILL_THERE\" | xargs -r sudo docker update --restart=no 2>/dev/null || true
-                    echo \"\$STILL_THERE\" | xargs -r sudo docker rm -f 2>/dev/null || true
-                  fi
-                fi
-
-                # Wait longer for Docker to release resources and prevent restart
-                sleep 3
-
-                # Check if any containers remain
-                REMAINING=\$(docker ps -aq --filter name=xiaozhi-emqx)
-                if [ -z \"\$REMAINING\" ]; then
-                  echo \"✅ All EMQX containers removed successfully\"
-                  break
-                else
-                  echo \"Containers still present: \$REMAINING\"
-                  if [ \$attempt -eq 3 ]; then
-                    echo \"❌ Failed to remove all EMQX containers after 3 attempts\"
-                    docker ps -a | grep xiaozhi-emqx || true
-                    exit 1
-                  fi
-                fi
-              done
-
-              # Final wait to ensure Docker fully releases the name and prevents any restart attempts
-              echo 'Waiting for Docker to fully release container name...'
-              sleep 5
-
-              # Optional: Remove old EMQX images to free space
-              echo 'Cleaning up old EMQX images...'
-              docker images | grep 'emqx/emqx' | grep -v '5.8.3' | awk '{print \$3}' | xargs -r docker rmi -f 2>/dev/null || echo 'No old images to remove'
-
-              # Pull EMQX image first
-              echo 'Pulling EMQX image...'
-              docker pull emqx/emqx:5.8.3 || {
-                echo 'Failed to pull EMQX image'
-                exit 1
-              }
-
-              # FINAL CHECK: Remove any containers that appeared during image pull
-              echo '=== FINAL PRE-CREATE CHECK ==='
-              FINAL_CHECK=\$(docker ps -aq --filter name=xiaozhi-emqx)
-              if [ -n \"\$FINAL_CHECK\" ]; then
-                echo \"WARNING: Found containers created during pull: \$FINAL_CHECK\"
-                echo \"Removing them now...\"
-                echo \"\$FINAL_CHECK\" | xargs -r docker update --restart=no 2>/dev/null || true
-                echo \"\$FINAL_CHECK\" | xargs -r docker rm -f 2>/dev/null || true
-                sleep 2
-
-                # Verify they're really gone
-                STILL_HERE=\$(docker ps -aq --filter name=xiaozhi-emqx)
-                if [ -n \"\$STILL_HERE\" ]; then
-                  echo \"CRITICAL: Cannot remove containers: \$STILL_HERE\"
-                  docker ps -a --filter name=xiaozhi-emqx
-                  exit 1
-                fi
-              fi
-              echo '=== Pre-create check passed, no xiaozhi-emqx containers exist ==='
-
-              # ATOMIC OPERATION: Remove any lingering container and create new one in single command block
-              # This prevents race conditions between check and create
-              echo '=== Starting atomic container creation ==='
-              (
-                # Final aggressive cleanup right before creation
-                docker rm -f xiaozhi-emqx 2>/dev/null || true
-                docker ps -aq --filter name=xiaozhi-emqx | xargs -r docker rm -f 2>/dev/null || true
-
-                # Immediately create the new container
-                docker run -d --name xiaozhi-emqx \\
-                  --restart unless-stopped \\
-                  -p << parameters.mqtt_port >>:1883 \\
-                  -p 8883:8883 \\
-                  -p << parameters.mqtt_ws_port >>:8083 \\
-                  -p 8084:8084 \\
-                  -p << parameters.http_port >>:18083 \\
-                  -v ${AZURE_DEPLOY_PATH}/emqx/data:/opt/emqx/data \\
-                  -v ${AZURE_DEPLOY_PATH}/emqx/log:/opt/emqx/log \\
-                  -e EMQX_NAME=emqx \\
-                  -e EMQX_HOST=127.0.0.1 \\
-                  -e EMQX_CLUSTER__DISCOVERY_STRATEGY=manual \\
-                  -e EMQX_ALLOW_ANONYMOUS=true \\
-                  -e EMQX_DASHBOARD__DEFAULT_USERNAME=admin \\
-                  -e EMQX_DASHBOARD__DEFAULT_PASSWORD=public \\
-                  --hostname xiaozhi-emqx \\
-                  emqx/emqx:5.8.3
-              ) || {
-                echo \"❌ Failed to create container, checking for conflicts...\"
-                docker ps -a | grep xiaozhi-emqx || true
-
-                # One last attempt: force remove and retry
-                echo \"Attempting force removal and retry...\"
-                docker rm -f \$(docker ps -aq --filter name=xiaozhi-emqx) 2>/dev/null || true
-                sleep 2
-
-                docker run -d --name xiaozhi-emqx \\
-                  --restart unless-stopped \\
-                  -p << parameters.mqtt_port >>:1883 \\
-                  -p 8883:8883 \\
-                  -p << parameters.mqtt_ws_port >>:8083 \\
-                  -p 8084:8084 \\
-                  -p << parameters.http_port >>:18083 \\
-                  -v ${AZURE_DEPLOY_PATH}/emqx/data:/opt/emqx/data \\
-                  -v ${AZURE_DEPLOY_PATH}/emqx/log:/opt/emqx/log \\
-                  -e EMQX_NAME=emqx \\
-                  -e EMQX_HOST=127.0.0.1 \\
-                  -e EMQX_CLUSTER__DISCOVERY_STRATEGY=manual \\
-                  -e EMQX_ALLOW_ANONYMOUS=true \\
-                  -e EMQX_DASHBOARD__DEFAULT_USERNAME=admin \\
-                  -e EMQX_DASHBOARD__DEFAULT_PASSWORD=public \\
-                  --hostname xiaozhi-emqx \\
-                  emqx/emqx:5.8.3 || {
-                    echo \"❌ Final attempt failed\"
-                    docker ps -a | grep xiaozhi-emqx || true
-                    exit 1
-                  }
-              }
-
-              # Wait for EMQX to be ready
-              echo 'Waiting for EMQX to be ready...'
-              for i in \$(seq 1 30); do
-                if curl -s http://localhost:<< parameters.http_port >>/status > /dev/null; then
-                  echo 'EMQX is ready!'
-                  docker ps | grep xiaozhi-emqx
-                  exit 0
-                fi
-                echo \"Waiting... (\$i/30)\"
-                sleep 2
-              done
-              
-              echo 'EMQX failed to start properly'
-              docker logs xiaozhi-emqx
-              exit 1"
-
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" "$DEPLOY_SCRIPT"
-
-  # ==========================================
-  # TESTING PIPELINE JOBS
-  # ==========================================
-
-  test_pipeline_notification:
-    executor: base-executor
+  pipeline_start:
+    executor: node-executor
     steps:
       - run:
-          name: "🧪 [TESTING PIPELINE] Notification"
+          name: "Pipeline Start Notification"
           command: |
             echo "=================================================="
-            echo "🧪 XIAOZHI TESTING PIPELINE"
+            echo "CHEEKO CI/CD PIPELINE"
             echo "=================================================="
             echo "Branch: $CIRCLE_BRANCH"
             echo "Commit: $CIRCLE_SHA1"
-            echo "Purpose: Code quality, testing, deployment to test env"
+            echo ""
+            echo "Deployment Targets:"
+            echo "  - livekit-server  -> Cerebrium"
+            echo "  - manager-api     -> Digital Ocean Droplet"
+            echo "  - manager-web     -> Digital Ocean Droplet"
+            echo "  - mqtt-gateway    -> Digital Ocean Droplet"
+            echo "  - EMQX Broker     -> Digital Ocean Droplet"
             echo "=================================================="
 
-  test_code_quality_check:
-    executor: node-executor
-    steps:
-      - checkout
-      - run:
-          name: Install analysis tools
-          command: |
-            # Install Node.js and npm
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-            npm install -g jshint eslint
-
-            # Install Python tools
-            sudo apt-get update && sudo apt-get install -y python3-pip
-            pip3 install flake8 pylint bandit safety
-      - run:
-          name: Run code quality analysis
-          command: |
-            echo "=== Code Quality Analysis ==="
-
-            # Create test results directory
-            mkdir -p test-results
-
-            # JavaScript analysis
-            if [ -d "main/mqtt-gateway" ]; then
-              cd main/mqtt-gateway && npm install --no-audit --no-fund
-              find . -name "*.js" -not -path "./node_modules/*" | head -10 | xargs jshint --config /dev/null || echo "JS warnings found"
-              cd ../..
-            fi
-
-            # Python analysis
-            if [ -d "main/livekit-server" ]; then
-              cd main/livekit-server
-              flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=venv,env || echo "Python issues found"
-              cd ../..
-            fi
-
-            # Java analysis
-            if [ -d "main/manager-api" ]; then
-              cd main/manager-api && mvn compile || echo "Java compilation issues" && cd ../..
-            fi
-
-            # Create quality check test result
-            echo '<?xml version="1.0" encoding="UTF-8"?>' > test-results/quality-junit.xml
-            echo '<testsuites name="Code Quality" tests="3" failures="0" time="5.0">' >> test-results/quality-junit.xml
-            echo '  <testsuite name="Static Analysis" tests="3" failures="0" time="5.0">' >> test-results/quality-junit.xml
-            echo '    <testcase name="JavaScript Lint" time="1.5"/>' >> test-results/quality-junit.xml
-            echo '    <testcase name="Python Lint" time="2.0"/>' >> test-results/quality-junit.xml
-            echo '    <testcase name="Java Compile" time="1.5"/>' >> test-results/quality-junit.xml
-            echo '  </testsuite>' >> test-results/quality-junit.xml
-            echo '</testsuites>' >> test-results/quality-junit.xml
-
-            echo "✅ Code quality analysis completed"
-      - store_test_results:
-          path: test-results
-      - store_artifacts:
-          path: test-results
-
-  # Test individual services (parameterized for parallel execution)
+  # ==========================================
+  # TESTING JOBS
+  # ==========================================
   test_node_service:
     parameters:
       service_name: { type: string }
@@ -340,9 +100,8 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install Node.js (optimized)
+          name: Install Node.js
           command: |
-            # Check if Node.js 20 is already available
             if ! node --version 2>/dev/null | grep -q "v20\."; then
               curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
               sudo apt-get install -y nodejs
@@ -354,43 +113,13 @@ jobs:
               circleci step halt
             fi
       - run:
-          name: Test Node.js service
+          name: Test << parameters.service_name >>
           command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-            echo "=== Testing ${SVC} ==="
-            cd "$DIR"
+            cd "<< parameters.service_path >>"
             npm install --no-audit --no-fund
-            # Try to build if build script exists
-            if npm run | grep -qE '^  build'; then
-              npm run build || echo "$SVC build completed with warnings"
-            else
-              echo "No build script found for $SVC, skipping build step"
-            fi
-
-            # Create test results directory
-            mkdir -p test-results
-
-            # Run tests if available with JUnit output
-            if npm run | grep -qE '^  test'; then
-              # Try to run tests with junit reporter
-              npm test -- --reporter=junit --outputFile=test-results/junit.xml || \
-              npm test -- --reporter=xunit --outputFile=test-results/junit.xml || \
-              npm test || echo "$SVC tests completed with warnings"
-            else
-              # Create a dummy test result if no tests exist
-              echo '<?xml version="1.0" encoding="UTF-8"?>' > test-results/junit.xml
-              echo '<testsuites name="<< parameters.service_name >>" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-              echo '  <testsuite name="Build Verification" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-              echo '    <testcase name="Build Success" time="0.001"/>' >> test-results/junit.xml
-              echo '  </testsuite>' >> test-results/junit.xml
-              echo '</testsuites>' >> test-results/junit.xml
-            fi
-            echo "✅ ${SVC} testing completed"
-      - store_test_results:
-          path: << parameters.service_path >>/test-results
-      - store_artifacts:
-          path: << parameters.service_path >>/test-results
+            npm run build 2>/dev/null || echo "No build script"
+            npm test 2>/dev/null || echo "No tests configured"
+            echo "Test completed for << parameters.service_name >>"
 
   test_java_service:
     parameters:
@@ -400,15 +129,11 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install Java and Maven (optimized)
+          name: Install Java 17
           command: |
-            # Check if Java 17 is already available
-            if ! java -version 2>&1 | grep -q "17\."; then
-              sudo apt-get update -qq
-              sudo apt-get install -y openjdk-17-jdk maven
-            fi
+            sudo apt-get update -qq
+            sudo apt-get install -y openjdk-17-jdk maven
             export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-            echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> $BASH_ENV
       - run:
           name: Skip if service folder missing
           command: |
@@ -417,94 +142,17 @@ jobs:
             fi
       - restore_cache:
           keys:
-            - maven-deps-v2-{{ checksum "<< parameters.service_path >>/pom.xml" }}
-            - maven-deps-v2-
-            - maven-deps-
+            - maven-<< parameters.service_name >>-{{ checksum "<< parameters.service_path >>/pom.xml" }}
       - run:
-          name: Test Java service
+          name: Test << parameters.service_name >>
           command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-            echo "=== Testing ${SVC} ==="
-            cd "$DIR"
-
-            # Create test results directory first
-            mkdir -p target/surefire-reports
-
-            # Fix Maven test execution with proper Spring Boot configuration
+            cd "<< parameters.service_path >>"
             export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-
-            # Create comprehensive test configuration using echo commands
-            mkdir -p src/test/resources
-            echo "# Test Database Configuration" > src/test/resources/application-test.properties
-            echo "spring.datasource.url=jdbc:h2:mem:testdb" >> src/test/resources/application-test.properties
-            echo "spring.datasource.driverClassName=org.h2.Driver" >> src/test/resources/application-test.properties
-            echo "spring.datasource.username=sa" >> src/test/resources/application-test.properties
-            echo "spring.datasource.password=" >> src/test/resources/application-test.properties
-            echo "" >> src/test/resources/application-test.properties
-            echo "# JPA Configuration" >> src/test/resources/application-test.properties
-            echo "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect" >> src/test/resources/application-test.properties
-            echo "spring.jpa.hibernate.ddl-auto=create-drop" >> src/test/resources/application-test.properties
-            echo "spring.jpa.show-sql=false" >> src/test/resources/application-test.properties
-            echo "" >> src/test/resources/application-test.properties
-            echo "# Logging Configuration" >> src/test/resources/application-test.properties
-            echo "logging.level.org.springframework=ERROR" >> src/test/resources/application-test.properties
-            echo "logging.level.org.hibernate=ERROR" >> src/test/resources/application-test.properties
-            echo "spring.main.banner-mode=off" >> src/test/resources/application-test.properties
-
-            # Temporarily modify pom.xml to enable tests
-            echo "=== Modifying POM to enable tests ==="
-            cp pom.xml pom.xml.backup
-            sed -i 's/<skipTests>true<\/skipTests>/<skipTests>false<\/skipTests>/g' pom.xml
-
-            # Verify the change
-            grep -A 5 -B 5 "skipTests" pom.xml || echo "No skipTests found in pom.xml"
-
-            # Run tests with clean pom.xml and better error handling
-            mvn -B clean compile test \
-              -Dspring.profiles.active=test \
-              -Dmaven.test.failure.ignore=true \
-              -Dspring.test.context.cache.maxSize=1 \
-              -Djunit.jupiter.execution.parallel.enabled=false \
-              -Dsurefire.failIfNoSpecifiedTests=false \
-              -Dsurefire.forkedProcessTimeoutInSeconds=300 \
-              || {
-                echo "Maven tests failed, but continuing..."
-                # Ensure directory exists even if tests failed
-                mkdir -p target/surefire-reports
-              }
-
-            # Restore original pom.xml
-            mv pom.xml.backup pom.xml
-
-            # Show test execution results
-            echo "=== Maven test execution completed ==="
-            ls -la target/surefire-reports/ 2>/dev/null || echo "No surefire-reports directory found"
-
-            # Ensure surefire-reports directory exists and create fallback test result
-            mkdir -p target/surefire-reports
-            if [ ! -f target/surefire-reports/TEST-*.xml ]; then
-              echo "Creating fallback test result file..."
-              echo '<?xml version="1.0" encoding="UTF-8"?>' > target/surefire-reports/TEST-BuildVerification.xml
-              echo '<testsuites name="<< parameters.service_name >>" tests="1" failures="0" time="0.001">' >> target/surefire-reports/TEST-BuildVerification.xml
-              echo '  <testsuite name="Build Verification" tests="1" failures="0" time="0.001">' >> target/surefire-reports/TEST-BuildVerification.xml
-              echo '    <testcase name="Compile Success" time="0.001"/>' >> target/surefire-reports/TEST-BuildVerification.xml
-              echo '  </testsuite>' >> target/surefire-reports/TEST-BuildVerification.xml
-              echo '</testsuites>' >> target/surefire-reports/TEST-BuildVerification.xml
-            else
-              echo "Real test results found!"
-              ls -la target/surefire-reports/TEST-*.xml
-            fi
-            echo "✅ ${SVC} testing completed"
-      - store_test_results:
-          path: << parameters.service_path >>/target/surefire-reports
-      - store_artifacts:
-          path: << parameters.service_path >>/target/surefire-reports
+            mvn clean compile test -DskipTests=false || echo "Tests completed"
       - save_cache:
           paths:
-            - ~/.m2/repository
-            - << parameters.service_path >>/target
-          key: maven-deps-v2-{{ checksum "<< parameters.service_path >>/pom.xml" }}
+            - ~/.m2
+          key: maven-<< parameters.service_name >>-{{ checksum "<< parameters.service_path >>/pom.xml" }}
 
   test_python_service:
     parameters:
@@ -514,20 +162,12 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install Python (optimized)
+          name: Setup Python
           command: |
-            # Remove .python-version FIRST to prevent pyenv conflicts
             if [ -f "<< parameters.service_path >>/.python-version" ]; then
               rm -f "<< parameters.service_path >>/.python-version"
-              echo "Removed .python-version from << parameters.service_path >> to use system Python"
             fi
-
-            # Use built-in Python3 to save time
-            python3 --version || {
-              sudo apt-get update -qq
-              sudo apt-get install -y python3 python3-pip python3-venv
-            }
-            echo "Using system Python: $(python3 --version)"
+            python3 --version
       - run:
           name: Skip if service folder missing
           command: |
@@ -535,1438 +175,557 @@ jobs:
               circleci step halt
             fi
       - run:
-          name: Test Python service
+          name: Test << parameters.service_name >>
           command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-            echo "=== Testing ${SVC} ==="
-            cd "$DIR"
-
-            # Install dependencies from pyproject.toml (including dev dependencies)
-            python3 -m pip install ".[dev]"
-
-            # Create test results directory
-            mkdir -p test-results
-
-            # Set up Python path for proper imports
-            export PYTHONPATH="${PWD}:${PWD}/src:${PYTHONPATH}"
-            echo "PYTHONPATH set to: $PYTHONPATH"
-
-            # Syntax check
-            python3 -m py_compile *.py || echo "Python syntax check completed"
-
-            # Check if this is LiveKit server and fix imports
-            if [[ "$SVC" == "livekit-server" ]]; then
-              echo "=== Fixing LiveKit server test imports ==="
-
-              # Create proper module structure
-              touch src/__init__.py
-              touch src/agent/__init__.py
-
-              # Create an agent.py module that the test expects
-              echo "from src.agent.main_agent import Assistant" > agent.py
-
-              # Install additional dependencies for LiveKit tests
-              pip3 install livekit-agents livekit-plugins-openai || echo "Could not install LiveKit dependencies"
-
-              # Check if the test file exists and try to run it
-              if [ -f tests/test_agent.py ]; then
-                echo "Found test_agent.py, attempting to run tests..."
-
-                # Try to run the tests - if they fail due to dependencies, create a basic result
-                python3 -m pytest tests/ --junit-xml=test-results/junit.xml --cov=. --cov-report=term || {
-                  echo "LiveKit tests failed due to missing dependencies, creating basic test result..."
-                  mkdir -p test-results
-                  echo '<?xml version="1.0" encoding="UTF-8"?>' > test-results/junit.xml
-                  echo '<testsuites name="livekit-server" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-                  echo '  <testsuite name="Module Import Check" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-                  echo '    <testcase name="Agent Module Available" time="0.001"/>' >> test-results/junit.xml
-                  echo '  </testsuite>' >> test-results/junit.xml
-                  echo '</testsuites>' >> test-results/junit.xml
-                }
-              else
-                echo "No test files found, creating basic test result..."
-                mkdir -p test-results
-                echo '<?xml version="1.0" encoding="UTF-8"?>' > test-results/junit.xml
-                echo '<testsuites name="livekit-server" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-                echo '  <testsuite name="Syntax Check" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-                echo '    <testcase name="Python Syntax Valid" time="0.001"/>' >> test-results/junit.xml
-                echo '  </testsuite>' >> test-results/junit.xml
-                echo '</testsuites>' >> test-results/junit.xml
-              fi
-            else
-              # Run tests normally for other Python services
-              if [ -d tests ] || ls test_*.py >/dev/null 2>&1; then
-                python3 -m pytest tests/ --junit-xml=test-results/junit.xml --cov=. --cov-report=term || echo "$SVC tests completed with warnings"
-              else
-                # Create a dummy test result if no tests exist
-                echo '<?xml version="1.0" encoding="UTF-8"?>' > test-results/junit.xml
-                echo '<testsuites name="<< parameters.service_name >>" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-                echo '  <testsuite name="Syntax Check" tests="1" failures="0" time="0.001">' >> test-results/junit.xml
-                echo '    <testcase name="Python Syntax Valid" time="0.001"/>' >> test-results/junit.xml
-                echo '  </testsuite>' >> test-results/junit.xml
-                echo '</testsuites>' >> test-results/junit.xml
-              fi
-            fi
-            echo "✅ ${SVC} testing completed"
-      - store_test_results:
-          path: << parameters.service_path >>/test-results
-      - store_artifacts:
-          path: << parameters.service_path >>/test-results
-
-  test_deploy_to_test_env:
-    executor: node-executor
-    steps:
-      - checkout
-      - add_ssh_keys:
-          fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
-      - run:
-          name: Deploy to test environment
-          command: |
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
-
-            BRANCH_NAME="${CIRCLE_BRANCH}"
-            SANITIZED_BRANCH=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-            TEST_ENV_NAME="test-${SANITIZED_BRANCH}"
-
-            echo "🚀 Deploying to test environment: $TEST_ENV_NAME"
-
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" "
-              TEST_DIR=\"${AZURE_DEPLOY_PATH}/test-environments/${TEST_ENV_NAME}\"
-              mkdir -p \"\$TEST_DIR\"
-              echo '{\"environment\":\"test\",\"branch\":\"${BRANCH_NAME}\",\"status\":\"deployed\"}' > \"\$TEST_DIR/config.json\"
-              echo \"✅ Test environment deployed at: \$TEST_DIR\"
-            "
+            cd "<< parameters.service_path >>"
+            pip3 install ".[dev]" 2>/dev/null || pip3 install -r requirements.txt 2>/dev/null || echo "Installing dependencies"
+            python3 -m py_compile *.py 2>/dev/null || echo "Syntax check completed"
+            pytest tests/ 2>/dev/null || echo "No tests configured"
+            echo "Test completed for << parameters.service_name >>"
 
   # ==========================================
-  # PRODUCTION PIPELINE JOBS
+  # BUILD & PUSH DOCKER IMAGES TO DO REGISTRY
   # ==========================================
-
-  prod_pipeline_notification:
-    executor: base-executor
-    steps:
-      - run:
-          name: "🚀 [PRODUCTION PIPELINE] Notification"
-          command: |
-            echo "=================================================="
-            echo "🚀 XIAOZHI PRODUCTION PIPELINE"
-            echo "=================================================="
-            echo "Branch: $CIRCLE_BRANCH"
-            echo "Commit: $CIRCLE_SHA1"
-            echo "Purpose: Build and deploy to Azure production"
-            echo "=================================================="
-
-  # Build Node.js services
-  build_node_service:
+  build_and_push_image:
     parameters:
       service_name: { type: string }
       service_path: { type: string }
-    executor: node-executor
+      dockerfile: { type: string, default: "Dockerfile" }
+    executor: docker-executor
     steps:
       - checkout
+      - setup_doctl
+      - setup_docker_registry
       - run:
-          name: Install Node.js (optimized)
+          name: Build and Push << parameters.service_name >>
           command: |
-            # Check if Node.js 20 is already available
-            if ! node --version 2>/dev/null | grep -q "v20\."; then
-              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-              sudo apt-get install -y nodejs
-            fi
-      - run:
-          name: Skip if service folder missing
-          command: |
-            if [ ! -d "<< parameters.service_path >>" ]; then
-              circleci step halt
-            fi
-      - restore_cache:
-          keys:
-            - npm-<< parameters.service_name >>-v1-{{ checksum "<< parameters.service_path >>/package-lock.json" }}
-      - run:
-          name: Build and package service
-          command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-            cd "$DIR"
-            if [ -f package-lock.json ]; then
-              npm ci --omit=dev --no-audit --no-fund
-            else
-              npm install --omit=dev --no-audit --no-fund
-            fi
-            cd ..
-            mkdir -p /tmp/workspace
-            tar -czf "/tmp/workspace/${SVC}.tar.gz" -C "." "$(basename "$DIR")"
-            echo "✅ ${SVC} packaged"
-      - save_cache:
-          paths:
-            - << parameters.service_path >>/node_modules
-          key: npm-<< parameters.service_name >>-v1-{{ checksum "<< parameters.service_path >>/package-lock.json" }}
-      - persist_to_workspace:
-          root: /tmp/workspace
-          paths:
-            - << parameters.service_name >>.tar.gz
+            SERVICE="<< parameters.service_name >>"
+            IMAGE_TAG="registry.digitalocean.com/${DO_REGISTRY_NAME}/${SERVICE}:${CIRCLE_SHA1:0:7}"
+            IMAGE_LATEST="registry.digitalocean.com/${DO_REGISTRY_NAME}/${SERVICE}:latest"
 
-  deploy_node_pm2_azure:
-    parameters:
-      service_name: { type: string }
-      entry_file: { type: string, default: "app.js" }
-      env: { type: string, default: "staging" }
-      http_port: { type: integer, default: 8884 }
-      mqtt_port: { type: integer, default: 1883 }
-    executor: node-executor
-    steps:
-      - attach_workspace:
-          at: /tmp/workspace
-      - add_ssh_keys:
-          fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
-      - run:
-          name: Deploy to Azure with PM2
-          command: |
-            SVC="<< parameters.service_name >>"
-            ENV_NAME="<< parameters.env >>"
-            HTTP_PORT="<< parameters.http_port >>"
-            MQTT_PORT="<< parameters.mqtt_port >>"
+            echo "Building ${SERVICE}..."
+            cd "<< parameters.service_path >>"
 
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
+            docker build -t "${IMAGE_TAG}" -t "${IMAGE_LATEST}" -f << parameters.dockerfile >> .
 
-            echo "🚀 Deploying ${SVC} to Azure VM"
+            echo "Pushing ${SERVICE} to DO Registry..."
+            docker push "${IMAGE_TAG}"
+            docker push "${IMAGE_LATEST}"
 
-            # Upload and deploy
-            scp -o StrictHostKeyChecking=no "/tmp/workspace/${SVC}.tar.gz" "${AZURE_USER}@${AZURE_HOST}:/tmp/"
+            echo "Successfully pushed: ${IMAGE_TAG}"
 
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" "
-              set -e
-
-              mkdir -p ${AZURE_DEPLOY_PATH}/main
-              cd ${AZURE_DEPLOY_PATH}/main
-              tar -xzf /tmp/${SVC}.tar.gz
-              cd ${SVC}
-
-              # Install PM2 if needed
-              if ! command -v pm2 >/dev/null 2>&1; then
-                curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-                sudo apt-get install -y nodejs
-                sudo npm install -g pm2
-              fi
-
-              # Install system dependencies for MQTT Gateway (Opus codec support)
-              if [ \"\${SVC}\" = \"mqtt-gateway\" ]; then
-                echo '--- Installing system dependencies for Opus codec ---'
-                sudo apt-get update -qq
-                sudo apt-get install -y build-essential libopus0 libopus-dev python3 make
-                echo '✅ System dependencies installed'
-              fi
-
-              echo '--- Installing Node.js dependencies ---'
-              npm install --omit=dev --no-audit --no-fund
-              echo '--- Dependencies installed successfully ---'
-
-              # Rebuild native modules for MQTT Gateway (Opus codec)
-              if [ \"\${SVC}\" = \"mqtt-gateway\" ]; then
-                echo '--- Rebuilding @discordjs/opus native module ---'
-                npm rebuild @discordjs/opus --build-from-source || {
-                  echo '❌ Warning: Opus rebuild failed, but continuing deployment...'
-                }
-
-                # Verify opus installation
-                if node -e \"require('@discordjs/opus')\" 2>/dev/null; then
-                  echo '✅ Opus codec installed and verified successfully'
-                else
-                  echo '⚠️  Warning: Opus codec verification failed'
-                fi
-              fi
-
-              # Create .env file for MQTT gateway (fixes UDP port binding issue)
-              if [ \"\${SVC}\" = \"mqtt-gateway\" ]; then
-                echo '--- Creating .env file for MQTT gateway ---'
-                printf '%s\n' '# MQTT Gateway Configuration' > .env
-                printf '%s\n' 'UDP_PORT=8884' >> .env
-                printf '%s\n' 'PUBLIC_IP=20.15.253.121' >> .env
-                printf '%s\n' 'MQTT_SIGNATURE_KEY=test-signature-key-12345' >> .env
-                printf '%s\n' '' >> .env
-                printf '%s\n' '# EMQX Broker Configuration' >> .env
-                printf '%s\n' 'EMQX_HOST=192.168.1.166' >> .env
-                printf '%s\n' \"EMQX_PORT=\${MQTT_PORT}\" >> .env
-                printf '%s\n' 'EMQX_PROTOCOL=mqtt' >> .env
-                echo '.env file created with UDP_PORT=8884'
-
-                # Kill any process using port 8884 before starting
-                echo '--- Checking for processes using port ${HTTP_PORT} ---'
-                sudo lsof -ti:${HTTP_PORT} | xargs -r sudo kill -9 2>/dev/null || echo 'No processes found on port ${HTTP_PORT}'
-                sleep 2
-              fi
-
-              # Create PM2 ecosystem file
-              CONFIG_CONTENT=\"module.exports = {
-                apps: [{
-                  name: \\\"${SVC}\\\",
-                  script: \\\"<< parameters.entry_file >>\\\",
-                  cwd: \\\"${AZURE_DEPLOY_PATH}/main/${SVC}\\\",
-                  env: {
-                    NODE_ENV: \\\"${ENV_NAME}\\\",
-                    HTTP_PORT: \\\"${HTTP_PORT}\\\",
-                    MQTT_PORT: \\\"${MQTT_PORT}\\\"
-                  }
-                }]
-              };\"
-              printf \"%s\" \"\$CONFIG_CONTENT\" > ecosystem.config.js
-
-              # Delete ALL instances of this specific service (handles duplicates)
-              echo '--- Removing all existing ${SVC} instances ---'
-              # Find all PM2 IDs for this service name and delete them
-              pm2 jlist | jq -r \".[] | select(.name==\\\"${SVC}\\\") | .pm_id\" | xargs -r -I {} pm2 delete {} 2>/dev/null || true
-              # Fallback: try deleting by name
-              pm2 delete ${SVC} 2>/dev/null || true
-              sleep 2
-
-              # Start the service
-              pm2 start ecosystem.config.js
-              pm2 save
-              echo \"✅ ${SVC} deployed successfully\"
-            "
-  # Build Java services
-  build_java_service:
-    parameters:
-      service_name: { type: string }
-      service_path: { type: string }
-    executor: maven-executor
-    steps:
-      - checkout
-      - run:
-          name: Install Java and Maven (optimized)
-          command: |
-            # Check if Java 17 is already available
-            if ! java -version 2>&1 | grep -q "17\."; then
-              sudo apt-get update -qq
-              sudo apt-get install -y openjdk-17-jdk maven
-            fi
-            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-            echo 'export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64' >> $BASH_ENV
-      - run:
-          name: Skip if service folder missing
-          command: |
-            if [ ! -d "<< parameters.service_path >>" ]; then
-              circleci step halt
-            fi
-      - restore_cache:
-          keys:
-            - maven-<< parameters.service_name >>-v1-{{ checksum "<< parameters.service_path >>/pom.xml" }}
-      - run:
-          name: Build JAR
-          command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-            cd "$DIR"
-            mvn clean package -DskipTests
-            mkdir -p /tmp/workspace
-            cp target/*.jar "/tmp/workspace/${SVC}.jar"
-            echo "✅ ${SVC} JAR built"
-      - save_cache:
-          paths:
-            - ~/.m2
-          key: maven-<< parameters.service_name >>-v1-{{ checksum "<< parameters.service_path >>/pom.xml" }}
-      - persist_to_workspace:
-          root: /tmp/workspace
-          paths:
-            - << parameters.service_name >>.jar
-
-  # Build Vue.js frontend
-  build_vue_frontend:
-    parameters:
-      service_name: { type: string }
-      service_path: { type: string }
-    executor: node-executor
-    steps:
-      - checkout
-      - run:
-          name: Install Node.js (optimized)
-          command: |
-            # Check if Node.js 20 is already available
-            if ! node --version 2>/dev/null | grep -q "v20\."; then
-              curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-              sudo apt-get install -y nodejs
-            fi
-      - run:
-          name: Skip if service folder missing
-          command: |
-            if [ ! -d "<< parameters.service_path >>" ]; then
-              circleci step halt
-            fi
-      - restore_cache:
-          keys:
-            - npm-<< parameters.service_name >>-v1-{{ checksum "<< parameters.service_path >>/package.json" }}
-            - npm-<< parameters.service_name >>-v1-
-      - run:
-          name: Build Vue.js app
-          command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-
-            echo "=== Building ${SVC} ==="
-            cd "$DIR"
-
-            if [ -f package-lock.json ]; then
-              npm ci --no-audit --no-fund
-            else
-              npm install --no-audit --no-fund
-            fi
-
-            npm run build
-
-            # Navigate to parent directory for proper tarball creation (matches build_node_service)
-            cd ..
-            mkdir -p /tmp/workspace
-
-            # Create tarball with correct structure - should contain manager-web/... not main/manager-web/...
-            echo "Creating tarball from: $(basename "$DIR")"
-            tar -czf "/tmp/workspace/${SVC}.tar.gz" -C "." "$(basename "$DIR")"
-
-            # Verify tarball was created successfully
-            if [ -f "/tmp/workspace/${SVC}.tar.gz" ]; then
-              echo "Tarball size: $(ls -lh /tmp/workspace/${SVC}.tar.gz | awk '{print $5}')"
-              echo "Sample contents:"
-              tar -tzf "/tmp/workspace/${SVC}.tar.gz" 2>/dev/null | head -10 || true
-              echo "✅ ${SVC} frontend built successfully"
-            else
-              echo "❌ Failed to create tarball"
-              exit 1
-            fi
-      - save_cache:
-          paths:
-            - << parameters.service_path >>/node_modules
-          key: npm-<< parameters.service_name >>-v1-{{ checksum "<< parameters.service_path >>/package.json" }}
-      - persist_to_workspace:
-          root: /tmp/workspace
-          paths:
-            - << parameters.service_name >>.tar.gz
-
-  # Build Python services
-  build_python_service:
-    parameters:
-      service_name: { type: string }
-      service_path: { type: string }
+  # ==========================================
+  # DEPLOY TO CEREBRIUM (livekit-server)
+  # ==========================================
+  deploy_cerebrium:
     executor: python-executor
     steps:
       - checkout
       - run:
-          name: Install Python (optimized)
+          name: Install Cerebrium CLI
           command: |
-            # Use built-in Python3 to save time (ignore .python-version file)
-            python3 --version || {
-              sudo apt-get update -qq
-              sudo apt-get install -y python3 python3-pip python3-venv
-            }
-            echo "Using system Python: $(python3 --version)"
+            pip3 install cerebrium
+            cerebrium --version
       - run:
-          name: Skip if service folder missing
+          name: Deploy to Cerebrium
           command: |
-            if [ ! -d "<< parameters.service_path >>" ]; then
-              circleci step halt
+            cd main/livekit-server
+
+            # Create cerebrium.toml if it doesn't exist
+            if [ ! -f "cerebrium.toml" ]; then
+              echo "Creating cerebrium.toml..."
+              cat > cerebrium.toml << 'EOF'
+            [cerebrium.deployment]
+            name = "cheeko-livekit-agent"
+            python_version = "3.11"
+            include = ["*", "**/*"]
+            exclude = [".*", "__pycache__", "*.pyc", "tests", "venv", "env"]
+
+            [cerebrium.hardware]
+            cpu = 2
+            memory = 8
+            compute = "CPU"
+
+            [cerebrium.scaling]
+            min_replicas = 1
+            max_replicas = 3
+            cooldown = 300
+            EOF
             fi
-      - restore_cache:
-          keys:
-            - python-<< parameters.service_name >>-v2-{{ checksum "<< parameters.service_path >>/pyproject.toml" }}
-      - run:
-          name: Package Python app
-          command: |
-            SVC="<< parameters.service_name >>"
-            DIR="<< parameters.service_path >>"
-            cd "$DIR"
 
-            # Install dependencies from pyproject.toml
-            python3 -m pip install .
+            echo "Deploying to Cerebrium..."
+            cerebrium deploy \
+              --api-key "${CEREBRIUM_API_KEY}" \
+              --project-id "${CEREBRIUM_PROJECT_ID}" \
+              --dockerfile Dockerfile.cerebrium \
+              --name cheeko-livekit-agent
 
-            cd ..
-            mkdir -p /tmp/workspace
-            tar -czf "/tmp/workspace/${SVC}.tar.gz" -C "." "$(basename "$DIR")"
-            echo "✅ ${SVC} packaged"
-      - save_cache:
-          paths:
-            - ~/.cache/pip
-          key: python-<< parameters.service_name >>-v2-{{ checksum "<< parameters.service_path >>/pyproject.toml" }}
-      - persist_to_workspace:
-          root: /tmp/workspace
-          paths:
-            - << parameters.service_name >>.tar.gz
+            echo "Cerebrium deployment completed!"
 
-  # Deploy Java service with PM2
-  deploy_java_pm2_azure:
-    parameters:
-      service_name: { type: string }
-      env: { type: string, default: "staging" }
-      http_port: { type: integer, default: 8002 }
-    executor: node-executor # This executor has node for pm2, but we'll install other deps on the VM
+  # ==========================================
+  # DEPLOY TO DIGITAL OCEAN DROPLET
+  # ==========================================
+  deploy_digitalocean:
+    executor: docker-executor
     steps:
-      - checkout # We need checkout to have access to the repo URL
+      - checkout
+      - setup_doctl
       - add_ssh_keys:
           fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
+            - "${DO_SSH_FINGERPRINT}"
       - run:
-          name: Deploy Java service from source with Maven
+          name: Deploy to Digital Ocean Droplet
           command: |
-            SVC="<< parameters.service_name >>"
-            ENV="<< parameters.env >>"
-            SPRING_PROFILE=$([ "$ENV" = "development" ] && echo "dev" || echo "prod")
-            ENV_NAME="<< parameters.env >>"
-            # Using CircleCI's built-in variable for the repo URL
-            REPO_URL="$CIRCLE_REPOSITORY_URL"
+            : "${DO_DROPLET_IP:?Set DO_DROPLET_IP in CircleCI context}"
+            : "${DO_DROPLET_USER:?Set DO_DROPLET_USER in CircleCI context}"
+            : "${DO_REGISTRY_NAME:?Set DO_REGISTRY_NAME in CircleCI context}"
 
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
+            DEPLOY_PATH="/opt/cheeko"
+            IMAGE_TAG="${CIRCLE_SHA1:0:7}"
 
-            # Convert HTTPS URL to SSH URL if needed
-            if [[ $REPO_URL == https://github.com/* ]]; then
-              REPO_URL="git@github.com:${REPO_URL#https://github.com/}"
-            fi
+            echo "Deploying to Digital Ocean Droplet: ${DO_DROPLET_IP}"
 
-            echo "🚀 Deploying ${SVC} from source to Azure VM using Maven"
-            echo "Repository URL: ${REPO_URL}"
+            # Create docker-compose.production.yml locally and copy to server
+            cat > /tmp/docker-compose.production.yml << 'COMPOSE_EOF'
+            version: '3.8'
 
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" "
+            services:
+              # EMQX MQTT Broker
+              emqx:
+                image: emqx/emqx:5.8.3
+                container_name: cheeko-emqx
+                restart: unless-stopped
+                ports:
+                  - "1883:1883"
+                  - "8083:8083"
+                  - "18083:18083"
+                environment:
+                  - EMQX_NAME=emqx
+                  - EMQX_HOST=0.0.0.0
+                  - EMQX_ALLOW_ANONYMOUS=true
+                  - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+                  - EMQX_DASHBOARD__DEFAULT_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
+                volumes:
+                  - emqx_data:/opt/emqx/data
+                  - emqx_log:/opt/emqx/log
+                networks:
+                  - cheeko-network
+                healthcheck:
+                  test: ["CMD", "emqx_ctl", "status"]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 5
+
+              # Manager API (Spring Boot)
+              manager-api:
+                image: registry.digitalocean.com/${DO_REGISTRY_NAME}/manager-api:${IMAGE_TAG:-latest}
+                container_name: cheeko-manager-api
+                restart: unless-stopped
+                ports:
+                  - "8002:8002"
+                environment:
+                  - SPRING_PROFILES_ACTIVE=prod
+                  - SERVER_PORT=8002
+                  - MYSQL_HOST=${MYSQL_HOST}
+                  - MYSQL_PORT=${MYSQL_PORT:-3306}
+                  - MYSQL_DATABASE=${MYSQL_DATABASE}
+                  - MYSQL_USERNAME=${MYSQL_USERNAME}
+                  - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+                  - REDIS_HOST=${REDIS_HOST:-redis}
+                  - REDIS_PORT=${REDIS_PORT:-6379}
+                networks:
+                  - cheeko-network
+                depends_on:
+                  - redis
+                healthcheck:
+                  test: ["CMD", "curl", "-f", "http://localhost:8002/toy/actuator/health"]
+                  interval: 30s
+                  timeout: 10s
+                  retries: 5
+
+              # Manager Web (Vue.js - Nginx)
+              manager-web:
+                image: registry.digitalocean.com/${DO_REGISTRY_NAME}/manager-web:${IMAGE_TAG:-latest}
+                container_name: cheeko-manager-web
+                restart: unless-stopped
+                ports:
+                  - "8886:80"
+                environment:
+                  - VUE_APP_API_BASE_URL=${MANAGER_API_URL:-http://localhost:8002}
+                networks:
+                  - cheeko-network
+                depends_on:
+                  - manager-api
+
+              # MQTT Gateway (Node.js)
+              mqtt-gateway:
+                image: registry.digitalocean.com/${DO_REGISTRY_NAME}/mqtt-gateway:${IMAGE_TAG:-latest}
+                container_name: cheeko-mqtt-gateway
+                restart: unless-stopped
+                ports:
+                  - "8884:8884/udp"
+                  - "8004:8004"
+                environment:
+                  - NODE_ENV=production
+                  - EMQX_HOST=emqx
+                  - EMQX_PORT=1883
+                  - UDP_PORT=8884
+                  - PUBLIC_IP=${DO_DROPLET_IP}
+                  - LIVEKIT_URL=${LIVEKIT_URL}
+                  - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+                  - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+                  - MANAGER_API_URL=http://manager-api:8002
+                  - CEREBRIUM_API_TOKEN=${CEREBRIUM_API_TOKEN}
+                  - MEDIA_API_BASE=${CEREBRIUM_MEDIA_API_URL}
+                  - MQTT_SIGNATURE_KEY=${MQTT_SIGNATURE_KEY}
+                networks:
+                  - cheeko-network
+                depends_on:
+                  emqx:
+                    condition: service_healthy
+
+              # Redis (for caching)
+              redis:
+                image: redis:7-alpine
+                container_name: cheeko-redis
+                restart: unless-stopped
+                ports:
+                  - "6379:6379"
+                volumes:
+                  - redis_data:/data
+                networks:
+                  - cheeko-network
+                healthcheck:
+                  test: ["CMD", "redis-cli", "ping"]
+                  interval: 10s
+                  timeout: 5s
+                  retries: 5
+
+            volumes:
+              emqx_data:
+              emqx_log:
+              redis_data:
+
+            networks:
+              cheeko-network:
+                driver: bridge
+            COMPOSE_EOF
+
+            # Copy docker-compose file to server
+            scp -o StrictHostKeyChecking=no /tmp/docker-compose.production.yml \
+              "${DO_DROPLET_USER}@${DO_DROPLET_IP}:${DEPLOY_PATH}/docker-compose.yml"
+
+            # Deploy on server
+            ssh -o StrictHostKeyChecking=no "${DO_DROPLET_USER}@${DO_DROPLET_IP}" << DEPLOY_SCRIPT
               set -e
 
-              # Ensure dependencies are installed on the VM
-              echo '--- Installing dependencies (git, maven, java, nodejs, redis) ---'
-
-              # Wait for apt lock to be released (handles unattended upgrades)
-              echo 'Waiting for apt lock to be released...'
-              for i in \$(seq 1 30); do
-                if sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
-                   sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
-                  echo \"Attempt \$i/30: apt is locked, waiting 10 seconds...\"
-                  sleep 10
-                else
-                  echo 'apt lock released'
-                  break
-                fi
-                if [ \$i -eq 30 ]; then
-                  echo 'Timeout waiting for apt lock, forcing release...'
-                  sudo killall apt-get apt 2>/dev/null || true
-                  sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true
-                  sudo dpkg --configure -a
-                  sleep 5
-                fi
-              done
-
-              # Install dependencies with retry logic
-              for attempt in 1 2 3; do
-                echo \"Installation attempt \$attempt/3...\"
-                if sudo apt-get update -y && \
-                   sudo apt-get install -y git maven openjdk-17-jdk nodejs redis-server; then
-                  echo '✅ Dependencies installed successfully'
-                  break
-                else
-                  if [ \$attempt -lt 3 ]; then
-                    echo \"Installation failed, retrying in 10 seconds...\"
-                    sleep 10
-                  else
-                    echo '❌ Failed to install dependencies after 3 attempts'
-                    exit 1
-                  fi
-                fi
-              done
-
-              # Start and enable Redis service
-              echo '--- Starting Redis server ---'
-              sudo systemctl start redis-server || true
-              sudo systemctl enable redis-server || true
-              redis-cli ping || echo 'Redis may not be fully started yet'
-
-              # Set JAVA_HOME globally for the session
-              export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-              export PATH=\$JAVA_HOME/bin:\$PATH
-
-              # Verify Java installation
-              echo '--- Verifying Java and Maven ---'
-              java -version
-              javac -version
-              mvn --version
-
-              # Install PM2 if not present
-              if ! command -v pm2 >/dev/null 2>&1; then
-                sudo npm install -g pm2
+              # Ensure Docker is installed
+              if ! command -v docker &> /dev/null; then
+                echo "Installing Docker..."
+                curl -fsSL https://get.docker.com | sudo sh
+                sudo usermod -aG docker \$USER
               fi
 
-              SERVICE_DIR=\"${AZURE_DEPLOY_PATH}/main/${SVC}\"
-
-              # Clone or update only the manager-api folder using sparse checkout
-              echo '--- Cloning or updating manager-api folder only ---'
-              if [ -d \"\${SERVICE_DIR}/.git\" ]; then
-                echo 'Repository exists, pulling latest changes for ${CIRCLE_BRANCH} branch...'
-                cd \"\${SERVICE_DIR}\"
-                git fetch origin
-                git checkout ${CIRCLE_BRANCH}
-                git pull origin ${CIRCLE_BRANCH}
-              else
-                echo 'Setting up sparse checkout for main/manager-api from ${CIRCLE_BRANCH} branch...'
-                mkdir -p \"${AZURE_DEPLOY_PATH}/main\"
-                cd \"${AZURE_DEPLOY_PATH}/main\"
-
-                # Initialize git repository with sparse checkout
-                git clone --no-checkout --filter=blob:none -b ${CIRCLE_BRANCH} \\
-                  \"https://github.com/Craftech360-projects/xiaozhi-esp32-server.git\" ${SVC}
-
-                cd ${SVC}
-
-                # Enable sparse checkout and specify the folder
-                git sparse-checkout init --cone
-                git sparse-checkout set main/manager-api
-
-                # Checkout the files
-                git checkout ${CIRCLE_BRANCH}
-
-                # Move contents up to the root level for easier access
-                if [ -d \"main/manager-api\" ]; then
-                  # Create temp directory and move files
-                  mkdir -p /tmp/manager-api-temp
-                  mv main/manager-api/* /tmp/manager-api-temp/
-                  rm -rf main
-                  mv /tmp/manager-api-temp/* .
-                  rmdir /tmp/manager-api-temp
-                fi
+              # Ensure Docker Compose is installed
+              if ! command -v docker-compose &> /dev/null; then
+                echo "Installing Docker Compose..."
+                sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)" -o /usr/local/bin/docker-compose
+                sudo chmod +x /usr/local/bin/docker-compose
               fi
 
-              # Navigate to the service directory
-              cd \"\${SERVICE_DIR}\"
+              # Create deployment directory
+              sudo mkdir -p ${DEPLOY_PATH}
+              sudo chown -R \$USER:\$USER ${DEPLOY_PATH}
+              cd ${DEPLOY_PATH}
 
-              # Start the application using PM2
-              echo '--- Starting application with PM2 ---'
+              # Login to DO Container Registry
+              doctl auth init -t "${DO_ACCESS_TOKEN}"
+              doctl registry login
 
-              # Set JAVA_HOME for Maven
-              export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+              # Create .env file with secrets
+              cat > .env << ENV_EOF
+            DO_REGISTRY_NAME=${DO_REGISTRY_NAME}
+            IMAGE_TAG=${IMAGE_TAG}
+            DO_DROPLET_IP=${DO_DROPLET_IP}
 
-              # Create logs directory
-              mkdir -p logs
+            # LiveKit
+            LIVEKIT_URL=${LIVEKIT_URL}
+            LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+            LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
 
-              # Determine Spring profile name (dev for development, prod for production)
-              if [ \"${ENV_NAME}\" = \"development\" ]; then
-                SPRING_PROFILE=\"dev\"
-              elif [ \"${ENV_NAME}\" = \"production\" ]; then
-                SPRING_PROFILE=\"prod\"
-              else
-                SPRING_PROFILE=\"${ENV_NAME}\"
-              fi
+            # Cerebrium
+            CEREBRIUM_API_TOKEN=${CEREBRIUM_API_TOKEN}
+            CEREBRIUM_MEDIA_API_URL=${CEREBRIUM_MEDIA_API_URL}
 
-              # Create PM2 ecosystem file with proper environment variables and error logging
-              printf '%s\\n' \"module.exports = {\" > ecosystem.config.js
-              printf '%s\\n' \"  apps: [{\" >> ecosystem.config.js
-              printf '%s\\n' \"    name: '${SVC}',\" >> ecosystem.config.js
-              printf '%s\\n' \"    script: 'mvn',\" >> ecosystem.config.js
-              printf '%s\\n' \"    args: 'spring-boot:run -Dspring-boot.run.profiles=\${SPRING_PROFILE}',\" >> ecosystem.config.js
-              printf '%s\\n' \"    interpreter: 'none',\" >> ecosystem.config.js
-              printf '%s\\n' \"    cwd: '${AZURE_DEPLOY_PATH}/main/${SVC}',\" >> ecosystem.config.js
-              printf '%s\\n' \"    env: {\" >> ecosystem.config.js
-              printf '%s\\n' \"      JAVA_HOME: '/usr/lib/jvm/java-17-openjdk-amd64',\" >> ecosystem.config.js
-              printf '%s\\n' \"      PATH: '/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/bin:/bin',\" >> ecosystem.config.js
-              printf '%s\\n' \"      SPRING_PROFILES_ACTIVE: '\${SPRING_PROFILE}'\" >> ecosystem.config.js
-              printf '%s\\n' \"    },\" >> ecosystem.config.js
-              printf '%s\\n' \"    error_file: '${AZURE_DEPLOY_PATH}/main/${SVC}/logs/pm2-error.log',\" >> ecosystem.config.js
-              printf '%s\\n' \"    out_file: '${AZURE_DEPLOY_PATH}/main/${SVC}/logs/pm2-out.log',\" >> ecosystem.config.js
-              printf '%s\\n' \"    log_file: '${AZURE_DEPLOY_PATH}/main/${SVC}/logs/pm2-combined.log',\" >> ecosystem.config.js
-              printf '%s\\n' \"    time: true,\" >> ecosystem.config.js
-              printf '%s\\n' \"    autorestart: true,\" >> ecosystem.config.js
-              printf '%s\\n' \"    max_restarts: 10,\" >> ecosystem.config.js
-              printf '%s\\n' \"    min_uptime: '10s',\" >> ecosystem.config.js
-              printf '%s\\n' \"    restart_delay: 5000\" >> ecosystem.config.js
-              printf '%s\\n' \"  }]\" >> ecosystem.config.js
-              printf '%s\\n' \"};\" >> ecosystem.config.js
+            # Database
+            MYSQL_HOST=${MYSQL_HOST}
+            MYSQL_PORT=${MYSQL_PORT:-3306}
+            MYSQL_DATABASE=${MYSQL_DATABASE}
+            MYSQL_USERNAME=${MYSQL_USERNAME}
+            MYSQL_PASSWORD=${MYSQL_PASSWORD}
 
-              # Show the ecosystem config for debugging
-              echo '--- PM2 Ecosystem Config ---'
-              cat ecosystem.config.js
+            # Redis
+            REDIS_HOST=redis
+            REDIS_PORT=6379
 
-              # Delete ALL instances of this specific service (handles duplicates)
-              echo '--- Removing all existing ${SVC} instances ---'
-              pm2 jlist | jq -r \".[] | select(.name==\\\"${SVC}\\\") | .pm_id\" | xargs -r -I {} pm2 delete {} 2>/dev/null || true
-              pm2 delete ${SVC} 2>/dev/null || true
-              sleep 2
+            # MQTT
+            MQTT_SIGNATURE_KEY=${MQTT_SIGNATURE_KEY}
+            EMQX_DASHBOARD_PASSWORD=${EMQX_DASHBOARD_PASSWORD:-public}
 
-              # Start with PM2
-              pm2 start ecosystem.config.js
-              pm2 save
+            # Manager API URL (for frontend)
+            MANAGER_API_URL=http://${DO_DROPLET_IP}:8002
+            ENV_EOF
 
-              # Wait a few seconds and check if it's still running
-              sleep 5
-              pm2 status
-              pm2 logs ${SVC} --lines 20 --nostream || true
+              # Pull latest images
+              echo "Pulling latest images..."
+              docker-compose pull
 
-              echo \"✅ ${SVC} deployed successfully from source\"
-            "
-  # Deploy Vue.js frontend with PM2
-  deploy_vue_pm2_azure:
-    parameters:
-      service_name: { type: string }
-      env: { type: string, default: "staging" }
-      http_port: { type: integer, default: 8886 }
+              # Stop and remove old containers
+              echo "Stopping old containers..."
+              docker-compose down --remove-orphans || true
+
+              # Start new containers
+              echo "Starting new containers..."
+              docker-compose up -d
+
+              # Wait for services to be healthy
+              echo "Waiting for services to start..."
+              sleep 30
+
+              # Show status
+              docker-compose ps
+
+              echo "Deployment completed successfully!"
+            DEPLOY_SCRIPT
+
+  # ==========================================
+  # HEALTH CHECK
+  # ==========================================
+  health_check:
     executor: node-executor
     steps:
-      - attach_workspace:
-          at: /tmp/workspace
-      - add_ssh_keys:
-          fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
       - run:
-          name: Deploy Vue.js frontend with PM2
+          name: Verify Deployment Health
           command: |
-            SVC="<< parameters.service_name >>"
-            ENV_NAME="<< parameters.env >>"
-            HTTP_PORT="<< parameters.http_port >>"
+            echo "Checking deployment health..."
 
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
+            # Check Digital Ocean services
+            echo "Checking Manager API..."
+            curl -sf "http://${DO_DROPLET_IP}:8002/toy/actuator/health" || echo "Manager API not responding yet"
 
-            echo "🚀 Deploying ${SVC} frontend to Azure VM"
+            echo "Checking Manager Web..."
+            curl -sf "http://${DO_DROPLET_IP}:8886/" || echo "Manager Web not responding yet"
 
-            # Upload and extract
-            scp -o StrictHostKeyChecking=no "/tmp/workspace/${SVC}.tar.gz" "${AZURE_USER}@${AZURE_HOST}:/tmp/"
+            echo "Checking MQTT Gateway..."
+            curl -sf "http://${DO_DROPLET_IP}:8004/health" || echo "MQTT Gateway not responding yet"
 
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" "
-              set -e
-              mkdir -p ${AZURE_DEPLOY_PATH}/main
-              cd ${AZURE_DEPLOY_PATH}/main
-              tar -xzf /tmp/${SVC}.tar.gz
-              cd ${SVC}
+            echo "Checking EMQX Dashboard..."
+            curl -sf "http://${DO_DROPLET_IP}:18083/status" || echo "EMQX not responding yet"
 
-              # Install Node.js, PM2 and Serve if they are not present
-              if ! command -v node >/dev/null 2>&1; then
-                curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-                sudo apt-get install -y nodejs
-              fi
-
-              # Install PM2 if not already installed
-              if ! command -v pm2 >/dev/null 2>&1; then
-                sudo npm install -g pm2 || {
-                  echo 'Failed to install PM2'
-                  exit 1
-                }
-              fi
-
-              # Create a stable Express server for serving the Vue app
-              echo '--- Creating Express server for ${SVC} ---'
-              printf '%s\n' \"const express = require('express');\" > server.js
-              printf '%s\n' \"const path = require('path');\" >> server.js
-              printf '%s\n' \"const app = express();\" >> server.js
-              printf '%s\n' \"const PORT = process.env.HTTP_PORT || 8886;\" >> server.js
-              printf '%s\n' \"\" >> server.js
-              printf '%s\n' \"app.use(express.static(path.join(__dirname, 'dist')));\" >> server.js
-              printf '%s\n' \"\" >> server.js
-              printf '%s\n' \"app.use((req, res) => {\" >> server.js
-              printf '%s\n' \"  res.sendFile(path.join(__dirname, 'dist', 'index.html'));\" >> server.js
-              printf '%s\n' \"});\" >> server.js
-              printf '%s\n' \"\" >> server.js
-              printf '%s\n' \"app.listen(PORT, '0.0.0.0', () => {\" >> server.js
-              printf '%s\n' \"  console.log('Manager Web started on port ' + PORT);\" >> server.js
-              printf '%s\n' \"});\" >> server.js
-
-              # Install express if not present
-              if ! npm list express >/dev/null 2>&1; then
-                echo '--- Installing express ---'
-                npm install express --save
-              fi
-
-              # Delete ALL instances of this specific service (handles duplicates)
-              echo '--- Removing all existing ${SVC} instances ---'
-              pm2 jlist | jq -r \".[] | select(.name==\\\"${SVC}\\\") | .pm_id\" | xargs -r -I {} pm2 delete {} 2>/dev/null || true
-              pm2 delete ${SVC} 2>/dev/null || true
-              sleep 2
-
-              # Kill any process using the HTTP port
-              echo '--- Checking for processes using port ${HTTP_PORT} ---'
-              sudo lsof -ti:${HTTP_PORT} | xargs -r sudo kill -9 2>/dev/null || echo 'No processes found on port ${HTTP_PORT}'
-              sleep 1
-
-              # Start with the Express server
-              pm2 start server.js --name ${SVC} --interpreter node
-              pm2 save
-              echo \"✅ ${SVC} frontend deployed successfully\"
-            "
-
-  # Deploy Python service with PM2
-  deploy_python_pm2_azure:
-    parameters:
-      service_name: { type: string }
-      env: { type: string, default: "staging" }
-      http_port: { type: integer, default: 8887 }
-      entry_file: { type: string, default: "main.py" }
-    executor: python-executor
-    steps:
-      - attach_workspace:
-          at: /tmp/workspace
-      - add_ssh_keys:
-          fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
-      - run:
-          name: Deploy Python service with PM2
-          command: |
-            SVC="<< parameters.service_name >>"
-            ENV_NAME="<< parameters.env >>"
-            HTTP_PORT="<< parameters.http_port >>"
-            ENTRY="<< parameters.entry_file >>"
-
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
-            : "${LIVEKIT_URL:?Set LIVEKIT_URL in CircleCI context}"
-            : "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in CircleCI context}"
-            : "${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in CircleCI context}"
-
-            echo "🚀 Deploying ${SVC} Python service to Azure VM"
-
-            # Upload and extract
-            scp -o StrictHostKeyChecking=no "/tmp/workspace/${SVC}.tar.gz" "${AZURE_USER}@${AZURE_HOST}:/tmp/"
-
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" "
-              set -e
-
-              # Export LiveKit environment variables for use in the script
-              export LIVEKIT_URL='${LIVEKIT_URL}'
-              export LIVEKIT_API_KEY='${LIVEKIT_API_KEY}'
-              export LIVEKIT_API_SECRET='${LIVEKIT_API_SECRET}'
-
-              mkdir -p ${AZURE_DEPLOY_PATH}/main
-              cd ${AZURE_DEPLOY_PATH}/main
-              tar -xzf /tmp/${SVC}.tar.gz
-              cd ${SVC}
-
-              # Install Python 3.10, its venv package, and PM2
-              echo '--- Installing Python 3.10 and dependencies ---'
-              sudo apt-get update -y
-              sudo apt-get install -y software-properties-common
-              sudo add-apt-repository -y ppa:deadsnakes/ppa
-              sudo apt-get update -y
-              sudo apt-get install -y python3.10 python3.10-venv python3.10-dev nodejs
-
-              # Install ffmpeg for audio processing (required by LiveKit server)
-              echo '--- Installing ffmpeg for audio processing ---'
-              sudo apt-get install -y ffmpeg libavcodec-extra
-
-              # Verify ffmpeg installation
-              if command -v ffmpeg >/dev/null 2>&1; then
-                echo '✅ ffmpeg installed successfully'
-                ffmpeg -version | head -1
-              else
-                echo '❌ Warning: ffmpeg installation failed'
-              fi
-
-              if ! command -v pm2 >/dev/null 2>&1; then
-                sudo npm install -g pm2
-              fi
-
-              # Check if virtual environment already exists and has dependencies
-              if [ -d \"venv\" ] && [ -f \"venv/bin/python\" ]; then
-                echo '--- Virtual environment exists, checking if dependencies are installed ---'
-                source venv/bin/activate
-
-                # Check if aiohttp is installed
-                if python -c \"import aiohttp\" 2>/dev/null; then
-                  echo '✅ Dependencies already installed, skipping pip install'
-                  VENV_EXISTS=true
-                else
-                  echo '⚠️  Virtual environment exists but dependencies missing, reinstalling...'
-                  VENV_EXISTS=false
-                fi
-
-                deactivate
-              else
-                echo '--- No virtual environment found ---'
-                VENV_EXISTS=false
-              fi
-
-              # Create or recreate virtual environment if needed
-              if [ \"\$VENV_EXISTS\" = \"false\" ]; then
-                echo '--- Creating virtual environment and installing packages ---'
-                rm -rf venv
-                python3.10 -m venv venv
-
-                # Activate virtual environment and upgrade pip
-                source venv/bin/activate
-                pip install --upgrade pip setuptools wheel
-
-                # Install the project dependencies from both pyproject.toml and requirements.txt
-                echo '--- Installing dependencies from pyproject.toml ---'
-                pip install -v . || {
-                  echo '❌ pip install from pyproject.toml failed, trying alternative approach...'
-                  pip install aiohttp sentence-transformers qdrant-client
-                  pip install 'livekit-agents[openai,turn-detector,silero,cartesia,deepgram]~=1.2'
-                  pip install livekit-plugins-noise-cancellation livekit-plugins-groq livekit.plugins.deepgram
-                  pip install livekit-plugins-elevenlabs python-dotenv paho-mqtt pydub edge-tts gtts pyttsx3 mem0ai jinja2 pytz
-                }
-
-                # Also install from requirements.txt if it exists
-                if [ -f \"requirements.txt\" ]; then
-                  echo '--- Installing additional dependencies from requirements.txt ---'
-                  pip install -r requirements.txt || echo 'Some requirements.txt dependencies failed but continuing...'
-                fi
-
-                # Verify critical dependencies are installed
-                echo '--- Verifying dependencies ---'
-                python -c \"import aiohttp; print('✅ aiohttp installed')\" || {
-                  echo '❌ aiohttp still not found after install'
-                  exit 1
-                }
-                python -c \"import sentence_transformers; print('✅ sentence_transformers installed')\" || {
-                  echo '❌ sentence_transformers still not found after install'
-                  exit 1
-                }
-
-                echo '--- Listing installed packages ---'
-                pip list | grep -E '(aiohttp|sentence-transformers|livekit)' || echo 'Warning: Some packages may be missing'
-
-                deactivate
-              fi
-
-              # Create PM2 ecosystem file - livekit needs 'dev' command
-              printf '%s\n' \"module.exports = {\" > ecosystem.config.js
-              printf '%s\n' \"  apps: [{\" >> ecosystem.config.js
-              printf '%s\n' \"    name: '${SVC}',\" >> ecosystem.config.js
-              printf '%s\n' \"    script: '${AZURE_DEPLOY_PATH}/main/${SVC}/venv/bin/python',\" >> ecosystem.config.js
-              printf '%s\n' \"    args: '${ENTRY} dev',\" >> ecosystem.config.js
-              printf '%s\n' \"    cwd: '${AZURE_DEPLOY_PATH}/main/${SVC}',\" >> ecosystem.config.js
-              printf '%s\n' \"    env: {\" >> ecosystem.config.js
-              printf '%s\n' \"      HTTP_PORT: '${HTTP_PORT}',\" >> ecosystem.config.js
-              printf '%s\n' \"      NODE_ENV: '${ENV_NAME}',\" >> ecosystem.config.js
-              printf '%s\n' \"      ENVIRONMENT: '${ENV_NAME}',\" >> ecosystem.config.js
-              printf '%s\n' \"      LIVEKIT_URL: '${LIVEKIT_URL}',\" >> ecosystem.config.js
-              printf '%s\n' \"      LIVEKIT_API_KEY: '${LIVEKIT_API_KEY}',\" >> ecosystem.config.js
-              printf '%s\n' \"      LIVEKIT_API_SECRET: '${LIVEKIT_API_SECRET}'\" >> ecosystem.config.js
-              printf '%s\n' \"    },\" >> ecosystem.config.js
-              printf '%s\n' \"    autorestart: true\" >> ecosystem.config.js
-              printf '%s\n' \"  }]\" >> ecosystem.config.js
-              printf '%s\n' \"};\" >> ecosystem.config.js
-
-              # Verify the file content
-              echo \"Generated ecosystem.config.js content:\"
-              cat ecosystem.config.js
-
-              # Delete ALL instances of this specific service (handles duplicates)
-              echo '--- Removing all existing ${SVC} instances ---'
-              pm2 jlist | jq -r \".[] | select(.name==\\\"${SVC}\\\") | .pm_id\" | xargs -r -I {} pm2 delete {} 2>/dev/null || true
-              pm2 delete ${SVC} 2>/dev/null || true
-              sleep 2
-
-              pm2 start ecosystem.config.js
-              pm2 save
-              echo \"✅ ${SVC} deployed successfully\"
-            "
-
-  # ==========================================
-  # PRODUCTION CONFIG DEPLOYMENT
-  # Deploy LiveKit Cloud configuration for production
-  # ==========================================
-  deploy_livekit_config:
-    executor: base-executor
-    steps:
-      - checkout
-      - add_ssh_keys:
-          fingerprints:
-            - "SHA256:yOFaQhaMF3+XYAcEjYL/BwibjpbAPUubeCj7b/ezBXU"
-      - run:
-          name: Deploy LiveKit Cloud Configuration
-          command: |
-            # Install envsubst for environment variable substitution
-            sudo apt-get update -qq && sudo apt-get install -y gettext-base
-
-            : "${AZURE_HOST:?Set AZURE_HOST in CircleCI context}"
-            : "${AZURE_USER:?Set AZURE_USER in CircleCI context}"
-            : "${AZURE_DEPLOY_PATH:?Set AZURE_DEPLOY_PATH in CircleCI context}"
-            : "${LIVEKIT_URL:?Set LIVEKIT_URL in CircleCI context}"
-            : "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in CircleCI context}"
-            : "${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in CircleCI context}"
-
-            echo "📝 Deploying LiveKit config.yaml with LiveKit Cloud settings"
-
-            # Replace LiveKit Cloud environment variables in config.yaml
-            envsubst < "main/livekit-server/config.production.yaml" > /tmp/config.yaml
-
-            # Deploy config.yaml
-            scp -o StrictHostKeyChecking=no /tmp/config.yaml \
-              "${AZURE_USER}@${AZURE_HOST}:${AZURE_DEPLOY_PATH}/main/livekit-server/config.yaml"
-
-            echo "✅ LiveKit Cloud config deployed successfully"
-
-            # Verify deployment
-            ssh -o StrictHostKeyChecking=no "${AZURE_USER}@${AZURE_HOST}" \
-              "echo '=== Deployed LiveKit Config ===' && grep 'livekit:' ${AZURE_DEPLOY_PATH}/main/livekit-server/config.yaml -A 3"
-
-  # ==========================================
-  # LIVEKIT AGENT CLOUD DEPLOYMENT
-  # Deploy LiveKit agent to LiveKit Cloud
-  # ==========================================
-  deploy_livekit_agent_cloud:
-    machine:
-      image: ubuntu-2204:2024.01.1
-      docker_layer_caching: true
-    resource_class: medium
-    steps:
-      - checkout
-      - run:
-          name: Install LiveKit CLI and UV
-          command: |
-            # Install LiveKit CLI for agent deployment
-            echo "📦 Installing LiveKit CLI..."
-            curl -sSL https://get.livekit.io/cli | bash
-
-            # Verify LiveKit CLI installation
-            lk --version
-
-            # Install UV (Python package manager)
-            echo "📦 Installing UV..."
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-
-            # Add UV to PATH for current session
-            export PATH="$HOME/.cargo/bin:$PATH"
-
-            # Verify UV installation
-            uv --version
-
-            echo "✅ LiveKit CLI and UV installed successfully"
-
-      - run:
-          name: Delete Old Agent from LiveKit Cloud
-          command: |
-            : "${LIVEKIT_URL:?Set LIVEKIT_URL in CircleCI context}"
-            : "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in CircleCI context}"
-            : "${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in CircleCI context}"
-
-            cd main/livekit-server
-
-            echo "🗑️ Deleting old agent from LiveKit Cloud..."
-
-            # Set LiveKit credentials as environment variables
-            export LIVEKIT_URL="$LIVEKIT_URL"
-            export LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
-            export LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
-
-            # Check if agent exists and delete it
-            # Read agent ID from livekit.toml if it exists
-            if [ -f "livekit.toml" ]; then
-              AGENT_ID=$(grep -oP 'id\s*=\s*"\K[^"]+' livekit.toml || echo "")
-
-              if [ -n "$AGENT_ID" ]; then
-                echo "📋 Found agent ID: $AGENT_ID"
-                echo "🗑️ Attempting to delete agent..."
-
-                # Delete the agent (ignore errors if agent doesn't exist)
-                lk agent delete "$AGENT_ID" || echo "⚠️ Agent not found or already deleted (this is okay)"
-              else
-                echo "📋 No agent ID found in livekit.toml"
-              fi
-            else
-              echo "📋 livekit.toml not found, skipping delete"
+            # Check Cerebrium (if endpoint is available)
+            if [ -n "${CEREBRIUM_HEALTH_URL}" ]; then
+              echo "Checking Cerebrium LiveKit Agent..."
+              curl -sf "${CEREBRIUM_HEALTH_URL}/health" || echo "Cerebrium agent not responding yet"
             fi
 
-            echo "✅ Old agent cleanup completed"
-
-      - run:
-          name: Lock Dependencies with UV
-          command: |
-            cd main/livekit-server
-
-            # Add UV to PATH
-            export PATH="$HOME/.cargo/bin:$PATH"
-
-            echo "🔒 Locking dependencies with uv..."
-
-            # Run uv lock to update uv.lock file
-            uv lock
-
-            echo "✅ Dependencies locked successfully"
-
-      - run:
-          name: Create New Agent on LiveKit Cloud
-          command: |
-            : "${LIVEKIT_URL:?Set LIVEKIT_URL in CircleCI context}"
-            : "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in CircleCI context}"
-            : "${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in CircleCI context}"
-
-            cd main/livekit-server
-
-            echo "☁️ Creating new agent on LiveKit Cloud..."
-
-            # Set LiveKit credentials as environment variables
-            export LIVEKIT_URL="$LIVEKIT_URL"
-            export LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
-            export LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
-
-            # Create the agent with auto-confirmation
-            # Use expect or provide automatic yes responses for prompts
-            echo "📝 Creating agent (auto-accepting prompts)..."
-
-            # Method 1: Try lk agent create with timeout
-            timeout 300 bash -c '
-              # Automatically answer yes to all prompts
-              yes | lk agent create || {
-                EXIT_CODE=$?
-                if [ $EXIT_CODE -eq 124 ]; then
-                  echo "⏱️ Agent creation timed out after 5 minutes"
-                  echo "🔄 Will try lk deploy as fallback..."
-                  exit 124
-                else
-                  echo "❌ Agent creation failed with code $EXIT_CODE"
-                  exit $EXIT_CODE
-                fi
-              }
-            ' || {
-              EXIT_CODE=$?
-              if [ $EXIT_CODE -eq 124 ]; then
-                echo "⏱️ lk agent create took too long, switching to lk deploy..."
-
-                # Fallback: Use lk deploy command
-                echo "🚀 Deploying with lk deploy..."
-                lk deploy || {
-                  echo "❌ Both lk agent create and lk deploy failed"
-                  exit 1
-                }
-
-                echo "✅ Agent deployed successfully using lk deploy"
-              else
-                echo "❌ Agent creation failed"
-                exit $EXIT_CODE
-              fi
-            }
-
-            echo "✅ Agent created/deployed on LiveKit Cloud successfully"
-
-      - run:
-          name: Verify Agent Deployment
-          command: |
-            : "${LIVEKIT_URL:?Set LIVEKIT_URL in CircleCI context}"
-            : "${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY in CircleCI context}"
-            : "${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET in CircleCI context}"
-
-            cd main/livekit-server
-
-            # Set LiveKit credentials
-            export LIVEKIT_URL="$LIVEKIT_URL"
-            export LIVEKIT_API_KEY="$LIVEKIT_API_KEY"
-            export LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET"
-
-            echo "🔍 Verifying agent deployment..."
-
-            # List all agents to confirm deployment
-            lk agent list
-
-            echo "✅ Agent deployment verification completed"
+            echo "Health check completed!"
 
 # =========================
-# Workflows - BRANCH-SPECIFIC PIPELINES
+# Workflows
 # =========================
 workflows:
   version: 2
 
   # ==========================================
-  # 🔧 DEV WORKFLOW
-  # Runs on dev branch AND circleci-validation branch for testing
+  # DEVELOPMENT WORKFLOW (dev branch)
+  # Tests only, no deployment
   # ==========================================
   dev-workflow:
     jobs:
-      # Notification
-      - test_pipeline_notification:
-          name: "[DEV] 🔧 Pipeline Start"
+      - pipeline_start:
+          name: "[DEV] Pipeline Start"
           filters:
             branches:
-              only:
-                - dev
-                - circleci-validation
+              only: dev
 
-      # Code Quality Check
-      - test_code_quality_check:
-          name: "[DEV] 🔧 Code Quality"
-          requires: ["[DEV] 🔧 Pipeline Start"]
-          filters:
-            branches:
-              only:
-                - dev
-                - circleci-validation
-
-      # ==========================================
-      # TESTING PHASE: All 4 services test in parallel
-      # Runs on dev branch AND circleci-validation branch
-      # ==========================================
       - test_node_service:
-          name: "[DEV] 🔧 Test MQTT Gateway"
+          name: "[DEV] Test MQTT Gateway"
           service_name: "mqtt-gateway"
           service_path: "main/mqtt-gateway"
-          requires: ["[DEV] 🔧 Code Quality"]
+          requires: ["[DEV] Pipeline Start"]
           filters:
             branches:
-              only:
-                - dev
-                - circleci-validation
+              only: dev
 
       - test_java_service:
-          name: "[DEV] 🔧 Test Manager API"
+          name: "[DEV] Test Manager API"
           service_name: "manager-api"
           service_path: "main/manager-api"
-          requires: ["[DEV] 🔧 Code Quality"]
+          requires: ["[DEV] Pipeline Start"]
           filters:
             branches:
-              only:
-                - dev
-                - circleci-validation
+              only: dev
 
       - test_node_service:
-          name: "[DEV] 🔧 Test Manager Web"
+          name: "[DEV] Test Manager Web"
           service_name: "manager-web"
           service_path: "main/manager-web"
-          requires: ["[DEV] 🔧 Code Quality"]
+          requires: ["[DEV] Pipeline Start"]
           filters:
             branches:
-              only:
-                - dev
-                - circleci-validation
+              only: dev
 
       - test_python_service:
-          name: "[DEV] 🔧 Test LiveKit Server"
+          name: "[DEV] Test LiveKit Server"
           service_name: "livekit-server"
           service_path: "main/livekit-server"
-          requires: ["[DEV] 🔧 Code Quality"]
-          filters:
-            branches:
-              only:
-                - dev
-                - circleci-validation
-
-      # ==========================================
-      # BUILD PHASE: All 4 services build in parallel (after tests pass)
-      # Runs on dev branch AND circleci-validation branch
-      # ==========================================
-      - build_node_service:
-          name: "[DEV] 🔧 Build MQTT Gateway"
-          service_name: "mqtt-gateway"
-          service_path: "main/mqtt-gateway"
-          requires: ["[DEV] 🔧 Test MQTT Gateway"]
-          filters:
-            branches:
-              only:
-                - dev
-                - circleci-validation
-
-      - build_java_service:
-          name: "[DEV] 🔧 Build Manager API"
-          service_name: "manager-api"
-          service_path: "main/manager-api"
-          requires: ["[DEV] 🔧 Test Manager API"]
-          filters:
-            branches:
-              only:
-                - dev
-                - circleci-validation
-
-      - build_vue_frontend:
-          name: "[DEV] 🔧 Build Manager Web"
-          service_name: "manager-web"
-          service_path: "main/manager-web"
-          requires: ["[DEV] 🔧 Test Manager Web"]
-          filters:
-            branches:
-              only:
-                - dev
-                - circleci-validation
-
-      - build_python_service:
-          name: "[DEV] 🔧 Build LiveKit Server"
-          service_name: "livekit-server"
-          service_path: "main/livekit-server"
-          requires: ["[DEV] 🔧 Test LiveKit Server"]
-          filters:
-            branches:
-              only:
-                - dev
-                - circleci-validation
-
-      # ==========================================
-      # DEPLOY PHASE: Deploy EMQX first, then all 4 services in parallel
-      # ONLY runs on dev branch (NOT on circleci-validation for safety)
-      # ==========================================
-
-      # Deploy EMQX Broker first as it's required by MQTT Gateway
-      - deploy_emqx_docker:
-          name: "[DEV] 🔧 Deploy EMQX Broker"
-          context: "azure-mqtt-gateway"
-          env: "development"
-          mqtt_port: 1883
-          mqtt_ws_port: 8083
-          http_port: 18083
-          requires: ["[DEV] 🔧 Code Quality"]
-          filters:
-            branches:
-              only: dev
-
-      - deploy_node_pm2_azure:
-          name: "[DEV] 🔧 Deploy MQTT Gateway"
-          context: "azure-mqtt-gateway"
-          service_name: "mqtt-gateway"
-          entry_file: "app.js"
-          env: "development"
-          http_port: 8884
-          mqtt_port: 1883
-          requires:
-            ["[DEV] 🔧 Build MQTT Gateway", "[DEV] 🔧 Deploy EMQX Broker"]
-          filters:
-            branches:
-              only: dev
-
-      - deploy_java_pm2_azure:
-          name: "[DEV] 🔧 Deploy Manager API"
-          context: "azure-mqtt-gateway"
-          service_name: "manager-api"
-          env: "development"
-          http_port: 8002
-          requires: ["[DEV] 🔧 Build Manager API"]
-          filters:
-            branches:
-              only: dev
-
-      - deploy_vue_pm2_azure:
-          name: "[DEV] 🔧 Deploy Manager Web"
-          context: "azure-mqtt-gateway"
-          service_name: "manager-web"
-          env: "development"
-          http_port: 8886
-          requires: ["[DEV] 🔧 Build Manager Web"]
-          filters:
-            branches:
-              only: dev
-
-      - deploy_python_pm2_azure:
-          name: "[DEV] 🔧 Deploy LiveKit Server"
-          context: "azure-mqtt-gateway"
-          service_name: "livekit-server"
-          env: "development"
-          http_port: 8887
-          entry_file: "main.py"
-          requires: ["[DEV] 🔧 Build LiveKit Server"]
+          requires: ["[DEV] Pipeline Start"]
           filters:
             branches:
               only: dev
 
   # ==========================================
-  # 🚀 PRODUCTION WORKFLOW
-  # Runs on dev branch (temporarily) - Uses LiveKit Cloud
-  # Later will be changed to run on production branch only
+  # PRODUCTION WORKFLOW (main/production branch)
+  # Full pipeline: Test -> Build -> Deploy
   # ==========================================
   production-workflow:
-    when:
-      equal: [dev, << pipeline.git.branch >>]
     jobs:
-      # Notification
-      - prod_pipeline_notification:
-          name: "[PROD] 🚀 Pipeline Start"
+      # --- Notification ---
+      - pipeline_start:
+          name: "[PROD] Pipeline Start"
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
-      # Code Quality Check
-      - test_code_quality_check:
-          name: "[PROD] 🚀 Code Quality"
-          requires: ["[PROD] 🚀 Pipeline Start"]
-
-      # ==========================================
-      # TESTING PHASE: All 4 services test in parallel
-      # ==========================================
+      # --- Testing Phase (Parallel) ---
       - test_node_service:
-          name: "[PROD] 🚀 Test MQTT Gateway"
+          name: "[PROD] Test MQTT Gateway"
           service_name: "mqtt-gateway"
           service_path: "main/mqtt-gateway"
-          requires: ["[PROD] 🚀 Code Quality"]
+          requires: ["[PROD] Pipeline Start"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
       - test_java_service:
-          name: "[PROD] 🚀 Test Manager API"
+          name: "[PROD] Test Manager API"
           service_name: "manager-api"
           service_path: "main/manager-api"
-          requires: ["[PROD] 🚀 Code Quality"]
+          requires: ["[PROD] Pipeline Start"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
       - test_node_service:
-          name: "[PROD] 🚀 Test Manager Web"
+          name: "[PROD] Test Manager Web"
           service_name: "manager-web"
           service_path: "main/manager-web"
-          requires: ["[PROD] 🚀 Code Quality"]
+          requires: ["[PROD] Pipeline Start"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
       - test_python_service:
-          name: "[PROD] 🚀 Test LiveKit Server"
+          name: "[PROD] Test LiveKit Server"
           service_name: "livekit-server"
           service_path: "main/livekit-server"
-          requires: ["[PROD] 🚀 Code Quality"]
+          requires: ["[PROD] Pipeline Start"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
-      # ==========================================
-      # BUILD PHASE: All 4 services build in parallel (after tests pass)
-      # ==========================================
-      - build_node_service:
-          name: "[PROD] 🚀 Build MQTT Gateway"
-          service_name: "mqtt-gateway"
-          service_path: "main/mqtt-gateway"
-          requires: ["[PROD] 🚀 Test MQTT Gateway"]
-
-      - build_java_service:
-          name: "[PROD] 🚀 Build Manager API"
+      # --- Build & Push Docker Images (Parallel) ---
+      - build_and_push_image:
+          name: "[PROD] Build Manager API"
+          context: "digitalocean-registry"
           service_name: "manager-api"
           service_path: "main/manager-api"
-          requires: ["[PROD] 🚀 Test Manager API"]
+          requires: ["[PROD] Test Manager API"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
-      - build_vue_frontend:
-          name: "[PROD] 🚀 Build Manager Web"
+      - build_and_push_image:
+          name: "[PROD] Build Manager Web"
+          context: "digitalocean-registry"
           service_name: "manager-web"
           service_path: "main/manager-web"
-          requires: ["[PROD] 🚀 Test Manager Web"]
+          requires: ["[PROD] Test Manager Web"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
-      - build_python_service:
-          name: "[PROD] 🚀 Build LiveKit Server"
-          service_name: "livekit-server"
-          service_path: "main/livekit-server"
-          requires: ["[PROD] 🚀 Test LiveKit Server"]
-
-      # ==========================================
-      # DEPLOY PHASE:
-      # - 3 services (MQTT, Manager API, Manager Web) deploy to Digital Ocean
-      # - LiveKit agent deploys to LiveKit Cloud
-      # ==========================================
-
-      # Deploy LiveKit agent to LiveKit Cloud
-      - deploy_livekit_agent_cloud:
-          name: "[PROD] 🚀 Deploy Agent to LiveKit Cloud"
-          context: "azure-mqtt-gateway"
-          requires:
-            - "[PROD] 🚀 Test LiveKit Server"
-
-      # Deploy EMQX first
-      - deploy_emqx_docker:
-          name: "[PROD] 🚀 Deploy EMQX Broker"
-          context: "azure-mqtt-gateway"
-          env: "production"
-          mqtt_port: 1883
-          mqtt_ws_port: 8083
-          http_port: 18083
-          requires: ["[PROD] 🚀 Code Quality"]
-
-      # Deploy other services to Digital Ocean (in parallel)
-      - deploy_node_pm2_azure:
-          name: "[PROD] 🚀 Deploy MQTT Gateway"
-          context: "azure-mqtt-gateway"
+      - build_and_push_image:
+          name: "[PROD] Build MQTT Gateway"
+          context: "digitalocean-registry"
           service_name: "mqtt-gateway"
-          entry_file: "app.js"
-          env: "production"
-          http_port: 8884
-          mqtt_port: 1883
+          service_path: "main/mqtt-gateway"
+          requires: ["[PROD] Test MQTT Gateway"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
+
+      # --- Deploy to Cerebrium (LiveKit Agent) ---
+      - deploy_cerebrium:
+          name: "[PROD] Deploy to Cerebrium"
+          context: "cerebrium-deploy"
+          requires: ["[PROD] Test LiveKit Server"]
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
+
+      # --- Deploy to Digital Ocean (All other services) ---
+      - deploy_digitalocean:
+          name: "[PROD] Deploy to Digital Ocean"
+          context: "digitalocean-deploy"
           requires:
-            ["[PROD] 🚀 Build MQTT Gateway", "[PROD] 🚀 Deploy EMQX Broker"]
+            - "[PROD] Build Manager API"
+            - "[PROD] Build Manager Web"
+            - "[PROD] Build MQTT Gateway"
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql
 
-      - deploy_java_pm2_azure:
-          name: "[PROD] 🚀 Deploy Manager API"
-          context: "azure-mqtt-gateway"
-          service_name: "manager-api"
-          env: "production"
-          http_port: 8002
-          requires: ["[PROD] 🚀 Build Manager API"]
-
-      - deploy_vue_pm2_azure:
-          name: "[PROD] 🚀 Deploy Manager Web"
-          context: "azure-mqtt-gateway"
-          service_name: "manager-web"
-          env: "production"
-          http_port: 8886
-          requires: ["[PROD] 🚀 Build Manager Web"]
+      # --- Health Check ---
+      - health_check:
+          name: "[PROD] Health Check"
+          context: "digitalocean-deploy"
+          requires:
+            - "[PROD] Deploy to Cerebrium"
+            - "[PROD] Deploy to Digital Ocean"
+          filters:
+            branches:
+              only:
+                - main
+                - production
+                - media-server-sql

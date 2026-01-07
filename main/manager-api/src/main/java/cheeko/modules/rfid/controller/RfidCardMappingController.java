@@ -27,8 +27,10 @@ import cheeko.common.validator.group.AddGroup;
 import cheeko.common.validator.group.DefaultGroup;
 import cheeko.common.validator.group.UpdateGroup;
 import cheeko.modules.rfid.dto.RfidCardMappingDTO;
+import cheeko.modules.rfid.dto.RfidContentLookupDTO;
 import cheeko.modules.rfid.dto.RfidQuestionDTO;
 import cheeko.modules.rfid.service.RfidCardMappingService;
+import cheeko.modules.rfid.service.RfidContentPackService;
 
 /**
  * RFID Card Mapping Management
@@ -40,6 +42,7 @@ import cheeko.modules.rfid.service.RfidCardMappingService;
 public class RfidCardMappingController {
 
     private final RfidCardMappingService rfidCardMappingService;
+    private final RfidContentPackService rfidContentPackService;
 
     @GetMapping("/page")
     @Operation(summary = "Paginated card mapping query")
@@ -87,7 +90,20 @@ public class RfidCardMappingController {
     }
 
     @GetMapping("/lookup/{rfidUid}")
-    @Operation(summary = "Lookup question for RFID card (device tap endpoint)")
+    @Operation(summary = "Lookup content for RFID card (device tap endpoint with RAG support)")
+    @Parameters({
+            @Parameter(name = "rfidUid", description = "RFID card UID", required = true),
+            @Parameter(name = "sequence", description = "Sequence number for content item (1-based)")
+    })
+    public Result<RfidContentLookupDTO> lookupContent(
+            @PathVariable("rfidUid") String rfidUid,
+            @RequestParam(value = "sequence", required = false) Integer sequence) {
+        RfidContentLookupDTO dto = rfidContentPackService.lookupContentByRfidUid(rfidUid, sequence);
+        return new Result<RfidContentLookupDTO>().ok(dto);
+    }
+
+    @GetMapping("/lookup-legacy/{rfidUid}")
+    @Operation(summary = "Lookup question for RFID card (legacy endpoint)")
     public Result<RfidQuestionDTO> lookupQuestion(@PathVariable("rfidUid") String rfidUid) {
         RfidQuestionDTO dto = rfidCardMappingService.getQuestionByRfidUid(rfidUid);
         return new Result<RfidQuestionDTO>().ok(dto);

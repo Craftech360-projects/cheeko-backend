@@ -50,11 +50,17 @@ function setConfigManager(cm) {
 }
 
 /**
- * Lookup RFID question prompt text from Manager API by RFID UID.
- * Uses the open device-tap endpoint in RfidCardMappingController:
- *   GET /toy/admin/rfid/card/lookup/{rfidUid}
+ * Lookup RFID content from Manager API by RFID UID and sequence.
+ * Uses the RAG-enabled endpoint in RfidCardMappingController:
+ *   GET /toy/admin/rfid/card/lookup/{rfidUid}?sequence={sequence}
+ *
+ * Returns object with:
+ *   - contentType: "read_only" (TTS only) or "prompt" (send to LLM)
+ *   - title: Content title
+ *   - contentText: Text to speak directly (for read_only mode)
+ *   - promptText: Text to send to LLM (for prompt mode, backward compatible)
  */
-async function fetchRfidPromptTextFromManagerApi(rfidUid) {
+async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
   try {
     const trimmedUid = (rfidUid || "").trim();
     if (!trimmedUid) {
@@ -65,17 +71,21 @@ async function fetchRfidPromptTextFromManagerApi(rfidUid) {
     const baseUrl = process.env.MANAGER_API_URL || "";
     if (!baseUrl) {
       logger.warn(
-        `⚠️ [RFID-LOOKUP] MANAGER_API_URL not set, cannot look up RFID question for UID ${trimmedUid}`
+        `⚠️ [RFID-LOOKUP] MANAGER_API_URL not set, cannot look up RFID content for UID ${trimmedUid}`
       );
       return null;
     }
 
-    const apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/lookup/${encodeURIComponent(
+    // Build URL with optional sequence parameter
+    let apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/lookup/${encodeURIComponent(
       trimmedUid
     )}`;
+    if (sequence !== null && sequence !== undefined) {
+      apiUrl += `?sequence=${encodeURIComponent(sequence)}`;
+    }
 
     logger.info(
-      `🔍 [RFID-LOOKUP] Looking up question for RFID UID ${trimmedUid} via ${apiUrl}`
+      `🔍 [RFID-LOOKUP] Looking up content for RFID UID ${trimmedUid}, sequence=${sequence} via ${apiUrl}`
     );
 
     const response = await axios.get(apiUrl, { timeout: 5000 });
@@ -89,28 +99,59 @@ async function fetchRfidPromptTextFromManagerApi(rfidUid) {
       return null;
     }
 
-    const promptText = (body.data.promptText || "").trim();
-    if (!promptText) {
+    const data = body.data;
+    const contentType = data.contentType || "prompt";
+    const title = (data.title || "").trim();
+    const contentText = (data.contentText || "").trim();
+    const promptText = (data.promptText || "").trim();
+
+    // For read_only mode, we need contentText; for prompt mode, we need promptText
+    if (contentType === "read_only" && !contentText) {
       logger.warn(
-        `⚠️ [RFID-LOOKUP] No promptText configured for UID ${trimmedUid}`
+        `⚠️ [RFID-LOOKUP] read_only mode but no contentText for UID ${trimmedUid}, sequence=${sequence}`
       );
       return null;
     }
 
+    if (contentType === "prompt" && !promptText) {
+      logger.warn(
+        `⚠️ [RFID-LOOKUP] prompt mode but no promptText for UID ${trimmedUid}`
+      );
+      return null;
+    }
+
+    const displayText = contentType === "read_only" ? contentText : promptText;
     logger.info(
-      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} to promptText: "${promptText.slice(
+      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", text="${displayText.slice(
         0,
         80
-      )}${promptText.length > 80 ? "..." : ""}"`
+      )}${displayText.length > 80 ? "..." : ""}"`
     );
 
-    return promptText;
+    return {
+      contentType,
+      title,
+      contentText,
+      promptText,
+      packCode: data.packCode,
+      language: data.language,
+    };
   } catch (error) {
     logger.error(
       `❌ [RFID-LOOKUP] Error looking up RFID UID ${rfidUid}: ${error.message}`
     );
     return null;
   }
+}
+
+/**
+ * Legacy function for backward compatibility
+ * @deprecated Use fetchRfidContentFromManagerApi instead
+ */
+async function fetchRfidPromptTextFromManagerApi(rfidUid) {
+  const result = await fetchRfidContentFromManagerApi(rfidUid, null);
+  if (!result) return null;
+  return result.promptText || result.contentText || null;
 }
 
 class MQTTGateway {
@@ -693,26 +734,43 @@ class MQTTGateway {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
         }
       } else if (originalPayload.type === "start_greeting_text") {
-        // Handle RFID-based greeting: resolve question via Manager API then forward to LiveKit agent
+        // Handle RFID-based greeting: resolve content via Manager API then forward to LiveKit agent
+        // Supports RAG system with read_only content and legacy prompt mode
         const rfidUid =
           originalPayload.rfid_uid ||
           originalPayload.rfidUid ||
           null;
+        const sequence =
+          originalPayload.sequence ||
+          originalPayload.seq ||
+          originalPayload.sl_no ||
+          null;
         const legacyText = (originalPayload.text || "").trim();
 
+        let rfidContent = null;
         let textToSend = null;
 
         if (rfidUid) {
           logger.info(
-            `✉️ [TEXT-GREETING] Received RFID UID from device ${deviceId}: "${rfidUid}"`
+            `✉️ [TEXT-GREETING] Received RFID UID from device ${deviceId}: "${rfidUid}", sequence=${sequence}`
           );
-          textToSend = await fetchRfidPromptTextFromManagerApi(rfidUid);
+          // Use the new RAG-enabled content lookup
+          rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
+
+          if (rfidContent) {
+            // For read_only mode, use contentText; for prompt mode, use promptText
+            textToSend =
+              rfidContent.contentType === "read_only"
+                ? rfidContent.contentText
+                : rfidContent.promptText;
+          }
 
           if (!textToSend && legacyText) {
             logger.warn(
-              `⚠️ [TEXT-GREETING] No promptText found for UID ${rfidUid}, falling back to legacy text from device ${deviceId}`
+              `⚠️ [TEXT-GREETING] No content found for UID ${rfidUid}, falling back to legacy text from device ${deviceId}`
             );
             textToSend = legacyText;
+            rfidContent = null; // Clear so we don't send read_only fields
           }
         } else if (legacyText) {
           // Backward compatibility: old firmware sending text directly
@@ -758,7 +816,7 @@ class MQTTGateway {
 
         try {
           logger.info(
-            `✉️ [TEXT-GREETING] Prepared prompt for device ${deviceId}: "${textToSend}"`
+            `✉️ [TEXT-GREETING] Prepared content for device ${deviceId}: type=${rfidContent?.contentType || "prompt"}, title="${rfidContent?.title || ""}", text="${textToSend.slice(0, 80)}..."`
           );
 
           // Guard: if audio is currently playing, abort existing playback before new text
@@ -782,6 +840,7 @@ class MQTTGateway {
             }
           }
 
+          // Build message with RAG content fields
           const userTextMsg = {
             type: "user_text",
             text: textToSend,
@@ -792,8 +851,22 @@ class MQTTGateway {
             timestamp: Date.now(),
           };
 
+          // Add RFID-specific fields
           if (rfidUid) {
             userTextMsg.rfid_uid = rfidUid;
+          }
+          if (sequence !== null && sequence !== undefined) {
+            userTextMsg.sequence = sequence;
+          }
+
+          // Add RAG content fields if available
+          if (rfidContent) {
+            userTextMsg.content_type = rfidContent.contentType; // "read_only" or "prompt"
+            userTextMsg.title = rfidContent.title;
+            userTextMsg.content_text = rfidContent.contentText; // For read_only mode
+            userTextMsg.prompt_text = rfidContent.promptText; // For prompt mode
+            userTextMsg.pack_code = rfidContent.packCode;
+            userTextMsg.language = rfidContent.language;
           }
 
           const payloadStr = JSON.stringify(userTextMsg);
@@ -801,7 +874,7 @@ class MQTTGateway {
 
           await room.localParticipant.publishData(data, { reliable: true });
           logger.info(
-            `✅ [TEXT-GREETING] Forwarded RFID question to LiveKit agent for device ${deviceId}`
+            `✅ [TEXT-GREETING] Forwarded RFID content to LiveKit agent for device ${deviceId} (content_type=${rfidContent?.contentType || "prompt"})`
           );
         } catch (err) {
           logger.error(

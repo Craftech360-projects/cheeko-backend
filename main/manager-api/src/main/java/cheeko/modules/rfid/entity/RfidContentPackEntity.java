@@ -1,14 +1,12 @@
 package cheeko.modules.rfid.entity;
 
 import java.util.Date;
-import java.util.List;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -16,40 +14,39 @@ import lombok.EqualsAndHashCode;
 import cheeko.common.entity.BaseEntity;
 
 /**
- * RFID Card Mapping Entity
- * Links physical RFID UIDs to question templates
+ * RFID Content Pack Entity
+ * Stores markdown content for read-only TTS playback (RAG system)
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
-@TableName(value = "rfid_card_mapping", autoResultMap = true)
-@Schema(description = "RFID Card to Question Mapping Entity")
-public class RfidCardMappingEntity extends BaseEntity {
+@TableName("rfid_content_pack")
+@Schema(description = "RFID Content Pack Entity for RAG System")
+public class RfidContentPackEntity extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     @Schema(description = "Primary key")
     private Long id;
 
-    @Schema(description = "RFID card UID (hex string format)")
-    private String rfidUid;
-
-    @Schema(description = "FK to rfid_question table (legacy single question)")
-    private Long questionId;
-
-    @Schema(description = "JSON array of question IDs for multi-question support")
-    @TableField(typeHandler = JacksonTypeHandler.class)
-    private List<Long> questionIds;
-
-    @Schema(description = "Product/pack/SKU identifier (e.g., BLINKIT_ANIMALS_PACK_1)")
+    @Schema(description = "Unique pack identifier (e.g., RHYMES_EN_01)")
     private String packCode;
 
-    @Schema(description = "FK to rfid_pack table")
-    private Long packId;
+    @Schema(description = "Display name (e.g., Classic Nursery Rhymes)")
+    private String name;
 
-    @Schema(description = "FK to rfid_content_pack table for RAG system")
-    private Long contentPackId;
+    @Schema(description = "Pack description")
+    private String description;
 
-    @Schema(description = "Internal notes or description")
-    private String notes;
+    @Schema(description = "Content type: read_only (TTS only) or prompt (send to LLM)")
+    private String contentType;
+
+    @Schema(description = "Full markdown content with numbered sections")
+    private String contentMd;
+
+    @Schema(description = "Total number of items in the pack")
+    private Integer totalItems;
+
+    @Schema(description = "Language code (en, hi, etc.)")
+    private String language;
 
     @Schema(description = "Active status: 0=Disabled, 1=Enabled")
     private Boolean active;

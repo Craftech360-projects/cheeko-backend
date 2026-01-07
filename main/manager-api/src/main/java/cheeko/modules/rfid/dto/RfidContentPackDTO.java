@@ -2,7 +2,6 @@ package cheeko.modules.rfid.dto;
 
 import java.io.Serializable;
 import java.util.Date;
-import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -18,38 +17,38 @@ import cheeko.common.validator.group.DefaultGroup;
 import cheeko.common.validator.group.UpdateGroup;
 
 /**
- * RFID Card Mapping DTO
+ * RFID Content Pack DTO
  */
 @Data
-@Schema(description = "RFID Card to Question Mapping")
-public class RfidCardMappingDTO implements Serializable {
+@Schema(description = "RFID Content Pack for RAG System")
+public class RfidContentPackDTO implements Serializable {
 
     @Schema(description = "ID")
     @Null(message = "{id.null}", groups = AddGroup.class)
     @NotNull(message = "{id.require}", groups = UpdateGroup.class)
     private Long id;
 
-    @Schema(description = "RFID card UID (hex string format)")
-    @NotBlank(message = "RFID UID is required", groups = DefaultGroup.class)
-    private String rfidUid;
-
-    @Schema(description = "FK to rfid_question table (legacy single question)")
-    private Long questionId;
-
-    @Schema(description = "JSON array of question IDs for multi-question support")
-    private List<Long> questionIds;
-
-    @Schema(description = "Product/pack/SKU identifier (e.g., BLINKIT_ANIMALS_PACK_1)")
+    @Schema(description = "Unique pack identifier (e.g., RHYMES_EN_01)")
+    @NotBlank(message = "Pack code is required", groups = DefaultGroup.class)
     private String packCode;
 
-    @Schema(description = "FK to rfid_pack table")
-    private Long packId;
+    @Schema(description = "Display name (e.g., Classic Nursery Rhymes)")
+    private String name;
 
-    @Schema(description = "FK to rfid_content_pack table for RAG system")
-    private Long contentPackId;
+    @Schema(description = "Pack description")
+    private String description;
 
-    @Schema(description = "Internal notes or description")
-    private String notes;
+    @Schema(description = "Content type: read_only (TTS only) or prompt (send to LLM)")
+    private String contentType;
+
+    @Schema(description = "Full markdown content with numbered sections")
+    private String contentMd;
+
+    @Schema(description = "Total number of items in the pack")
+    private Integer totalItems;
+
+    @Schema(description = "Language code (en, hi, etc.)")
+    private String language;
 
     @Schema(description = "Active status")
     private Boolean active;

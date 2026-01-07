@@ -28,9 +28,12 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-from livekit.plugins import google
+from livekit.plugins import google, elevenlabs
+import io
+from pydub import AudioSegment
 
 from src.config.config_loader import ConfigLoader
+from src.services.elevenlabs_tts_service import get_elevenlabs_service
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
@@ -53,6 +56,53 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
+
+async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
+    """
+    Play ElevenLabs MP3 audio via session.say() with pre-synthesized audio frames.
+    This plays through the agent's existing audio track.
+
+    Args:
+        session: The AgentSession to play audio through
+        mp3_data: MP3 audio bytes from ElevenLabs
+        title: Title for logging purposes
+    """
+    try:
+        logger.info(f"🎵 [ELEVENLABS] Playing audio for: {title}")
+
+        # Convert MP3 to raw PCM audio (48kHz mono for LiveKit)
+        audio_segment = AudioSegment.from_mp3(io.BytesIO(mp3_data))
+        audio_segment = audio_segment.set_frame_rate(48000).set_channels(1)
+
+        # Get raw PCM data
+        raw_data = audio_segment.raw_data
+        sample_rate = audio_segment.frame_rate
+        num_channels = audio_segment.channels
+        samples_per_channel = len(audio_segment.get_array_of_samples())
+
+        logger.info(f"🎵 [ELEVENLABS] Audio: {len(audio_segment)}ms, {sample_rate}Hz, {num_channels}ch")
+
+        # Create AudioFrame from the raw PCM data
+        audio_frame = rtc.AudioFrame(
+            data=raw_data,
+            sample_rate=sample_rate,
+            num_channels=num_channels,
+            samples_per_channel=samples_per_channel,
+        )
+
+        # Async generator that yields the audio frame
+        async def audio_generator():
+            yield audio_frame
+
+        # Play using session.say with pre-synthesized audio
+        # Pass title as text (for transcript), audio frames for playback
+        await session.say(text=title, audio=audio_generator(), allow_interruptions=False, add_to_chat_ctx=False)
+
+        logger.info(f"✅ [ELEVENLABS] Finished playing: {title}")
+
+    except Exception as e:
+        logger.error(f"❌ [ELEVENLABS] Error playing audio: {e}")
+        raise
 
 
 class CheekoAssistant(BaseAssistant):
@@ -230,9 +280,15 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info("Gemini Realtime model created")
 
-    # Create AgentSession with mode switching tools
-    session = AgentSession(llm=realtime_model, tools=MODE_SWITCH_TOOLS)
-    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools")
+    # Create ElevenLabs TTS for session.say() with pre-synthesized audio
+    # This is needed because realtime models don't have built-in TTS for session.say()
+    elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "ecp3DWciuUyW7BYM7II1")
+    elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
+    logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
+
+    # Create AgentSession with mode switching tools and TTS for session.say()
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=MODE_SWITCH_TOOLS)
+    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + ElevenLabs TTS")
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
@@ -421,21 +477,59 @@ async def entrypoint(ctx: JobContext):
                 return
 
             # Handle text input forwarded from MQTT gateway (RFID text)
+            # Supports RAG system with read_only content and legacy prompt mode
             if msg_type == 'user_text':
                 text = (message.get('text') or '').strip()
                 if not text:
                     logger.warning("⚠️ user_text message with empty text, ignoring")
                     return
 
-                logger.info(f"💬 [USER_TEXT] Received from gateway: {text}")
+                # Extract RAG content fields
+                content_type = message.get('content_type', 'prompt')  # "read_only" or "prompt"
+                title = message.get('title', '')
+                content_text = message.get('content_text', '')
+                sequence = message.get('sequence')
+                rfid_uid = message.get('rfid_uid', '')
+
+                logger.info(f"💬 [USER_TEXT] Received from gateway: content_type={content_type}, title={title}")
                 logger.info(f"🧾 [USER_TEXT-RAW] Payload: {message}")
 
                 async def handle_user_text():
                     try:
-                        # Optional: mark agent as listening for LED state
+                        # Mark agent as listening/processing for LED state
                         await emit_agent_state("listening")
-                        # Treat this as a normal user request/question for Gemini
-                        await session.generate_reply(instructions=text)
+
+                        if content_type == 'read_only' and content_text:
+                            # RAG mode: Use ElevenLabs TTS for high-quality rhyme playback
+                            logger.info(f"📖 [RFID-RAG] Generating ElevenLabs audio for: {title}")
+
+                            try:
+                                # Get ElevenLabs service and generate audio
+                                elevenlabs_svc = get_elevenlabs_service()
+                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
+
+                                if audio_data and not error:
+                                    logger.info(f"🎵 [RFID-RAG] ElevenLabs audio generated: {len(audio_data)} bytes")
+
+                                    # Play audio using session.say with pre-synthesized frames
+                                    await emit_agent_state("speaking")
+                                    await play_elevenlabs_audio(session, audio_data, title)
+                                    await emit_agent_state("listening")
+                                    logger.info(f"✅ [RFID-RAG] Finished playing rhyme: {title}")
+                                else:
+                                    # Fallback to Gemini if ElevenLabs fails
+                                    logger.warning(f"⚠️ [RFID-RAG] ElevenLabs failed: {error}, falling back to Gemini")
+                                    read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
+                                    await session.generate_reply(instructions=read_instruction)
+
+                            except Exception as tts_error:
+                                logger.error(f"❌ [RFID-RAG] ElevenLabs error: {tts_error}, falling back to Gemini")
+                                read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
+                                await session.generate_reply(instructions=read_instruction)
+                        else:
+                            # Prompt mode: Send to Gemini for generation (current behavior)
+                            logger.info(f"🤖 [RFID-PROMPT] Sending to Gemini: {text[:100]}...")
+                            await session.generate_reply(instructions=text)
                     except Exception as e:
                         logger.error(f"❌ Error handling user_text: {e}")
 
