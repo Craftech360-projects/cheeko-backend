@@ -60,6 +60,24 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_5_0__rfid_content_pack.sql
 
+  - changeSet:
+      id: V1_5_1_rfid_content_pack_emotion_tags
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_5_1__rfid_content_pack_emotion_tags.sql
+
+  - changeSet:
+      id: V1_6_0_phonics_content_pack
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_6_0__phonics_content_pack.sql
+
   # - changeSet:
   #     id: 202601032000
   #     author: cheeko

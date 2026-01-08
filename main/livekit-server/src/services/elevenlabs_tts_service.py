@@ -131,11 +131,12 @@ class ElevenLabsTTSService:
             Tuple of (audio_bytes, error_message)
         """
         # Use settings optimized for expressive, child-friendly rhyme delivery
+        # Note: ElevenLabs v3 only accepts stability values: 0.0 (Creative), 0.5 (Natural), 1.0 (Robust)
         return await self.generate_speech(
             text=rhyme_text,
-            stability=0.4,          # Lower stability = more expressive
+            stability=0.0,          # Creative mode = most expressive for v3
             similarity_boost=0.75,  # Keep voice consistent
-            style=0.7,              # Higher style = more animated/engaging
+            style=0.5,              # Style for v3 compatibility
         )
 
 
