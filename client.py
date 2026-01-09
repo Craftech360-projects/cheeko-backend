@@ -163,7 +163,7 @@ class LiveKitAudioClient:
     Event-driven architecture with declarative configuration.
     """
 
-    def __init__(self, url: str, token: str, room_name: str, audio_playback_queue: Queue, options: Optional[LiveKitRoomOptions] = None):
+    def __init__(self, url: str, token: str, room_name: str, audio_playback_queue: Queue, audio_params: dict = None, options: Optional[LiveKitRoomOptions] = None):
         if not LIVEKIT_AVAILABLE:
             raise RuntimeError("LiveKit SDK not available. Install with: pip install livekit livekit-rtc")
 
@@ -174,6 +174,7 @@ class LiveKitAudioClient:
         self.token = token
         self.room_name = room_name
         self.audio_playback_queue = audio_playback_queue
+        self.audio_params = audio_params or {"sample_rate": 24000, "channels": 1}  # Default from gateway
         self.room = None  # Will be initialized in the async loop
         
         # ESP32-style failure tracking
@@ -328,7 +329,12 @@ class LiveKitAudioClient:
         """ESP32-style track subscription handler."""
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info(f"[LIVEKIT] Subscribed to audio from: {participant.identity}")
-            self.audio_stream = rtc.AudioStream(track)
+            # Create AudioStream with the sample rate from audio_params (24kHz from gateway)
+            self.audio_stream = rtc.AudioStream(
+                track,
+                sample_rate=self.audio_params["sample_rate"],
+                num_channels=self.audio_params["channels"]
+            )
             # Start receiving audio in a separate task
             asyncio.create_task(self._receive_audio())
             
@@ -977,6 +983,7 @@ class TestClient:
                                 token=livekit_creds["token"],
                                 room_name=livekit_creds["room_name"],
                                 audio_playback_queue=self.audio_playback_queue,
+                                audio_params=response.get("audio_params", {"sample_rate": 24000, "channels": 1}),
                                 options=options
                             )
                             self.livekit_client.start()
