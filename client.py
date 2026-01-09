@@ -16,12 +16,22 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from queue import Queue, Empty
 import opuslib
+import asyncio
+import numpy as np
+
+# LiveKit SDK imports (optional - for direct connection mode)
+try:
+    from livekit import rtc
+    LIVEKIT_AVAILABLE = True
+except ImportError:
+    LIVEKIT_AVAILABLE = False
+    rtc = None
 
 # --- Configuration ---
 
-SERVER_IP = "10.171.215.210"
+SERVER_IP = "192.168.1.2"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "10.171.215.210"
+MQTT_BROKER_HOST = "192.168.1.2"
 
 
 MQTT_BROKER_PORT = 1883
@@ -94,6 +104,157 @@ def generate_unique_mac() -> str:
     return '_'.join(f'{b:02x}' for b in mac_bytes)
 
 
+class LiveKitAudioClient:
+    """
+    LiveKit Audio Client for direct WebRTC connection to LiveKit server.
+    Handles audio publishing and subscribing without going through the MQTT gateway.
+    """
+
+    def __init__(self, url: str, token: str, room_name: str, audio_playback_queue: Queue):
+        if not LIVEKIT_AVAILABLE:
+            raise RuntimeError("LiveKit SDK not available. Install with: pip install livekit livekit-rtc")
+
+        self.url = url
+        self.token = token
+        self.room_name = room_name
+        self.audio_playback_queue = audio_playback_queue
+        self.room = rtc.Room()
+        self.audio_source = rtc.AudioSource(16000, 1)  # 16kHz mono for input
+        self.audio_stream = None
+        self.connected = False
+        self.stop_event = threading.Event()
+        self._loop = None
+        self._thread = None
+
+        # Audio decoder for received Opus frames
+        try:
+            self.decoder = opuslib.Decoder(24000, 1)  # 24kHz mono for output
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Failed to create Opus decoder: {e}")
+            self.decoder = None
+
+        logger.info(f"[LIVEKIT] Initialized client for room: {room_name}")
+
+    def start(self):
+        """Start the LiveKit connection in a separate thread."""
+        self._thread = threading.Thread(target=self._run_async, daemon=True)
+        self._thread.start()
+
+    def _run_async(self):
+        """Run the async event loop in a thread."""
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._connect_and_run())
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Error in async loop: {e}")
+        finally:
+            self._loop.close()
+
+    async def _connect_and_run(self):
+        """Connect to LiveKit and handle audio."""
+        try:
+            # Set up event handlers before connecting
+            self.room.on("track_subscribed", self._on_track_subscribed)
+            self.room.on("participant_connected", self._on_participant_connected)
+            self.room.on("disconnected", self._on_disconnected)
+
+            # Connect to LiveKit room
+            logger.info(f"[LIVEKIT] Connecting to {self.url}...")
+            await self.room.connect(self.url, self.token)
+            self.connected = True
+            logger.info(f"[LIVEKIT] Connected to room: {self.room.name}")
+
+            # Publish microphone track
+            track = rtc.LocalAudioTrack.create_audio_track("microphone", self.audio_source)
+            options = rtc.TrackPublishOptions()
+            options.source = rtc.TrackSource.SOURCE_MICROPHONE
+            await self.room.local_participant.publish_track(track, options)
+            logger.info("[LIVEKIT] Published audio track")
+
+            # Keep running until stopped
+            while not self.stop_event.is_set():
+                await asyncio.sleep(0.1)
+
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Connection error: {e}")
+            self.connected = False
+
+    def _on_track_subscribed(self, track, publication, participant):
+        """Handle subscribed audio tracks from other participants."""
+        if track.kind == rtc.TrackKind.KIND_AUDIO:
+            logger.info(f"[LIVEKIT] Subscribed to audio from: {participant.identity}")
+            self.audio_stream = rtc.AudioStream(track)
+            # Start receiving audio in a separate task
+            asyncio.create_task(self._receive_audio())
+
+    def _on_participant_connected(self, participant):
+        """Handle new participant joining."""
+        logger.info(f"[LIVEKIT] Participant connected: {participant.identity}")
+
+    def _on_disconnected(self):
+        """Handle room disconnection."""
+        logger.info("[LIVEKIT] Disconnected from room")
+        self.connected = False
+
+    async def _receive_audio(self):
+        """Receive and queue audio frames from the agent."""
+        try:
+            async for frame in self.audio_stream:
+                if self.stop_event.is_set():
+                    break
+
+                # Convert AudioFrame to PCM bytes
+                pcm_data = frame.data.tobytes()
+
+                # Queue for playback
+                self.audio_playback_queue.put(pcm_data)
+
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Error receiving audio: {e}")
+
+    async def send_audio_async(self, pcm_data: bytes):
+        """Send PCM audio data to LiveKit."""
+        if not self.connected or not self.audio_source:
+            return
+
+        try:
+            # Convert bytes to numpy array
+            samples = np.frombuffer(pcm_data, dtype=np.int16)
+
+            # Create audio frame
+            frame = rtc.AudioFrame(
+                data=samples,
+                sample_rate=16000,
+                num_channels=1,
+                samples_per_channel=len(samples)
+            )
+
+            # Capture frame to audio source
+            await self.audio_source.capture_frame(frame)
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Error sending audio: {e}")
+
+    def send_audio(self, pcm_data: bytes):
+        """Send PCM audio data (thread-safe wrapper)."""
+        if self._loop and self.connected:
+            asyncio.run_coroutine_threadsafe(
+                self.send_audio_async(pcm_data),
+                self._loop
+            )
+
+    def stop(self):
+        """Stop the LiveKit connection."""
+        logger.info("[LIVEKIT] Stopping...")
+        self.stop_event.set()
+        if self._loop:
+            asyncio.run_coroutine_threadsafe(self.room.disconnect(), self._loop)
+        if self._thread:
+            self._thread.join(timeout=2)
+        self.connected = False
+        logger.info("[LIVEKIT] Stopped")
+
+
 class TestClient:
     def __init__(self):
         self.mqtt_client = None
@@ -129,6 +290,10 @@ class TestClient:
         self.last_audio_received = 0
         self.session_active = True
         self.conversation_count = 0
+
+        # --- LiveKit direct connection ---
+        self.livekit_client = None
+        self.use_livekit_direct = False  # Will be set based on hello response
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
@@ -512,11 +677,19 @@ class TestClient:
     def send_hello_and_get_session(self) -> bool:
         """Sends 'hello' message and waits for session details."""
         logger.info("[STEP] STEP 3: Sending 'hello' and pinging UDP...")
+
+        # Determine capabilities based on LiveKit SDK availability
+        capabilities = ["udp"]  # Always support UDP fallback
+        if LIVEKIT_AVAILABLE:
+            capabilities.append("livekit_direct")
+            logger.info("[LIVEKIT] LiveKit SDK available - requesting direct connection")
+
         # Use the client_id from our generated MQTT credentials
         hello_message = {
             "type": "hello",
-            "version": 3,
+            "version": 4,  # Bumped version for new protocol
             "transport": "mqtt",
+            "capabilities": capabilities,  # NEW: Advertise client capabilities
             "audio_params": {
                 "sample_rate": 16000,
                 "channels": 1,
@@ -527,32 +700,76 @@ class TestClient:
         }
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
-            response = mqtt_message_queue.get(timeout=30)
-            if response.get("type") == "hello" and "udp" in response:
-                global udp_session_details
-                udp_session_details = response
-                self.udp_socket = socket.socket(
-                    socket.AF_INET, socket.SOCK_DGRAM)
-                # Increase UDP receive buffer to handle burst traffic
-                self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
-                self.udp_socket.settimeout(1.0)
-                ping_payload = f"ping:{udp_session_details['session_id']}".encode(
-                )
-                encrypted_ping = self.encrypt_packet(ping_payload)
-                server_udp_addr = (
-                    udp_session_details['udp']['server'], udp_session_details['udp']['port'])
-                logger.info(f"[RETRY] Sending UDP Ping to {server_udp_addr} with session ID {udp_session_details['session_id']}"
-                            f" and key {udp_session_details['udp']['key']}"
-                            f" (local sequence: {self.udp_local_sequence})"
+            # Wait for specifically the 'hello' response, skip other messages like mode_update
+            start_time = time.time()
+            timeout_seconds = 30
+            while time.time() - start_time < timeout_seconds:
+                try:
+                    remaining_time = timeout_seconds - (time.time() - start_time)
+                    if remaining_time <= 0:
+                        break
+                    response = mqtt_message_queue.get(timeout=remaining_time)
+
+                    # Skip non-hello messages (like mode_update that arrives before hello)
+                    if response.get("type") != "hello":
+                        logger.info(f"[INFO] Skipping non-hello message: {response.get('type')}")
+                        continue
+
+                    # Got the hello response
+                    global udp_session_details
+                    udp_session_details = response
+
+                    # Check for LiveKit direct connection credentials
+                    if "livekit" in response and LIVEKIT_AVAILABLE:
+                        livekit_creds = response["livekit"]
+                        logger.info(f"[LIVEKIT] Received LiveKit credentials for room: {livekit_creds.get('room_name')}")
+                        try:
+                            self.livekit_client = LiveKitAudioClient(
+                                url=livekit_creds["url"],
+                                token=livekit_creds["token"],
+                                room_name=livekit_creds["room_name"],
+                                audio_playback_queue=self.audio_playback_queue
                             )
-                if encrypted_ping:
-                    self.udp_socket.sendto(encrypted_ping, server_udp_addr)
-                    logger.info(f"[OK] UDP Ping sent. Session configured.")
-                    return True
-            logger.error(f"[ERROR] Received unexpected message: {response}")
-            return False
-        except Empty:
+                            self.livekit_client.start()
+                            self.use_livekit_direct = True
+                            logger.info("[LIVEKIT] Using direct LiveKit connection for audio")
+                            return True
+                        except Exception as e:
+                            logger.error(f"[LIVEKIT] Failed to setup LiveKit: {e}")
+                            logger.info("[LIVEKIT] Falling back to UDP...")
+                            self.use_livekit_direct = False
+
+                    # Fallback to UDP connection
+                    if "udp" in response:
+                        self.udp_socket = socket.socket(
+                            socket.AF_INET, socket.SOCK_DGRAM)
+                        # Increase UDP receive buffer to handle burst traffic
+                        self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
+                        self.udp_socket.settimeout(1.0)
+                        ping_payload = f"ping:{udp_session_details['session_id']}".encode(
+                        )
+                        encrypted_ping = self.encrypt_packet(ping_payload)
+                        server_udp_addr = (
+                            udp_session_details['udp']['server'], udp_session_details['udp']['port'])
+                        logger.info(f"[RETRY] Sending UDP Ping to {server_udp_addr} with session ID {udp_session_details['session_id']}"
+                                    f" and key {udp_session_details['udp']['key']}"
+                                    f" (local sequence: {self.udp_local_sequence})"
+                                    )
+                        if encrypted_ping:
+                            self.udp_socket.sendto(encrypted_ping, server_udp_addr)
+                            logger.info(f"[OK] UDP Ping sent. Session configured.")
+                            return True
+
+                    logger.error(f"[ERROR] Hello response missing both livekit and udp credentials")
+                    return False
+
+                except Empty:
+                    continue
+
             logger.error("[ERROR] Timed out waiting for 'hello' response.")
+            return False
+        except Exception as e:
+            logger.error(f"[ERROR] Exception while waiting for hello: {e}")
             return False
 
     def _playback_thread(self):
@@ -690,19 +907,25 @@ class TestClient:
                 "channels"], audio_params["sample_rate"], audio_params["frame_duration"]
             SAMPLES_PER_FRAME = int(RATE * FRAME_DURATION_MS / 1000)
 
-            try:
-                encoder = opuslib.Encoder(
-                    RATE, CHANNELS, opuslib.APPLICATION_VOIP)
-            except Exception as e:
-                logger.error(f"[ERROR] Failed to create Opus encoder: {e}")
-                return  # Exit thread if encoder fails
+            # Only create Opus encoder for UDP mode (LiveKit handles encoding)
+            encoder = None
+            if not self.use_livekit_direct:
+                try:
+                    encoder = opuslib.Encoder(
+                        RATE, CHANNELS, opuslib.APPLICATION_VOIP)
+                except Exception as e:
+                    logger.error(f"[ERROR] Failed to create Opus encoder: {e}")
+                    return  # Exit thread if encoder fails
 
             stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                             input=True, frames_per_buffer=SAMPLES_PER_FRAME)
-            logger.info(
-                "[MIC] Microphone stream opened. Sending audio to server...")
-            server_udp_addr = (
-                udp_session_details['udp']['server'], udp_session_details['udp']['port'])
+
+            if self.use_livekit_direct:
+                logger.info("[MIC] Microphone stream opened. Sending audio via LiveKit...")
+            else:
+                logger.info("[MIC] Microphone stream opened. Sending audio to server via UDP...")
+                server_udp_addr = (
+                    udp_session_details['udp']['server'], udp_session_details['udp']['port'])
 
             packets_sent = 0
             last_log_time = time.time()
@@ -712,19 +935,28 @@ class TestClient:
                 try:
                     pcm_data = stream.read(
                         SAMPLES_PER_FRAME, exception_on_overflow=False)
-                    opus_data = encoder.encode(pcm_data, SAMPLES_PER_FRAME)
-                    encrypted_packet = self.encrypt_packet(opus_data)
 
-                    if encrypted_packet:
-                        self.udp_socket.sendto(
-                            encrypted_packet, server_udp_addr)
-                        packets_sent += 1
+                    if self.use_livekit_direct:
+                        # Send PCM directly to LiveKit (it handles encoding)
+                        if self.livekit_client and self.livekit_client.connected:
+                            self.livekit_client.send_audio(pcm_data)
+                            packets_sent += 1
+                    else:
+                        # UDP mode: Encode and encrypt
+                        opus_data = encoder.encode(pcm_data, SAMPLES_PER_FRAME)
+                        encrypted_packet = self.encrypt_packet(opus_data)
 
-                        if time.time() - last_log_time >= 1.0:
-                            logger.info(
-                                f"[UP]  Sent {packets_sent} audio packets in the last second.")
-                            packets_sent = 0
-                            last_log_time = time.time()
+                        if encrypted_packet:
+                            self.udp_socket.sendto(
+                                encrypted_packet, server_udp_addr)
+                            packets_sent += 1
+
+                    if time.time() - last_log_time >= 1.0:
+                        mode = "LiveKit" if self.use_livekit_direct else "UDP"
+                        logger.info(
+                            f"[UP]  Sent {packets_sent} audio packets via {mode} in the last second.")
+                        packets_sent = 0
+                        last_log_time = time.time()
 
                 except Exception as e:
                     logger.error(
@@ -748,8 +980,11 @@ class TestClient:
 
     def trigger_conversation(self):
         """Starts the audio streaming threads and sends initial listen message."""
-        if not self.udp_socket:
+        # Check if we have either LiveKit or UDP connection
+        if not self.use_livekit_direct and not self.udp_socket:
+            logger.error("[ERROR] No audio connection available (neither LiveKit nor UDP)")
             return False
+
         logger.info("[STEP] STEP 4: Starting all streaming audio threads...")
         global stop_threads, start_recording_event, stop_recording_event
         stop_threads.clear()
@@ -757,14 +992,23 @@ class TestClient:
         start_recording_event.clear()
         stop_recording_event.clear()
 
+        # Start playback thread (works for both modes - reads from audio_playback_queue)
         self.playback_thread = threading.Thread(
             target=self._playback_thread, daemon=True)
-        self.udp_listener_thread = threading.Thread(
-            target=self.listen_for_udp_audio, daemon=True)
+        self.playback_thread.start()
+
+        # Only start UDP listener if not using LiveKit (LiveKit handles receiving in its own thread)
+        if not self.use_livekit_direct:
+            self.udp_listener_thread = threading.Thread(
+                target=self.listen_for_udp_audio, daemon=True)
+            self.udp_listener_thread.start()
+        else:
+            logger.info("[LIVEKIT] Skipping UDP listener - using LiveKit for audio")
+
+        # Start recording thread (handles both modes)
         self.audio_recording_thread = threading.Thread(
             target=self._record_and_send_audio_thread, daemon=True)
-        self.playback_thread.start(), self.udp_listener_thread.start(
-        ), self.audio_recording_thread.start()
+        self.audio_recording_thread.start()
 
         logger.info(
             "[STEP] STEP 5: Sending 'listen' message to trigger initial TTS from server...")
@@ -850,6 +1094,12 @@ class TestClient:
             self.udp_listener_thread.join(timeout=2)
         if self.udp_socket:
             self.udp_socket.close()
+
+        # Stop LiveKit client if active
+        if self.livekit_client:
+            logger.info("[LIVEKIT] Stopping LiveKit client...")
+            self.livekit_client.stop()
+            self.livekit_client = None
 
         if self.mqtt_client and udp_session_details:
             goodbye_payload = {"type": "goodbye",

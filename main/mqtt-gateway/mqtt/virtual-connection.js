@@ -18,6 +18,10 @@ const {
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
 const { fetchMemoriesWithTimeout, buildDispatchMetadata } = require("../core/mem0-integration");
+const {
+  generateLiveKitCredentials,
+  setConfigManager: setTokenConfigManager,
+} = require("../livekit/token-generator");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
@@ -39,6 +43,8 @@ function setConfigManager(cm) {
   // Setup debug logger
   const debugModule = require("debug");
   debug = debugModule("mqtt-server");
+  // Initialize token generator with config
+  setTokenConfigManager(cm);
 }
 class VirtualMQTTConnection {
   constructor(deviceId, connectionId, gateway, helloPayload, workerPool) {
@@ -192,7 +198,8 @@ class VirtualMQTTConnection {
     try {
       const json = JSON.parse(publishData.payload);
       if (json.type === "hello") {
-        if (json.version !== 3) {
+        // Accept version 3 (legacy UDP) and version 4 (LiveKit direct support)
+        if (json.version !== 3 && json.version !== 4) {
           debug(
             "Unsupported protocol version:",
             json.version,
@@ -481,6 +488,12 @@ class VirtualMQTTConnection {
       }
     }
 
+    // Determine connection mode based on client capabilities
+    const clientCaps = json.capabilities || [];
+    const connectionMode = clientCaps.includes("livekit_direct")
+      ? "direct"
+      : "gateway_bridge";
+
     // Create bridge after cleanup completes
     this.bridge = new LiveKitBridge(
       this,
@@ -488,8 +501,12 @@ class VirtualMQTTConnection {
       this.deviceId,
       newSessionUuid,
       this.userData,
-      this.workerPool
+      this.workerPool,
+      { connectionMode } // Pass connection mode to bridge
     );
+
+    // Store connection mode for hello response
+    this.connectionMode = connectionMode;
 
     // Mark bridge as waiting for agent deployment
     this.bridge.agentDeployed = false;
@@ -561,6 +578,29 @@ class VirtualMQTTConnection {
       //   session_id: futureSessionId,
       //   timestamp: Date.now()
       // }));
+
+      // Generate LiveKit credentials for direct client connection
+      let livekitCredentials = null;
+      const isDirectMode = this.connectionMode === "direct";
+
+      if (isDirectMode) {
+        try {
+          livekitCredentials = await generateLiveKitCredentials(
+            futureSessionId, // Room name
+            this.deviceId,   // Participant identity
+            {
+              macAddress: this.macAddress,
+              uuid: this.uuid || "",
+              roomType: this.roomType,
+            }
+          );
+          console.log(`🎫 [LIVEKIT] Generated direct connection credentials for ${this.deviceId}`);
+        } catch (err) {
+          console.warn(`⚠️ [LIVEKIT] Failed to generate credentials: ${err.message}`);
+          // Continue with UDP fallback
+        }
+      }
+
       const helloResponseMsg = {
         type: "hello",
         version: json.version,
@@ -570,7 +610,10 @@ class VirtualMQTTConnection {
           : {}),
         session_id: this.udp.session_id,
         timestamp: Date.now(),
-        transport: "udp",
+        transport: isDirectMode && livekitCredentials ? "livekit" : "udp",
+        // LiveKit direct connection credentials (for capable clients)
+        ...(livekitCredentials ? { livekit: livekitCredentials } : {}),
+        // UDP fallback (for legacy clients or if LiveKit fails)
         udp: {
           server: this.gateway.publicIp,
           port: this.gateway.udpPort,

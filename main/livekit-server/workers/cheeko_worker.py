@@ -100,6 +100,12 @@ async def entrypoint(ctx: JobContext):
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)
 
+    # IMPORTANT: Connect to room EARLY to avoid 10-second timeout warning
+    # This allows the client to see the agent join while we do API calls
+    logger.info("Connecting to LiveKit room early (before API calls)...")
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    logger.info("Connected to room - continuing with initialization")
+
     # Initialize services
     prompt_service = PromptService()
     agent_prompt = ConfigLoader.get_default_prompt()
@@ -470,8 +476,8 @@ async def entrypoint(ctx: JobContext):
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
-    # Connect and start session
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    # NOTE: Room was already connected early (before API calls) to avoid timeout warning
+    # await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)  # Already done earlier
 
     # DUPLICATE AGENT CHECK: Prevent multiple agents in same room
     # Check if another agent is already in the room

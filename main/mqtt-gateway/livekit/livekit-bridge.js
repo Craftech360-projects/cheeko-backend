@@ -35,7 +35,7 @@ function setConfigManager(cm) {
   configManager = cm;
 }
 class LiveKitBridge extends EventEmitter {
-  constructor(connection, protocolVersion, macAddress, uuid, userData, workerPool) {
+  constructor(connection, protocolVersion, macAddress, uuid, userData, workerPool, options = {}) {
     super();
     this.connection = connection;
     this.macAddress = macAddress;
@@ -48,7 +48,15 @@ class LiveKitBridge extends EventEmitter {
     this.room = null;
     this.roomService = null; // Store roomService for cleanup on disconnect
     this.roomName = null; // Store room name for deletion on disconnect
-    this.audioSource = new AudioSource(16000, 1);
+
+    // Connection mode: "gateway_bridge" (default) or "direct"
+    // In "direct" mode, client connects to LiveKit directly, gateway only handles signaling
+    this.connectionMode = options.connectionMode || "gateway_bridge";
+
+    // Only create audioSource for gateway_bridge mode (not for direct client connections)
+    this.audioSource = this.connectionMode === "gateway_bridge"
+      ? new AudioSource(16000, 1)
+      : null;
     this.protocolVersion = protocolVersion;
     this.isAudioPlaying = false; // Track if audio is actively playing
     this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
@@ -757,27 +765,33 @@ class LiveKitBridge extends EventEmitter {
           }
         });
 
-        // Fixed: Use proper track publishing method (simplified to match dev branch)
-        const {
-          LocalAudioTrack,
-          TrackPublishOptions,
-          TrackSource,
-        } = require("@livekit/rtc-node");
+        // Only publish audio track in gateway_bridge mode
+        // In direct mode, client publishes its own audio directly to LiveKit
+        if (this.connectionMode === "gateway_bridge") {
+          // Fixed: Use proper track publishing method (simplified to match dev branch)
+          const {
+            LocalAudioTrack,
+            TrackPublishOptions,
+            TrackSource,
+          } = require("@livekit/rtc-node");
 
-        const track = LocalAudioTrack.createAudioTrack(
-          "microphone",
-          this.audioSource
-        );
-        const options = new TrackPublishOptions();
-        options.source = TrackSource.SOURCE_MICROPHONE;
+          const track = LocalAudioTrack.createAudioTrack(
+            "microphone",
+            this.audioSource
+          );
+          const options = new TrackPublishOptions();
+          options.source = TrackSource.SOURCE_MICROPHONE;
 
-        const publication = await this.room.localParticipant.publishTrack(
-          track,
-          options
-        );
-        const trackPublishedTime = Date.now();
-        // console.log(`🎤 [PUBLISH] Published local audio track: ${publication.trackSid || publication.sid}`);
-        // console.log(`⏱️ [TIMING-TRACK] Track publish took ${trackPublishedTime - roomConnectedTime}ms`);
+          const publication = await this.room.localParticipant.publishTrack(
+            track,
+            options
+          );
+          const trackPublishedTime = Date.now();
+          // console.log(`🎤 [PUBLISH] Published local audio track: ${publication.trackSid || publication.sid}`);
+          // console.log(`⏱️ [TIMING-TRACK] Track publish took ${trackPublishedTime - roomConnectedTime}ms`);
+        } else {
+          console.log(`🔗 [DIRECT] Client will connect directly to LiveKit - gateway is signaling only`);
+        }
 
         // Use roomName as session_id - this is consistent with how LiveKit rooms work
         // The room.sid might not be immediately available, but roomName is our session identifier
