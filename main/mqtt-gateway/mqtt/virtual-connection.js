@@ -2,7 +2,11 @@
  * Virtual MQTT Connection
  *
  * Represents a per-device MQTT session.
- * Manages UDP encryption, LiveKit bridge lifecycle, and device communication.
+ * Manages LiveKit room creation, agent dispatch, and MQTT signaling.
+ *
+ * NOTE: UDP audio bridging has been removed. Clients now connect directly
+ * to LiveKit for real-time audio streaming. This gateway only handles
+ * MQTT-based control messages and session management.
  */
 
 const axios = require("axios");
@@ -11,7 +15,6 @@ const {
   LiveKitBridge,
   setConfigManager: setLivekitConfigManager,
 } = require("../livekit/livekit-bridge");
-const { streamingCrypto } = require("../core/streaming-crypto");
 const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
@@ -58,15 +61,13 @@ class VirtualMQTTConnection {
     this.fullClientId = helloPayload.clientId;
 
     this.bridge = null;
-    this.roomType = null; // ADD: Track room type (conversation, music, story)
-    this.language = null; // ADD: Track language for music/story filtering
-    this.udp = {
-      remoteAddress: null,
-      cookie: null,
-      localSequence: 0,
-      remoteSequence: 0,
+    this.roomType = null; // Track room type (conversation, music, story)
+    this.language = null; // Track language for music/story filtering
+    // Session tracking (UDP audio removed - clients connect directly to LiveKit)
+    this.sessionInfo = {
+      sessionId: null,
+      startTime: null,
     };
-    this.headerBuffer = Buffer.alloc(16);
     this.closing = false;
 
     // Add inactivity timeout tracking
@@ -287,54 +288,15 @@ class VirtualMQTTConnection {
     }
   }
 
-  sendUdpMessage(payload, timestamp) {
-    // Direct UDP implementation for virtual devices
-    if (!this.udp.remoteAddress) {
-      // console.log(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
-      return;
-    }
-
-    this.udp.localSequence++;
-    const header = this.generateUdpHeader(
-      payload.length,
-      timestamp,
-      this.udp.localSequence
-    );
-
-    // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
-    const encryptedPayload = streamingCrypto.encrypt(
-      payload,
-      this.udp.encryption,
-      this.udp.key,
-      header
-    );
-    const message = Buffer.concat([header, encryptedPayload]);
-    this.gateway.sendUdpMessage(message, this.udp.remoteAddress);
-  }
-
-  generateUdpHeader(length, timestamp, sequence) {
-    this.headerBuffer.writeUInt8(1, 0);
-    this.headerBuffer.writeUInt8(0, 1);
-    this.headerBuffer.writeUInt16BE(length, 2);
-    this.headerBuffer.writeUInt32BE(this.connectionId, 4);
-    this.headerBuffer.writeUInt32BE(timestamp, 8);
-    this.headerBuffer.writeUInt32BE(sequence, 12);
-    return Buffer.from(this.headerBuffer);
-  }
+  // NOTE: UDP audio handling removed - clients now connect directly to LiveKit
+  // This gateway only handles MQTT signaling (room creation, agent dispatch, control messages)
 
   async parseHelloMessage(json) {
     console.log(
       `🔍 [PARSE-HELLO] Starting parseHelloMessage for ${this.deviceId}`
     );
     console.log(
-      `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${this.udp.remoteAddress
-        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-        : "null"
-      }`
-    );
-    console.log(
-      `🔍 [PARSE-HELLO] JSON version: ${json.version}, has bridge: ${!!this
-        .bridge}`
+      `🔍 [PARSE-HELLO] JSON version: ${json.version}, has bridge: ${!!this.bridge}`
     );
 
     // ADD: Query database for device mode instead of reading from hello message
@@ -429,21 +391,8 @@ class VirtualMQTTConnection {
       }
     }
 
-    this.udp = {
-      ...this.udp,
-      key: crypto.randomBytes(16),
-      nonce: this.generateUdpHeader(0, 0, 0),
-      encryption: "aes-128-ctr",
-      remoteSequence: 0,
-      localSequence: 0,
-      startTime: Date.now(),
-    };
-    console.log(
-      `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${this.udp.remoteAddress
-        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-        : "null"
-      }`
-    );
+    // Initialize session tracking (UDP audio removed - clients connect directly to LiveKit)
+    this.sessionInfo.startTime = Date.now();
 
     if (this.bridge) {
       debug(
@@ -460,7 +409,7 @@ class VirtualMQTTConnection {
     // Generate session_id for room WITH ROOM TYPE
     const macForRoom = this.macAddress.replace(/:/g, "");
     const futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
-    this.udp.session_id = futureSessionId;
+    this.sessionInfo.sessionId = futureSessionId;
 
     console.log(`🏠 [ROOM-NAME] Room will be: ${futureSessionId}`);
 
@@ -488,13 +437,10 @@ class VirtualMQTTConnection {
       }
     }
 
-    // Determine connection mode based on client capabilities
-    const clientCaps = json.capabilities || [];
-    const connectionMode = clientCaps.includes("livekit_direct")
-      ? "direct"
-      : "gateway_bridge";
+    // Always use direct connection mode - clients connect directly to LiveKit for audio
+    const connectionMode = "direct";
 
-    // Create bridge after cleanup completes
+    // Create bridge after cleanup completes (signaling only - no audio bridging)
     this.bridge = new LiveKitBridge(
       this,
       json.version,
@@ -502,7 +448,7 @@ class VirtualMQTTConnection {
       newSessionUuid,
       this.userData,
       this.workerPool,
-      { connectionMode } // Pass connection mode to bridge
+      { connectionMode }
     );
 
     // Store connection mode for hello response
@@ -516,7 +462,7 @@ class VirtualMQTTConnection {
       const seconds = (Date.now() - this.udp.startTime) / 1000;
       console.log(`Call ended: ${this.deviceId} Duration: ${seconds}s`);
       this.sendMqttMessage(
-        JSON.stringify({ type: "goodbye", session_id: this.udp.session_id })
+        JSON.stringify({ type: "goodbye", session_id: this.sessionInfo.sessionId })
       );
       this.bridge = null;
     });
@@ -579,28 +525,25 @@ class VirtualMQTTConnection {
       //   timestamp: Date.now()
       // }));
 
-      // Generate LiveKit credentials for direct client connection
+      // Generate LiveKit credentials for direct client connection (always direct mode)
       let livekitCredentials = null;
-      const isDirectMode = this.connectionMode === "direct";
-
-      if (isDirectMode) {
-        try {
-          livekitCredentials = await generateLiveKitCredentials(
-            futureSessionId, // Room name
-            this.deviceId,   // Participant identity
-            {
-              macAddress: this.macAddress,
-              uuid: this.uuid || "",
-              roomType: this.roomType,
-            }
-          );
-          console.log(`🎫 [LIVEKIT] Generated direct connection credentials for ${this.deviceId}`);
-        } catch (err) {
-          console.warn(`⚠️ [LIVEKIT] Failed to generate credentials: ${err.message}`);
-          // Continue with UDP fallback
-        }
+      try {
+        livekitCredentials = await generateLiveKitCredentials(
+          futureSessionId, // Room name
+          this.deviceId,   // Participant identity
+          {
+            macAddress: this.macAddress,
+            uuid: this.uuid || "",
+            roomType: this.roomType,
+          }
+        );
+        console.log(`🎫 [LIVEKIT] Generated direct connection credentials for ${this.deviceId}`);
+      } catch (err) {
+        console.error(`❌ [LIVEKIT] Failed to generate credentials: ${err.message}`);
+        // This is critical in direct mode - client can't connect without credentials
       }
 
+      // Build hello response - always use LiveKit direct connection
       const helloResponseMsg = {
         type: "hello",
         version: json.version,
@@ -608,21 +551,11 @@ class VirtualMQTTConnection {
         ...(this.roomType === "conversation" && this.currentCharacter
           ? { character: this.currentCharacter }
           : {}),
-        session_id: this.udp.session_id,
+        session_id: this.sessionInfo.sessionId,
         timestamp: Date.now(),
-        transport: isDirectMode && livekitCredentials ? "livekit" : "udp",
-        // LiveKit direct connection credentials (for capable clients)
+        transport: "livekit", // Always use LiveKit direct mode
+        // LiveKit direct connection credentials
         ...(livekitCredentials ? { livekit: livekitCredentials } : {}),
-        // UDP fallback (for legacy clients or if LiveKit fails)
-        udp: {
-          server: this.gateway.publicIp,
-          port: this.gateway.udpPort,
-          encryption: this.udp.encryption,
-          key: this.udp.key.toString("hex"),
-          nonce: this.udp.nonce.toString("hex"),
-          connection_id: this.connectionId,
-          cookie: this.connectionId,
-        },
         audio_params: {
           sample_rate: 24000,
           channels: 1,
@@ -631,7 +564,7 @@ class VirtualMQTTConnection {
         },
       };
       this.sendMqttMessage(JSON.stringify(helloResponseMsg));
-      console.log(`📤 [HELLO] Sent hello response with mode: ${this.roomType}`);
+      console.log(`📤 [HELLO] Sent hello response with mode: ${this.roomType}, transport: livekit`);
 
       // AUTO-DEPLOY AGENT: Dispatch agent immediately for conversation mode
       // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed
@@ -645,7 +578,7 @@ class VirtualMQTTConnection {
           return;
         }
 
-        const roomName = this.bridge?.room?.name || this.udp.session_id;
+        const roomName = this.bridge?.room?.name || this.sessionInfo.sessionId;
 
         // Use currentCharacter (fetched from DB earlier) to dispatch correct agent
         const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-agent";
@@ -689,7 +622,7 @@ class VirtualMQTTConnection {
         this.sendMqttMessage(
           JSON.stringify({
             type: "ready_for_greeting",
-            session_id: this.udp.session_id,
+            session_id: this.sessionInfo.sessionId,
             timestamp: Date.now(),
           })
         );
@@ -1203,7 +1136,7 @@ class VirtualMQTTConnection {
 
         if (playbackFunctions.includes(functionName)) {
           console.log(`🛑 [MOBILE] Sending abort signal before new playback`);
-          await this.bridge.sendAbortSignal(this.udp.session_id);
+          await this.bridge.sendAbortSignal(this.sessionInfo.sessionId);
           // Wait a moment for abort to process
           await new Promise((resolve) => setTimeout(resolve, 100));
         } else {
@@ -1364,43 +1297,8 @@ class VirtualMQTTConnection {
     debug("Received other message, not forwarding to LiveKit:", json);
   }
 
-  onUdpMessage(rinfo, message, payloadLength, timestamp, sequence) {
-    // UDP messages do not reset inactivity timer - only MQTT messages do
-
-    if (!this.bridge) {
-      return;
-    }
-
-    if (this.udp.remoteAddress !== rinfo) {
-      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
-      this.udp.remoteAddress = rinfo;
-    }
-
-    if (sequence < this.udp.remoteSequence) {
-      return;
-    }
-
-    // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
-    const header = message.slice(0, 16);
-    const encryptedPayload = message.slice(16, 16 + payloadLength);
-    const payload = streamingCrypto.decrypt(
-      encryptedPayload,
-      this.udp.encryption,
-      this.udp.key,
-      header
-    );
-
-    const payloadStr = payload.toString();
-    if (payloadStr.startsWith("ping:")) {
-      console.log(
-        `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
-      );
-      return;
-    }
-
-    this.bridge.sendAudio(payload, timestamp);
-    this.udp.remoteSequence = sequence;
-  }
+  // NOTE: onUdpMessage removed - clients now connect directly to LiveKit for audio
+  // No UDP audio bridging needed - gateway only handles MQTT signaling
 
   async checkKeepAlive() {
     // Don't check keepalive if connection is closing
@@ -1439,7 +1337,7 @@ class VirtualMQTTConnection {
           this.sendMqttMessage(
             JSON.stringify({
               type: "goodbye",
-              session_id: this.udp ? this.udp.session_id : null,
+              session_id: this.udp ? this.sessionInfo.sessionId : null,
               reason: "end_prompt_timeout",
               timestamp: Date.now(),
             })
@@ -1521,7 +1419,7 @@ class VirtualMQTTConnection {
           // Send end prompt to agent for voice goodbye (TTS "Time flies fast...")
           // Note: Goodbye MQTT will be sent AFTER TTS finishes (in agent_state_changed handler)
           this.goodbyeSent = false; // Flag to track if goodbye MQTT was sent
-          await this.bridge.sendEndPrompt(this.udp.session_id);
+          await this.bridge.sendEndPrompt(this.sessionInfo.sessionId);
           console.log(
             `👋 [END-PROMPT-SENT] Waiting for TTS goodbye to complete before sending goodbye MQTT: ${this.deviceId}`
           );
@@ -1543,7 +1441,7 @@ class VirtualMQTTConnection {
           this.sendMqttMessage(
             JSON.stringify({
               type: "goodbye",
-              session_id: this.udp ? this.udp.session_id : null,
+              session_id: this.udp ? this.sessionInfo.sessionId : null,
               reason: "inactivity_timeout",
               timestamp: Date.now(),
             })

@@ -7,8 +7,9 @@ import struct
 import logging
 import pyaudio
 import keyboard
-# hjvk
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, Optional, Tuple, Callable
 import requests
 import paho.mqtt.client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
@@ -104,22 +105,85 @@ def generate_unique_mac() -> str:
     return '_'.join(f'{b:02x}' for b in mac_bytes)
 
 
+# ============================================================================
+# ESP32-Style LiveKit Classes
+# ============================================================================
+
+class LiveKitFailureReason(Enum):
+    """
+    Structured failure reasons matching ESP32 SDK.
+    Provides clear error categorization for LiveKit connection failures.
+    """
+    NONE = 0
+    UNREACHABLE = 1
+    BAD_TOKEN = 2
+    UNAUTHORIZED = 3
+    DUPLICATE_IDENTITY = 4
+    PING_TIMEOUT = 5
+    CONNECTION_TIMEOUT = 6
+    RTC_ERROR = 7
+    OTHER = 99
+
+
+class LiveKitError(Exception):
+    """
+    ESP32-style structured error with failure reason.
+    """
+    def __init__(self, reason: LiveKitFailureReason, message: str):
+        self.reason = reason
+        super().__init__(f"[{reason.name}] {message}")
+
+
+@dataclass
+class LiveKitRoomOptions:
+    """
+    ESP32-style declarative room configuration.
+    All media and event handling options are specified upfront.
+    """
+    # Publish options
+    publish_audio: bool = True
+    audio_sample_rate: int = 16000
+    audio_channels: int = 1
+    
+    # Subscribe options
+    subscribe_audio: bool = True
+    auto_subscribe: bool = True  # Automatically subscribe to remote tracks
+    
+    # Event callbacks (ESP32-style)
+    on_state_changed: Optional[Callable[[str], None]] = None
+    on_participant_connected: Optional[Callable[[any, str], None]] = None  # (participant, kind)
+    on_participant_disconnected: Optional[Callable[[any], None]] = None
+    on_track_subscribed: Optional[Callable[[any, any], None]] = None  # (track, participant)
+    on_data_received: Optional[Callable[[dict], None]] = None
+
+
 class LiveKitAudioClient:
     """
-    LiveKit Audio Client for direct WebRTC connection to LiveKit server.
-    Handles audio publishing and subscribing without going through the MQTT gateway.
+    ESP32-style LiveKit Audio Client for direct WebRTC connection.
+    Event-driven architecture with declarative configuration.
     """
 
-    def __init__(self, url: str, token: str, room_name: str, audio_playback_queue: Queue):
+    def __init__(self, url: str, token: str, room_name: str, audio_playback_queue: Queue, options: Optional[LiveKitRoomOptions] = None):
         if not LIVEKIT_AVAILABLE:
             raise RuntimeError("LiveKit SDK not available. Install with: pip install livekit livekit-rtc")
 
+        # Use provided options or create default
+        self.options = options or LiveKitRoomOptions()
+        
         self.url = url
         self.token = token
         self.room_name = room_name
         self.audio_playback_queue = audio_playback_queue
-        self.room = rtc.Room()
-        self.audio_source = rtc.AudioSource(16000, 1)  # 16kHz mono for input
+        self.room = None  # Will be initialized in the async loop
+        
+        # ESP32-style failure tracking
+        self.failure_reason = LiveKitFailureReason.NONE
+        
+        # Audio configuration from options
+        self.audio_source = rtc.AudioSource(
+            self.options.audio_sample_rate, 
+            self.options.audio_channels
+        )
         self.audio_stream = None
         self.connected = False
         self.stop_event = threading.Event()
@@ -133,7 +197,7 @@ class LiveKitAudioClient:
             logger.error(f"[LIVEKIT] Failed to create Opus decoder: {e}")
             self.decoder = None
 
-        logger.info(f"[LIVEKIT] Initialized client for room: {room_name}")
+        logger.info(f"[LIVEKIT] Initialized ESP32-style client for room: {room_name}")
 
     def start(self):
         """Start the LiveKit connection in a separate thread."""
@@ -152,57 +216,254 @@ class LiveKitAudioClient:
             self._loop.close()
 
     async def _connect_and_run(self):
-        """Connect to LiveKit and handle audio."""
+        """ESP32-style connect with automatic setup and error handling."""
         try:
-            # Set up event handlers before connecting
+            # Create room in the correct loop
+            self.room = rtc.Room()
+            
+            # Register event listeners
             self.room.on("track_subscribed", self._on_track_subscribed)
+            self.room.on("data_received", self._on_data_received)
             self.room.on("participant_connected", self._on_participant_connected)
+            self.room.on("participant_disconnected", self._on_participant_disconnected)
             self.room.on("disconnected", self._on_disconnected)
 
             # Connect to LiveKit room
             logger.info(f"[LIVEKIT] Connecting to {self.url}...")
             await self.room.connect(self.url, self.token)
             self.connected = True
-            logger.info(f"[LIVEKIT] Connected to room: {self.room.name}")
+            local_id = self.room.local_participant.identity if self.room.local_participant else "None"
+            logger.info(f"[LIVEKIT] Connected to room: {self.room.name} as {local_id}")
 
-            # Publish microphone track
-            track = rtc.LocalAudioTrack.create_audio_track("microphone", self.audio_source)
-            options = rtc.TrackPublishOptions()
-            options.source = rtc.TrackSource.SOURCE_MICROPHONE
-            await self.room.local_participant.publish_track(track, options)
-            logger.info("[LIVEKIT] Published audio track")
+            # ESP32-style duplicate identity detection
+            if local_id in self.room.remote_participants:
+                self.failure_reason = LiveKitFailureReason.DUPLICATE_IDENTITY
+                raise LiveKitError(
+                    LiveKitFailureReason.DUPLICATE_IDENTITY,
+                    f"Duplicate identity detected: {local_id}"
+                )
 
-            # Keep running until stopped
+            # ESP32-style: Force global subscription if enabled
+            if self.options.subscribe_audio and self.options.auto_subscribe:
+                # Subscribe to all existing remote participants' tracks
+                for participant in self.room.remote_participants.values():
+                    for pub in participant.track_publications.values():
+                        pub.set_subscribed(True)
+                logger.info("[LIVEKIT] Auto-subscribe enabled for all existing tracks")
+
+            # ESP32-style: Auto-publish audio if configured
+            if self.options.publish_audio:
+                try:
+                    await self._auto_publish_audio()
+                except Exception as pub_err:
+                    logger.error(f"[LIVEKIT] Auto-publish failed: {pub_err}")
+                    # Continue anyway - we can still receive audio
+
+            # Check for already present participants
+            for p in self.room.remote_participants.values():
+                kind = self._get_participant_kind(p)
+                logger.info(f"[LIVEKIT] Existing participant: {p.identity} (kind: {kind})")
+                
+                # Trigger callback if provided
+                if self.options.on_participant_connected:
+                    self.options.on_participant_connected(p, kind)
+
+            # Keep connection alive (event-driven, no polling)
+            logger.info("[LIVEKIT] Connection established - waiting for events...")
             while not self.stop_event.is_set():
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1)
 
+        except LiveKitError as lk_err:
+            logger.error(f"[LIVEKIT] LiveKit error: {lk_err}")
+            self.failure_reason = lk_err.reason
         except Exception as e:
             logger.error(f"[LIVEKIT] Connection error: {e}")
-            self.connected = False
+            self.failure_reason = LiveKitFailureReason.OTHER
+        finally:
+            # Only disconnect if we actually connected
+            if self.connected:
+                try:
+                    await self.room.disconnect()
+                except Exception as disc_err:
+                    logger.warning(f"[LIVEKIT] Disconnect error: {disc_err}")
+                finally:
+                    self.connected = False
+                    logger.info("[LIVEKIT] Disconnected")
+
+    async def _auto_publish_audio(self):
+        """ESP32-style automatic audio track publishing."""
+        try:
+            logger.info("[LIVEKIT] Auto-publishing audio track...")
+            track = rtc.LocalAudioTrack.create_audio_track("microphone", self.audio_source)
+            
+            publish_options = rtc.TrackPublishOptions(
+                source=rtc.TrackSource.SOURCE_MICROPHONE
+            )
+            
+            await self.room.local_participant.publish_track(track, publish_options)
+            logger.info("[LIVEKIT] Audio track published successfully")
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Failed to publish audio: {e}")
+            raise
+
+    def _get_participant_kind(self, participant) -> str:
+        """
+        ESP32-style participant kind detection.
+        Returns: "AGENT", "GATEWAY", or "STANDARD"
+        """
+        identity = participant.identity.lower()
+        
+        if "agent" in identity:
+            return "AGENT"
+        elif "gateway" in identity:
+            return "GATEWAY"
+        else:
+            return "STANDARD"
+
+    def get_failure_reason(self) -> LiveKitFailureReason:
+        """ESP32-style failure reason getter."""
+        return self.failure_reason
 
     def _on_track_subscribed(self, track, publication, participant):
-        """Handle subscribed audio tracks from other participants."""
+        """ESP32-style track subscription handler."""
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             logger.info(f"[LIVEKIT] Subscribed to audio from: {participant.identity}")
             self.audio_stream = rtc.AudioStream(track)
             # Start receiving audio in a separate task
             asyncio.create_task(self._receive_audio())
+            
+            # Trigger user callback if provided
+            if self.options.on_track_subscribed:
+                self.options.on_track_subscribed(track, participant)
 
     def _on_participant_connected(self, participant):
-        """Handle new participant joining."""
-        logger.info(f"[LIVEKIT] Participant connected: {participant.identity}")
+        """ESP32-style participant connection handler with auto-subscribe."""
+        kind = self._get_participant_kind(participant)
+        logger.info(f"[LIVEKIT] Participant connected: {participant.identity} (kind: {kind})")
+        
+        # ESP32-style: Auto-subscribe to all tracks from this participant
+        if self.options.auto_subscribe:
+            for pub in participant.track_publications.values():
+                pub.set_subscribed(True)
+        
+        # Trigger user callback if provided
+        if self.options.on_participant_connected:
+            self.options.on_participant_connected(participant, kind)
 
+    def _on_participant_disconnected(self, participant):
+        """ESP32-style participant disconnection handler."""
+        kind = self._get_participant_kind(participant)
+        logger.info(f"[LIVEKIT] Participant disconnected: {participant.identity} (kind: {kind})")
+        
+        # Trigger user callback if provided
+        if self.options.on_participant_disconnected:
+            self.options.on_participant_disconnected(participant)
+    
     def _on_disconnected(self):
         """Handle room disconnection."""
         logger.info("[LIVEKIT] Disconnected from room")
         self.connected = False
 
+    def _on_data_received(self, data_packet):
+        """ESP32-style data message handler."""
+        try:
+            payload = json.loads(data_packet.data.decode('utf-8'))
+            msg_type = payload.get('type', 'unknown')
+            logger.info(f"[LIVEKIT] Data received: {msg_type}")
+
+            # Trigger user callback if provided
+            if self.options.on_data_received:
+                self.options.on_data_received(payload)
+            
+            # Handle agent state changes directly (backward compatibility)
+            if msg_type == 'agent_state_changed':
+                state = payload.get('state', '')
+                logger.info(f"[LIVEKIT] Agent state: {state}")
+                if state == 'listening':
+                    # Agent is listening - start recording immediately!
+                    logger.info("[LIVEKIT] Agent is listening - enabling microphone")
+                    stop_recording_event.clear()
+                    start_recording_event.set()
+
+            # Forward to MQTT message queue for processing by TestClient (backward compatibility)
+            mqtt_message_queue.put(payload)
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Error processing data: {e}")
+
+    async def _send_audio_async(self, pcm_data: bytes):
+        """Async method to capture audio frame to LiveKit AudioSource."""
+        try:
+            # Convert PCM bytes to numpy array
+            audio_array = np.frombuffer(pcm_data, dtype=np.int16)
+            
+            # Create AudioFrame and capture it
+            frame = rtc.AudioFrame(
+                data=audio_array.tobytes(),
+                sample_rate=self.options.audio_sample_rate,
+                num_channels=self.options.audio_channels,
+                samples_per_channel=len(audio_array) // self.options.audio_channels
+            )
+            
+            await self.audio_source.capture_frame(frame)
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Error capturing audio frame: {e}")
+
+    def send_audio(self, pcm_data: bytes):
+        """
+        Thread-safe method to send audio from recording thread to LiveKit.
+        Schedules the async audio capture on the event loop.
+        """
+        if not self._loop or not self.connected:
+            return
+        
+        try:
+            # Schedule the async operation on the event loop
+            asyncio.run_coroutine_threadsafe(
+                self._send_audio_async(pcm_data),
+                self._loop
+            )
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Failed to schedule audio send: {e}")
+
+    async def _send_data_async(self, data: dict):
+        """Async method to send data message to LiveKit room."""
+        if not self.connected or not self.room or not self.room.local_participant:
+            return
+        try:
+            payload = json.dumps(data).encode('utf-8')
+            await self.room.local_participant.publish_data(payload, reliable=True)
+            logger.info(f"[LIVEKIT] Sent data message: {data.get('type', 'unknown')}")
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Error sending data: {e}")
+
+    def send_data(self, data: dict):
+        """Thread-safe method to send data message."""
+        if not self._loop or not self.connected:
+            return
+        
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._send_data_async(data),
+                self._loop
+            )
+        except Exception as e:
+            logger.error(f"[LIVEKIT] Failed to schedule data send: {e}")
+
     async def _receive_audio(self):
         """Receive and queue audio frames from the agent."""
+        logger.info("[LIVEKIT] Started receiving audio stream")
+        frame_count = 0
         try:
-            async for frame in self.audio_stream:
+            async for event in self.audio_stream:
                 if self.stop_event.is_set():
                     break
+
+                frame = event.frame  # Extract AudioFrame from AudioFrameEvent
+                frame_count += 1
+                if frame_count == 1:
+                    logger.info(f"[LIVEKIT] First audio frame received! sample_rate={frame.sample_rate}, channels={frame.num_channels}")
+                elif frame_count % 100 == 0:
+                    logger.info(f"[LIVEKIT] Received {frame_count} audio frames")
 
                 # Convert AudioFrame to PCM bytes
                 pcm_data = frame.data.tobytes()
@@ -211,46 +472,24 @@ class LiveKitAudioClient:
                 self.audio_playback_queue.put(pcm_data)
 
         except Exception as e:
-            logger.error(f"[LIVEKIT] Error receiving audio: {e}")
-
-    async def send_audio_async(self, pcm_data: bytes):
-        """Send PCM audio data to LiveKit."""
-        if not self.connected or not self.audio_source:
-            return
-
-        try:
-            # Convert bytes to numpy array
-            samples = np.frombuffer(pcm_data, dtype=np.int16)
-
-            # Create audio frame
-            frame = rtc.AudioFrame(
-                data=samples,
-                sample_rate=16000,
-                num_channels=1,
-                samples_per_channel=len(samples)
-            )
-
-            # Capture frame to audio source
-            await self.audio_source.capture_frame(frame)
-        except Exception as e:
-            logger.error(f"[LIVEKIT] Error sending audio: {e}")
-
-    def send_audio(self, pcm_data: bytes):
-        """Send PCM audio data (thread-safe wrapper)."""
-        if self._loop and self.connected:
-            asyncio.run_coroutine_threadsafe(
-                self.send_audio_async(pcm_data),
-                self._loop
-            )
+            logger.info(f"[LIVEKIT] Audio stream ended or error: {e}")
+        finally:
+            logger.info(f"[LIVEKIT] Audio stream task finished. Total frames: {frame_count}")
 
     def stop(self):
         """Stop the LiveKit connection."""
         logger.info("[LIVEKIT] Stopping...")
         self.stop_event.set()
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self.room.disconnect(), self._loop)
+        if self._loop and self.connected and self.room:
+            try:
+                # Schedule disconnection
+                asyncio.run_coroutine_threadsafe(self.room.disconnect(), self._loop)
+            except Exception as e:
+                logger.warning(f"[LIVEKIT] Error during stop: {e}")
+        
         if self._thread:
             self._thread.join(timeout=2)
+        
         self.connected = False
         logger.info("[LIVEKIT] Stopped")
 
@@ -724,15 +963,25 @@ class TestClient:
                         livekit_creds = response["livekit"]
                         logger.info(f"[LIVEKIT] Received LiveKit credentials for room: {livekit_creds.get('room_name')}")
                         try:
+                            # Create ESP32-style options
+                            options = LiveKitRoomOptions(
+                                auto_subscribe=True,
+                                publish_audio=True,
+                                # Port backward compatibility for data messages
+                                on_data_received=lambda p: mqtt_message_queue.put(p),
+                                on_participant_connected=lambda p, k: logger.info(f"[LIVEKIT] {k} connected: {p.identity}")
+                            )
+                            
                             self.livekit_client = LiveKitAudioClient(
                                 url=livekit_creds["url"],
                                 token=livekit_creds["token"],
                                 room_name=livekit_creds["room_name"],
-                                audio_playback_queue=self.audio_playback_queue
+                                audio_playback_queue=self.audio_playback_queue,
+                                options=options
                             )
                             self.livekit_client.start()
                             self.use_livekit_direct = True
-                            logger.info("[LIVEKIT] Using direct LiveKit connection for audio")
+                            logger.info("[LIVEKIT] Using direct LiveKit connection with ESP32-style options")
                             return True
                         except Exception as e:
                             logger.error(f"[LIVEKIT] Failed to setup LiveKit: {e}")
@@ -1010,12 +1259,21 @@ class TestClient:
             target=self._record_and_send_audio_thread, daemon=True)
         self.audio_recording_thread.start()
 
-        logger.info(
-            "[STEP] STEP 5: Sending 'listen' message to trigger initial TTS from server...")
-        # The server's initial TTS will then trigger the client's recording.
-        listen_payload = {
-            "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
-        self.mqtt_client.publish("device-server", json.dumps(listen_payload))
+        if self.use_livekit_direct and self.livekit_client:
+            # Direct mode: Client speaks first - enable recording immediately
+            logger.info("[LIVEKIT] Client speaks first mode - enabling microphone immediately...")
+            # Small delay to let LiveKit connection stabilize
+            time.sleep(1.0)
+            stop_recording_event.clear()
+            start_recording_event.set()
+            logger.info("[LIVEKIT] Microphone enabled - speak now!")
+        else:
+            # Gateway bridge mode: Send listen via MQTT
+            listen_payload = {
+                "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
+            self.mqtt_client.publish("device-server", json.dumps(listen_payload))
+            logger.info("[MQTT] Sent listen message via MQTT")
+
         logger.info(
             "[WAIT] Test running. Press Spacebar to abort TTS or Ctrl+C to stop.")
 

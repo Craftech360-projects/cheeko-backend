@@ -2,7 +2,11 @@
  * LiveKit Bridge
  *
  * Manages LiveKit room connections for each device.
- * Handles audio resampling, frame buffering, and agent communication.
+ * Handles room creation, agent dispatch, and data channel messaging.
+ *
+ * NOTE: Audio bridging has been removed. Clients now connect directly
+ * to LiveKit for real-time audio streaming. This bridge only handles
+ * signaling, room management, and control messages.
  */
 
 const { EventEmitter } = require("events");
@@ -10,23 +14,8 @@ const JSON5 = require("json5");
 const {
   Room,
   RoomEvent,
-  AudioSource,
-  AudioStream,
-  AudioFrame,
-  LocalAudioTrack,
-  TrackPublishOptions,
-  TrackSource,
-  TrackKind,
-  AudioResampler,
-  AudioResamplerQuality,
 } = require("@livekit/rtc-node");
 const { AccessToken } = require("livekit-server-sdk");
-const { WorkerPoolManager } = require("../core/worker-pool-manager");
-const {
-  OUTGOING_SAMPLE_RATE,
-  INCOMING_SAMPLE_RATE,
-  CHANNELS,
-} = require("../constants/audio");
 
 // Global config manager reference (injected by app.js)
 let configManager = null;
@@ -41,36 +30,27 @@ class LiveKitBridge extends EventEmitter {
     this.macAddress = macAddress;
     this.uuid = uuid;
     this.userData = userData;
-    // Unique session identifier for shared worker pool
     this.sessionId = this.uuid;
-    this.workerPool = workerPool; // Shared WorkerPoolManager (global)
-    this.roomType = connection.roomType || "conversation"; // ADD: Store room type from connection
+    this.roomType = connection.roomType || "conversation";
     this.room = null;
     this.roomService = null; // Store roomService for cleanup on disconnect
     this.roomName = null; // Store room name for deletion on disconnect
 
-    // Connection mode: "gateway_bridge" (default) or "direct"
-    // In "direct" mode, client connects to LiveKit directly, gateway only handles signaling
-    this.connectionMode = options.connectionMode || "gateway_bridge";
+    // Always use direct mode - clients connect directly to LiveKit for audio
+    this.connectionMode = "direct";
 
-    // Only create audioSource for gateway_bridge mode (not for direct client connections)
-    this.audioSource = this.connectionMode === "gateway_bridge"
-      ? new AudioSource(16000, 1)
-      : null;
     this.protocolVersion = protocolVersion;
-    this.isAudioPlaying = false; // Track if audio is actively playing
+    this.isAudioPlaying = false; // Track if audio is actively playing (for UI state)
     this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
-    this.stopAudioForwarding = false; // Flag to stop audio forwarding during mode switch
 
-    // Add agent join tracking
+    // Agent join tracking
     this.agentJoined = false;
-    this.greetingSent = false; // Track if greeting has been sent
+    this.greetingSent = false;
     this.agentJoinPromise = null;
     this.agentJoinResolve = null;
     this.agentJoinTimeout = null;
 
-    // PRIMARY AGENT TRACKING: Only subscribe to ONE agent's audio
-    // This prevents audio from duplicate agents if they somehow join
+    // PRIMARY AGENT TRACKING: Only track ONE agent
     this.primaryAgentIdentity = null;
 
     // Create a promise that resolves when agent joins
@@ -85,50 +65,9 @@ class LiveKitBridge extends EventEmitter {
     // Volume adjustment queue for request serialization
     this.volumeAdjustmentQueue = [];
     this.isAdjustingVolume = false;
-    this.lastKnownVolume = null; // Optimistic volume tracking
-    this.volumeDebounceTimer = null; // Debounce timer for volume changes
-    this.pendingVolumeAction = null; // Accumulator for debounced volume actions
-
-    // Initialize audio resampler for 48kHz -> 24kHz conversion (outgoing: LiveKit -> ESP32)
-    this.audioResampler = new AudioResampler(
-      48000,
-      24000,
-      1,
-      AudioResamplerQuality.QUICK
-    );
-
-    // Frame buffer for accumulating resampled audio into proper frame sizes
-    this.frameBuffer = Buffer.alloc(0);
-    this.targetFrameSize = 1440; // 1440 samples = 60ms at 24kHz (outgoing)
-    this.targetFrameBytes = this.targetFrameSize * 2; // 2880 bytes for 16-bit PCM
-
-    // PHASE 2: Initialize Worker Pool for parallel audio processing
-    // Use shared/global WorkerPoolManager instead of per-bridge pools
-
-    // Initialize workers with encoder/decoder settings (idempotent across sessions)
-    this.workerPool
-      .initializeWorker("init_encoder", {
-        sampleRate: OUTGOING_SAMPLE_RATE,
-        channels: CHANNELS,
-      })
-      .then(() => {
-        // console.log(`✅ [PHASE-2] Workers encoder ready (${OUTGOING_SAMPLE_RATE}Hz)`);
-      })
-      .catch((err) => {
-        console.error(`❌ [PHASE-2] Worker encoder init failed:`, err.message);
-      });
-
-    this.workerPool
-      .initializeWorker("init_decoder", {
-        sampleRate: INCOMING_SAMPLE_RATE,
-        channels: CHANNELS,
-      })
-      .then(() => {
-        // console.log(`✅ [PHASE-2] Workers decoder ready (${INCOMING_SAMPLE_RATE}Hz)`);
-      })
-      .catch((err) => {
-        console.error(`❌ [PHASE-2] Worker decoder init failed:`, err.message);
-      });
+    this.lastKnownVolume = null;
+    this.volumeDebounceTimer = null;
+    this.pendingVolumeAction = null;
 
     this.initializeLiveKit();
   }
@@ -141,109 +80,7 @@ class LiveKitBridge extends EventEmitter {
     this.livekitConfig = livekitConfig;
   }
 
-  /**
-   * Clear all audio buffers and pending requests to prevent audio from old session
-   * bleeding into new session during mode change
-   */
-  clearAudioBuffers() {
-    // console.log(`🧹 [AUDIO-CLEAR] Clearing audio buffers for ${this.macAddress}...`);
-
-    // 1. Clear frame buffer (accumulated PCM data waiting to be encoded)
-    const oldFrameBufferSize = this.frameBuffer.length;
-    this.frameBuffer = Buffer.alloc(0);
-    // console.log(`🧹 [AUDIO-CLEAR] Cleared frame buffer (was ${oldFrameBufferSize} bytes)`);
-
-    // 2. Clear worker pool pending requests
-    if (this.workerPool && this.workerPool.pendingRequests) {
-      const pendingCount = this.workerPool.pendingRequests.size;
-      // Reject all pending requests to prevent callbacks from firing
-      for (const [requestId, request] of this.workerPool.pendingRequests) {
-        if (request && request.reject) {
-          request.reject(new Error("Audio buffer cleared due to mode change"));
-        }
-        // Clear timeout if any
-        if (request && request.timeout) {
-          clearTimeout(request.timeout);
-        }
-      }
-      this.workerPool.pendingRequests.clear();
-      // Reset pending counts per worker
-      this.workerPool.workerPendingCount =
-        this.workerPool.workerPendingCount.map(() => 0);
-      // console.log(`🧹 [AUDIO-CLEAR] Cleared ${pendingCount} pending worker requests`);
-    }
-
-    // 3. Reset audio playing state
-    this.isAudioPlaying = false;
-    this.audioPlayingStartTime = null;
-
-    // 4. Set flag to stop any ongoing audio forwarding
-    this.stopAudioForwarding = true;
-
-    // console.log(`✅ [AUDIO-CLEAR] Audio buffers cleared for ${this.macAddress}`);
-  }
-
-  // PHASE 2: Process buffered audio frames and encode to Opus using worker threads
-  async processBufferedFrames(timestamp, frameCount) {
-    if (!this.connection) {
-      // console.error(`❌ [PROCESS] No connection available, cannot send audio`);
-      return;
-    }
-
-    // Check if audio forwarding has been stopped (during mode change)
-    if (this.stopAudioForwarding) {
-      // Silently discard audio during mode change
-      return;
-    }
-
-    while (this.frameBuffer.length >= this.targetFrameBytes) {
-      // Extract one complete frame
-      const frameData = this.frameBuffer.subarray(0, this.targetFrameBytes);
-      this.frameBuffer = this.frameBuffer.subarray(this.targetFrameBytes);
-
-      // Process this complete frame - encode to Opus before sending
-      if (frameData.length > 0) {
-        const samples = new Int16Array(
-          frameData.buffer,
-          frameData.byteOffset,
-          frameData.length / 2
-        );
-        const isSilent = samples.every((sample) => sample === 0);
-        const maxAmplitude = Math.max(...samples.map((s) => Math.abs(s)));
-        const isNearlySilent = maxAmplitude < 10;
-
-        // if (frameCount <= 5) {
-        //   console.log(`🔍 [DEBUG] Frame ${frameCount}: samples=${samples.length}, max=${maxAmplitude}`);
-        // }
-
-        if (isSilent || isNearlySilent) {
-          // if (frameCount <= 5) {
-          //   console.log(`🔇 [PCM] Silent frame ${frameCount} detected (max=${maxAmplitude}), skipping`);
-          // }
-          continue;
-        }
-
-        // TEMPORARY: Use synchronous encoding to avoid worker thread issues
-        try {
-          const opusBuffer = await this.workerPool.encodeOpus(
-            this.sessionId,
-            frameData,
-            this.targetFrameSize
-          );
-
-          // if (frameCount <= 3 || frameCount % 100 === 0) {
-          //   console.log(`🎵 [WORKER] Frame ${frameCount}: PCM ${frameData.length}B → Opus ${opusBuffer.length}B`);
-          // }
-
-          this.connection.sendUdpMessage(opusBuffer, timestamp);
-        } catch (err) {
-          console.error(`❌ [SYNC] Encode error: ${err.message}`);
-          // Fallback to PCM if encoding fails
-          this.connection.sendUdpMessage(frameData, timestamp);
-        }
-      }
-    }
-  }
+  // NOTE: Audio buffer/processing methods removed - clients connect directly to LiveKit
 
   async connect(audio_params, features, roomService) {
     const connectStartTime = Date.now();
@@ -253,14 +90,14 @@ class LiveKitBridge extends EventEmitter {
     // Include MAC address AND room type in room name
     const macForRoom = this.macAddress.replace(/:/g, ""); // Remove colons: 00:16:3e:ac:b5:38 → 00163eacb538
     const roomName = `${this.uuid}_${macForRoom}_${this.roomType}`; // CHANGED: Include room type
-    const participantName = this.macAddress;
+    const participantName = `gateway-${macForRoom}`; // Use distinct identity to avoid collision with client (no colons)
 
     // Store roomService and roomName for cleanup on disconnect
     this.roomService = roomService;
     this.roomName = roomName;
 
     console.log(
-      `🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`
+      `🏠 [LIVEKIT] Creating/Joining room: ${roomName} (as ${participantName}, type: ${this.roomType})`
     );
 
     // Pre-create room with emptyTimeout setting
@@ -289,6 +126,7 @@ class LiveKitBridge extends EventEmitter {
 
     const at = new AccessToken(api_key, api_secret, {
       identity: participantName,
+      ttl: 3600, // 1 hour TTL (matching token.js)
       // Add MAC address as custom attributes
       attributes: {
         device_mac: this.macAddress,
@@ -296,14 +134,31 @@ class LiveKitBridge extends EventEmitter {
         room_type: "device_session",
       },
     });
+    
     at.addGrant({
-      room: roomName,
       roomJoin: true,
+      room: roomName,
       roomCreate: true,
       canPublish: true,
       canSubscribe: true,
     });
-    const token = await at.toJwt(); // Fixed: Make this async
+    
+    const token = await at.toJwt();
+
+    // signaling-only mode: don't join the room, just return the token
+    if (this.connectionMode === "direct") {
+      console.log(`🔗 [SIGNALLING] Room '${roomName}' pre-created. Returning token to client.`);
+      return {
+        session_id: roomName,
+        audio_params: {
+          sample_rate: 24000,
+          channels: 1,
+          frame_duration: 60,
+          format: "opus",
+        },
+        token: token, // Actually we might not need to return token here as generateLiveKitCredentials handles it
+      };
+    }
 
     this.room = new Room();
 
@@ -335,8 +190,7 @@ class LiveKitBridge extends EventEmitter {
             data = JSON5.parse(str);
             // Simplified LiveKit message log
             console.log(
-              `📨 [LIVEKIT-IN] Type: ${data?.type} from ${
-                participant?.identity || "unknown"
+              `📨 [LIVEKIT-IN] Type: ${data?.type} from ${participant?.identity || "unknown"
               }`
             );
           } catch (err) {
@@ -482,9 +336,9 @@ class LiveKitBridge extends EventEmitter {
         });
         const roomConnectedTime = Date.now();
         console.log(`✅ [LIVEKIT] Connected to room: ${roomName}`);
-        // console.log(`⏱️ [TIMING-ROOM] Room connection took ${roomConnectedTime - connectStartTime}ms`);
-        // console.log(`🔗 [CONNECTION] State: ${this.room.connectionState}`);
-        // console.log(`🟢 [STATUS] Is connected: ${this.room.isConnected}`);
+        console.log(`👤 [LIVEKIT] My identity: ${this.room.localParticipant.identity}`);
+        console.log(`👥 [LIVEKIT] Remote participants already in room: ${this.room.remoteParticipants.size}`);
+        this.room.remoteParticipants.forEach(p => console.log(`   - Participant: ${p.identity}`));
 
         // Store the current mode in deviceInfo for function_call validation
         if (this.connection && this.connection.gateway) {
@@ -511,187 +365,12 @@ class LiveKitBridge extends EventEmitter {
         //   });
         // });
 
+        // NOTE: TrackSubscribed audio forwarding removed
+        // In direct mode, clients receive audio directly from LiveKit - no gateway forwarding needed
         this.room.on(
           RoomEvent.TrackSubscribed,
           (track, publication, participant) => {
-            // console.log(`🎵 [TRACK] Subscribed to track: ${track.sid} from ${participant.identity}, kind: ${track.kind}`);
-
-            // Handle audio track from agent (TTS audio)
-            // Check for both string "audio" and TrackKind.KIND_AUDIO constant
-            if (track.kind === "audio" || track.kind === TrackKind.KIND_AUDIO) {
-              // PRIMARY AGENT CHECK: Only accept audio from the primary agent
-              // If no primary agent set yet, this participant becomes the primary
-              if (!this.primaryAgentIdentity) {
-                this.primaryAgentIdentity = participant.identity;
-                console.log(`🎯 [PRIMARY-AGENT] Set primary agent: ${participant.identity}`);
-              } else if (this.primaryAgentIdentity !== participant.identity) {
-                // Another agent is trying to send audio - IGNORE IT
-                console.warn(`⚠️ [DUPLICATE-AGENT] Ignoring audio from non-primary agent: ${participant.identity} (primary: ${this.primaryAgentIdentity})`);
-
-                // Optionally unsubscribe from this track to save resources
-                try {
-                  publication.setSubscribed(false);
-                  console.log(`🔇 [DUPLICATE-AGENT] Unsubscribed from duplicate agent's track: ${participant.identity}`);
-                } catch (unsubErr) {
-                  console.warn(`⚠️ [DUPLICATE-AGENT] Failed to unsubscribe: ${unsubErr.message}`);
-                }
-                return; // Don't process this audio
-              }
-
-              // console.log(`🔊 [AUDIO TRACK] Starting audio stream processing for ${participant.identity}`);
-
-              const stream = new AudioStream(track);
-              const reader = stream.getReader();
-
-              let frameCount = 0;
-              let totalBytes = 0;
-              let lastLogTime = Date.now();
-
-              const readStream = async () => {
-                try {
-                  // console.log(`🎧 [AUDIO STREAM] Starting to read audio frames from ${participant.identity}`);
-
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) {
-                      // TTS stop is handled by agent_state_changed event (speaking -> listening)
-                      // Don't send here as stream can end before agent finishes speaking
-                      // console.log(`🏁 [AUDIO STREAM] Stream ended for ${participant.identity}. Total frames: ${frameCount}, Total bytes: ${totalBytes}`);
-
-                      // Flush any remaining resampled data
-                      const finalFrames = this.audioResampler.flush();
-                      for (const finalFrame of finalFrames) {
-                        const finalBuffer = Buffer.from(
-                          finalFrame.data.buffer,
-                          finalFrame.data.byteOffset,
-                          finalFrame.data.byteLength
-                        );
-                        // Add final frames to buffer
-                        this.frameBuffer = Buffer.concat([
-                          this.frameBuffer,
-                          finalBuffer,
-                        ]);
-                      }
-
-                      // Process any remaining complete frames in buffer
-                      const finalTimestamp =
-                        (Date.now() - this.connection.udp.startTime) &
-                        0xffffffff;
-                      this.processBufferedFrames(
-                        finalTimestamp,
-                        frameCount,
-                        participant.identity
-                      );
-
-                      // SKIP partial frames - they cause Opus encoder to crash
-                      // Opus encoder requires exact frame sizes, partial frames will be dropped
-                      // if (this.frameBuffer.length > 0) {
-                      //   console.log(`⏭️ [FLUSH] Skipping partial frame (${this.frameBuffer.length}B) - would cause Opus crash`);
-                      // }
-
-                      // Clear the buffer
-                      this.frameBuffer = Buffer.alloc(0);
-
-                      // Notify connection that audio stream has ended
-                      if (this.connection && this.connection.isEnding) {
-                        // console.log(`✅ [END-COMPLETE] Audio stream completed, closing connection: ${this.connection.clientId || this.connection.deviceId}`);
-                        // Use setTimeout to allow TTS stop message to be sent first
-                        setTimeout(() => {
-                          if (this.connection && this.connection.isEnding) {
-                            this.connection.close();
-                          }
-                        }, 1000); // 1 second delay to ensure TTS stop is processed
-                      }
-
-                      break;
-                    }
-
-                    frameCount++;
-
-                    // value is an AudioFrame from LiveKit (48kHz)
-                    // Add safety checks for AudioFrame processing
-                    try {
-                      // Check if audio forwarding is stopped (e.g., during mode switch)
-                      if (this.stopAudioForwarding) {
-                        // Skip processing audio frames when mode switch is in progress
-                        continue;
-                      }
-
-                      if (!value || !value.data) {
-                        // console.warn(`⚠️ [AUDIO] Invalid AudioFrame received, skipping`);
-                        continue;
-                      }
-
-                      // Push the frame to resampler and get resampled frames back (24kHz)
-                      const resampledFrames = this.audioResampler.push(value);
-
-                      // Add resampled frames to buffer instead of processing directly
-                      for (const resampledFrame of resampledFrames) {
-                        if (!resampledFrame || !resampledFrame.data) {
-                          // console.warn(`⚠️ [AUDIO] Invalid resampled frame, skipping`);
-                          continue;
-                        }
-
-                        // Safer buffer creation with validation
-                        let resampledBuffer;
-                        try {
-                          resampledBuffer = Buffer.from(
-                            resampledFrame.data.buffer,
-                            resampledFrame.data.byteOffset,
-                            resampledFrame.data.byteLength
-                          );
-                        } catch (bufferError) {
-                          // console.error(`❌ [AUDIO] Buffer creation failed:`, bufferError.message);
-                          continue;
-                        }
-
-                        // Append to frame buffer
-                        this.frameBuffer = Buffer.concat([
-                          this.frameBuffer,
-                          resampledBuffer,
-                        ]);
-                        totalBytes += resampledBuffer.length;
-                      }
-
-                      const timestamp =
-                        (Date.now() - this.connection.udp.startTime) &
-                        0xffffffff;
-
-                      // Process any complete frames from the buffer
-                      this.processBufferedFrames(
-                        timestamp,
-                        frameCount,
-                        participant.identity
-                      );
-
-                      // Log every 50 frames or every 5 seconds
-                      // const now = Date.now();
-                      // if (frameCount % 50 === 0 || now - lastLogTime > 5000) {
-                      //   console.log(
-                      //     `🎵 [AUDIO FRAMES] Received ${frameCount} frames, ${totalBytes} total bytes from ${participant.identity}, buffer: ${this.frameBuffer.length}B`
-                      //   );
-                      //   lastLogTime = now;
-                      // }
-                    } catch (audioProcessError) {
-                      // console.error(`❌ [AUDIO] Frame processing error:`, audioProcessError.message);
-                      // Continue processing other frames
-                    }
-                  }
-                } catch (error) {
-                  console.error(
-                    `❌ [AUDIO STREAM] Error reading audio stream:`,
-                    error.message
-                  );
-                } finally {
-                  // console.log(`🔒 [AUDIO STREAM] Releasing reader lock for ${participant.identity}`);
-                  reader.releaseLock();
-                }
-              };
-
-              readStream();
-            } else {
-              // console.log(`⚠️ [TRACK] Non-audio track subscribed: ${track.kind} (type: ${typeof track.kind}) from ${participant.identity}`);
-            }
+            console.log(`🎵 [TRACK] Track subscribed: ${track.kind} from ${participant.identity} (direct mode - no forwarding)`);
           }
         );
 
@@ -704,7 +383,7 @@ class LiveKitBridge extends EventEmitter {
         // );
 
         // Add participant connection handlers
-        this.room.on(RoomEvent.ParticipantConnected, (participant) => {
+        this.room.on(RoomEvent.ParticipantConnected, async (participant) => {
           // console.log(`👤 [PARTICIPANT] Connected: ${participant.identity} (${participant.sid})`);
 
           // Check if this is an agent joining (agent identity typically contains "agent")
@@ -749,8 +428,23 @@ class LiveKitBridge extends EventEmitter {
               this.agentJoinTimeout = null;
             }
 
-            // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed
-            console.log(`✅ [AGENT-READY] Agent ready, will greet via on_enter hook`);
+            // NEW: Explicitly trigger greeting via data channel
+            // Agent (BaseAssistant) waits for this trigger in direct connection mode
+            try {
+              const greetingMsg = JSON.stringify({
+                type: "ready_for_greeting",
+                timestamp: Date.now(),
+              });
+              await this.room.localParticipant.publishData(
+                Buffer.from(greetingMsg, "utf-8"),
+                { reliable: true }
+              );
+              console.log(`📤 [DATA-OUT] Sent ready_for_greeting to agent (device: ${this.macAddress})`);
+            } catch (err) {
+              console.error(`❌ [DATA-OUT] Failed to send ready_for_greeting: ${err.message}`);
+            }
+
+            console.log(`✅ [AGENT-READY] Agent ready and greeting triggered`);
           }
         });
 
@@ -765,33 +459,9 @@ class LiveKitBridge extends EventEmitter {
           }
         });
 
-        // Only publish audio track in gateway_bridge mode
-        // In direct mode, client publishes its own audio directly to LiveKit
-        if (this.connectionMode === "gateway_bridge") {
-          // Fixed: Use proper track publishing method (simplified to match dev branch)
-          const {
-            LocalAudioTrack,
-            TrackPublishOptions,
-            TrackSource,
-          } = require("@livekit/rtc-node");
-
-          const track = LocalAudioTrack.createAudioTrack(
-            "microphone",
-            this.audioSource
-          );
-          const options = new TrackPublishOptions();
-          options.source = TrackSource.SOURCE_MICROPHONE;
-
-          const publication = await this.room.localParticipant.publishTrack(
-            track,
-            options
-          );
-          const trackPublishedTime = Date.now();
-          // console.log(`🎤 [PUBLISH] Published local audio track: ${publication.trackSid || publication.sid}`);
-          // console.log(`⏱️ [TIMING-TRACK] Track publish took ${trackPublishedTime - roomConnectedTime}ms`);
-        } else {
-          console.log(`🔗 [DIRECT] Client will connect directly to LiveKit - gateway is signaling only`);
-        }
+        // NOTE: Audio track publishing removed - gateway is signaling only
+        // Client publishes its own audio directly to LiveKit
+        console.log(`🔗 [DIRECT] Gateway is signaling only - client connects directly to LiveKit for audio`);
 
         // Use roomName as session_id - this is consistent with how LiveKit rooms work
         // The room.sid might not be immediately available, but roomName is our session identifier
@@ -837,11 +507,10 @@ class LiveKitBridge extends EventEmitter {
         opusData.length <= 100
           ? "40ms"
           : opusData.length <= 150
-          ? "60ms"
-          : "unknown";
+            ? "60ms"
+            : "unknown";
       console.log(
-        `🎵 [FRAME-VERIFY] Incoming audio frame #${
-          this.frameCountLogged + 1
+        `🎵 [FRAME-VERIFY] Incoming audio frame #${this.frameCountLogged + 1
         }: ${opusData.length}B (likely ${frameDurationGuess})`
       );
       this.frameCountLogged++;
@@ -1947,6 +1616,12 @@ class LiveKitBridge extends EventEmitter {
      * Send abort signal to LiveKit agent via data channel
      * This tells the agent to stop current TTS/music playback
      */
+    if (this.connectionMode === "direct") {
+      // In direct mode, client sends abort directly via LiveKit Data Channel
+      console.log(`ℹ️ [SIGNALLING] Skipping abort forwarding in direct mode (client handles it locally)`);
+      return;
+    }
+
     if (!this.room || !this.room.localParticipant) {
       throw new Error("Room not connected or no local participant");
     }
@@ -1987,6 +1662,11 @@ class LiveKitBridge extends EventEmitter {
      * Send end prompt signal to LiveKit agent via data channel
      * This tells the agent to say goodbye using the end prompt before session ends
      */
+    if (this.connectionMode === "direct") {
+      console.log(`ℹ️ [SIGNALLING] Skipping end prompt in direct mode`);
+      return;
+    }
+
     if (!this.room || !this.room.localParticipant) {
       throw new Error("Room not connected or no local participant");
     }
@@ -2076,26 +1756,27 @@ class LiveKitBridge extends EventEmitter {
         );
       }
 
-      // Step 3: Force delete the room from LiveKit server to remove all participants
-      if (this.roomService && this.roomName) {
-        try {
-          await this.roomService.deleteRoom(this.roomName);
-          console.log(
-            `✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`
-          );
-        } catch (error) {
-          // Room might already be gone, that's okay
-          console.log(
-            `⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`
-          );
-        }
-      } else {
+      this.room = null;
+    }
+
+    // Step 3: Force delete the room from LiveKit server to remove all participants (including agents)
+    // This is done even in signaling-only mode (where this.room is null)
+    if (this.roomService && this.roomName) {
+      try {
+        await this.roomService.deleteRoom(this.roomName);
         console.log(
-          `⚠️ [CLEANUP] No roomService or roomName available for room deletion`
+          `✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`
+        );
+      } catch (error) {
+        // Room might already be gone, that's okay
+        console.log(
+          `⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`
         );
       }
-
-      this.room = null;
+    } else {
+      console.log(
+        `⚠️ [CLEANUP] No roomService or roomName available for room deletion`
+      );
     }
 
     // Tell the shared worker pool to cleanup per-session codec state
@@ -2170,8 +1851,7 @@ class LiveKitBridge extends EventEmitter {
           const roomCreationTime = Number(room.creationTime) * 1000; // Convert seconds to ms
           const roomAge = (now - roomCreationTime) / 1000; // Convert to seconds for display
           console.log(
-            `   - Deleting room: ${room.name} (${
-              room.numParticipants
+            `   - Deleting room: ${room.name} (${room.numParticipants
             } participants, age: ${roomAge.toFixed(0)}s)`
           );
           try {
