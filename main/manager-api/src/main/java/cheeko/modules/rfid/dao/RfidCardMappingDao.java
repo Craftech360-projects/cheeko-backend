@@ -35,6 +35,19 @@ public interface RfidCardMappingDao extends BaseDao<RfidCardMappingEntity> {
     RfidQuestionEntity getQuestionByRfidUid(@Param("rfidUid") String rfidUid);
 
     /**
+     * Get question for RFID card by sequence (uses question_ids JSON array)
+     * @param rfidUid RFID card UID
+     * @param sequence Sequence number (1-based index into question_ids array)
+     * @return Question entity if card is active and sequence is valid
+     */
+    @Select("SELECT q.* FROM rfid_card_mapping m " +
+            "INNER JOIN rfid_question q ON q.id = JSON_EXTRACT(m.question_ids, CONCAT('$[', #{sequence} - 1, ']')) " +
+            "WHERE m.rfid_uid = #{rfidUid} AND m.active = 1 AND q.active = 1 " +
+            "AND m.question_ids IS NOT NULL " +
+            "AND JSON_LENGTH(m.question_ids) >= #{sequence}")
+    RfidQuestionEntity getQuestionByRfidUidAndSequence(@Param("rfidUid") String rfidUid, @Param("sequence") Integer sequence);
+
+    /**
      * Get all mappings by pack code
      * @param packCode Pack/SKU code
      * @return List of card mappings

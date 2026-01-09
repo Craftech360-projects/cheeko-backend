@@ -142,8 +142,24 @@ public class RfidContentPackServiceImpl extends CrudServiceImpl<RfidContentPackD
         // Step 2: Fallback to legacy rfid_question lookup (backward compatibility)
         log.info("No content pack found for UID {}, falling back to legacy question lookup", rfidUid);
 
-        // Try exact match
-        RfidQuestionEntity questionEntity = rfidCardMappingDao.getQuestionByRfidUid(rfidUid);
+        RfidQuestionEntity questionEntity = null;
+
+        // Try to get question by sequence if sequence is provided and question_ids exists
+        if (sequence != null && sequence > 0) {
+            log.info("Attempting to get question by sequence {} for UID {}", sequence, rfidUid);
+            questionEntity = rfidCardMappingDao.getQuestionByRfidUidAndSequence(rfidUid, sequence);
+            
+            if (questionEntity != null) {
+                log.info("Found question by sequence {}: {}", sequence, questionEntity.getTitle());
+            } else {
+                log.warn("No question found for sequence {} for UID {}, falling back to single question", sequence, rfidUid);
+            }
+        }
+
+        // Fallback to single question if sequence lookup failed or no sequence provided
+        if (questionEntity == null) {
+            questionEntity = rfidCardMappingDao.getQuestionByRfidUid(rfidUid);
+        }
 
         // Try series range match if exact match fails
         if (questionEntity == null) {
