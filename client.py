@@ -61,10 +61,6 @@ logger = logging.getLogger("TestClient")
 mqtt_message_queue = Queue()
 udp_session_details = {}
 stop_threads = threading.Event()
-# Event to signal recording thread to start
-start_recording_event = threading.Event()
-# Event to signal recording thread to stop
-stop_recording_event = threading.Event()
 
 
 def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
@@ -385,11 +381,7 @@ class LiveKitAudioClient:
             if msg_type == 'agent_state_changed':
                 state = payload.get('state', '')
                 logger.info(f"[LIVEKIT] Agent state: {state}")
-                if state == 'listening':
-                    # Agent is listening - start recording immediately!
-                    logger.info("[LIVEKIT] Agent is listening - enabling microphone")
-                    stop_recording_event.clear()
-                    start_recording_event.set()
+                # Note: With push-to-talk, user controls recording via spacebar
 
             # Forward to MQTT message queue for processing by TestClient (backward compatibility)
             mqtt_message_queue.put(payload)
@@ -456,9 +448,14 @@ class LiveKitAudioClient:
             logger.error(f"[LIVEKIT] Failed to schedule data send: {e}")
 
     async def _receive_audio(self):
-        """Receive and queue audio frames from the agent."""
+        """Receive and play audio frames directly from the agent (streaming, no buffer)."""
         logger.info("[LIVEKIT] Started receiving audio stream")
         frame_count = 0
+        
+        # Initialize PyAudio for direct playback
+        p = pyaudio.PyAudio()
+        stream = None
+        
         try:
             async for event in self.audio_stream:
                 if self.stop_event.is_set():
@@ -466,20 +463,33 @@ class LiveKitAudioClient:
 
                 frame = event.frame  # Extract AudioFrame from AudioFrameEvent
                 frame_count += 1
+                
                 if frame_count == 1:
+                    # Initialize audio stream on first frame
                     logger.info(f"[LIVEKIT] First audio frame received! sample_rate={frame.sample_rate}, channels={frame.num_channels}")
+                    stream = p.open(
+                        format=pyaudio.paInt16,
+                        channels=frame.num_channels,
+                        rate=frame.sample_rate,
+                        output=True,
+                        frames_per_buffer=frame.samples_per_channel
+                    )
+                    logger.info(f"[LIVEKIT] Audio playback stream opened - streaming directly (no buffer)")
                 elif frame_count % 100 == 0:
                     logger.info(f"[LIVEKIT] Received {frame_count} audio frames")
 
-                # Convert AudioFrame to PCM bytes
-                pcm_data = frame.data.tobytes()
-
-                # Queue for playback
-                self.audio_playback_queue.put(pcm_data)
+                # Convert AudioFrame to PCM bytes and play immediately
+                if stream:
+                    pcm_data = frame.data.tobytes()
+                    stream.write(pcm_data)
 
         except Exception as e:
             logger.info(f"[LIVEKIT] Audio stream ended or error: {e}")
         finally:
+            if stream:
+                stream.stop_stream()
+                stream.close()
+            p.terminate()
             logger.info(f"[LIVEKIT] Audio stream task finished. Total frames: {frame_count}")
 
     def stop(self):
@@ -577,37 +587,24 @@ class TestClient:
                     except Exception as e:
                         logger.warning(f"[WARN] Failed to send UDP keepalive: {e}")
 
-            # Handle TTS stop signal (start recording for next user input)
+            # Handle TTS stop signal
             elif payload.get("type") == "tts" and payload.get("state") == "stop":
-                logger.info(
-                    "[MIC] TTS finished. Received 'stop' signal. Preparing for microphone capture...")
+                logger.info("[TTS] TTS finished.")
                 self.tts_active = False
                 self.print_sequence_summary()  # Print summary when TTS ends
 
-                # Only proceed with recording if we actually received audio
-                if self.total_packets_received > 0:
-                    # Clear the stop event to allow the recording thread to continue or start
-                    stop_recording_event.clear()
-                    # Set the start event to signal the recording thread to begin (if it was waiting)
-                    start_recording_event.set()
-                    logger.info(
-                        "[MIC] Cleared stop_recording_event and set start_recording_event for next recording.")
-                else:
-                    logger.warning(
-                        "[WARN] No audio packets received during TTS. Server may have an issue.")
-                    # Try to trigger another conversation after a short delay
-                    threading.Timer(2.0, self.retry_conversation).start()
+                # With push-to-talk, user controls when to speak via spacebar
+                if self.total_packets_received == 0:
+                    logger.warning("[WARN] No audio packets received during TTS. Server may have an issue.")
 
             # Handle STT message (server processed our speech)
             elif payload.get("type") == "stt":
                 transcription = payload.get("text", "")
-                logger.info(f"[EMOJI] Server transcribed: '{transcription}'")
+                logger.info(f"[STT] Server transcribed: '{transcription}'")
 
-            # Handle record stop signal (stop recording)
+            # Handle record stop signal (informational only with push-to-talk)
             elif payload.get("type") == "record_stop":
-                logger.info(
-                    "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
-                stop_recording_event.set()  # This will cause the recording thread loop to exit
+                logger.info("[INFO] Server sent record_stop (push-to-talk mode - user controls recording)")
 
             else:
                 mqtt_message_queue.put(payload)
@@ -1145,55 +1142,76 @@ class TestClient:
         logger.info("[BYE] UDP Listener shutting down.")
 
     def _record_and_send_audio_thread(self):
-        """Thread to record microphone audio and send it to the server."""
-        # Main loop to keep the thread alive for multiple recording sessions
-        while not stop_threads.is_set() and self.session_active:
-            # Wait here until the start event is set (e.g., after TTS stop)
-            if not start_recording_event.wait(timeout=1):
-                continue
-
-            # If the main stop signal was set while waiting, exit the thread
-            if stop_threads.is_set():
-                break
-
-            logger.info("[REC] Recording thread activated. Capturing audio.")
-            p = pyaudio.PyAudio()
+        """Thread to record microphone audio with push-to-talk (hold spacebar to record)."""
+        logger.info("[REC] Push-to-talk recording thread started. Hold SPACEBAR to talk.")
+        
+        p = pyaudio.PyAudio()
+        stream = None
+        is_recording = False
+        
+        # Get audio params from session details or use defaults
+        if udp_session_details and "audio_params" in udp_session_details:
             audio_params = udp_session_details["audio_params"]
-            FORMAT, CHANNELS, RATE, FRAME_DURATION_MS = pyaudio.paInt16, audio_params[
-                "channels"], audio_params["sample_rate"], audio_params["frame_duration"]
-            SAMPLES_PER_FRAME = int(RATE * FRAME_DURATION_MS / 1000)
-
-            # Only create Opus encoder for UDP mode (LiveKit handles encoding)
-            encoder = None
-            if not self.use_livekit_direct:
-                try:
-                    encoder = opuslib.Encoder(
-                        RATE, CHANNELS, opuslib.APPLICATION_VOIP)
-                except Exception as e:
-                    logger.error(f"[ERROR] Failed to create Opus encoder: {e}")
-                    return  # Exit thread if encoder fails
-
-            stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE,
-                            input=True, frames_per_buffer=SAMPLES_PER_FRAME)
-
-            if self.use_livekit_direct:
-                logger.info("[MIC] Microphone stream opened. Sending audio via LiveKit...")
-            else:
-                logger.info("[MIC] Microphone stream opened. Sending audio to server via UDP...")
-                server_udp_addr = (
-                    udp_session_details['udp']['server'], udp_session_details['udp']['port'])
-
-            packets_sent = 0
-            last_log_time = time.time()
-
-            # Inner loop for the active recording session
-            while not stop_threads.is_set() and not stop_recording_event.is_set() and self.session_active:
-                try:
-                    pcm_data = stream.read(
-                        SAMPLES_PER_FRAME, exception_on_overflow=False)
-
+        else:
+            audio_params = {"sample_rate": 16000, "channels": 1, "frame_duration": 60}
+        
+        FORMAT = pyaudio.paInt16
+        CHANNELS = audio_params["channels"]
+        # Use 16kHz for recording (agent expects this)
+        RATE = 16000
+        FRAME_DURATION_MS = audio_params.get("frame_duration", 60)
+        SAMPLES_PER_FRAME = int(RATE * FRAME_DURATION_MS / 1000)
+        
+        # Only create Opus encoder for UDP mode (LiveKit handles encoding)
+        encoder = None
+        if not self.use_livekit_direct:
+            try:
+                encoder = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_VOIP)
+            except Exception as e:
+                logger.error(f"[ERROR] Failed to create Opus encoder: {e}")
+                return
+        
+        # Open microphone stream once
+        try:
+            stream = p.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=SAMPLES_PER_FRAME
+            )
+            logger.info(f"[MIC] Microphone opened: {RATE}Hz, {CHANNELS}ch - Hold SPACEBAR to talk")
+        except Exception as e:
+            logger.error(f"[ERROR] Failed to open microphone: {e}")
+            p.terminate()
+            return
+        
+        packets_sent = 0
+        last_log_time = time.time()
+        
+        # Main recording loop with push-to-talk
+        while not stop_threads.is_set() and self.session_active:
+            try:
+                # Check if spacebar is pressed
+                space_pressed = keyboard.is_pressed('space')
+                
+                if space_pressed and not is_recording:
+                    # Start recording
+                    is_recording = True
+                    logger.info("[PTT] 🎤 Recording started (spacebar pressed)")
+                    
+                elif not space_pressed and is_recording:
+                    # Stop recording
+                    is_recording = False
+                    logger.info("[PTT] 🔇 Recording stopped (spacebar released)")
+                    packets_sent = 0
+                
+                if is_recording:
+                    # Read audio from microphone
+                    pcm_data = stream.read(SAMPLES_PER_FRAME, exception_on_overflow=False)
+                    
                     if self.use_livekit_direct:
-                        # Send PCM directly to LiveKit (it handles encoding)
+                        # Send PCM directly to LiveKit
                         if self.livekit_client and self.livekit_client.connected:
                             self.livekit_client.send_audio(pcm_data)
                             packets_sent += 1
@@ -1201,114 +1219,72 @@ class TestClient:
                         # UDP mode: Encode and encrypt
                         opus_data = encoder.encode(pcm_data, SAMPLES_PER_FRAME)
                         encrypted_packet = self.encrypt_packet(opus_data)
-
-                        if encrypted_packet:
-                            self.udp_socket.sendto(
-                                encrypted_packet, server_udp_addr)
+                        
+                        if encrypted_packet and udp_session_details:
+                            server_udp_addr = (
+                                udp_session_details['udp']['server'],
+                                udp_session_details['udp']['port']
+                            )
+                            self.udp_socket.sendto(encrypted_packet, server_udp_addr)
                             packets_sent += 1
-
+                    
+                    # Log stats every second while recording
                     if time.time() - last_log_time >= 1.0:
                         mode = "LiveKit" if self.use_livekit_direct else "UDP"
-                        logger.info(
-                            f"[UP]  Sent {packets_sent} audio packets via {mode} in the last second.")
+                        logger.info(f"[PTT] 📤 Sent {packets_sent} packets via {mode}")
                         packets_sent = 0
                         last_log_time = time.time()
-
-                except Exception as e:
-                    logger.error(
-                        f"An error occurred in the recording loop: {e}")
-                    break  # Exit inner loop on error
-
-            # Cleanup for the current recording session
-            logger.info("[MIC] Stopping microphone stream for this session.")
+                else:
+                    # Not recording - sleep briefly to avoid busy loop
+                    time.sleep(0.01)
+                    
+            except Exception as e:
+                logger.error(f"[ERROR] Recording loop error: {e}")
+                break
+        
+        # Cleanup
+        if stream:
             stream.stop_stream()
             stream.close()
-            p.terminate()
-
-            # Clear the start event so it has to be triggered again for the next session
-            start_recording_event.clear()
-
-            if stop_recording_event.is_set():
-                logger.info(
-                    "[STOP] Recording stopped by server signal. Waiting for next turn.")
-
-        logger.info("[REC] Recording thread finished completely.")
+        p.terminate()
+        logger.info("[REC] Recording thread finished.")
 
     def trigger_conversation(self):
-        """Starts the audio streaming threads and sends initial listen message."""
+        """Starts the audio streaming threads."""
         # Check if we have either LiveKit or UDP connection
         if not self.use_livekit_direct and not self.udp_socket:
             logger.error("[ERROR] No audio connection available (neither LiveKit nor UDP)")
             return False
 
-        logger.info("[STEP] STEP 4: Starting all streaming audio threads...")
-        global stop_threads, start_recording_event, stop_recording_event
+        logger.info("[STEP] STEP 4: Starting audio threads...")
+        global stop_threads
         stop_threads.clear()
-        # Initially, clear both events. The server's initial TTS will set start_recording_event.
-        start_recording_event.clear()
-        stop_recording_event.clear()
 
-        # Start playback thread (works for both modes - reads from audio_playback_queue)
-        self.playback_thread = threading.Thread(
-            target=self._playback_thread, daemon=True)
-        self.playback_thread.start()
-
-        # Only start UDP listener if not using LiveKit (LiveKit handles receiving in its own thread)
-        if not self.use_livekit_direct:
-            self.udp_listener_thread = threading.Thread(
-                target=self.listen_for_udp_audio, daemon=True)
-            self.udp_listener_thread.start()
-        else:
-            logger.info("[LIVEKIT] Skipping UDP listener - using LiveKit for audio")
-
-        # Start recording thread (handles both modes)
+        # Start recording thread with push-to-talk
         self.audio_recording_thread = threading.Thread(
             target=self._record_and_send_audio_thread, daemon=True)
         self.audio_recording_thread.start()
 
-        if self.use_livekit_direct and self.livekit_client:
-            # Direct mode: Client speaks first - enable recording immediately
-            logger.info("[LIVEKIT] Client speaks first mode - enabling microphone immediately...")
-            # Small delay to let LiveKit connection stabilize
-            time.sleep(1.0)
-            stop_recording_event.clear()
-            start_recording_event.set()
-            logger.info("[LIVEKIT] Microphone enabled - speak now!")
+        # Only start UDP listener if not using LiveKit (LiveKit streams audio directly)
+        if not self.use_livekit_direct:
+            # Start playback thread for UDP mode
+            self.playback_thread = threading.Thread(
+                target=self._playback_thread, daemon=True)
+            self.playback_thread.start()
+            
+            self.udp_listener_thread = threading.Thread(
+                target=self.listen_for_udp_audio, daemon=True)
+            self.udp_listener_thread.start()
         else:
-            # Gateway bridge mode: Send listen via MQTT
-            listen_payload = {
-                "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
-            self.mqtt_client.publish("device-server", json.dumps(listen_payload))
-            logger.info("[MQTT] Sent listen message via MQTT")
+            logger.info("[LIVEKIT] Audio streaming directly - no buffering")
 
+        logger.info("[READY] Hold SPACEBAR to talk, release to stop")
+        
         logger.info(
-            "[WAIT] Test running. Press Spacebar to abort TTS or Ctrl+C to stop.")
+            "[WAIT] 🎤 Hold SPACEBAR to talk | Press Ctrl+C to stop")
 
-        # Start a thread to monitor spacebar press
-        def monitor_spacebar():
-            while not stop_threads.is_set() and self.session_active:
-                if keyboard.is_pressed('space'):
-                    logger.info(
-                        "[EMOJI] Spacebar pressed. Sending abort message to server...")
-                    abort_payload = {
-                        "type": "abort",
-                        "session_id": udp_session_details["session_id"]
-                    }
-                    self.mqtt_client.publish(
-                        "device-server", json.dumps(abort_payload))
-                    logger.info(f"[EMOJI] Sent abort message: {abort_payload}")
-                    # Wait for the key to be released to avoid multiple sends
-                    while keyboard.is_pressed('space') and not stop_threads.is_set():
-                        time.sleep(0.01)
-                time.sleep(0.01)
-
-        spacebar_thread = threading.Thread(
-            target=monitor_spacebar, daemon=True)
-        spacebar_thread.start()
-
+        # Main wait loop - just keep running until stopped
         try:
-            # Keep running with better timeout handling
-            timeout_count = 0
             while not stop_threads.is_set() and self.session_active:
                 time.sleep(1)
 
@@ -1335,11 +1311,9 @@ class TestClient:
     def cleanup(self):
         """Cleans up resources and disconnects."""
         logger.info("[STEP] STEP 6: Cleaning up and disconnecting...")
-        global stop_threads, start_recording_event, stop_recording_event
+        global stop_threads
         stop_threads.set()
         self.session_active = False
-        start_recording_event.set()  # Unblock if waiting
-        stop_recording_event.set()  # Unblock if running
 
         # Print final sequence summary
         if ENABLE_SEQUENCE_LOGGING and self.total_packets_received > 0:
