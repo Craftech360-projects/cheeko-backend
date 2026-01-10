@@ -1,0 +1,53 @@
+# Dockerfile for MQTT Gateway - Local Docker Deployment
+# Starts with: node app.js
+
+FROM node:20-bullseye
+
+# Create app directory
+WORKDIR /usr/src/app
+
+# Install system dependencies for native modules
+RUN apt-get update && apt-get install -y \
+  git \
+  python3 \
+  make \
+  g++ \
+  libasound2-dev \
+  libasound2 \
+  alsa-utils \
+  libpulse-dev \
+  libpulse0 \
+  netcat-openbsd \
+  curl \
+  && ldconfig \
+  && ln -sf /usr/lib/x86_64-linux-gnu/libasound.so.2 /usr/lib/libasound.so.2 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy package files first for better caching
+COPY package*.json ./
+
+# Downgrade @discordjs/opus to 0.9.0 to avoid prebuild issues
+RUN sed -i 's/"@discordjs\/opus": "github:discordjs\/opus"/"@discordjs\/opus": "^0.9.0"/' package.json
+
+# Install dependencies
+RUN npm install --production --unsafe-perm
+
+# Copy source code
+COPY . .
+
+# Copy Docker-specific .env file
+COPY .env.docker .env
+
+# Create necessary directories
+RUN mkdir -p logs config
+
+# Expose ports
+EXPOSE 8004
+EXPOSE 8884/udp
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -sf http://localhost:8004/health || exit 1
+
+# Start directly with node app.js
+CMD ["node", "app.js"]
