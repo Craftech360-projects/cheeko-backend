@@ -292,7 +292,7 @@ pipeline {
                             RETRY_COUNT=0
 
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${HOST}:8004/health 2>/dev/null || echo "000")
+                                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${HOST}:8004/health 2>/dev/null) || HTTP_CODE="000"
 
                                 if [ "$HTTP_CODE" = "200" ]; then
                                     echo "✅ MQTT Gateway is healthy!"

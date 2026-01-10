@@ -6,6 +6,7 @@
  */
 
 const dgram = require("dgram");
+const http = require("http");
 const mqtt = require("mqtt");
 const axios = require("axios");
 const {
@@ -241,11 +242,42 @@ class MQTTGateway {
       logger.warn(`UDP server listening on ${this.publicIp}:${this.udpPort}`);
     });
 
+    // Start HTTP health server on port 8004
+    this.startHealthServer();
+
     // Start global heartbeat check timer
     this.setupKeepAliveTimer();
 
     // Start ghost room/session cleanup timer (every 5 minutes)
     this.setupGhostCleanupTimer();
+  }
+
+  /**
+   * Start HTTP health server for container health checks
+   */
+  startHealthServer() {
+    const healthPort = parseInt(process.env.HTTP_PORT) || 8004;
+
+    this.healthServer = http.createServer((req, res) => {
+      if (req.method === 'GET' && req.url === '/health') {
+        const healthData = {
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          connections: this.connections.size,
+          devices: this.deviceConnections.size,
+          mqttConnected: this.mqttClient ? this.mqttClient.connected : false
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(healthData));
+      } else {
+        res.writeHead(404);
+        res.end('Not found');
+      }
+    });
+
+    this.healthServer.listen(healthPort, () => {
+      logger.info(`✅ [HEALTH] HTTP health server listening on port ${healthPort}`);
+    });
   }
 
   /**
