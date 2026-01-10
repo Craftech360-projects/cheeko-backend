@@ -1,0 +1,111 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = 'cheeko-manager-api'
+        CONTAINER_NAME = 'cheeko-manager-api'
+        HOST_PORT = '8002'
+        CONTAINER_PORT = '8002'
+        SERVICE_PATH = 'main/manager-api'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo '📥 Checking out code...'
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            // Maven build happens inside Docker multi-stage build
+            steps {
+                echo '🐳 Building Docker image...'
+                dir("${SERVICE_PATH}") {
+                    sh """
+                        docker build \
+                            -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                            -t ${IMAGE_NAME}:latest \
+                            -f Dockerfile.local .
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Local Docker') {
+            steps {
+                echo '🚀 Deploying to local Docker...'
+                sh """
+                    # Stop and remove existing container if running
+                    docker stop ${CONTAINER_NAME} 2>/dev/null || true
+                    docker rm ${CONTAINER_NAME} 2>/dev/null || true
+
+                    # Run new container with host.docker.internal support
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        --restart unless-stopped \
+                        --add-host=host.docker.internal:host-gateway \
+                        -p ${HOST_PORT}:${CONTAINER_PORT} \
+                        -v /uploadfile:/uploadfile \
+                        ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    # Wait for container to start
+                    echo 'Waiting for container to start...'
+                    sleep 10
+                """
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                echo '🏥 Running health check...'
+                sh '''
+                    # Wait for Spring Boot to fully start
+                    echo "Waiting for Spring Boot to initialize..."
+                    sleep 30
+
+                    # Check health endpoint
+                    MAX_RETRIES=5
+                    RETRY_COUNT=0
+
+                    while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                        if curl -sf http://localhost:8002/toy/actuator/health > /dev/null 2>&1; then
+                            echo "✅ Manager API is healthy!"
+                            curl -s http://localhost:8002/toy/actuator/health | head -100
+                            exit 0
+                        fi
+
+                        RETRY_COUNT=$((RETRY_COUNT + 1))
+                        echo "Waiting for API to be ready... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+                        sleep 10
+                    done
+
+                    echo "⚠️ Health check timeout - checking container logs..."
+                    docker logs cheeko-manager-api --tail 50
+                    exit 1
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ✅ Pipeline completed successfully!
+
+            Manager API is running at: http://localhost:${HOST_PORT}/toy
+            API Docs: http://localhost:${HOST_PORT}/toy/doc.html
+            Health: http://localhost:${HOST_PORT}/toy/actuator/health
+            Docker Image: ${IMAGE_NAME}:${BUILD_NUMBER}
+            """
+        }
+        failure {
+            echo '❌ Pipeline failed! Check the logs above for details.'
+            sh 'docker logs ${CONTAINER_NAME} --tail 100 2>/dev/null || true'
+        }
+        always {
+            echo '🧹 Cleaning up workspace...'
+            deleteDir()
+        }
+    }
+}
