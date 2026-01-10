@@ -182,6 +182,7 @@ main/manager-web/.webpack_cache/
 main/xiaozhi-server/mysql
 uploadfile
 *.json
+!package-lock.json
 .vscode
 
 # Spring Boot configuration files (contain sensitive data)
