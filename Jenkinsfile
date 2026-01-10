@@ -128,13 +128,16 @@ pipeline {
                             API_HOST="host.docker.internal"
 
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                                if curl -sf http://${API_HOST}:8002/toy/actuator/health > /dev/null 2>&1; then
-                                    echo "✅ Manager API is healthy!"
-                                    curl -s http://${API_HOST}:8002/toy/actuator/health
+                                # Check if API responds (401 Unauthorized is OK - means server is running)
+                                HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://${API_HOST}:8002/toy/actuator/health 2>/dev/null || echo "000")
+
+                                if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+                                    echo "✅ Manager API is healthy! (HTTP $HTTP_CODE)"
                                     exit 0
                                 fi
+
                                 RETRY_COUNT=$((RETRY_COUNT + 1))
-                                echo "Waiting for API... (attempt $RETRY_COUNT/$MAX_RETRIES)"
+                                echo "Waiting for API... (attempt $RETRY_COUNT/$MAX_RETRIES, HTTP: $HTTP_CODE)"
                                 sleep 10
                             done
 
