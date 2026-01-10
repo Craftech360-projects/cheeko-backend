@@ -594,6 +594,18 @@ class MQTTGateway {
         return;
       }
 
+      // Handle mode-change messages from device
+      if (originalPayload.type === "mode-change") {
+        const mode = originalPayload.mode;
+        if (mode) {
+          await this.handleModeChange(deviceId, mode, clientId);
+          return;
+        } else {
+          logger.warn(`⚠️ [MODE-CHANGE] No mode specified in payload`);
+          return;
+        }
+      }
+
       // Handle specific content playback requests (play_music / play_story)
       if (originalPayload.type === "function_call") {
         const functionName = originalPayload.function_call?.name;
@@ -758,9 +770,9 @@ class MQTTGateway {
           rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
 
           if (rfidContent) {
-            // For read_only mode, use contentText; for prompt mode, use promptText
+            // For read_only/animal mode, use contentText; for prompt mode, use promptText
             textToSend =
-              rfidContent.contentType === "read_only"
+              rfidContent.contentType === "read_only" || rfidContent.contentType === "animal"
                 ? rfidContent.contentText
                 : rfidContent.promptText;
           }
@@ -861,9 +873,9 @@ class MQTTGateway {
 
           // Add RAG content fields if available
           if (rfidContent) {
-            userTextMsg.content_type = rfidContent.contentType; // "read_only" or "prompt"
+            userTextMsg.content_type = rfidContent.contentType; // "read_only", "animal", or "prompt"
             userTextMsg.title = rfidContent.title;
-            userTextMsg.content_text = rfidContent.contentText; // For read_only mode
+            userTextMsg.content_text = rfidContent.contentText; // For read_only/animal mode
             userTextMsg.prompt_text = rfidContent.promptText; // For prompt mode
             userTextMsg.pack_code = rfidContent.packCode;
             userTextMsg.language = rfidContent.language;
@@ -1187,6 +1199,201 @@ class MQTTGateway {
         };
         this.mqttPublish(errorTopic, errorMsg);
       }
+    }
+  }
+
+  /**
+   * Handle mode-change messages from device
+   * Switches between conversation, music, and story modes
+   * @param {string} deviceId - Device MAC address
+   * @param {string} mode - Target mode: "conversation", "music", or "story"
+   * @param {string} clientId - MQTT client ID
+   */
+  async handleModeChange(deviceId, mode, clientId = null) {
+    const validModes = ["conversation", "music", "story"];
+
+    if (!validModes.includes(mode)) {
+      logger.warn(`⚠️ [MODE-CHANGE] Invalid mode: ${mode}, valid modes: ${validModes.join(", ")}`);
+      return;
+    }
+
+    logger.info(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode: ${mode}`);
+
+    try {
+      const deviceInfo = this.deviceConnections.get(deviceId);
+      if (!deviceInfo) {
+        logger.warn(`⚠️ [MODE-CHANGE] Device not found: ${deviceId}`);
+        return;
+      }
+
+      const connection = deviceInfo.connection;
+      if (!connection) {
+        logger.warn(`⚠️ [MODE-CHANGE] No connection for device: ${deviceId}`);
+        return;
+      }
+
+      // Check if already in the same mode
+      if (connection.roomType === mode) {
+        logger.info(`ℹ️ [MODE-CHANGE] Device ${deviceId} already in ${mode} mode, skipping`);
+        return;
+      }
+
+      const previousMode = connection.roomType || null;
+      logger.info(`🔄 [MODE-CHANGE] Switching from ${previousMode} to ${mode}`);
+
+      // Step 1: Cleanup old room/agent if exists
+      if (connection.bridge) {
+        logger.info(`🧹 [MODE-CHANGE] Cleaning up previous ${previousMode} session`);
+        await this.performRobustAgentCleanup(connection, 'mode_change');
+      }
+
+      // Step 2: Generate new room name
+      const newSessionUuid = require("crypto").randomUUID();
+      const macForRoom = deviceId.replace(/:/g, "");
+      const newRoomName = `${newSessionUuid}_${macForRoom}_${mode}`;
+      logger.info(`🏠 [MODE-CHANGE] New room: ${newRoomName}`);
+
+      // Step 3: Update connection state
+      connection.roomType = mode;
+      connection.udp = connection.udp || {};
+      connection.udp.session_id = newRoomName;
+      deviceInfo.currentMode = mode;
+
+      // Step 4: Create new LiveKit bridge and connect
+      const newBridge = new LiveKitBridge(
+        connection,
+        connection.protocolVersion || 1,
+        deviceId,                      // macAddress
+        newSessionUuid,                // uuid
+        connection.userData || {},     // userData
+        this.workerPool                // workerPool for audio encoding/decoding
+      );
+
+      try {
+        await newBridge.connect();
+        connection.bridge = newBridge;
+        logger.info(`✅ [MODE-CHANGE] Bridge connected to room: ${newRoomName}`);
+      } catch (bridgeError) {
+        logger.error(`❌ [MODE-CHANGE] Failed to connect bridge: ${bridgeError.message}`);
+        return;
+      }
+
+      // Step 5: Dispatch agent/bot based on mode
+      if (mode === "conversation") {
+        // Dispatch conversation agent
+        if (this.agentDispatchClient) {
+          try {
+            // Fetch character name
+            const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+            let characterName = "Cheeko";
+            let childProfile = null;
+
+            try {
+              const [charResponse, profileResponse] = await Promise.all([
+                axios.get(`${process.env.MANAGER_API_URL}/agent/device/${macAddress}/current-character`, { timeout: 5000 }),
+                axios.post(
+                  `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
+                  { macAddress },
+                  { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
+                )
+              ]);
+
+              if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
+                characterName = charResponse.data.data.characterName;
+              }
+              if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
+                childProfile = profileResponse.data.data;
+              }
+            } catch (fetchError) {
+              logger.warn(`⚠️ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
+            }
+
+            const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
+            logger.info(`🚀 [MODE-CHANGE] Dispatching: ${characterName} → ${agentName}`);
+
+            newBridge.agentDeployed = true;
+
+            await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
+              metadata: JSON.stringify({
+                device_mac: deviceId,
+                character: characterName,
+                child_profile: childProfile,
+                timestamp: Date.now(),
+              }),
+            });
+
+            connection.currentCharacter = characterName;
+            logger.info(`✅ [MODE-CHANGE] Agent ${agentName} dispatched to ${newRoomName}`);
+          } catch (dispatchError) {
+            newBridge.agentDeployed = false;
+            logger.error(`❌ [MODE-CHANGE] Failed to dispatch agent: ${dispatchError.message}`);
+          }
+        } else {
+          logger.error(`❌ [MODE-CHANGE] AgentDispatchClient not initialized`);
+        }
+      } else if (mode === "music") {
+        // Start music bot - must call /start-music-bot to create bot first
+        const apiUrl = `${MEDIA_API_BASE}/start-music-bot`;
+        const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+        try {
+          const response = await axios.post(
+            apiUrl,
+            {
+              room_name: newRoomName,
+              device_mac: macAddress,
+              language: null,  // Use all languages
+              playlist: null   // Auto-generate playlist
+            },
+            mediaAxiosConfig({ timeout: 10000 })
+          );
+          if (response.data?.status === "started" || response.data?.status === "already_active") {
+            logger.info(`✅ [MODE-CHANGE] Music bot started for ${newRoomName}`);
+          }
+        } catch (error) {
+          logger.error(`❌ [MODE-CHANGE] Failed to start music bot: ${error.message}`);
+        }
+      } else if (mode === "story") {
+        // Start story bot - must call /start-story-bot to create bot first
+        const apiUrl = `${MEDIA_API_BASE}/start-story-bot`;
+        const macAddress = deviceId.replace(/:/g, "").toLowerCase();
+        try {
+          const response = await axios.post(
+            apiUrl,
+            {
+              room_name: newRoomName,
+              device_mac: macAddress,
+              age_group: null,  // Use all age groups
+              playlist: null    // Auto-generate playlist
+            },
+            mediaAxiosConfig({ timeout: 10000 })
+          );
+          if (response.data?.status === "started" || response.data?.status === "already_active") {
+            logger.info(`✅ [MODE-CHANGE] Story bot started for ${newRoomName}`);
+          }
+        } catch (error) {
+          logger.error(`❌ [MODE-CHANGE] Failed to start story bot: ${error.message}`);
+        }
+      }
+
+      // Step 6: Send mode_update confirmation to device
+      if (clientId) {
+        const modeUpdateMsg = {
+          type: "mode_update",
+          mode: mode,
+          session_id: newRoomName,
+          previous_mode: previousMode,
+          timestamp: Date.now(),
+        };
+
+        const responseTopic = `devices/p2p/${clientId}`;
+        this.mqttPublish(responseTopic, modeUpdateMsg);
+        logger.info(`📤 [MODE-CHANGE] Sent mode_update to device: ${mode}`);
+      }
+
+      logger.info(`✅ [MODE-CHANGE] Successfully switched device ${deviceId} to ${mode} mode`);
+
+    } catch (error) {
+      logger.error(`❌ [MODE-CHANGE] Error: ${error.message}`, { stack: error.stack });
     }
   }
 

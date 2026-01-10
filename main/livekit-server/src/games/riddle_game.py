@@ -141,12 +141,12 @@ class RiddleGameState:
 
     def is_game_complete(self) -> bool:
         """
-        Check if game is complete (3 correct in a row)
+        Check if game is complete (5 correct in a row)
 
         Returns:
-            bool: True if streak reached 3
+            bool: True if streak reached 5
         """
-        return self.streak >= 3
+        return self.streak >= 5
 
     def get_state(self) -> dict:
         """

@@ -55,8 +55,20 @@ GAME_TOOLS = [check_math_answer, update_agent_mode]
 class MathTutorAssistant(BaseAssistant):
     """Math Tutor Assistant"""
 
-    # Custom greeting for Math Tutor
-    GREETING_INSTRUCTION = "Greet the user as a friendly Math Tutor. Introduce yourself briefly and ask if they're ready for a fun math challenge. Keep it encouraging and playful."
+    # Custom greeting for Math Tutor - MUST include first question immediately
+    GREETING_INSTRUCTION = """You are the Maths Commander. Start the game NOW with a greeting AND your first math question in ONE response.
+
+REQUIRED FORMAT - Say EXACTLY this pattern:
+"Namaste beta! I'm your Maths Commander! Arrey, we have an EMERGENCY! [UNIQUE STORY WITH MATH PROBLEM]? Tell me quick!"
+
+EXAMPLE: "Namaste beta! I'm your Maths Commander! Arrey, we have an EMERGENCY! There are 8 parrots on a tree and 3 fly away! How many are left? Tell me quick!"
+
+RULES:
+1. Greet + Ask first question in ONE turn
+2. Use a UNIQUE Indian-themed story (cricket, food, animals, festivals)
+3. Use simple addition or subtraction with numbers under 20
+4. End with the question and STOP - do NOT add anything after
+5. Wait silently for the child's answer"""
 
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
@@ -99,7 +111,8 @@ async def entrypoint(ctx: JobContext):
     realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
     gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
     gemini_voice = realtime_config.get('voice', 'Zephyr')
-    gemini_temperature = realtime_config.get('temperature', 0.8)
+    # Lower temperature for more consistent game behavior (was 0.8)
+    gemini_temperature = realtime_config.get('temperature', 0.6)
 
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)

@@ -59,7 +59,9 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
     start_time = time.perf_counter()
 
     try:
-        logger.info(f"🧮 Checking math answer: user='{user_answer}', expected='{expected_answer}'")
+        logger.info(f"{'=' * 60}")
+        logger.info(f"🧮 [MATH-TOOL] check_math_answer CALLED")
+        logger.info(f"🧮 [MATH-TOOL] INPUT: user_answer='{user_answer}', expected_answer='{expected_answer}'")
         
         # Parse user answer to number
         parsed_user = _parse_number_from_text(user_answer)
@@ -92,21 +94,25 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                 _math_game_state.streak += 1
                 _math_game_state.current_attempts = 0
                 
+                game_complete = _math_game_state.streak >= 5
                 result = {
                     'correct': True,
                     'retry': False,
                     'move_next': True,
                     'streak': _math_game_state.streak,
-                    'game_complete': _math_game_state.streak >= 5,
+                    'game_complete': game_complete,
                     'message': f"Correct! Streak: {_math_game_state.streak}"
                 }
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
-                logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (correct)")
+                logger.info(f"🧮 [MATH-TOOL] RESULT: correct=True, streak={_math_game_state.streak}, game_complete={game_complete}")
+                logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
+                logger.info(f"{'=' * 60}")
                 return json.dumps(result)
             else:
                 _math_game_state.streak = 0
                 _math_game_state.current_attempts += 1
-                
+                logger.info(f"🧮 [MATH-TOOL] WRONG: parsed_user={parsed_user}, parsed_expected={parsed_expected}, attempts={_math_game_state.current_attempts}/{_math_game_state.max_attempts}")
+
                 if _math_game_state.current_attempts < _math_game_state.max_attempts:
                     result = {
                         'correct': False,
@@ -116,8 +122,9 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                         'game_complete': False,
                         'message': f"Try again! Attempts left: {_math_game_state.max_attempts - _math_game_state.current_attempts}"
                     }
-                    elapsed_ms = (time.perf_counter() - start_time) * 1000
-                    logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (retry)")
+                    logger.info(f"🧮 [MATH-TOOL] RESULT: correct=False, retry=True, streak=0")
+                    logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
+                    logger.info(f"{'=' * 60}")
                     return json.dumps(result)
                 else:
                     _math_game_state.current_attempts = 0
@@ -130,8 +137,9 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                         'correct_answer': str(parsed_expected),
                         'message': f"The answer was {parsed_expected}. Let's try a new one!"
                     }
-                    elapsed_ms = (time.perf_counter() - start_time) * 1000
-                    logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (move_next)")
+                    logger.info(f"🧮 [MATH-TOOL] RESULT: correct=False, move_next=True, streak=0")
+                    logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
+                    logger.info(f"{'=' * 60}")
                     return json.dumps(result)
         else:
             # No state, simple check
@@ -185,15 +193,42 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
 
     try:
         logger.info(f"🤔 Checking riddle answer: user='{user_answer}', expected='{expected_answer}'")
-        
+
         # Normalize both answers for comparison
         user_normalized = user_answer.lower().strip()
         expected_normalized = expected_answer.lower().strip()
-        
-        # Check if correct (exact match or contained)
-        is_correct = (user_normalized == expected_normalized or 
-                     expected_normalized in user_normalized or
-                     user_normalized in expected_normalized)
+
+        # Remove common prefixes from user answer
+        prefixes_to_remove = ["it's a ", "it is a ", "it's an ", "it is an ", "it's ", "it is ",
+                              "a ", "an ", "the ", "is it a ", "is it an ", "is it "]
+        for prefix in prefixes_to_remove:
+            if user_normalized.startswith(prefix):
+                user_normalized = user_normalized[len(prefix):]
+                break
+
+        # Also clean expected answer
+        for prefix in prefixes_to_remove:
+            if expected_normalized.startswith(prefix):
+                expected_normalized = expected_normalized[len(prefix):]
+                break
+
+        logger.info(f"🤔 Normalized: user='{user_normalized}', expected='{expected_normalized}'")
+
+        # Check if correct with improved matching
+        is_correct = False
+
+        # Exact match
+        if user_normalized == expected_normalized:
+            is_correct = True
+        # Expected is IN user's answer (they said more than needed, e.g., "a clock" when answer is "clock")
+        elif expected_normalized in user_normalized:
+            is_correct = True
+        # User's core answer is in expected (partial but meaningful match)
+        # Only if user's answer is substantial (at least 3 chars) and not too short compared to expected
+        elif len(user_normalized) >= 3 and user_normalized in expected_normalized:
+            # Require user's answer to be at least 50% of expected length to avoid false positives
+            if len(user_normalized) >= len(expected_normalized) * 0.5:
+                is_correct = True
         
         if _riddle_game_state:
             if is_correct:
@@ -413,19 +448,20 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
 def _parse_number_from_text(text: str) -> Optional[float]:
     """
     Parse a number from text (handles words like 'eight', 'twenty-one', etc.)
+    Also handles common STT errors and variations.
     """
     if text is None:
         return None
-        
+
     text = str(text).lower().strip()
-    
+
     # First try direct number parsing
     try:
         return float(text)
     except ValueError:
         pass
-    
-    # Word to number mapping
+
+    # Word to number mapping (including common STT errors)
     word_to_num = {
         'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4,
         'five': 5, 'six': 6, 'seven': 7, 'eight': 8, 'nine': 9,
@@ -433,27 +469,69 @@ def _parse_number_from_text(text: str) -> Optional[float]:
         'fourteen': 14, 'fifteen': 15, 'sixteen': 16, 'seventeen': 17,
         'eighteen': 18, 'nineteen': 19, 'twenty': 20,
         'thirty': 30, 'forty': 40, 'fifty': 50, 'sixty': 60,
-        'seventy': 70, 'eighty': 80, 'ninety': 90, 'hundred': 100
+        'seventy': 70, 'eighty': 80, 'ninety': 90, 'hundred': 100,
+        # Common STT errors
+        'to': 2, 'too': 2, 'tu': 2,
+        'for': 4, 'fore': 4,
+        'won': 1, 'wan': 1,
+        'ate': 8, 'ait': 8,
+        'tree': 3, 'free': 3,
+        'sex': 6, 'sax': 6,
+        'nein': 9, 'nain': 9,
+        'tin': 10, 'tan': 10,
+        # Hindi/Indian English variations
+        'ek': 1, 'do': 2, 'teen': 3, 'char': 4, 'paanch': 5, 'panch': 5,
+        'chhe': 6, 'che': 6, 'saat': 7, 'sat': 7, 'aath': 8, 'ath': 8,
+        'nau': 9, 'das': 10,
     }
-    
+
     # Check for exact word match
     if text in word_to_num:
         return float(word_to_num[text])
-    
+
     # Handle compound numbers (e.g., "twenty-one", "twenty one")
     text = text.replace('-', ' ')
     parts = text.split()
-    
+
+    # Handle "hundred" properly (e.g., "two hundred", "one hundred five")
+    if 'hundred' in parts:
+        try:
+            hundred_idx = parts.index('hundred')
+            multiplier = 1
+            if hundred_idx > 0 and parts[hundred_idx - 1] in word_to_num:
+                multiplier = word_to_num[parts[hundred_idx - 1]]
+            result = multiplier * 100
+
+            # Check for remainder after "hundred"
+            remainder_parts = parts[hundred_idx + 1:]
+            if remainder_parts:
+                for part in remainder_parts:
+                    if part in word_to_num:
+                        result += word_to_num[part]
+            return float(result)
+        except Exception:
+            pass
+
+    # Handle two-part compound numbers (e.g., "twenty one")
     if len(parts) == 2:
         if parts[0] in word_to_num and parts[1] in word_to_num:
             return float(word_to_num[parts[0]] + word_to_num[parts[1]])
-    
-    # Try to extract first number from text
+
+    # Try single parts
+    if len(parts) == 1 and parts[0] in word_to_num:
+        return float(word_to_num[parts[0]])
+
+    # Try to extract first number from text using regex
     import re
     numbers = re.findall(r'\d+\.?\d*', text)
     if numbers:
         return float(numbers[0])
-    
+
+    # Last resort: check if any word in text maps to a number
+    for part in parts:
+        if part in word_to_num:
+            return float(word_to_num[part])
+
     return None
 
 

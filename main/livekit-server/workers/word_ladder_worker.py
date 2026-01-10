@@ -55,12 +55,19 @@ GAME_TOOLS = [validate_word_ladder_move, update_agent_mode]
 class WordLadderAssistant(BaseAssistant):
     """Word Ladder Assistant"""
 
-    # Custom greeting for Word Ladder
-    GREETING_INSTRUCTION = "Greet the user as the Word Ladder game host. Introduce the word ladder game briefly and ask if they're ready to climb the word ladder. Be enthusiastic and encouraging."
+    # Default greeting - will be overridden with word pair in __init__
+    GREETING_INSTRUCTION = "Greet the user as the Word Pilot and announce the starting word and required letter."
 
-    def __init__(self, instructions: str = None) -> None:
+    def __init__(self, instructions: str = None, start_word: str = "road", target_word: str = "root") -> None:
         super().__init__(instructions=instructions)
-        logger.info("WordLadderAssistant initialized")
+        self.start_word = start_word
+        self.target_word = target_word
+        # Dynamic greeting that includes the actual word pair
+        self.GREETING_INSTRUCTION = f"""Greet the user as the Word Pilot. Then IMMEDIATELY announce the starting word and required letter.
+You MUST clearly say: "Our starting word is '{start_word.upper()}'! It ends with the letter '{start_word[-1].upper()}'. So give me a word that STARTS with '{start_word[-1].upper()}'!"
+Do NOT wait for them to say "yes" or "ready" - announce the starting word right after greeting.
+After announcing, STOP and wait silently for their word."""
+        logger.info(f"WordLadderAssistant initialized with words: {start_word} -> {target_word}")
 
 
 def prewarm(proc: JobProcess):
@@ -99,7 +106,8 @@ async def entrypoint(ctx: JobContext):
     realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
     gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
     gemini_voice = realtime_config.get('voice', 'Zephyr')
-    gemini_temperature = realtime_config.get('temperature', 0.8)
+    # Lower temperature for more consistent game behavior (was 0.8)
+    gemini_temperature = realtime_config.get('temperature', 0.6)
 
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)
@@ -346,7 +354,8 @@ async def entrypoint(ctx: JobContext):
     except Exception as e:
         logger.warning(f"Error handler not available: {e}")
 
-    assistant = WordLadderAssistant(instructions=agent_prompt)
+    # Pass word pair to assistant for dynamic greeting
+    assistant = WordLadderAssistant(instructions=agent_prompt, start_word=start_word, target_word=target_word)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
 
     from src.services.unified_audio_player import UnifiedAudioPlayer

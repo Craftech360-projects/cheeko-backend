@@ -78,14 +78,23 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_6_0__phonics_content_pack.sql
 
-  # - changeSet:
-  #     id: V1_7_0_rfid_cards_setup
-  #     author: cheeko
-  #     validCheckSum: ANY
-  #     changes:
-  #       - sqlFile:
-  #           encoding: utf8
-  #           path: classpath:db/changelog/V1_7_0__rfid_cards_setup.sql
+  - changeSet:
+      id: V1_7_0_rfid_cards_setup
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_7_0__rfid_cards_setup.sql
+
+  - changeSet:
+      id: V1_8_0_animal_sounds_content_pack
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_8_0__animal_sounds_content_pack.sql
 
   # # - changeSet:
   #     id: 202601032000

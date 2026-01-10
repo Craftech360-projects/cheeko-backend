@@ -55,8 +55,11 @@ GAME_TOOLS = [check_riddle_answer, update_agent_mode]
 class RiddleSolverAssistant(BaseAssistant):
     """Riddle Solver Assistant"""
 
-    # Custom greeting for Riddle Solver
-    GREETING_INSTRUCTION = "Greet the user as the Riddle Master. Introduce yourself mysteriously and ask if they're ready to solve some brain-teasing riddles. Be playful and intriguing."
+    # Custom greeting for Riddle Solver - includes immediate first riddle
+    GREETING_INSTRUCTION = """Greet the user as the Riddle Master. Then IMMEDIATELY present your first riddle.
+Do NOT wait for them to say "yes" or "ready" - after greeting, instantly ask the first riddle.
+Example: "Namaste detective! Shhh... You've reached the Haunted Haveli! Here's your first mystery: I have hands but cannot clap, I have a face but cannot smile. What am I?"
+After asking, STOP and wait silently for the answer."""
 
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
@@ -99,7 +102,8 @@ async def entrypoint(ctx: JobContext):
     realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
     gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
     gemini_voice = realtime_config.get('voice', 'Zephyr')
-    gemini_temperature = realtime_config.get('temperature', 0.8)
+    # Lower temperature for more consistent game behavior (was 0.8)
+    gemini_temperature = realtime_config.get('temperature', 0.6)
 
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)

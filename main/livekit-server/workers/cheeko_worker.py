@@ -26,6 +26,7 @@ from livekit.agents import (
     cli,
     AutoSubscribe,
     RoomInputOptions,
+    # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
 from livekit import rtc, api
 from livekit.plugins import google, elevenlabs
@@ -34,6 +35,7 @@ from pydub import AudioSegment
 
 from src.config.config_loader import ConfigLoader
 from src.services.elevenlabs_tts_service import get_elevenlabs_service
+from src.services.animal_audio_service import AnimalAudioService
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
@@ -102,6 +104,57 @@ async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: s
 
     except Exception as e:
         logger.error(f"❌ [ELEVENLABS] Error playing audio: {e}")
+        raise
+
+
+async def play_local_mp3_audio(session: AgentSession, file_path: str, title: str = ""):
+    """
+    Play a local MP3 file via session.say() on the same audio track as TTS.
+    This ensures all audio plays on a single track (no robotic mixing).
+
+    Args:
+        session: The AgentSession to play audio through
+        file_path: Absolute path to the MP3 file
+        title: Title for logging purposes
+    """
+    try:
+        logger.info(f"🔊 [LOCAL-MP3] Playing audio from: {file_path}")
+
+        # Read the MP3 file
+        with open(file_path, 'rb') as f:
+            mp3_data = f.read()
+
+        # Convert MP3 to raw PCM audio (48kHz mono for LiveKit)
+        audio_segment = AudioSegment.from_mp3(io.BytesIO(mp3_data))
+        audio_segment = audio_segment.set_frame_rate(48000).set_channels(1)
+
+        # Get raw PCM data
+        raw_data = audio_segment.raw_data
+        sample_rate = audio_segment.frame_rate
+        num_channels = audio_segment.channels
+        samples_per_channel = len(audio_segment.get_array_of_samples())
+
+        logger.info(f"🔊 [LOCAL-MP3] Audio: {len(audio_segment)}ms, {sample_rate}Hz, {num_channels}ch")
+
+        # Create AudioFrame from the raw PCM data
+        audio_frame = rtc.AudioFrame(
+            data=raw_data,
+            sample_rate=sample_rate,
+            num_channels=num_channels,
+            samples_per_channel=samples_per_channel,
+        )
+
+        # Async generator that yields the audio frame
+        async def audio_generator():
+            yield audio_frame
+
+        # Play using session.say with pre-synthesized audio (same track as TTS)
+        await session.say(text=title, audio=audio_generator(), allow_interruptions=False, add_to_chat_ctx=False)
+
+        logger.info(f"✅ [LOCAL-MP3] Finished playing: {title}")
+
+    except Exception as e:
+        logger.error(f"❌ [LOCAL-MP3] Error playing audio: {e}")
         raise
 
 
@@ -289,6 +342,15 @@ async def entrypoint(ctx: JobContext):
     # Create AgentSession with mode switching tools and TTS for session.say()
     session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=MODE_SWITCH_TOOLS)
     logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + ElevenLabs TTS")
+
+    # Initialize animal audio service
+    animal_audio_service = AnimalAudioService()
+    logger.info(f"Animal audio service initialized: {animal_audio_service.sounds_dir}")
+    
+    # NOTE: BackgroundAudioPlayer is NOT used - it plays on a separate track causing robotic audio
+    # All audio (TTS + animal sounds) now plays via session.say() on a single track
+    # background_audio = BackgroundAudioPlayer()
+    # logger.info("BackgroundAudioPlayer created for animal sounds")
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
@@ -479,17 +541,19 @@ async def entrypoint(ctx: JobContext):
             # Handle text input forwarded from MQTT gateway (RFID text)
             # Supports RAG system with read_only content and legacy prompt mode
             if msg_type == 'user_text':
-                text = (message.get('text') or '').strip()
-                if not text:
-                    logger.warning("⚠️ user_text message with empty text, ignoring")
-                    return
-
-                # Extract RAG content fields
-                content_type = message.get('content_type', 'prompt')  # "read_only" or "prompt"
+                # Extract RAG content fields first (needed for validation)
+                content_type = message.get('content_type', 'prompt')  # "animal", "read_only", or "prompt"
                 title = message.get('title', '')
                 content_text = message.get('content_text', '')
                 sequence = message.get('sequence')
                 rfid_uid = message.get('rfid_uid', '')
+                text = (message.get('text') or '').strip()
+
+                # For animal/read_only, content is in content_text; for prompt, it's in text
+                has_content = bool(content_text) if content_type in ('animal', 'read_only') else bool(text)
+                if not has_content:
+                    logger.warning(f"⚠️ user_text message with empty content (type={content_type}), ignoring")
+                    return
 
                 logger.info(f"💬 [USER_TEXT] Received from gateway: content_type={content_type}, title={title}")
                 logger.info(f"🧾 [USER_TEXT-RAW] Payload: {message}")
@@ -499,7 +563,57 @@ async def entrypoint(ctx: JobContext):
                         # Mark agent as listening/processing for LED state
                         await emit_agent_state("listening")
 
-                        if content_type == 'read_only' and content_text:
+                        if content_type == 'animal' and content_text:
+                            # ANIMAL mode: Play TTS description + animal sound
+                            # audio_file can be explicit or derived from title (e.g., "Cow" → "cow.mp3")
+                            audio_filename = message.get('audio_file', '')
+                            if not audio_filename and title:
+                                # Derive audio filename from title: "Cow" → "cow.mp3"
+                                audio_filename = f"{title.lower().strip().replace(' ', '_')}.mp3"
+                                logger.info(f"🐾 [ANIMAL] Derived audio_file from title: {audio_filename}")
+                            logger.info(f"🐾 [ANIMAL] Processing animal: {title}, audio_file={audio_filename}")
+
+                            try:
+                                # Step 1: Generate and play TTS for the description
+                                logger.info(f"📖 [ANIMAL] Step 1: Speaking description for {title}")
+                                elevenlabs_svc = get_elevenlabs_service()
+                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
+
+                                if audio_data and not error:
+                                    logger.info(f"🎵 [ANIMAL] Generated {len(audio_data)} bytes of TTS audio")
+                                    await emit_agent_state("speaking")
+                                    await play_elevenlabs_audio(session, audio_data, title)
+                                    await emit_agent_state("listening")
+                                    logger.info(f"✅ [ANIMAL] Finished speaking description")
+                                else:
+                                    # Fallback to Gemini if ElevenLabs fails
+                                    logger.warning(f"⚠️ [ANIMAL] ElevenLabs failed: {error}, using Gemini")
+                                    await session.generate_reply(instructions=f"Say this: {content_text}")
+
+                                # Step 2: Play the animal sound (if audio_file provided)
+                                if audio_filename:
+                                    logger.info(f"🔊 [ANIMAL] Step 2: Playing animal sound: {audio_filename}")
+
+                                    # Small pause between TTS and animal sound
+                                    await asyncio.sleep(0.5)
+
+                                    # Get the sound file path
+                                    sound_path = animal_audio_service.get_animal_sound_path(audio_filename)
+
+                                    if sound_path:
+                                        logger.info(f"🎵 [ANIMAL] Playing sound from: {sound_path}")
+                                        # Play the animal sound on the SAME track as TTS (no robotic mixing)
+                                        await play_local_mp3_audio(session, sound_path, f"{title} sound")
+                                        logger.info(f"✅ [ANIMAL] Animal sound playback completed")
+                                    else:
+                                        logger.warning(f"⚠️ [ANIMAL] Sound file not found: {audio_filename}")
+                                else:
+                                    logger.info(f"ℹ️ [ANIMAL] No audio_file provided, skipping sound playback")
+
+                            except Exception as animal_error:
+                                logger.error(f"❌ [ANIMAL] Error in animal playback: {animal_error}")
+                        
+                        elif content_type == 'read_only' and content_text:
                             # RAG mode: Use ElevenLabs TTS for high-quality rhyme playback
                             logger.info(f"📖 [RFID-RAG] Generating ElevenLabs audio for: {title}")
 
@@ -566,6 +680,10 @@ async def entrypoint(ctx: JobContext):
 
     # Connect and start session
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+
+    # NOTE: BackgroundAudioPlayer NOT started - all audio plays via session.say() on single track
+    # await background_audio.start(room=ctx.room, agent_session=session)
+    # logger.info("✅ BackgroundAudioPlayer started")
 
     # DUPLICATE AGENT CHECK: Prevent multiple agents in same room
     # Check if another agent is already in the room
