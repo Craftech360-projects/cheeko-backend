@@ -124,9 +124,13 @@ pipeline {
                             MAX_RETRIES=5
                             RETRY_COUNT=0
 
+                            # Use host.docker.internal to access host from inside Jenkins container
+                            API_HOST="host.docker.internal"
+
                             while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-                                if curl -sf http://localhost:8002/toy/actuator/health > /dev/null 2>&1; then
+                                if curl -sf http://${API_HOST}:8002/toy/actuator/health > /dev/null 2>&1; then
                                     echo "✅ Manager API is healthy!"
+                                    curl -s http://${API_HOST}:8002/toy/actuator/health
                                     exit 0
                                 fi
                                 RETRY_COUNT=$((RETRY_COUNT + 1))
@@ -146,10 +150,14 @@ pipeline {
                         echo '🏥 Checking Manager Web health...'
                         sh '''
                             sleep 5
-                            if curl -sf http://localhost:8886/ > /dev/null 2>&1; then
+                            # Use host.docker.internal to access host from inside Jenkins container
+                            WEB_HOST="host.docker.internal"
+
+                            if curl -sf http://${WEB_HOST}:8886/ > /dev/null 2>&1; then
                                 echo "✅ Manager Web is healthy!"
                             else
                                 echo "⚠️ Web health check failed"
+                                docker logs cheeko-manager-web --tail 20
                                 exit 1
                             fi
                         '''
