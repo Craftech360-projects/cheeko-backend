@@ -124,9 +124,9 @@ pipeline {
         failure {
             echo '❌ Pipeline failed! Check the logs above for details.'
         }
-        cleanup {
+        always {
             echo '🧹 Cleaning up workspace...'
-            cleanWs()
+            deleteDir()
         }
     }
 }
