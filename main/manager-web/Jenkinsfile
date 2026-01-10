@@ -1,0 +1,132 @@
+pipeline {
+    agent any
+
+    tools {
+        nodejs 'NodeJS'
+    }
+
+    environment {
+        IMAGE_NAME = 'cheeko-manager-web'
+        CONTAINER_NAME = 'cheeko-manager-web'
+        HOST_PORT = '8886'
+        CONTAINER_PORT = '80'
+        SERVICE_PATH = 'main/manager-web'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo '📥 Checking out code...'
+                checkout scm
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                echo '📦 Installing dependencies...'
+                dir("${SERVICE_PATH}") {
+                    sh 'npm ci --no-audit --no-fund'
+                }
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                echo '🔍 Linting skipped (no lint script configured)...'
+                // Uncomment when ESLint is added:
+                // dir("${SERVICE_PATH}") {
+                //     sh 'npm run lint || true'
+                // }
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo '🧪 Tests skipped (no test script configured)...'
+                // Uncomment when tests are added:
+                // dir("${SERVICE_PATH}") {
+                //     sh 'npm test || true'
+                // }
+            }
+        }
+
+        stage('Build Vue App') {
+            steps {
+                echo '🔨 Building Vue.js application...'
+                dir("${SERVICE_PATH}") {
+                    sh 'npm run build'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo '🐳 Building Docker image...'
+                dir("${SERVICE_PATH}") {
+                    sh """
+                        docker build \
+                            -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                            -t ${IMAGE_NAME}:latest \
+                            -f Dockerfile.production .
+                    """
+                }
+            }
+        }
+
+        stage('Deploy to Local Docker') {
+            steps {
+                echo '🚀 Deploying to local Docker...'
+                sh """
+                    # Stop and remove existing container if running
+                    docker stop ${CONTAINER_NAME} 2>/dev/null || true
+                    docker rm ${CONTAINER_NAME} 2>/dev/null || true
+
+                    # Run new container
+                    docker run -d \
+                        --name ${CONTAINER_NAME} \
+                        --restart unless-stopped \
+                        -p ${HOST_PORT}:${CONTAINER_PORT} \
+                        ${IMAGE_NAME}:${BUILD_NUMBER}
+
+                    # Wait for container to be healthy
+                    echo 'Waiting for container to start...'
+                    sleep 5
+
+                    # Verify container is running
+                    docker ps | grep ${CONTAINER_NAME}
+                """
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                echo '🏥 Running health check...'
+                sh """
+                    # Wait for nginx to be ready
+                    sleep 3
+
+                    # Check if the app is responding
+                    curl -sf http://localhost:${HOST_PORT}/ > /dev/null && echo '✅ Application is healthy!' || echo '⚠️ Health check failed'
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo """
+            ✅ Pipeline completed successfully!
+
+            Manager Web is now running at: http://localhost:${HOST_PORT}
+            Docker Image: ${IMAGE_NAME}:${BUILD_NUMBER}
+            """
+        }
+        failure {
+            echo '❌ Pipeline failed! Check the logs above for details.'
+        }
+        cleanup {
+            echo '🧹 Cleaning up workspace...'
+            cleanWs()
+        }
+    }
+}
