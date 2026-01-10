@@ -91,13 +91,15 @@ pipeline {
         // ==========================================
         stage('Deploy EMQX Broker') {
             steps {
-                echo '📡 Deploying EMQX Broker with predefined rules...'
+                echo '📡 Checking EMQX Broker...'
                 sh '''
-                    # Check if EMQX is already running
-                    if docker ps -q -f name=cheeko-emqx | grep -q .; then
-                        echo "EMQX is already running, checking if update needed..."
-                        # For now, keep existing EMQX to preserve connections
-                        echo "✅ EMQX already running - skipping restart to preserve connections"
+                    # Check if ANY EMQX container is running (by port or by name pattern)
+                    EMQX_RUNNING=$(docker ps --filter "publish=1883" --format "{{.Names}}" | head -1)
+
+                    if [ -n "$EMQX_RUNNING" ]; then
+                        echo "✅ EMQX already running as '$EMQX_RUNNING' - keeping existing to preserve connections"
+                        echo "   MQTT: localhost:1883"
+                        echo "   Dashboard: localhost:18083"
                     else
                         echo "Starting new EMQX container..."
 
