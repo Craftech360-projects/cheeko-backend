@@ -48,5 +48,11 @@ python-logging-loki>=0.3.1
 # AWS S3 for audio caching
 boto3
 
+# SFTP for remote Navidrome upload
+paramiko
+
+# Async file I/O
+aiofiles
+
 # Gemini text API (for caching AI responses)
 google-generativeai

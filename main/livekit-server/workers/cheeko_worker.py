@@ -659,17 +659,17 @@ async def entrypoint(ctx: JobContext):
                             question_id = message.get('question_id')
 
                             if cached_audio_url:
-                                # CACHE HIT - Download and play cached audio
-                                logger.info(f"🎯 [CACHE-HIT] Playing cached response for {rfid_uid}")
-                                local_path = await audio_cache_service.get_cached_audio(cached_audio_url)
-                                if local_path:
+                                # CACHE HIT - Stream directly from Navidrome/CloudFront and play
+                                logger.info(f"🎯 [CACHE-HIT] Streaming cached response for {rfid_uid}")
+                                audio_bytes = await audio_cache_service.stream_cached_audio(cached_audio_url)
+                                if audio_bytes:
                                     await emit_agent_state("speaking")
-                                    await play_local_mp3_audio(session, local_path, title or "Cached response")
+                                    await play_elevenlabs_audio(session, audio_bytes, title or "Cached response")
                                     await emit_agent_state("listening")
                                     logger.info(f"✅ [CACHE-HIT] Finished playing cached audio")
                                     return
                                 else:
-                                    logger.warning(f"⚠️ [CACHE-HIT] Failed to download cached audio, regenerating...")
+                                    logger.warning(f"⚠️ [CACHE-HIT] Failed to stream cached audio, regenerating...")
 
                             # CACHE MISS - Generate new response
                             logger.info(f"🔄 [CACHE-MISS] Generating new response for {rfid_uid}")

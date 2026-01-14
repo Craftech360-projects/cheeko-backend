@@ -4,6 +4,8 @@ Similar to livekit-media/server.py but integrated with existing services
 """
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 import asyncio
@@ -31,6 +33,9 @@ LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
 # Manager API configuration (for analytics)
 MANAGER_API_URL = os.getenv("MANAGER_API_URL", "http://localhost:8002")
 MANAGER_API_SECRET = os.getenv("MANAGER_API_SECRET", "")
+
+# Navidrome music folder for static file serving (Direct Streaming Mode)
+NAVIDROME_MUSIC_FOLDER = os.getenv("NAVIDROME_MUSIC_FOLDER", "./navidrome_music")
 
 app = FastAPI(title="Cheeko Media API")
 
@@ -2254,6 +2259,21 @@ async def health_check():
         "music_service": music_service.is_initialized if music_service else False,
         "story_service": story_service.is_initialized if story_service else False
     }
+
+
+# Mount static files for audio streaming (Direct Streaming Mode - No S3/CDN)
+# This serves files from navidrome_music folder at /audio/ path
+# Example: http://server:8003/audio/ai_responses/questions/question_1.mp3
+_music_folder = Path(NAVIDROME_MUSIC_FOLDER)
+if _music_folder.exists():
+    app.mount("/audio", StaticFiles(directory=str(_music_folder)), name="audio")
+    print(f"🎵 [STATIC-FILES] Serving audio from: {_music_folder.absolute()}")
+else:
+    print(f"⚠️ [STATIC-FILES] Music folder not found: {NAVIDROME_MUSIC_FOLDER}")
+    # Create it so it can be used later
+    _music_folder.mkdir(parents=True, exist_ok=True)
+    app.mount("/audio", StaticFiles(directory=str(_music_folder)), name="audio")
+    print(f"🎵 [STATIC-FILES] Created and serving audio from: {_music_folder.absolute()}")
 
 
 if __name__ == "__main__":
