@@ -171,7 +171,7 @@ def main():
     logger.info("   docker-compose up -d media-server")
     logger.info("2. Update .env to use local media:")
     logger.info("   USE_CDN=false")
-    logger.info("   LOCAL_MEDIA_URL=http://192.168.1.2:8080")
+    logger.info("   LOCAL_MEDIA_URL=http://192.168.1.99:8080")
     logger.info("3. Test media playback with local files")
 
 

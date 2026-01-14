@@ -51,7 +51,7 @@ services:
     networks:
       - manager-api_manager-api-network
 
-  # Local Media Server (Nginx)
+  # Local Media Server (Nginx) - Legacy, replaced by Navidrome
   media-server:
     image: nginx:alpine
     container_name: media-server
@@ -60,6 +60,28 @@ services:
       - "8082:80"
     volumes:
       - ./local_media:/usr/share/nginx/html:ro
+    networks:
+      - manager-api_manager-api-network
+
+  # Navidrome Music Server - Content Management
+  # Web UI: http://192.168.1.2:4533
+  # Syncs to S3 via cron job for CloudFront delivery
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    restart: unless-stopped
+    ports:
+      - "4533:4533"
+    environment:
+      ND_SCANSCHEDULE: "*/5 * * * *"  # Scan for new files every 5 minutes
+      ND_LOGLEVEL: info
+      ND_SESSIONTIMEOUT: 24h
+      ND_BASEURL: ""
+      ND_ENABLETRANSCODINGCONFIG: "true"
+      ND_MUSICFOLDER: /music
+    volumes:
+      - navidrome_data:/data
+      - ./navidrome_music:/music
     networks:
       - manager-api_manager-api-network
 
@@ -72,4 +94,6 @@ volumes:
   qdrant_storage:
     driver: local
   ollama_data:
+    driver: local
+  navidrome_data:
     driver: local

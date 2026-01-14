@@ -35,6 +35,7 @@ from pydub import AudioSegment
 
 from src.config.config_loader import ConfigLoader
 from src.services.elevenlabs_tts_service import get_elevenlabs_service
+from src.services.edge_tts_service import get_edge_tts_service
 from src.services.animal_audio_service import AnimalAudioService
 from src.services.audio_cache_service import AudioCacheService
 from src.services.gemini_text_service import GeminiTextService
@@ -584,8 +585,8 @@ async def entrypoint(ctx: JobContext):
                             try:
                                 # Step 1: Generate and play TTS for the description
                                 logger.info(f"📖 [ANIMAL] Step 1: Speaking description for {title}")
-                                elevenlabs_svc = get_elevenlabs_service()
-                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
+                                edge_tts_svc = get_edge_tts_service()
+                                audio_data, error = await edge_tts_svc.generate_rhyme_speech(content_text, title)
 
                                 if audio_data and not error:
                                     logger.info(f"🎵 [ANIMAL] Generated {len(audio_data)} bytes of TTS audio")
@@ -594,8 +595,8 @@ async def entrypoint(ctx: JobContext):
                                     await emit_agent_state("listening")
                                     logger.info(f"✅ [ANIMAL] Finished speaking description")
                                 else:
-                                    # Fallback to Gemini if ElevenLabs fails
-                                    logger.warning(f"⚠️ [ANIMAL] ElevenLabs failed: {error}, using Gemini")
+                                    # Fallback to Gemini if Edge TTS fails
+                                    logger.warning(f"⚠️ [ANIMAL] Edge TTS failed: {error}, using Gemini")
                                     await session.generate_reply(instructions=f"Say this: {content_text}")
 
                                 # Step 2: Play the animal sound (from CDN or local)
@@ -626,16 +627,16 @@ async def entrypoint(ctx: JobContext):
                                 logger.error(f"❌ [ANIMAL] Error in animal playback: {animal_error}")
                         
                         elif content_type == 'read_only' and content_text:
-                            # RAG mode: Use ElevenLabs TTS for high-quality rhyme playback
-                            logger.info(f"📖 [RFID-RAG] Generating ElevenLabs audio for: {title}")
+                            # RAG mode: Use Edge TTS for high-quality rhyme playback
+                            logger.info(f"📖 [RFID-RAG] Generating Edge TTS audio for: {title}")
 
                             try:
-                                # Get ElevenLabs service and generate audio
-                                elevenlabs_svc = get_elevenlabs_service()
-                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
+                                # Get Edge TTS service and generate audio
+                                edge_tts_svc = get_edge_tts_service()
+                                audio_data, error = await edge_tts_svc.generate_rhyme_speech(content_text, title)
 
                                 if audio_data and not error:
-                                    logger.info(f"🎵 [RFID-RAG] ElevenLabs audio generated: {len(audio_data)} bytes")
+                                    logger.info(f"🎵 [RFID-RAG] Edge TTS audio generated: {len(audio_data)} bytes")
 
                                     # Play audio using session.say with pre-synthesized frames
                                     await emit_agent_state("speaking")
@@ -643,13 +644,13 @@ async def entrypoint(ctx: JobContext):
                                     await emit_agent_state("listening")
                                     logger.info(f"✅ [RFID-RAG] Finished playing rhyme: {title}")
                                 else:
-                                    # Fallback to Gemini if ElevenLabs fails
-                                    logger.warning(f"⚠️ [RFID-RAG] ElevenLabs failed: {error}, falling back to Gemini")
+                                    # Fallback to Gemini if Edge TTS fails
+                                    logger.warning(f"⚠️ [RFID-RAG] Edge TTS failed: {error}, falling back to Gemini")
                                     read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
                                     await session.generate_reply(instructions=read_instruction)
 
                             except Exception as tts_error:
-                                logger.error(f"❌ [RFID-RAG] ElevenLabs error: {tts_error}, falling back to Gemini")
+                                logger.error(f"❌ [RFID-RAG] Edge TTS error: {tts_error}, falling back to Gemini")
                                 read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
                                 await session.generate_reply(instructions=read_instruction)
                         else:
@@ -677,22 +678,22 @@ async def entrypoint(ctx: JobContext):
                             response_text = await gemini_text_service.generate_response(text)
 
                             if response_text:
-                                # Step 2: Generate audio with ElevenLabs
-                                logger.info(f"🎵 [CACHE-MISS] Generating ElevenLabs TTS for response")
-                                elevenlabs_svc = get_elevenlabs_service()
-                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(response_text, title or "AI Response")
+                                # Step 2: Generate audio with Edge TTS
+                                logger.info(f"🎵 [CACHE-MISS] Generating Edge TTS for response")
+                                edge_tts_svc = get_edge_tts_service()
+                                audio_data, error = await edge_tts_svc.generate_rhyme_speech(response_text, title or "AI Response")
 
                                 if audio_data and not error:
-                                    # Step 3: Upload to S3 cache and update DB (async, don't wait)
+                                    # Step 3: Upload to cache and update DB (async, don't wait)
                                     if question_id:
                                         async def save_and_update():
                                             try:
-                                                # Save to S3 (using question_id as cache key)
+                                                # Save to cache (S3 or Navidrome based on config)
                                                 cloudfront_url = await audio_cache_service.save_audio_to_cache(
                                                     audio_data, question_id
                                                 )
                                                 if cloudfront_url:
-                                                    logger.info(f"✅ [CACHE] Saved to S3: {cloudfront_url}")
+                                                    logger.info(f"✅ [CACHE] Saved: {cloudfront_url}")
                                                     # Update database with cached URL
                                                     await audio_cache_service.update_database_cached_url(
                                                         question_id, cloudfront_url
@@ -710,8 +711,8 @@ async def entrypoint(ctx: JobContext):
                                     await emit_agent_state("listening")
                                     logger.info(f"✅ [CACHE-MISS] Finished playing generated audio")
                                 else:
-                                    # Fallback to Gemini Realtime if ElevenLabs fails
-                                    logger.warning(f"⚠️ [CACHE-MISS] ElevenLabs failed: {error}, using Gemini Realtime")
+                                    # Fallback to Gemini Realtime if Edge TTS fails
+                                    logger.warning(f"⚠️ [CACHE-MISS] Edge TTS failed: {error}, using Gemini Realtime")
                                     await session.generate_reply(instructions=text)
                             else:
                                 # Fallback to Gemini Realtime if text generation fails
