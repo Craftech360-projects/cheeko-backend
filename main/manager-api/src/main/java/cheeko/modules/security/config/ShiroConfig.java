@@ -115,6 +115,7 @@ public class ShiroConfig {
         filterMap.put("/device/**/playlist/**", "anon"); // Allow anonymous access to playlist APIs
         filterMap.put("/admin/rfid/card/lookup/**", "anon"); // Allow ESP32 device access to RFID question lookup
         filterMap.put("/admin/rfid/series/lookup/**", "anon"); // Allow ESP32 device access to RFID series lookup
+        filterMap.put("/admin/rfid/question/*/cached-audio", "anon"); // Allow LiveKit server to update cached audio URL
         filterMap.put("/admin/rfid/pack/active", "anon"); // Allow public access to active packs
         filterMap.put("/admin/rfid/pack/age/**", "anon"); // Allow public access to age-based packs
         filterMap.put("/**", "oauth2");

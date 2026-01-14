@@ -36,6 +36,8 @@ from pydub import AudioSegment
 from src.config.config_loader import ConfigLoader
 from src.services.elevenlabs_tts_service import get_elevenlabs_service
 from src.services.animal_audio_service import AnimalAudioService
+from src.services.audio_cache_service import AudioCacheService
+from src.services.gemini_text_service import GeminiTextService
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
@@ -346,7 +348,12 @@ async def entrypoint(ctx: JobContext):
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
     logger.info(f"Animal audio service initialized: {animal_audio_service.sounds_dir}")
-    
+
+    # Initialize AI response caching services
+    audio_cache_service = AudioCacheService()
+    gemini_text_service = GeminiTextService()
+    logger.info(f"AI response caching services initialized")
+
     # NOTE: BackgroundAudioPlayer is NOT used - it plays on a separate track causing robotic audio
     # All audio (TTS + animal sounds) now plays via session.say() on a single track
     # background_audio = BackgroundAudioPlayer()
@@ -565,13 +572,14 @@ async def entrypoint(ctx: JobContext):
 
                         if content_type == 'animal' and content_text:
                             # ANIMAL mode: Play TTS description + animal sound
-                            # audio_file can be explicit or derived from title (e.g., "Cow" → "cow.mp3")
+                            # Get audio_url from CDN (new) or derive filename from title (fallback)
+                            audio_url = message.get('audio_url', '')
                             audio_filename = message.get('audio_file', '')
                             if not audio_filename and title:
                                 # Derive audio filename from title: "Cow" → "cow.mp3"
                                 audio_filename = f"{title.lower().strip().replace(' ', '_')}.mp3"
                                 logger.info(f"🐾 [ANIMAL] Derived audio_file from title: {audio_filename}")
-                            logger.info(f"🐾 [ANIMAL] Processing animal: {title}, audio_file={audio_filename}")
+                            logger.info(f"🐾 [ANIMAL] Processing animal: {title}, audio_url={audio_url}, audio_file={audio_filename}")
 
                             try:
                                 # Step 1: Generate and play TTS for the description
@@ -590,15 +598,19 @@ async def entrypoint(ctx: JobContext):
                                     logger.warning(f"⚠️ [ANIMAL] ElevenLabs failed: {error}, using Gemini")
                                     await session.generate_reply(instructions=f"Say this: {content_text}")
 
-                                # Step 2: Play the animal sound (if audio_file provided)
-                                if audio_filename:
-                                    logger.info(f"🔊 [ANIMAL] Step 2: Playing animal sound: {audio_filename}")
+                                # Step 2: Play the animal sound (from CDN or local)
+                                if audio_url or audio_filename:
+                                    logger.info(f"🔊 [ANIMAL] Step 2: Playing animal sound")
 
                                     # Small pause between TTS and animal sound
                                     await asyncio.sleep(0.5)
 
-                                    # Get the sound file path
-                                    sound_path = animal_audio_service.get_animal_sound_path(audio_filename)
+                                    # Get the sound file path using new CDN-aware method with fallback chain:
+                                    # 1. Local cache (if < 24h) → 2. CloudFront → 3. S3 → 4. Local assets
+                                    sound_path = await animal_audio_service.get_audio_file(
+                                        audio_url=audio_url,
+                                        filename=audio_filename
+                                    )
 
                                     if sound_path:
                                         logger.info(f"🎵 [ANIMAL] Playing sound from: {sound_path}")
@@ -606,9 +618,9 @@ async def entrypoint(ctx: JobContext):
                                         await play_local_mp3_audio(session, sound_path, f"{title} sound")
                                         logger.info(f"✅ [ANIMAL] Animal sound playback completed")
                                     else:
-                                        logger.warning(f"⚠️ [ANIMAL] Sound file not found: {audio_filename}")
+                                        logger.warning(f"⚠️ [ANIMAL] Sound file not found: url={audio_url}, file={audio_filename}")
                                 else:
-                                    logger.info(f"ℹ️ [ANIMAL] No audio_file provided, skipping sound playback")
+                                    logger.info(f"ℹ️ [ANIMAL] No audio_url or audio_file provided, skipping sound playback")
 
                             except Exception as animal_error:
                                 logger.error(f"❌ [ANIMAL] Error in animal playback: {animal_error}")
@@ -641,9 +653,70 @@ async def entrypoint(ctx: JobContext):
                                 read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
                                 await session.generate_reply(instructions=read_instruction)
                         else:
-                            # Prompt mode: Send to Gemini for generation (current behavior)
-                            logger.info(f"🤖 [RFID-PROMPT] Sending to Gemini: {text[:100]}...")
-                            await session.generate_reply(instructions=text)
+                            # Prompt mode: Check cache first, then generate if needed
+                            cached_audio_url = message.get('cached_audio_url', '')
+                            question_id = message.get('question_id')
+
+                            if cached_audio_url:
+                                # CACHE HIT - Download and play cached audio
+                                logger.info(f"🎯 [CACHE-HIT] Playing cached response for {rfid_uid}")
+                                local_path = await audio_cache_service.get_cached_audio(cached_audio_url)
+                                if local_path:
+                                    await emit_agent_state("speaking")
+                                    await play_local_mp3_audio(session, local_path, title or "Cached response")
+                                    await emit_agent_state("listening")
+                                    logger.info(f"✅ [CACHE-HIT] Finished playing cached audio")
+                                    return
+                                else:
+                                    logger.warning(f"⚠️ [CACHE-HIT] Failed to download cached audio, regenerating...")
+
+                            # CACHE MISS - Generate new response
+                            logger.info(f"🔄 [CACHE-MISS] Generating new response for {rfid_uid}")
+
+                            # Step 1: Get text from Gemini API (not realtime)
+                            response_text = await gemini_text_service.generate_response(text)
+
+                            if response_text:
+                                # Step 2: Generate audio with ElevenLabs
+                                logger.info(f"🎵 [CACHE-MISS] Generating ElevenLabs TTS for response")
+                                elevenlabs_svc = get_elevenlabs_service()
+                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(response_text, title or "AI Response")
+
+                                if audio_data and not error:
+                                    # Step 3: Upload to S3 cache and update DB (async, don't wait)
+                                    if question_id:
+                                        async def save_and_update():
+                                            try:
+                                                # Save to S3 (using question_id as cache key)
+                                                cloudfront_url = await audio_cache_service.save_audio_to_cache(
+                                                    audio_data, question_id
+                                                )
+                                                if cloudfront_url:
+                                                    logger.info(f"✅ [CACHE] Saved to S3: {cloudfront_url}")
+                                                    # Update database with cached URL
+                                                    await audio_cache_service.update_database_cached_url(
+                                                        question_id, cloudfront_url
+                                                    )
+                                            except Exception as cache_err:
+                                                logger.error(f"❌ [CACHE] Failed to save: {cache_err}")
+
+                                        asyncio.create_task(save_and_update())
+                                    else:
+                                        logger.warning(f"⚠️ [CACHE] No question_id, skipping cache save")
+
+                                    # Step 4: Play the audio immediately
+                                    await emit_agent_state("speaking")
+                                    await play_elevenlabs_audio(session, audio_data, title or "AI Response")
+                                    await emit_agent_state("listening")
+                                    logger.info(f"✅ [CACHE-MISS] Finished playing generated audio")
+                                else:
+                                    # Fallback to Gemini Realtime if ElevenLabs fails
+                                    logger.warning(f"⚠️ [CACHE-MISS] ElevenLabs failed: {error}, using Gemini Realtime")
+                                    await session.generate_reply(instructions=text)
+                            else:
+                                # Fallback to Gemini Realtime if text generation fails
+                                logger.warning(f"⚠️ [CACHE-MISS] Gemini text generation failed, using Realtime")
+                                await session.generate_reply(instructions=text)
                     except Exception as e:
                         logger.error(f"❌ Error handling user_text: {e}")
 

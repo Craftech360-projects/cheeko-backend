@@ -44,3 +44,9 @@ ddtrace
 
 # Grafana Loki logging
 python-logging-loki>=0.3.1
+
+# AWS S3 for audio caching
+boto3
+
+# Gemini text API (for caching AI responses)
+google-generativeai

@@ -48,6 +48,9 @@ public class RfidContentPackEntity extends BaseEntity {
     @Schema(description = "Language code (en, hi, etc.)")
     private String language;
 
+    @Schema(description = "Base CloudFront URL for audio files (e.g., https://d23u4d6oyrni77.cloudfront.net/audio/animals/)")
+    private String audioUrl;
+
     @Schema(description = "Active status: 0=Disabled, 1=Enabled")
     private Boolean active;
 

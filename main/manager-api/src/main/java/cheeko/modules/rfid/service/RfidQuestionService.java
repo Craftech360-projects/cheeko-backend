@@ -31,4 +31,11 @@ public interface RfidQuestionService extends CrudService<RfidQuestionEntity, Rfi
      * @return List of questions
      */
     List<RfidQuestionDTO> getActiveByLanguage(String language);
+
+    /**
+     * Update cached audio URL for a question
+     * @param id Question ID
+     * @param cachedAudioUrl CloudFront URL for cached audio
+     */
+    void updateCachedAudioUrl(Long id, String cachedAudioUrl);
 }

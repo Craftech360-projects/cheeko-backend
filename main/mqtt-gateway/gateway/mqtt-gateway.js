@@ -135,6 +135,9 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       promptText,
       packCode: data.packCode,
       language: data.language,
+      audioUrl: data.audioUrl,
+      cachedAudioUrl: data.cachedAudioUrl,
+      questionId: data.questionId,
     };
   } catch (error) {
     logger.error(
@@ -879,6 +882,18 @@ class MQTTGateway {
             userTextMsg.prompt_text = rfidContent.promptText; // For prompt mode
             userTextMsg.pack_code = rfidContent.packCode;
             userTextMsg.language = rfidContent.language;
+            // Add CloudFront audio URL for animal sounds
+            if (rfidContent.audioUrl) {
+              userTextMsg.audio_url = rfidContent.audioUrl;
+            }
+            // Add cached audio URL for AI-generated responses
+            if (rfidContent.cachedAudioUrl) {
+              userTextMsg.cached_audio_url = rfidContent.cachedAudioUrl;
+            }
+            // Add question ID for caching (identifies which question to update)
+            if (rfidContent.questionId) {
+              userTextMsg.question_id = rfidContent.questionId;
+            }
           }
 
           const payloadStr = JSON.stringify(userTextMsg);

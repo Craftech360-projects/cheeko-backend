@@ -119,6 +119,16 @@ public class RfidQuestionController {
         return new Result<>();
     }
 
+    @PutMapping("/{id}/cached-audio")
+    @Operation(summary = "Update cached audio URL for question")
+    public Result<Void> updateCachedAudioUrl(
+            @PathVariable("id") Long id,
+            @RequestBody Map<String, String> body) {
+        String cachedAudioUrl = body.get("cachedAudioUrl");
+        rfidQuestionService.updateCachedAudioUrl(id, cachedAudioUrl);
+        return new Result<>();
+    }
+
     @DeleteMapping
     @Operation(summary = "Delete questions")
     @RequiresPermissions("sys:role:superAdmin")

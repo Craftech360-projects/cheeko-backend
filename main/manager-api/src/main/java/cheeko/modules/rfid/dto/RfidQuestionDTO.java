@@ -53,6 +53,9 @@ public class RfidQuestionDTO implements Serializable {
     @Max(value = 5, message = "Difficulty must be between 1 and 5", groups = DefaultGroup.class)
     private Integer difficulty;
 
+    @Schema(description = "S3/CloudFront URL for cached AI-generated audio response")
+    private String cachedAudioUrl;
+
     @Schema(description = "Active status")
     private Boolean active;
 

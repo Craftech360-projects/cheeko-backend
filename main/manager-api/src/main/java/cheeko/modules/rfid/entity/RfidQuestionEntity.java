@@ -45,6 +45,9 @@ public class RfidQuestionEntity extends BaseEntity {
     @Schema(description = "Difficulty level (1-5)")
     private Integer difficulty;
 
+    @Schema(description = "S3/CloudFront URL for cached AI-generated audio response")
+    private String cachedAudioUrl;
+
     @Schema(description = "Active status: 0=Disabled, 1=Enabled")
     private Boolean active;
 

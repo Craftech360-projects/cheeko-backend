@@ -96,6 +96,24 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_8_0__animal_sounds_content_pack.sql
 
+  - changeSet:
+      id: V1_9_0_add_audio_url_to_content
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_9_0__add_audio_url_to_content.sql
+
+  - changeSet:
+      id: V1_10_0_add_cached_audio_url
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_10_0__add_cached_audio_url.sql
+
   # # - changeSet:
   #     id: 202601032000
   #     author: cheeko

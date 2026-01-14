@@ -128,6 +128,21 @@ public class RfidContentPackServiceImpl extends CrudServiceImpl<RfidContentPackD
                     result.setTitle(item.getTitle());
                     result.setContentText(item.getContent());
                     log.info("Extracted content for sequence {}: {}", sequence, item.getTitle());
+
+                    // Build full audio URL for animal content type
+                    // Combines base URL with title-derived filename: {baseUrl}{title.toLowerCase()}.mp3
+                    if (StringUtils.isNotBlank(contentPack.getAudioUrl()) && StringUtils.isNotBlank(item.getTitle())) {
+                        String baseUrl = contentPack.getAudioUrl();
+                        // Ensure base URL ends with /
+                        if (!baseUrl.endsWith("/")) {
+                            baseUrl = baseUrl + "/";
+                        }
+                        // Derive filename from title: "Cow" -> "cow.mp3"
+                        String filename = item.getTitle().toLowerCase().trim().replaceAll("\\s+", "_") + ".mp3";
+                        String fullAudioUrl = baseUrl + filename;
+                        result.setAudioUrl(fullAudioUrl);
+                        log.info("Built audio URL for {}: {}", item.getTitle(), fullAudioUrl);
+                    }
                 } else {
                     log.warn("Sequence {} not found in content pack {}", sequence, contentPack.getPackCode());
                     // Return pack info but no content if sequence not found
@@ -172,7 +187,10 @@ public class RfidContentPackServiceImpl extends CrudServiceImpl<RfidContentPackD
             result.setTitle(questionEntity.getTitle());
             result.setPromptText(questionEntity.getPromptText());
             result.setLanguage(questionEntity.getLanguage());
-            log.info("Found legacy question for UID {}: {}", rfidUid, questionEntity.getTitle());
+            result.setCachedAudioUrl(questionEntity.getCachedAudioUrl()); // Return cached audio if exists
+            result.setQuestionId(questionEntity.getId()); // For caching - identifies which question to update
+            log.info("Found legacy question for UID {}: questionId={}, title={}, cachedAudioUrl: {}",
+                    rfidUid, questionEntity.getId(), questionEntity.getTitle(), questionEntity.getCachedAudioUrl());
         } else {
             log.warn("No content or question found for RFID UID {}", rfidUid);
         }

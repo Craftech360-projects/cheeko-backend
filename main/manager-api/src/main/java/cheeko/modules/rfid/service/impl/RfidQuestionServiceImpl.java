@@ -77,4 +77,13 @@ public class RfidQuestionServiceImpl extends CrudServiceImpl<RfidQuestionDao, Rf
                 .map(entity -> ConvertUtils.sourceToTarget(entity, RfidQuestionDTO.class))
                 .collect(Collectors.toList());
     }
+
+    @Override
+    public void updateCachedAudioUrl(Long id, String cachedAudioUrl) {
+        RfidQuestionEntity entity = rfidQuestionDao.selectById(id);
+        if (entity != null) {
+            entity.setCachedAudioUrl(cachedAudioUrl);
+            rfidQuestionDao.updateById(entity);
+        }
+    }
 }

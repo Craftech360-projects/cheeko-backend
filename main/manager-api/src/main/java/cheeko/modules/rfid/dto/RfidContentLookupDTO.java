@@ -36,4 +36,13 @@ public class RfidContentLookupDTO implements Serializable {
 
     @Schema(description = "Language code")
     private String language;
+
+    @Schema(description = "CloudFront audio URL for animal sounds")
+    private String audioUrl;
+
+    @Schema(description = "CloudFront URL for cached AI-generated audio response")
+    private String cachedAudioUrl;
+
+    @Schema(description = "Question ID (for prompt mode, used for caching)")
+    private Long questionId;
 }
