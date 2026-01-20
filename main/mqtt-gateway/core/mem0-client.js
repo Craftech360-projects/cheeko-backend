@@ -14,7 +14,7 @@ const MEM0_API_KEY = process.env.MEM0_API_KEY;
 let MEM0_API_URL = process.env.MEM0_API_URL || 'https://api.mem0.ai/v1';
 MEM0_API_URL = MEM0_API_URL.replace(/\/+$/, '').replace(/\/memories\/?$/, '');
 const MEM0_MEMORY_LIMIT = 20; // ~500 tokens max
-const MEM0_TIMEOUT_MS = 5000; // 5 second timeout for API calls
+const MEM0_TIMEOUT_MS = parseInt(process.env.MEM0_TIMEOUT_MS) || 15000; // 15 second timeout (configurable)
 
 /**
  * Mem0Client - REST API client for memory retrieval and storage

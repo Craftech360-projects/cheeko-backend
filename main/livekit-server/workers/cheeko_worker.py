@@ -51,9 +51,31 @@ from src.shared.entrypoint_utils import (
 )
 # from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
 from src.features.mode_switching import update_agent_mode
+from src.services.mem0_service import mem0_service
 
 # Agent configuration
 AGENT_NAME = "cheeko-agent"
+
+# Keywords that trigger context-aware memory search (high-value triggers only)
+# These are patterns where memory injection provides significant value
+MEMORY_TRIGGER_PATTERNS = [
+    ("story", ["story about", "tell me a story", "tell a story"]),  # Story requests
+    ("remember", ["do you remember", "remember my", "remember when"]),  # Memory queries
+    ("family", ["about my", "my dog", "my cat", "my pet", "my brother", "my sister", "my mom", "my dad", "my family"]),  # Family/pet references
+    ("question", ["what's my", "who is my", "what is my"]),  # Direct memory questions
+]
+
+def should_inject_memory(text: str) -> tuple[bool, str]:
+    """
+    Check if the user's message should trigger memory injection.
+    Returns (should_inject, trigger_category)
+    """
+    text_lower = text.lower()
+    for category, patterns in MEMORY_TRIGGER_PATTERNS:
+        for pattern in patterns:
+            if pattern in text_lower:
+                return True, category
+    return False, ""
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
@@ -323,15 +345,18 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model
+    # Create Gemini Realtime model with Google Search enabled
+    # GoogleSearch is a provider tool that must be passed to RealtimeModel, not AgentSession
+    google_search_tool = google.tools.GoogleSearch()
     realtime_model = google.realtime.RealtimeModel(
         model=gemini_model,
         voice=gemini_voice,
         instructions=agent_prompt,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
+        _gemini_tools=[google_search_tool],
     )
-    logger.info("Gemini Realtime model created")
+    logger.info("Gemini Realtime model created with Google Search enabled")
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
@@ -340,6 +365,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
     # Create AgentSession with mode switching tools and TTS for session.say()
+    # Note: Google Search is passed to RealtimeModel as a provider tool, not here
     session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=MODE_SWITCH_TOOLS)
     logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + ElevenLabs TTS")
 
@@ -360,11 +386,80 @@ async def entrypoint(ctx: JobContext):
     # DEBUG: Track user speech and function calls
     # ============================================================================
 
+    # Track if we're currently injecting memory to avoid conflicts
+    memory_injection_in_progress = False
+    last_memory_injection_time = 0
+
     @session.on("user_speech_committed")
     def on_user_speech(msg):
-        """Log what the user said (transcription)"""
+        """Log what the user said and inject memory context if relevant"""
+        nonlocal memory_injection_in_progress, last_memory_injection_time
+
         text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
         logger.info(f"🎤 USER SAID: '{text}'")
+
+        # Skip memory injection if one is already in progress or happened recently
+        current_time = time.time()
+        if memory_injection_in_progress or (current_time - last_memory_injection_time) < 5:
+            logger.debug(f"🧠 [MEM0] Skipping memory check - recent injection or in progress")
+            return
+
+        # Check if this message should trigger memory injection
+        inject, category = should_inject_memory(text)
+
+        if inject and device_mac and mem0_service.is_ready():
+            logger.info(f"🧠 [MEM0] Memory trigger detected: category='{category}'")
+            memory_injection_in_progress = True
+            last_memory_injection_time = current_time
+            # Search for relevant memories and inject context
+            asyncio.create_task(inject_memory_context(text, device_mac, category))
+
+    async def inject_memory_context(user_query: str, mac_address: str, category: str):
+        """Search for relevant memories and inject them into the conversation"""
+        nonlocal memory_injection_in_progress
+
+        try:
+            # Small delay to let any automatic response start
+            # This helps us decide whether to interrupt or not
+            await asyncio.sleep(0.3)
+
+            # Search for memories relevant to what the user just said
+            relevant_memories = await mem0_service.search_relevant_memories(
+                user_id=mac_address,
+                query=user_query,
+                limit=3  # Keep it small for low latency
+            )
+
+            if relevant_memories:
+                logger.info(f"🧠 [MEM0-INJECT] Found {len(relevant_memories)} relevant memories for '{category}': '{user_query[:30]}...'")
+
+                # Format the memory context
+                memory_context = mem0_service.format_relevant_memories_for_injection(
+                    user_query, relevant_memories
+                )
+
+                # For high-value triggers like stories, inject with generate_reply
+                # This will guide the response to use the memories
+                if category in ["story", "remember", "question"]:
+                    try:
+                        logger.info(f"🧠 [MEM0-INJECT] Injecting memory context for {category} request")
+                        await session.generate_reply(
+                            instructions=f"{memory_context}\n\nRespond to the child's request: '{user_query}'"
+                        )
+                        logger.info(f"🧠 [MEM0-INJECT] Memory context injected successfully")
+                    except Exception as gen_err:
+                        # This is expected if the model is already responding
+                        logger.debug(f"🧠 [MEM0-INJECT] Could not inject (model may be responding): {gen_err}")
+                else:
+                    # For other categories, just log - rely on prompt instructions
+                    logger.info(f"🧠 [MEM0-INJECT] Relevant memories available for '{category}' - relying on prompt")
+            else:
+                logger.debug(f"🧠 [MEM0-INJECT] No relevant memories found for: '{user_query[:30]}...'")
+
+        except Exception as e:
+            logger.error(f"🧠 [MEM0-INJECT] Error searching memories: {e}")
+        finally:
+            memory_injection_in_progress = False
 
     @session.on("function_calls_started")
     def on_function_calls_started(ev):

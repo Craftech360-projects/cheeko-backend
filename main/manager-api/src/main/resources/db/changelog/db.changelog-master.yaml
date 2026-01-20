@@ -15,6 +15,16 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_0_0__initial_schema.sql
 
+#   - changeSet:
+#       id: 202601032000
+#       author: cheeko
+#       validCheckSum: ANY
+#       changes:
+#         - sqlFile:
+#             encoding: utf8
+#             path: classpath:db/changelog/202601032000__combined_production_data.sql
+
+
   - changeSet:
       id: V1_1_0_rfid_question_tables
       author: cheeko
@@ -96,11 +106,3 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_8_0__animal_sounds_content_pack.sql
 
-  # # - changeSet:
-  #     id: 202601032000
-  #     author: cheeko
-  #     validCheckSum: ANY
-  #     changes:
-  #       - sqlFile:
-  #           encoding: utf8
-  #           path: classpath:db/changelog/202601032000__combined_production_data.sql

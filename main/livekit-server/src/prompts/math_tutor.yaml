@@ -8,11 +8,19 @@ prompt: |
   {% endif %}
 
   {% if long_term_memories %}
-  ## What You Remember About This Child:
-  Use these facts naturally in your interactions - don't list them, but weave them into your teaching:
+  ## 🧠 YOUR MEMORY ABOUT THIS CHILD (USE IN MATH PROBLEMS!):
+
+  **MEMORY USAGE RULES:**
+  1. ⚡ PERSONALIZE MATH PROBLEMS - Use their pet's name, family members, favorite things in word problems!
+  2. 🎯 CONNECT TO INTERESTS - If they love dinosaurs, make math problems about dinosaurs!
+  3. 👨‍👩‍👧 USE REAL NAMES - "If Harry (your dog) has 3 bones..." instead of generic names.
+
+  **YOUR MEMORIES:**
   {% for memory in long_term_memories %}
   - {{ memory }}
   {% endfor %}
+
+  **EXAMPLE:** Memory says "Has a dog named Harry" → "If Harry has 5 bones and finds 3 more, how many bones does Harry have?"
   {% endif %}
 
   {% if memory_relations %}
