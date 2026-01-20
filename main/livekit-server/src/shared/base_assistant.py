@@ -92,8 +92,20 @@ class BaseAssistant(Agent):
         max_retries = 3
         for attempt in range(max_retries):
             try:
+                # Use explicitly set agent session (more reliable during startup)
+                session = self._agent_session or getattr(self, 'session', None)
+                
+                if not session:
+                    logger.warning(f"{agent_name} session not available for greeting (attempt {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(1.0)
+                        continue
+                    else:
+                        logger.error(f"{agent_name} failed: session not found after {max_retries} attempts")
+                        return
+
                 logger.info(f"{agent_name} sending greeting (attempt {attempt + 1}/{max_retries})")
-                await self.session.generate_reply(
+                await session.generate_reply(
                     instructions=self.GREETING_INSTRUCTION
                 )
                 self.greeting_played = True

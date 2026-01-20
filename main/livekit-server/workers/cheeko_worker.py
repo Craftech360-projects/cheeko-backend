@@ -26,6 +26,7 @@ from livekit.agents import (
     cli,
     AutoSubscribe,
     RoomInputOptions,
+    RoomOutputOptions,
 )
 from livekit import rtc, api
 from livekit.plugins import google
@@ -100,11 +101,8 @@ async def entrypoint(ctx: JobContext):
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)
 
-    # IMPORTANT: Connect to room EARLY to avoid 10-second timeout warning
-    # This allows the client to see the agent join while we do API calls
-    logger.info("Connecting to LiveKit room early (before API calls)...")
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    logger.info("Connected to room - continuing with initialization")
+    # Services will be initialized before connecting to room
+    logger.info("Initializing services...")
 
     # Initialize services
     prompt_service = PromptService()
@@ -476,8 +474,8 @@ async def entrypoint(ctx: JobContext):
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
-    # NOTE: Room was already connected early (before API calls) to avoid timeout warning
-    # await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)  # Already done earlier
+    # Connect to room now that handlers are registered
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     # DUPLICATE AGENT CHECK: Prevent multiple agents in same room
     # Check if another agent is already in the room
@@ -503,12 +501,16 @@ async def entrypoint(ctx: JobContext):
     assistant.set_session_context(ctx)
     # audio_player.set_session(session)  # COMMENTED OUT - Music service disabled
 
-    # Start session with 16kHz input audio to match MQTT gateway
+    # Start session with 16kHz input audio and 24kHz output audio
     await session.start(
         room=ctx.room,
         agent=assistant,
         room_input_options=RoomInputOptions(
-            audio_sample_rate=16000,
+            audio_sample_rate=24000,
+            audio_num_channels=1
+        ),
+        room_output_options=RoomOutputOptions(
+            audio_sample_rate=24000,  # Match gateway audio_params (24kHz mono)
             audio_num_channels=1
         )
     )
