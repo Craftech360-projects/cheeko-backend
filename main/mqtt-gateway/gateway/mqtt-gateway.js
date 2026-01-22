@@ -154,6 +154,75 @@ async function fetchRfidPromptTextFromManagerApi(rfidUid) {
   return result.promptText || result.contentText || null;
 }
 
+/**
+ * Fetch habit download manifest from Manager API for SD card content download.
+ * Uses the habit download endpoint:
+ *   GET /toy/admin/rfid/card/habit/download/{rfidUid}?version={v}&hash={h}
+ *
+ * @param {string} rfidUid - RFID card UID
+ * @param {string} currentVersion - Current version on device (for cache check)
+ * @param {string} currentHash - Current content hash on device (for cache check)
+ * @returns {Object|null} Habit download manifest or null if not found
+ */
+async function fetchHabitDownloadManifest(rfidUid, currentVersion, currentHash) {
+  try {
+    const trimmedUid = (rfidUid || "").trim();
+    if (!trimmedUid) {
+      logger.warn(`⚠️ [HABIT-DOWNLOAD] Empty rfidUid provided`);
+      return null;
+    }
+
+    const baseUrl = process.env.MANAGER_API_URL || "";
+    if (!baseUrl) {
+      logger.warn(
+        `⚠️ [HABIT-DOWNLOAD] MANAGER_API_URL not set, cannot fetch habit manifest for UID ${trimmedUid}`
+      );
+      return null;
+    }
+
+    // Build URL with optional version and hash parameters
+    let apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/habit/download/${encodeURIComponent(
+      trimmedUid
+    )}`;
+    const params = [];
+    if (currentVersion) params.push(`version=${encodeURIComponent(currentVersion)}`);
+    if (currentHash) params.push(`hash=${encodeURIComponent(currentHash)}`);
+    if (params.length > 0) apiUrl += `?${params.join("&")}`;
+
+    logger.info(
+      `🔍 [HABIT-DOWNLOAD] Fetching habit manifest for RFID UID ${trimmedUid} via ${apiUrl}`
+    );
+
+    const response = await axios.get(apiUrl, { timeout: 10000 });
+    const body = response.data;
+
+    if (!body || body.code !== 0) {
+      logger.warn(
+        `⚠️ [HABIT-DOWNLOAD] Fetch failed for UID ${trimmedUid}: code=${body && body.code}, msg=${body && body.msg}`
+      );
+      return null;
+    }
+
+    // data can be null if no habit is linked to this card
+    if (!body.data) {
+      logger.info(`📦 [HABIT-DOWNLOAD] No habit linked to RFID UID ${trimmedUid}`);
+      return null;
+    }
+
+    const manifest = body.data;
+    logger.info(
+      `✅ [HABIT-DOWNLOAD] Got manifest for UID ${trimmedUid} -> habit=${manifest.habitCode}, version=${manifest.version}, steps=${manifest.totalSteps}`
+    );
+
+    return manifest;
+  } catch (error) {
+    logger.error(
+      `❌ [HABIT-DOWNLOAD] Error fetching habit manifest for RFID UID ${rfidUid}: ${error.message}`
+    );
+    return null;
+  }
+}
+
 class MQTTGateway {
   constructor(workerPool) {
     // Shared worker pool for all LiveKit bridges / audio processing
@@ -604,6 +673,12 @@ class MQTTGateway {
           logger.warn(`⚠️ [MODE-CHANGE] No mode specified in payload`);
           return;
         }
+      }
+
+      // Handle habit download requests from device (for SD card content)
+      if (originalPayload.type === "habit_download_request") {
+        await this.handleHabitDownloadRequest(deviceId, originalPayload, clientId);
+        return;
       }
 
       // Handle specific content playback requests (play_music / play_story)
@@ -1199,6 +1274,89 @@ class MQTTGateway {
         };
         this.mqttPublish(errorTopic, errorMsg);
       }
+    }
+  }
+
+  /**
+   * Handle habit download request from device.
+   * Used when an RFID card is tapped and the device needs to download habit content to SD card.
+   * @param {string} deviceId - Device MAC address
+   * @param {Object} payload - Request payload with rfid_uid, current_version, current_hash
+   * @param {string} clientId - MQTT client ID for response
+   */
+  async handleHabitDownloadRequest(deviceId, payload, clientId) {
+    const rfidUid = payload.rfid_uid;
+    const currentVersion = payload.current_version;
+    const currentHash = payload.current_hash;
+
+    logger.info(`📥 [HABIT-DOWNLOAD] Device ${deviceId} requesting habit for RFID: ${rfidUid}`);
+
+    try {
+      // Fetch manifest from Manager API
+      const manifest = await fetchHabitDownloadManifest(rfidUid, currentVersion, currentHash);
+
+      if (!manifest) {
+        // No habit linked to this card
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: "habit_download_response",
+          status: "not_found",
+          rfid_uid: rfidUid,
+          message: "No habit linked to this RFID card"
+        });
+        return;
+      }
+
+      // Check if device already has current version
+      if (currentVersion && manifest.version === currentVersion) {
+        logger.info(`📦 [HABIT-DOWNLOAD] Device already has version ${currentVersion}, sending up_to_date`);
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: "habit_download_response",
+          status: "up_to_date",
+          rfid_uid: rfidUid,
+          habit_code: manifest.habitCode,
+          version: manifest.version
+        });
+        return;
+      }
+
+      // Build simplified files object with audio_N and image_N keys for firmware
+      const files = {};
+
+      for (const step of manifest.steps || []) {
+        const stepNum = step.stepNumber;
+
+        // Add audio URL
+        if (step.audio && step.audio.url) {
+          files[`audio_${stepNum}`] = step.audio.url;
+        }
+
+        // Add image URL (first image for each step)
+        if (step.images && step.images.length > 0 && step.images[0].url) {
+          files[`image_${stepNum}`] = step.images[0].url;
+        }
+      }
+
+      // Send simplified download response for firmware
+      logger.info(`📦 [HABIT-DOWNLOAD] Sending download links for ${manifest.habitCode} v${manifest.version} (${Object.keys(files).length} files)`);
+      this.mqttPublish(`devices/p2p/${clientId}`, {
+        type: "habit_download_response",
+        status: "download_required",
+        rfid_uid: rfidUid,
+        habit_code: manifest.habitCode,
+        habit_name: manifest.habitName,
+        version: manifest.version,
+        total_steps: manifest.totalSteps,
+        files: files
+      });
+
+    } catch (error) {
+      logger.error(`❌ [HABIT-DOWNLOAD] Error handling request: ${error.message}`);
+      this.mqttPublish(`devices/p2p/${clientId}`, {
+        type: "habit_download_response",
+        status: "error",
+        rfid_uid: rfidUid,
+        message: "Server error processing request"
+      });
     }
   }
 

@@ -19,9 +19,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "10.171.215.210"
+SERVER_IP = "192.168.1.168"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "10.171.215.210"
+MQTT_BROKER_HOST = "192.168.1.168"
 
 
 MQTT_BROKER_PORT = 1883
@@ -149,6 +149,11 @@ class TestClient:
             payload = json.loads(payload_str)
             logger.info(
                 f"[EMOJI] MQTT Message received on topic '{msg.topic}':\n{json.dumps(payload, indent=2)}")
+
+            # Handle habit download response
+            if payload.get("type") == "habit_download_response":
+                self.handle_habit_download_response(payload)
+                return
 
             # Handle TTS start signal (reset sequence tracking)
             if payload.get("type") == "tts" and payload.get("state") == "start":
@@ -823,6 +828,119 @@ class TestClient:
             self.session_active = False
         return True
 
+    def handle_habit_download_response(self, payload):
+        """Handle habit download response from server."""
+        status = payload.get("status")
+        rfid_uid = payload.get("rfid_uid")
+
+        logger.info("=" * 60)
+        logger.info("[HABIT] HABIT DOWNLOAD RESPONSE RECEIVED")
+        logger.info("=" * 60)
+        logger.info(f"  Status: {status}")
+        logger.info(f"  RFID UID: {rfid_uid}")
+
+        if status == "download_required":
+            habit_code = payload.get("habit_code")
+            habit_name = payload.get("habit_name")
+            version = payload.get("version")
+            total_steps = payload.get("total_steps")
+            files = payload.get("files", {})
+
+            logger.info(f"  Habit Code: {habit_code}")
+            logger.info(f"  Habit Name: {habit_name}")
+            logger.info(f"  Version: {version}")
+            logger.info(f"  Total Steps: {total_steps}")
+            logger.info(f"  Files ({len(files)} total):")
+
+            # Sort and display files
+            for key in sorted(files.keys()):
+                url = files[key]
+                # Truncate long URLs for display
+                display_url = url if len(url) < 60 else url[:57] + "..."
+                logger.info(f"    {key}: {display_url}")
+
+        elif status == "up_to_date":
+            logger.info("  Device already has the latest version")
+
+        elif status == "not_found":
+            message = payload.get("message", "No habit linked to this RFID card")
+            logger.info(f"  Message: {message}")
+
+        elif status == "error":
+            message = payload.get("message", "Unknown error")
+            logger.error(f"  Error: {message}")
+
+        logger.info("=" * 60)
+
+    def send_habit_download_request(self, rfid_uid: str, current_version: str = None):
+        """Send a habit download request for testing."""
+        logger.info(f"[HABIT] Sending habit download request for RFID: {rfid_uid}")
+
+        request_payload = {
+            "type": "habit_download_request",
+            "rfid_uid": rfid_uid
+        }
+
+        if current_version:
+            request_payload["current_version"] = current_version
+
+        # Publish to device-server topic (same as other messages like hello, listen, etc.)
+        self.mqtt_client.publish("device-server", json.dumps(request_payload))
+        logger.info(f"[HABIT] Request sent to topic: device-server")
+        logger.info(f"[HABIT] Payload: {json.dumps(request_payload, indent=2)}")
+
+    def test_habit_download(self, rfid_uids: list = None):
+        """Run habit download test for specified RFID UIDs."""
+        if rfid_uids is None:
+            # Default test UIDs from the database
+            rfid_uids = ["HABIT001", "HABIT002", "HABIT003", "HABIT004", "HABIT005"]
+
+        logger.info("=" * 60)
+        logger.info("[TEST] HABIT DOWNLOAD TEST MODE")
+        logger.info("=" * 60)
+
+        # Get OTA config and connect to MQTT
+        if not self.get_ota_config():
+            logger.error("[ERROR] Failed to get OTA config")
+            return
+
+        if not self.connect_mqtt():
+            logger.error("[ERROR] Failed to connect to MQTT")
+            return
+
+        # Wait for MQTT connection to establish
+        time.sleep(2)
+
+        if not self.mqtt_client.is_connected():
+            logger.error("[ERROR] MQTT not connected")
+            return
+
+        logger.info(f"[TEST] Testing {len(rfid_uids)} RFID cards...")
+
+        for rfid_uid in rfid_uids:
+            logger.info(f"\n[TEST] Testing RFID: {rfid_uid}")
+            self.send_habit_download_request(rfid_uid)
+
+            # Wait for response
+            time.sleep(2)
+
+        # Test with an invalid RFID
+        logger.info(f"\n[TEST] Testing invalid RFID: INVALID123")
+        self.send_habit_download_request("INVALID123")
+        time.sleep(2)
+
+        # Test cache check (with version)
+        logger.info(f"\n[TEST] Testing cache check with version 1.0.0")
+        self.send_habit_download_request("HABIT001", current_version="1.0.0")
+        time.sleep(2)
+
+        logger.info("\n[TEST] Habit download test completed!")
+
+        # Cleanup
+        if self.mqtt_client:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+
     def cleanup(self):
         """Cleans up resources and disconnects."""
         logger.info("[STEP] STEP 6: Cleaning up and disconnecting...")
@@ -886,14 +1004,51 @@ class TestClient:
 
 
 if __name__ == "__main__":
-    # You can control sequence logging from here
-    print(
-        f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
-    print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
+    import sys
+
+    # Check for test mode argument
+    test_mode = "audio"  # default mode
+    rfid_uids = None
+
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "habit":
+            test_mode = "habit"
+            # Optional: specify specific RFID UIDs to test
+            if len(sys.argv) > 2:
+                rfid_uids = sys.argv[2:]
+        elif sys.argv[1] == "help":
+            print("Usage: python client.py [mode] [rfid_uids...]")
+            print("")
+            print("Modes:")
+            print("  audio         - Run audio streaming test (default)")
+            print("  habit         - Run habit download test")
+            print("  help          - Show this help message")
+            print("")
+            print("Examples:")
+            print("  python client.py                    # Run audio test")
+            print("  python client.py habit              # Test all 5 habits")
+            print("  python client.py habit HABIT001     # Test specific RFID")
+            print("  python client.py habit HABIT001 HABIT002")
+            sys.exit(0)
 
     client = TestClient()
-    try:
-        client.run_test()
-    except KeyboardInterrupt:
-        logger.info("Manual interruption detected. Cleaning up...")
-        client.cleanup()
+
+    if test_mode == "habit":
+        print("=" * 60)
+        print("[MODE] HABIT DOWNLOAD TEST MODE")
+        print("=" * 60)
+        try:
+            client.test_habit_download(rfid_uids)
+        except KeyboardInterrupt:
+            logger.info("Manual interruption detected.")
+    else:
+        # Original audio test mode
+        print(
+            f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
+        print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
+
+        try:
+            client.run_test()
+        except KeyboardInterrupt:
+            logger.info("Manual interruption detected. Cleaning up...")
+            client.cleanup()

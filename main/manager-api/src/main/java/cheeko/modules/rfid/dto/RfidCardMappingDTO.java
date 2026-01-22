@@ -48,6 +48,9 @@ public class RfidCardMappingDTO implements Serializable {
     @Schema(description = "FK to rfid_content_pack table for RAG system")
     private Long contentPackId;
 
+    @Schema(description = "FK to habit table for basic habits")
+    private Long habitId;
+
     @Schema(description = "Internal notes or description")
     private String notes;
 

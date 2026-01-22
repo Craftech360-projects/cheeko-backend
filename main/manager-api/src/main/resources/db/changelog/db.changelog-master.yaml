@@ -106,3 +106,12 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_8_0__animal_sounds_content_pack.sql
 
+  - changeSet:
+      id: V1_9_0_basic_habits_tables
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_9_0__basic_habits_tables.sql
+
