@@ -22,6 +22,9 @@ const {
   setConfigManager: setLivekitConfigManager,
 } = require("../livekit/livekit-bridge");
 const {
+  generateLiveKitCredentials,
+} = require("../livekit/token-generator");
+const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
 } = require("../core/media-api-client");
@@ -1773,10 +1776,17 @@ class MQTTGateway {
         payload.characterName || payload.character_name || null;
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
       const crypto = require("crypto");
-
       const axios = require("axios");
-      let apiUrl, requestBody;
 
+      // Get clientId from payload (for direct LiveKit connections)
+      const clientId = payload.clientId;
+      if (!clientId) {
+        logger.error(`[CHARACTER-CHANGE] No clientId in payload for device: ${deviceId}`);
+        return;
+      }
+
+      // Step 1: Cycle character in database
+      let apiUrl, requestBody;
       if (characterName) {
         apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/set-character`;
         requestBody = { characterName: characterName };
@@ -1793,28 +1803,20 @@ class MQTTGateway {
         const { newModeName } = response.data.data;
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
-        // Step 1: Get agent name for the new character
+        // Step 2: Get agent name for the new character
         const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-agent";
-        logger.info(`[CHARACTER-CHANGE] Dispatching agent: ${agentName}`);
+        logger.info(`[CHARACTER-CHANGE] Agent: ${agentName}`);
 
-        // Step 2: Get device connection
+        // Step 3: Get device connection (optional - may not exist for direct LiveKit)
         const deviceInfo = this.deviceConnections.get(deviceId);
         const connection = deviceInfo?.connection;
-
-        if (!connection) {
-          logger.error(`[CHARACTER-CHANGE] No connection found for device: ${deviceId}`);
-          return;
-        }
-
-        // Step 3: Robust cleanup of old room and agent
-        await this.performRobustAgentCleanup(connection, 'character_change');
 
         // Step 4: Generate new room name
         const newSessionUuid = crypto.randomUUID();
         const macForRoom = deviceId.replace(/:/g, "");
         const newRoomName = `${newSessionUuid}_${macForRoom}_conversation`;
 
-        // Step 4.5: Clean up ALL old sessions for this device (prevents ghost rooms)
+        // Step 5: Clean up old sessions for this device (if roomService available)
         if (this.roomService) {
           try {
             await LiveKitBridge.cleanupOldSessionsForDevice(
@@ -1828,7 +1830,23 @@ class MQTTGateway {
           }
         }
 
-        // Step 5: Create new room
+        // Step 6: If connection exists in map, do cleanup and update state
+        if (connection) {
+          await this.performRobustAgentCleanup(connection, 'character_change');
+
+          // Update connection state
+          if (connection.udp) {
+            connection.udp.session_id = newRoomName;
+          }
+          connection.sessionId = newRoomName;
+          connection.currentCharacter = newModeName;
+          connection.isEnding = false;
+          connection.endPromptSentTime = null;
+          connection.goodbyeSent = false;
+          connection.lastActivityTime = Date.now();
+        }
+
+        // Step 7: Create new room
         if (this.roomService) {
           try {
             await this.roomService.createRoom({
@@ -1843,40 +1861,9 @@ class MQTTGateway {
           }
         }
 
-        // Step 6: Update connection state
-        connection.udp.session_id = newRoomName;
-        connection.currentCharacter = newModeName;
-        connection.isEnding = false;
-        connection.endPromptSentTime = null;
-        connection.goodbyeSent = false;
-        connection.lastActivityTime = Date.now();
-
-        // Step 7: Create new LiveKitBridge and connect (MUST be before dispatch)
-        const newBridge = new LiveKitBridge(
-          connection,
-          connection.protocolVersion || 1,
-          deviceId,
-          newSessionUuid,
-          connection.userData || {},
-          this.workerPool  // Pass workerPool for audio encoding/decoding
-        );
-        connection.bridge = newBridge;
-
-        newBridge.on("close", () => {
-          connection.bridge = null;
-        });
-
-        await newBridge.connect(
-          connection.audio_params || { sample_rate: 24000, channels: 1 },
-          connection.features || {},
-          this.roomService
-        );
-        logger.info(`[CHARACTER-CHANGE] New bridge connected to room: ${newRoomName}`);
-
-        // Step 8: Fetch child profile and dispatch named agent to the new room
+        // Step 8: Fetch child profile for agent metadata
         let childProfile = null;
         try {
-          const macAddress = deviceId.replace(/:/g, "").toLowerCase();
           const profileResponse = await axios.post(
             `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
             { macAddress },
@@ -1893,9 +1880,6 @@ class MQTTGateway {
         // Step 9: Dispatch agent to new room
         if (this.agentDispatchClient) {
           try {
-            // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
-            newBridge.agentDeployed = true;
-
             await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
               metadata: JSON.stringify({
                 device_mac: deviceId,
@@ -1906,62 +1890,45 @@ class MQTTGateway {
             });
             logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
           } catch (error) {
-            // Reset flag on failure so retry can work
-            newBridge.agentDeployed = false;
             logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
           }
         }
 
-        // Step 9: Load and play audio feedback
-        const fs = require("fs");
-        const path = require("path");
-        const audioMapPath = path.join(
-          __dirname,
-          "audio",
-          "character_change",
-          "audio_map.json"
-        );
-
-        if (fs.existsSync(audioMapPath)) {
-          const audioMap = JSON.parse(fs.readFileSync(audioMapPath, "utf8"));
-          const audioFileName = audioMap.modes[newModeName] || audioMap.default;
-          const pcmFileName = audioFileName.replace(".opus", ".pcm");
-          const audioFilePath = path.join(
-            __dirname,
-            "audio",
-            "character_change",
-            pcmFileName
+        // Step 10: ALWAYS send hello response with LiveKit credentials via MQTT
+        // This works for both direct LiveKit connections and UDP bridge mode
+        try {
+          const livekitCredentials = await generateLiveKitCredentials(
+            newRoomName,
+            deviceId.replace(/:/g, "_"), // Participant identity
+            {
+              macAddress: deviceId,
+              uuid: connection?.uuid || "",
+              roomType: "conversation",
+            }
           );
 
-          if (fs.existsSync(audioFilePath)) {
-            // Stream audio without sending goodbye (we're staying connected)
-            await this.streamAudioViaUdp(deviceId, audioFilePath, newModeName, false);
-          } else {
-            logger.warn(`[CHARACTER-CHANGE] Audio file not found: ${audioFilePath}`);
-          }
-        }
-
-        // Step 10: Send mode_update to device firmware
-        const clientId = connection.clientId;
-        if (clientId) {
-          const modeUpdateMsg = {
-            type: "mode_update",
+          const helloResponse = {
+            type: "hello",
+            version: connection?.protocolVersion || 4,
             mode: "conversation",
-            listening_mode: connection.deviceMode || "manual",
             character: newModeName,
-            agent: agentName,
             session_id: newRoomName,
             timestamp: Date.now(),
-            transport: "udp",
-            udp: {
-              server: this.publicIp,
-              port: this.udpPort,
-              encryption: connection.udp.encryption,
+            transport: "livekit",
+            livekit: livekitCredentials,
+            audio_params: {
+              sample_rate: 24000,
+              channels: 1,
+              frame_duration: 60,
+              format: "opus",
             },
           };
+
           const controlTopic = `devices/p2p/${clientId}`;
-          this.mqttPublish(controlTopic, modeUpdateMsg);
-          logger.info(`[CHARACTER-CHANGE] Sent mode_update to device (listening_mode: ${connection.deviceMode || "manual"})`);
+          this.mqttPublish(controlTopic, helloResponse);
+          logger.info(`[CHARACTER-CHANGE] Sent hello response with LiveKit credentials for room: ${newRoomName}`);
+        } catch (credError) {
+          logger.error(`[CHARACTER-CHANGE] Failed to generate LiveKit credentials: ${credError.message}`);
         }
 
         logger.info(`[CHARACTER-CHANGE] Successfully switched to ${newModeName} (${agentName})`);
@@ -2190,7 +2157,11 @@ class MQTTGateway {
           }
         }
 
-        connection.udp.session_id = newRoomName;
+        // Handle both UDP bridge and direct LiveKit connection modes
+        if (connection.udp) {
+          connection.udp.session_id = newRoomName;
+        }
+        connection.sessionId = newRoomName;  // Also store at connection level for direct mode
         connection.isEnding = false;
         connection.endPromptSentTime = null;
         connection.goodbyeSent = false;
@@ -2239,34 +2210,74 @@ class MQTTGateway {
           logger.info(`[MODE-CHANGE] ✅ Character: ${currentCharacter || 'null'}`);
         }
 
-        logger.info(`[MODE-CHANGE] Step 10: Sending mode_update to device`);
-        // Send mode_update to device firmware
-        const modeUpdateMsg = {
-          type: "mode_update",
-          mode: newMode,
-          listening_mode: connection.deviceMode || "manual",
-          ...(newMode === "conversation" && currentCharacter
-            ? { character: currentCharacter }
-            : {}),
-          session_id: newRoomName,
-          timestamp: Date.now(),
-          transport: "udp",
-          udp: {
-            server: this.publicIp,
-            port: this.udpPort,
-            encryption: connection.udp.encryption,
-            key: connection.udp.key.toString("hex"),
-            nonce: connection.udp.nonce.toString("hex"),
-          },
-          audio_params: {
-            sample_rate: 24000,
-            channels: 1,
-            frame_duration: 60,
-            format: "opus",
-          },
-        };
-        connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-        logger.info(`[MODE-CHANGE] Sent mode_update (listening_mode: ${connection.deviceMode || "manual"})`);
+        logger.info(`[MODE-CHANGE] Step 10: Sending mode_update/hello to device`);
+
+        // Check if using direct LiveKit connection (no UDP) or UDP bridge
+        if (connection.udp) {
+          // UDP bridge mode - send mode_update with UDP credentials
+          const modeUpdateMsg = {
+            type: "mode_update",
+            mode: newMode,
+            listening_mode: connection.deviceMode || "manual",
+            ...(newMode === "conversation" && currentCharacter
+              ? { character: currentCharacter }
+              : {}),
+            session_id: newRoomName,
+            timestamp: Date.now(),
+            transport: "udp",
+            udp: {
+              server: this.publicIp,
+              port: this.udpPort,
+              encryption: connection.udp.encryption,
+              key: connection.udp.key.toString("hex"),
+              nonce: connection.udp.nonce.toString("hex"),
+            },
+            audio_params: {
+              sample_rate: 24000,
+              channels: 1,
+              frame_duration: 60,
+              format: "opus",
+            },
+          };
+          connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+          logger.info(`[MODE-CHANGE] Sent mode_update (UDP mode, listening_mode: ${connection.deviceMode || "manual"})`);
+        } else {
+          // Direct LiveKit mode - send hello response with LiveKit credentials
+          try {
+            const livekitCredentials = await generateLiveKitCredentials(
+              newRoomName,
+              deviceId.replace(/:/g, "_"),
+              {
+                macAddress: deviceId,
+                uuid: connection.uuid || "",
+                roomType: newMode,
+              }
+            );
+
+            const helloResponse = {
+              type: "hello",
+              version: connection.protocolVersion || 4,
+              mode: newMode,
+              ...(newMode === "conversation" && currentCharacter
+                ? { character: currentCharacter }
+                : {}),
+              session_id: newRoomName,
+              timestamp: Date.now(),
+              transport: "livekit",
+              livekit: livekitCredentials,
+              audio_params: {
+                sample_rate: 24000,
+                channels: 1,
+                frame_duration: 60,
+                format: "opus",
+              },
+            };
+            connection.sendMqttMessage(JSON.stringify(helloResponse));
+            logger.info(`[MODE-CHANGE] Sent hello response (direct LiveKit mode) for room: ${newRoomName}`);
+          } catch (credError) {
+            logger.error(`[MODE-CHANGE] Failed to generate LiveKit credentials: ${credError.message}`);
+          }
+        }
 
         // Handle mode-specific startup
         logger.info(`[MODE-CHANGE] Step 11: Starting ${newMode} mode`);

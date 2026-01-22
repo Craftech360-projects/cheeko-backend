@@ -201,3 +201,6 @@ main/manager-api/src/main/resources/application-dev.yml
 client-sdk-esp32-0.3.4
 jiuchuan-s3/
 client-sdk-esp32/
+.claude/
+
+.shared/ui-ux-pro-max/

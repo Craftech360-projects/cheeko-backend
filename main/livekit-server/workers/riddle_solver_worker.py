@@ -48,7 +48,7 @@ from src.features.mode_switching import update_agent_mode
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
-DEFAULT_PORT = 8083
+DEFAULT_PORT = 8085
 GAME_TOOLS = [check_riddle_answer, update_agent_mode]
 
 
