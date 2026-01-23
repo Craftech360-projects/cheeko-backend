@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 24
-**Current Task:** Feature - Implement OTA firmware update endpoints
+**Tasks Completed:** 25
+**Current Task:** Feature - Implement Token Usage tracking
 
 ---
 
@@ -892,6 +892,66 @@ npm test     # 508 tests passed (455 previous + 53 new Mem0 tests)
 - formatForPrompt utility tests
 - URL normalization tests
 - Client lifecycle tests
+
+---
+
+### 2026-01-23 - Task 25: Implement OTA firmware update endpoints (COMPLETED)
+
+**Files Modified:**
+- `src/services/device.service.js` - Added 11 OTA service methods:
+  - `getLatestFirmware(type)` - Get latest firmware by type
+  - `getForceUpdateFirmware(type)` - Get firmware with force update flag
+  - `checkOtaVersion(mac, version, board)` - Check for firmware updates (for ESP32)
+  - `listFirmware({ page, limit, type })` - Paginated firmware list
+  - `getAllFirmware(type)` - All firmware without pagination
+  - `getFirmwareById(id)` - Get firmware by ID
+  - `createFirmware(data)` - Create firmware record
+  - `updateFirmware(id, data)` - Update firmware record
+  - `deleteFirmware(ids)` - Delete firmware record(s)
+  - `setForceUpdate(id, forceUpdate)` - Set force update flag
+
+- `src/routes/device.routes.js` - Added 9 OTA routes with comprehensive Swagger documentation:
+  - `POST /device/ota/check` - Check for firmware updates (public for ESP32)
+  - `GET /device/ota/firmware` - List firmware paginated (auth)
+  - `GET /device/ota/firmware/all` - List all firmware (auth)
+  - `GET /device/ota/firmware/latest/:type` - Get latest firmware by type (public)
+  - `GET /device/ota/firmware/:id` - Get firmware by ID (auth)
+  - `POST /device/ota/firmware` - Create firmware (auth)
+  - `PUT /device/ota/firmware/:id` - Update firmware (auth)
+  - `DELETE /device/ota/firmware/:id` - Delete firmware (auth)
+  - `PUT /device/ota/firmware/:id/force-update` - Set force update flag (auth)
+
+- `tests/integration/device.test.js` - Added 19 integration tests for:
+  - OTA check endpoint validation
+  - MAC address format handling (colons, dashes, raw hex)
+  - Latest firmware lookup by type
+  - Authentication checks for protected routes
+  - Input validation tests
+
+**Swagger Components Added:**
+- `Firmware` schema - Firmware record structure
+- `FirmwareInput` schema - Input for create/update operations
+- `OtaCheckResponse` schema - Response for OTA check endpoint
+
+**Features:**
+- Device firmware version tracking on check-in
+- Force update support (only one firmware per type can have force_update=1)
+- Duplicate type+version prevention
+- Server time included in OTA check response
+- Auto-update flag support per device
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 527 tests passed (508 previous + 19 new OTA tests)
+```
+
+**Test Results:**
+- All 527 tests pass
+- 10 test suites pass
+- OTA check endpoint tests (public)
+- Protected route authentication tests
+- Input validation tests
 
 ---
 
