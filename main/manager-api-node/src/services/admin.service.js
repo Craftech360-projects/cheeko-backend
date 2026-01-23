@@ -29,8 +29,8 @@ const listUsers = async ({ page = 1, limit = 20, status, superAdmin, search } = 
 
   let dataQuery = supabaseAdmin
     .from('sys_user')
-    .select('id, username, status, super_admin, create_date, update_date')
-    .order('create_date', { ascending: false });
+    .select('id, username, status, super_admin, created_at, updated_at')
+    .order('created_at', { ascending: false });
 
   // Apply filters
   if (status !== undefined) {
@@ -73,7 +73,7 @@ const getAllUsers = async () => {
 
   const { data: users, error } = await supabaseAdmin
     .from('sys_user')
-    .select('id, username, status, super_admin, create_date, update_date')
+    .select('id, username, status, super_admin, created_at, updated_at')
     .order('username', { ascending: true });
 
   if (error) {
@@ -94,7 +94,7 @@ const getUserById = async (id) => {
 
   const { data: user, error } = await supabaseAdmin
     .from('sys_user')
-    .select('id, username, status, super_admin, create_date, update_date')
+    .select('id, username, status, super_admin, created_at, updated_at')
     .eq('id', id)
     .single();
 
@@ -113,7 +113,7 @@ const getUserByUsername = async (username) => {
 
   const { data: user, error } = await supabaseAdmin
     .from('sys_user')
-    .select('id, username, status, super_admin, create_date, update_date')
+    .select('id, username, status, super_admin, created_at, updated_at')
     .eq('username', username)
     .single();
 
@@ -150,7 +150,7 @@ const createUser = async (creatorId, data) => {
       super_admin: data.superAdmin !== undefined ? data.superAdmin : 0,
       creator: creatorId
     })
-    .select('id, username, status, super_admin, create_date')
+    .select('id, username, status, super_admin, created_at')
     .single();
 
   if (error) {
@@ -170,7 +170,7 @@ const createUser = async (creatorId, data) => {
 const updateUser = async (id, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { updated_at: new Date().toISOString() };
 
   if (data.username !== undefined) {
     // Check if new username is taken
@@ -194,7 +194,7 @@ const updateUser = async (id, data) => {
     .from('sys_user')
     .update(updateData)
     .eq('id', id)
-    .select('id, username, status, super_admin, create_date, update_date')
+    .select('id, username, status, super_admin, created_at, updated_at')
     .single();
 
   if (error) {
@@ -367,9 +367,9 @@ const getUserRegistrationStats = async (days = 30) => {
 
   const { data: users, error } = await supabaseAdmin
     .from('sys_user')
-    .select('create_date')
-    .gte('create_date', startDate.toISOString())
-    .order('create_date', { ascending: true });
+    .select('created_at')
+    .gte('created_at', startDate.toISOString())
+    .order('created_at', { ascending: true });
 
   if (error) {
     logger.error('Failed to fetch user registration stats:', error);
@@ -379,7 +379,7 @@ const getUserRegistrationStats = async (days = 30) => {
   // Group by date
   const dailyStats = {};
   (users || []).forEach(user => {
-    const date = new Date(user.create_date).toISOString().split('T')[0];
+    const date = new Date(user.created_at).toISOString().split('T')[0];
     dailyStats[date] = (dailyStats[date] || 0) + 1;
   });
 
@@ -418,9 +418,9 @@ const getDeviceRegistrationStats = async (days = 30) => {
 
   const { data: devices, error } = await supabaseAdmin
     .from('ai_device')
-    .select('create_date')
-    .gte('create_date', startDate.toISOString())
-    .order('create_date', { ascending: true });
+    .select('created_at')
+    .gte('created_at', startDate.toISOString())
+    .order('created_at', { ascending: true });
 
   if (error) {
     logger.error('Failed to fetch device registration stats:', error);
@@ -430,7 +430,7 @@ const getDeviceRegistrationStats = async (days = 30) => {
   // Group by date
   const dailyStats = {};
   (devices || []).forEach(device => {
-    const date = new Date(device.create_date).toISOString().split('T')[0];
+    const date = new Date(device.created_at).toISOString().split('T')[0];
     dailyStats[date] = (dailyStats[date] || 0) + 1;
   });
 
@@ -600,9 +600,9 @@ const getActiveSessions = async () => {
 
   const { data: devices, error } = await supabaseAdmin
     .from('ai_device')
-    .select('mac_address, device_name, online, agent_id, update_date')
+    .select('mac_address, device_name, online, agent_id, updated_at')
     .eq('online', 1)
-    .gte('update_date', fiveMinutesAgo.toISOString());
+    .gte('updated_at', fiveMinutesAgo.toISOString());
 
   if (error) {
     logger.error('Failed to fetch active sessions:', error);

@@ -65,10 +65,10 @@ const { success, badRequest, notFound } = require('../utils/response');
  *           type: string
  *           format: date-time
  *           description: When privacy policy was accepted
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
- *         update_date:
+ *         updated_at:
  *           type: string
  *           format: date-time
  *     ParentProfileInput:

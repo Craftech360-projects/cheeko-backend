@@ -26,7 +26,7 @@ const htmlEntities = {
  */
 const escapeHtml = (str) => {
   if (typeof str !== 'string') return str;
-  return str.replace(/[&<>"'`=\/]/g, (char) => htmlEntities[char]);
+  return str.replace(/[&<>"'`=/]/g, (char) => htmlEntities[char]);
 };
 
 /**

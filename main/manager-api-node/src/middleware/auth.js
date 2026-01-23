@@ -35,22 +35,53 @@ const extractServiceKey = (req) => {
 };
 
 /**
- * Verify Supabase JWT token
- * @param {string} token - JWT token
+ * Verify custom token from sys_user_token table
+ * @param {string} token - Custom token
  * @returns {Promise<Object|null>} User data or null
  */
-const verifySupabaseToken = async (token) => {
+const verifyCustomToken = async (token) => {
   if (!supabaseAdmin) {
     logger.warn('Supabase not configured, cannot verify token');
     return null;
   }
 
   try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) {
-      logger.debug('Token verification failed:', error?.message);
+    // Find valid token in sys_user_token table
+    const { data: tokenData, error: tokenError } = await supabaseAdmin
+      .from('sys_user_token')
+      .select('user_id, expire_date')
+      .eq('token', token)
+      .single();
+
+    if (tokenError || !tokenData) {
+      logger.debug('Token not found:', tokenError?.message);
       return null;
     }
+
+    // Check expiration
+    if (new Date(tokenData.expire_date) < new Date()) {
+      logger.debug('Token expired');
+      // Delete expired token
+      await supabaseAdmin
+        .from('sys_user_token')
+        .delete()
+        .eq('token', token);
+      return null;
+    }
+
+    // Get user
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('sys_user')
+      .select('id, username, email, role, status, created_at')
+      .eq('id', tokenData.user_id)
+      .eq('status', 1)
+      .single();
+
+    if (userError || !user) {
+      logger.debug('User not found:', userError?.message);
+      return null;
+    }
+
     return user;
   } catch (error) {
     logger.error('Token verification error:', error);
@@ -69,7 +100,7 @@ const requireAuth = async (req, res, next) => {
     return unauthorized(res, 'No authorization token provided');
   }
 
-  const user = await verifySupabaseToken(token);
+  const user = await verifyCustomToken(token);
   if (!user) {
     return unauthorized(res, 'Invalid or expired token');
   }
@@ -121,7 +152,7 @@ const requireDualAuth = async (req, res, next) => {
 
   // Try OAuth2 token
   if (token) {
-    const user = await verifySupabaseToken(token);
+    const user = await verifyCustomToken(token);
     if (user) {
       req.user = user;
       req.token = token;
@@ -147,7 +178,7 @@ const optionalAuth = async (req, res, next) => {
 
   // Check OAuth2 token
   if (token) {
-    const user = await verifySupabaseToken(token);
+    const user = await verifyCustomToken(token);
     if (user) {
       req.user = user;
       req.token = token;
@@ -169,7 +200,7 @@ const requireAdmin = async (req, res, next) => {
     return unauthorized(res, 'No authorization token provided');
   }
 
-  const user = await verifySupabaseToken(token);
+  const user = await verifyCustomToken(token);
   if (!user) {
     return unauthorized(res, 'Invalid or expired token');
   }
@@ -234,7 +265,7 @@ const requireRole = (role) => {
 module.exports = {
   extractBearerToken,
   extractServiceKey,
-  verifySupabaseToken,
+  verifyCustomToken,
   requireAuth,
   requireAdmin,
   requireServiceKey,

@@ -23,11 +23,11 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
  */
 const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      auth: {
-        autoRefreshToken: true,
-        persistSession: false
-      }
-    })
+    auth: {
+      autoRefreshToken: true,
+      persistSession: false
+    }
+  })
   : null;
 
 /**
@@ -36,11 +36,11 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
  */
 const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false
-      }
-    })
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  })
   : null;
 
 /**
@@ -54,14 +54,21 @@ const testConnection = async () => {
   }
 
   try {
-    // Try to query a simple table or run a health check
+    // Try to query sys_user table (should exist after migrations)
     const { data, error } = await supabaseAdmin
-      .from('sys_params')
+      .from('sys_user')
       .select('id')
       .limit(1);
 
-    if (error && error.code !== 'PGRST116') {
-      // PGRST116 = table doesn't exist (ok for initial setup)
+    // Check for table not found error
+    if (error) {
+      if (error.code === 'PGRST116' || error.code === '42P01' ||
+          error.message.includes('does not exist') ||
+          error.message.includes('schema cache')) {
+        // Table doesn't exist yet - migrations needed but connection works
+        logger.info('Supabase connected but tables not created');
+        return true;
+      }
       throw error;
     }
 

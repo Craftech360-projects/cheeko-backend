@@ -38,7 +38,7 @@ const getCardMappingPage = async ({ page = 1, limit = 10, packCode, active } = {
       pack:pack_id(id, pack_code, name),
       content_pack:content_pack_id(id, pack_code, name, content_type)
     `)
-    .order('create_date', { ascending: false });
+    .order('created_at', { ascending: false });
 
   // Apply filters
   if (packCode) {
@@ -84,7 +84,7 @@ const getCardMappingList = async ({ packCode, active } = {}) => {
       pack:pack_id(id, pack_code, name),
       content_pack:content_pack_id(id, pack_code, name, content_type)
     `)
-    .order('create_date', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (packCode) {
     query = query.eq('pack_code', packCode);
@@ -257,7 +257,7 @@ const updateCardMapping = async (data, userId) => {
 
   const updateData = {
     updater: userId,
-    update_date: new Date().toISOString()
+    updated_at: new Date().toISOString()
   };
 
   // Only update provided fields
@@ -586,7 +586,7 @@ const getPackList = async ({ active } = {}) => {
   let query = supabaseAdmin
     .from('rfid_pack')
     .select('*')
-    .order('create_date', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (active !== undefined) {
     query = query.eq('active', active);
@@ -673,7 +673,7 @@ const updatePack = async (data, userId) => {
 
   const updateData = {
     updater: userId,
-    update_date: new Date().toISOString()
+    updated_at: new Date().toISOString()
   };
 
   // Only update provided fields
@@ -732,7 +732,7 @@ const deletePack = async (packId) => {
  * @param {Object} options - Pagination and filter options
  * @returns {Promise<Object>} Paginated series list
  */
-const getSeriesList = async ({ page = 1, limit = 10, packId, active } = {}) => {
+const getSeriesList = async ({ page = 1, limit = 10, packId, status } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const offset = (page - 1) * limit;
@@ -742,25 +742,21 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, active } = {}) => {
     .from('rfid_series')
     .select('id', { count: 'exact', head: true });
 
-  // Build data query with joins
+  // Build data query - rfid_series has: series_name, start_uid, end_uid, content_pack_id, priority, status
   let dataQuery = supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language),
-      pack:pack_id(id, pack_code, name)
-    `)
-    .order('create_date', { ascending: false });
+    .select('*')
+    .order('created_at', { ascending: false });
 
   // Apply filters
   if (packId) {
-    countQuery = countQuery.eq('pack_id', packId);
-    dataQuery = dataQuery.eq('pack_id', packId);
+    countQuery = countQuery.eq('content_pack_id', packId);
+    dataQuery = dataQuery.eq('content_pack_id', packId);
   }
 
-  if (active !== undefined) {
-    countQuery = countQuery.eq('active', active);
-    dataQuery = dataQuery.eq('active', active);
+  if (status !== undefined) {
+    countQuery = countQuery.eq('status', status);
+    dataQuery = dataQuery.eq('status', status);
   }
 
   const { count } = await countQuery;
@@ -785,24 +781,20 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, active } = {}) => {
  * @param {Object} options - Filter options
  * @returns {Promise<Array>} All series
  */
-const getSeriesAll = async ({ packId, active } = {}) => {
+const getSeriesAll = async ({ packId, status } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   let query = supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language),
-      pack:pack_id(id, pack_code, name)
-    `)
-    .order('create_date', { ascending: false });
+    .select('*')
+    .order('created_at', { ascending: false });
 
   if (packId) {
-    query = query.eq('pack_id', packId);
+    query = query.eq('content_pack_id', packId);
   }
 
-  if (active !== undefined) {
-    query = query.eq('active', active);
+  if (status !== undefined) {
+    query = query.eq('status', status);
   }
 
   const { data: series, error } = await query;
@@ -904,7 +896,7 @@ const updateSeries = async (data, userId) => {
 
   const updateData = {
     updater: userId,
-    update_date: new Date().toISOString()
+    updated_at: new Date().toISOString()
   };
 
   // Only update provided fields

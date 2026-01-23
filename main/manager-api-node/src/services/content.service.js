@@ -41,8 +41,8 @@ const getLibraryList = async ({ page = 1, limit = 10, contentType, category, isA
 
   if (isActive !== undefined) {
     const activeValue = isActive === true || isActive === 'true' || isActive === 1 ? 1 : 0;
-    countQuery = countQuery.eq('is_active', activeValue);
-    dataQuery = dataQuery.eq('is_active', activeValue);
+    countQuery = countQuery.eq('status', activeValue);
+    dataQuery = dataQuery.eq('status', activeValue);
   }
 
   const { count } = await countQuery;
@@ -76,13 +76,13 @@ const searchLibrary = async (query, { page = 1, limit = 20, contentType, categor
   let countQuery = supabaseAdmin
     .from('content_library')
     .select('id', { count: 'exact', head: true })
-    .eq('is_active', 1)
+    .eq('status', 1)
     .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`);
 
   let dataQuery = supabaseAdmin
     .from('content_library')
     .select('*')
-    .eq('is_active', 1)
+    .eq('status', 1)
     .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`)
     .order('created_at', { ascending: false });
 
@@ -124,7 +124,7 @@ const getLibraryCategories = async (contentType) => {
   let query = supabaseAdmin
     .from('content_library')
     .select('category, content_type')
-    .eq('is_active', 1)
+    .eq('status', 1)
     .not('category', 'is', null);
 
   if (contentType) {
@@ -194,7 +194,7 @@ const createLibraryItem = async (data) => {
       aws_s3_url: data.awsS3Url,
       duration_seconds: data.durationSeconds,
       file_size_bytes: data.fileSizeBytes,
-      is_active: data.isActive !== undefined ? data.isActive : 1
+      status: data.isActive !== undefined ? data.isActive : 1
     })
     .select()
     .single();
@@ -227,7 +227,7 @@ const updateLibraryItem = async (contentId, data) => {
   if (data.awsS3Url !== undefined) updateData.aws_s3_url = data.awsS3Url;
   if (data.durationSeconds !== undefined) updateData.duration_seconds = data.durationSeconds;
   if (data.fileSizeBytes !== undefined) updateData.file_size_bytes = data.fileSizeBytes;
-  if (data.isActive !== undefined) updateData.is_active = data.isActive;
+  if (data.isActive !== undefined) updateData.status = data.isActive;
 
   const { data: content, error } = await supabaseAdmin
     .from('content_library')
@@ -284,7 +284,7 @@ const batchCreateLibraryItems = async (items) => {
     aws_s3_url: item.awsS3Url,
     duration_seconds: item.durationSeconds,
     file_size_bytes: item.fileSizeBytes,
-    is_active: item.isActive !== undefined ? item.isActive : 1
+    status: item.isActive !== undefined ? item.isActive : 1
   }));
 
   const { data: content, error } = await supabaseAdmin
@@ -804,7 +804,7 @@ const getPlaylist = async (deviceId, playlistType) => {
         category,
         aws_s3_url,
         duration_seconds,
-        is_active
+        status
       )
     `)
     .eq('device_id', deviceId)

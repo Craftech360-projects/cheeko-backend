@@ -1636,7 +1636,7 @@ router.post('/register-batch',
  *           type: string
  *         active:
  *           type: boolean
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *         question:
@@ -1737,7 +1737,7 @@ router.post('/register-batch',
  *           type: integer
  *         active:
  *           type: boolean
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *     ContentPack:
@@ -1766,7 +1766,7 @@ router.post('/register-batch',
  *           example: "en"
  *         active:
  *           type: boolean
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *     RfidSeries:
@@ -1795,7 +1795,7 @@ router.post('/register-batch',
  *           description: Priority for overlapping ranges (higher wins)
  *         active:
  *           type: boolean
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *         question:

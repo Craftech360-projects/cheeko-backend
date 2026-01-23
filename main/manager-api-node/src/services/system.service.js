@@ -26,7 +26,7 @@ const listParams = async ({ page = 1, limit = 20, paramType } = {}) => {
   let dataQuery = supabaseAdmin
     .from('sys_params')
     .select('*')
-    .order('create_date', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (paramType !== undefined) {
     countQuery = countQuery.eq('param_type', paramType);
@@ -177,7 +177,7 @@ const createParam = async (userId, data) => {
 const updateParam = async (id, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { updated_at: new Date().toISOString() };
 
   if (data.paramCode !== undefined) updateData.param_code = data.paramCode;
   if (data.paramValue !== undefined) updateData.param_value = data.paramValue;
@@ -260,7 +260,7 @@ const listDictTypes = async ({ page = 1, limit = 20 } = {}) => {
     .from('sys_dict_type')
     .select('*')
     .order('sort', { ascending: true })
-    .order('create_date', { ascending: false })
+    .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (error) {
@@ -375,7 +375,7 @@ const createDictType = async (userId, data) => {
 const updateDictType = async (id, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { updated_at: new Date().toISOString() };
 
   if (data.dictType !== undefined) updateData.dict_type = data.dictType;
   if (data.dictName !== undefined) updateData.dict_name = data.dictName;
@@ -458,7 +458,7 @@ const listDictData = async ({ page = 1, limit = 20, dictTypeId } = {}) => {
     .from('sys_dict_data')
     .select('*, dict_type:sys_dict_type(id, dict_type, dict_name)')
     .order('sort', { ascending: true })
-    .order('create_date', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (dictTypeId) {
     countQuery = countQuery.eq('dict_type_id', dictTypeId);
@@ -580,7 +580,7 @@ const createDictData = async (userId, data) => {
 const updateDictData = async (id, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { updated_at: new Date().toISOString() };
 
   if (data.dictTypeId !== undefined) updateData.dict_type_id = data.dictTypeId;
   if (data.dictLabel !== undefined) updateData.dict_label = data.dictLabel;

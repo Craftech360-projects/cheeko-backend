@@ -67,12 +67,12 @@ const { success, badRequest, notFound } = require('../utils/response');
  *           description: Parameter description/note
  *         creator:
  *           type: integer
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *         updater:
  *           type: integer
- *         update_date:
+ *         updated_at:
  *           type: string
  *           format: date-time
  *     SysParamInput:
@@ -116,12 +116,12 @@ const { success, badRequest, notFound } = require('../utils/response');
  *           description: Sort order
  *         creator:
  *           type: integer
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *         updater:
  *           type: integer
- *         update_date:
+ *         updated_at:
  *           type: string
  *           format: date-time
  *     DictTypeInput:
@@ -172,12 +172,12 @@ const { success, badRequest, notFound } = require('../utils/response');
  *               type: string
  *         creator:
  *           type: integer
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
  *         updater:
  *           type: integer
- *         update_date:
+ *         updated_at:
  *           type: string
  *           format: date-time
  *     DictDataInput:

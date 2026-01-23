@@ -525,10 +525,10 @@ router.get('/:mac',
  *           type: integer
  *           enum: [0, 1]
  *           description: 0=optional, 1=forced update
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
- *         update_date:
+ *         updated_at:
  *           type: string
  *           format: date-time
  *     FirmwareInput:

@@ -56,10 +56,10 @@ const { success, badRequest, notFound } = require('../utils/response');
  *           type: integer
  *           enum: [0, 1]
  *           description: 0=normal user, 1=super admin
- *         create_date:
+ *         created_at:
  *           type: string
  *           format: date-time
- *         update_date:
+ *         updated_at:
  *           type: string
  *           format: date-time
  *     AdminUserInput:
@@ -1007,7 +1007,7 @@ router.get('/stats/tokens',
  *                             type: integer
  *                           agent_id:
  *                             type: integer
- *                           update_date:
+ *                           updated_at:
  *                             type: string
  *                             format: date-time
  *       401:

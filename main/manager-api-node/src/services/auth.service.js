@@ -40,8 +40,10 @@ const register = async ({ username, password, email, phone }) => {
     .insert({
       username,
       password: hashedPassword,
+      email: email || null,
+      phone: phone || null,
       status: 1,
-      super_admin: 0
+      role: 'user'
     })
     .select()
     .single();
@@ -171,7 +173,7 @@ const changePassword = async (userId, oldPassword, newPassword) => {
     .from('sys_user')
     .update({
       password: hashedPassword,
-      update_date: new Date().toISOString()
+      updated_at: new Date().toISOString()
     })
     .eq('id', userId);
 
@@ -210,7 +212,7 @@ const updatePassword = async (username, newPassword) => {
     .from('sys_user')
     .update({
       password: hashedPassword,
-      update_date: new Date().toISOString()
+      updated_at: new Date().toISOString()
     })
     .eq('id', user.id);
 
@@ -297,7 +299,7 @@ const getUserByToken = async (token) => {
   // Get user
   const { data: user } = await supabaseAdmin
     .from('sys_user')
-    .select('id, username, super_admin, status, create_date')
+    .select('id, username, role, status, created_at')
     .eq('id', tokenData.user_id)
     .eq('status', 1)
     .single();

@@ -885,7 +885,7 @@ const recordTokenUsage = async ({
         message_count: existing.message_count + messageCount,
         total_response_duration_seconds: existing.total_response_duration_seconds + totalResponseDurationSeconds,
         session_count: sessionId && !existing.session_id ? existing.session_count + 1 : existing.session_count,
-        updated_at: new Date().toISOString()
+        update_date: new Date().toISOString()
       })
       .eq('id', existing.id)
       .select()

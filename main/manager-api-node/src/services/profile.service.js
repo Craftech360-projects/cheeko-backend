@@ -417,7 +417,7 @@ const updateParentProfile = async (userId, data) => {
   const existing = await getParentProfile(userId);
   if (!existing) throw new Error('Parent profile not found');
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { updated_at: new Date().toISOString() };
 
   if (data.fullName !== undefined) updateData.full_name = data.fullName;
   if (data.email !== undefined) updateData.email = data.email;
@@ -488,7 +488,7 @@ const updateNotificationPreferences = async (userId, preferences) => {
     .from('parent_profile')
     .update({
       notification_preferences: updatedPrefs,
-      update_date: new Date().toISOString()
+      updated_at: new Date().toISOString()
     })
     .eq('user_id', userId)
     .select('notification_preferences')
@@ -514,7 +514,7 @@ const completeOnboarding = async (userId) => {
     .from('parent_profile')
     .update({
       onboarding_completed: true,
-      update_date: new Date().toISOString()
+      updated_at: new Date().toISOString()
     })
     .eq('user_id', userId)
     .select()
@@ -538,7 +538,7 @@ const acceptTerms = async (userId, data = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const now = new Date().toISOString();
-  const updateData = { update_date: now };
+  const updateData = { updated_at: now };
 
   if (data.acceptTerms) {
     updateData.terms_accepted_at = now;

@@ -198,3 +198,8 @@ main/manager-api/src/main/resources/application-dev.yml
 backups/railway_backup_20260103_193209.sql
 main/mqtt-gateway/config/mqtt.json
 main/manager-api/src/main/resources/application-dev.yml
+.env
+venv
+node_modules
+CLAUDE.md
+clerk-nextjs-guide
