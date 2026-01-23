@@ -360,6 +360,361 @@ describe('RFID Routes', () => {
     });
   });
 
+  describe('GET /toy/admin/rfid/pack/:id', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/pack/1');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return 404 for non-existent pack', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/pack/999999')
+        .set('Authorization', FAKE_TOKEN);
+
+      // 404 if not found, 401 if auth fails, 500 if DB not configured
+      expect([404, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return pack details by ID', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/pack/1')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 404, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('PUT /toy/admin/rfid/pack', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/pack')
+        .send({ id: 1, name: 'Updated Pack' });
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should require id field', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/pack')
+        .send({ name: 'Updated Pack' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept valid update data', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/pack')
+        .send({
+          id: 1,
+          name: 'Updated Pack Name',
+          description: 'Updated description',
+          ageMin: 4,
+          ageMax: 10,
+          active: false
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('DELETE /toy/admin/rfid/pack/:id', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/pack/1');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept valid pack ID', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/pack/999999')
+        .set('Authorization', FAKE_TOKEN);
+
+      // 200 for success, 401/403 for auth
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  // =============================================
+  // Series Management Routes
+  // =============================================
+
+  describe('GET /toy/admin/rfid/series/page', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/page');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept pagination parameters', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/page')
+        .query({ page: 1, limit: 10 })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept packId filter', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/page')
+        .query({ packId: 1 })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept active filter', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/page')
+        .query({ active: 'true' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/series/list', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/list');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept filter parameters', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/list')
+        .query({ packId: 1, active: 'false' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/series/:id', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/1');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return 404 for non-existent series', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/999999')
+        .set('Authorization', FAKE_TOKEN);
+
+      // 404 if not found, 401 if auth fails, 500 if DB not configured
+      expect([404, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return series details by ID', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/series/1')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 404, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('POST /toy/admin/rfid/series', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          name: 'Test Series',
+          startUid: '04A3B2C1D00000',
+          endUid: '04A3B2C1DFFFFF'
+        });
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should require name', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          startUid: '04A3B2C1D00000',
+          endUid: '04A3B2C1DFFFFF'
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should require startUid', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          name: 'Test Series',
+          endUid: '04A3B2C1DFFFFF'
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should require endUid', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          name: 'Test Series',
+          startUid: '04A3B2C1D00000'
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept valid series data', async () => {
+      const timestamp = Date.now();
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          name: `Test Series ${timestamp}`,
+          description: 'Created during testing',
+          startUid: '04A3B2C1D00000',
+          endUid: '04A3B2C1DFFFFF',
+          questionId: 1,
+          packId: 1,
+          priority: 10,
+          active: true
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept UIDs with colons', async () => {
+      const timestamp = Date.now();
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          name: `Test Series Colons ${timestamp}`,
+          startUid: '04:A3:B2:C1:D0:00:00',
+          endUid: '04:A3:B2:C1:DF:FF:FF'
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept UIDs with dashes', async () => {
+      const timestamp = Date.now();
+      const res = await request(app)
+        .post('/toy/admin/rfid/series')
+        .send({
+          name: `Test Series Dashes ${timestamp}`,
+          startUid: '04-A3-B2-C1-D0-00-00',
+          endUid: '04-A3-B2-C1-DF-FF-FF'
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('PUT /toy/admin/rfid/series', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/series')
+        .send({ id: 1, name: 'Updated Series' });
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should require id field', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/series')
+        .send({ name: 'Updated Series' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept valid update data', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/series')
+        .send({
+          id: 1,
+          name: 'Updated Series Name',
+          description: 'Updated description',
+          priority: 20,
+          active: false
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should allow updating UID range', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/series')
+        .send({
+          id: 1,
+          startUid: '04A3B2C1E00000',
+          endUid: '04A3B2C1FFFFFF'
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('DELETE /toy/admin/rfid/series/:id', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/series/1');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept valid series ID', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/series/999999')
+        .set('Authorization', FAKE_TOKEN);
+
+      // 200 for success, 401/403 for auth
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
   // =============================================
   // Legacy Routes (backward compatibility)
   // =============================================

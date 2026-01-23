@@ -762,6 +762,514 @@ router.post('/pack',
   })
 );
 
+/**
+ * @swagger
+ * /admin/rfid/pack/{id}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get pack by ID
+ *     description: Retrieve RFID pack details by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Pack ID
+ *     responses:
+ *       200:
+ *         description: Pack details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/RfidPack'
+ *       404:
+ *         description: Pack not found
+ */
+router.get('/pack/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const pack = await rfidService.getPackById(parseInt(id));
+    if (!pack) {
+      return notFound(res, 'Pack not found');
+    }
+
+    success(res, pack);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/pack:
+ *   put:
+ *     tags: [RFID]
+ *     summary: Update RFID pack
+ *     description: Update an existing RFID pack (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 description: Pack ID
+ *               packCode:
+ *                 type: string
+ *                 description: Unique pack identifier
+ *               name:
+ *                 type: string
+ *                 description: Pack display name
+ *               description:
+ *                 type: string
+ *               ageMin:
+ *                 type: integer
+ *                 description: Minimum recommended age
+ *               ageMax:
+ *                 type: integer
+ *                 description: Maximum recommended age
+ *               active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Pack updated
+ *       400:
+ *         description: Validation error
+ */
+router.put('/pack',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.body;
+
+    if (!id) {
+      return badRequest(res, 'Pack ID is required');
+    }
+
+    try {
+      const pack = await rfidService.updatePack(req.body, req.user.id);
+      success(res, pack, 'Pack updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/pack/{id}:
+ *   delete:
+ *     tags: [RFID]
+ *     summary: Delete RFID pack
+ *     description: Delete an RFID pack (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Pack ID
+ *     responses:
+ *       200:
+ *         description: Pack deleted
+ *       400:
+ *         description: Pack ID required
+ */
+router.delete('/pack/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!id) {
+      return badRequest(res, 'Pack ID is required');
+    }
+
+    try {
+      await rfidService.deletePack(parseInt(id));
+      success(res, null, 'Pack deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// =============================================
+// Series Management Routes
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/series/page:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get series list (paginated)
+ *     description: Returns paginated list of RFID series (UID range mappings)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: packId
+ *         schema:
+ *           type: integer
+ *         description: Filter by pack ID
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Paginated series list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/RfidSeries'
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     pages:
+ *                       type: integer
+ */
+router.get('/series/page',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit, packId, active } = req.query;
+    const result = await rfidService.getSeriesList({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      packId: packId ? parseInt(packId) : undefined,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/list:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get all series
+ *     description: Returns all RFID series without pagination
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: packId
+ *         schema:
+ *           type: integer
+ *         description: Filter by pack ID
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Series list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidSeries'
+ */
+router.get('/series/list',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { packId, active } = req.query;
+    const result = await rfidService.getSeriesAll({
+      packId: packId ? parseInt(packId) : undefined,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/{id}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get series by ID
+ *     description: Retrieve RFID series details by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Series ID
+ *     responses:
+ *       200:
+ *         description: Series details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/RfidSeries'
+ *       404:
+ *         description: Series not found
+ */
+router.get('/series/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Skip if id is 'lookup' (handled by earlier route)
+    if (id === 'lookup') {
+      return notFound(res, 'Series not found');
+    }
+
+    const series = await rfidService.getSeriesById(parseInt(id));
+    if (!series) {
+      return notFound(res, 'Series not found');
+    }
+
+    success(res, series);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Create RFID series
+ *     description: Create a new RFID series (UID range mapping) (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - startUid
+ *               - endUid
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 description: Series name
+ *                 example: "Animal Cards Series 1"
+ *               description:
+ *                 type: string
+ *                 description: Series description
+ *               startUid:
+ *                 type: string
+ *                 description: Starting RFID UID (hex string)
+ *                 example: "04A3B2C1D00000"
+ *               endUid:
+ *                 type: string
+ *                 description: Ending RFID UID (hex string)
+ *                 example: "04A3B2C1DFFFFF"
+ *               questionId:
+ *                 type: integer
+ *                 description: Question ID to associate with this series
+ *               packId:
+ *                 type: integer
+ *                 description: Pack ID this series belongs to
+ *               priority:
+ *                 type: integer
+ *                 default: 0
+ *                 description: Priority for overlapping ranges (higher wins)
+ *               active:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Series created
+ *       400:
+ *         description: Validation error
+ */
+router.post('/series',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { name, startUid, endUid } = req.body;
+
+    if (!name) {
+      return badRequest(res, 'Series name is required');
+    }
+    if (!startUid) {
+      return badRequest(res, 'Start UID is required');
+    }
+    if (!endUid) {
+      return badRequest(res, 'End UID is required');
+    }
+
+    try {
+      const series = await rfidService.createSeries(req.body, req.user.id);
+      success(res, series, 'Series created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series:
+ *   put:
+ *     tags: [RFID]
+ *     summary: Update RFID series
+ *     description: Update an existing RFID series (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 description: Series ID
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               startUid:
+ *                 type: string
+ *               endUid:
+ *                 type: string
+ *               questionId:
+ *                 type: integer
+ *               packId:
+ *                 type: integer
+ *               priority:
+ *                 type: integer
+ *               active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Series updated
+ *       400:
+ *         description: Validation error
+ */
+router.put('/series',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.body;
+
+    if (!id) {
+      return badRequest(res, 'Series ID is required');
+    }
+
+    try {
+      const series = await rfidService.updateSeries(req.body, req.user.id);
+      success(res, series, 'Series updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/{id}:
+ *   delete:
+ *     tags: [RFID]
+ *     summary: Delete RFID series
+ *     description: Delete an RFID series (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Series ID
+ *     responses:
+ *       200:
+ *         description: Series deleted
+ *       400:
+ *         description: Series ID required
+ */
+router.delete('/series/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    if (!id) {
+      return badRequest(res, 'Series ID is required');
+    }
+
+    try {
+      await rfidService.deleteSeries(parseInt(id));
+      success(res, null, 'Series deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 // =============================================
 // Legacy Routes (backward compatibility)
 // =============================================
@@ -1261,6 +1769,57 @@ router.post('/register-batch',
  *         create_date:
  *           type: string
  *           format: date-time
+ *     RfidSeries:
+ *       type: object
+ *       description: RFID series for UID range mappings
+ *       properties:
+ *         id:
+ *           type: integer
+ *         name:
+ *           type: string
+ *           description: Series name
+ *         description:
+ *           type: string
+ *         start_uid:
+ *           type: string
+ *           description: Starting RFID UID (normalized hex)
+ *         end_uid:
+ *           type: string
+ *           description: Ending RFID UID (normalized hex)
+ *         question_id:
+ *           type: integer
+ *         pack_id:
+ *           type: integer
+ *         priority:
+ *           type: integer
+ *           description: Priority for overlapping ranges (higher wins)
+ *         active:
+ *           type: boolean
+ *         create_date:
+ *           type: string
+ *           format: date-time
+ *         question:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             code:
+ *               type: string
+ *             title:
+ *               type: string
+ *             prompt_text:
+ *               type: string
+ *             language:
+ *               type: string
+ *         pack:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             pack_code:
+ *               type: string
+ *             name:
+ *               type: string
  */
 
 module.exports = router;

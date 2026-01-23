@@ -636,6 +636,336 @@ const createPack = async (data, userId) => {
   return pack;
 };
 
+/**
+ * Get pack by ID
+ * @param {number} packId - Pack ID
+ * @returns {Promise<Object>} Pack details
+ */
+const getPackById = async (packId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: pack, error } = await supabaseAdmin
+    .from('rfid_pack')
+    .select('*')
+    .eq('id', packId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch pack:', error);
+    throw new Error('Failed to fetch pack');
+  }
+
+  return pack || null;
+};
+
+/**
+ * Update pack
+ * @param {Object} data - Update data (must include id)
+ * @param {number} userId - Updater user ID
+ * @returns {Promise<Object>} Updated pack
+ */
+const updatePack = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!data.id) {
+    throw new Error('Pack ID is required');
+  }
+
+  const updateData = {
+    updater: userId,
+    update_date: new Date().toISOString()
+  };
+
+  // Only update provided fields
+  if (data.packCode !== undefined) updateData.pack_code = data.packCode;
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.ageMin !== undefined) updateData.age_min = data.ageMin;
+  if (data.ageMax !== undefined) updateData.age_max = data.ageMax;
+  if (data.active !== undefined) updateData.active = data.active;
+
+  const { data: pack, error } = await supabaseAdmin
+    .from('rfid_pack')
+    .update(updateData)
+    .eq('id', data.id)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update pack:', error);
+    if (error.code === '23505') {
+      throw new Error('Pack with this code already exists');
+    }
+    throw new Error('Failed to update pack');
+  }
+
+  return pack;
+};
+
+/**
+ * Delete pack
+ * @param {number} packId - Pack ID
+ * @returns {Promise<boolean>} Success status
+ */
+const deletePack = async (packId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('rfid_pack')
+    .delete()
+    .eq('id', packId);
+
+  if (error) {
+    logger.error('Failed to delete pack:', error);
+    throw new Error('Failed to delete pack');
+  }
+
+  return true;
+};
+
+// =============================================
+// Series Management Methods
+// =============================================
+
+/**
+ * Get series list with pagination
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated series list
+ */
+const getSeriesList = async ({ page = 1, limit = 10, packId, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  // Build count query
+  let countQuery = supabaseAdmin
+    .from('rfid_series')
+    .select('id', { count: 'exact', head: true });
+
+  // Build data query with joins
+  let dataQuery = supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language),
+      pack:pack_id(id, pack_code, name)
+    `)
+    .order('create_date', { ascending: false });
+
+  // Apply filters
+  if (packId) {
+    countQuery = countQuery.eq('pack_id', packId);
+    dataQuery = dataQuery.eq('pack_id', packId);
+  }
+
+  if (active !== undefined) {
+    countQuery = countQuery.eq('active', active);
+    dataQuery = dataQuery.eq('active', active);
+  }
+
+  const { count } = await countQuery;
+  const { data: series, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch series:', error);
+    throw new Error('Failed to fetch series');
+  }
+
+  return {
+    list: series || [],
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit)
+  };
+};
+
+/**
+ * Get all series (no pagination)
+ * @param {Object} options - Filter options
+ * @returns {Promise<Array>} All series
+ */
+const getSeriesAll = async ({ packId, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language),
+      pack:pack_id(id, pack_code, name)
+    `)
+    .order('create_date', { ascending: false });
+
+  if (packId) {
+    query = query.eq('pack_id', packId);
+  }
+
+  if (active !== undefined) {
+    query = query.eq('active', active);
+  }
+
+  const { data: series, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch series:', error);
+    throw new Error('Failed to fetch series');
+  }
+
+  return series || [];
+};
+
+/**
+ * Get series by ID
+ * @param {number} seriesId - Series ID
+ * @returns {Promise<Object>} Series details
+ */
+const getSeriesById = async (seriesId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language, category, difficulty),
+      pack:pack_id(id, pack_code, name, description)
+    `)
+    .eq('id', seriesId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch series:', error);
+    throw new Error('Failed to fetch series');
+  }
+
+  return series || null;
+};
+
+/**
+ * Create series
+ * @param {Object} data - Series data
+ * @param {number} userId - Creator user ID
+ * @returns {Promise<Object>} Created series
+ */
+const createSeries = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Normalize UIDs
+  const startUid = data.startUid.toUpperCase().replace(/[:-]/g, '');
+  const endUid = data.endUid.toUpperCase().replace(/[:-]/g, '');
+
+  // Validate UID order
+  if (startUid > endUid) {
+    throw new Error('Start UID must be less than or equal to End UID');
+  }
+
+  const insertData = {
+    name: data.name,
+    description: data.description || null,
+    start_uid: startUid,
+    end_uid: endUid,
+    question_id: data.questionId || null,
+    pack_id: data.packId || null,
+    priority: data.priority || 0,
+    active: data.active !== false,
+    creator: userId
+  };
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .insert(insertData)
+    .select(`
+      *,
+      question:question_id(id, code, title),
+      pack:pack_id(id, pack_code, name)
+    `)
+    .single();
+
+  if (error) {
+    logger.error('Failed to create series:', error);
+    throw new Error('Failed to create series');
+  }
+
+  return series;
+};
+
+/**
+ * Update series
+ * @param {Object} data - Update data (must include id)
+ * @param {number} userId - Updater user ID
+ * @returns {Promise<Object>} Updated series
+ */
+const updateSeries = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!data.id) {
+    throw new Error('Series ID is required');
+  }
+
+  const updateData = {
+    updater: userId,
+    update_date: new Date().toISOString()
+  };
+
+  // Only update provided fields
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.startUid !== undefined) {
+    updateData.start_uid = data.startUid.toUpperCase().replace(/[:-]/g, '');
+  }
+  if (data.endUid !== undefined) {
+    updateData.end_uid = data.endUid.toUpperCase().replace(/[:-]/g, '');
+  }
+  if (data.questionId !== undefined) updateData.question_id = data.questionId;
+  if (data.packId !== undefined) updateData.pack_id = data.packId;
+  if (data.priority !== undefined) updateData.priority = data.priority;
+  if (data.active !== undefined) updateData.active = data.active;
+
+  // Validate UID order if both are being updated
+  if (updateData.start_uid && updateData.end_uid && updateData.start_uid > updateData.end_uid) {
+    throw new Error('Start UID must be less than or equal to End UID');
+  }
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .update(updateData)
+    .eq('id', data.id)
+    .select(`
+      *,
+      question:question_id(id, code, title),
+      pack:pack_id(id, pack_code, name)
+    `)
+    .single();
+
+  if (error) {
+    logger.error('Failed to update series:', error);
+    throw new Error('Failed to update series');
+  }
+
+  return series;
+};
+
+/**
+ * Delete series
+ * @param {number} seriesId - Series ID
+ * @returns {Promise<boolean>} Success status
+ */
+const deleteSeries = async (seriesId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('rfid_series')
+    .delete()
+    .eq('id', seriesId);
+
+  if (error) {
+    logger.error('Failed to delete series:', error);
+    throw new Error('Failed to delete series');
+  }
+
+  return true;
+};
+
 // =============================================
 // Legacy RFID Tag Methods (for backward compatibility)
 // =============================================
@@ -950,12 +1280,21 @@ module.exports = {
   deleteRagContent,
   deleteRagContentByPack,
 
-  // Series lookup
+  // Series lookup and management
   lookupSeriesByUid,
+  getSeriesList,
+  getSeriesAll,
+  getSeriesById,
+  createSeries,
+  updateSeries,
+  deleteSeries,
 
   // Pack management
   getPackList,
+  getPackById,
   createPack,
+  updatePack,
+  deletePack,
 
   // Legacy RFID tag methods
   getRfidList,

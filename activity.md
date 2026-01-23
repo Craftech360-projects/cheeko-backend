@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 15
-**Current Task:** Feature - Implement RFID routes - Packs and Series
+**Tasks Completed:** 16
+**Current Task:** Feature - Implement Kid Profile routes (/api/mobile/kids/*)
 
 ---
 
@@ -462,6 +462,72 @@ npm test     # 225 tests passed (165 previous + 60 new RAG tests)
 - POST /admin/rfid/rag/search - Auth and validation tests
 - GET /admin/rfid/content-pack/:id - Auth and lookup tests
 - Embedding handling and filter tests
+
+---
+
+### 2026-01-23 - Task 16: Implement RFID routes - Packs and Series (COMPLETED)
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added pack and series management methods:
+  - `getPackById()` - Get pack by ID
+  - `updatePack()` - Update pack
+  - `deletePack()` - Delete pack
+  - `getSeriesList()` - Get series with pagination
+  - `getSeriesAll()` - Get all series without pagination
+  - `getSeriesById()` - Get series by ID
+  - `createSeries()` - Create new series
+  - `updateSeries()` - Update series
+  - `deleteSeries()` - Delete series
+
+- `src/routes/rfid.routes.js` - Added new routes with Swagger documentation:
+  - `GET /admin/rfid/pack/:id` - Get pack by ID (auth)
+  - `PUT /admin/rfid/pack` - Update pack (admin)
+  - `DELETE /admin/rfid/pack/:id` - Delete pack (admin)
+  - `GET /admin/rfid/series/page` - List series paginated (auth)
+  - `GET /admin/rfid/series/list` - List all series (auth)
+  - `GET /admin/rfid/series/:id` - Get series by ID (auth)
+  - `POST /admin/rfid/series` - Create series (admin)
+  - `PUT /admin/rfid/series` - Update series (admin)
+  - `DELETE /admin/rfid/series/:id` - Delete series (admin)
+
+- `tests/integration/rfid.test.js` - Added 30 new integration tests for:
+  - Pack CRUD operations (GET by ID, PUT, DELETE)
+  - Series CRUD operations (GET page, GET list, GET by ID, POST, PUT, DELETE)
+  - UID format handling for series (colons, dashes, raw hex)
+  - Authentication and validation checks
+
+**Endpoints Implemented (PRD-compliant):**
+- GET /admin/rfid/pack/list - Already existed
+- POST /admin/rfid/pack - Already existed
+- PUT /admin/rfid/pack - NEW: Update pack (admin)
+- DELETE /admin/rfid/pack/:id - NEW: Delete pack (admin)
+- GET /admin/rfid/series/lookup/:uid - Already existed (public)
+- GET /admin/rfid/series/page - NEW: List series paginated (auth)
+- GET /admin/rfid/series/list - NEW: List all series (auth)
+- GET /admin/rfid/series/:id - NEW: Get series by ID (auth)
+- POST /admin/rfid/series - NEW: Create series (admin)
+- PUT /admin/rfid/series - NEW: Update series (admin)
+- DELETE /admin/rfid/series/:id - NEW: Delete series (admin)
+
+**Features:**
+- UID range validation (startUid must be <= endUid)
+- UID normalization (supports colons, dashes, or raw hex)
+- Priority-based series lookup for overlapping ranges
+- Age range filtering for packs
+- Swagger documentation with RfidSeries schema
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 11 warnings (pre-existing in other files)
+npm test     # 255 tests passed (225 previous + 30 new pack/series tests)
+```
+
+**Test Results:**
+- All 30 new pack/series tests pass
+- Authentication checks for protected routes
+- Admin access validation for create/update/delete
+- UID format normalization tests
+- Pagination and filter tests
 
 ---
 
