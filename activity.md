@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 20
-**Current Task:** Feature - Implement Analytics routes - Session tracking
+**Tasks Completed:** 22
+**Current Task:** Feature - Implement Analytics routes - Statistics
 
 ---
 
@@ -688,6 +688,101 @@ npm test     # 389 tests passed (335 previous + 54 new model tests)
 - Route priority tests (static before dynamic)
 - TTS voice CRUD tests
 - Response format validation
+
+---
+
+### 2026-01-23 - Task 21: Implement Analytics routes - Session tracking (COMPLETED)
+
+**Files Created:**
+- `src/services/analytics.service.js` - Full analytics service with 18 methods:
+  - Session management: `startSession()`, `endSession()`, `getSession()`, `getSessionsByMac()`
+  - Game attempts: `logGameAttempt()`, `getAttemptsBySession()`, `getAttemptsByMac()`
+  - Media playback: `logMediaEvent()`, `getMediaPlaybackByMac()`
+  - Streaks: `logStreak()`, `getStreaksByMac()`
+  - User progress: `updateUserProgress()`, `getUserProgress()`
+  - Statistics: `getOverallStats()`, `getGameStats()`, `getDailyUsage()`
+
+- `src/routes/analytics.routes.js` - Analytics routes with comprehensive Swagger documentation:
+  - Session tracking endpoints (service auth)
+  - Game attempt logging (service auth)
+  - Media event tracking (service auth)
+  - Streak recording (service auth)
+  - Statistics endpoints (OAuth auth)
+
+- `tests/integration/analytics.test.js` - 52 integration tests covering:
+  - Session start/end endpoints
+  - Game attempt logging
+  - Media event tracking (start, end, skip)
+  - Streak recording
+  - Statistics endpoints (overall, math, riddle, wordladder)
+  - MAC address format validation
+  - Authentication checks
+
+**Files Modified:**
+- `src/routes/index.js` - Added analytics routes mount at `/analytics`
+
+**PRD-Compliant Endpoints Implemented:**
+- POST /analytics/session/start - Start game session (service auth)
+- POST /analytics/session/end - End game session (service auth)
+- POST /analytics/game-attempt - Log game attempt (service auth)
+- POST /analytics/media-event - Log media playback event (service auth)
+- POST /analytics/streak - Log streak (service auth)
+- GET /analytics/user/:mac/overall - Get overall stats (OAuth)
+- GET /analytics/user/:mac/math - Get math stats (OAuth)
+- GET /analytics/user/:mac/riddle - Get riddle stats (OAuth)
+- GET /analytics/user/:mac/wordladder - Get word ladder stats (OAuth)
+- GET /analytics/sessions/:mac - Get sessions for device (OAuth)
+- GET /analytics/usage/daily/:mac - Get daily usage (OAuth)
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 441 tests passed (389 previous + 52 new analytics tests)
+```
+
+**Test Results:**
+- All 52 analytics tests pass
+- Service key authentication tests
+- OAuth authentication tests
+- Input validation tests
+- MAC address format handling
+- Response format validation
+
+---
+
+### 2026-01-23 - Task 22: Implement Analytics routes - Media and streaks (COMPLETED)
+
+**Verified Existing Implementation:**
+Task 22 was already fully implemented in the previous session (Task 21). All required endpoints and tests were already in place.
+
+**Endpoints Verified (PRD-compliant):**
+- POST /analytics/media-event - Log media playback event (service auth)
+- POST /analytics/streak - Log streak (service auth)
+- GET /analytics/sessions/:mac - Get sessions for device (OAuth)
+
+**Service Methods Already Implemented:**
+- `logMediaEvent()` - Records media start/end/skip events
+- `getMediaPlaybackByMac()` - Get media playback history
+- `logStreak()` - Record streak achievement
+- `getStreaksByMac()` - Get streak history
+
+**Integration Tests Already Present:**
+- Media event authentication tests (lines 238-379)
+- Streak endpoint validation tests (lines 385-519)
+- Sessions endpoint tests (lines 602-618)
+- Media type validation (music, story)
+- Event type validation (start, end, skip)
+- Streak field validation tests
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 441 tests passed (all suites)
+```
+
+**Test Results:**
+- All 441 tests pass
+- No changes needed - implementation was complete
 
 ---
 
