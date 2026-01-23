@@ -315,7 +315,255 @@ const updatePreferences = async (userId, kidId, preferences) => {
   return profile.preferences;
 };
 
+// =============================================
+// Parent Profile Methods
+// =============================================
+
+/**
+ * Get parent profile for user
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Parent profile
+ */
+const getParentProfile = async (userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch parent profile', { error, userId });
+    throw new Error('Failed to fetch parent profile');
+  }
+
+  return profile || null;
+};
+
+/**
+ * Get parent profile by Supabase user ID
+ * @param {string} supabaseUserId - Supabase user ID
+ * @returns {Promise<Object>} Parent profile
+ */
+const getParentBySupabaseId = async (supabaseUserId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .select('*')
+    .eq('supabase_user_id', supabaseUserId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch parent profile by Supabase ID', { error, supabaseUserId });
+    throw new Error('Failed to fetch parent profile');
+  }
+
+  return profile || null;
+};
+
+/**
+ * Create parent profile
+ * @param {string} userId - User ID
+ * @param {Object} data - Profile data
+ * @returns {Promise<Object>} Created profile
+ */
+const createParentProfile = async (userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Check if profile already exists
+  const existing = await getParentProfile(userId);
+  if (existing) {
+    throw new Error('Parent profile already exists for this user');
+  }
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .insert({
+      user_id: userId,
+      supabase_user_id: data.supabaseUserId,
+      full_name: data.fullName,
+      email: data.email,
+      phone_number: data.phoneNumber,
+      preferred_language: data.preferredLanguage || 'en',
+      timezone: data.timezone,
+      notification_preferences: data.notificationPreferences || {},
+      onboarding_completed: data.onboardingCompleted || false,
+      terms_accepted_at: data.termsAcceptedAt,
+      privacy_policy_accepted_at: data.privacyPolicyAcceptedAt
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to create parent profile', { error, userId });
+    throw new Error('Failed to create parent profile');
+  }
+
+  return profile;
+};
+
+/**
+ * Update parent profile
+ * @param {string} userId - User ID
+ * @param {Object} data - Update data
+ * @returns {Promise<Object>} Updated profile
+ */
+const updateParentProfile = async (userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Verify profile exists
+  const existing = await getParentProfile(userId);
+  if (!existing) throw new Error('Parent profile not found');
+
+  const updateData = { update_date: new Date().toISOString() };
+
+  if (data.fullName !== undefined) updateData.full_name = data.fullName;
+  if (data.email !== undefined) updateData.email = data.email;
+  if (data.phoneNumber !== undefined) updateData.phone_number = data.phoneNumber;
+  if (data.preferredLanguage !== undefined) updateData.preferred_language = data.preferredLanguage;
+  if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.notificationPreferences !== undefined) updateData.notification_preferences = data.notificationPreferences;
+  if (data.onboardingCompleted !== undefined) updateData.onboarding_completed = data.onboardingCompleted;
+  if (data.termsAcceptedAt !== undefined) updateData.terms_accepted_at = data.termsAcceptedAt;
+  if (data.privacyPolicyAcceptedAt !== undefined) updateData.privacy_policy_accepted_at = data.privacyPolicyAcceptedAt;
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update(updateData)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update parent profile', { error, userId });
+    throw new Error('Failed to update parent profile');
+  }
+
+  return profile;
+};
+
+/**
+ * Delete parent profile
+ * @param {string} userId - User ID
+ */
+const deleteParentProfile = async (userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Verify profile exists
+  const existing = await getParentProfile(userId);
+  if (!existing) throw new Error('Parent profile not found');
+
+  const { error } = await supabaseAdmin
+    .from('parent_profile')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    logger.error('Failed to delete parent profile', { error, userId });
+    throw new Error('Failed to delete parent profile');
+  }
+};
+
+/**
+ * Update notification preferences
+ * @param {string} userId - User ID
+ * @param {Object} preferences - Notification preferences
+ * @returns {Promise<Object>} Updated preferences
+ */
+const updateNotificationPreferences = async (userId, preferences) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Verify profile exists
+  const existing = await getParentProfile(userId);
+  if (!existing) throw new Error('Parent profile not found');
+
+  const updatedPrefs = {
+    ...existing.notification_preferences,
+    ...preferences
+  };
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update({
+      notification_preferences: updatedPrefs,
+      update_date: new Date().toISOString()
+    })
+    .eq('user_id', userId)
+    .select('notification_preferences')
+    .single();
+
+  if (error) {
+    logger.error('Failed to update notification preferences', { error, userId });
+    throw new Error('Failed to update notification preferences');
+  }
+
+  return profile.notification_preferences;
+};
+
+/**
+ * Mark onboarding as completed
+ * @param {string} userId - User ID
+ * @returns {Promise<Object>} Updated profile
+ */
+const completeOnboarding = async (userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update({
+      onboarding_completed: true,
+      update_date: new Date().toISOString()
+    })
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to complete onboarding', { error, userId });
+    throw new Error('Failed to complete onboarding');
+  }
+
+  return profile;
+};
+
+/**
+ * Accept terms and privacy policy
+ * @param {string} userId - User ID
+ * @param {Object} data - Acceptance data
+ * @returns {Promise<Object>} Updated profile
+ */
+const acceptTerms = async (userId, data = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const now = new Date().toISOString();
+  const updateData = { update_date: now };
+
+  if (data.acceptTerms) {
+    updateData.terms_accepted_at = now;
+  }
+  if (data.acceptPrivacyPolicy) {
+    updateData.privacy_policy_accepted_at = now;
+  }
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update(updateData)
+    .eq('user_id', userId)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to accept terms', { error, userId });
+    throw new Error('Failed to accept terms');
+  }
+
+  return profile;
+};
+
 module.exports = {
+  // Kid profile methods
   getKidProfiles,
   getKidById,
   createKid,
@@ -326,5 +574,14 @@ module.exports = {
   getActivityHistory,
   logActivity,
   getPreferences,
-  updatePreferences
+  updatePreferences,
+  // Parent profile methods
+  getParentProfile,
+  getParentBySupabaseId,
+  createParentProfile,
+  updateParentProfile,
+  deleteParentProfile,
+  updateNotificationPreferences,
+  completeOnboarding,
+  acceptTerms
 };

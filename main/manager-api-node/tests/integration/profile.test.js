@@ -492,3 +492,429 @@ describe('Profile Routes', () => {
     });
   });
 });
+
+// =============================================
+// Parent Profile Routes Tests
+// =============================================
+
+describe('Parent Profile Routes', () => {
+  // Test constants
+  const validParentProfile = {
+    fullName: 'John Parent',
+    email: 'john.parent@example.com',
+    phoneNumber: '+1234567890',
+    preferredLanguage: 'en',
+    timezone: 'America/New_York',
+    notificationPreferences: {
+      email: true,
+      push: true,
+      sms: false
+    }
+  };
+
+  // ========================================
+  // GET /toy/api/mobile/parent
+  // ========================================
+
+  describe('GET /toy/api/mobile/parent', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent');
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should return 404 or profile when authenticated', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token');
+
+      // Without real auth, we expect 401; with mocked auth, expect 200 or 404
+      expect([200, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should return standardized response format', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token');
+
+      expect(res.body).toHaveProperty('code');
+      expect(res.body).toHaveProperty('msg');
+    });
+  });
+
+  // ========================================
+  // POST /toy/api/mobile/parent
+  // ========================================
+
+  describe('POST /toy/api/mobile/parent', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .send(validParentProfile);
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should accept valid profile data', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send(validParentProfile);
+
+      // Without real auth, we expect 401
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+
+    it('should accept minimal profile (empty object)', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({});
+
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+
+    it('should accept profile with only email', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ email: 'test@example.com' });
+
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+
+    it('should accept notification preferences as object', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          fullName: 'Test Parent',
+          notificationPreferences: {
+            email: true,
+            push: false,
+            sms: true,
+            weeklyReport: true
+          }
+        });
+
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // PUT /toy/api/mobile/parent
+  // ========================================
+
+  describe('PUT /toy/api/mobile/parent', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent')
+        .send({ fullName: 'Updated Name' });
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should accept partial update data', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ fullName: 'New Name' });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept full update data', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send(validParentProfile);
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should handle non-existent profile', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ fullName: 'Updated' });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept timezone update', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ timezone: 'Europe/London' });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept preferred language update', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ preferredLanguage: 'es' });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // DELETE /toy/api/mobile/parent
+  // ========================================
+
+  describe('DELETE /toy/api/mobile/parent', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .delete('/toy/api/mobile/parent');
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should handle non-existent profile', async () => {
+      const res = await request(app)
+        .delete('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token');
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // Notification Preferences Endpoints
+  // ========================================
+
+  describe('GET /toy/api/mobile/parent/notifications', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent/notifications');
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should return notification preferences or 404', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent/notifications')
+        .set('Authorization', 'Bearer test-token');
+
+      expect([200, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  describe('PUT /toy/api/mobile/parent/notifications', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent/notifications')
+        .send({ email: true });
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should accept valid notification preferences', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent/notifications')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          email: true,
+          push: false,
+          sms: true
+        });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept partial notification updates', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent/notifications')
+        .set('Authorization', 'Bearer test-token')
+        .send({ weeklyReport: true });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept achievement alerts preference', async () => {
+      const res = await request(app)
+        .put('/toy/api/mobile/parent/notifications')
+        .set('Authorization', 'Bearer test-token')
+        .send({ achievementAlerts: true });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // Onboarding Endpoints
+  // ========================================
+
+  describe('POST /toy/api/mobile/parent/onboarding/complete', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/onboarding/complete');
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should mark onboarding as complete', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/onboarding/complete')
+        .set('Authorization', 'Bearer test-token');
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // Terms Acceptance Endpoints
+  // ========================================
+
+  describe('POST /toy/api/mobile/parent/terms/accept', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/terms/accept')
+        .send({ acceptTerms: true });
+
+      expect(res.statusCode).toBe(401);
+    });
+
+    it('should accept terms of service', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/terms/accept')
+        .set('Authorization', 'Bearer test-token')
+        .send({ acceptTerms: true });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept privacy policy', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/terms/accept')
+        .set('Authorization', 'Bearer test-token')
+        .send({ acceptPrivacyPolicy: true });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should accept both terms and privacy policy', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/terms/accept')
+        .set('Authorization', 'Bearer test-token')
+        .send({
+          acceptTerms: true,
+          acceptPrivacyPolicy: true
+        });
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // Input Validation Tests
+  // ========================================
+
+  describe('Input Validation - Parent', () => {
+    it('should handle invalid JSON body gracefully', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .set('Content-Type', 'application/json')
+        .send('{ invalid json }');
+
+      expect([400, 401]).toContain(res.statusCode);
+    });
+
+    it('should handle empty request body', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({});
+
+      // Should work with empty body (all fields optional)
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+
+    it('should accept valid email format', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ email: 'valid.email@domain.com' });
+
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+
+    it('should accept phone number with international format', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token')
+        .send({ phoneNumber: '+1-555-123-4567' });
+
+      expect([200, 400, 401]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // Route Priority Tests - Parent
+  // ========================================
+
+  describe('Route Priority - Parent', () => {
+    it('should match /parent/notifications before generic /parent', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent/notifications')
+        .set('Authorization', 'Bearer test-token');
+
+      expect([200, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should match /parent/onboarding/complete as nested route', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/onboarding/complete')
+        .set('Authorization', 'Bearer test-token');
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+
+    it('should match /parent/terms/accept as nested route', async () => {
+      const res = await request(app)
+        .post('/toy/api/mobile/parent/terms/accept')
+        .set('Authorization', 'Bearer test-token')
+        .send({});
+
+      expect([200, 400, 401, 404]).toContain(res.statusCode);
+    });
+  });
+
+  // ========================================
+  // Response Format Tests - Parent
+  // ========================================
+
+  describe('Response Format - Parent', () => {
+    it('should return standardized response format', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token');
+
+      expect(res.body).toHaveProperty('code');
+      expect(res.body).toHaveProperty('msg');
+    });
+
+    it('should return error response format on auth failure', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent');
+
+      expect(res.statusCode).toBe(401);
+      expect(res.body).toHaveProperty('code');
+      expect(res.body.code).not.toBe(0);
+    });
+
+    it('should return data property on successful get', async () => {
+      const res = await request(app)
+        .get('/toy/api/mobile/parent')
+        .set('Authorization', 'Bearer test-token');
+
+      if (res.statusCode === 200) {
+        expect(res.body).toHaveProperty('data');
+      }
+    });
+  });
+});

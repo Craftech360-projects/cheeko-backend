@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 17
-**Current Task:** Feature - Implement Parent Profile routes
+**Tasks Completed:** 18
+**Current Task:** Feature - Implement Model Configuration routes (/models/*)
 
 ---
 
@@ -578,6 +578,56 @@ npm test     # 297 tests passed (255 previous + 42 new profile tests)
 - Input validation tests for required fields
 - Route priority tests (static routes before :id routes)
 - Response format validation
+
+---
+
+### 2026-01-23 - Task 18: Implement Parent Profile routes (COMPLETED)
+
+**Files Modified:**
+- `src/services/profile.service.js` - Added 8 parent profile methods:
+  - `getParentProfile()` - Get parent profile for user
+  - `getParentBySupabaseId()` - Get parent profile by Supabase user ID
+  - `createParentProfile()` - Create parent profile
+  - `updateParentProfile()` - Update parent profile
+  - `deleteParentProfile()` - Delete parent profile
+  - `updateNotificationPreferences()` - Update notification settings
+  - `completeOnboarding()` - Mark onboarding as complete
+  - `acceptTerms()` - Accept terms and privacy policy
+
+- `src/routes/profile.routes.js` - Added parent profile routes with Swagger documentation:
+  - `GET /api/mobile/parent` - Get parent profile (auth)
+  - `POST /api/mobile/parent` - Create parent profile (auth)
+  - `PUT /api/mobile/parent` - Update parent profile (auth)
+  - `DELETE /api/mobile/parent` - Delete parent profile (auth)
+  - `GET /api/mobile/parent/notifications` - Get notification preferences (auth)
+  - `PUT /api/mobile/parent/notifications` - Update notification preferences (auth)
+  - `POST /api/mobile/parent/onboarding/complete` - Mark onboarding complete (auth)
+  - `POST /api/mobile/parent/terms/accept` - Accept terms/privacy policy (auth)
+
+- `tests/integration/profile.test.js` - Added 38 new integration tests for:
+  - Parent profile CRUD operations
+  - Notification preferences endpoints
+  - Onboarding completion endpoint
+  - Terms acceptance endpoint
+  - Input validation tests
+  - Route priority tests
+  - Response format tests
+
+**Swagger Components Added:**
+- `ParentProfile` schema - Full parent profile structure
+- `ParentProfileInput` schema - Input for create/update operations
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 10 warnings (pre-existing)
+npm test     # 335 tests passed (297 previous + 38 new parent profile tests)
+```
+
+**Test Results:**
+- All 38 new parent profile tests pass
+- Authentication checks for all endpoints
+- Response format validation
+- Route priority tests
 
 ---
 

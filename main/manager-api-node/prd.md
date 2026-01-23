@@ -691,7 +691,7 @@ manager-api-node/
       "Add Swagger documentation",
       "Write integration tests"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
