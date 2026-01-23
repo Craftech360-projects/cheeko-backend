@@ -836,7 +836,7 @@ manager-api-node/
       "Add error handling tests",
       "Run full test suite and fix failures"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "testing",
