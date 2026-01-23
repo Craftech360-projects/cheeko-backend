@@ -509,7 +509,7 @@ manager-api-node/
       "Add Swagger documentation for all endpoints",
       "Write integration tests for auth routes"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

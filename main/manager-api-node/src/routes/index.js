@@ -8,8 +8,8 @@ const express = require('express');
 const router = express.Router();
 const { testConnection, supabaseAdmin } = require('../config/database');
 
-// Import route modules (will be added as they are implemented)
-// const authRoutes = require('./auth.routes');
+// Import route modules
+const authRoutes = require('./auth.routes');
 // const deviceRoutes = require('./device.routes');
 // const agentRoutes = require('./agent.routes');
 // const contentRoutes = require('./content.routes');
@@ -172,8 +172,8 @@ router.get('/pub-config', (req, res) => {
   });
 });
 
-// Mount route modules (uncomment as implemented)
-// router.use('/user', authRoutes);
+// Mount route modules
+router.use('/user', authRoutes);
 // router.use('/device', deviceRoutes);
 // router.use('/agent', agentRoutes);
 // router.use('/content', contentRoutes);
