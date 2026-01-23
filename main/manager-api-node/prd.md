@@ -637,7 +637,7 @@ manager-api-node/
       "Implement upsert method for embeddings",
       "Write tests with mocked Qdrant client"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
