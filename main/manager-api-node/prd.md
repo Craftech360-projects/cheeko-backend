@@ -449,7 +449,7 @@ manager-api-node/
       "Create health check endpoint to verify connection",
       "Test connection to Supabase"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",
@@ -466,7 +466,7 @@ manager-api-node/
       "Create migration for content_library, content_items, playlists",
       "Run all migrations and verify schema"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",
@@ -479,7 +479,7 @@ manager-api-node/
       "Add xss-clean, helmet, and rate limiting middleware",
       "Configure CORS for allowed origins"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",
@@ -491,7 +491,7 @@ manager-api-node/
       "Add JSDoc annotations to a sample route",
       "Verify Swagger UI loads correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

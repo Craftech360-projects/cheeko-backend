@@ -13,6 +13,7 @@ const rateLimit = require('express-rate-limit');
 
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const { xssFilter } = require('./middleware/xssFilter');
 const routes = require('./routes');
 const swaggerSetup = require('./config/swagger');
 
@@ -58,6 +59,9 @@ app.use(limiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// XSS protection
+app.use(xssFilter());
 
 // ===========================================
 // Logging Middleware

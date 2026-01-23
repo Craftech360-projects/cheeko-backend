@@ -6,6 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
+const { testConnection, supabaseAdmin } = require('../config/database');
 
 // Import route modules (will be added as they are implemented)
 // const authRoutes = require('./auth.routes');
@@ -62,6 +63,66 @@ router.get('/health', (req, res) => {
       environment: process.env.NODE_ENV || 'development'
     }
   });
+});
+
+/**
+ * @swagger
+ * /health/db:
+ *   get:
+ *     tags: [Health]
+ *     summary: Database health check
+ *     description: Tests connectivity to Supabase database
+ *     responses:
+ *       200:
+ *         description: Database connection status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     database:
+ *                       type: string
+ *                       enum: [connected, disconnected, not_configured]
+ */
+router.get('/health/db', async (req, res) => {
+  try {
+    if (!supabaseAdmin) {
+      return res.json({
+        code: 0,
+        msg: 'success',
+        data: {
+          database: 'not_configured',
+          message: 'Supabase credentials not configured'
+        }
+      });
+    }
+
+    const isConnected = await testConnection();
+    res.json({
+      code: 0,
+      msg: 'success',
+      data: {
+        database: isConnected ? 'connected' : 'disconnected',
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    res.json({
+      code: 0,
+      msg: 'success',
+      data: {
+        database: 'error',
+        message: error.message
+      }
+    });
+  }
 });
 
 /**
