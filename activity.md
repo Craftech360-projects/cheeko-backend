@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 16
-**Current Task:** Feature - Implement Kid Profile routes (/api/mobile/kids/*)
+**Tasks Completed:** 17
+**Current Task:** Feature - Implement Parent Profile routes
 
 ---
 
@@ -528,6 +528,56 @@ npm test     # 255 tests passed (225 previous + 30 new pack/series tests)
 - Admin access validation for create/update/delete
 - UID format normalization tests
 - Pagination and filter tests
+
+---
+
+### 2026-01-23 - Task 17: Implement Kid Profile routes (/api/mobile/kids/*) (COMPLETED)
+
+**Files Modified:**
+- `src/routes/profile.routes.js` - Updated routes to match PRD specification:
+  - Added `GET /api/mobile/kids/list` (PRD-compliant path)
+  - Added `POST /api/mobile/kids/create` (PRD-compliant path)
+  - Preserved legacy REST-style routes for backward compatibility
+  - Added comprehensive Swagger documentation with KidProfile and KidProfileInput schemas
+
+- `tests/integration/profile.test.js` - Created 42 integration tests for:
+  - PRD-compliant endpoints (/kids/list, /kids/create)
+  - Legacy endpoints (/kids GET, POST)
+  - CRUD operations (/kids/:id GET, PUT, DELETE)
+  - Learning progress endpoints (/kids/:id/progress)
+  - Activity logging endpoints (/kids/:id/activity)
+  - Preferences endpoints (/kids/:id/preferences)
+  - Input validation tests
+  - Route priority tests
+  - Response format tests
+
+**PRD-Compliant Endpoints Implemented:**
+- GET /api/mobile/kids/list - List kid profiles (auth)
+- GET /api/mobile/kids/:id - Get kid profile by ID (auth)
+- POST /api/mobile/kids/create - Create kid profile (auth)
+- PUT /api/mobile/kids/:id - Update kid profile (auth)
+- DELETE /api/mobile/kids/:id - Delete kid profile (auth)
+
+**Additional Endpoints (already existed):**
+- GET /api/mobile/kids/:id/progress - Get learning progress
+- POST /api/mobile/kids/:id/progress - Update learning progress
+- GET /api/mobile/kids/:id/activity - Get activity history
+- POST /api/mobile/kids/:id/activity - Log activity (public for internal use)
+- GET /api/mobile/kids/:id/preferences - Get preferences
+- PUT /api/mobile/kids/:id/preferences - Update preferences
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 11 warnings (pre-existing)
+npm test     # 297 tests passed (255 previous + 42 new profile tests)
+```
+
+**Test Results:**
+- All 42 new profile tests pass
+- Authentication checks for protected routes
+- Input validation tests for required fields
+- Route priority tests (static routes before :id routes)
+- Response format validation
 
 ---
 
