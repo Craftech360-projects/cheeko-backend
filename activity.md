@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 23
-**Current Task:** Integration - Implement Mem0 memory integration
+**Tasks Completed:** 24
+**Current Task:** Feature - Implement OTA firmware update endpoints
 
 ---
 
@@ -841,6 +841,57 @@ npm test     # 455 tests passed (441 previous + 14 new weekly/monthly tests)
 - 9 test suites pass
 - Weekly usage endpoint tests (6 tests)
 - Monthly usage endpoint tests (8 tests)
+
+---
+
+### 2026-01-23 - Task 24: Implement Mem0 memory integration (COMPLETED)
+
+**Files Created:**
+- `src/services/integrations/mem0.service.js` - Full Mem0 API integration service with 15 methods:
+  - Client management: `getClient()`, `isAvailable()`, `testConnection()`, `resetClient()`
+  - Memory search: `searchMemories()`, `getAllMemories()`
+  - Memory CRUD: `addMemory()`, `addFact()`, `addConversation()`, `getMemory()`, `updateMemory()`, `deleteMemory()`, `deleteAllMemories()`
+  - History: `getMemoryHistory()`
+  - Utilities: `normalizeUserId()`, `formatForPrompt()`
+
+- `tests/unit/mem0.service.test.js` - 53 unit tests with mocked HTTP requests
+
+**Files Modified:**
+- `src/services/agent.service.js` - Added 5 memory integration methods:
+  - `getMemoriesByMac()` - Get memories for a device
+  - `addConversationToMemory()` - Store conversation in Mem0
+  - `addFactToMemory()` - Store single fact
+  - `getPromptWithMemories()` - Get agent prompt with memories included
+  - `clearMemoriesByMac()` - Clear all memories for device
+
+**Features:**
+- Native fetch API (Node.js 18+) for HTTP requests
+- Knowledge graph support with entities and relations
+- Chat history format conversion (chatType 1/2 to role user/assistant)
+- Prompt formatting for memory injection
+- Graceful degradation when Mem0 is not configured
+- Configurable via environment variables:
+  - `MEM0_API_KEY` - API key for authentication
+  - `MEM0_API_URL` - Base URL (default: https://api.mem0.ai/v1)
+  - `MEM0_MEMORY_LIMIT` - Max memories to retrieve (default: 20)
+  - `MEM0_TIMEOUT_MS` - Request timeout (default: 5000ms)
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 508 tests passed (455 previous + 53 new Mem0 tests)
+```
+
+**Test Results:**
+- All 53 Mem0 tests pass
+- isAvailable/testConnection tests
+- searchMemories/getAllMemories tests
+- addMemory/addFact/addConversation tests
+- deleteMemory/deleteAllMemories tests
+- getMemory/updateMemory/getMemoryHistory tests
+- formatForPrompt utility tests
+- URL normalization tests
+- Client lifecycle tests
 
 ---
 

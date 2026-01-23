@@ -774,7 +774,7 @@ manager-api-node/
       "Integrate with agent service for personalization",
       "Write tests with mocked API"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

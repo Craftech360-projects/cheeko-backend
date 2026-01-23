@@ -7,6 +7,7 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
+const mem0Service = require('./integrations/mem0.service');
 
 /**
  * Create a new agent
@@ -464,6 +465,156 @@ const getCurrentCharacter = async (mac) => {
   };
 };
 
+/**
+ * Get memories for a device (for personalization)
+ * @param {string} mac - Device MAC address
+ * @param {Object} [options] - Options
+ * @param {string} [options.query] - Custom search query
+ * @param {number} [options.limit] - Max memories to return
+ * @returns {Promise<Object>} Memory data with memories, relations, entities
+ */
+const getMemoriesByMac = async (mac, options = {}) => {
+  const normalizedMac = normalizeMacAddress(mac);
+
+  if (!mem0Service.isAvailable()) {
+    logger.debug('Mem0 not configured, returning empty memories');
+    return { memories: [], relations: [], entities: [] };
+  }
+
+  try {
+    const result = await mem0Service.searchMemories({
+      userId: normalizedMac,
+      query: options.query,
+      limit: options.limit
+    });
+
+    return result;
+  } catch (error) {
+    logger.error('Failed to get memories by MAC:', { error: error.message, mac: normalizedMac });
+    return { memories: [], relations: [], entities: [] };
+  }
+};
+
+/**
+ * Add conversation to memory for a device
+ * @param {string} mac - Device MAC address
+ * @param {Array} chatHistory - Array of {chatType: 1|2, content: string}
+ * @param {string} [sessionId] - Session identifier
+ * @returns {Promise<boolean>} True if successful
+ */
+const addConversationToMemory = async (mac, chatHistory, sessionId = null) => {
+  const normalizedMac = normalizeMacAddress(mac);
+
+  if (!mem0Service.isAvailable()) {
+    logger.debug('Mem0 not configured, skipping memory storage');
+    return false;
+  }
+
+  if (!chatHistory || chatHistory.length === 0) {
+    return false;
+  }
+
+  try {
+    const result = await mem0Service.addConversation({
+      userId: normalizedMac,
+      chatHistory,
+      sessionId
+    });
+
+    return result !== null;
+  } catch (error) {
+    logger.error('Failed to add conversation to memory:', { error: error.message, mac: normalizedMac });
+    return false;
+  }
+};
+
+/**
+ * Add a fact to memory for a device
+ * @param {string} mac - Device MAC address
+ * @param {string} fact - The fact to store
+ * @returns {Promise<boolean>} True if successful
+ */
+const addFactToMemory = async (mac, fact) => {
+  const normalizedMac = normalizeMacAddress(mac);
+
+  if (!mem0Service.isAvailable()) {
+    logger.debug('Mem0 not configured, skipping fact storage');
+    return false;
+  }
+
+  if (!fact) {
+    return false;
+  }
+
+  try {
+    const result = await mem0Service.addFact({
+      userId: normalizedMac,
+      fact
+    });
+
+    return result !== null;
+  } catch (error) {
+    logger.error('Failed to add fact to memory:', { error: error.message, mac: normalizedMac });
+    return false;
+  }
+};
+
+/**
+ * Get agent prompt with memories included
+ * @param {string} mac - Device MAC address
+ * @param {Object} [options] - Options
+ * @param {boolean} [options.includeMemories=true] - Include memories in response
+ * @returns {Promise<Object>} Agent prompt config with optional memories
+ */
+const getPromptWithMemories = async (mac, options = { includeMemories: true }) => {
+  const promptConfig = await getPromptByMac(mac);
+
+  if (!options.includeMemories || !mem0Service.isAvailable()) {
+    return promptConfig;
+  }
+
+  try {
+    const normalizedMac = normalizeMacAddress(mac);
+    const memoryData = await mem0Service.searchMemories({
+      userId: normalizedMac
+    });
+
+    // Format memories for prompt injection
+    const memoriesText = mem0Service.formatForPrompt(memoryData);
+
+    return {
+      ...promptConfig,
+      memories: memoryData,
+      memoriesText
+    };
+  } catch (error) {
+    logger.error('Failed to get memories for prompt:', { error: error.message, mac });
+    return promptConfig;
+  }
+};
+
+/**
+ * Clear all memories for a device
+ * @param {string} mac - Device MAC address
+ * @returns {Promise<boolean>} True if successful
+ */
+const clearMemoriesByMac = async (mac) => {
+  const normalizedMac = normalizeMacAddress(mac);
+
+  if (!mem0Service.isAvailable()) {
+    return false;
+  }
+
+  try {
+    return await mem0Service.deleteAllMemories({
+      userId: normalizedMac
+    });
+  } catch (error) {
+    logger.error('Failed to clear memories:', { error: error.message, mac: normalizedMac });
+    return false;
+  }
+};
+
 module.exports = {
   createAgent,
   getAgentById,
@@ -478,5 +629,11 @@ module.exports = {
   getAgentIdByMac,
   cycleCharacter,
   setCharacter,
-  getCurrentCharacter
+  getCurrentCharacter,
+  // Memory integration
+  getMemoriesByMac,
+  addConversationToMemory,
+  addFactToMemory,
+  getPromptWithMemories,
+  clearMemoriesByMac
 };
