@@ -18,6 +18,7 @@ const profileRoutes = require('./profile.routes');
 const modelRoutes = require('./model.routes');
 const analyticsRoutes = require('./analytics.routes');
 const systemRoutes = require('./system.routes');
+const adminRoutes = require('./admin.routes');
 
 /**
  * @swagger
@@ -183,5 +184,6 @@ router.use('/api/mobile', profileRoutes);
 router.use('/models', modelRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/system', systemRoutes);
+router.use('/admin', adminRoutes);
 
 module.exports = router;

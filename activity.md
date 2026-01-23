@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 27
-**Current Task:** Feature - Implement Admin endpoints
+**Tasks Completed:** 28
+**Current Task:** Testing - Complete integration test suite
 
 ---
 
@@ -1099,6 +1099,79 @@ npm test     # 621 tests passed (556 previous + 65 new system tests)
 **Issues and Resolutions:**
 - Fixed switch statement indentation in getParamValue() to match ESLint rules
 - Fixed getDictDataByType() to return empty array instead of throwing when database not configured (public endpoint)
+
+---
+
+### 2026-01-23 - Task 28: Implement Admin endpoints (COMPLETED)
+
+**Files Created:**
+- `src/services/admin.service.js` - Full admin service with 18 methods:
+  - User Management: `listUsers()`, `getAllUsers()`, `getUserById()`, `getUserByUsername()`, `createUser()`, `updateUser()`, `deleteUser()`, `deleteUsers()`, `updateUserStatus()`, `resetUserPassword()`, `setUserSuperAdmin()`
+  - System Statistics: `getSystemOverview()`, `getUserRegistrationStats()`, `getDeviceRegistrationStats()`, `getContentStats()`, `getSessionStats()`, `getTokenUsageStats()`, `getActiveSessions()`
+
+- `src/routes/admin.routes.js` - Admin routes with comprehensive Swagger documentation:
+  - User Management endpoints: GET page, GET list, GET by ID, POST, PUT, DELETE, batch DELETE
+  - User status/password/super-admin endpoints
+  - Statistics endpoints: overview, users, devices, content, sessions, tokens, active
+
+- `tests/integration/admin.test.js` - 76 integration tests for all admin endpoints
+
+**Files Modified:**
+- `src/routes/index.js` - Added admin routes mount at `/admin`
+
+**User Management Endpoints Implemented:**
+- GET /admin/users/page - List users (paginated, super admin)
+- GET /admin/users/list - List all users (super admin)
+- GET /admin/users/:id - Get user by ID (super admin)
+- POST /admin/users - Create user (super admin)
+- PUT /admin/users/:id - Update user (super admin)
+- DELETE /admin/users/:id - Delete user (super admin)
+- DELETE /admin/users - Batch delete users (super admin)
+- PUT /admin/users/:id/status - Update user status (super admin)
+- PUT /admin/users/:id/password - Reset user password (super admin)
+- PUT /admin/users/:id/super-admin - Set super admin flag (super admin)
+
+**Statistics Endpoints Implemented:**
+- GET /admin/stats/overview - System overview (super admin)
+- GET /admin/stats/users - User registration stats (super admin)
+- GET /admin/stats/devices - Device registration stats (super admin)
+- GET /admin/stats/content - Content stats by type (super admin)
+- GET /admin/stats/sessions - Game session stats (super admin)
+- GET /admin/stats/tokens - Token usage stats (super admin)
+- GET /admin/stats/active - Active sessions/devices (super admin)
+
+**Swagger Components Added:**
+- `AdminUser` schema - User structure (without password)
+- `AdminUserInput` schema - Input for create/update
+- `SystemOverview` schema - System statistics overview
+- `RegistrationStats` schema - Time-series registration data
+- `ContentStats` schema - Content counts by type
+- `TokenUsageStats` schema - Token usage aggregation
+
+**Features:**
+- Role-based access control using `requireSuperAdmin` middleware
+- User search by username
+- User filtering by status and super_admin flag
+- Password hashing with bcrypt
+- Time-series statistics with configurable period (days)
+- Daily aggregation for registration and usage stats
+- Active session detection (5-minute activity window)
+- No namespace conflict with existing /admin/rfid routes
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 697 tests passed (621 previous + 76 new admin tests)
+```
+
+**Test Results:**
+- All 697 tests pass
+- 12 test suites pass
+- Admin tests: 76 tests covering all CRUD operations and statistics
+- Super admin access validation tests
+- Route priority tests
+- Input validation tests
+- Namespace conflict prevention tests
 
 ---
 
