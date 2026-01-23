@@ -872,7 +872,7 @@ manager-api-node/
       "Update .env.example with all required variables",
       "Add npm scripts for dev, test, start"
     ],
-    "passes": false
+    "passes": true
   }
 ]
 ```

@@ -1,0 +1,95 @@
+# ===========================================
+# Cheeko Manager API (Node.js) - Docker Compose
+# ===========================================
+# Local development environment with Supabase
+#
+# Usage:
+#   docker-compose up -d              # Start all services
+#   docker-compose up -d api          # Start API only (use remote Supabase)
+#   docker-compose down               # Stop all services
+#   docker-compose logs -f api        # Follow API logs
+# ===========================================
+
+version: '3.8'
+
+services:
+  # ---------------------------------------------
+  # Cheeko Manager API
+  # ---------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cheeko-manager-api
+    ports:
+      - "${PORT:-8002}:8002"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=8002
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SERVICE_SECRET_KEY=${SERVICE_SECRET_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - MEM0_API_KEY=${MEM0_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      # Mount logs for debugging (optional)
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8002/toy/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - cheeko-network
+
+  # ---------------------------------------------
+  # Local Development API (with hot reload)
+  # ---------------------------------------------
+  api-dev:
+    image: node:20-alpine
+    container_name: cheeko-manager-api-dev
+    working_dir: /app
+    command: npm run dev
+    ports:
+      - "${PORT:-8002}:8002"
+    environment:
+      - NODE_ENV=development
+      - PORT=8002
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SERVICE_SECRET_KEY=${SERVICE_SECRET_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - MEM0_API_KEY=${MEM0_API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+    volumes:
+      - .:/app
+      - /app/node_modules  # Prevent overwriting node_modules
+    restart: unless-stopped
+    profiles:
+      - dev
+    networks:
+      - cheeko-network
+
+  # ---------------------------------------------
+  # Local Supabase (optional - for offline dev)
+  # Uses Supabase CLI: https://supabase.com/docs/guides/cli
+  # ---------------------------------------------
+  # Note: For local Supabase, use `npx supabase start` instead
+  # This provides a full local PostgreSQL + Auth + Storage setup
+  #
+  # Local Supabase URLs (when running `npx supabase start`):
+  #   API URL:      http://localhost:54321
+  #   Anon Key:     (generated - check supabase start output)
+  #   Service Key:  (generated - check supabase start output)
+  #   Studio:       http://localhost:54323
+
+networks:
+  cheeko-network:
+    driver: bridge

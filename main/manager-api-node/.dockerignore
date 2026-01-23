@@ -1,0 +1,73 @@
+# ===========================================
+# Docker Build Context Ignore File
+# ===========================================
+# Files and directories to exclude from Docker build context
+
+# Dependencies (will be installed in container)
+node_modules/
+npm-debug.log*
+
+# Environment files (will be provided at runtime)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+
+# Keep .env.example for reference
+!.env.example
+
+# Logs (will be generated in container)
+logs/
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+tests/
+
+# Build output (if any)
+dist/
+build/
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Supabase local dev
+.supabase/
+
+# Cache directories
+.cache/
+.npm/
+
+# Temporary files
+tmp/
+temp/
+
+# Git
+.git/
+.gitignore
+
+# Documentation (optional - keep if needed in container)
+# README.md
+# API_CONTRACT.md
+
+# Development files
+nodemon.json
+.eslintrc.js
+CLAUDE.md
+prd.md
+activity.md
+screenshots/
+
+# Database setup (handled by migrations)
+database-setup.sql
