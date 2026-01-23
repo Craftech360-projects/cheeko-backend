@@ -775,6 +775,313 @@ const searchContent = async (query, { page = 1, limit = 20 } = {}) => {
   };
 };
 
+// ==================== PLAYLIST METHODS ====================
+
+/**
+ * Get playlist for a device
+ * @param {string} deviceId - Device ID
+ * @param {string} playlistType - 'music' or 'story'
+ * @returns {Promise<Array>} Playlist items with content details
+ */
+const getPlaylist = async (deviceId, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select(`
+      id,
+      position,
+      created_at,
+      content_id,
+      content_library (
+        id,
+        title,
+        romanized,
+        filename,
+        content_type,
+        category,
+        aws_s3_url,
+        duration_seconds,
+        is_active
+      )
+    `)
+    .eq('device_id', deviceId)
+    .order('position', { ascending: true });
+
+  if (error) {
+    logger.error(`Failed to fetch ${playlistType} playlist`, { error: error.message, deviceId });
+    throw new Error(`Failed to fetch ${playlistType} playlist`);
+  }
+
+  // Flatten the response
+  return (data || []).map(item => ({
+    id: item.id,
+    position: item.position,
+    contentId: item.content_id,
+    createdAt: item.created_at,
+    content: item.content_library
+  }));
+};
+
+/**
+ * Add content to playlist
+ * @param {string} deviceId - Device ID
+ * @param {string} contentId - Content ID
+ * @param {string} playlistType - 'music' or 'story'
+ * @param {number} position - Optional position (appends to end if not specified)
+ * @returns {Promise<Object>} Created playlist item
+ */
+const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  // If position not specified, get the max position and add 1
+  if (position === undefined || position === null) {
+    const { data: maxData } = await supabaseAdmin
+      .from(table)
+      .select('position')
+      .eq('device_id', deviceId)
+      .order('position', { ascending: false })
+      .limit(1)
+      .single();
+
+    position = maxData ? maxData.position + 1 : 0;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .insert({
+      device_id: deviceId,
+      content_id: contentId,
+      position
+    })
+    .select(`
+      id,
+      position,
+      created_at,
+      content_id,
+      content_library (
+        id,
+        title,
+        romanized,
+        filename,
+        content_type,
+        category,
+        aws_s3_url,
+        duration_seconds
+      )
+    `)
+    .single();
+
+  if (error) {
+    // Check for duplicate entry
+    if (error.code === '23505') {
+      throw new Error('Content already exists in playlist');
+    }
+    logger.error(`Failed to add to ${playlistType} playlist`, { error: error.message, deviceId, contentId });
+    throw new Error(`Failed to add to ${playlistType} playlist`);
+  }
+
+  return {
+    id: data.id,
+    position: data.position,
+    contentId: data.content_id,
+    createdAt: data.created_at,
+    content: data.content_library
+  };
+};
+
+/**
+ * Remove content from playlist
+ * @param {string} deviceId - Device ID
+ * @param {string} contentId - Content ID
+ * @param {string} playlistType - 'music' or 'story'
+ */
+const removeFromPlaylist = async (deviceId, contentId, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  const { error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq('device_id', deviceId)
+    .eq('content_id', contentId);
+
+  if (error) {
+    logger.error(`Failed to remove from ${playlistType} playlist`, { error: error.message, deviceId, contentId });
+    throw new Error(`Failed to remove from ${playlistType} playlist`);
+  }
+};
+
+/**
+ * Remove playlist item by ID
+ * @param {number} playlistItemId - Playlist item ID
+ * @param {string} playlistType - 'music' or 'story'
+ */
+const removePlaylistItem = async (playlistItemId, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  const { error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq('id', playlistItemId);
+
+  if (error) {
+    logger.error('Failed to remove playlist item', { error: error.message, playlistItemId });
+    throw new Error('Failed to remove playlist item');
+  }
+};
+
+/**
+ * Clear entire playlist for a device
+ * @param {string} deviceId - Device ID
+ * @param {string} playlistType - 'music' or 'story'
+ */
+const clearPlaylist = async (deviceId, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  const { error } = await supabaseAdmin
+    .from(table)
+    .delete()
+    .eq('device_id', deviceId);
+
+  if (error) {
+    logger.error(`Failed to clear ${playlistType} playlist`, { error: error.message, deviceId });
+    throw new Error(`Failed to clear ${playlistType} playlist`);
+  }
+};
+
+/**
+ * Reorder playlist items
+ * @param {string} deviceId - Device ID
+ * @param {Array} itemIds - Array of playlist item IDs in new order
+ * @param {string} playlistType - 'music' or 'story'
+ */
+const reorderPlaylist = async (deviceId, itemIds, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  // Update positions based on array order
+  const updates = itemIds.map((id, index) => ({
+    id,
+    position: index,
+    updated_at: new Date().toISOString()
+  }));
+
+  // Perform batch update
+  for (const update of updates) {
+    const { error } = await supabaseAdmin
+      .from(table)
+      .update({ position: update.position, updated_at: update.updated_at })
+      .eq('id', update.id)
+      .eq('device_id', deviceId);
+
+    if (error) {
+      logger.error(`Failed to reorder ${playlistType} playlist`, { error: error.message, deviceId });
+      throw new Error(`Failed to reorder ${playlistType} playlist`);
+    }
+  }
+
+  // Return updated playlist
+  return getPlaylist(deviceId, playlistType);
+};
+
+/**
+ * Move playlist item to new position
+ * @param {string} deviceId - Device ID
+ * @param {number} playlistItemId - Playlist item ID to move
+ * @param {number} newPosition - New position for the item
+ * @param {string} playlistType - 'music' or 'story'
+ */
+const movePlaylistItem = async (deviceId, playlistItemId, newPosition, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  // Get current playlist
+  const { data: playlist, error: fetchError } = await supabaseAdmin
+    .from(table)
+    .select('id, position')
+    .eq('device_id', deviceId)
+    .order('position', { ascending: true });
+
+  if (fetchError) {
+    logger.error('Failed to fetch playlist for reorder', { error: fetchError.message, deviceId });
+    throw new Error('Failed to move playlist item');
+  }
+
+  // Find current item
+  const currentIndex = playlist.findIndex(item => item.id === playlistItemId);
+  if (currentIndex === -1) {
+    throw new Error('Playlist item not found');
+  }
+
+  // Clamp new position to valid range
+  const clampedPosition = Math.max(0, Math.min(newPosition, playlist.length - 1));
+
+  // Create new ordered array
+  const item = playlist.splice(currentIndex, 1)[0];
+  playlist.splice(clampedPosition, 0, item);
+
+  // Update all positions
+  const updates = playlist.map((item) => item.id);
+  return reorderPlaylist(deviceId, updates, playlistType);
+};
+
+/**
+ * Get playlist item by ID
+ * @param {number} playlistItemId - Playlist item ID
+ * @param {string} playlistType - 'music' or 'story'
+ * @returns {Promise<Object|null>} Playlist item
+ */
+const getPlaylistItem = async (playlistItemId, playlistType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
+
+  const { data, error } = await supabaseAdmin
+    .from(table)
+    .select(`
+      id,
+      device_id,
+      position,
+      created_at,
+      content_id,
+      content_library (
+        id,
+        title,
+        romanized,
+        filename,
+        content_type,
+        category,
+        aws_s3_url,
+        duration_seconds
+      )
+    `)
+    .eq('id', playlistItemId)
+    .single();
+
+  if (error || !data) return null;
+
+  return {
+    id: data.id,
+    deviceId: data.device_id,
+    position: data.position,
+    contentId: data.content_id,
+    createdAt: data.created_at,
+    content: data.content_library
+  };
+};
+
 module.exports = {
   // Content Library methods
   getLibraryList,
@@ -803,5 +1110,14 @@ module.exports = {
   createTextbook,
   // Generic methods
   getRandomContent,
-  searchContent
+  searchContent,
+  // Playlist methods
+  getPlaylist,
+  addToPlaylist,
+  removeFromPlaylist,
+  removePlaylistItem,
+  clearPlaylist,
+  reorderPlaylist,
+  movePlaylistItem,
+  getPlaylistItem
 };

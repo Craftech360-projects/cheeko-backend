@@ -1019,6 +1019,611 @@ router.post('/textbook/create',
   })
 );
 
+// ==================== MUSIC PLAYLIST ROUTES ====================
+
+/**
+ * @swagger
+ * /content/playlist/music/{deviceId}:
+ *   get:
+ *     tags: [Content - Playlists]
+ *     summary: Get music playlist for device
+ *     description: Get all music items in a device's playlist ordered by position
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     responses:
+ *       200:
+ *         description: Music playlist
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       position:
+ *                         type: integer
+ *                       contentId:
+ *                         type: string
+ *                       content:
+ *                         type: object
+ */
+router.get('/playlist/music/:deviceId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const playlist = await contentService.getPlaylist(req.params.deviceId, 'music');
+    success(res, playlist);
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/music/{deviceId}:
+ *   post:
+ *     tags: [Content - Playlists]
+ *     summary: Add music to playlist
+ *     description: Add a content item to device's music playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - contentId
+ *             properties:
+ *               contentId:
+ *                 type: string
+ *                 description: Content ID to add
+ *               position:
+ *                 type: integer
+ *                 description: Position in playlist (appends to end if not specified)
+ *     responses:
+ *       200:
+ *         description: Item added to playlist
+ *       400:
+ *         description: Invalid input or content already in playlist
+ */
+router.post('/playlist/music/:deviceId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { contentId, position } = req.body;
+
+    if (!contentId) {
+      return badRequest(res, 'Content ID is required');
+    }
+
+    // Verify content exists and is music type
+    const content = await contentService.getLibraryById(contentId);
+    if (!content) {
+      return notFound(res, 'Content not found');
+    }
+    if (content.content_type !== 'music') {
+      return badRequest(res, 'Content must be of type music');
+    }
+
+    try {
+      const item = await contentService.addToPlaylist(
+        req.params.deviceId,
+        contentId,
+        'music',
+        position
+      );
+      success(res, item, 'Added to music playlist');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/music/{deviceId}/{contentId}:
+ *   delete:
+ *     tags: [Content - Playlists]
+ *     summary: Remove music from playlist
+ *     description: Remove a content item from device's music playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *       - in: path
+ *         name: contentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content ID to remove
+ *     responses:
+ *       200:
+ *         description: Item removed from playlist
+ */
+router.delete('/playlist/music/:deviceId/:contentId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      await contentService.removeFromPlaylist(
+        req.params.deviceId,
+        req.params.contentId,
+        'music'
+      );
+      success(res, null, 'Removed from music playlist');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/music/{deviceId}/clear:
+ *   delete:
+ *     tags: [Content - Playlists]
+ *     summary: Clear music playlist
+ *     description: Remove all items from device's music playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     responses:
+ *       200:
+ *         description: Playlist cleared
+ */
+router.delete('/playlist/music/:deviceId/clear',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      await contentService.clearPlaylist(req.params.deviceId, 'music');
+      success(res, null, 'Music playlist cleared');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/music/{deviceId}/reorder:
+ *   put:
+ *     tags: [Content - Playlists]
+ *     summary: Reorder music playlist
+ *     description: Reorder items in device's music playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - itemIds
+ *             properties:
+ *               itemIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Playlist item IDs in new order
+ *     responses:
+ *       200:
+ *         description: Playlist reordered
+ *       400:
+ *         description: Invalid input
+ */
+router.put('/playlist/music/:deviceId/reorder',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { itemIds } = req.body;
+
+    if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
+      return badRequest(res, 'itemIds must be a non-empty array');
+    }
+
+    try {
+      const playlist = await contentService.reorderPlaylist(
+        req.params.deviceId,
+        itemIds,
+        'music'
+      );
+      success(res, playlist, 'Music playlist reordered');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/music/{deviceId}/move:
+ *   put:
+ *     tags: [Content - Playlists]
+ *     summary: Move music playlist item
+ *     description: Move a single item to a new position in the playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - itemId
+ *               - newPosition
+ *             properties:
+ *               itemId:
+ *                 type: integer
+ *                 description: Playlist item ID to move
+ *               newPosition:
+ *                 type: integer
+ *                 description: New position (0-based)
+ *     responses:
+ *       200:
+ *         description: Item moved
+ *       400:
+ *         description: Invalid input
+ */
+router.put('/playlist/music/:deviceId/move',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { itemId, newPosition } = req.body;
+
+    if (itemId === undefined || newPosition === undefined) {
+      return badRequest(res, 'itemId and newPosition are required');
+    }
+
+    try {
+      const playlist = await contentService.movePlaylistItem(
+        req.params.deviceId,
+        itemId,
+        newPosition,
+        'music'
+      );
+      success(res, playlist, 'Music playlist item moved');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==================== STORY PLAYLIST ROUTES ====================
+
+/**
+ * @swagger
+ * /content/playlist/story/{deviceId}:
+ *   get:
+ *     tags: [Content - Playlists]
+ *     summary: Get story playlist for device
+ *     description: Get all story items in a device's playlist ordered by position
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     responses:
+ *       200:
+ *         description: Story playlist
+ */
+router.get('/playlist/story/:deviceId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const playlist = await contentService.getPlaylist(req.params.deviceId, 'story');
+    success(res, playlist);
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/story/{deviceId}:
+ *   post:
+ *     tags: [Content - Playlists]
+ *     summary: Add story to playlist
+ *     description: Add a content item to device's story playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - contentId
+ *             properties:
+ *               contentId:
+ *                 type: string
+ *                 description: Content ID to add
+ *               position:
+ *                 type: integer
+ *                 description: Position in playlist (appends to end if not specified)
+ *     responses:
+ *       200:
+ *         description: Item added to playlist
+ *       400:
+ *         description: Invalid input or content already in playlist
+ */
+router.post('/playlist/story/:deviceId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { contentId, position } = req.body;
+
+    if (!contentId) {
+      return badRequest(res, 'Content ID is required');
+    }
+
+    // Verify content exists and is story type
+    const content = await contentService.getLibraryById(contentId);
+    if (!content) {
+      return notFound(res, 'Content not found');
+    }
+    if (content.content_type !== 'story') {
+      return badRequest(res, 'Content must be of type story');
+    }
+
+    try {
+      const item = await contentService.addToPlaylist(
+        req.params.deviceId,
+        contentId,
+        'story',
+        position
+      );
+      success(res, item, 'Added to story playlist');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/story/{deviceId}/{contentId}:
+ *   delete:
+ *     tags: [Content - Playlists]
+ *     summary: Remove story from playlist
+ *     description: Remove a content item from device's story playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *       - in: path
+ *         name: contentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content ID to remove
+ *     responses:
+ *       200:
+ *         description: Item removed from playlist
+ */
+router.delete('/playlist/story/:deviceId/:contentId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      await contentService.removeFromPlaylist(
+        req.params.deviceId,
+        req.params.contentId,
+        'story'
+      );
+      success(res, null, 'Removed from story playlist');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/story/{deviceId}/clear:
+ *   delete:
+ *     tags: [Content - Playlists]
+ *     summary: Clear story playlist
+ *     description: Remove all items from device's story playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     responses:
+ *       200:
+ *         description: Playlist cleared
+ */
+router.delete('/playlist/story/:deviceId/clear',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      await contentService.clearPlaylist(req.params.deviceId, 'story');
+      success(res, null, 'Story playlist cleared');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/story/{deviceId}/reorder:
+ *   put:
+ *     tags: [Content - Playlists]
+ *     summary: Reorder story playlist
+ *     description: Reorder items in device's story playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - itemIds
+ *             properties:
+ *               itemIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Playlist item IDs in new order
+ *     responses:
+ *       200:
+ *         description: Playlist reordered
+ *       400:
+ *         description: Invalid input
+ */
+router.put('/playlist/story/:deviceId/reorder',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { itemIds } = req.body;
+
+    if (!itemIds || !Array.isArray(itemIds) || itemIds.length === 0) {
+      return badRequest(res, 'itemIds must be a non-empty array');
+    }
+
+    try {
+      const playlist = await contentService.reorderPlaylist(
+        req.params.deviceId,
+        itemIds,
+        'story'
+      );
+      success(res, playlist, 'Story playlist reordered');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/playlist/story/{deviceId}/move:
+ *   put:
+ *     tags: [Content - Playlists]
+ *     summary: Move story playlist item
+ *     description: Move a single item to a new position in the playlist
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - itemId
+ *               - newPosition
+ *             properties:
+ *               itemId:
+ *                 type: integer
+ *                 description: Playlist item ID to move
+ *               newPosition:
+ *                 type: integer
+ *                 description: New position (0-based)
+ *     responses:
+ *       200:
+ *         description: Item moved
+ *       400:
+ *         description: Invalid input
+ */
+router.put('/playlist/story/:deviceId/move',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { itemId, newPosition } = req.body;
+
+    if (itemId === undefined || newPosition === undefined) {
+      return badRequest(res, 'itemId and newPosition are required');
+    }
+
+    try {
+      const playlist = await contentService.movePlaylistItem(
+        req.params.deviceId,
+        itemId,
+        newPosition,
+        'story'
+      );
+      success(res, playlist, 'Story playlist item moved');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 // ==================== GENERIC CONTENT ROUTES ====================
 
 /**

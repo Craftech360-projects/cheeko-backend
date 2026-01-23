@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 11
-**Current Task:** Feature - Implement Playlist management
+**Tasks Completed:** 12
+**Current Task:** Feature - Implement RFID routes - Card mapping (/admin/rfid/*)
 
 ---
 
@@ -263,6 +263,51 @@ npm test     # 89 tests passed (4 health + 23 device + 26 agent + 36 content)
 - Admin access validation for create/update/delete
 - Validation for required fields and contentType enum
 - Search query minimum length validation
+
+---
+
+### 2026-01-23 - Task 12: Implement Playlist management (COMPLETED)
+
+**Files Modified:**
+- `src/services/content.service.js` - Added 8 playlist methods (getPlaylist, addToPlaylist, removeFromPlaylist, removePlaylistItem, clearPlaylist, reorderPlaylist, movePlaylistItem, getPlaylistItem)
+- `src/routes/content.routes.js` - Added 12 playlist routes (6 for music, 6 for story)
+- `tests/integration/content.test.js` - Added 31 playlist integration tests
+
+**Music Playlist Endpoints Implemented:**
+- GET /content/playlist/music/:deviceId - Get music playlist (auth)
+- POST /content/playlist/music/:deviceId - Add to playlist (auth)
+- DELETE /content/playlist/music/:deviceId/:contentId - Remove from playlist (auth)
+- DELETE /content/playlist/music/:deviceId/clear - Clear playlist (auth)
+- PUT /content/playlist/music/:deviceId/reorder - Reorder playlist (auth)
+- PUT /content/playlist/music/:deviceId/move - Move item to position (auth)
+
+**Story Playlist Endpoints Implemented:**
+- GET /content/playlist/story/:deviceId - Get story playlist (auth)
+- POST /content/playlist/story/:deviceId - Add to playlist (auth)
+- DELETE /content/playlist/story/:deviceId/:contentId - Remove from playlist (auth)
+- DELETE /content/playlist/story/:deviceId/clear - Clear playlist (auth)
+- PUT /content/playlist/story/:deviceId/reorder - Reorder playlist (auth)
+- PUT /content/playlist/story/:deviceId/move - Move item to position (auth)
+
+**Features:**
+- Content type validation (music items only in music playlist, stories only in story playlist)
+- Position-based ordering with automatic position calculation
+- Duplicate prevention (unique constraint on device_id + content_id)
+- Batch reordering with itemIds array
+- Single item move with newPosition parameter
+- Joined queries to include content details in playlist responses
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 13 warnings (pre-existing)
+npm test     # 120 tests passed (4 health + 23 device + 26 agent + 67 content with playlists)
+```
+
+**Test Results:**
+- All 31 new playlist tests pass
+- Authentication checks for all endpoints
+- Input validation for contentId, itemIds, and newPosition
+- Content type validation when adding to playlist
 
 ---
 

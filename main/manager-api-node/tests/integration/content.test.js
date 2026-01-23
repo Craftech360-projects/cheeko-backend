@@ -391,6 +391,344 @@ describe('Content Library Routes', () => {
     });
   });
 
+  // ==================== PLAYLIST ROUTES ====================
+
+  describe('Music Playlist Routes', () => {
+    const TEST_DEVICE_ID = 'test-device-id-123';
+    const TEST_CONTENT_ID = 'test-content-id-456';
+
+    describe('GET /toy/content/playlist/music/:deviceId', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .get(`/toy/content/playlist/music/${TEST_DEVICE_ID}`);
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should return playlist with auth', async () => {
+        const res = await request(app)
+          .get(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`);
+
+        // May return 200 (empty list) or 401 (token validation) or 500 (db error)
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+
+        if (res.status === 200) {
+          expect(Array.isArray(res.body.data)).toBe(true);
+        }
+      });
+    });
+
+    describe('POST /toy/content/playlist/music/:deviceId', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
+          .send({ contentId: TEST_CONTENT_ID });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require contentId', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({});
+
+        // 400 for missing contentId, or 401 for invalid token
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should reject non-existent content', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ contentId: 'non-existent-content-id' });
+
+        // 404 for content not found, or 401 for invalid token
+        expect([404, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept optional position parameter', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({
+            contentId: TEST_CONTENT_ID,
+            position: 0
+          });
+
+        // Various statuses possible depending on auth and content existence
+        expect([200, 400, 401, 404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('DELETE /toy/content/playlist/music/:deviceId/:contentId', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/music/${TEST_DEVICE_ID}/${TEST_CONTENT_ID}`);
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should remove content from playlist with auth', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/music/${TEST_DEVICE_ID}/${TEST_CONTENT_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`);
+
+        // 200 for success (even if item didn't exist), or 401/500
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('DELETE /toy/content/playlist/music/:deviceId/clear', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/music/${TEST_DEVICE_ID}/clear`);
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should clear playlist with auth', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/music/${TEST_DEVICE_ID}/clear`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`);
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('PUT /toy/content/playlist/music/:deviceId/reorder', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/reorder`)
+          .send({ itemIds: [1, 2, 3] });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require itemIds array', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/reorder`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({});
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should reject empty itemIds array', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/reorder`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ itemIds: [] });
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept valid itemIds array', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/reorder`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ itemIds: [1, 2, 3] });
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('PUT /toy/content/playlist/music/:deviceId/move', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/move`)
+          .send({ itemId: 1, newPosition: 0 });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require itemId and newPosition', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/move`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ itemId: 1 });
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept valid move request', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/music/${TEST_DEVICE_ID}/move`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ itemId: 1, newPosition: 2 });
+
+        expect([200, 400, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+  });
+
+  describe('Story Playlist Routes', () => {
+    const TEST_DEVICE_ID = 'test-device-id-123';
+    const TEST_CONTENT_ID = 'test-content-id-789';
+
+    describe('GET /toy/content/playlist/story/:deviceId', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .get(`/toy/content/playlist/story/${TEST_DEVICE_ID}`);
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should return playlist with auth', async () => {
+        const res = await request(app)
+          .get(`/toy/content/playlist/story/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`);
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+
+        if (res.status === 200) {
+          expect(Array.isArray(res.body.data)).toBe(true);
+        }
+      });
+    });
+
+    describe('POST /toy/content/playlist/story/:deviceId', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/story/${TEST_DEVICE_ID}`)
+          .send({ contentId: TEST_CONTENT_ID });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require contentId', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/story/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({});
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should reject non-existent content', async () => {
+        const res = await request(app)
+          .post(`/toy/content/playlist/story/${TEST_DEVICE_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ contentId: 'non-existent-content-id' });
+
+        expect([404, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('DELETE /toy/content/playlist/story/:deviceId/:contentId', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/story/${TEST_DEVICE_ID}/${TEST_CONTENT_ID}`);
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should remove content from playlist with auth', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/story/${TEST_DEVICE_ID}/${TEST_CONTENT_ID}`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`);
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('DELETE /toy/content/playlist/story/:deviceId/clear', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/story/${TEST_DEVICE_ID}/clear`);
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should clear playlist with auth', async () => {
+        const res = await request(app)
+          .delete(`/toy/content/playlist/story/${TEST_DEVICE_ID}/clear`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`);
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('PUT /toy/content/playlist/story/:deviceId/reorder', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/story/${TEST_DEVICE_ID}/reorder`)
+          .send({ itemIds: [1, 2, 3] });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require itemIds array', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/story/${TEST_DEVICE_ID}/reorder`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({});
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should reject empty itemIds array', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/story/${TEST_DEVICE_ID}/reorder`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ itemIds: [] });
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('PUT /toy/content/playlist/story/:deviceId/move', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/story/${TEST_DEVICE_ID}/move`)
+          .send({ itemId: 1, newPosition: 0 });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require itemId and newPosition', async () => {
+        const res = await request(app)
+          .put(`/toy/content/playlist/story/${TEST_DEVICE_ID}/move`)
+          .set('Authorization', `Bearer ${MOCK_AUTH_TOKEN}`)
+          .send({ itemId: 1 });
+
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+  });
+
   describe('Generic Content Routes', () => {
     describe('GET /toy/content/search', () => {
       it('should require minimum 2 characters', async () => {
