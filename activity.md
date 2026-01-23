@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 25
-**Current Task:** Feature - Implement Token Usage tracking
+**Tasks Completed:** 26
+**Current Task:** Feature - Implement System Parameters and Dictionary endpoints
 
 ---
 
@@ -952,6 +952,72 @@ npm test     # 527 tests passed (508 previous + 19 new OTA tests)
 - OTA check endpoint tests (public)
 - Protected route authentication tests
 - Input validation tests
+
+---
+
+### 2026-01-23 - Task 26: Implement Token Usage tracking (COMPLETED)
+
+**Files Modified:**
+- `src/services/device.service.js` - Added 5 token usage service methods:
+  - `recordTokenUsage()` - Record/accumulate token usage for a device (creates or updates daily record)
+  - `getTokenUsageStats()` - Get aggregated token usage statistics with daily breakdown
+  - `listTokenUsage()` - Get paginated token usage records for a device
+  - `getTokenUsageSummary()` - Get token usage summary across all devices (admin)
+  - `deleteTokenUsage()` - Delete token usage records with date filters
+
+- `src/routes/device.routes.js` - Added 5 token usage routes with comprehensive Swagger documentation:
+  - `POST /device/token-usage` - Record token usage (public for LiveKit agents)
+  - `GET /device/token-usage/summary` - Get usage summary across all devices (auth)
+  - `GET /device/token-usage/:mac/stats` - Get statistics for a device (auth)
+  - `GET /device/token-usage/:mac` - List usage records for a device (auth)
+  - `DELETE /device/token-usage/:mac` - Delete usage records (auth)
+
+- `tests/integration/device.test.js` - Added 29 new integration tests for:
+  - POST /device/token-usage endpoint tests (8 tests)
+  - GET /device/token-usage/summary tests (3 tests)
+  - GET /device/token-usage/:mac/stats tests (6 tests)
+  - GET /device/token-usage/:mac tests (4 tests)
+  - DELETE /device/token-usage/:mac tests (6 tests)
+  - Route priority tests (2 tests)
+
+**Swagger Components Added:**
+- `TokenUsage` schema - Token usage record structure
+- `TokenUsageInput` schema - Input for recording token usage
+- `TokenUsageStats` schema - Aggregated statistics response
+
+**Features:**
+- Daily token usage aggregation per device
+- Detailed token breakdown (input/output, audio/text, cached)
+- Session tracking with duration and message count
+- Average time-to-first-token (TTFT) latency tracking
+- Weighted average calculation for TTFT across sessions
+- Date range filtering for statistics and deletion
+- Pagination for usage lists
+- MAC address normalization (colons, dashes, raw hex)
+- Route ordering fix: /summary defined before /:mac to prevent matching
+
+**Database Table Used:**
+- `device_token_usage` - Tracks daily token usage per device with columns:
+  - input_tokens, output_tokens, total_tokens (computed)
+  - input_audio_tokens, input_text_tokens, input_cached_tokens
+  - output_audio_tokens, output_text_tokens
+  - session_duration_seconds, avg_ttft_seconds
+  - message_count, total_response_duration_seconds, session_count
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 556 tests passed (527 previous + 29 new token usage tests)
+```
+
+**Test Results:**
+- All 556 tests pass
+- 10 test suites pass
+- Device tests: 71 tests (42 previous + 29 new token usage tests)
+- Token usage recording tests (public endpoint)
+- Protected route authentication tests
+- MAC address format handling tests
+- Route priority tests
 
 ---
 

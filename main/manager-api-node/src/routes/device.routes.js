@@ -964,4 +964,454 @@ router.put('/ota/firmware/:id/force-update',
   })
 );
 
+// =============================================
+// Token Usage Tracking Routes
+// =============================================
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     TokenUsage:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         mac_address:
+ *           type: string
+ *         session_id:
+ *           type: string
+ *         usage_date:
+ *           type: string
+ *           format: date
+ *         input_tokens:
+ *           type: integer
+ *         output_tokens:
+ *           type: integer
+ *         total_tokens:
+ *           type: integer
+ *         input_audio_tokens:
+ *           type: integer
+ *         input_text_tokens:
+ *           type: integer
+ *         input_cached_tokens:
+ *           type: integer
+ *         output_audio_tokens:
+ *           type: integer
+ *         output_text_tokens:
+ *           type: integer
+ *         session_duration_seconds:
+ *           type: number
+ *         avg_ttft_seconds:
+ *           type: number
+ *           description: Average time-to-first-token (latency)
+ *         message_count:
+ *           type: integer
+ *         total_response_duration_seconds:
+ *           type: number
+ *         session_count:
+ *           type: integer
+ *         created_at:
+ *           type: string
+ *           format: date-time
+ *         updated_at:
+ *           type: string
+ *           format: date-time
+ *     TokenUsageInput:
+ *       type: object
+ *       required:
+ *         - mac
+ *       properties:
+ *         mac:
+ *           type: string
+ *           description: Device MAC address
+ *         sessionId:
+ *           type: string
+ *           description: Optional session identifier
+ *         inputTokens:
+ *           type: integer
+ *           default: 0
+ *         outputTokens:
+ *           type: integer
+ *           default: 0
+ *         inputAudioTokens:
+ *           type: integer
+ *           default: 0
+ *         inputTextTokens:
+ *           type: integer
+ *           default: 0
+ *         inputCachedTokens:
+ *           type: integer
+ *           default: 0
+ *         outputAudioTokens:
+ *           type: integer
+ *           default: 0
+ *         outputTextTokens:
+ *           type: integer
+ *           default: 0
+ *         sessionDurationSeconds:
+ *           type: number
+ *           default: 0
+ *         avgTtftSeconds:
+ *           type: number
+ *           default: 0
+ *           description: Average time-to-first-token
+ *         messageCount:
+ *           type: integer
+ *           default: 0
+ *         totalResponseDurationSeconds:
+ *           type: number
+ *           default: 0
+ *     TokenUsageStats:
+ *       type: object
+ *       properties:
+ *         mac:
+ *           type: string
+ *         period:
+ *           type: string
+ *         startDate:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *         endDate:
+ *           type: string
+ *           format: date
+ *           nullable: true
+ *         totals:
+ *           type: object
+ *           properties:
+ *             inputTokens:
+ *               type: integer
+ *             outputTokens:
+ *               type: integer
+ *             totalTokens:
+ *               type: integer
+ *             inputAudioTokens:
+ *               type: integer
+ *             inputTextTokens:
+ *               type: integer
+ *             inputCachedTokens:
+ *               type: integer
+ *             outputAudioTokens:
+ *               type: integer
+ *             outputTextTokens:
+ *               type: integer
+ *             sessionDurationSeconds:
+ *               type: number
+ *             avgTtftSeconds:
+ *               type: number
+ *             messageCount:
+ *               type: integer
+ *             totalResponseDurationSeconds:
+ *               type: number
+ *             sessionCount:
+ *               type: integer
+ *             dayCount:
+ *               type: integer
+ *         daily:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/TokenUsage'
+ */
+
+/**
+ * @swagger
+ * /device/token-usage:
+ *   post:
+ *     tags: [Device - Token Usage]
+ *     summary: Record token usage
+ *     description: Public endpoint for LiveKit agents to record LLM token usage
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/TokenUsageInput'
+ *     responses:
+ *       200:
+ *         description: Token usage recorded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TokenUsage'
+ */
+router.post('/token-usage',
+  asyncHandler(async (req, res) => {
+    const {
+      mac,
+      sessionId,
+      inputTokens,
+      outputTokens,
+      inputAudioTokens,
+      inputTextTokens,
+      inputCachedTokens,
+      outputAudioTokens,
+      outputTextTokens,
+      sessionDurationSeconds,
+      avgTtftSeconds,
+      messageCount,
+      totalResponseDurationSeconds
+    } = req.body;
+
+    if (!mac) {
+      return badRequest(res, 'MAC address is required');
+    }
+
+    try {
+      const record = await deviceService.recordTokenUsage({
+        mac,
+        sessionId,
+        inputTokens,
+        outputTokens,
+        inputAudioTokens,
+        inputTextTokens,
+        inputCachedTokens,
+        outputAudioTokens,
+        outputTextTokens,
+        sessionDurationSeconds,
+        avgTtftSeconds,
+        messageCount,
+        totalResponseDurationSeconds
+      });
+      success(res, record, 'Token usage recorded');
+    } catch (error) {
+      logger.error('Failed to record token usage:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /device/token-usage/summary:
+ *   get:
+ *     tags: [Device - Token Usage]
+ *     summary: Get token usage summary across all devices (admin)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Token usage summary by device
+ */
+// NOTE: This route MUST come before /token-usage/:mac to avoid matching "summary" as a MAC address
+router.get('/token-usage/summary',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const { startDate, endDate } = req.query;
+
+    try {
+      const result = await deviceService.getTokenUsageSummary({
+        page,
+        limit,
+        startDate,
+        endDate
+      });
+      success(res, result);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /device/token-usage/{mac}/stats:
+ *   get:
+ *     tags: [Device - Token Usage]
+ *     summary: Get token usage statistics for a device
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date for statistics (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date for statistics (YYYY-MM-DD)
+ *       - in: query
+ *         name: period
+ *         schema:
+ *           type: string
+ *           enum: [daily, weekly, monthly]
+ *           default: daily
+ *         description: Aggregation period
+ *     responses:
+ *       200:
+ *         description: Token usage statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TokenUsageStats'
+ */
+router.get('/token-usage/:mac/stats',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { startDate, endDate, period } = req.query;
+
+    try {
+      const stats = await deviceService.getTokenUsageStats(mac, {
+        startDate,
+        endDate,
+        period
+      });
+      success(res, stats);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /device/token-usage/{mac}:
+ *   get:
+ *     tags: [Device - Token Usage]
+ *     summary: List token usage records for a device (paginated)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Paginated token usage list
+ */
+router.get('/token-usage/:mac',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 30;
+    const { startDate, endDate } = req.query;
+
+    try {
+      const result = await deviceService.listTokenUsage(mac, {
+        page,
+        limit,
+        startDate,
+        endDate
+      });
+      success(res, result);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /device/token-usage/{mac}:
+ *   delete:
+ *     tags: [Device - Token Usage]
+ *     summary: Delete token usage records for a device
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Delete records from this date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Delete records until this date
+ *       - in: query
+ *         name: olderThan
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Delete records older than this date
+ *     responses:
+ *       200:
+ *         description: Token usage records deleted
+ */
+router.delete('/token-usage/:mac',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { startDate, endDate, olderThan } = req.query;
+
+    try {
+      const count = await deviceService.deleteTokenUsage(mac, {
+        startDate,
+        endDate,
+        olderThan
+      });
+      success(res, { deletedCount: count }, 'Token usage records deleted');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 module.exports = router;

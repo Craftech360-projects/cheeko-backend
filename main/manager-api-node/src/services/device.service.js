@@ -820,6 +820,354 @@ const getAllFirmware = async (type) => {
   return firmware || [];
 };
 
+// =============================================
+// Token Usage Tracking Methods
+// =============================================
+
+/**
+ * Record token usage for a device
+ * @param {Object} data - Token usage data
+ * @returns {Promise<Object>} Created or updated usage record
+ */
+const recordTokenUsage = async ({
+  mac,
+  sessionId,
+  inputTokens = 0,
+  outputTokens = 0,
+  inputAudioTokens = 0,
+  inputTextTokens = 0,
+  inputCachedTokens = 0,
+  outputAudioTokens = 0,
+  outputTextTokens = 0,
+  sessionDurationSeconds = 0,
+  avgTtftSeconds = 0,
+  messageCount = 0,
+  totalResponseDurationSeconds = 0
+}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const today = new Date().toISOString().split('T')[0];
+
+  // Check if we have an existing record for this mac + date (or mac + sessionId)
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*')
+    .eq('mac_address', normalizedMac)
+    .eq('usage_date', today);
+
+  if (sessionId) {
+    query = query.eq('session_id', sessionId);
+  }
+
+  const { data: existing } = await query.single();
+
+  if (existing) {
+    // Update existing record - accumulate values
+    const { data: updated, error } = await supabaseAdmin
+      .from('device_token_usage')
+      .update({
+        input_tokens: existing.input_tokens + inputTokens,
+        output_tokens: existing.output_tokens + outputTokens,
+        input_audio_tokens: existing.input_audio_tokens + inputAudioTokens,
+        input_text_tokens: existing.input_text_tokens + inputTextTokens,
+        input_cached_tokens: existing.input_cached_tokens + inputCachedTokens,
+        output_audio_tokens: existing.output_audio_tokens + outputAudioTokens,
+        output_text_tokens: existing.output_text_tokens + outputTextTokens,
+        session_duration_seconds: existing.session_duration_seconds + sessionDurationSeconds,
+        // Calculate weighted average for TTFT
+        avg_ttft_seconds: existing.message_count + messageCount > 0
+          ? ((existing.avg_ttft_seconds * existing.message_count) + (avgTtftSeconds * messageCount)) /
+            (existing.message_count + messageCount)
+          : avgTtftSeconds,
+        message_count: existing.message_count + messageCount,
+        total_response_duration_seconds: existing.total_response_duration_seconds + totalResponseDurationSeconds,
+        session_count: sessionId && !existing.session_id ? existing.session_count + 1 : existing.session_count,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', existing.id)
+      .select()
+      .single();
+
+    if (error) {
+      logger.error('Failed to update token usage:', error);
+      throw new Error('Failed to update token usage');
+    }
+
+    return updated;
+  }
+
+  // Create new record
+  const { data: record, error } = await supabaseAdmin
+    .from('device_token_usage')
+    .insert({
+      mac_address: normalizedMac,
+      session_id: sessionId,
+      usage_date: today,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      input_audio_tokens: inputAudioTokens,
+      input_text_tokens: inputTextTokens,
+      input_cached_tokens: inputCachedTokens,
+      output_audio_tokens: outputAudioTokens,
+      output_text_tokens: outputTextTokens,
+      session_duration_seconds: sessionDurationSeconds,
+      avg_ttft_seconds: avgTtftSeconds,
+      message_count: messageCount,
+      total_response_duration_seconds: totalResponseDurationSeconds,
+      session_count: 1
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to record token usage:', error);
+    throw new Error('Failed to record token usage');
+  }
+
+  return record;
+};
+
+/**
+ * Get token usage statistics for a device
+ * @param {string} mac - Device MAC address
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Token usage statistics
+ */
+const getTokenUsageStats = async (mac, { startDate, endDate, period = 'daily' } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*')
+    .eq('mac_address', normalizedMac)
+    .order('usage_date', { ascending: false });
+
+  // Apply date filters
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+
+  const { data: records, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch token usage:', error);
+    throw new Error('Failed to fetch token usage statistics');
+  }
+
+  // Aggregate statistics
+  const totals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    inputAudioTokens: 0,
+    inputTextTokens: 0,
+    inputCachedTokens: 0,
+    outputAudioTokens: 0,
+    outputTextTokens: 0,
+    sessionDurationSeconds: 0,
+    avgTtftSeconds: 0,
+    messageCount: 0,
+    totalResponseDurationSeconds: 0,
+    sessionCount: 0,
+    dayCount: records?.length || 0
+  };
+
+  if (records && records.length > 0) {
+    let weightedTtftSum = 0;
+
+    for (const record of records) {
+      totals.inputTokens += record.input_tokens || 0;
+      totals.outputTokens += record.output_tokens || 0;
+      totals.totalTokens += record.total_tokens || 0;
+      totals.inputAudioTokens += record.input_audio_tokens || 0;
+      totals.inputTextTokens += record.input_text_tokens || 0;
+      totals.inputCachedTokens += record.input_cached_tokens || 0;
+      totals.outputAudioTokens += record.output_audio_tokens || 0;
+      totals.outputTextTokens += record.output_text_tokens || 0;
+      totals.sessionDurationSeconds += record.session_duration_seconds || 0;
+      totals.messageCount += record.message_count || 0;
+      totals.totalResponseDurationSeconds += record.total_response_duration_seconds || 0;
+      totals.sessionCount += record.session_count || 0;
+      weightedTtftSum += (record.avg_ttft_seconds || 0) * (record.message_count || 0);
+    }
+
+    // Calculate weighted average TTFT
+    if (totals.messageCount > 0) {
+      totals.avgTtftSeconds = weightedTtftSum / totals.messageCount;
+    }
+  }
+
+  return {
+    mac: normalizedMac,
+    period,
+    startDate: startDate || null,
+    endDate: endDate || null,
+    totals,
+    daily: records || []
+  };
+};
+
+/**
+ * Get token usage for a specific date range (paginated)
+ * @param {string} mac - Device MAC address
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated token usage list
+ */
+const listTokenUsage = async (mac, { page = 1, limit = 30, startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const offset = (page - 1) * limit;
+
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*', { count: 'exact' })
+    .eq('mac_address', normalizedMac);
+
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+
+  const { data: records, count, error } = await query
+    .order('usage_date', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to list token usage:', error);
+    throw new Error('Failed to list token usage');
+  }
+
+  return {
+    list: records || [],
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
+/**
+ * Get token usage summary for all devices (admin)
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Summary by device
+ */
+const getTokenUsageSummary = async ({ startDate, endDate, page = 1, limit = 20 } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // For now, fetch all records and aggregate in memory
+  // In production, this could use a database view or aggregation query
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*');
+
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+
+  const { data: records, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch token usage summary:', error);
+    throw new Error('Failed to fetch token usage summary');
+  }
+
+  // Group by MAC address
+  const byDevice = {};
+  for (const record of records || []) {
+    const mac = record.mac_address;
+    if (!byDevice[mac]) {
+      byDevice[mac] = {
+        mac,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        sessionCount: 0,
+        messageCount: 0,
+        sessionDurationSeconds: 0,
+        dayCount: 0
+      };
+    }
+    byDevice[mac].inputTokens += record.input_tokens || 0;
+    byDevice[mac].outputTokens += record.output_tokens || 0;
+    byDevice[mac].totalTokens += record.total_tokens || 0;
+    byDevice[mac].sessionCount += record.session_count || 0;
+    byDevice[mac].messageCount += record.message_count || 0;
+    byDevice[mac].sessionDurationSeconds += record.session_duration_seconds || 0;
+    byDevice[mac].dayCount += 1;
+  }
+
+  // Sort by total tokens (descending)
+  const devices = Object.values(byDevice)
+    .sort((a, b) => b.totalTokens - a.totalTokens);
+
+  // Paginate
+  const total = devices.length;
+  const offset = (page - 1) * limit;
+  const paginatedDevices = devices.slice(offset, offset + limit);
+
+  return {
+    list: paginatedDevices,
+    total,
+    page,
+    limit,
+    startDate: startDate || null,
+    endDate: endDate || null
+  };
+};
+
+/**
+ * Delete token usage records for a device
+ * @param {string} mac - Device MAC address
+ * @param {Object} options - Delete options
+ * @returns {Promise<number>} Number of deleted records
+ */
+const deleteTokenUsage = async (mac, { startDate, endDate, olderThan } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .delete()
+    .eq('mac_address', normalizedMac);
+
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+  if (olderThan) {
+    query = query.lt('usage_date', olderThan);
+  }
+
+  const { error, count } = await query;
+
+  if (error) {
+    logger.error('Failed to delete token usage:', error);
+    throw new Error('Failed to delete token usage');
+  }
+
+  return count || 0;
+};
+
 module.exports = {
   registerDevice,
   bindDevice,
@@ -844,5 +1192,11 @@ module.exports = {
   createFirmware,
   updateFirmware,
   deleteFirmware,
-  setForceUpdate
+  setForceUpdate,
+  // Token usage methods
+  recordTokenUsage,
+  getTokenUsageStats,
+  listTokenUsage,
+  getTokenUsageSummary,
+  deleteTokenUsage
 };

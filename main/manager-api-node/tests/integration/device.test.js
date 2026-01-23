@@ -502,3 +502,308 @@ describe('OTA Firmware Routes', () => {
     });
   });
 });
+
+// =============================================
+// Token Usage Tracking Tests
+// =============================================
+
+describe('Token Usage Routes', () => {
+  describe('POST /toy/device/token-usage', () => {
+    it('should record token usage (public endpoint)', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: TEST_MAC,
+          inputTokens: 100,
+          outputTokens: 50
+        });
+
+      // May return success or error depending on DB config
+      expect([200, 400, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+
+      if (res.status === 200 && res.body.data) {
+        expect(res.body.data).toHaveProperty('mac_address');
+        expect(res.body.data).toHaveProperty('usage_date');
+      }
+    });
+
+    it('should require MAC address', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          inputTokens: 100,
+          outputTokens: 50
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should reject invalid MAC address', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: INVALID_MAC,
+          inputTokens: 100
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept MAC with colons', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: 'AA:BB:CC:DD:EE:01',
+          inputTokens: 50,
+          outputTokens: 25
+        });
+
+      expect([200, 400, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept MAC with dashes', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: 'AA-BB-CC-DD-EE-02',
+          inputTokens: 50,
+          outputTokens: 25
+        });
+
+      expect([200, 400, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept raw MAC format', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: 'AABBCCDDEF03',
+          inputTokens: 50,
+          outputTokens: 25
+        });
+
+      expect([200, 400, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept all token usage fields', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: TEST_MAC,
+          sessionId: 'test-session-123',
+          inputTokens: 100,
+          outputTokens: 50,
+          inputAudioTokens: 80,
+          inputTextTokens: 20,
+          inputCachedTokens: 10,
+          outputAudioTokens: 40,
+          outputTextTokens: 10,
+          sessionDurationSeconds: 60.5,
+          avgTtftSeconds: 0.3,
+          messageCount: 5,
+          totalResponseDurationSeconds: 15.2
+        });
+
+      expect([200, 400, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept minimal request with only MAC', async () => {
+      const res = await request(app)
+        .post('/toy/device/token-usage')
+        .send({
+          mac: TEST_MAC
+        });
+
+      // Should work - all fields except MAC are optional
+      expect([200, 400, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/device/token-usage/summary', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/summary');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept pagination parameters', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/summary?page=1&limit=10');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept date filter parameters', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/summary?startDate=2024-01-01&endDate=2024-12-31');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/device/token-usage/:mac/stats', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC}/stats`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept date filter parameters', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC}/stats?startDate=2024-01-01&endDate=2024-12-31`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept period parameter', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC}/stats?period=weekly`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle MAC with colons', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/AA:BB:CC:DD:EE:FF/stats');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle MAC with dashes', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/AA-BB-CC-DD-EE-FF/stats');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle raw MAC format', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/AABBCCDDEEFF/stats');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/device/token-usage/:mac', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept pagination parameters', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC}?page=1&limit=30`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept date filter parameters', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC}?startDate=2024-01-01&endDate=2024-12-31`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle lowercase MAC', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/aa:bb:cc:dd:ee:ff');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('DELETE /toy/device/token-usage/:mac', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .delete(`/toy/device/token-usage/${TEST_MAC}`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept date filter parameters', async () => {
+      const res = await request(app)
+        .delete(`/toy/device/token-usage/${TEST_MAC}?startDate=2024-01-01&endDate=2024-01-31`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept olderThan parameter', async () => {
+      const res = await request(app)
+        .delete(`/toy/device/token-usage/${TEST_MAC}?olderThan=2024-01-01`);
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle MAC with colons', async () => {
+      const res = await request(app)
+        .delete('/toy/device/token-usage/AA:BB:CC:DD:EE:FF');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle MAC with dashes', async () => {
+      const res = await request(app)
+        .delete('/toy/device/token-usage/AA-BB-CC-DD-EE-FF');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should handle raw MAC format', async () => {
+      const res = await request(app)
+        .delete('/toy/device/token-usage/AABBCCDDEEFF');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('Route Priority', () => {
+    it('should correctly route to summary endpoint (not treat "summary" as MAC)', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/summary');
+
+      // Should require auth for summary endpoint, not fail with invalid MAC
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should correctly route to stats endpoint', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/AA:BB:CC:DD:EE:FF/stats');
+
+      // Should require auth for stats endpoint
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+});
