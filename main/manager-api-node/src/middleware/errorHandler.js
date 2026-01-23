@@ -69,22 +69,23 @@ const errorHandler = (err, req, res, next) => {
     message = 'Referenced resource does not exist';
   }
 
-  // Log the error
+  // Log the error with request ID for tracing
+  const logMeta = {
+    requestId: req.requestId,
+    message: err.message,
+    url: req.originalUrl,
+    method: req.method,
+    statusCode
+  };
+
   if (statusCode >= 500) {
     logger.error('Server error:', {
-      message: err.message,
+      ...logMeta,
       stack: err.stack,
-      url: req.originalUrl,
-      method: req.method,
       ip: req.ip
     });
   } else {
-    logger.warn('Client error:', {
-      message: err.message,
-      url: req.originalUrl,
-      method: req.method,
-      statusCode
-    });
+    logger.warn('Client error:', logMeta);
   }
 
   // Don't leak stack traces in production

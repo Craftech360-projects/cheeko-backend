@@ -14,6 +14,7 @@ const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { xssFilter } = require('./middleware/xssFilter');
+const { requestIdMiddleware } = require('./middleware/requestId');
 const routes = require('./routes');
 const swaggerSetup = require('./config/swagger');
 
@@ -64,15 +65,26 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(xssFilter());
 
 // ===========================================
+// Request Tracking Middleware
+// ===========================================
+
+// Add unique request ID to each request
+app.use(requestIdMiddleware());
+
+// ===========================================
 // Logging Middleware
 // ===========================================
 
-// HTTP request logging
-const morganFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
+// HTTP request logging with request ID
+const morganFormat = process.env.NODE_ENV === 'production'
+  ? ':method :url :status :response-time ms - :res[content-length] [:req[X-Request-ID]]'
+  : 'dev';
 app.use(morgan(morganFormat, {
   stream: {
     write: (message) => logger.http(message.trim())
-  }
+  },
+  // Skip logging for health checks in production
+  skip: (req) => process.env.NODE_ENV === 'production' && req.url === '/health'
 }));
 
 // ===========================================

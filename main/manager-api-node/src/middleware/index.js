@@ -15,6 +15,7 @@ const {
 } = require('./auth');
 const { validate, schemas } = require('./validation');
 const { xssFilter, escapeHtml, sanitize, stripHtml } = require('./xssFilter');
+const { requestIdMiddleware } = require('./requestId');
 
 module.exports = {
   // Error handling
@@ -39,5 +40,8 @@ module.exports = {
   xssFilter,
   escapeHtml,
   sanitize,
-  stripHtml
+  stripHtml,
+
+  // Request tracking
+  requestIdMiddleware
 };

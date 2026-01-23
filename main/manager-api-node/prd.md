@@ -860,7 +860,7 @@ manager-api-node/
       "Configure log levels by environment",
       "Add request ID tracking"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",

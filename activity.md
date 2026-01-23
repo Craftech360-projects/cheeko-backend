@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 30
-**Current Task:** Setup - Add logging and monitoring
+**Tasks Completed:** 31
+**Current Task:** Setup - Finalize deployment configuration
 
 ---
 
@@ -1296,6 +1296,60 @@ npm test     # 776 tests passed (744 previous + 32 new contract tests)
 
 **Issues and Resolutions:**
 - Fixed swagger endpoint test: Changed from `/toy/api-docs.json` to `/toy/swagger.json` (actual path)
+
+---
+
+### 2026-01-23 - Task 31: Add logging and monitoring (COMPLETED)
+
+**Files Created:**
+- `src/middleware/requestId.js` - Request ID middleware for unique request tracking (UUID v4)
+- `tests/integration/logging.test.js` - 20 integration tests for logging and request ID functionality
+
+**Files Modified:**
+- `src/utils/logger.js` - Enhanced Winston logger with:
+  - Environment-based log level defaults (debug in dev, info in production)
+  - Request ID support in log messages
+  - Logs directory auto-creation in production
+  - Configurable max file size and rotation
+  - Test environment log suppression
+  - `createRequestLogger()` function for request-scoped logging
+
+- `src/app.js` - Added:
+  - Request ID middleware (before logging)
+  - Enhanced Morgan format with request ID in production
+  - Health check skipping in production logs
+
+- `src/middleware/errorHandler.js` - Added request ID to error logs
+
+- `src/middleware/index.js` - Exported requestIdMiddleware
+
+**Features Implemented:**
+- Request ID tracking via `X-Request-ID` header
+- UUID v4 generation for new requests
+- Client-provided request ID passthrough
+- Request ID in all response headers
+- Request ID in error logs for tracing
+- Environment-based log configuration
+- Log file rotation (5MB max, 5 files)
+- Test environment log suppression
+
+**Environment Variables Documented:**
+- `LOG_LEVEL` - Logging level (error, warn, info, http, verbose, debug, silly)
+- `LOGS_DIR` - Directory for log files (default: logs)
+- `LOG_MAX_SIZE` - Max size per log file in bytes (default: 5MB)
+- `LOG_MAX_FILES` - Number of rotated log files (default: 5)
+- `LOG_IN_TEST` - Enable logging in test environment
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 796 tests passed (776 previous + 20 new logging tests)
+```
+
+**Test Results:**
+- All 796 tests pass
+- 15 test suites pass
+- Logging tests: 20 tests covering request ID middleware and logger functionality
 
 ---
 
