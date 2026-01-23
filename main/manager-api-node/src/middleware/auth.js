@@ -158,6 +158,40 @@ const optionalAuth = async (req, res, next) => {
 };
 
 /**
+ * Middleware: Require admin role
+ * Combines authentication and admin check
+ */
+const requireAdmin = async (req, res, next) => {
+  // First verify authentication
+  const token = extractBearerToken(req);
+
+  if (!token) {
+    return unauthorized(res, 'No authorization token provided');
+  }
+
+  const user = await verifySupabaseToken(token);
+  if (!user) {
+    return unauthorized(res, 'Invalid or expired token');
+  }
+
+  req.user = user;
+  req.token = token;
+
+  // Check admin flag in user metadata or database
+  const isAdmin = user.user_metadata?.admin === true ||
+                  user.user_metadata?.super_admin === true ||
+                  user.app_metadata?.admin === true ||
+                  user.app_metadata?.super_admin === true ||
+                  (user.app_metadata?.roles || []).includes('admin');
+
+  if (!isAdmin) {
+    return forbidden(res, 'Admin access required');
+  }
+
+  next();
+};
+
+/**
  * Middleware: Require super admin role
  * Must be used after requireAuth
  */
@@ -202,6 +236,7 @@ module.exports = {
   extractServiceKey,
   verifySupabaseToken,
   requireAuth,
+  requireAdmin,
   requireServiceKey,
   requireDualAuth,
   optionalAuth,
