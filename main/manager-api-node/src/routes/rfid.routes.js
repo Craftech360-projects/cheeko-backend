@@ -1,0 +1,962 @@
+/**
+ * RFID Routes
+ *
+ * Handles RFID card mapping management and lookups.
+ * Base path: /admin/rfid
+ *
+ * PRD-specified endpoints:
+ * - GET /admin/rfid/card/page - List cards (paginated)
+ * - GET /admin/rfid/card/list - List all cards
+ * - GET /admin/rfid/card/lookup/:rfidUid - Lookup by UID (public)
+ * - POST /admin/rfid/card - Create mapping (admin)
+ * - PUT /admin/rfid/card - Update mapping (admin)
+ * - DELETE /admin/rfid/card - Delete mapping (admin)
+ * - GET /admin/rfid/series/lookup/:uid - Series lookup (public)
+ * - GET /admin/rfid/pack/list - List packs
+ * - POST /admin/rfid/pack - Create pack (admin)
+ */
+
+const express = require('express');
+const router = express.Router();
+const rfidService = require('../services/rfid.service');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { success, badRequest, notFound } = require('../utils/response');
+
+// =============================================
+// Card Mapping Routes (PRD-specified)
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/card/page:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get card mappings (paginated)
+ *     description: Returns paginated list of RFID card to content mappings
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: packCode
+ *         schema:
+ *           type: string
+ *         description: Filter by pack code
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Paginated card mapping list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/CardMapping'
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     pages:
+ *                       type: integer
+ */
+router.get('/card/page',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit, packCode, active } = req.query;
+    const result = await rfidService.getCardMappingPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      packCode,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/list:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get all card mappings
+ *     description: Returns all RFID card mappings without pagination
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: packCode
+ *         schema:
+ *           type: string
+ *         description: Filter by pack code
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Card mapping list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/CardMapping'
+ */
+router.get('/card/list',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { packCode, active } = req.query;
+    const result = await rfidService.getCardMappingList({
+      packCode,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/lookup/{rfidUid}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Lookup card mapping by RFID UID
+ *     description: Public endpoint for ESP32 devices to lookup card content. Also checks series mappings if no exact match.
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string, colons/dashes optional)
+ *         example: "04:A3:B2:C1:D0:00:00"
+ *     responses:
+ *       200:
+ *         description: Card mapping with question data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/CardMappingLookup'
+ *       404:
+ *         description: Card mapping not found
+ */
+router.get('/card/lookup/:rfidUid',
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    const card = await rfidService.lookupCardByUid(rfidUid);
+    if (!card) {
+      return notFound(res, 'Card mapping not found');
+    }
+    success(res, card);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Create card mapping
+ *     description: Create a new RFID card to content mapping (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - rfidUid
+ *             properties:
+ *               rfidUid:
+ *                 type: string
+ *                 description: RFID UID (hex string)
+ *                 example: "04A3B2C1D00000"
+ *               questionId:
+ *                 type: integer
+ *                 description: Primary question ID
+ *               questionIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Multiple question IDs for multi-question support
+ *               packCode:
+ *                 type: string
+ *                 description: Pack code identifier
+ *               packId:
+ *                 type: integer
+ *                 description: Pack ID
+ *               contentPackId:
+ *                 type: integer
+ *                 description: Content pack ID for RAG
+ *               notes:
+ *                 type: string
+ *                 description: Admin notes
+ *               active:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Card mapping created
+ *       400:
+ *         description: Validation error or duplicate UID
+ */
+router.post('/card',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.body;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    try {
+      const card = await rfidService.createCardMapping(req.body, req.user.id);
+      success(res, card, 'Card mapping created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card:
+ *   put:
+ *     tags: [RFID]
+ *     summary: Update card mapping
+ *     description: Update an existing RFID card mapping (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 description: Card mapping ID
+ *               rfidUid:
+ *                 type: string
+ *                 description: RFID UID (hex string)
+ *               questionId:
+ *                 type: integer
+ *               questionIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *               packCode:
+ *                 type: string
+ *               packId:
+ *                 type: integer
+ *               contentPackId:
+ *                 type: integer
+ *               notes:
+ *                 type: string
+ *               active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Card mapping updated
+ *       400:
+ *         description: Validation error
+ */
+router.put('/card',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.body;
+
+    if (!id) {
+      return badRequest(res, 'Card mapping ID is required');
+    }
+
+    try {
+      const card = await rfidService.updateCardMapping(req.body, req.user.id);
+      success(res, card, 'Card mapping updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card:
+ *   delete:
+ *     tags: [RFID]
+ *     summary: Delete card mapping
+ *     description: Delete an RFID card mapping (admin only). Provide either id or rfidUid.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 description: Card mapping ID
+ *               rfidUid:
+ *                 type: string
+ *                 description: RFID UID (alternative to id)
+ *     responses:
+ *       200:
+ *         description: Card mapping deleted
+ *       400:
+ *         description: ID or RFID UID required
+ */
+router.delete('/card',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id, rfidUid } = req.body;
+
+    if (!id && !rfidUid) {
+      return badRequest(res, 'Card mapping ID or RFID UID is required');
+    }
+
+    try {
+      await rfidService.deleteCardMapping({ id, rfidUid });
+      success(res, null, 'Card mapping deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// =============================================
+// Series Lookup Routes
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/series/lookup/{uid}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Lookup series mapping by UID
+ *     description: Public endpoint to check if UID falls within a series range
+ *     parameters:
+ *       - in: path
+ *         name: uid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID to check against series ranges
+ *     responses:
+ *       200:
+ *         description: Series mapping found
+ *       404:
+ *         description: No series mapping found
+ */
+router.get('/series/lookup/:uid',
+  asyncHandler(async (req, res) => {
+    const { uid } = req.params;
+
+    if (!uid) {
+      return badRequest(res, 'UID is required');
+    }
+
+    const series = await rfidService.lookupSeriesByUid(uid);
+    if (!series) {
+      return notFound(res, 'No series mapping found for this UID');
+    }
+    success(res, series);
+  })
+);
+
+// =============================================
+// Pack Management Routes
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/pack/list:
+ *   get:
+ *     tags: [RFID]
+ *     summary: List RFID packs
+ *     description: Returns list of RFID product packs/SKUs
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Pack list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidPack'
+ */
+router.get('/pack/list',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { active } = req.query;
+    const result = await rfidService.getPackList({
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/pack:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Create RFID pack
+ *     description: Create a new RFID product pack (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - packCode
+ *               - name
+ *             properties:
+ *               packCode:
+ *                 type: string
+ *                 description: Unique pack identifier
+ *                 example: "ANIMALS_PACK_1"
+ *               name:
+ *                 type: string
+ *                 description: Pack display name
+ *               description:
+ *                 type: string
+ *               ageMin:
+ *                 type: integer
+ *                 description: Minimum recommended age
+ *               ageMax:
+ *                 type: integer
+ *                 description: Maximum recommended age
+ *               active:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Pack created
+ *       400:
+ *         description: Validation error or duplicate code
+ */
+router.post('/pack',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { packCode, name } = req.body;
+
+    if (!packCode) {
+      return badRequest(res, 'Pack code is required');
+    }
+    if (!name) {
+      return badRequest(res, 'Pack name is required');
+    }
+
+    try {
+      const pack = await rfidService.createPack(req.body, req.user.id);
+      success(res, pack, 'Pack created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// =============================================
+// Legacy Routes (backward compatibility)
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/list:
+ *   get:
+ *     tags: [RFID Legacy]
+ *     summary: Get RFID tags list (legacy)
+ *     description: Legacy endpoint for RFID tag management
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: RFID tags list
+ */
+router.get('/list',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const result = await rfidService.getRfidList({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/by-uid/{uid}:
+ *   get:
+ *     tags: [RFID Legacy]
+ *     summary: Get RFID tag by UID (legacy)
+ *     parameters:
+ *       - in: path
+ *         name: uid
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: RFID tag details
+ */
+router.get('/by-uid/:uid',
+  asyncHandler(async (req, res) => {
+    const tag = await rfidService.getRfidByUid(req.params.uid);
+    if (!tag) {
+      return notFound(res, 'RFID tag not found');
+    }
+    success(res, tag);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/create:
+ *   post:
+ *     tags: [RFID Legacy]
+ *     summary: Create RFID tag (legacy)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - uid
+ *             properties:
+ *               uid:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               contentType:
+ *                 type: string
+ *                 enum: [music, story, textbook, action]
+ *               contentId:
+ *                 type: string
+ *               actionType:
+ *                 type: string
+ *                 enum: [play, pause, next, prev, volume_up, volume_down]
+ *               actionParams:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: RFID tag created
+ */
+router.post('/create',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!req.body.uid) {
+      return badRequest(res, 'UID is required');
+    }
+
+    try {
+      const tag = await rfidService.createRfid(req.user.id, req.body);
+      success(res, tag, 'RFID tag created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/update/{id}:
+ *   put:
+ *     tags: [RFID Legacy]
+ *     summary: Update RFID tag (legacy)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: RFID tag updated
+ */
+router.put('/update/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      const tag = await rfidService.updateRfid(req.params.id, req.body);
+      success(res, tag, 'RFID tag updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/delete/{id}:
+ *   delete:
+ *     tags: [RFID Legacy]
+ *     summary: Delete RFID tag (legacy)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: RFID tag deleted
+ */
+router.delete('/delete/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      await rfidService.deleteRfid(req.params.id);
+      success(res, null, 'RFID tag deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/{id}:
+ *   get:
+ *     tags: [RFID Legacy]
+ *     summary: Get RFID tag by ID (legacy)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: RFID tag details
+ */
+router.get('/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const tag = await rfidService.getRfidById(req.params.id);
+    if (!tag) {
+      return notFound(res, 'RFID tag not found');
+    }
+    success(res, tag);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/scan/{mac}/{uid}:
+ *   post:
+ *     tags: [RFID Legacy]
+ *     summary: Process RFID scan from device (legacy)
+ *     description: Public endpoint for ESP32 to report RFID scans
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *       - in: path
+ *         name: uid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID tag UID
+ *     responses:
+ *       200:
+ *         description: Action to perform
+ */
+router.post('/scan/:mac/:uid',
+  asyncHandler(async (req, res) => {
+    const { mac, uid } = req.params;
+
+    try {
+      const result = await rfidService.processScan(mac, uid);
+      success(res, result);
+    } catch (error) {
+      notFound(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/scan-logs:
+ *   get:
+ *     tags: [RFID Legacy]
+ *     summary: Get RFID scan logs (legacy)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: mac
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: uid
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Scan logs
+ */
+router.get('/scan-logs',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit, mac, uid } = req.query;
+    const result = await rfidService.getScanLogs({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 50,
+      mac,
+      uid
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/register-batch:
+ *   post:
+ *     tags: [RFID Legacy]
+ *     summary: Register multiple RFID tags for a device (legacy)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - mac
+ *               - tags
+ *             properties:
+ *               mac:
+ *                 type: string
+ *                 description: Device MAC address
+ *               tags:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     uid:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Registration results
+ */
+router.post('/register-batch',
+  asyncHandler(async (req, res) => {
+    const { mac, tags } = req.body;
+
+    if (!mac || !tags || !Array.isArray(tags)) {
+      return badRequest(res, 'MAC address and tags array are required');
+    }
+
+    try {
+      const results = await rfidService.registerDeviceTags(mac, tags);
+      success(res, results, `Processed ${results.length} tags`);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// =============================================
+// Swagger Component Schemas
+// =============================================
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     CardMapping:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         rfid_uid:
+ *           type: string
+ *         question_id:
+ *           type: integer
+ *         question_ids:
+ *           type: array
+ *           items:
+ *             type: integer
+ *         pack_code:
+ *           type: string
+ *         pack_id:
+ *           type: integer
+ *         content_pack_id:
+ *           type: integer
+ *         notes:
+ *           type: string
+ *         active:
+ *           type: boolean
+ *         create_date:
+ *           type: string
+ *           format: date-time
+ *         question:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             code:
+ *               type: string
+ *             title:
+ *               type: string
+ *         pack:
+ *           type: object
+ *           properties:
+ *             id:
+ *               type: integer
+ *             pack_code:
+ *               type: string
+ *             name:
+ *               type: string
+ *     CardMappingLookup:
+ *       allOf:
+ *         - $ref: '#/components/schemas/CardMapping'
+ *         - type: object
+ *           properties:
+ *             questions:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   code:
+ *                     type: string
+ *                   title:
+ *                     type: string
+ *                   prompt_text:
+ *                     type: string
+ *                   language:
+ *                     type: string
+ *     RfidPack:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *         pack_code:
+ *           type: string
+ *         name:
+ *           type: string
+ *         description:
+ *           type: string
+ *         age_min:
+ *           type: integer
+ *         age_max:
+ *           type: integer
+ *         active:
+ *           type: boolean
+ *         create_date:
+ *           type: string
+ *           format: date-time
+ */
+
+module.exports = router;

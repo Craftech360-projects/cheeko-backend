@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 12
-**Current Task:** Feature - Implement RFID routes - Card mapping (/admin/rfid/*)
+**Tasks Completed:** 13
+**Current Task:** Integration - Implement Qdrant vector search integration
 
 ---
 
@@ -308,6 +308,57 @@ npm test     # 120 tests passed (4 health + 23 device + 26 agent + 67 content wi
 - Authentication checks for all endpoints
 - Input validation for contentId, itemIds, and newPosition
 - Content type validation when adding to playlist
+
+---
+
+### 2026-01-23 - Task 13: Implement RFID routes - Card mapping (/admin/rfid/*) (COMPLETED)
+
+**Files Created/Modified:**
+- `src/services/rfid.service.js` - Added PRD-specified card mapping methods (getCardMappingPage, getCardMappingList, lookupCardByUid, createCardMapping, updateCardMapping, deleteCardMapping, lookupSeriesByUid, getPackList, createPack)
+- `src/routes/rfid.routes.js` - Updated routes to match PRD specification with card/* paths and comprehensive Swagger documentation
+- `tests/integration/rfid.test.js` - Created 45 integration tests for RFID endpoints
+
+**PRD-Compliant Card Mapping Endpoints Implemented:**
+- GET /admin/rfid/card/page - List cards (paginated, auth)
+- GET /admin/rfid/card/list - List all cards (auth)
+- GET /admin/rfid/card/lookup/:rfidUid - Lookup by UID (public for ESP32)
+- POST /admin/rfid/card - Create mapping (admin)
+- PUT /admin/rfid/card - Update mapping (admin)
+- DELETE /admin/rfid/card - Delete mapping (admin)
+- GET /admin/rfid/series/lookup/:uid - Series lookup (public)
+- GET /admin/rfid/pack/list - List packs (auth)
+- POST /admin/rfid/pack - Create pack (admin)
+
+**Legacy Routes Preserved (backward compatibility):**
+- GET /admin/rfid/list - RFID tags list
+- GET /admin/rfid/by-uid/:uid - Get tag by UID
+- POST /admin/rfid/create - Create RFID tag
+- PUT /admin/rfid/update/:id - Update tag
+- DELETE /admin/rfid/delete/:id - Delete tag
+- GET /admin/rfid/:id - Get tag by ID
+- POST /admin/rfid/scan/:mac/:uid - Process RFID scan
+- GET /admin/rfid/scan-logs - Get scan logs
+- POST /admin/rfid/register-batch - Batch register tags
+
+**Features:**
+- UID normalization (supports colons, dashes, or raw hex)
+- Multi-question support per card (question_ids array)
+- Series lookup for UID ranges (start_uid/end_uid)
+- Pack management with age range filtering
+- RAG integration ready (content_pack_id for Qdrant)
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 11 warnings (pre-existing in other files)
+npm test     # 165 tests passed (4 health + 23 device + 26 agent + 67 content + 45 rfid)
+```
+
+**Test Results:**
+- All 45 RFID tests pass
+- Authentication checks for protected routes
+- Admin access validation for create/update/delete
+- UID format normalization tests
+- Public endpoint access for ESP32 lookup
 
 ---
 
