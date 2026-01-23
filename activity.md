@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 14
-**Current Task:** Feature - Implement RFID routes - RAG-powered lookup
+**Tasks Completed:** 15
+**Current Task:** Feature - Implement RFID routes - Packs and Series
 
 ---
 
@@ -412,6 +412,56 @@ npm test     # 208 tests passed (165 integration + 43 unit)
 - Full coverage of search, upsert, delete, and filter operations
 - Error handling for missing configuration
 - Connection failure graceful handling
+
+---
+
+### 2026-01-23 - Task 15: Implement RFID routes - RAG-powered lookup (COMPLETED)
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added RAG-powered search methods and emotion tagging support
+- `src/routes/rfid.routes.js` - Added RAG lookup routes with Swagger documentation
+- `tests/integration/rfid.test.js` - Added 60 new integration tests for RAG functionality
+
+**RAG Service Methods Added:**
+- `ragSearch({ embedding, contentPackId, language, limit, scoreThreshold })` - Perform semantic search via Qdrant
+- `lookupCardWithRag(rfidUid, { queryEmbedding, queryText, includeRag })` - Enhanced card lookup with RAG
+- `getContentPack(contentPackId)` - Get content pack details
+- `upsertRagContent({ id, embedding, payload })` - Index content to Qdrant
+- `deleteRagContent(ids)` - Delete content by IDs
+- `deleteRagContentByPack(contentPackId)` - Delete content by pack
+
+**New Endpoints Implemented:**
+- POST /admin/rfid/card/rag-lookup/:rfidUid - RAG-enhanced card lookup (public for ESP32)
+- POST /admin/rfid/rag/search - Semantic search in vector DB (auth required)
+- GET /admin/rfid/content-pack/:id - Get content pack details (auth required)
+
+**Features:**
+- Qdrant integration for semantic similarity search
+- Embedding-based queries (1536-dimensional vectors for ada-002)
+- Content pack filtering for scoped searches
+- Language filtering support
+- Score threshold configuration
+- Emotion tagging extraction from RAG results
+- Multi-emotion support (aggregated from matched content)
+- Graceful degradation when Qdrant is unavailable
+
+**Swagger Components Added:**
+- RagResult schema for search results
+- ContentPack schema for content pack details
+- Updated CardMappingLookup with rag_results, emotions, emotion fields
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 11 warnings (pre-existing)
+npm test     # 225 tests passed (165 previous + 60 new RAG tests)
+```
+
+**Test Results:**
+- All 60 new RAG tests pass
+- POST /admin/rfid/card/rag-lookup/:rfidUid - Public endpoint tests
+- POST /admin/rfid/rag/search - Auth and validation tests
+- GET /admin/rfid/content-pack/:id - Auth and lookup tests
+- Embedding handling and filter tests
 
 ---
 

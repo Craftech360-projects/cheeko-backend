@@ -8,6 +8,7 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
+const qdrantService = require('./integrations/qdrant.service');
 
 // =============================================
 // Card Mapping Methods (PRD-specified)
@@ -320,6 +321,218 @@ const deleteCardMapping = async (data) => {
   }
 
   return true;
+};
+
+// =============================================
+// RAG-powered Search Methods
+// =============================================
+
+/**
+ * Perform RAG semantic search using Qdrant
+ * @param {Object} options - Search options
+ * @param {number[]} options.embedding - Query embedding vector
+ * @param {number} [options.contentPackId] - Filter by content pack ID
+ * @param {string} [options.language] - Filter by language
+ * @param {number} [options.limit=5] - Max results
+ * @param {number} [options.scoreThreshold=0.7] - Minimum similarity score
+ * @returns {Promise<Array>} Search results with payloads
+ */
+const ragSearch = async ({ embedding, contentPackId, language, limit = 5, scoreThreshold = 0.7 }) => {
+  if (!qdrantService.isAvailable()) {
+    logger.debug('Qdrant not available, skipping RAG search');
+    return [];
+  }
+
+  if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+    logger.warn('No embedding provided for RAG search');
+    return [];
+  }
+
+  try {
+    // Build filter conditions
+    const filterConditions = {};
+
+    if (contentPackId) {
+      filterConditions.must = filterConditions.must || {};
+      filterConditions.must.content_pack_id = contentPackId;
+    }
+
+    if (language) {
+      filterConditions.must = filterConditions.must || {};
+      filterConditions.must.language = language;
+    }
+
+    const filter = Object.keys(filterConditions).length > 0
+      ? qdrantService.buildFilter(filterConditions)
+      : null;
+
+    const results = await qdrantService.search({
+      vector: embedding,
+      collection: qdrantService.DEFAULT_COLLECTION,
+      limit,
+      scoreThreshold,
+      filter
+    });
+
+    logger.debug('RAG search completed:', {
+      resultCount: results.length,
+      contentPackId,
+      language
+    });
+
+    return results;
+  } catch (error) {
+    logger.error('RAG search failed:', { error: error.message });
+    return [];
+  }
+};
+
+/**
+ * Lookup card with RAG-enhanced content matching
+ * @param {string} rfidUid - RFID UID
+ * @param {Object} [options] - Additional options
+ * @param {number[]} [options.queryEmbedding] - Pre-computed query embedding for RAG
+ * @param {string} [options.queryText] - Text query for context (logged only)
+ * @param {boolean} [options.includeRag=true] - Whether to include RAG results
+ * @returns {Promise<Object>} Card mapping with RAG-enhanced questions
+ */
+const lookupCardWithRag = async (rfidUid, options = {}) => {
+  const { queryEmbedding, queryText, includeRag = true } = options;
+
+  // First, get the basic card lookup
+  const card = await lookupCardByUid(rfidUid);
+
+  if (!card) {
+    return null;
+  }
+
+  // If card has a content_pack_id and we have an embedding, perform RAG search
+  if (includeRag && card.content_pack_id && queryEmbedding) {
+    try {
+      const ragResults = await ragSearch({
+        embedding: queryEmbedding,
+        contentPackId: card.content_pack_id,
+        limit: 5,
+        scoreThreshold: 0.7
+      });
+
+      if (ragResults.length > 0) {
+        // Add RAG results to the response
+        card.rag_results = ragResults.map(result => ({
+          id: result.id,
+          score: result.score,
+          content: result.payload.content,
+          title: result.payload.title,
+          category: result.payload.category,
+          emotion: result.payload.emotion,
+          language: result.payload.language
+        }));
+
+        // Extract emotions from RAG results
+        const emotions = new Set();
+        ragResults.forEach(result => {
+          if (result.payload.emotion) {
+            emotions.add(result.payload.emotion);
+          }
+        });
+        if (emotions.size > 0) {
+          card.emotions = Array.from(emotions);
+        }
+
+        logger.info('RAG-enhanced lookup completed:', {
+          rfidUid,
+          contentPackId: card.content_pack_id,
+          ragResultCount: ragResults.length,
+          queryText: queryText ? queryText.substring(0, 50) : undefined
+        });
+      }
+    } catch (error) {
+      logger.error('RAG enhancement failed:', { error: error.message, rfidUid });
+      // Continue without RAG results - graceful degradation
+    }
+  }
+
+  // Add emotion from card content pack if available
+  if (card.content_pack && card.content_pack.emotion) {
+    card.emotion = card.content_pack.emotion;
+  }
+
+  return card;
+};
+
+/**
+ * Get content pack by ID with metadata
+ * @param {number} contentPackId - Content pack ID
+ * @returns {Promise<Object>} Content pack details
+ */
+const getContentPack = async (contentPackId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: pack, error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .eq('id', contentPackId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch content pack:', error);
+    throw new Error('Failed to fetch content pack');
+  }
+
+  return pack || null;
+};
+
+/**
+ * Upsert content to Qdrant for RAG
+ * @param {Object} options - Upsert options
+ * @param {string|number} options.id - Unique point ID
+ * @param {number[]} options.embedding - Vector embedding
+ * @param {Object} options.payload - Content metadata
+ * @returns {Promise<Object>} Upsert result
+ */
+const upsertRagContent = async ({ id, embedding, payload }) => {
+  if (!qdrantService.isAvailable()) {
+    throw new Error('Qdrant not configured');
+  }
+
+  return qdrantService.upsertOne({
+    id,
+    vector: embedding,
+    payload: {
+      ...payload,
+      indexed_at: new Date().toISOString()
+    }
+  });
+};
+
+/**
+ * Delete RAG content by IDs
+ * @param {Array} ids - Point IDs to delete
+ * @returns {Promise<Object>} Delete result
+ */
+const deleteRagContent = async (ids) => {
+  if (!qdrantService.isAvailable()) {
+    throw new Error('Qdrant not configured');
+  }
+
+  return qdrantService.deletePoints({ ids });
+};
+
+/**
+ * Delete RAG content by content pack ID
+ * @param {number} contentPackId - Content pack ID
+ * @returns {Promise<Object>} Delete result
+ */
+const deleteRagContentByPack = async (contentPackId) => {
+  if (!qdrantService.isAvailable()) {
+    throw new Error('Qdrant not configured');
+  }
+
+  const filter = qdrantService.buildFilter({
+    must: { content_pack_id: contentPackId }
+  });
+
+  return qdrantService.deleteByFilter({ filter });
 };
 
 // =============================================
@@ -728,6 +941,14 @@ module.exports = {
   createCardMapping,
   updateCardMapping,
   deleteCardMapping,
+
+  // RAG-powered search
+  ragSearch,
+  lookupCardWithRag,
+  getContentPack,
+  upsertRagContent,
+  deleteRagContent,
+  deleteRagContentByPack,
 
   // Series lookup
   lookupSeriesByUid,

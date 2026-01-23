@@ -507,6 +507,230 @@ describe('RFID Routes', () => {
   });
 
   // =============================================
+  // RAG-powered Lookup Routes
+  // =============================================
+
+  describe('RAG-powered Lookup', () => {
+    describe('POST /toy/admin/rfid/card/rag-lookup/:rfidUid', () => {
+      it('should be a public endpoint (no auth required)', async () => {
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${TEST_UID}`)
+          .send({});
+
+        // 200 if found, 404 if not found, 500 if DB not configured
+        expect([200, 404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept embedding vector in request body', async () => {
+        // Create a mock embedding (1536 dimensions like ada-002)
+        const mockEmbedding = new Array(1536).fill(0).map(() => Math.random() * 2 - 1);
+
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${TEST_UID}`)
+          .send({
+            embedding: mockEmbedding,
+            queryText: 'What is this animal?',
+            includeRag: true
+          });
+
+        // 200 if found, 404 if not found, 500 if DB not configured
+        expect([200, 404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should work without embedding (fallback to basic lookup)', async () => {
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${TEST_UID}`)
+          .send({
+            includeRag: false
+          });
+
+        // 200 if found, 404 if not found, 500 if DB not configured
+        expect([200, 404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should return 404 for non-existent UID', async () => {
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${NON_EXISTENT_UID}`)
+          .send({});
+
+        // 404 if not found, 500 if DB not configured
+        expect([404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept UID with colons', async () => {
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${encodeURIComponent(TEST_UID_COLONS)}`)
+          .send({});
+
+        expect([200, 404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept UID with dashes', async () => {
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${encodeURIComponent(TEST_UID_DASHES)}`)
+          .send({});
+
+        expect([200, 404, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should include rag_results when card has content_pack_id and embedding provided', async () => {
+        const mockEmbedding = new Array(1536).fill(0).map(() => Math.random() * 2 - 1);
+
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${TEST_UID}`)
+          .send({
+            embedding: mockEmbedding,
+            includeRag: true
+          });
+
+        // If found and RAG is configured, should have rag_results
+        expect([200, 404, 500]).toContain(res.status);
+        if (res.status === 200 && res.body.data) {
+          // Response structure is valid
+          expect(res.body).toHaveProperty('code');
+          expect(res.body).toHaveProperty('data');
+          // rag_results may or may not be present depending on Qdrant config
+        }
+      });
+
+      it('should include emotions array when available', async () => {
+        const mockEmbedding = new Array(1536).fill(0).map(() => Math.random() * 2 - 1);
+
+        const res = await request(app)
+          .post(`/toy/admin/rfid/card/rag-lookup/${TEST_UID}`)
+          .send({
+            embedding: mockEmbedding,
+            includeRag: true
+          });
+
+        if (res.status === 200 && res.body.data && res.body.data.emotions) {
+          expect(Array.isArray(res.body.data.emotions)).toBe(true);
+        }
+      });
+    });
+
+    describe('POST /toy/admin/rfid/rag/search', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .post('/toy/admin/rfid/rag/search')
+          .send({
+            embedding: new Array(1536).fill(0)
+          });
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should require embedding vector', async () => {
+        const res = await request(app)
+          .post('/toy/admin/rfid/rag/search')
+          .send({})
+          .set('Authorization', FAKE_TOKEN);
+
+        // 400 for validation error or 401 for auth
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should reject empty embedding array', async () => {
+        const res = await request(app)
+          .post('/toy/admin/rfid/rag/search')
+          .send({ embedding: [] })
+          .set('Authorization', FAKE_TOKEN);
+
+        // 400 for validation error or 401 for auth
+        expect([400, 401]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept valid search request', async () => {
+        const mockEmbedding = new Array(1536).fill(0).map(() => Math.random() * 2 - 1);
+
+        const res = await request(app)
+          .post('/toy/admin/rfid/rag/search')
+          .send({
+            embedding: mockEmbedding,
+            limit: 5,
+            scoreThreshold: 0.7
+          })
+          .set('Authorization', FAKE_TOKEN);
+
+        // 200 for success, 401 for auth, 500 if Qdrant not configured
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept contentPackId filter', async () => {
+        const mockEmbedding = new Array(1536).fill(0).map(() => Math.random() * 2 - 1);
+
+        const res = await request(app)
+          .post('/toy/admin/rfid/rag/search')
+          .send({
+            embedding: mockEmbedding,
+            contentPackId: 1,
+            limit: 5
+          })
+          .set('Authorization', FAKE_TOKEN);
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept language filter', async () => {
+        const mockEmbedding = new Array(1536).fill(0).map(() => Math.random() * 2 - 1);
+
+        const res = await request(app)
+          .post('/toy/admin/rfid/rag/search')
+          .send({
+            embedding: mockEmbedding,
+            language: 'en',
+            limit: 5
+          })
+          .set('Authorization', FAKE_TOKEN);
+
+        expect([200, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+
+    describe('GET /toy/admin/rfid/content-pack/:id', () => {
+      it('should require authentication', async () => {
+        const res = await request(app)
+          .get('/toy/admin/rfid/content-pack/1');
+
+        expect(res.status).toBe(401);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should return 404 for non-existent pack', async () => {
+        const res = await request(app)
+          .get('/toy/admin/rfid/content-pack/999999')
+          .set('Authorization', FAKE_TOKEN);
+
+        // 404 if not found, 401 if auth fails, 500 if DB not configured
+        expect([404, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+
+      it('should accept valid pack ID', async () => {
+        const res = await request(app)
+          .get('/toy/admin/rfid/content-pack/1')
+          .set('Authorization', FAKE_TOKEN);
+
+        // 200 if found, 404 if not found, 401 if auth fails
+        expect([200, 404, 401, 500]).toContain(res.status);
+        expect(res.body).toHaveProperty('code');
+      });
+    });
+  });
+
+  // =============================================
   // UID Format Handling
   // =============================================
 

@@ -202,6 +202,238 @@ router.get('/card/lookup/:rfidUid',
 
 /**
  * @swagger
+ * /admin/rfid/card/rag-lookup/{rfidUid}:
+ *   post:
+ *     tags: [RFID]
+ *     summary: RAG-powered card lookup by RFID UID
+ *     description: |
+ *       Enhanced lookup using Retrieval-Augmented Generation (RAG).
+ *       When a card has a content_pack_id and an embedding is provided,
+ *       performs semantic search via Qdrant to find related questions.
+ *       Also returns emotion tags if available.
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string, colons/dashes optional)
+ *         example: "04:A3:B2:C1:D0:00:00"
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               embedding:
+ *                 type: array
+ *                 items:
+ *                   type: number
+ *                 description: Pre-computed query embedding vector (1536 dimensions for ada-002)
+ *               queryText:
+ *                 type: string
+ *                 description: Original text query (for logging/debugging)
+ *               includeRag:
+ *                 type: boolean
+ *                 default: true
+ *                 description: Whether to include RAG results
+ *     responses:
+ *       200:
+ *         description: Card mapping with RAG-enhanced results and emotion tags
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   allOf:
+ *                     - $ref: '#/components/schemas/CardMappingLookup'
+ *                     - type: object
+ *                       properties:
+ *                         rag_results:
+ *                           type: array
+ *                           description: Semantically similar content from Qdrant
+ *                           items:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: string
+ *                               score:
+ *                                 type: number
+ *                                 description: Similarity score (0-1)
+ *                               content:
+ *                                 type: string
+ *                               title:
+ *                                 type: string
+ *                               category:
+ *                                 type: string
+ *                               emotion:
+ *                                 type: string
+ *                               language:
+ *                                 type: string
+ *                         emotions:
+ *                           type: array
+ *                           description: Extracted emotion tags from RAG results
+ *                           items:
+ *                             type: string
+ *                           example: ["happy", "curious", "excited"]
+ *                         emotion:
+ *                           type: string
+ *                           description: Primary emotion from content pack
+ *       404:
+ *         description: Card mapping not found
+ */
+router.post('/card/rag-lookup/:rfidUid',
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+    const { embedding, queryText, includeRag = true } = req.body;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    const card = await rfidService.lookupCardWithRag(rfidUid, {
+      queryEmbedding: embedding,
+      queryText,
+      includeRag
+    });
+
+    if (!card) {
+      return notFound(res, 'Card mapping not found');
+    }
+
+    success(res, card);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/rag/search:
+ *   post:
+ *     tags: [RFID]
+ *     summary: RAG semantic search
+ *     description: |
+ *       Perform semantic search in the RFID content vector database.
+ *       Requires a pre-computed embedding vector and returns matching content.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - embedding
+ *             properties:
+ *               embedding:
+ *                 type: array
+ *                 items:
+ *                   type: number
+ *                 description: Query embedding vector (1536 dimensions for ada-002)
+ *               contentPackId:
+ *                 type: integer
+ *                 description: Filter results to a specific content pack
+ *               language:
+ *                 type: string
+ *                 description: Filter by language code (en, es, etc.)
+ *               limit:
+ *                 type: integer
+ *                 default: 5
+ *                 description: Maximum results to return
+ *               scoreThreshold:
+ *                 type: number
+ *                 default: 0.7
+ *                 description: Minimum similarity score (0-1)
+ *     responses:
+ *       200:
+ *         description: RAG search results
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       score:
+ *                         type: number
+ *                       payload:
+ *                         type: object
+ *       400:
+ *         description: Embedding vector required
+ */
+router.post('/rag/search',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { embedding, contentPackId, language, limit, scoreThreshold } = req.body;
+
+    if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+      return badRequest(res, 'Embedding vector is required');
+    }
+
+    const results = await rfidService.ragSearch({
+      embedding,
+      contentPackId,
+      language,
+      limit: parseInt(limit) || 5,
+      scoreThreshold: parseFloat(scoreThreshold) || 0.7
+    });
+
+    success(res, results);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/{id}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get content pack by ID
+ *     description: Retrieve content pack details for RAG content management
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Content pack ID
+ *     responses:
+ *       200:
+ *         description: Content pack details
+ *       404:
+ *         description: Content pack not found
+ */
+router.get('/content-pack/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const pack = await rfidService.getContentPack(parseInt(id));
+    if (!pack) {
+      return notFound(res, 'Content pack not found');
+    }
+
+    success(res, pack);
+  })
+);
+
+/**
+ * @swagger
  * /admin/rfid/card:
  *   post:
  *     tags: [RFID]
@@ -937,6 +1169,49 @@ router.post('/register-batch',
  *                     type: string
  *                   language:
  *                     type: string
+ *             rag_results:
+ *               type: array
+ *               description: Semantically similar content from Qdrant (RAG)
+ *               items:
+ *                 $ref: '#/components/schemas/RagResult'
+ *             emotions:
+ *               type: array
+ *               description: Extracted emotion tags from RAG results
+ *               items:
+ *                 type: string
+ *               example: ["happy", "curious", "excited"]
+ *             emotion:
+ *               type: string
+ *               description: Primary emotion tag from content pack
+ *               example: "curious"
+ *     RagResult:
+ *       type: object
+ *       description: RAG semantic search result
+ *       properties:
+ *         id:
+ *           type: string
+ *           description: Qdrant point ID
+ *         score:
+ *           type: number
+ *           description: Cosine similarity score (0-1)
+ *           example: 0.87
+ *         content:
+ *           type: string
+ *           description: The matched content text
+ *         title:
+ *           type: string
+ *           description: Content title
+ *         category:
+ *           type: string
+ *           description: Content category
+ *         emotion:
+ *           type: string
+ *           description: Emotion tag for this content
+ *           example: "happy"
+ *         language:
+ *           type: string
+ *           description: Content language code
+ *           example: "en"
  *     RfidPack:
  *       type: object
  *       properties:
@@ -952,6 +1227,35 @@ router.post('/register-batch',
  *           type: integer
  *         age_max:
  *           type: integer
+ *         active:
+ *           type: boolean
+ *         create_date:
+ *           type: string
+ *           format: date-time
+ *     ContentPack:
+ *       type: object
+ *       description: RFID content pack for RAG/TTS
+ *       properties:
+ *         id:
+ *           type: integer
+ *         pack_code:
+ *           type: string
+ *         name:
+ *           type: string
+ *         description:
+ *           type: string
+ *         content_type:
+ *           type: string
+ *           enum: [read_only, prompt]
+ *           description: read_only for TTS, prompt for LLM interaction
+ *         content_md:
+ *           type: string
+ *           description: Full markdown content
+ *         total_items:
+ *           type: integer
+ *         language:
+ *           type: string
+ *           example: "en"
  *         active:
  *           type: boolean
  *         create_date:

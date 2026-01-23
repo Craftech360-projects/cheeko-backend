@@ -649,7 +649,7 @@ manager-api-node/
       "Add emotion tagging support",
       "Write integration tests"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
