@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 5
-**Current Task:** Feature - Implement Authentication routes (/user/*)
+**Tasks Completed:** 10
+**Current Task:** Feature - Implement Content Library routes (/content/*)
 
 ---
 
@@ -102,6 +102,117 @@ npm test     # 4 tests passed
 - Documentation available at `/toy/doc.html`
 
 **All 5 setup tasks completed!**
+
+---
+
+### 2026-01-23 - Task 6: Implement Authentication routes (/user/*) (COMPLETED)
+
+**Previously Implemented:**
+- `src/services/auth.service.js` - Auth service with Supabase Auth methods
+- `src/routes/auth.routes.js` - Authentication routes
+
+**Endpoints Implemented:**
+- POST /user/register - User registration
+- POST /user/login - User login
+- GET /user/captcha - Get CAPTCHA
+- PUT /user/change-password - Change password (requires auth)
+- PUT /user/update-password - Password recovery
+- DELETE /user/delete-account - Account deletion
+- GET /user/pub-config - Public configuration
+
+---
+
+### 2026-01-23 - Task 7: Implement Device routes (/device/*) (COMPLETED)
+
+**Files Verified/Created:**
+- `src/services/device.service.js` - Device management service
+- `src/routes/device.routes.js` - Device routes with Swagger docs
+- `tests/integration/device.test.js` - 23 integration tests for device routes
+
+**Endpoints Implemented:**
+- POST /device/register - ESP32 device registration (public)
+- POST /device/bind/:agentId/:deviceCode - Bind device to agent (auth)
+- GET /device/bind/:agentId - Get devices bound to agent (auth)
+- POST /device/unbind - Unbind device (auth)
+- PUT /device/update/:id - Update device (auth)
+- POST /device/manual-add - Manually add device (auth)
+- PUT /device/assign-kid/:deviceId - Assign kid to device (auth)
+- PUT /device/assign-kid-by-mac - Assign kid by MAC (auth)
+- POST /device/:mac/cycle-mode - Cycle device mode (public)
+- GET /device/:mac/mode - Get device mode (public)
+- GET /device/:mac/device-mode - Get PTT mode (public)
+- GET /device/list - List user's devices (auth)
+- GET /device/:mac - Get device by MAC (public)
+
+**Commands Run:**
+```bash
+npm test     # 27 tests passed (4 health + 23 device)
+npm run lint # 0 errors, 16 warnings
+```
+
+**Test Results:**
+- All device endpoints tested for validation
+- MAC address format validation (colon, dash, raw)
+- Authentication checks for protected routes
+- Error handling for non-existent devices
+
+**Fixes Applied:**
+- Fixed XSS filter regex escape character warning
+- Fixed ESLint indentation issues in database.js and content.service.js
+
+---
+
+### 2026-01-23 - Tasks 8-10: Implement Agent routes (ALL COMPLETED)
+
+**Task 8: Agent Core CRUD (/agent/*)**
+Reorganized and verified the agent routes to match PRD specification exactly.
+
+**Files Modified:**
+- `src/routes/agent.routes.js` - Reorganized routes for proper priority ordering
+- `tests/integration/agent.test.js` - Created comprehensive integration tests (26 tests)
+
+**Endpoints Implemented (PRD-compliant paths):**
+- GET /agent/list - List agents (paginated, auth)
+- GET /agent/all - List all agents (auth)
+- POST /agent - Create agent (auth) ✓ Changed from /agent/create
+- GET /agent/:id - Get agent by ID (auth)
+- PUT /agent/:id - Update agent (auth) ✓ Changed from /agent/update/:id
+- DELETE /agent/:id - Delete agent (auth) ✓ Changed from /agent/delete/:id
+
+**Task 9: Agent Chat History & Sessions**
+Verified existing implementation.
+
+**Endpoints:**
+- GET /agent/:id/sessions - Get agent sessions (auth)
+- GET /agent/:id/chat-history/:sessionId - Get chat history (auth)
+- POST /agent/chat-message - Add chat message (public for LiveKit)
+
+**Task 10: Agent Device Integration**
+Verified existing implementation.
+
+**Endpoints:**
+- GET /agent/prompt/:mac - Get agent prompt by MAC (public)
+- GET /agent/config/:mac - Alias for prompt (public)
+- GET /agent/agent-id/:mac - Get agent ID by MAC (public)
+- POST /agent/cycle-character/:mac - Cycle character (public)
+- POST /agent/set-character/:mac/:agentId - Set character (public)
+- GET /agent/current-character/:mac - Get current character (public)
+
+**Route Ordering Fix:**
+Static routes (/list, /all, /prompt/:mac, etc.) now defined BEFORE dynamic :id routes to prevent Express routing conflicts.
+
+**Commands Run:**
+```bash
+npm test     # 53 tests passed (4 health + 23 device + 26 agent)
+npm run lint # 0 errors, 15 warnings
+```
+
+**Test Results:**
+- All 26 agent tests pass
+- Authentication checks for protected routes
+- Route priority verified (static vs dynamic routes)
+- Chat message validation
+- MAC address format handling
 
 ---
 
