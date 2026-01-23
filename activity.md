@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 22
-**Current Task:** Feature - Implement Analytics routes - Statistics
+**Tasks Completed:** 23
+**Current Task:** Integration - Implement Mem0 memory integration
 
 ---
 
@@ -783,6 +783,64 @@ npm test     # 441 tests passed (all suites)
 **Test Results:**
 - All 441 tests pass
 - No changes needed - implementation was complete
+
+---
+
+### 2026-01-23 - Task 23: Implement Analytics routes - Statistics (COMPLETED)
+
+**Files Modified:**
+- `src/services/analytics.service.js` - Added 2 new service methods and 3 helper functions:
+  - `getWeeklyUsage(mac, weeks)` - Get weekly usage statistics grouped by ISO week
+  - `getMonthlyUsage(mac, months)` - Get monthly usage statistics
+  - `getISOWeek(date)` - Helper to calculate ISO week number
+  - `getISOWeekYear(date)` - Helper to get ISO week year
+  - `getWeekStart(date)` - Helper to get Monday of the week
+
+- `src/routes/analytics.routes.js` - Added 2 new routes with comprehensive Swagger documentation:
+  - `GET /analytics/usage/weekly/:mac` - Weekly usage statistics (OAuth auth)
+  - `GET /analytics/usage/monthly/:mac` - Monthly usage statistics (OAuth auth)
+
+- `tests/integration/analytics.test.js` - Added 14 new integration tests for:
+  - Weekly usage endpoint authentication
+  - Weekly usage invalid MAC validation
+  - Weekly usage query parameter handling (weeks)
+  - Weekly usage MAC format handling (colons, dashes, raw hex)
+  - Monthly usage endpoint authentication
+  - Monthly usage invalid MAC validation
+  - Monthly usage query parameter handling (months)
+  - Monthly usage MAC format handling (colons, dashes, raw hex, lowercase)
+
+**PRD-Compliant Endpoints Verified (all existing):**
+- GET /analytics/user/:mac/overall - Overall statistics (OAuth)
+- GET /analytics/user/:mac/math - Math tutor statistics (OAuth)
+- GET /analytics/user/:mac/riddle - Riddle solver statistics (OAuth)
+- GET /analytics/user/:mac/wordladder - Word ladder statistics (OAuth)
+- GET /analytics/usage/daily/:mac - Daily usage statistics (OAuth)
+
+**New Endpoints Implemented:**
+- GET /analytics/usage/weekly/:mac - Weekly usage statistics (OAuth)
+- GET /analytics/usage/monthly/:mac - Monthly usage statistics (OAuth)
+
+**Features:**
+- Weekly data grouped by ISO week (YYYY-Www format)
+- Weekly data includes weekStart and weekEnd dates
+- Monthly data grouped by YYYY-MM format
+- Monthly data includes monthStart and monthEnd dates
+- All endpoints support different MAC address formats
+- All endpoints require OAuth authentication
+- Swagger documentation with detailed response schemas
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 455 tests passed (441 previous + 14 new weekly/monthly tests)
+```
+
+**Test Results:**
+- All 455 tests pass
+- 9 test suites pass
+- Weekly usage endpoint tests (6 tests)
+- Monthly usage endpoint tests (8 tests)
 
 ---
 
