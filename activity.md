@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 26
-**Current Task:** Feature - Implement System Parameters and Dictionary endpoints
+**Tasks Completed:** 27
+**Current Task:** Feature - Implement Admin endpoints
 
 ---
 
@@ -1018,6 +1018,87 @@ npm test     # 556 tests passed (527 previous + 29 new token usage tests)
 - Protected route authentication tests
 - MAC address format handling tests
 - Route priority tests
+
+---
+
+### 2026-01-23 - Task 27: Implement System Parameters and Dictionary endpoints (COMPLETED)
+
+**Files Created:**
+- `src/services/system.service.js` - Full system service with 27 methods:
+  - System Parameters: `listParams()`, `getAllParams()`, `getParamById()`, `getParamByCode()`, `getParamValue()`, `createParam()`, `updateParam()`, `deleteParam()`, `deleteParams()`
+  - Dictionary Types: `listDictTypes()`, `getAllDictTypes()`, `getDictTypeById()`, `getDictTypeByCode()`, `createDictType()`, `updateDictType()`, `deleteDictType()`, `deleteDictTypes()`
+  - Dictionary Data: `listDictData()`, `getDictDataByTypeId()`, `getDictDataByType()`, `getDictDataById()`, `createDictData()`, `updateDictData()`, `deleteDictData()`, `deleteDictDataBatch()`
+
+- `src/routes/system.routes.js` - System routes with comprehensive Swagger documentation:
+  - System Parameters endpoints: GET page, GET list, GET by code, GET by ID, POST, PUT, DELETE, batch DELETE
+  - Dictionary Types endpoints: GET page, GET list, GET by ID, POST, PUT, DELETE, batch DELETE
+  - Dictionary Data endpoints: GET page, GET by type code (public), GET by ID, POST, PUT, DELETE, batch DELETE
+
+- `tests/integration/system.test.js` - 65 integration tests for all system endpoints
+
+**Files Modified:**
+- `src/routes/index.js` - Added system routes mount at `/system`
+
+**System Parameters Endpoints Implemented:**
+- GET /system/params/page - List params (paginated, auth)
+- GET /system/params/list - List all params (auth)
+- GET /system/params/code/:code - Get param by code (auth)
+- GET /system/params/:id - Get param by ID (auth)
+- POST /system/params - Create param (admin)
+- PUT /system/params/:id - Update param (admin)
+- DELETE /system/params/:id - Delete param (admin)
+- DELETE /system/params - Batch delete params (admin)
+
+**Dictionary Types Endpoints Implemented:**
+- GET /system/dict/type/page - List dict types (paginated, auth)
+- GET /system/dict/type/list - List all dict types (auth)
+- GET /system/dict/type/:id - Get dict type by ID (auth)
+- POST /system/dict/type - Create dict type (admin)
+- PUT /system/dict/type/:id - Update dict type (admin)
+- DELETE /system/dict/type/:id - Delete dict type (admin)
+- DELETE /system/dict/type - Batch delete dict types (admin)
+
+**Dictionary Data Endpoints Implemented:**
+- GET /system/dict/data/page - List dict data (paginated, auth)
+- GET /system/dict/data/type/:dictType - Get data by type code (public)
+- GET /system/dict/data/:id - Get dict data by ID (auth)
+- POST /system/dict/data - Create dict data (admin)
+- PUT /system/dict/data/:id - Update dict data (admin)
+- DELETE /system/dict/data/:id - Delete dict data (admin)
+- DELETE /system/dict/data - Batch delete dict data (admin)
+
+**Swagger Components Added:**
+- `SysParam` schema - System parameter structure
+- `SysParamInput` schema - Input for create/update
+- `DictType` schema - Dictionary type structure
+- `DictTypeInput` schema - Input for create/update
+- `DictData` schema - Dictionary data structure
+- `DictDataInput` schema - Input for create/update
+
+**Features:**
+- Value type parsing for params (string, number, boolean, array, object)
+- Batch delete support for all entities
+- Foreign key relationships with cascade delete
+- Public endpoint for dictionary data lookup by type code
+- Route priority ordering (static routes before dynamic :id routes)
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 621 tests passed (556 previous + 65 new system tests)
+```
+
+**Test Results:**
+- All 621 tests pass
+- 11 test suites pass
+- System tests: 65 tests covering all CRUD operations
+- Authentication and admin access validation tests
+- Route priority tests
+- Input validation tests
+
+**Issues and Resolutions:**
+- Fixed switch statement indentation in getParamValue() to match ESLint rules
+- Fixed getDictDataByType() to return empty array instead of throwing when database not configured (public endpoint)
 
 ---
 

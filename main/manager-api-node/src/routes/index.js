@@ -10,13 +10,14 @@ const { testConnection, supabaseAdmin } = require('../config/database');
 
 // Import route modules
 const authRoutes = require('./auth.routes');
-// const deviceRoutes = require('./device.routes');
-// const agentRoutes = require('./agent.routes');
-// const contentRoutes = require('./content.routes');
-// const rfidRoutes = require('./rfid.routes');
-// const profileRoutes = require('./profile.routes');
-// const modelRoutes = require('./model.routes');
-// const analyticsRoutes = require('./analytics.routes');
+const deviceRoutes = require('./device.routes');
+const agentRoutes = require('./agent.routes');
+const contentRoutes = require('./content.routes');
+const rfidRoutes = require('./rfid.routes');
+const profileRoutes = require('./profile.routes');
+const modelRoutes = require('./model.routes');
+const analyticsRoutes = require('./analytics.routes');
+const systemRoutes = require('./system.routes');
 
 /**
  * @swagger
@@ -174,12 +175,13 @@ router.get('/pub-config', (req, res) => {
 
 // Mount route modules
 router.use('/user', authRoutes);
-// router.use('/device', deviceRoutes);
-// router.use('/agent', agentRoutes);
-// router.use('/content', contentRoutes);
-// router.use('/admin/rfid', rfidRoutes);
-// router.use('/api/mobile', profileRoutes);
-// router.use('/models', modelRoutes);
-// router.use('/analytics', analyticsRoutes);
+router.use('/device', deviceRoutes);
+router.use('/agent', agentRoutes);
+router.use('/content', contentRoutes);
+router.use('/admin/rfid', rfidRoutes);
+router.use('/api/mobile', profileRoutes);
+router.use('/models', modelRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/system', systemRoutes);
 
 module.exports = router;
