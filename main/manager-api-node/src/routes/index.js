@@ -1,0 +1,124 @@
+/**
+ * API Routes Index
+ *
+ * Aggregates all route modules under the /toy context path.
+ */
+
+const express = require('express');
+const router = express.Router();
+
+// Import route modules (will be added as they are implemented)
+// const authRoutes = require('./auth.routes');
+// const deviceRoutes = require('./device.routes');
+// const agentRoutes = require('./agent.routes');
+// const contentRoutes = require('./content.routes');
+// const rfidRoutes = require('./rfid.routes');
+// const profileRoutes = require('./profile.routes');
+// const modelRoutes = require('./model.routes');
+// const analyticsRoutes = require('./analytics.routes');
+
+/**
+ * @swagger
+ * /health:
+ *   get:
+ *     tags: [Health]
+ *     summary: Health check endpoint
+ *     description: Returns the health status of the API
+ *     responses:
+ *       200:
+ *         description: API is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: healthy
+ *                     version:
+ *                       type: string
+ *                       example: 1.0.0
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ */
+router.get('/health', (req, res) => {
+  res.json({
+    code: 0,
+    msg: 'success',
+    data: {
+      status: 'healthy',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development'
+    }
+  });
+});
+
+/**
+ * @swagger
+ * /pub-config:
+ *   get:
+ *     tags: [Health]
+ *     summary: Get public configuration
+ *     description: Returns public configuration values (no auth required)
+ *     responses:
+ *       200:
+ *         description: Public configuration
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                   example: success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     apiVersion:
+ *                       type: string
+ *                       example: v1
+ *                     features:
+ *                       type: object
+ */
+router.get('/pub-config', (req, res) => {
+  res.json({
+    code: 0,
+    msg: 'success',
+    data: {
+      apiVersion: 'v1',
+      platform: 'node',
+      features: {
+        rfid: true,
+        analytics: true,
+        rag: true,
+        memory: true
+      }
+    }
+  });
+});
+
+// Mount route modules (uncomment as implemented)
+// router.use('/user', authRoutes);
+// router.use('/device', deviceRoutes);
+// router.use('/agent', agentRoutes);
+// router.use('/content', contentRoutes);
+// router.use('/admin/rfid', rfidRoutes);
+// router.use('/api/mobile', profileRoutes);
+// router.use('/models', modelRoutes);
+// router.use('/analytics', analyticsRoutes);
+
+module.exports = router;
