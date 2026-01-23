@@ -848,7 +848,7 @@ manager-api-node/
       "Verify error response format matches",
       "Document any intentional differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "setup",

@@ -1,0 +1,79 @@
+/**
+ * Application Constants
+ *
+ * Error codes matching the Spring Boot API for compatibility
+ */
+
+// Error Codes (5-digit format: 2-digit module code + 3-digit business code)
+const ErrorCode = {
+  // HTTP standard codes (used as fallbacks)
+  INTERNAL_SERVER_ERROR: 500,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+
+  // System module (10xxx)
+  NOT_NULL: 10001,
+  DB_RECORD_EXISTS: 10002,
+  PARAMS_GET_ERROR: 10003,
+  ACCOUNT_PASSWORD_ERROR: 10004,
+  ACCOUNT_DISABLE: 10005,
+  IDENTIFIER_NOT_NULL: 10006,
+  CAPTCHA_ERROR: 10007,
+  PHONE_NOT_NULL: 10008,
+  PASSWORD_ERROR: 10009,
+
+  SUPERIOR_DEPT_ERROR: 10011,
+  SUPERIOR_MENU_ERROR: 10012,
+  DATA_SCOPE_PARAMS_ERROR: 10013,
+  DEPT_SUB_DELETE_ERROR: 10014,
+  DEPT_USER_DELETE_ERROR: 10015,
+
+  UPLOAD_FILE_EMPTY: 10019,
+  TOKEN_NOT_EMPTY: 10020,
+  TOKEN_INVALID: 10021,
+  ACCOUNT_LOCK: 10022,
+
+  OSS_UPLOAD_FILE_ERROR: 10024,
+
+  REDIS_ERROR: 10027,
+  JOB_ERROR: 10028,
+  INVALID_SYMBOL: 10029,
+  PASSWORD_LENGTH_ERROR: 10030,
+  PASSWORD_WEAK_ERROR: 10031,
+  DEL_MYSELF_ERROR: 10032,
+  DEVICE_CAPTCHA_ERROR: 10033,
+
+  // Parameter validation error codes
+  PARAM_VALUE_NULL: 10034,
+  PARAM_TYPE_NULL: 10035,
+  PARAM_TYPE_INVALID: 10036,
+  PARAM_NUMBER_INVALID: 10037,
+  PARAM_BOOLEAN_INVALID: 10038,
+  PARAM_ARRAY_INVALID: 10039,
+  PARAM_JSON_INVALID: 10040,
+
+  // OTA related
+  OTA_DEVICE_NOT_FOUND: 10041,
+  OTA_DEVICE_NEED_BIND: 10042,
+  ACCOUNT_NOT_EXIST: 10043
+};
+
+// Pagination constants
+const Pagination = {
+  PAGE: 'page',
+  LIMIT: 'limit',
+  ORDER_FIELD: 'orderField',
+  ORDER: 'order',
+  DEFAULT_PAGE: 1,
+  DEFAULT_LIMIT: 10,
+  MAX_LIMIT: 100
+};
+
+// Date format pattern (matching Java DateUtils.DATE_TIME_PATTERN)
+const DATE_TIME_PATTERN = 'yyyy-MM-dd HH:mm:ss';
+
+module.exports = {
+  ErrorCode,
+  Pagination,
+  DATE_TIME_PATTERN
+};

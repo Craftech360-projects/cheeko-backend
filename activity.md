@@ -2,8 +2,8 @@
 
 ## Current Status
 **Last Updated:** 2026-01-23
-**Tasks Completed:** 29
-**Current Task:** Testing - API contract validation
+**Tasks Completed:** 30
+**Current Task:** Setup - Add logging and monitoring
 
 ---
 
@@ -1229,6 +1229,73 @@ npm test     # 744 tests passed (697 previous + 47 new auth tests)
 
 **Issues and Resolutions:**
 - Fixed CAPTCHA image format test: Changed regex to accept both base64 encoded images and inline SVG data URIs
+
+---
+
+### 2026-01-23 - Task 30: API contract validation (COMPLETED)
+
+**Files Created:**
+- `src/config/constants.js` - Error codes matching Java API ErrorCode.java
+- `tests/integration/contract.test.js` - 32 API contract validation tests
+- `API_CONTRACT.md` - Comprehensive API contract documentation
+
+**Contract Validation Performed:**
+
+*Response Format Comparison:*
+- Java API: `{ code: 0, msg: "success", data: ... }` ✓ Match
+- Node.js API: `{ code: 0, msg: "success", data: ... }` ✓ Match
+
+*Pagination Format Comparison:*
+- Java API: `{ total, list }` only
+- Node.js API: `{ list, total, page, limit }` (extra fields are additive, backward compatible)
+
+*Error Codes:*
+- Both APIs use numeric codes (0 = success, non-zero = error)
+- HTTP status codes: 400, 401, 403, 404, 500 ✓ Match
+- 5-digit codes: 10001, 10004, 10034, etc. - documented in constants.js
+
+*Field Naming Convention:*
+- Java DTOs: camelCase (agentName, macAddress)
+- Node.js: snake_case from Supabase (agent_name, mac_address)
+- **Documented as intentional difference** in API_CONTRACT.md
+
+*Date Format:*
+- Java: `yyyy-MM-dd HH:mm:ss`
+- Node.js: ISO 8601 from PostgreSQL
+- Both parseable by standard date libraries
+
+*Authentication:*
+- Bearer token: `Authorization: Bearer <jwt>` ✓ Match
+- Service key: `X-Service-Key: <key>` ✓ Match
+
+*Public/Protected Endpoints:*
+- Same endpoints are public/protected in both APIs ✓ Match
+
+**Contract Tests Added (32 tests):**
+- Response wrapper format tests (6 tests)
+- Pagination format tests (2 tests)
+- Error code tests (3 tests)
+- Field naming tests (3 tests)
+- Public endpoint tests (5 tests)
+- Protected endpoint tests (4 tests)
+- HTTP methods tests (3 tests)
+- Content-Type tests (2 tests)
+- CORS tests (2 tests)
+- Swagger documentation tests (2 tests)
+
+**Commands Run:**
+```bash
+npm run lint # 0 errors, 9 warnings (pre-existing)
+npm test     # 776 tests passed (744 previous + 32 new contract tests)
+```
+
+**Test Results:**
+- All 776 tests pass
+- 14 test suites pass
+- Contract validation tests: 32 tests
+
+**Issues and Resolutions:**
+- Fixed swagger endpoint test: Changed from `/toy/api-docs.json` to `/toy/swagger.json` (actual path)
 
 ---
 
