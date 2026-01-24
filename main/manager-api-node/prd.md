@@ -405,7 +405,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add POST /ota/activate for activation",
       "Add GET /ota/ for status"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

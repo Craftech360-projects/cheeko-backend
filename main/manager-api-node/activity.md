@@ -19,7 +19,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 6 | feature | Model Provider CRUD endpoints | Complete |
 | 7 | feature | Extended Analytics endpoints | Complete |
 | 8 | feature | Token Usage Analytics endpoints | Complete |
-| 9 | feature | OTA root endpoints (/ota/) | Pending |
+| 9 | feature | OTA root endpoints (/ota/) | Complete |
 | 10 | feature | OTA Management endpoints (/otaMag) | Pending |
 | 11 | feature | RFID Question CRUD endpoints | Pending |
 | 12 | feature | Extended RFID Series endpoints | Pending |
@@ -45,6 +45,44 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - OTA Root Endpoints Complete
+
+**Task 9: Add OTA root endpoints (/ota/)**
+
+**Status:** COMPLETE
+
+**Endpoints Already Implemented:**
+- `POST /toy/ota/` - OTA version and activation check (device boot check)
+- `POST /toy/ota/activate` - Device quick activation check
+- `GET /toy/ota/` - Get OTA status (firmware versions by type)
+
+**Service Methods Used from `device.service.js`:**
+- `checkOtaVersion(mac, version, board)` - Check for updates, register/update device
+- `getDeviceByMac(mac)` - Get device for activation check
+- `getLatestFirmware(type)` - Get latest firmware for status endpoint
+
+**Files Already Complete:**
+- `src/routes/ota.routes.js` - All 3 root OTA endpoints with Swagger docs (~300 lines)
+- `src/routes/index.js` - OTA routes mounted at `/ota`
+
+**Fix Applied:**
+- Fixed import in `ota.routes.js` - Changed `asyncHandler` import from `../utils/response` to `../middleware/errorHandler`
+
+**API Contract:**
+```
+POST   /toy/ota/          - Returns {device, firmware, serverTime}
+POST   /toy/ota/activate  - Returns {activated, deviceId, mac, serverTime}
+GET    /toy/ota/          - Returns {status, latestVersions, serverTime}
+```
+
+**Note:** These endpoints provide Spring Boot compatibility for ESP32 devices that expect `/toy/ota/*` paths rather than `/toy/device/ota/*`.
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Token Usage Analytics Endpoints Complete
 
