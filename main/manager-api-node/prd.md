@@ -352,7 +352,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add getMcpAddress, getMcpTools to agent.service.js",
       "Test MCP integration"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

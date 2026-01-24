@@ -586,6 +586,109 @@ router.post('/chat-history/session',
 );
 
 // ==============================================
+// MCP Access Point Routes
+// ==============================================
+
+/**
+ * @swagger
+ * /agent/mcp/address/{agentId}:
+ *   get:
+ *     tags: [Agent MCP]
+ *     summary: Get MCP access point URL for an agent
+ *     description: Returns the primary enabled MCP server configuration for the agent
+ *     parameters:
+ *       - in: path
+ *         name: agentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Agent ID
+ *     responses:
+ *       200:
+ *         description: MCP access point info
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 agentId:
+ *                   type: string
+ *                 mcpServerUrl:
+ *                   type: string
+ *                 mcpServerName:
+ *                   type: string
+ *                 isEnabled:
+ *                   type: boolean
+ *                 config:
+ *                   type: object
+ *       404:
+ *         description: No MCP access point configured for this agent
+ */
+router.get('/mcp/address/:agentId',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getMcpAddress(req.params.agentId);
+      if (!result) {
+        return notFound(res, 'No MCP access point configured for this agent');
+      }
+      success(res, result);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/mcp/tools/{agentId}:
+ *   get:
+ *     tags: [Agent MCP]
+ *     summary: Get MCP tools list for an agent
+ *     description: Returns all enabled MCP server configurations for the agent
+ *     parameters:
+ *       - in: path
+ *         name: agentId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Agent ID
+ *     responses:
+ *       200:
+ *         description: List of MCP access points
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                   agentId:
+ *                     type: string
+ *                   serverUrl:
+ *                     type: string
+ *                   serverName:
+ *                     type: string
+ *                   isEnabled:
+ *                     type: boolean
+ *                   config:
+ *                     type: object
+ *       400:
+ *         description: Failed to get MCP tools
+ */
+router.get('/mcp/tools/:agentId',
+  asyncHandler(async (req, res) => {
+    try {
+      const tools = await agentService.getMcpTools(req.params.agentId);
+      success(res, tools);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==============================================
 // Agent Memory and Mode Routes
 // ==============================================
 

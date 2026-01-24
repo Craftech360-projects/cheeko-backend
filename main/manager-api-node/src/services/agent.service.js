@@ -1091,6 +1091,76 @@ const updateTemplate = async (templateId, data) => {
   return template;
 };
 
+// ==============================================
+// MCP Access Point Methods
+// ==============================================
+
+/**
+ * Get MCP access point URL for an agent
+ * @param {string} agentId - Agent ID
+ * @returns {object|null} MCP access point info or null if not found
+ */
+const getMcpAddress = async (agentId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data, error } = await supabaseAdmin
+    .from('ai_agent_mcp_access_point')
+    .select('id, agent_id, mcp_server_url, mcp_server_name, is_enabled, config_json')
+    .eq('agent_id', agentId)
+    .eq('is_enabled', 1)
+    .order('id', { ascending: true })
+    .limit(1)
+    .single();
+
+  if (error) {
+    // PGRST116 means no rows found - not an error, just no MCP configured
+    if (error.code === 'PGRST116') {
+      return null;
+    }
+    logger.error('Failed to get MCP address:', error);
+    throw new Error('Failed to get MCP address');
+  }
+
+  return {
+    agentId: data.agent_id,
+    mcpServerUrl: data.mcp_server_url,
+    mcpServerName: data.mcp_server_name,
+    isEnabled: data.is_enabled === 1,
+    config: data.config_json
+  };
+};
+
+/**
+ * Get MCP tools list for an agent
+ * @param {string} agentId - Agent ID
+ * @returns {array} List of MCP access points with tools
+ */
+const getMcpTools = async (agentId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data, error } = await supabaseAdmin
+    .from('ai_agent_mcp_access_point')
+    .select('id, agent_id, mcp_server_url, mcp_server_name, is_enabled, config_json')
+    .eq('agent_id', agentId)
+    .eq('is_enabled', 1)
+    .order('id', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to get MCP tools:', error);
+    throw new Error('Failed to get MCP tools');
+  }
+
+  // Map to a tools-friendly format
+  return (data || []).map(item => ({
+    id: item.id.toString(),
+    agentId: item.agent_id,
+    serverUrl: item.mcp_server_url,
+    serverName: item.mcp_server_name,
+    isEnabled: item.is_enabled === 1,
+    config: item.config_json
+  }));
+};
+
 module.exports = {
   createAgent,
   getAgentById,
@@ -1125,5 +1195,8 @@ module.exports = {
   getTemplates,
   getTemplateById,
   createTemplate,
-  updateTemplate
+  updateTemplate,
+  // MCP Access Point methods
+  getMcpAddress,
+  getMcpTools
 };

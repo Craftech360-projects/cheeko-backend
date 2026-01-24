@@ -14,7 +14,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 1 | feature | Agent Template CRUD endpoints | Complete |
 | 2 | feature | Agent Memory and Mode endpoints | Complete |
 | 3 | feature | Agent Chat History batch endpoints | Complete |
-| 4 | feature | Agent MCP Access Point endpoints | Pending |
+| 4 | feature | Agent MCP Access Point endpoints | Complete |
 | 5 | feature | Configuration endpoints (/config) | Pending |
 | 6 | feature | Model Provider CRUD endpoints | Pending |
 | 7 | feature | Extended Analytics endpoints | Pending |
@@ -45,6 +45,38 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Agent MCP Access Point Endpoints Complete
+
+**Task 4: Add Agent MCP Access Point endpoints (/agent/mcp)**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/agent/mcp/address/:agentId` - Get MCP access point URL for an agent
+- `GET /toy/agent/mcp/tools/:agentId` - Get all MCP tools list for an agent
+
+**Service Methods Implemented in `agent.service.js`:**
+- `getMcpAddress(agentId)` - Returns primary enabled MCP server config (URL, name, config)
+- `getMcpTools(agentId)` - Returns all enabled MCP access points for agent
+
+**Files Modified:**
+- `src/services/agent.service.js` - Added 2 MCP service methods (~60 lines)
+- `src/routes/agent.routes.js` - Added 2 MCP route handlers with Swagger docs (~90 lines)
+
+**API Contract:**
+```
+GET    /toy/agent/mcp/address/:agentId  - Returns {agentId, mcpServerUrl, mcpServerName, isEnabled, config}
+GET    /toy/agent/mcp/tools/:agentId    - Returns array of MCP access points
+```
+
+**Database Table Used:** `ai_agent_mcp_access_point` (already in Prisma schema)
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Agent Chat History Batch Endpoints Complete
 
