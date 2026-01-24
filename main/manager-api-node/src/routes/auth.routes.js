@@ -290,6 +290,85 @@ router.put('/update-password',
 
 /**
  * @swagger
+ * /user/retrieve-password:
+ *   put:
+ *     tags: [User]
+ *     summary: Retrieve/reset forgotten password
+ *     description: Alias for /user/update-password - resets password for a user (no auth required)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - newPassword
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 description: Username or email of the account
+ *               newPassword:
+ *                 type: string
+ *                 minLength: 6
+ *                 description: New password (minimum 6 characters)
+ *               verificationCode:
+ *                 type: string
+ *                 description: SMS verification code (when SMS verification is enabled)
+ *     responses:
+ *       200:
+ *         description: Password retrieved/reset successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                   example: Password retrieved successfully
+ *       400:
+ *         description: User not found or invalid input
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 400
+ *                 msg:
+ *                   type: string
+ *                   example: User not found
+ */
+router.put('/retrieve-password',
+  asyncHandler(async (req, res) => {
+    const { username, newPassword } = req.body;
+
+    if (!username || !newPassword) {
+      return badRequest(res, 'Username and new password are required');
+    }
+
+    if (newPassword.length < 6) {
+      return badRequest(res, 'New password must be at least 6 characters');
+    }
+
+    // Note: SMS verification is deferred, so we skip verification code check
+    // In production, you would verify the SMS code here before allowing password reset
+
+    try {
+      await authService.updatePassword(username, newPassword);
+      success(res, null, 'Password retrieved successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
  * /user/delete-account:
  *   delete:
  *     tags: [User]
