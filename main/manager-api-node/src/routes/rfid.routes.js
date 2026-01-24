@@ -1271,6 +1271,535 @@ router.delete('/series/:id',
 );
 
 // =============================================
+// Question Management Routes
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/question/page:
+ *   get:
+ *     tags: [RFID Questions]
+ *     summary: Get questions (paginated)
+ *     description: Returns paginated list of RFID questions
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by category
+ *       - in: query
+ *         name: language
+ *         schema:
+ *           type: string
+ *         description: Filter by language (e.g., en, es)
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Paginated question list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/RfidQuestion'
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     pages:
+ *                       type: integer
+ */
+router.get('/question/page',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit, category, language, active } = req.query;
+    const result = await rfidService.getQuestionPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      category,
+      language,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question/list:
+ *   get:
+ *     tags: [RFID Questions]
+ *     summary: Get all questions
+ *     description: Returns all RFID questions without pagination
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by category
+ *       - in: query
+ *         name: language
+ *         schema:
+ *           type: string
+ *         description: Filter by language
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
+ *     responses:
+ *       200:
+ *         description: Question list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidQuestion'
+ */
+router.get('/question/list',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { category, language, active } = req.query;
+    const result = await rfidService.getQuestionList({
+      category,
+      language,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question/code/{code}:
+ *   get:
+ *     tags: [RFID Questions]
+ *     summary: Get question by code
+ *     description: Retrieve question by unique code
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: code
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Question code
+ *     responses:
+ *       200:
+ *         description: Question details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/RfidQuestion'
+ *       404:
+ *         description: Question not found
+ */
+router.get('/question/code/:code',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { code } = req.params;
+
+    const question = await rfidService.getQuestionByCode(code);
+    if (!question) {
+      return notFound(res, 'Question not found');
+    }
+
+    success(res, question);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question/category/{category}:
+ *   get:
+ *     tags: [RFID Questions]
+ *     summary: Get questions by category
+ *     description: Retrieve all active questions in a category
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: category
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Category name
+ *     responses:
+ *       200:
+ *         description: Questions in category
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidQuestion'
+ */
+router.get('/question/category/:category',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { category } = req.params;
+    const questions = await rfidService.getQuestionsByCategory(category);
+    success(res, questions);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question/language/{language}:
+ *   get:
+ *     tags: [RFID Questions]
+ *     summary: Get questions by language
+ *     description: Retrieve all active questions in a language
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: language
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Language code (e.g., en, es)
+ *     responses:
+ *       200:
+ *         description: Questions in language
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidQuestion'
+ */
+router.get('/question/language/:language',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { language } = req.params;
+    const questions = await rfidService.getQuestionsByLanguage(language);
+    success(res, questions);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question/{id}:
+ *   get:
+ *     tags: [RFID Questions]
+ *     summary: Get question by ID
+ *     description: Retrieve question details by ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Question ID
+ *     responses:
+ *       200:
+ *         description: Question details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/RfidQuestion'
+ *       404:
+ *         description: Question not found
+ */
+router.get('/question/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Skip if id is one of the special routes
+    if (['page', 'list', 'code', 'category', 'language'].includes(id)) {
+      return notFound(res, 'Question not found');
+    }
+
+    const question = await rfidService.getQuestionById(parseInt(id));
+    if (!question) {
+      return notFound(res, 'Question not found');
+    }
+
+    success(res, question);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question:
+ *   post:
+ *     tags: [RFID Questions]
+ *     summary: Create question
+ *     description: Create a new RFID question (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *               - title
+ *               - promptText
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: Unique question code
+ *                 example: "ANIMAL_DOG_01"
+ *               title:
+ *                 type: string
+ *                 description: Question title
+ *                 example: "Tell me about dogs"
+ *               promptText:
+ *                 type: string
+ *                 description: Full prompt text for the AI
+ *               language:
+ *                 type: string
+ *                 default: "en"
+ *                 description: Language code
+ *               category:
+ *                 type: string
+ *                 description: Category name
+ *                 example: "animals"
+ *               difficulty:
+ *                 type: integer
+ *                 default: 1
+ *                 description: Difficulty level (1-5)
+ *               active:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Question created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/RfidQuestion'
+ *       400:
+ *         description: Validation error or duplicate code
+ */
+router.post('/question',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { code, title, promptText } = req.body;
+
+    if (!code) {
+      return badRequest(res, 'Question code is required');
+    }
+    if (!title) {
+      return badRequest(res, 'Question title is required');
+    }
+    if (!promptText) {
+      return badRequest(res, 'Prompt text is required');
+    }
+
+    try {
+      const question = await rfidService.createQuestion(req.body, req.user.id);
+      success(res, question, 'Question created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question:
+ *   put:
+ *     tags: [RFID Questions]
+ *     summary: Update question
+ *     description: Update an existing RFID question (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 description: Question ID
+ *               code:
+ *                 type: string
+ *               title:
+ *                 type: string
+ *               promptText:
+ *                 type: string
+ *               language:
+ *                 type: string
+ *               category:
+ *                 type: string
+ *               difficulty:
+ *                 type: integer
+ *               active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Question updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   $ref: '#/components/schemas/RfidQuestion'
+ *       400:
+ *         description: Validation error
+ */
+router.put('/question',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.body;
+
+    if (!id) {
+      return badRequest(res, 'Question ID is required');
+    }
+
+    try {
+      const question = await rfidService.updateQuestion(req.body, req.user.id);
+      success(res, question, 'Question updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question:
+ *   delete:
+ *     tags: [RFID Questions]
+ *     summary: Delete questions
+ *     description: Delete one or more RFID questions (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 description: Single question ID
+ *               ids:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Multiple question IDs
+ *     responses:
+ *       200:
+ *         description: Questions deleted
+ *       400:
+ *         description: ID or IDs required
+ */
+router.delete('/question',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id, ids } = req.body;
+
+    if (!id && (!ids || !Array.isArray(ids) || ids.length === 0)) {
+      return badRequest(res, 'Question ID or IDs array is required');
+    }
+
+    try {
+      const deleteIds = ids || [id];
+      await rfidService.deleteQuestions(deleteIds);
+      success(res, null, `${deleteIds.length} question(s) deleted successfully`);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// =============================================
 // Legacy Routes (backward compatibility)
 // =============================================
 
@@ -1820,6 +2349,44 @@ router.post('/register-batch',
  *               type: string
  *             name:
  *               type: string
+ *     RfidQuestion:
+ *       type: object
+ *       description: RFID question for card mappings
+ *       properties:
+ *         id:
+ *           type: integer
+ *         code:
+ *           type: string
+ *           description: Unique question code
+ *         title:
+ *           type: string
+ *           description: Question title
+ *         prompt_text:
+ *           type: string
+ *           description: Full prompt text for AI
+ *         language:
+ *           type: string
+ *           description: Language code (e.g., en, es)
+ *           example: "en"
+ *         category:
+ *           type: string
+ *           description: Question category
+ *         difficulty:
+ *           type: integer
+ *           description: Difficulty level (1-5)
+ *         active:
+ *           type: boolean
+ *           description: Whether question is active
+ *         creator:
+ *           type: integer
+ *         create_date:
+ *           type: string
+ *           format: date-time
+ *         updater:
+ *           type: integer
+ *         update_date:
+ *           type: string
+ *           format: date-time
  */
 
 module.exports = router;

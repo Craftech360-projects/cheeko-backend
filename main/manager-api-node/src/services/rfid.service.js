@@ -959,6 +959,304 @@ const deleteSeries = async (seriesId) => {
 };
 
 // =============================================
+// Question Management Methods
+// =============================================
+
+/**
+ * Get questions with pagination
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated question list
+ */
+const getQuestionPage = async ({ page = 1, limit = 10, category, language, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  // Build count query
+  let countQuery = supabaseAdmin
+    .from('rfid_question')
+    .select('id', { count: 'exact', head: true });
+
+  // Build data query
+  let dataQuery = supabaseAdmin
+    .from('rfid_question')
+    .select('*')
+    .order('create_date', { ascending: false });
+
+  // Apply filters
+  if (category) {
+    countQuery = countQuery.eq('category', category);
+    dataQuery = dataQuery.eq('category', category);
+  }
+
+  if (language) {
+    countQuery = countQuery.eq('language', language);
+    dataQuery = dataQuery.eq('language', language);
+  }
+
+  if (active !== undefined) {
+    countQuery = countQuery.eq('active', active);
+    dataQuery = dataQuery.eq('active', active);
+  }
+
+  const { count } = await countQuery;
+  const { data: questions, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch questions:', error);
+    throw new Error('Failed to fetch questions');
+  }
+
+  return {
+    list: questions || [],
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit)
+  };
+};
+
+/**
+ * Get all questions (no pagination)
+ * @param {Object} options - Filter options
+ * @returns {Promise<Array>} All questions
+ */
+const getQuestionList = async ({ category, language, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('rfid_question')
+    .select('*')
+    .order('create_date', { ascending: false });
+
+  if (category) {
+    query = query.eq('category', category);
+  }
+
+  if (language) {
+    query = query.eq('language', language);
+  }
+
+  if (active !== undefined) {
+    query = query.eq('active', active);
+  }
+
+  const { data: questions, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch questions:', error);
+    throw new Error('Failed to fetch questions');
+  }
+
+  return questions || [];
+};
+
+/**
+ * Get question by ID
+ * @param {number} questionId - Question ID
+ * @returns {Promise<Object>} Question details
+ */
+const getQuestionById = async (questionId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: question, error } = await supabaseAdmin
+    .from('rfid_question')
+    .select('*')
+    .eq('id', questionId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch question:', error);
+    throw new Error('Failed to fetch question');
+  }
+
+  return question || null;
+};
+
+/**
+ * Get question by code
+ * @param {string} code - Question code
+ * @returns {Promise<Object>} Question details
+ */
+const getQuestionByCode = async (code) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: question, error } = await supabaseAdmin
+    .from('rfid_question')
+    .select('*')
+    .eq('code', code)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch question by code:', error);
+    throw new Error('Failed to fetch question');
+  }
+
+  return question || null;
+};
+
+/**
+ * Get questions by category
+ * @param {string} category - Category name
+ * @returns {Promise<Array>} Questions in category
+ */
+const getQuestionsByCategory = async (category) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: questions, error } = await supabaseAdmin
+    .from('rfid_question')
+    .select('*')
+    .eq('category', category)
+    .eq('active', true)
+    .order('create_date', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch questions by category:', error);
+    throw new Error('Failed to fetch questions');
+  }
+
+  return questions || [];
+};
+
+/**
+ * Get questions by language
+ * @param {string} language - Language code
+ * @returns {Promise<Array>} Questions in language
+ */
+const getQuestionsByLanguage = async (language) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: questions, error } = await supabaseAdmin
+    .from('rfid_question')
+    .select('*')
+    .eq('language', language)
+    .eq('active', true)
+    .order('create_date', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch questions by language:', error);
+    throw new Error('Failed to fetch questions');
+  }
+
+  return questions || [];
+};
+
+/**
+ * Create question
+ * @param {Object} data - Question data
+ * @param {number} userId - Creator user ID
+ * @returns {Promise<Object>} Created question
+ */
+const createQuestion = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Check for duplicate code
+  const existing = await getQuestionByCode(data.code);
+  if (existing) {
+    throw new Error('Question with this code already exists');
+  }
+
+  const insertData = {
+    code: data.code,
+    title: data.title,
+    prompt_text: data.promptText,
+    language: data.language || 'en',
+    category: data.category || null,
+    difficulty: data.difficulty || 1,
+    active: data.active !== false,
+    creator: userId
+  };
+
+  const { data: question, error } = await supabaseAdmin
+    .from('rfid_question')
+    .insert(insertData)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to create question:', error);
+    if (error.code === '23505') {
+      throw new Error('Question with this code already exists');
+    }
+    throw new Error('Failed to create question');
+  }
+
+  return question;
+};
+
+/**
+ * Update question
+ * @param {Object} data - Update data (must include id)
+ * @param {number} userId - Updater user ID
+ * @returns {Promise<Object>} Updated question
+ */
+const updateQuestion = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!data.id) {
+    throw new Error('Question ID is required');
+  }
+
+  const updateData = {
+    updater: userId,
+    update_date: new Date().toISOString()
+  };
+
+  // Only update provided fields
+  if (data.code !== undefined) updateData.code = data.code;
+  if (data.title !== undefined) updateData.title = data.title;
+  if (data.promptText !== undefined) updateData.prompt_text = data.promptText;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.category !== undefined) updateData.category = data.category;
+  if (data.difficulty !== undefined) updateData.difficulty = data.difficulty;
+  if (data.active !== undefined) updateData.active = data.active;
+
+  const { data: question, error } = await supabaseAdmin
+    .from('rfid_question')
+    .update(updateData)
+    .eq('id', data.id)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update question:', error);
+    if (error.code === '23505') {
+      throw new Error('Question with this code already exists');
+    }
+    throw new Error('Failed to update question');
+  }
+
+  return question;
+};
+
+/**
+ * Delete questions
+ * @param {Array|number} ids - Question ID(s) to delete
+ * @returns {Promise<boolean>} Success status
+ */
+const deleteQuestions = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const idArray = Array.isArray(ids) ? ids : [ids];
+
+  if (idArray.length === 0) {
+    throw new Error('At least one question ID is required');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('rfid_question')
+    .delete()
+    .in('id', idArray);
+
+  if (error) {
+    logger.error('Failed to delete questions:', error);
+    throw new Error('Failed to delete questions');
+  }
+
+  return true;
+};
+
+// =============================================
 // Legacy RFID Tag Methods (for backward compatibility)
 // =============================================
 
@@ -1287,6 +1585,17 @@ module.exports = {
   createPack,
   updatePack,
   deletePack,
+
+  // Question management
+  getQuestionPage,
+  getQuestionList,
+  getQuestionById,
+  getQuestionByCode,
+  getQuestionsByCategory,
+  getQuestionsByLanguage,
+  createQuestion,
+  updateQuestion,
+  deleteQuestions,
 
   // Legacy RFID tag methods
   getRfidList,

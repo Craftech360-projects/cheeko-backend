@@ -21,7 +21,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 8 | feature | Token Usage Analytics endpoints | Complete |
 | 9 | feature | OTA root endpoints (/ota/) | Complete |
 | 10 | feature | OTA Management endpoints (/otaMag) | Complete |
-| 11 | feature | RFID Question CRUD endpoints | Pending |
+| 11 | feature | RFID Question CRUD endpoints | Complete |
 | 12 | feature | Extended RFID Series endpoints | Pending |
 | 13 | feature | Content Items CRUD endpoints | Pending |
 | 14 | feature | Device Playlist path aliases | Pending |
@@ -45,6 +45,59 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - RFID Question CRUD Endpoints Complete
+
+**Task 11: Add RFID Question CRUD endpoints (/admin/rfid/question)**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/admin/rfid/question/page` - Paginated question query with filters
+- `GET /toy/admin/rfid/question/list` - List all questions with filters
+- `GET /toy/admin/rfid/question/:id` - Get question by ID
+- `GET /toy/admin/rfid/question/code/:code` - Get question by code
+- `GET /toy/admin/rfid/question/category/:category` - Get questions by category
+- `GET /toy/admin/rfid/question/language/:language` - Get questions by language
+- `POST /toy/admin/rfid/question` - Create question (admin only)
+- `PUT /toy/admin/rfid/question` - Update question (admin only)
+- `DELETE /toy/admin/rfid/question` - Delete question(s) (admin only)
+
+**Service Methods Added to `rfid.service.js`:**
+- `getQuestionPage({ page, limit, category, language, active })` - Paginated questions
+- `getQuestionList({ category, language, active })` - All questions
+- `getQuestionById(id)` - Get question by ID
+- `getQuestionByCode(code)` - Get question by code
+- `getQuestionsByCategory(category)` - Get active questions in category
+- `getQuestionsByLanguage(language)` - Get active questions in language
+- `createQuestion(data, userId)` - Create new question
+- `updateQuestion(data, userId)` - Update question
+- `deleteQuestions(ids)` - Delete one or more questions
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added 9 question management methods (~250 lines)
+- `src/routes/rfid.routes.js` - Added 9 route handlers with Swagger docs (~400 lines)
+
+**API Contract:**
+```
+GET    /toy/admin/rfid/question/page            - Returns {list, total, page, limit, pages}
+GET    /toy/admin/rfid/question/list            - Returns array of questions
+GET    /toy/admin/rfid/question/:id             - Returns question or 404
+GET    /toy/admin/rfid/question/code/:code      - Returns question or 404
+GET    /toy/admin/rfid/question/category/:cat   - Returns array of questions
+GET    /toy/admin/rfid/question/language/:lang  - Returns array of questions
+POST   /toy/admin/rfid/question                 - Creates question, returns question object
+PUT    /toy/admin/rfid/question                 - Updates question (id in body), returns question
+DELETE /toy/admin/rfid/question                 - Deletes question(s) (id or ids in body)
+```
+
+**Database Table Used:** `rfid_question` (already in Prisma schema)
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - OTA Management Endpoints Complete
 
