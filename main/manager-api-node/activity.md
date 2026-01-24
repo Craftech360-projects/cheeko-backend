@@ -22,7 +22,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 4 | auth | Test GET /user/pub-config endpoint | Complete |
 | 5 | admin | Test GET /admin/users pagination endpoint | Complete |
 | 6 | admin | Test admin user CRUD operations | Complete |
-| 7-10 | admin | Test admin endpoints (params, dict) | Pending |
+| 7-8 | admin | Test admin params endpoints | Complete |
+| 9-10 | admin | Test admin dict endpoints | Pending |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
 | 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
@@ -75,6 +76,59 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Tasks 7-8 Complete (Admin Params Endpoints)
+
+**Task 7: Test and fix GET /admin/params/page endpoint**
+**Task 8: Test and fix params CRUD operations**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+
+1. **Missing endpoint** - `/admin/params/page` endpoint didn't exist in Node.js API (only `/system/params/page` existed)
+2. **Response format mismatch** - Node.js used snake_case, Spring Boot uses camelCase
+3. **Database schema mismatch** - Node.js service tried to use `creator` and `updater` columns that don't exist in `sys_params` table
+
+**Fixes Applied:**
+
+**1. Created `/admin/params/*` routes (`src/routes/params.routes.js`)**
+- Added Spring Boot compatible endpoints at `/admin/params/page`, `/admin/params/{id}`, etc.
+- Added response transformation from snake_case to camelCase
+- Added date formatting to match Spring Boot format (`yyyy-MM-dd HH:mm:ss`)
+
+**2. Updated `src/routes/index.js`**
+- Added import for params.routes.js
+- Mounted params routes at `/admin/params`
+
+**3. Fixed `src/services/system.service.js`**
+- Removed `creator` field from createParam (column doesn't exist)
+- Removed `updater` field from updateParam (column doesn't exist)
+
+**Endpoints Verified:**
+- `GET /admin/params/page?page=1&limit=10` - Returns paginated list with camelCase fields
+- `GET /admin/params/{id}` - Returns single param with camelCase fields
+- `POST /admin/params` - Creates param, returns success
+- `PUT /admin/params` - Updates param (id in body), returns success
+- `POST /admin/params/delete` - Deletes param(s) (array of IDs in body)
+
+**Response Format Transformation:**
+```json
+// Before (database)
+{"id": 1, "param_code": "X", "param_value": "Y", "created_at": "2026-01-24T17:49:18Z"}
+
+// After (API response)
+{"id": 1, "paramCode": "X", "paramValue": "Y", "createDate": "2026-01-24 17:49:18"}
+```
+
+**Files Created:**
+- `src/routes/params.routes.js` - Spring Boot compatible params endpoints (~300 lines)
+
+**Files Modified:**
+- `src/routes/index.js` - Added params routes import and mount
+- `src/services/system.service.js` - Removed non-existent creator/updater columns
+
+---
 
 ### 2026-01-24 - Phase 4 Tasks 5-6 Complete (Admin User Endpoints)
 

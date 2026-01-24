@@ -151,8 +151,8 @@ const createParam = async (userId, data) => {
       param_value: data.paramValue,
       value_type: data.valueType || 'string',
       param_type: data.paramType !== undefined ? data.paramType : 1,
-      remark: data.remark,
-      creator: userId
+      remark: data.remark
+      // Note: creator column doesn't exist in sys_params table
     })
     .select()
     .single();
@@ -184,7 +184,7 @@ const updateParam = async (id, data) => {
   if (data.valueType !== undefined) updateData.value_type = data.valueType;
   if (data.paramType !== undefined) updateData.param_type = data.paramType;
   if (data.remark !== undefined) updateData.remark = data.remark;
-  if (data.updater !== undefined) updateData.updater = data.updater;
+  // Note: updater column doesn't exist in sys_params table
 
   const { data: param, error } = await supabaseAdmin
     .from('sys_params')
