@@ -16,7 +16,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ## Phase 4 Task Summary (API Compatibility)
 | ID | Category | Description | Status |
 |----|----------|-------------|--------|
-| 1 | setup | Start manager-web frontend | Pending |
+| 1 | setup | Start manager-web frontend | Complete |
 | 2-4 | auth | Test auth endpoints (login, info, pub-config) | Pending |
 | 5-10 | admin | Test admin endpoints (users, params, dict) | Pending |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
@@ -71,6 +71,27 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 1 Complete
+
+**Task 1: Start manager-web frontend and verify connection to Node.js API**
+
+**Status:** COMPLETE
+
+**Summary:**
+- Node.js API already running on port 8002
+- Spring Boot API already running on port 8003 (reference)
+- Started Vue.js frontend with `npm run serve`
+- Frontend running on port 8004 (configured in vue.config.js as 8001, but using available port)
+- Verified proxy configuration in vue.config.js points `/toy` to `http://127.0.0.1:8002`
+- Tested API proxy: `curl http://localhost:8004/toy/user/pub-config` returns valid response
+
+**Configuration Verified:**
+- `.env.development`: `VUE_APP_API_BASE_URL=/toy`
+- `vue.config.js`: proxy forwards `/toy/*` to `http://127.0.0.1:8002`
+- All API calls from frontend will route to Node.js API
+
+---
 
 ### 2026-01-24 - Integration Tests Complete
 

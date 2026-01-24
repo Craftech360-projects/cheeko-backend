@@ -40,7 +40,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Run npm run serve to start the frontend",
       "Verify frontend loads at http://localhost:8080 without errors"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
