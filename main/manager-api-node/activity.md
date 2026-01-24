@@ -15,7 +15,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 2 | feature | Agent Memory and Mode endpoints | Complete |
 | 3 | feature | Agent Chat History batch endpoints | Complete |
 | 4 | feature | Agent MCP Access Point endpoints | Complete |
-| 5 | feature | Configuration endpoints (/config) | Pending |
+| 5 | feature | Configuration endpoints (/config) | Complete |
 | 6 | feature | Model Provider CRUD endpoints | Pending |
 | 7 | feature | Extended Analytics endpoints | Pending |
 | 8 | feature | Token Usage Analytics endpoints | Pending |
@@ -45,6 +45,49 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Configuration Endpoints Complete
+
+**Task 5: Add Configuration endpoints (/config)**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `POST /toy/config/server-base` - Get server-side base configuration
+- `POST /toy/config/agent-models` - Get agent model configurations for device
+- `POST /toy/config/agent-prompt` - Get agent prompt by MAC address
+- `POST /toy/config/child-profile-by-mac` - Get child profile by device MAC
+- `POST /toy/config/agent-template-id` - Get agent template ID by MAC
+- `GET /toy/config/template/:templateId` - Get template content (personality)
+- `POST /toy/config/device-location` - Get device location info
+- `POST /toy/config/weather` - Get weather forecast by location
+
+**Files Created:**
+- `src/services/config.service.js` - 8 service methods (~320 lines)
+- `src/routes/config.routes.js` - 8 route handlers with Swagger docs (~350 lines)
+
+**Files Modified:**
+- `src/routes/index.js` - Added config routes import and mount
+
+**API Contract:**
+```
+POST   /toy/config/server-base         - Returns {serverVersion, platform, config}
+POST   /toy/config/agent-models        - Returns {agentId, agentName, models, voice}
+POST   /toy/config/agent-prompt        - Returns {agentId, systemPrompt, summaryMemory...}
+POST   /toy/config/child-profile-by-mac - Returns kid profile or null
+POST   /toy/config/agent-template-id   - Returns {agentId, agentCode, templateId}
+GET    /toy/config/template/:id        - Returns full template content
+POST   /toy/config/device-location     - Returns {macAddress, deviceId, location}
+POST   /toy/config/weather             - Returns weather forecast (stub)
+```
+
+**Note:** Weather endpoint returns a stub response - actual weather API integration needed.
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Agent MCP Access Point Endpoints Complete
 

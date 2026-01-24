@@ -363,7 +363,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add all /config/* endpoints",
       "Test with LiveKit worker"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
