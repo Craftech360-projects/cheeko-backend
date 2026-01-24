@@ -319,7 +319,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test MCP tools endpoint on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 20,

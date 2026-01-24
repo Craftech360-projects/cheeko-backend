@@ -28,7 +28,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 15-16 | agent | Test agent listing and CRUD endpoints | Complete |
 | 17 | agent | Test agent template endpoints | Complete |
 | 18 | agent | Test agent chat history endpoints | Complete |
-| 19 | agent | Test agent MCP endpoints | Pending |
+| 19 | agent | Test agent MCP endpoints | Complete |
 | 20-21 | analytics | Test analytics endpoints | Pending |
 | 22-24 | model | Test model endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
@@ -79,6 +79,85 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 19 Complete (Agent MCP Endpoints)
+
+**Task 19: Test and fix agent MCP endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /agent/mcp/address/{agentId}`
+- `GET /agent/mcp/tools/{agentId}`
+
+**Issues Found:**
+
+1. **Wrong implementation approach** - Node.js used `ai_agent_mcp_access_point` table (which doesn't exist)
+   - Spring Boot doesn't use this table at all
+   - Spring Boot gets MCP endpoint URL from `sys_params` (key: `server.mcp_endpoint`)
+   - Spring Boot constructs WebSocket URL dynamically with encrypted token
+
+2. **Missing encryption utilities** - Spring Boot uses AES-ECB with PKCS5 padding and MD5 hashing
+   - Required implementing `padKey()`, `aesEncrypt()`, and `md5Hash()` functions
+
+3. **Missing WebSocket JSON-RPC protocol** - For tools endpoint, Spring Boot:
+   - Connects to WebSocket
+   - Sends initialize message
+   - Waits for initialize response
+   - Sends notifications/initialized
+   - Sends tools/list request
+   - Parses tool names from response
+
+4. **Missing permission check** - Spring Boot requires auth and checks agent permission
+
+**Fixes Applied:**
+
+**1. Completely rewrote `getMcpAddress()` (`src/services/agent.service.js`)**
+- Gets MCP endpoint URL from `sys_params` with key `server.mcp_endpoint`
+- Parses URL to extract secret key from query params
+- Creates MD5 hash of agentId
+- Encrypts JSON `{"agentId": "<md5>"}` with AES-ECB
+- URL encodes token
+- Returns WebSocket URL: `wss://host/path/mcp/?token=<encoded>`
+
+**2. Completely rewrote `getMcpTools()` (`src/services/agent.service.js`)**
+- Gets MCP address and replaces `/mcp/` with `/call/`
+- Connects via WebSocket (`ws` module)
+- Implements full JSON-RPC 2.0 protocol:
+  - Sends `initialize` message (id=1)
+  - Waits for result response
+  - Sends `notifications/initialized`
+  - Sends `tools/list` request (id=2)
+  - Parses tool names from response
+- Returns array of tool name strings
+- Includes 15-second timeout and proper cleanup
+
+**3. Added crypto utilities**
+- `padKey(keyBytes)` - Pads AES key to 16/24/32 bytes
+- `aesEncrypt(key, plainText)` - AES-256-ECB with PKCS5 padding
+- `md5Hash(text)` - MD5 hex digest
+
+**4. Added MCP JSON-RPC messages**
+- `MCP_JSON_RPC.initialize` - Protocol init message
+- `MCP_JSON_RPC.notificationsInitialized` - Init complete notification
+- `MCP_JSON_RPC.toolsList` - Tools list request
+
+**5. Updated route handlers (`src/routes/agent.routes.js`)**
+- Added `requireAuth` middleware to both endpoints
+- Added permission check (super admin can access any agent)
+- Returns Spring Boot compatible error messages
+- Updated Swagger docs
+
+**Files Modified:**
+- `src/services/agent.service.js` - Rewrote getMcpAddress and getMcpTools (~200 lines)
+- `src/routes/agent.routes.js` - Updated route handlers and Swagger docs (~120 lines)
+
+**Verification:**
+- `npm run lint` - 4 pre-existing errors, 6 warnings (no new issues)
+- `GET /agent/mcp/address/{id}` - Returns URL or "Please contact admin..." message
+- `GET /agent/mcp/tools/{id}` - Returns empty array when MCP not configured
+
+---
 
 ### 2026-01-24 - Phase 4 Task 18 Complete (Agent Chat History Endpoints)
 

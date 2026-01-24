@@ -1211,73 +1211,251 @@ const updateTemplate = async (templateId, data) => {
 };
 
 // ==============================================
-// MCP Access Point Methods
+// MCP Access Point Methods (Spring Boot Compatible)
 // ==============================================
+
+const crypto = require('crypto');
+const WebSocket = require('ws');
+
+// System param key for MCP endpoint
+const SERVER_MCP_ENDPOINT = 'server.mcp_endpoint';
+
+// JSON-RPC 2.0 messages for MCP protocol
+const MCP_JSON_RPC = {
+  initialize: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'initialize',
+    params: {
+      protocolVersion: '2024-11-05',
+      capabilities: {
+        roots: { listChanged: false },
+        sampling: {}
+      },
+      clientInfo: {
+        name: 'xz-mcp-broker',
+        version: '0.0.1'
+      }
+    },
+    id: 1
+  }),
+  notificationsInitialized: '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+  toolsList: JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'tools/list',
+    params: null,
+    id: 2
+  })
+};
+
+/**
+ * Pad AES key to 16, 24, or 32 bytes (matching Java AESUtils.padKey)
+ * @param {Buffer} keyBytes - Key as buffer
+ * @returns {Buffer} Padded key
+ */
+const padKey = (keyBytes) => {
+  const keyLength = keyBytes.length;
+  if (keyLength === 16 || keyLength === 24 || keyLength === 32) {
+    return keyBytes;
+  }
+  // Pad to 32 bytes with zeros or truncate
+  const paddedKey = Buffer.alloc(32);
+  keyBytes.copy(paddedKey, 0, 0, Math.min(keyLength, 32));
+  return paddedKey;
+};
+
+/**
+ * AES ECB encrypt with PKCS5 padding (matching Java AESUtils.encrypt)
+ * @param {string} key - Encryption key
+ * @param {string} plainText - Text to encrypt
+ * @returns {string} Base64 encoded ciphertext
+ */
+const aesEncrypt = (key, plainText) => {
+  const keyBytes = padKey(Buffer.from(key, 'utf8'));
+  const cipher = crypto.createCipheriv('aes-256-ecb', keyBytes, null);
+  let encrypted = cipher.update(plainText, 'utf8', 'base64');
+  encrypted += cipher.final('base64');
+  return encrypted;
+};
+
+/**
+ * MD5 hash (matching Java HashEncryptionUtil.Md5hexDigest)
+ * @param {string} text - Text to hash
+ * @returns {string} MD5 hex digest
+ */
+const md5Hash = (text) => {
+  return crypto.createHash('md5').update(text, 'utf8').digest('hex');
+};
 
 /**
  * Get MCP access point URL for an agent
+ * Matches Spring Boot AgentMcpAccessPointServiceImpl.getAgentMcpAccessAddress
  * @param {string} agentId - Agent ID
- * @returns {object|null} MCP access point info or null if not found
+ * @returns {string|null} MCP WebSocket URL or null if not configured
  */
 const getMcpAddress = async (agentId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data, error } = await supabaseAdmin
-    .from('ai_agent_mcp_access_point')
-    .select('id, agent_id, mcp_server_url, mcp_server_name, is_enabled, config_json')
-    .eq('agent_id', agentId)
-    .eq('is_enabled', 1)
-    .order('id', { ascending: true })
-    .limit(1)
+  // Get MCP endpoint from sys_params
+  const { data: param, error } = await supabaseAdmin
+    .from('sys_params')
+    .select('param_value')
+    .eq('param_code', SERVER_MCP_ENDPOINT)
     .single();
 
-  if (error) {
-    // PGRST116 means no rows found - not an error, just no MCP configured
-    if (error.code === 'PGRST116') {
-      return null;
-    }
-    logger.error('Failed to get MCP address:', error);
-    throw new Error('Failed to get MCP address');
+  if (error || !param || !param.param_value || param.param_value === 'null') {
+    // No MCP configured - return null (not an error)
+    return null;
   }
 
-  return {
-    agentId: data.agent_id,
-    mcpServerUrl: data.mcp_server_url,
-    mcpServerName: data.mcp_server_name,
-    isEnabled: data.is_enabled === 1,
-    config: data.config_json
-  };
+  const url = param.param_value;
+
+  try {
+    // Parse the URL
+    const parsedUrl = new URL(url);
+
+    // Get the secret key from query params
+    const key = parsedUrl.searchParams.get('key');
+    if (!key) {
+      logger.error('MCP endpoint URL missing key parameter');
+      return null;
+    }
+
+    // Get WebSocket scheme (wss for https, ws for http)
+    const wsScheme = parsedUrl.protocol === 'https:' ? 'wss' : 'ws';
+
+    // Get path before the last /
+    let path = parsedUrl.pathname;
+    path = path.substring(0, path.lastIndexOf('/'));
+
+    // Build agent MCP URL prefix
+    const agentMcpUrl = `${wsScheme}://${parsedUrl.host}${path}`;
+
+    // Create encrypted token
+    // 1. MD5 hash the agentId
+    const md5AgentId = md5Hash(agentId);
+    // 2. Create JSON with the MD5 hash
+    const json = JSON.stringify({ agentId: md5AgentId });
+    // 3. AES encrypt
+    const encryptedToken = aesEncrypt(key, json);
+    // 4. URL encode
+    const encodedToken = encodeURIComponent(encryptedToken);
+
+    // Return the full MCP access URL
+    return `${agentMcpUrl}/mcp/?token=${encodedToken}`;
+  } catch (err) {
+    logger.error('Failed to parse MCP endpoint URL:', err.message);
+    throw new Error('MCP address error, please contact admin to update MCP access point address in parameter management');
+  }
 };
 
 /**
- * Get MCP tools list for an agent
+ * Get MCP tools list for an agent via WebSocket JSON-RPC
+ * Matches Spring Boot AgentMcpAccessPointServiceImpl.getAgentMcpToolsList
  * @param {string} agentId - Agent ID
- * @returns {array} List of MCP access points with tools
+ * @returns {array} List of tool names
  */
 const getMcpTools = async (agentId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data, error } = await supabaseAdmin
-    .from('ai_agent_mcp_access_point')
-    .select('id, agent_id, mcp_server_url, mcp_server_name, is_enabled, config_json')
-    .eq('agent_id', agentId)
-    .eq('is_enabled', 1)
-    .order('id', { ascending: true });
-
-  if (error) {
-    logger.error('Failed to get MCP tools:', error);
-    throw new Error('Failed to get MCP tools');
+  // Get the MCP address
+  const wsUrl = await getMcpAddress(agentId);
+  if (!wsUrl) {
+    return [];
   }
 
-  // Map to a tools-friendly format
-  return (data || []).map(item => ({
-    id: item.id.toString(),
-    agentId: item.agent_id,
-    serverUrl: item.mcp_server_url,
-    serverName: item.mcp_server_name,
-    isEnabled: item.is_enabled === 1,
-    config: item.config_json
-  }));
+  // Replace /mcp/ with /call/ for tools endpoint
+  const callUrl = wsUrl.replace('/mcp/', '/call/');
+
+  return new Promise((resolve) => {
+    let ws;
+    let initSucceeded = false;
+    let resolved = false;
+
+    // Cleanup function - defined first for reference
+    const doCleanup = (timer) => {
+      if (timer) clearTimeout(timer);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.close(); } catch { /* ignore */ }
+      }
+    };
+
+    // Safe resolve that only resolves once
+    const safeResolve = (value, timer) => {
+      if (!resolved) {
+        resolved = true;
+        doCleanup(timer);
+        resolve(value);
+      }
+    };
+
+    // Set overall timeout
+    const timeoutHandle = setTimeout(() => {
+      logger.warn(`MCP tools request timeout for agent ${agentId}`);
+      safeResolve([], timeoutHandle);
+    }, 15000);
+
+    try {
+      ws = new WebSocket(callUrl, {
+        handshakeTimeout: 8000
+      });
+
+      ws.on('open', () => {
+        // Step 1: Send initialize message
+        logger.info(`Sending MCP initialize message, AgentID: ${agentId}`);
+        ws.send(MCP_JSON_RPC.initialize);
+      });
+
+      ws.on('message', (data) => {
+        try {
+          const response = JSON.parse(data.toString());
+
+          // Check for initialize response (id=1)
+          if (response.id === 1) {
+            if (response.result) {
+              logger.info(`MCP initialize success, AgentID: ${agentId}`);
+              initSucceeded = true;
+              // Step 2: Send notifications/initialized
+              logger.info(`Sending MCP initialize complete notification, AgentID: ${agentId}`);
+              ws.send(MCP_JSON_RPC.notificationsInitialized);
+              // Step 3: Send tools/list request
+              logger.info(`Sending MCP tools list request, AgentID: ${agentId}`);
+              ws.send(MCP_JSON_RPC.toolsList);
+            } else if (response.error) {
+              logger.error(`MCP initialize failure, AgentID: ${agentId}, Error:`, response.error);
+              safeResolve([], timeoutHandle);
+            }
+          }
+          // Check for tools/list response (id=2)
+          else if (response.id === 2) {
+            if (response.result && response.result.tools && Array.isArray(response.result.tools)) {
+              const toolNames = response.result.tools
+                .map(tool => tool.name)
+                .filter(name => name !== null);
+              logger.info(`Successfully got MCP tools list, AgentID: ${agentId}, Tools count: ${toolNames.length}`);
+              safeResolve(toolNames, timeoutHandle);
+            } else if (response.error) {
+              logger.error(`Get tools list failure, AgentID: ${agentId}, Error:`, response.error);
+              safeResolve([], timeoutHandle);
+            }
+          }
+        } catch (err) {
+          logger.warn(`Parse MCP response failure: ${data.toString()}`, err);
+        }
+      });
+
+      ws.on('error', (err) => {
+        logger.error(`Get agent MCP tools list failure, AgentID: ${agentId}, Error: ${err.message}`);
+        safeResolve([], timeoutHandle);
+      });
+
+      ws.on('close', () => {
+        if (!initSucceeded) {
+          logger.warn(`MCP WebSocket closed before init succeeded, AgentID: ${agentId}`);
+        }
+      });
+    } catch (err) {
+      logger.error(`Failed to connect to MCP, AgentID: ${agentId}, Error: ${err.message}`);
+      safeResolve([], timeoutHandle);
+    }
+  });
 };
 
 /**

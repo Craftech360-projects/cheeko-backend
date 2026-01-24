@@ -685,7 +685,9 @@ router.post('/chat-history/session',
  *   get:
  *     tags: [Agent MCP]
  *     summary: Get MCP access point URL for an agent
- *     description: Returns the primary enabled MCP server configuration for the agent
+ *     description: Returns the MCP WebSocket URL for the agent (matches Spring Boot format)
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: agentId
@@ -695,35 +697,53 @@ router.post('/chat-history/session',
  *         description: Agent ID
  *     responses:
  *       200:
- *         description: MCP access point info
+ *         description: MCP access point URL or message if not configured
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 agentId:
+ *                 code:
+ *                   type: integer
+ *                 data:
  *                   type: string
- *                 mcpServerUrl:
- *                   type: string
- *                 mcpServerName:
- *                   type: string
- *                 isEnabled:
- *                   type: boolean
- *                 config:
- *                   type: object
- *       404:
- *         description: No MCP access point configured for this agent
+ *                   description: MCP WebSocket URL or helpful message
+ *       403:
+ *         description: No permission to query this agent's MCP access point
  */
 router.get('/mcp/address/:agentId',
+  requireAuth,
   asyncHandler(async (req, res) => {
-    try {
-      const result = await agentService.getMcpAddress(req.params.agentId);
-      if (!result) {
-        return notFound(res, 'No MCP access point configured for this agent');
+    const { agentId } = req.params;
+    const userId = req.user.id;
+    const isSuperAdmin = req.user.super_admin === 1;
+
+    // Check permission (super admin can access any agent)
+    if (!isSuperAdmin) {
+      const agent = await agentService.getAgentById(agentId);
+      if (!agent || agent.user_id !== userId) {
+        return res.status(200).json({
+          code: 500,
+          msg: 'No permission to query this agent\'s MCP access point address',
+          data: null
+        });
       }
-      success(res, result);
+    }
+
+    try {
+      const mcpUrl = await agentService.getMcpAddress(agentId);
+      if (!mcpUrl) {
+        // Match Spring Boot response when MCP not configured
+        return success(res, 'Please contact admin to configure MCP access point address in parameter management');
+      }
+      success(res, mcpUrl);
     } catch (error) {
-      badRequest(res, error.message);
+      // Return error as Result format
+      return res.status(200).json({
+        code: 500,
+        msg: error.message || 'Failed to get MCP address',
+        data: null
+      });
     }
   })
 );
@@ -734,7 +754,9 @@ router.get('/mcp/address/:agentId',
  *   get:
  *     tags: [Agent MCP]
  *     summary: Get MCP tools list for an agent
- *     description: Returns all enabled MCP server configurations for the agent
+ *     description: Connects to MCP server via WebSocket and returns list of available tool names
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: agentId
@@ -744,36 +766,49 @@ router.get('/mcp/address/:agentId',
  *         description: Agent ID
  *     responses:
  *       200:
- *         description: List of MCP access points
+ *         description: List of tool names from MCP server
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
  *                     type: string
- *                   agentId:
- *                     type: string
- *                   serverUrl:
- *                     type: string
- *                   serverName:
- *                     type: string
- *                   isEnabled:
- *                     type: boolean
- *                   config:
- *                     type: object
- *       400:
- *         description: Failed to get MCP tools
+ *       403:
+ *         description: No permission to query this agent's MCP tools
  */
 router.get('/mcp/tools/:agentId',
+  requireAuth,
   asyncHandler(async (req, res) => {
+    const { agentId } = req.params;
+    const userId = req.user.id;
+    const isSuperAdmin = req.user.super_admin === 1;
+
+    // Check permission (super admin can access any agent)
+    if (!isSuperAdmin) {
+      const agent = await agentService.getAgentById(agentId);
+      if (!agent || agent.user_id !== userId) {
+        return res.status(200).json({
+          code: 500,
+          msg: 'No permission to query this agent\'s MCP tools list',
+          data: null
+        });
+      }
+    }
+
     try {
-      const tools = await agentService.getMcpTools(req.params.agentId);
+      const tools = await agentService.getMcpTools(agentId);
       success(res, tools);
     } catch (error) {
-      badRequest(res, error.message);
+      return res.status(200).json({
+        code: 500,
+        msg: error.message || 'Failed to get MCP tools',
+        data: null
+      });
     }
   })
 );
