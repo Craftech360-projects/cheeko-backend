@@ -337,7 +337,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify dashboard analytics display correctly"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 21,

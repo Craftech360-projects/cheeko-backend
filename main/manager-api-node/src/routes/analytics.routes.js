@@ -1937,12 +1937,20 @@ router.get('/user/:mac/media', requireAuth, asyncHandler(async (req, res) => {
  *                   properties:
  *                     count:
  *                       type: integer
+ *                       description: Number of unique devices that interacted today
+ *                     date:
+ *                       type: string
+ *                       format: date
+ *                       description: Today's date (YYYY-MM-DD)
+ *                       example: "2026-01-24"
  *       401:
  *         description: Unauthorized
  */
 router.get('/today/device-count', requireAuth, asyncHandler(async (req, res) => {
   const count = await analyticsService.getTodayDeviceCount();
-  return success(res, { count });
+  const now = new Date();
+  const date = now.toISOString().split('T')[0]; // YYYY-MM-DD format
+  return success(res, { count, date });
 }));
 
 /**
@@ -1969,12 +1977,44 @@ router.get('/today/device-count', requireAuth, asyncHandler(async (req, res) => 
  *                   properties:
  *                     count:
  *                       type: integer
+ *                       description: Number of unique devices that interacted this month
+ *                     month:
+ *                       type: string
+ *                       description: Month name in uppercase
+ *                       example: "JANUARY"
+ *                     year:
+ *                       type: integer
+ *                       description: Current year
+ *                       example: 2026
+ *                     startDate:
+ *                       type: string
+ *                       format: date
+ *                       description: First day of the month (YYYY-MM-DD)
+ *                       example: "2026-01-01"
+ *                     endDate:
+ *                       type: string
+ *                       format: date
+ *                       description: Last day of the month (YYYY-MM-DD)
+ *                       example: "2026-01-31"
  *       401:
  *         description: Unauthorized
  */
 router.get('/month/device-count', requireAuth, asyncHandler(async (req, res) => {
   const count = await analyticsService.getMonthDeviceCount();
-  return success(res, { count });
+  const now = new Date();
+  const year = now.getFullYear();
+  const monthNum = now.getMonth(); // 0-indexed
+  // Get month name in uppercase to match Spring Boot's Java LocalDate.getMonth().toString()
+  const monthNames = [
+    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+    'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'
+  ];
+  const month = monthNames[monthNum];
+  // Calculate start and end dates of the month using local date formatting
+  const startDate = `${year}-${String(monthNum + 1).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, monthNum + 1, 0).getDate();
+  const endDate = `${year}-${String(monthNum + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return success(res, { count, month, year, startDate, endDate });
 }));
 
 /**

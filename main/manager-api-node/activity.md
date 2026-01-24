@@ -29,7 +29,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 17 | agent | Test agent template endpoints | Complete |
 | 18 | agent | Test agent chat history endpoints | Complete |
 | 19 | agent | Test agent MCP endpoints | Complete |
-| 20-21 | analytics | Test analytics endpoints | Pending |
+| 20 | analytics | Test device analytics endpoints | Complete |
+| 21 | analytics | Test usage/token analytics endpoints | Pending |
 | 22-24 | model | Test model endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
 | 26-29 | rfid | Test RFID endpoints | Pending |
@@ -79,6 +80,55 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 20 Complete (Device Analytics Endpoints)
+
+**Task 20: Test and fix device analytics endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /analytics/today/device-count`
+- `GET /analytics/month/device-count`
+- `GET /analytics/today/active-devices`
+- `GET /analytics/month/active-devices`
+
+**Issues Found:**
+
+1. **GET /analytics/today/device-count** - Missing `date` field
+   - Node.js returned: `{"count": N}`
+   - Spring Boot returns: `{"count": N, "date": "2026-01-24"}`
+
+2. **GET /analytics/month/device-count** - Missing month metadata fields
+   - Node.js returned: `{"count": N}`
+   - Spring Boot returns: `{"count": N, "month": "JANUARY", "year": 2026, "startDate": "2026-01-01", "endDate": "2026-01-31"}`
+
+**Fixes Applied:**
+
+**1. Fixed `GET /today/device-count` (`src/routes/analytics.routes.js`)**
+- Added `date` field with today's date in YYYY-MM-DD format
+- Matches Spring Boot's LocalDate.now().toString() format
+
+**2. Fixed `GET /month/device-count` (`src/routes/analytics.routes.js`)**
+- Added `month` field with uppercase month name (matches Java's LocalDate.getMonth().toString())
+- Added `year` field with current year
+- Added `startDate` field with first day of month (YYYY-MM-DD)
+- Added `endDate` field with last day of month (YYYY-MM-DD)
+
+**3. Updated Swagger documentation**
+- Added new response fields to API documentation
+
+**Files Modified:**
+- `src/routes/analytics.routes.js` - Updated route handlers and Swagger docs (~40 lines)
+
+**Verification:**
+- `npm run lint` - No new errors in analytics.routes.js (4 pre-existing errors, 6 warnings)
+- `GET /analytics/today/device-count` - Returns `{"count":2,"date":"2026-01-24"}`
+- `GET /analytics/month/device-count` - Returns `{"count":2,"month":"JANUARY","year":2026,"startDate":"2026-01-01","endDate":"2026-01-31"}`
+- `GET /analytics/today/active-devices` - Returns list of active devices (no changes needed)
+- `GET /analytics/month/active-devices` - Returns list of active devices (no changes needed)
+
+---
 
 ### 2026-01-24 - Phase 4 Task 19 Complete (Agent MCP Endpoints)
 
