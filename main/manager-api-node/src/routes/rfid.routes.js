@@ -1041,6 +1041,182 @@ router.get('/series/list',
 
 /**
  * @swagger
+ * /admin/rfid/series/active:
+ *   get:
+ *     tags: [RFID Series]
+ *     summary: Get all active series
+ *     description: Returns all active RFID series sorted by priority
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Active series list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidSeries'
+ */
+router.get('/series/active',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const series = await rfidService.getActiveSeries();
+    success(res, series);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/find/{uid}:
+ *   get:
+ *     tags: [RFID Series]
+ *     summary: Find series containing UID
+ *     description: Find all series whose UID range contains the given UID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: uid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID to check
+ *         example: "04A3B2C1D00000"
+ *     responses:
+ *       200:
+ *         description: Series containing the UID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidSeries'
+ */
+router.get('/series/find/:uid',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { uid } = req.params;
+
+    if (!uid) {
+      return badRequest(res, 'UID is required');
+    }
+
+    const series = await rfidService.findSeriesByUid(uid);
+    success(res, series);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/pack/{packId}:
+ *   get:
+ *     tags: [RFID Series]
+ *     summary: Get series by pack ID
+ *     description: Get all series belonging to a specific pack
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: packId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Pack ID
+ *     responses:
+ *       200:
+ *         description: Series in the pack
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidSeries'
+ */
+router.get('/series/pack/:packId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { packId } = req.params;
+
+    if (!packId) {
+      return badRequest(res, 'Pack ID is required');
+    }
+
+    const series = await rfidService.getSeriesByPackId(parseInt(packId));
+    success(res, series);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/question/{questionId}:
+ *   get:
+ *     tags: [RFID Series]
+ *     summary: Get series by question ID
+ *     description: Get all series associated with a specific question
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: questionId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Question ID
+ *     responses:
+ *       200:
+ *         description: Series with the question
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/RfidSeries'
+ */
+router.get('/series/question/:questionId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { questionId } = req.params;
+
+    if (!questionId) {
+      return badRequest(res, 'Question ID is required');
+    }
+
+    const series = await rfidService.getSeriesByQuestionId(parseInt(questionId));
+    success(res, series);
+  })
+);
+
+/**
+ * @swagger
  * /admin/rfid/series/{id}:
  *   get:
  *     tags: [RFID]

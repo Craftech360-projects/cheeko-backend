@@ -958,6 +958,112 @@ const deleteSeries = async (seriesId) => {
   return true;
 };
 
+/**
+ * Get all active series
+ * @returns {Promise<Array>} All active series
+ */
+const getActiveSeries = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language, category, difficulty),
+      pack:pack_id(id, pack_code, name, description)
+    `)
+    .eq('active', true)
+    .order('priority', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch active series:', error);
+    throw new Error('Failed to fetch active series');
+  }
+
+  return series || [];
+};
+
+/**
+ * Find all series containing a UID
+ * @param {string} uid - RFID UID to check
+ * @returns {Promise<Array>} Series that contain the UID
+ */
+const findSeriesByUid = async (uid) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = uid.toUpperCase().replace(/[:-]/g, '');
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language, category, difficulty),
+      pack:pack_id(id, pack_code, name, description)
+    `)
+    .lte('start_uid', normalizedUid)
+    .gte('end_uid', normalizedUid)
+    .order('priority', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to find series by UID:', error);
+    throw new Error('Failed to find series');
+  }
+
+  return series || [];
+};
+
+/**
+ * Get series by pack ID
+ * @param {number} packId - Pack ID
+ * @returns {Promise<Array>} Series in the pack
+ */
+const getSeriesByPackId = async (packId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language, category, difficulty),
+      pack:pack_id(id, pack_code, name, description)
+    `)
+    .eq('pack_id', packId)
+    .order('priority', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch series by pack:', error);
+    throw new Error('Failed to fetch series');
+  }
+
+  return series || [];
+};
+
+/**
+ * Get series by question ID
+ * @param {number} questionId - Question ID
+ * @returns {Promise<Array>} Series with the question
+ */
+const getSeriesByQuestionId = async (questionId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: series, error } = await supabaseAdmin
+    .from('rfid_series')
+    .select(`
+      *,
+      question:question_id(id, code, title, prompt_text, language, category, difficulty),
+      pack:pack_id(id, pack_code, name, description)
+    `)
+    .eq('question_id', questionId)
+    .order('priority', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch series by question:', error);
+    throw new Error('Failed to fetch series');
+  }
+
+  return series || [];
+};
+
 // =============================================
 // Question Management Methods
 // =============================================
@@ -1578,6 +1684,10 @@ module.exports = {
   createSeries,
   updateSeries,
   deleteSeries,
+  getActiveSeries,
+  findSeriesByUid,
+  getSeriesByPackId,
+  getSeriesByQuestionId,
 
   // Pack management
   getPackList,

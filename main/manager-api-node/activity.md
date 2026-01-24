@@ -22,7 +22,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 9 | feature | OTA root endpoints (/ota/) | Complete |
 | 10 | feature | OTA Management endpoints (/otaMag) | Complete |
 | 11 | feature | RFID Question CRUD endpoints | Complete |
-| 12 | feature | Extended RFID Series endpoints | Pending |
+| 12 | feature | Extended RFID Series endpoints | Complete |
 | 13 | feature | Content Items CRUD endpoints | Pending |
 | 14 | feature | Device Playlist path aliases | Pending |
 | 15 | feature | Password Recovery endpoint | Pending |
@@ -45,6 +45,44 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Extended RFID Series Endpoints Complete
+
+**Task 12: Add Extended RFID Series endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/admin/rfid/series/active` - List all active series sorted by priority
+- `GET /toy/admin/rfid/series/find/:uid` - Find all series containing a specific UID
+- `GET /toy/admin/rfid/series/pack/:packId` - Get all series by pack ID
+- `GET /toy/admin/rfid/series/question/:questionId` - Get all series by question ID
+
+**Service Methods Added to `rfid.service.js`:**
+- `getActiveSeries()` - Get all active series with related pack/question data
+- `findSeriesByUid(uid)` - Find all series whose range contains the UID
+- `getSeriesByPackId(packId)` - Get series belonging to a pack
+- `getSeriesByQuestionId(questionId)` - Get series associated with a question
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added 4 series query methods (~100 lines)
+- `src/routes/rfid.routes.js` - Added 4 route handlers with Swagger docs (~180 lines)
+
+**API Contract:**
+```
+GET    /toy/admin/rfid/series/active              - Returns array of active series
+GET    /toy/admin/rfid/series/find/:uid           - Returns array of series containing UID
+GET    /toy/admin/rfid/series/pack/:packId        - Returns array of series in pack
+GET    /toy/admin/rfid/series/question/:questionId - Returns array of series with question
+```
+
+**Database Table Used:** `rfid_series` (already in Prisma schema)
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - RFID Question CRUD Endpoints Complete
 

@@ -437,7 +437,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add /series/pack/:packId endpoint",
       "Add /series/question/:questionId endpoint"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
