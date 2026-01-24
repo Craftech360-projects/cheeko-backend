@@ -1281,13 +1281,14 @@ router.post('/pack/delete',
  *                       type: integer
  */
 router.get('/series/page',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, packId, active } = req.query;
+    const { page, limit, packId, questionId, active } = req.query;
     const result = await rfidService.getSeriesList({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
       packId: packId ? parseInt(packId) : undefined,
+      questionId: questionId ? parseInt(questionId) : undefined,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
@@ -1332,11 +1333,12 @@ router.get('/series/page',
  *                     $ref: '#/components/schemas/RfidSeries'
  */
 router.get('/series/list',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { packId, active } = req.query;
+    const { packId, questionId, active } = req.query;
     const result = await rfidService.getSeriesAll({
       packId: packId ? parseInt(packId) : undefined,
+      questionId: questionId ? parseInt(questionId) : undefined,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
@@ -1370,7 +1372,7 @@ router.get('/series/list',
  *                     $ref: '#/components/schemas/RfidSeries'
  */
 router.get('/series/active',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const series = await rfidService.getActiveSeries();
     success(res, series);
@@ -1412,7 +1414,7 @@ router.get('/series/active',
  *                     $ref: '#/components/schemas/RfidSeries'
  */
 router.get('/series/find/:uid',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { uid } = req.params;
 
@@ -1459,7 +1461,7 @@ router.get('/series/find/:uid',
  *                     $ref: '#/components/schemas/RfidSeries'
  */
 router.get('/series/pack/:packId',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { packId } = req.params;
 
@@ -1506,7 +1508,7 @@ router.get('/series/pack/:packId',
  *                     $ref: '#/components/schemas/RfidSeries'
  */
 router.get('/series/question/:questionId',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { questionId } = req.params;
 
@@ -1553,7 +1555,7 @@ router.get('/series/question/:questionId',
  *         description: Series not found
  */
 router.get('/series/:id',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
@@ -1628,21 +1630,22 @@ router.get('/series/:id',
 router.post('/series',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { name, startUid, endUid } = req.body;
+    const { startUid, endUid, questionId } = req.body;
 
-    if (!name) {
-      return badRequest(res, 'Series name is required');
-    }
+    // Match Spring Boot validation from RfidSeriesDTO
     if (!startUid) {
       return badRequest(res, 'Start UID is required');
     }
     if (!endUid) {
       return badRequest(res, 'End UID is required');
     }
+    if (!questionId) {
+      return badRequest(res, 'Question ID is required');
+    }
 
     try {
-      const series = await rfidService.createSeries(req.body, req.user.id);
-      success(res, series, 'Series created successfully');
+      await rfidService.createSeries(req.body, req.user.id);
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1702,8 +1705,8 @@ router.put('/series',
     }
 
     try {
-      const series = await rfidService.updateSeries(req.body, req.user.id);
-      success(res, series, 'Series updated successfully');
+      await rfidService.updateSeries(req.body, req.user.id);
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1712,38 +1715,90 @@ router.put('/series',
 
 /**
  * @swagger
- * /admin/rfid/series/{id}:
+ * /admin/rfid/series:
  *   delete:
  *     tags: [RFID]
  *     summary: Delete RFID series
- *     description: Delete an RFID series (admin only)
+ *     description: Delete one or more RFID series (admin only). Accepts Long[] array in body.
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: Series ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             example: [1, 2, 3]
  *     responses:
  *       200:
- *         description: Series deleted
+ *         description: Series deleted (data is null)
  *       400:
- *         description: Series ID required
+ *         description: Series IDs required
  */
-router.delete('/series/:id',
+router.delete('/series',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    // Accept raw array or {ids: [...]} format
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
 
-    if (!id) {
-      return badRequest(res, 'Series ID is required');
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Series IDs are required');
     }
 
     try {
-      await rfidService.deleteSeries(parseInt(id));
-      success(res, null, 'Series deleted successfully');
+      await rfidService.deleteSeriesBatch(ids.map(id => parseInt(id)));
+      success(res, null);  // Spring Boot returns Result<Void>
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/series/delete:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Delete RFID series (POST)
+ *     description: Delete one or more RFID series (admin only). POST alternative for DELETE. Accepts Long[] array in body.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             example: [1, 2, 3]
+ *     responses:
+ *       200:
+ *         description: Series deleted (data is null)
+ *       400:
+ *         description: Series IDs required
+ */
+router.post('/series/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    // Accept raw array or {ids: [...]} format
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Series IDs are required');
+    }
+
+    try {
+      await rfidService.deleteSeriesBatch(ids.map(id => parseInt(id)));
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }

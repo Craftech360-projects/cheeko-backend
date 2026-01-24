@@ -504,8 +504,15 @@ All manager-web frontend features work correctly with the Node.js API, matching 
     "endpoints": [
       "GET /admin/rfid/series/page",
       "GET /admin/rfid/series/list",
+      "GET /admin/rfid/series/active",
+      "GET /admin/rfid/series/{id}",
+      "GET /admin/rfid/series/lookup/{uid}",
+      "GET /admin/rfid/series/find/{uid}",
+      "GET /admin/rfid/series/pack/{packId}",
+      "GET /admin/rfid/series/question/{questionId}",
       "POST /admin/rfid/series",
       "PUT /admin/rfid/series",
+      "DELETE /admin/rfid/series",
       "POST /admin/rfid/series/delete"
     ],
     "steps": [
@@ -513,7 +520,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test series CRUD on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Added transformSeriesToCamelCase helper, 2) Changed auth to requireAdmin, 3) Added questionId filter support, 4) Replaced DELETE /{id} with DELETE body array, 5) Added POST /series/delete, 6) Fixed column names (pack_id not content_pack_id), 7) CUD operations return null (Result<Void>)"
   },
   {
     "id": 30,

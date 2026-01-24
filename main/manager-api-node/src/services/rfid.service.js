@@ -81,6 +81,25 @@ const transformCardMappingToCamelCase = (card) => {
 };
 
 // =============================================
+// Helper: Transform RFID Series to camelCase (RfidSeriesDTO)
+// =============================================
+const transformSeriesToCamelCase = (series) => {
+  if (!series) return null;
+  return {
+    id: series.id ? Number(series.id) : null,
+    startUid: series.start_uid,
+    endUid: series.end_uid,
+    questionId: series.question_id ? Number(series.question_id) : null,
+    packId: series.pack_id ? Number(series.pack_id) : null,
+    priority: series.priority,
+    notes: series.notes,
+    active: series.active,
+    createDate: formatDate(series.create_date || series.created_at),
+    updateDate: formatDate(series.update_date || series.updated_at)
+  };
+};
+
+// =============================================
 // Card Mapping Methods (PRD-specified)
 // =============================================
 
@@ -1066,11 +1085,11 @@ const deletePacks = async (ids) => {
 // =============================================
 
 /**
- * Get series list with pagination
+ * Get series list with pagination (matches Spring Boot /page endpoint)
  * @param {Object} options - Pagination and filter options
- * @returns {Promise<Object>} Paginated series list
+ * @returns {Promise<Object>} Paginated series list with camelCase fields
  */
-const getSeriesList = async ({ page = 1, limit = 10, packId, status } = {}) => {
+const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const offset = (page - 1) * limit;
@@ -1080,21 +1099,26 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, status } = {}) => {
     .from('rfid_series')
     .select('id', { count: 'exact', head: true });
 
-  // Build data query - rfid_series has: series_name, start_uid, end_uid, content_pack_id, priority, status
+  // Build data query
   let dataQuery = supabaseAdmin
     .from('rfid_series')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('priority', { ascending: false });
 
-  // Apply filters
+  // Apply filters (matching Spring Boot params)
   if (packId) {
-    countQuery = countQuery.eq('content_pack_id', packId);
-    dataQuery = dataQuery.eq('content_pack_id', packId);
+    countQuery = countQuery.eq('pack_id', packId);
+    dataQuery = dataQuery.eq('pack_id', packId);
   }
 
-  if (status !== undefined) {
-    countQuery = countQuery.eq('status', status);
-    dataQuery = dataQuery.eq('status', status);
+  if (questionId) {
+    countQuery = countQuery.eq('question_id', questionId);
+    dataQuery = dataQuery.eq('question_id', questionId);
+  }
+
+  if (active !== undefined) {
+    countQuery = countQuery.eq('active', active);
+    dataQuery = dataQuery.eq('active', active);
   }
 
   const { count } = await countQuery;
@@ -1106,7 +1130,7 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, status } = {}) => {
   }
 
   return {
-    list: series || [],
+    list: (series || []).map(transformSeriesToCamelCase),
     total: count || 0,
     page,
     limit,
@@ -1115,24 +1139,28 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, status } = {}) => {
 };
 
 /**
- * Get all series (no pagination)
+ * Get all series (no pagination, matches Spring Boot /list endpoint)
  * @param {Object} options - Filter options
- * @returns {Promise<Array>} All series
+ * @returns {Promise<Array>} All series with camelCase fields
  */
-const getSeriesAll = async ({ packId, status } = {}) => {
+const getSeriesAll = async ({ packId, questionId, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   let query = supabaseAdmin
     .from('rfid_series')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('priority', { ascending: false });
 
   if (packId) {
-    query = query.eq('content_pack_id', packId);
+    query = query.eq('pack_id', packId);
   }
 
-  if (status !== undefined) {
-    query = query.eq('status', status);
+  if (questionId) {
+    query = query.eq('question_id', questionId);
+  }
+
+  if (active !== undefined) {
+    query = query.eq('active', active);
   }
 
   const { data: series, error } = await query;
@@ -1142,24 +1170,20 @@ const getSeriesAll = async ({ packId, status } = {}) => {
     throw new Error('Failed to fetch series');
   }
 
-  return series || [];
+  return (series || []).map(transformSeriesToCamelCase);
 };
 
 /**
- * Get series by ID
+ * Get series by ID (matches Spring Boot GET /{id} endpoint)
  * @param {number} seriesId - Series ID
- * @returns {Promise<Object>} Series details
+ * @returns {Promise<Object>} Series details with camelCase fields
  */
 const getSeriesById = async (seriesId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .eq('id', seriesId)
     .single();
 
@@ -1168,16 +1192,16 @@ const getSeriesById = async (seriesId) => {
     throw new Error('Failed to fetch series');
   }
 
-  return series || null;
+  return transformSeriesToCamelCase(series);
 };
 
 /**
- * Create series
+ * Create series (matches Spring Boot POST /series)
  * @param {Object} data - Series data
  * @param {number} userId - Creator user ID
- * @returns {Promise<Object>} Created series
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
-const createSeries = async (data, userId) => {
+const createSeries = async (data, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   // Normalize UIDs
@@ -1190,42 +1214,34 @@ const createSeries = async (data, userId) => {
   }
 
   const insertData = {
-    name: data.name,
-    description: data.description || null,
     start_uid: startUid,
     end_uid: endUid,
     question_id: data.questionId || null,
     pack_id: data.packId || null,
     priority: data.priority || 0,
-    active: data.active !== false,
-    creator: userId
+    notes: data.notes || null,
+    active: data.active !== false
   };
 
-  const { data: series, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('rfid_series')
-    .insert(insertData)
-    .select(`
-      *,
-      question:question_id(id, code, title),
-      pack:pack_id(id, pack_code, name)
-    `)
-    .single();
+    .insert(insertData);
 
   if (error) {
     logger.error('Failed to create series:', error);
     throw new Error('Failed to create series');
   }
 
-  return series;
+  return null;  // Spring Boot returns Result<Void>
 };
 
 /**
- * Update series
+ * Update series (matches Spring Boot PUT /series)
  * @param {Object} data - Update data (must include id)
  * @param {number} userId - Updater user ID
- * @returns {Promise<Object>} Updated series
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
-const updateSeries = async (data, userId) => {
+const updateSeries = async (data, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   if (!data.id) {
@@ -1233,13 +1249,10 @@ const updateSeries = async (data, userId) => {
   }
 
   const updateData = {
-    updater: userId,
-    updated_at: new Date().toISOString()
+    update_date: new Date().toISOString()
   };
 
   // Only update provided fields
-  if (data.name !== undefined) updateData.name = data.name;
-  if (data.description !== undefined) updateData.description = data.description;
   if (data.startUid !== undefined) {
     updateData.start_uid = data.startUid.toUpperCase().replace(/[:-]/g, '');
   }
@@ -1249,6 +1262,7 @@ const updateSeries = async (data, userId) => {
   if (data.questionId !== undefined) updateData.question_id = data.questionId;
   if (data.packId !== undefined) updateData.pack_id = data.packId;
   if (data.priority !== undefined) updateData.priority = data.priority;
+  if (data.notes !== undefined) updateData.notes = data.notes;
   if (data.active !== undefined) updateData.active = data.active;
 
   // Validate UID order if both are being updated
@@ -1256,29 +1270,48 @@ const updateSeries = async (data, userId) => {
     throw new Error('Start UID must be less than or equal to End UID');
   }
 
-  const { data: series, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('rfid_series')
     .update(updateData)
-    .eq('id', data.id)
-    .select(`
-      *,
-      question:question_id(id, code, title),
-      pack:pack_id(id, pack_code, name)
-    `)
-    .single();
+    .eq('id', data.id);
 
   if (error) {
     logger.error('Failed to update series:', error);
     throw new Error('Failed to update series');
   }
 
-  return series;
+  return null;  // Spring Boot returns Result<Void>
 };
 
 /**
- * Delete series
+ * Delete multiple series (matches Spring Boot DELETE /series and POST /series/delete)
+ * @param {number[]} ids - Array of series IDs
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
+ */
+const deleteSeriesBatch = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Series IDs are required');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('rfid_series')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to delete series:', error);
+    throw new Error('Failed to delete series');
+  }
+
+  return null;  // Spring Boot returns Result<Void>
+};
+
+/**
+ * Delete single series (legacy - kept for backward compatibility)
  * @param {number} seriesId - Series ID
- * @returns {Promise<boolean>} Success status
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
 const deleteSeries = async (seriesId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1293,23 +1326,19 @@ const deleteSeries = async (seriesId) => {
     throw new Error('Failed to delete series');
   }
 
-  return true;
+  return null;  // Spring Boot returns Result<Void>
 };
 
 /**
- * Get all active series
- * @returns {Promise<Array>} All active series
+ * Get all active series (matches Spring Boot /active endpoint)
+ * @returns {Promise<Array>} All active series with camelCase fields
  */
 const getActiveSeries = async () => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .eq('active', true)
     .order('priority', { ascending: false });
 
@@ -1318,13 +1347,13 @@ const getActiveSeries = async () => {
     throw new Error('Failed to fetch active series');
   }
 
-  return series || [];
+  return (series || []).map(transformSeriesToCamelCase);
 };
 
 /**
- * Find all series containing a UID
+ * Find all series containing a UID (matches Spring Boot /find/{uid} endpoint)
  * @param {string} uid - RFID UID to check
- * @returns {Promise<Array>} Series that contain the UID
+ * @returns {Promise<Array>} Series that contain the UID with camelCase fields
  */
 const findSeriesByUid = async (uid) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1333,11 +1362,7 @@ const findSeriesByUid = async (uid) => {
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .lte('start_uid', normalizedUid)
     .gte('end_uid', normalizedUid)
     .order('priority', { ascending: false });
@@ -1347,24 +1372,20 @@ const findSeriesByUid = async (uid) => {
     throw new Error('Failed to find series');
   }
 
-  return series || [];
+  return (series || []).map(transformSeriesToCamelCase);
 };
 
 /**
- * Get series by pack ID
+ * Get series by pack ID (matches Spring Boot /pack/{packId} endpoint)
  * @param {number} packId - Pack ID
- * @returns {Promise<Array>} Series in the pack
+ * @returns {Promise<Array>} Series in the pack with camelCase fields
  */
 const getSeriesByPackId = async (packId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .eq('pack_id', packId)
     .order('priority', { ascending: false });
 
@@ -1373,24 +1394,20 @@ const getSeriesByPackId = async (packId) => {
     throw new Error('Failed to fetch series');
   }
 
-  return series || [];
+  return (series || []).map(transformSeriesToCamelCase);
 };
 
 /**
- * Get series by question ID
+ * Get series by question ID (matches Spring Boot /question/{questionId} endpoint)
  * @param {number} questionId - Question ID
- * @returns {Promise<Array>} Series with the question
+ * @returns {Promise<Array>} Series with the question with camelCase fields
  */
 const getSeriesByQuestionId = async (questionId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .eq('question_id', questionId)
     .order('priority', { ascending: false });
 
@@ -1399,7 +1416,7 @@ const getSeriesByQuestionId = async (questionId) => {
     throw new Error('Failed to fetch series');
   }
 
-  return series || [];
+  return (series || []).map(transformSeriesToCamelCase);
 };
 
 // =============================================
@@ -2030,6 +2047,7 @@ module.exports = {
   createSeries,
   updateSeries,
   deleteSeries,
+  deleteSeriesBatch,
   getActiveSeries,
   findSeriesByUid,
   getSeriesByPackId,

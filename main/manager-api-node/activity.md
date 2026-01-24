@@ -38,7 +38,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 26 | rfid | Test RFID question endpoints | Complete |
 | 27 | rfid | Test RFID pack endpoints | Complete |
 | 28 | rfid | Test RFID card endpoints | Complete |
-| 29 | rfid | Test RFID series endpoints | Pending |
+| 29 | rfid | Test RFID series endpoints | Complete |
 | 30 | voice | Test TTS voice endpoints | Pending |
 | 31-36 | integration | Full frontend integration tests | Pending |
 
@@ -85,6 +85,74 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 29 Complete (RFID Series Endpoints)
+
+**Task 29: Test and fix RFID series endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /admin/rfid/series/page` - Paginated series query (added questionId filter)
+- `GET /admin/rfid/series/list` - List all series (added questionId filter)
+- `GET /admin/rfid/series/active` - List all active series
+- `GET /admin/rfid/series/{id}` - Get series by ID
+- `GET /admin/rfid/series/lookup/{uid}` - Public lookup by UID range
+- `GET /admin/rfid/series/find/{uid}` - Find all series containing UID
+- `GET /admin/rfid/series/pack/{packId}` - Get series by pack ID
+- `GET /admin/rfid/series/question/{questionId}` - Get series by question ID
+- `POST /admin/rfid/series` - Create series
+- `PUT /admin/rfid/series` - Update series
+- `DELETE /admin/rfid/series` - Delete series (accepts Long[] array) - NEW (replaces /{id})
+- `POST /admin/rfid/series/delete` - Batch delete series (NEW)
+
+**Issues Found & Fixed:**
+
+1. **Response format (snake_case vs camelCase)**
+   - Spring Boot returns RfidSeriesDTO with camelCase fields
+   - Added `transformSeriesToCamelCase()` helper in rfid.service.js
+   - Maps: start_uid→startUid, end_uid→endUid, question_id→questionId, pack_id→packId, create_date→createDate
+
+2. **Missing batch delete endpoints**
+   - Spring Boot uses DELETE body with Long[] array, not path param
+   - Replaced DELETE /series/:id with DELETE /series (body array)
+   - Added POST /series/delete for batch deletion
+   - Added `deleteSeriesBatch()` service method
+
+3. **CUD operations response format**
+   - Spring Boot returns `Result<Void>` (null data) for POST, PUT, DELETE
+   - Updated createSeries, updateSeries, deleteSeries to return null
+   - Updated route handlers to call `success(res, null)`
+
+4. **Authentication level**
+   - Changed all series endpoints from `requireAuth` to `requireAdmin`
+   - Matches Spring Boot `sys:role:superAdmin` annotation
+   - Only /lookup/{uid} remains public for device tap
+
+5. **POST validation**
+   - Spring Boot RfidSeriesDTO requires: startUid, endUid, questionId
+   - Updated POST validation to match DTO requirements
+   - Removed old 'name' validation (not in DTO)
+
+6. **Filter parameters**
+   - Spring Boot /page and /list support: packId, questionId, active
+   - Added questionId filter support to getSeriesList and getSeriesAll
+   - Updated route handlers to pass questionId to service
+
+7. **Service method column names**
+   - Old code referenced incorrect columns (content_pack_id, status)
+   - Fixed to use correct schema: pack_id, active
+   - Fixed ordering: priority DESC instead of created_at DESC
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added transformSeriesToCamelCase, deleteSeriesBatch. Updated all series methods for camelCase transformation and correct column names. Updated CUD methods to return null.
+- `src/routes/rfid.routes.js` - Changed requireAuth to requireAdmin, added questionId filter, replaced DELETE /:id with DELETE body, added POST /delete. Updated CUD responses.
+
+**Verification:**
+- `npm run lint` - No new errors in rfid files
+- All endpoints match Spring Boot RfidSeriesController signature
+
+---
 
 ### 2026-01-24 - Phase 4 Task 28 Complete (RFID Card Endpoints)
 
