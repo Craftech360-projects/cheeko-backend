@@ -33,7 +33,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 21 | analytics | Test usage/token analytics endpoints | Complete |
 | 22 | model | Test model listing endpoints | Complete |
 | 23 | model | Test model CRUD operations | Complete |
-| 24 | model | Test model provider endpoints | Pending |
+| 24 | model | Test model provider endpoints | Complete |
 | 25 | ota | Test OTA management endpoints | Pending |
 | 26-29 | rfid | Test RFID endpoints | Pending |
 | 30 | voice | Test TTS voice endpoints | Pending |
@@ -82,6 +82,64 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 24 Complete (Model Provider Endpoints)
+
+**Task 24: Test and fix model provider endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /models/provider` - Get provider list (paginated)
+- `POST /models/provider` - Add model provider
+- `PUT /models/provider` - Edit model provider
+- `POST /models/provider/delete` - Delete model provider(s)
+
+**Issues Found:**
+
+1. **Authentication level mismatch** - Node.js used `requireAuth`, but Spring Boot requires `sys:role:superAdmin`
+   - Changed to use `requireAdmin` middleware for all provider endpoints
+
+2. **Response format mismatch** - Node.js returned snake_case fields, Spring Boot returns camelCase (ModelProviderDTO)
+   - Added `transformProviderToCamelCase()` helper function
+   - Updated all provider methods to return camelCase responses
+
+3. **Missing name filter** - Spring Boot supports searching by name (LIKE on name OR provider_code)
+   - Added `name` parameter to `getProviders()` with OR filter support
+
+4. **DELETE endpoint format** - Spring Boot accepts array of IDs for batch delete
+   - Node.js only accepted single `id`
+   - Updated to accept either `id` or `ids` array
+   - Added `deleteProviders()` batch delete function
+
+5. **Error messages** - Spring Boot uses standardized messages: "Failed to add data", "Failed to update data", "Failed to delete data"
+   - Updated error messages to match
+
+**Fixes Applied:**
+
+**1. Fixed authentication (`src/routes/model.routes.js`)**
+- Changed GET, POST, PUT, POST /delete from `requireAuth` to `requireAdmin`
+
+**2. Added camelCase transformation (`src/services/model.service.js`)**
+- Added `transformProviderToCamelCase()` helper
+- Updated `getProviders()`, `createProvider()`, `updateProvider()` to return camelCase
+
+**3. Added name filter support**
+- `getProviders()` now accepts `name` parameter
+- Uses Supabase `or()` filter: `name.ilike.%{name}%,provider_code.ilike.%{name}%`
+
+**4. Added batch delete support**
+- Route accepts `id` (single) or `ids` (array)
+- Added `deleteProviders(ids)` function for batch delete
+
+**Files Modified:**
+- `src/routes/model.routes.js` - Updated 4 provider route handlers (~30 lines)
+- `src/services/model.service.js` - Updated 4 provider service methods, added batch delete (~50 lines)
+
+**Verification:**
+- `npm run lint` - No new errors (4 pre-existing errors, 6 warnings)
+
+---
 
 ### 2026-01-24 - Phase 4 Task 23 Complete (Model CRUD Operations)
 

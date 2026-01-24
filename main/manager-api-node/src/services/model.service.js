@@ -692,12 +692,30 @@ const setDefaultModel = async (modelId) => {
 // Model Provider CRUD Methods
 // =============================================
 
+// Helper to transform provider to camelCase (matching ModelProviderDTO)
+const transformProviderToCamelCase = (obj) => {
+  if (!obj) return null;
+  return {
+    id: obj.id,
+    modelType: obj.model_type,
+    providerCode: obj.provider_code,
+    name: obj.name,
+    fields: obj.fields,
+    sort: obj.sort,
+    creator: obj.creator,
+    createDate: obj.create_date,
+    updater: obj.updater,
+    updateDate: obj.update_date
+  };
+};
+
 /**
  * Get model providers with pagination
+ * Matches Spring Boot: supports modelType filter and name search (LIKE on name OR provider_code)
  * @param {Object} options - Pagination and filter options
  * @returns {Promise<Object>} Paginated providers
  */
-const getProviders = async ({ page = 1, limit = 20, modelType } = {}) => {
+const getProviders = async ({ page = 1, limit = 20, modelType, name } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const offset = (page - 1) * limit;
@@ -717,13 +735,19 @@ const getProviders = async ({ page = 1, limit = 20, modelType } = {}) => {
     dataQuery = dataQuery.eq('model_type', modelType);
   }
 
+  // Spring Boot: filters by name OR provider_code (LIKE search)
+  if (name) {
+    countQuery = countQuery.or(`name.ilike.%${name}%,provider_code.ilike.%${name}%`);
+    dataQuery = dataQuery.or(`name.ilike.%${name}%,provider_code.ilike.%${name}%`);
+  }
+
   const { count } = await countQuery;
   const { data: providers, error } = await dataQuery.range(offset, offset + limit - 1);
 
   if (error) throw new Error('Failed to fetch providers');
 
   return {
-    list: providers || [],
+    list: (providers || []).map(transformProviderToCamelCase),
     total: count || 0,
     page,
     limit
@@ -751,6 +775,7 @@ const getProviderById = async (providerId) => {
 
 /**
  * Create model provider
+ * Matches Spring Boot: returns ModelProviderDTO in camelCase
  * @param {number} userId - User ID (creator)
  * @param {Object} data - Provider data
  * @returns {Promise<Object>} Created provider
@@ -773,14 +798,15 @@ const createProvider = async (userId, data) => {
 
   if (error) {
     logger.error('Failed to create provider:', error);
-    throw new Error('Failed to create provider');
+    throw new Error('Failed to add data');
   }
 
-  return provider;
+  return transformProviderToCamelCase(provider);
 };
 
 /**
  * Update model provider
+ * Matches Spring Boot: returns ModelProviderDTO in camelCase
  * @param {string} providerId - Provider ID
  * @param {Object} data - Update data
  * @returns {Promise<Object>} Updated provider
@@ -806,10 +832,10 @@ const updateProvider = async (providerId, data) => {
 
   if (error) {
     logger.error('Failed to update provider:', error);
-    throw new Error('Failed to update provider');
+    throw new Error('Failed to update data');
   }
 
-  return provider;
+  return transformProviderToCamelCase(provider);
 };
 
 /**
@@ -826,7 +852,26 @@ const deleteProvider = async (providerId) => {
 
   if (error) {
     logger.error('Failed to delete provider:', error);
-    throw new Error('Failed to delete provider');
+    throw new Error('Failed to delete data');
+  }
+};
+
+/**
+ * Delete multiple model providers (batch delete)
+ * Matches Spring Boot: accepts array of IDs
+ * @param {Array<string>} ids - Provider IDs to delete
+ */
+const deleteProviders = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to delete providers:', error);
+    throw new Error('Failed to delete data');
   }
 };
 
@@ -916,6 +961,7 @@ module.exports = {
   createProvider,
   updateProvider,
   deleteProvider,
+  deleteProviders,
   getProviderPluginNames,
   // Voice by model
   getVoicesByModelId

@@ -410,7 +410,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test provider CRUD on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Changed auth from requireAuth to requireAdmin, 2) Added camelCase transformation for responses, 3) Added name filter support (LIKE on name OR provider_code), 4) Added batch delete support (accepts ids array)"
   },
   {
     "id": 25,

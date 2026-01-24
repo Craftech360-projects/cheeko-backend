@@ -207,7 +207,8 @@ const VALID_MODEL_TYPES = ['asr', 'tts', 'llm', 'vad', 'mem', 'intent', 'vllm'];
 router.get('/names',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const names = await modelService.getModelNames();
+    const { modelType, modelName } = req.query;
+    const names = await modelService.getModelNames(modelType, modelName);
     success(res, names);
   })
 );
@@ -244,7 +245,8 @@ router.get('/names',
 router.get('/llm/names',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const names = await modelService.getLlmNames();
+    const { modelName } = req.query;
+    const names = await modelService.getLlmNames(modelName);
     success(res, names);
   })
 );
@@ -344,11 +346,12 @@ router.get('/options',
 router.get('/list',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { page, limit, modelType } = req.query;
+    const { page, limit, modelType, modelName } = req.query;
     const result = await modelService.listModels({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 20,
-      modelType
+      modelType,
+      modelName
     });
     success(res, result);
   })
@@ -701,20 +704,21 @@ router.get('/tts-voices/:id',
  *         description: Unauthorized
  */
 router.get('/provider',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, modelType } = req.query;
+    const { page, limit, modelType, name } = req.query;
     const result = await modelService.getProviders({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 20,
-      modelType
+      modelType,
+      name
     });
     success(res, result);
   })
 );
 
 router.post('/provider',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { modelType, providerCode, name } = req.body;
 
@@ -732,7 +736,7 @@ router.post('/provider',
 );
 
 router.put('/provider',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { id } = req.body;
 
@@ -780,17 +784,19 @@ router.put('/provider',
  *         description: Unauthorized
  */
 router.post('/provider/delete',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { id } = req.body;
+    // Spring Boot accepts either a single id or array of ids
+    const { id, ids } = req.body;
+    const idsToDelete = ids || (id ? [id] : []);
 
-    if (!id) {
-      return badRequest(res, 'Provider id is required');
+    if (idsToDelete.length === 0) {
+      return badRequest(res, 'Provider id(s) required');
     }
 
     try {
-      await modelService.deleteProvider(id);
-      success(res, null, 'Provider deleted successfully');
+      await modelService.deleteProviders(idsToDelete);
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1023,6 +1029,91 @@ router.get('/type/:type',
   })
 );
 
+// ==================== SPECIFIC PATH ROUTES (MUST BE BEFORE DYNAMIC :type ROUTES) ====================
+
+/**
+ * @swagger
+ * /models/enable/{id}/{status}:
+ *   put:
+ *     tags: [Models]
+ *     summary: Enable/disable model configuration
+ *     description: Set the enabled status of a model configuration
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Model ID
+ *       - in: path
+ *         name: status
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           enum: [0, 1]
+ *         description: Enable status (0=disabled, 1=enabled)
+ *     responses:
+ *       200:
+ *         description: Model status updated successfully
+ *       400:
+ *         description: Model configuration does not exist
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.put('/enable/:id/:status',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      await modelService.enableModel(req.params.id, parseInt(req.params.status));
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /models/default/{id}:
+ *   put:
+ *     tags: [Models]
+ *     summary: Set default model
+ *     description: Set a model as the default for its type
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Model ID
+ *     responses:
+ *       200:
+ *         description: Default model set successfully
+ *       400:
+ *         description: Model configuration does not exist
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.put('/default/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      await modelService.setDefaultModel(req.params.id);
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 // ==================== PRD-COMPLIANT DYNAMIC ROUTES ====================
 // These must be defined AFTER all static routes
 
@@ -1236,11 +1327,49 @@ router.put('/:type/:provider/:id',
 
 /**
  * @swagger
+ * /models/{modelId}/voices:
+ *   get:
+ *     tags: [Models]
+ *     summary: Get model voices
+ *     description: Returns list of TTS voices for a specific model
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: modelId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Model ID
+ *       - in: query
+ *         name: voiceName
+ *         schema:
+ *           type: string
+ *         description: Filter by voice name
+ *     responses:
+ *       200:
+ *         description: List of voices
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/:modelId/voices',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { voiceName } = req.query;
+    const voices = await modelService.getVoicesByModelId(req.params.modelId, voiceName);
+    success(res, voices);
+  })
+);
+
+/**
+ * @swagger
  * /models/{id}:
  *   get:
  *     tags: [Models]
  *     summary: Get model by ID
  *     description: Retrieve a single model by its ID
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1286,6 +1415,7 @@ router.put('/:type/:provider/:id',
  *         description: Admin access required
  */
 router.get('/:id',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const model = await modelService.getModelById(req.params.id);
     if (!model) {
