@@ -657,14 +657,36 @@ router.get('/series/lookup/:uid',
 
 /**
  * @swagger
- * /admin/rfid/pack/list:
+ * /admin/rfid/pack/page:
  *   get:
  *     tags: [RFID]
- *     summary: List RFID packs
- *     description: Returns list of RFID product packs/SKUs
+ *     summary: Paginated pack query
+ *     description: Returns paginated list of RFID packs with camelCase fields (matches Spring Boot)
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (starts from 1)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Records per page
+ *       - in: query
+ *         name: packCode
+ *         schema:
+ *           type: string
+ *         description: Filter by pack code (LIKE search)
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Filter by pack name (LIKE search)
  *       - in: query
  *         name: active
  *         schema:
@@ -672,26 +694,17 @@ router.get('/series/lookup/:uid',
  *         description: Filter by active status
  *     responses:
  *       200:
- *         description: Pack list
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/RfidPack'
+ *         description: Paginated pack list
  */
-router.get('/pack/list',
-  requireAuth,
+router.get('/pack/page',
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { active } = req.query;
-    const result = await rfidService.getPackList({
+    const { page, limit, packCode, name, active } = req.query;
+    const result = await rfidService.getPackPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      packCode,
+      name,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
@@ -700,65 +713,118 @@ router.get('/pack/list',
 
 /**
  * @swagger
- * /admin/rfid/pack:
- *   post:
+ * /admin/rfid/pack/list:
+ *   get:
  *     tags: [RFID]
- *     summary: Create RFID pack
- *     description: Create a new RFID product pack (admin only)
+ *     summary: List all packs
+ *     description: Returns list of all RFID packs with optional filters
  *     security:
  *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - packCode
- *               - name
- *             properties:
- *               packCode:
- *                 type: string
- *                 description: Unique pack identifier
- *                 example: "ANIMALS_PACK_1"
- *               name:
- *                 type: string
- *                 description: Pack display name
- *               description:
- *                 type: string
- *               ageMin:
- *                 type: integer
- *                 description: Minimum recommended age
- *               ageMax:
- *                 type: integer
- *                 description: Maximum recommended age
- *               active:
- *                 type: boolean
- *                 default: true
+ *     parameters:
+ *       - in: query
+ *         name: packCode
+ *         schema:
+ *           type: string
+ *         description: Filter by pack code (LIKE search)
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Filter by pack name (LIKE search)
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *         description: Filter by active status
  *     responses:
  *       200:
- *         description: Pack created
- *       400:
- *         description: Validation error or duplicate code
+ *         description: Pack list
  */
-router.post('/pack',
+router.get('/pack/list',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { packCode, name } = req.body;
+    const { packCode, name, active } = req.query;
+    const result = await rfidService.getPackList({
+      packCode,
+      name,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
 
-    if (!packCode) {
-      return badRequest(res, 'Pack code is required');
-    }
-    if (!name) {
-      return badRequest(res, 'Pack name is required');
-    }
+/**
+ * @swagger
+ * /admin/rfid/pack/active:
+ *   get:
+ *     tags: [RFID]
+ *     summary: List all active packs
+ *     description: Returns list of all active RFID packs (public endpoint)
+ *     responses:
+ *       200:
+ *         description: Active pack list
+ */
+router.get('/pack/active',
+  asyncHandler(async (req, res) => {
+    const result = await rfidService.getAllActivePacks();
+    success(res, result);
+  })
+);
 
-    try {
-      const pack = await rfidService.createPack(req.body, req.user.id);
-      success(res, pack, 'Pack created successfully');
-    } catch (error) {
-      badRequest(res, error.message);
-    }
+/**
+ * @swagger
+ * /admin/rfid/pack/code/{packCode}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get pack by code
+ *     description: Retrieve RFID pack details by pack code
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: packCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pack code
+ *     responses:
+ *       200:
+ *         description: Pack details
+ *       404:
+ *         description: Pack not found
+ */
+router.get('/pack/code/:packCode',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { packCode } = req.params;
+    const pack = await rfidService.getPackByCode(packCode);
+    success(res, pack);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/pack/age/{age}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get packs suitable for age
+ *     description: Returns active packs suitable for the specified age (public endpoint)
+ *     parameters:
+ *       - in: path
+ *         name: age
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Target age
+ *     responses:
+ *       200:
+ *         description: Pack list suitable for age
+ */
+router.get('/pack/age/:age',
+  asyncHandler(async (req, res) => {
+    const { age } = req.params;
+    const result = await rfidService.getPackByAge(parseInt(age));
+    success(res, result);
   })
 );
 
@@ -781,31 +847,76 @@ router.post('/pack',
  *     responses:
  *       200:
  *         description: Pack details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   $ref: '#/components/schemas/RfidPack'
  *       404:
  *         description: Pack not found
  */
 router.get('/pack/:id',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-
     const pack = await rfidService.getPackById(parseInt(id));
-    if (!pack) {
-      return notFound(res, 'Pack not found');
+    success(res, pack);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/pack:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Create RFID pack
+ *     description: Create a new RFID product pack (admin only). Returns Result<Void>.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - packCode
+ *               - name
+ *             properties:
+ *               packCode:
+ *                 type: string
+ *                 description: Unique pack identifier
+ *               name:
+ *                 type: string
+ *                 description: Pack display name
+ *               description:
+ *                 type: string
+ *               ageMin:
+ *                 type: integer
+ *               ageMax:
+ *                 type: integer
+ *               active:
+ *                 type: boolean
+ *                 default: true
+ *     responses:
+ *       200:
+ *         description: Pack created (data is null)
+ *       400:
+ *         description: Validation error
+ */
+router.post('/pack',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { packCode, name } = req.body;
+
+    if (!packCode) {
+      return badRequest(res, 'Pack code is required');
+    }
+    if (!name) {
+      return badRequest(res, 'Name is required');
     }
 
-    success(res, pack);
+    try {
+      await rfidService.createPack(req.body, req.user.id);
+      success(res, null);  // Spring Boot returns Result<Void>
+    } catch (error) {
+      badRequest(res, error.message);
+    }
   })
 );
 
@@ -815,7 +926,7 @@ router.get('/pack/:id',
  *   put:
  *     tags: [RFID]
  *     summary: Update RFID pack
- *     description: Update an existing RFID pack (admin only)
+ *     description: Update an existing RFID pack (admin only). Returns Result<Void>.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -832,23 +943,19 @@ router.get('/pack/:id',
  *                 description: Pack ID
  *               packCode:
  *                 type: string
- *                 description: Unique pack identifier
  *               name:
  *                 type: string
- *                 description: Pack display name
  *               description:
  *                 type: string
  *               ageMin:
  *                 type: integer
- *                 description: Minimum recommended age
  *               ageMax:
  *                 type: integer
- *                 description: Maximum recommended age
  *               active:
  *                 type: boolean
  *     responses:
  *       200:
- *         description: Pack updated
+ *         description: Pack updated (data is null)
  *       400:
  *         description: Validation error
  */
@@ -862,8 +969,8 @@ router.put('/pack',
     }
 
     try {
-      const pack = await rfidService.updatePack(req.body, req.user.id);
-      success(res, pack, 'Pack updated successfully');
+      await rfidService.updatePack(req.body, req.user.id);
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -872,38 +979,90 @@ router.put('/pack',
 
 /**
  * @swagger
- * /admin/rfid/pack/{id}:
+ * /admin/rfid/pack:
  *   delete:
  *     tags: [RFID]
- *     summary: Delete RFID pack
- *     description: Delete an RFID pack (admin only)
+ *     summary: Delete packs
+ *     description: Delete one or more RFID packs (admin only). Accepts Long[] array in body.
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: Pack ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             example: [1, 2, 3]
  *     responses:
  *       200:
- *         description: Pack deleted
+ *         description: Packs deleted (data is null)
  *       400:
- *         description: Pack ID required
+ *         description: Pack IDs required
  */
-router.delete('/pack/:id',
+router.delete('/pack',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    // Accept raw array or {ids: [...]} format
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
 
-    if (!id) {
-      return badRequest(res, 'Pack ID is required');
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Pack IDs are required');
     }
 
     try {
-      await rfidService.deletePack(parseInt(id));
-      success(res, null, 'Pack deleted successfully');
+      await rfidService.deletePacks(ids.map(id => parseInt(id)));
+      success(res, null);  // Spring Boot returns Result<Void>
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/pack/delete:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Delete packs (POST)
+ *     description: Delete one or more RFID packs (admin only). Accepts Long[] array in body.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             example: [1, 2, 3]
+ *     responses:
+ *       200:
+ *         description: Packs deleted (data is null)
+ *       400:
+ *         description: Pack IDs required
+ */
+router.post('/pack/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    // Accept raw array or {ids: [...]} format
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Pack IDs are required');
+    }
+
+    try {
+      await rfidService.deletePacks(ids.map(id => parseInt(id)));
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }

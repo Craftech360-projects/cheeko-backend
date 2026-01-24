@@ -36,7 +36,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 24 | model | Test model provider endpoints | Complete |
 | 25 | ota | Test OTA management endpoints | Complete |
 | 26 | rfid | Test RFID question endpoints | Complete |
-| 27-29 | rfid | Test remaining RFID endpoints | Pending |
+| 27 | rfid | Test RFID pack endpoints | Complete |
+| 28-29 | rfid | Test remaining RFID endpoints (card, series) | Pending |
 | 30 | voice | Test TTS voice endpoints | Pending |
 | 31-36 | integration | Full frontend integration tests | Pending |
 
@@ -83,6 +84,65 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 27 Complete (RFID Pack Endpoints)
+
+**Task 27: Test and fix RFID pack endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /admin/rfid/pack/page` - Paginated pack query (NEW)
+- `GET /admin/rfid/pack/list` - List all packs
+- `GET /admin/rfid/pack/active` - List all active packs (NEW)
+- `GET /admin/rfid/pack/{id}` - Get pack by ID
+- `GET /admin/rfid/pack/code/{packCode}` - Get pack by code (NEW)
+- `GET /admin/rfid/pack/age/{age}` - Get packs suitable for age (NEW)
+- `POST /admin/rfid/pack` - Create pack
+- `PUT /admin/rfid/pack` - Update pack
+- `DELETE /admin/rfid/pack` - Delete packs (accepts Long[] array)
+- `POST /admin/rfid/pack/delete` - Batch delete packs (NEW)
+
+**Issues Found & Fixed:**
+
+1. **Schema mismatch between Prisma and Spring Boot**
+   - Supabase uses: `pack_name`, `status` (int 0/1), `created_at`, `updated_at`
+   - Spring Boot uses: `name`, `active` (boolean), `createDate`, `updateDate`
+   - Fix: Added `transformPackToCamelCase()` helper to map Supabase schema to Spring Boot DTO format
+   - Transforms status (1/0) to active (true/false)
+
+2. **Missing endpoints**
+   - Spring Boot has: /page, /active, /code/:packCode, /age/:age, DELETE body, POST /delete
+   - Added all missing endpoints to match Spring Boot controller
+
+3. **Response format for CUD operations**
+   - Spring Boot returns `Result<Void>` (null data) for POST, PUT, DELETE
+   - Node.js was returning the created/updated object
+   - Fix: Changed all CUD operations to return null
+
+4. **Authentication level**
+   - Spring Boot requires `sys:role:superAdmin` for pack endpoints
+   - Changed from `requireAuth` to `requireAdmin` for protected endpoints
+   - `/active` and `/age/:age` are public (no auth)
+
+5. **Query filters**
+   - Added LIKE search support for `packCode` and `name` filters
+   - Added `active` filter with status conversion
+
+6. **Batch delete**
+   - Spring Boot accepts `Long[]` array directly in request body
+   - Added support for both raw array and `{ids: [...]}` format
+   - Added `deletePacks()` service method for batch deletion
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added transformPackToCamelCase, getPackPage, getAllActivePacks, getPackByCode, getPackByAge, deletePacks. Updated all pack methods for Supabase schema mapping.
+- `src/routes/rfid.routes.js` - Added /page, /active, /code/:packCode, /age/:age endpoints. Added DELETE body and POST /delete. Updated responses for Result<Void> compatibility.
+
+**Verification:**
+- `npm run lint` - No new errors in rfid files
+- All endpoints match Spring Boot RfidPackController signature
+
+---
 
 ### 2026-01-24 - Phase 4 Task 26 Complete (RFID Question Endpoints)
 

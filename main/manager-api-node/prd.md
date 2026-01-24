@@ -470,7 +470,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test pack CRUD on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Schema mapping from Supabase (pack_name, status) to Spring Boot (name, active), 2) Added transformPackToCamelCase helper, 3) Added missing endpoints (/page, /active, /code/:packCode, /age/:age), 4) CUD operations return null (Result<Void>), 5) Changed auth to requireAdmin, 6) Added batch delete support"
   },
   {
     "id": 28,

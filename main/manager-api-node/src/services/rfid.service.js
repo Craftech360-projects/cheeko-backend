@@ -40,6 +40,27 @@ const transformQuestionToCamelCase = (question) => {
 };
 
 // =============================================
+// Helper: Transform RFID Pack to camelCase (RfidPackDTO)
+// Maps Supabase schema (pack_name, status, created_at) to Spring Boot schema (name, active, createDate)
+// =============================================
+const transformPackToCamelCase = (pack) => {
+  if (!pack) return null;
+  return {
+    id: pack.id ? Number(pack.id) : null,
+    packCode: pack.pack_code,
+    // Supabase uses pack_name, Spring Boot uses name
+    name: pack.pack_name || pack.name,
+    description: pack.description,
+    ageMin: pack.age_min,
+    ageMax: pack.age_max,
+    // Supabase uses status (1=active, 0=inactive), Spring Boot uses active (boolean)
+    active: pack.status !== undefined ? pack.status === 1 : pack.active,
+    createDate: formatDate(pack.created_at || pack.create_date),
+    updateDate: formatDate(pack.updated_at || pack.update_date)
+  };
+};
+
+// =============================================
 // Card Mapping Methods (PRD-specified)
 // =============================================
 
@@ -602,23 +623,90 @@ const lookupSeriesByUid = async (uid) => {
 
 // =============================================
 // Pack Management Methods
+// Maps Supabase schema (pack_name, status) to Spring Boot schema (name, active)
 // =============================================
 
 /**
- * Get pack list
- * @param {Object} options - Filter options
- * @returns {Promise<Array>} Pack list
+ * Get pack list with pagination (matches Spring Boot /page endpoint)
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated pack list with camelCase fields
  */
-const getPackList = async ({ active } = {}) => {
+const getPackPage = async ({ page = 1, limit = 10, packCode, name, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  // Build count query
+  let countQuery = supabaseAdmin
+    .from('rfid_pack')
+    .select('id', { count: 'exact', head: true });
+
+  // Build data query - order by pack_name ascending (matches Spring Boot)
+  let dataQuery = supabaseAdmin
+    .from('rfid_pack')
+    .select('*')
+    .order('pack_name', { ascending: true });
+
+  // Apply filters (LIKE search matching Spring Boot)
+  if (packCode) {
+    countQuery = countQuery.ilike('pack_code', `%${packCode}%`);
+    dataQuery = dataQuery.ilike('pack_code', `%${packCode}%`);
+  }
+
+  if (name) {
+    countQuery = countQuery.ilike('pack_name', `%${name}%`);
+    dataQuery = dataQuery.ilike('pack_name', `%${name}%`);
+  }
+
+  if (active !== undefined) {
+    // Convert boolean to status (1=active, 0=inactive)
+    const statusValue = active ? 1 : 0;
+    countQuery = countQuery.eq('status', statusValue);
+    dataQuery = dataQuery.eq('status', statusValue);
+  }
+
+  const { count } = await countQuery;
+  const { data: packs, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch packs:', error);
+    throw new Error('Failed to fetch packs');
+  }
+
+  return {
+    list: (packs || []).map(transformPackToCamelCase),
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit)
+  };
+};
+
+/**
+ * Get all packs list (matches Spring Boot /list endpoint)
+ * @param {Object} options - Filter options
+ * @returns {Promise<Array>} Pack list with camelCase fields
+ */
+const getPackList = async ({ packCode, name, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   let query = supabaseAdmin
     .from('rfid_pack')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('pack_name', { ascending: true });
+
+  // Apply filters
+  if (packCode) {
+    query = query.ilike('pack_code', `%${packCode}%`);
+  }
+
+  if (name) {
+    query = query.ilike('pack_name', `%${name}%`);
+  }
 
   if (active !== undefined) {
-    query = query.eq('active', active);
+    const statusValue = active ? 1 : 0;
+    query = query.eq('status', statusValue);
   }
 
   const { data: packs, error } = await query;
@@ -628,47 +716,34 @@ const getPackList = async ({ active } = {}) => {
     throw new Error('Failed to fetch packs');
   }
 
-  return packs || [];
+  return (packs || []).map(transformPackToCamelCase);
 };
 
 /**
- * Create pack
- * @param {Object} data - Pack data
- * @param {number} userId - Creator user ID
- * @returns {Promise<Object>} Created pack
+ * Get all active packs (matches Spring Boot /active endpoint)
+ * @returns {Promise<Array>} Active pack list with camelCase fields
  */
-const createPack = async (data, userId) => {
+const getAllActivePacks = async () => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data: pack, error } = await supabaseAdmin
+  const { data: packs, error } = await supabaseAdmin
     .from('rfid_pack')
-    .insert({
-      pack_code: data.packCode,
-      name: data.name,
-      description: data.description,
-      age_min: data.ageMin,
-      age_max: data.ageMax,
-      active: data.active !== false,
-      creator: userId
-    })
-    .select()
-    .single();
+    .select('*')
+    .eq('status', 1)
+    .order('pack_name', { ascending: true });
 
   if (error) {
-    logger.error('Failed to create pack:', error);
-    if (error.code === '23505') {
-      throw new Error('Pack with this code already exists');
-    }
-    throw new Error('Failed to create pack');
+    logger.error('Failed to fetch active packs:', error);
+    throw new Error('Failed to fetch active packs');
   }
 
-  return pack;
+  return (packs || []).map(transformPackToCamelCase);
 };
 
 /**
  * Get pack by ID
  * @param {number} packId - Pack ID
- * @returns {Promise<Object>} Pack details
+ * @returns {Promise<Object>} Pack details with camelCase fields
  */
 const getPackById = async (packId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -684,16 +759,101 @@ const getPackById = async (packId) => {
     throw new Error('Failed to fetch pack');
   }
 
-  return pack || null;
+  return transformPackToCamelCase(pack);
 };
 
 /**
- * Update pack
+ * Get pack by pack code (matches Spring Boot /code/{packCode} endpoint)
+ * @param {string} packCode - Pack code
+ * @returns {Promise<Object>} Pack details with camelCase fields
+ */
+const getPackByCode = async (packCode) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: pack, error } = await supabaseAdmin
+    .from('rfid_pack')
+    .select('*')
+    .eq('pack_code', packCode)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch pack by code:', error);
+    throw new Error('Failed to fetch pack by code');
+  }
+
+  return transformPackToCamelCase(pack);
+};
+
+/**
+ * Get packs suitable for age (matches Spring Boot /age/{age} endpoint)
+ * @param {number} age - Target age
+ * @returns {Promise<Array>} Pack list with camelCase fields
+ */
+const getPackByAge = async (age) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get active packs where age is within range
+  const { data: packs, error } = await supabaseAdmin
+    .from('rfid_pack')
+    .select('*')
+    .eq('status', 1)
+    .or(`age_min.is.null,age_min.lte.${age}`)
+    .or(`age_max.is.null,age_max.gte.${age}`)
+    .order('pack_name', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch packs by age:', error);
+    throw new Error('Failed to fetch packs by age');
+  }
+
+  // Filter in memory for AND condition (Supabase or() creates OR)
+  const filtered = (packs || []).filter(p => {
+    const minOk = p.age_min === null || p.age_min <= age;
+    const maxOk = p.age_max === null || p.age_max >= age;
+    return minOk && maxOk;
+  });
+
+  return filtered.map(transformPackToCamelCase);
+};
+
+/**
+ * Create pack (matches Spring Boot POST /pack)
+ * @param {Object} data - Pack data (packCode, name, description, ageMin, ageMax, active)
+ * @param {number} userId - Creator user ID
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
+ */
+const createPack = async (data, _userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('rfid_pack')
+    .insert({
+      pack_code: data.packCode,
+      pack_name: data.name,  // Supabase uses pack_name
+      description: data.description,
+      age_min: data.ageMin,
+      age_max: data.ageMax,
+      status: data.active !== false ? 1 : 0  // Convert boolean to status
+    });
+
+  if (error) {
+    logger.error('Failed to create pack:', error);
+    if (error.code === '23505') {
+      throw new Error('Pack with this code already exists');
+    }
+    throw new Error('Failed to create pack');
+  }
+
+  return null;  // Spring Boot returns Result<Void>
+};
+
+/**
+ * Update pack (matches Spring Boot PUT /pack)
  * @param {Object} data - Update data (must include id)
  * @param {number} userId - Updater user ID
- * @returns {Promise<Object>} Updated pack
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
-const updatePack = async (data, userId) => {
+const updatePack = async (data, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   if (!data.id) {
@@ -701,24 +861,21 @@ const updatePack = async (data, userId) => {
   }
 
   const updateData = {
-    updater: userId,
     updated_at: new Date().toISOString()
   };
 
-  // Only update provided fields
+  // Only update provided fields - map to Supabase column names
   if (data.packCode !== undefined) updateData.pack_code = data.packCode;
-  if (data.name !== undefined) updateData.name = data.name;
+  if (data.name !== undefined) updateData.pack_name = data.name;  // Supabase uses pack_name
   if (data.description !== undefined) updateData.description = data.description;
   if (data.ageMin !== undefined) updateData.age_min = data.ageMin;
   if (data.ageMax !== undefined) updateData.age_max = data.ageMax;
-  if (data.active !== undefined) updateData.active = data.active;
+  if (data.active !== undefined) updateData.status = data.active ? 1 : 0;  // Convert boolean to status
 
-  const { data: pack, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('rfid_pack')
     .update(updateData)
-    .eq('id', data.id)
-    .select()
-    .single();
+    .eq('id', data.id);
 
   if (error) {
     logger.error('Failed to update pack:', error);
@@ -728,13 +885,13 @@ const updatePack = async (data, userId) => {
     throw new Error('Failed to update pack');
   }
 
-  return pack;
+  return null;  // Spring Boot returns Result<Void>
 };
 
 /**
- * Delete pack
+ * Delete pack (single ID)
  * @param {number} packId - Pack ID
- * @returns {Promise<boolean>} Success status
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
 const deletePack = async (packId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -749,7 +906,32 @@ const deletePack = async (packId) => {
     throw new Error('Failed to delete pack');
   }
 
-  return true;
+  return null;  // Spring Boot returns Result<Void>
+};
+
+/**
+ * Delete multiple packs (matches Spring Boot DELETE /pack and POST /pack/delete)
+ * @param {number[]} ids - Array of pack IDs
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
+ */
+const deletePacks = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Pack IDs are required');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('rfid_pack')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to delete packs:', error);
+    throw new Error('Failed to delete packs');
+  }
+
+  return null;  // Spring Boot returns Result<Void>
 };
 
 // =============================================
@@ -1722,11 +1904,16 @@ module.exports = {
   getSeriesByQuestionId,
 
   // Pack management
+  getPackPage,
   getPackList,
+  getAllActivePacks,
   getPackById,
+  getPackByCode,
+  getPackByAge,
   createPack,
   updatePack,
   deletePack,
+  deletePacks,
 
   // Question management
   getQuestionPage,
