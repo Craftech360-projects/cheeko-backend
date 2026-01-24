@@ -35,7 +35,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 23 | model | Test model CRUD operations | Complete |
 | 24 | model | Test model provider endpoints | Complete |
 | 25 | ota | Test OTA management endpoints | Complete |
-| 26-29 | rfid | Test RFID endpoints | Pending |
+| 26 | rfid | Test RFID question endpoints | Complete |
+| 27-29 | rfid | Test remaining RFID endpoints | Pending |
 | 30 | voice | Test TTS voice endpoints | Pending |
 | 31-36 | integration | Full frontend integration tests | Pending |
 
@@ -82,6 +83,59 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 26 Complete (RFID Question Endpoints)
+
+**Task 26: Test and fix RFID question endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /admin/rfid/question/page` - Paginated question listing
+- `GET /admin/rfid/question/{id}` - Get question by ID
+- `POST /admin/rfid/question` - Create new question
+- `PUT /admin/rfid/question` - Update question
+- `POST /admin/rfid/question/delete` - Delete questions (accepts Long[] array)
+
+**Issues Found & Fixed:**
+
+1. **Missing rfid_question table in Prisma schema**
+   - Error: "Could not find the table 'public.rfid_question' in the schema cache"
+   - Fix: Added rfid_question model to prisma/schema.prisma with all fields (id, code, title, prompt_text, language, category, difficulty, active, creator, create_date, updater, update_date)
+   - Ran `npx prisma db push` to create the table
+
+2. **Response format mismatch (snake_case vs camelCase)**
+   - Spring Boot returns RfidQuestionDTO with camelCase fields (promptText, createDate, updateDate)
+   - Node.js was returning snake_case from database
+   - Fix: Added `transformQuestionToCamelCase()` helper in rfid.service.js
+   - Added date formatting to `yyyy-MM-dd HH:mm:ss` pattern matching Spring Boot DateUtils.DATE_TIME_PATTERN
+
+3. **CUD operations response format**
+   - Spring Boot returns `Result<Void>` (null data) for POST, PUT, DELETE operations
+   - Node.js was returning the created/updated object
+   - Fix: Updated createQuestion, updateQuestion, deleteQuestions to return null
+   - Updated route handlers to call `success(res, null)`
+
+4. **DELETE endpoint format**
+   - Spring Boot accepts `Long[]` array directly in request body
+   - Fix: Updated both DELETE /question and POST /question/delete to accept raw array format
+   - Also maintained backward compatibility with `{id: X}` or `{ids: [X]}` format
+
+**Files Modified:**
+- `prisma/schema.prisma` - Added rfid_question model
+- `src/services/rfid.service.js` - Added transformer, updated all question methods
+- `src/routes/rfid.routes.js` - Updated POST/PUT/DELETE handlers, added POST /question/delete
+
+**Test Results:**
+```
+GET /admin/rfid/question/page → Returns camelCase fields with proper date format
+GET /admin/rfid/question/{id} → Returns single question in camelCase
+POST /admin/rfid/question → Creates question, returns null data
+PUT /admin/rfid/question → Updates question, returns null data
+POST /admin/rfid/question/delete [2] → Deletes questions, returns null data
+```
+
+---
 
 ### 2026-01-24 - Phase 4 Task 25 Complete (OTA Management Endpoints)
 

@@ -11,6 +11,35 @@ const { normalizeMacAddress } = require('../utils/helpers');
 const qdrantService = require('./integrations/qdrant.service');
 
 // =============================================
+// Helper: Format date to yyyy-MM-dd HH:mm:ss
+// =============================================
+const formatDate = (date) => {
+  if (!date) return null;
+  const d = new Date(date);
+  const pad = (n) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+};
+
+// =============================================
+// Helper: Transform RFID Question to camelCase (RfidQuestionDTO)
+// =============================================
+const transformQuestionToCamelCase = (question) => {
+  if (!question) return null;
+  return {
+    id: question.id ? Number(question.id) : null,
+    code: question.code,
+    title: question.title,
+    promptText: question.prompt_text,
+    language: question.language,
+    category: question.category,
+    difficulty: question.difficulty,
+    active: question.active,
+    createDate: formatDate(question.create_date),
+    updateDate: formatDate(question.update_date)
+  };
+};
+
+// =============================================
 // Card Mapping Methods (PRD-specified)
 // =============================================
 
@@ -1114,7 +1143,7 @@ const getQuestionPage = async ({ page = 1, limit = 10, category, language, activ
   }
 
   return {
-    list: questions || [],
+    list: (questions || []).map(transformQuestionToCamelCase),
     total: count || 0,
     page,
     limit,
@@ -1154,7 +1183,7 @@ const getQuestionList = async ({ category, language, active } = {}) => {
     throw new Error('Failed to fetch questions');
   }
 
-  return questions || [];
+  return (questions || []).map(transformQuestionToCamelCase);
 };
 
 /**
@@ -1176,7 +1205,7 @@ const getQuestionById = async (questionId) => {
     throw new Error('Failed to fetch question');
   }
 
-  return question || null;
+  return transformQuestionToCamelCase(question);
 };
 
 /**
@@ -1198,7 +1227,7 @@ const getQuestionByCode = async (code) => {
     throw new Error('Failed to fetch question');
   }
 
-  return question || null;
+  return transformQuestionToCamelCase(question);
 };
 
 /**
@@ -1221,7 +1250,7 @@ const getQuestionsByCategory = async (category) => {
     throw new Error('Failed to fetch questions');
   }
 
-  return questions || [];
+  return (questions || []).map(transformQuestionToCamelCase);
 };
 
 /**
@@ -1244,14 +1273,14 @@ const getQuestionsByLanguage = async (language) => {
     throw new Error('Failed to fetch questions');
   }
 
-  return questions || [];
+  return (questions || []).map(transformQuestionToCamelCase);
 };
 
 /**
  * Create question
  * @param {Object} data - Question data
  * @param {number} userId - Creator user ID
- * @returns {Promise<Object>} Created question
+ * @returns {Promise<Object>} Created question (returns null for Spring Boot compatibility)
  */
 const createQuestion = async (data, userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1287,14 +1316,15 @@ const createQuestion = async (data, userId) => {
     throw new Error('Failed to create question');
   }
 
-  return question;
+  // Return null for Spring Boot Result<Void> compatibility
+  return null;
 };
 
 /**
  * Update question
  * @param {Object} data - Update data (must include id)
  * @param {number} userId - Updater user ID
- * @returns {Promise<Object>} Updated question
+ * @returns {Promise<Object>} Updated question (returns null for Spring Boot compatibility)
  */
 const updateQuestion = async (data, userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1332,13 +1362,14 @@ const updateQuestion = async (data, userId) => {
     throw new Error('Failed to update question');
   }
 
-  return question;
+  // Return null for Spring Boot Result<Void> compatibility
+  return null;
 };
 
 /**
  * Delete questions
  * @param {Array|number} ids - Question ID(s) to delete
- * @returns {Promise<boolean>} Success status
+ * @returns {Promise<null>} Returns null for Spring Boot Result<Void> compatibility
  */
 const deleteQuestions = async (ids) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1359,7 +1390,8 @@ const deleteQuestions = async (ids) => {
     throw new Error('Failed to delete questions');
   }
 
-  return true;
+  // Return null for Spring Boot Result<Void> compatibility
+  return null;
 };
 
 // =============================================

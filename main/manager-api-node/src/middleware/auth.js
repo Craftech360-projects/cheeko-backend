@@ -211,8 +211,10 @@ const requireAdmin = async (req, res, next) => {
   req.user = user;
   req.token = token;
 
-  // Check admin flag in user metadata or database
-  const isAdmin = user.user_metadata?.admin === true ||
+  // Check admin flag in user object (from custom token) or metadata (from Supabase Auth)
+  const isAdmin = user.super_admin === 1 ||
+                  user.role === 'admin' ||
+                  user.user_metadata?.admin === true ||
                   user.user_metadata?.super_admin === true ||
                   user.app_metadata?.admin === true ||
                   user.app_metadata?.super_admin === true ||

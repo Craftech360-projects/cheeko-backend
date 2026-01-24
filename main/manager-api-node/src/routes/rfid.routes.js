@@ -1848,8 +1848,9 @@ router.post('/question',
     }
 
     try {
-      const question = await rfidService.createQuestion(req.body, req.user.id);
-      success(res, question, 'Question created successfully');
+      await rfidService.createQuestion(req.body, req.user.id);
+      // Return null data matching Spring Boot Result<Void>
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1918,8 +1919,9 @@ router.put('/question',
     }
 
     try {
-      const question = await rfidService.updateQuestion(req.body, req.user.id);
-      success(res, question, 'Question updated successfully');
+      await rfidService.updateQuestion(req.body, req.user.id);
+      // Return null data matching Spring Boot Result<Void>
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1932,7 +1934,7 @@ router.put('/question',
  *   delete:
  *     tags: [RFID Questions]
  *     summary: Delete questions
- *     description: Delete one or more RFID questions (admin only)
+ *     description: Delete one or more RFID questions (admin only). Accepts Long[] array directly in body.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -1940,35 +1942,86 @@ router.put('/question',
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               id:
- *                 type: integer
- *                 description: Single question ID
- *               ids:
- *                 type: array
- *                 items:
- *                   type: integer
- *                 description: Multiple question IDs
+ *             type: array
+ *             items:
+ *               type: integer
+ *             description: Array of question IDs to delete
  *     responses:
  *       200:
  *         description: Questions deleted
  *       400:
- *         description: ID or IDs required
+ *         description: IDs required
  */
 router.delete('/question',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { id, ids } = req.body;
+    // Spring Boot accepts Long[] array directly in body
+    let deleteIds = req.body;
 
-    if (!id && (!ids || !Array.isArray(ids) || ids.length === 0)) {
-      return badRequest(res, 'Question ID or IDs array is required');
+    // Also support legacy format {id: X} or {ids: [X]}
+    if (!Array.isArray(deleteIds)) {
+      const { id, ids } = req.body;
+      deleteIds = ids || (id ? [id] : []);
+    }
+
+    if (!deleteIds || deleteIds.length === 0) {
+      return badRequest(res, 'Question IDs array is required');
     }
 
     try {
-      const deleteIds = ids || [id];
       await rfidService.deleteQuestions(deleteIds);
-      success(res, null, `${deleteIds.length} question(s) deleted successfully`);
+      // Return null data matching Spring Boot Result<Void>
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/question/delete:
+ *   post:
+ *     tags: [RFID Questions]
+ *     summary: Delete questions (POST)
+ *     description: Delete one or more RFID questions (admin only). POST alternative for DELETE. Accepts Long[] array directly.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             description: Array of question IDs to delete
+ *     responses:
+ *       200:
+ *         description: Questions deleted
+ *       400:
+ *         description: IDs required
+ */
+router.post('/question/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    // Spring Boot accepts Long[] array directly in body
+    let deleteIds = req.body;
+
+    // Also support legacy format {id: X} or {ids: [X]}
+    if (!Array.isArray(deleteIds)) {
+      const { id, ids } = req.body;
+      deleteIds = ids || (id ? [id] : []);
+    }
+
+    if (!deleteIds || deleteIds.length === 0) {
+      return badRequest(res, 'Question IDs array is required');
+    }
+
+    try {
+      await rfidService.deleteQuestions(deleteIds);
+      // Return null data matching Spring Boot Result<Void>
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }
