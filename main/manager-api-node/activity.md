@@ -24,8 +24,8 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 11 | feature | RFID Question CRUD endpoints | Complete |
 | 12 | feature | Extended RFID Series endpoints | Complete |
 | 13 | feature | Content Items CRUD endpoints | Complete |
-| 14 | feature | Device Playlist path aliases | Pending |
-| 15 | feature | Password Recovery endpoint | Pending |
+| 14 | feature | Device Playlist path aliases | Complete |
+| 15 | feature | Password Recovery endpoint | Complete |
 | 16 | feature | Server Management endpoints | Pending |
 | 17 | testing | Integration test all new endpoints | Pending |
 
@@ -45,6 +45,92 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Password Recovery Endpoint Complete
+
+**Task 15: Add Password Recovery endpoint**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `PUT /toy/user/retrieve-password` - Retrieve/reset forgotten password
+
+**Service Methods Reused from `auth.service.js`:**
+- `updatePassword(username, newPassword)` - Updates user's password
+
+**Files Modified:**
+- `src/routes/auth.routes.js` - Added retrieve-password route handler with Swagger docs (~75 lines)
+
+**API Contract:**
+```
+PUT /toy/user/retrieve-password
+Request Body:
+  - username: string (required) - Username or email
+  - newPassword: string (required) - New password (min 6 chars)
+  - verificationCode: string (optional) - SMS code when enabled
+
+Response:
+  - code: 0
+  - msg: "Password retrieved successfully"
+```
+
+**Note:** This endpoint is an alias for `/user/update-password` with the same functionality. Both endpoints reset the user's password without requiring authentication. SMS verification is deferred to production implementation.
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
+
+### 2026-01-24 - Device Playlist Path Aliases Complete
+
+**Task 14: Add Device Playlist path aliases**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/device/:mac/playlist/music` - Get music playlist for device by MAC
+- `POST /toy/device/:mac/playlist/music` - Add music to device playlist
+- `DELETE /toy/device/:mac/playlist/music/:contentId` - Remove music from playlist
+- `DELETE /toy/device/:mac/playlist/music/clear` - Clear music playlist
+- `PUT /toy/device/:mac/playlist/music/reorder` - Reorder music playlist
+- `GET /toy/device/:mac/playlist/story` - Get story playlist for device by MAC
+- `POST /toy/device/:mac/playlist/story` - Add story to device playlist
+- `DELETE /toy/device/:mac/playlist/story/:contentId` - Remove story from playlist
+- `DELETE /toy/device/:mac/playlist/story/clear` - Clear story playlist
+- `PUT /toy/device/:mac/playlist/story/reorder` - Reorder story playlist
+
+**Service Methods Reused from `content.service.js`:**
+- `getPlaylist(deviceId, type)` - Get playlist items
+- `addToPlaylist(deviceId, contentId, type, position)` - Add item
+- `removeFromPlaylist(deviceId, contentId, type)` - Remove item
+- `clearPlaylist(deviceId, type)` - Clear all items
+- `reorderPlaylist(deviceId, itemIds, type)` - Reorder items
+
+**Files Modified:**
+- `src/routes/device.routes.js` - Added 10 playlist route handlers with Swagger docs (~350 lines)
+
+**API Contract:**
+```
+GET    /toy/device/:mac/playlist/music              - Returns array of playlist items
+POST   /toy/device/:mac/playlist/music              - Adds item, returns created item
+DELETE /toy/device/:mac/playlist/music/:contentId   - Removes item
+DELETE /toy/device/:mac/playlist/music/clear        - Clears playlist
+PUT    /toy/device/:mac/playlist/music/reorder      - Reorders items, returns playlist
+GET    /toy/device/:mac/playlist/story              - Returns array of playlist items
+POST   /toy/device/:mac/playlist/story              - Adds item, returns created item
+DELETE /toy/device/:mac/playlist/story/:contentId   - Removes item
+DELETE /toy/device/:mac/playlist/story/clear        - Clears playlist
+PUT    /toy/device/:mac/playlist/story/reorder      - Reorders items, returns playlist
+```
+
+**Note:** These routes use the device MAC address to look up the device, then delegate to the content service playlist methods. They provide an alternative path to `/content/playlist/{type}/{deviceId}`.
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Content Items CRUD Endpoints Complete
 

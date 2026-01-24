@@ -457,7 +457,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add /device/:mac/playlist/story routes",
       "Reuse existing playlist service methods"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
@@ -466,7 +466,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add PUT /user/retrieve-password endpoint",
       "Implement password reset logic"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
