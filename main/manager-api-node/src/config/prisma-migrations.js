@@ -14,16 +14,22 @@ const path = require('path');
 const logger = require('../utils/logger');
 
 /**
- * Run Prisma migrations using `prisma migrate deploy`
+ * Run Prisma migrations/schema sync
  *
- * This command applies all pending migrations to the database.
- * It is safe to run in production and will not create new migrations.
+ * In DEVELOPMENT: Uses `prisma db push` to auto-sync schema changes (creates missing tables/columns)
+ * In PRODUCTION: Uses `prisma migrate deploy` to apply migration files only (safe, no auto-changes)
  *
  * @returns {Promise<boolean>} True if migrations succeeded
  * @throws {Error} If migrations fail
  */
 const runPrismaMigrations = async () => {
-  logger.info('Starting Prisma migrations...');
+  // Skip if SKIP_DB_SYNC is set
+  if (process.env.SKIP_DB_SYNC === '1') {
+    logger.info('Skipping database sync (SKIP_DB_SYNC=1)');
+    return true;
+  }
+
+  logger.info('Starting Prisma database sync...');
 
   // Check if DIRECT_URL is set (required for Prisma migrations)
   if (!process.env.DIRECT_URL && !process.env.DATABASE_URL) {
@@ -41,10 +47,17 @@ const runPrismaMigrations = async () => {
     // Get the project root directory (where prisma.config.ts is located)
     const projectRoot = path.resolve(__dirname, '../..');
 
-    // Run prisma migrate deploy
-    logger.info('Running: npx prisma migrate deploy');
+    const isDevelopment = process.env.NODE_ENV !== 'production';
 
-    const output = execSync('npx prisma migrate deploy', {
+    // In development: use db push to auto-sync schema (creates missing tables)
+    // In production: use migrate deploy (only applies existing migration files)
+    const command = isDevelopment
+      ? 'npx prisma db push --accept-data-loss'
+      : 'npx prisma migrate deploy';
+
+    logger.info(`Running: ${command} (${isDevelopment ? 'development' : 'production'} mode)`);
+
+    const output = execSync(command, {
       cwd: projectRoot,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],

@@ -1,311 +1,26 @@
-# Cheeko Manager API (Node.js) - Missing APIs PRD
+# Manager API Node.js - API Compatibility Testing PRD
 
 ## Overview
-
-This document lists the APIs missing from the Node.js port of the Spring Boot manager-api. The Node.js version currently has ~209 endpoints while the Spring Boot version has ~270+ endpoints.
+Systematic testing and fixing of the Node.js manager-api-node to ensure full compatibility with the Vue.js manager-web frontend. Compare API responses with the Spring Boot manager-api (reference) and fix any differences.
 
 ## Target Audience
-
-Backend developers completing the migration from Spring Boot/MySQL to Node.js/Express/Supabase.
-
-## Missing APIs by Module
-
----
-
-## 1. Agent Templates (`/agent/template`)
-
-**Priority: HIGH** - Used for agent character management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/agent/template` | Get agent templates list |
-| POST | `/toy/agent/template` | Create agent template |
-| PUT | `/toy/agent/template/{id}` | Update agent template |
-
-**Service Methods Needed:**
-- `getTemplates()` - List all visible templates
-- `createTemplate(data)` - Create new template
-- `updateTemplate(id, data)` - Update template
-
----
-
-## 2. Agent Memory & Mode (`/agent`)
-
-**Priority: HIGH** - Used by LiveKit workers
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| PUT | `/toy/agent/saveMemory/{macAddress}` | Update agent summary memory by device MAC |
-| PUT | `/toy/agent/update-mode` | Update agent mode from template |
-| GET | `/toy/agent/device/{macAddress}/agent-name` | Get agent name for game mode detection |
-
----
-
-## 3. Agent Chat History (`/agent/chat-history`)
-
-**Priority: HIGH** - Used by LiveKit workers for session logging
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/toy/agent/chat-history/report` | Single message report (cheeko service) |
-| POST | `/toy/agent/chat-history/session` | Batch upload all session messages (LiveKit) |
-| GET | `/toy/agent/{id}/chat-history/user` | Get recent 50 chat messages (mobile app) |
-| GET | `/toy/agent/{id}/chat-history/audio` | Get audio content by audio ID |
-
----
-
-## 4. Agent MCP Access Points (`/agent/mcp`)
-
-**Priority: MEDIUM** - For MCP tool integration
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/agent/mcp/address/{agentId}` | Get agent MCP access point URL |
-| GET | `/toy/agent/mcp/tools/{agentId}` | Get agent MCP tools list |
-
-**Database Table:** `ai_agent_mcp_access_point` (already in Prisma schema)
-
----
-
-## 5. Configuration Endpoints (`/config`)
-
-**Priority: HIGH** - Used by LiveKit workers for device configuration
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/toy/config/server-base` | Get server-side configuration |
-| POST | `/toy/config/agent-models` | Get agent models for device |
-| POST | `/toy/config/agent-prompt` | Get agent prompt by MAC address |
-| POST | `/toy/config/child-profile-by-mac` | Get child profile by device MAC |
-| POST | `/toy/config/agent-template-id` | Get agent template ID by MAC |
-| GET | `/toy/config/template/{templateId}` | Get template content (personality) |
-| POST | `/toy/config/device-location` | Get device location info |
-| POST | `/toy/config/weather` | Get weather forecast by location |
-
-**Note:** Some of these may overlap with existing `/agent/config/:mac` - consolidate as needed.
-
----
-
-## 6. Model Providers (`/models/provider`)
-
-**Priority: MEDIUM** - Admin management of AI providers
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/models/provider` | Get provider list with pagination |
-| POST | `/toy/models/provider` | Add model provider |
-| PUT | `/toy/models/provider` | Edit model provider |
-| POST | `/toy/models/provider/delete` | Delete model provider |
-| GET | `/toy/models/provider/plugin/names` | Get plugin name list |
-
-**Database Table:** `ai_model_provider` (already in Prisma schema)
-
----
-
-## 7. Model Voices (`/models`)
-
-**Priority: MEDIUM** - TTS voice management by model
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/models/{modelId}/voices` | Get voices for specific TTS model |
-
----
-
-## 8. Extended Analytics (`/analytics`)
-
-**Priority: HIGH** - Dashboard and reporting
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/analytics/user/{macAddress}/media` | Get music/story playback stats |
-| POST | `/toy/analytics/user-progress/update` | Update aggregated user progress |
-| GET | `/toy/analytics/session-by-id/{id}` | Get session by ID |
-| GET | `/toy/analytics/sessions` | Get sessions with filters and pagination |
-| GET | `/toy/analytics/attempts/{id}` | Get game attempt by ID |
-| GET | `/toy/analytics/attempts` | Get attempts list with pagination |
-| GET | `/toy/analytics/media-playback/{id}` | Get media playback by ID |
-| GET | `/toy/analytics/media-playback` | Get media playback list with pagination |
-| GET | `/toy/analytics/streaks/{id}` | Get streak by ID |
-| GET | `/toy/analytics/streaks` | Get streaks list with pagination |
-| GET | `/toy/analytics/user-progress/{macAddress}/{modeType}` | Get user progress by mode |
-| GET | `/toy/analytics/user-progress/{macAddress}` | Get all user progress for MAC |
-| GET | `/toy/analytics/attempts/stats/{macAddress}` | Get attempt statistics by question type |
-| GET | `/toy/analytics/today/device-count` | Count devices interacted today |
-| GET | `/toy/analytics/month/device-count` | Count devices interacted this month |
-| GET | `/toy/analytics/today/active-devices` | List active devices today |
-| GET | `/toy/analytics/month/active-devices` | List active devices this month |
-
----
-
-## 9. Token Usage Analytics (`/usage`)
-
-**Priority: MEDIUM** - Currently under `/device/token-usage`, need to add analytics
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/usage/tokens/{macAddress}/session/{sessionId}` | Get usage for specific session |
-| GET | `/toy/usage/analytics/daily-summary` | Get daily usage summary across devices |
-| GET | `/toy/usage/analytics/per-device` | Get per-device daily usage |
-| GET | `/toy/usage/analytics/totals` | Get overall totals across all devices |
-
-**Note:** Consider keeping current paths or adding aliases for backwards compatibility.
-
----
-
-## 10. OTA Activation (`/ota`)
-
-**Priority: HIGH** - Device activation
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/toy/ota/` | OTA version and activation check |
-| POST | `/toy/ota/activate` | Device quick activation check |
-| GET | `/toy/ota/` | Get OTA status |
-
-**Note:** Current Node.js has `/device/ota/*` - add `/ota/` aliases for Spring Boot compatibility.
-
----
-
-## 11. OTA Management (`/otaMag`)
-
-**Priority: MEDIUM** - Admin firmware management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/otaMag` | Paginated OTA firmware query |
-| GET | `/toy/otaMag/{id}` | Get OTA firmware info |
-| POST | `/toy/otaMag` | Save OTA firmware info |
-| DELETE | `/toy/otaMag/{id}` | Delete OTA firmware |
-| PUT | `/toy/otaMag/{id}` | Update OTA firmware info |
-| PUT | `/toy/otaMag/forceUpdate/{id}` | Set firmware force update |
-| GET | `/toy/otaMag/getDownloadUrl/{id}` | Get OTA firmware download link |
-| GET | `/toy/otaMag/download/{uuid}` | Download firmware file |
-| POST | `/toy/otaMag/upload` | Upload firmware file |
-
----
-
-## 12. Server Management (`/admin/server`)
-
-**Priority: LOW** - Admin server management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/admin/server/server-list` | Get WebSocket server list |
-| POST | `/toy/admin/server/emit-action` | Notify Python server to update config |
-
----
-
-## 13. Password Recovery (`/user`)
-
-**Priority: MEDIUM** - User account recovery
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| PUT | `/toy/user/retrieve-password` | Retrieve/reset forgotten password |
-
----
-
-## 14. Extended RFID Series (`/admin/rfid/series`)
-
-**Priority: MEDIUM** - RFID range management
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/admin/rfid/series/active` | List all active series |
-| GET | `/toy/admin/rfid/series/find/{uid}` | Find all series containing UID |
-| GET | `/toy/admin/rfid/series/pack/{packId}` | Get series by pack ID |
-| GET | `/toy/admin/rfid/series/question/{questionId}` | Get series by question ID |
-
----
-
-## 15. RFID Questions (`/admin/rfid/question`)
-
-**Priority: HIGH** - RFID question management (MISSING ENTIRELY)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/admin/rfid/question/page` | Paginated question query |
-| GET | `/toy/admin/rfid/question/list` | List all questions |
-| GET | `/toy/admin/rfid/question/{id}` | Get question by ID |
-| GET | `/toy/admin/rfid/question/code/{code}` | Get question by code |
-| GET | `/toy/admin/rfid/question/category/{category}` | Get questions by category |
-| GET | `/toy/admin/rfid/question/language/{language}` | Get questions by language |
-| POST | `/toy/admin/rfid/question` | Create question |
-| PUT | `/toy/admin/rfid/question` | Update question |
-| DELETE | `/toy/admin/rfid/question` | Delete questions |
-
-**Database Table:** `rfid_question` (already in Prisma schema)
-
----
-
-## 16. Content Items (`/content/items`)
-
-**Priority: MEDIUM** - Generic content CRUD (more complete than current)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/toy/content/items` | Create single content item |
-| POST | `/toy/content/items/batch` | Batch create content items |
-| GET | `/toy/content/items` | Get all content items with pagination |
-| GET | `/toy/content/items/{id}` | Get content item by ID |
-| GET | `/toy/content/items/type/{contentType}` | Get items by type |
-| GET | `/toy/content/items/category/{category}` | Get items by category |
-| GET | `/toy/content/items/search` | Full-text search content items |
-| GET | `/toy/content/items/categories` | Get categories by type |
-| GET | `/toy/content/items/statistics` | Get content statistics |
-| PUT | `/toy/content/items/{id}` | Update content item |
-| PATCH | `/toy/content/items/{id}` | Partial update content item |
-| PUT | `/toy/content/items/batch` | Batch update content items |
-| DELETE | `/toy/content/items/{id}` | Delete content item |
-| DELETE | `/toy/content/items/batch` | Batch delete content items |
-
----
-
-## 17. Device Playlists (Spring Boot Path Compatibility)
-
-**Priority: HIGH** - ESP32 devices expect this path format
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/toy/device/{macAddress}/playlist/music` | Get music playlist |
-| POST | `/toy/device/{macAddress}/playlist/music` | Add songs to playlist |
-| PUT | `/toy/device/{macAddress}/playlist/music` | Replace entire playlist |
-| PATCH | `/toy/device/{macAddress}/playlist/music/reorder` | Reorder playlist |
-| DELETE | `/toy/device/{macAddress}/playlist/music/{contentId}` | Remove song |
-| DELETE | `/toy/device/{macAddress}/playlist/music` | Clear playlist |
-| GET | `/toy/device/{macAddress}/playlist/story` | Get story playlist |
-| POST | `/toy/device/{macAddress}/playlist/story` | Add stories to playlist |
-| PUT | `/toy/device/{macAddress}/playlist/story` | Replace entire playlist |
-| PATCH | `/toy/device/{macAddress}/playlist/story/reorder` | Reorder playlist |
-| DELETE | `/toy/device/{macAddress}/playlist/story/{contentId}` | Remove story |
-| DELETE | `/toy/device/{macAddress}/playlist/story` | Clear playlist |
-
-**Note:** Current Node.js has `/content/playlist/*` - add device path aliases.
-
----
+- The manager-web Vue.js frontend application
+- Developers maintaining the Cheeko backend
+- ESP32 devices connecting via OTA endpoints
+
+## Reference Setup
+- **Node.js API**: http://localhost:8002/toy (being tested/fixed)
+- **Spring Boot API**: http://localhost:8003/toy (reference for expected behavior)
+- **Frontend**: main/manager-web Vue.js application
 
 ## Tech Stack
-
-- **Runtime:** Node.js 20+
-- **Framework:** Express.js
-- **Database:** Supabase (PostgreSQL) via Prisma ORM
-- **Authentication:** Supabase Auth + Service Key for backend calls
-
----
-
-## Database Migrations Required
-
-All tables already exist in `prisma/schema.prisma`. No new migrations needed.
-
----
+- **Backend**: Node.js/Express.js
+- **Database**: Supabase (PostgreSQL) with Prisma ORM
+- **Authentication**: JWT tokens via custom auth middleware
+- **API Documentation**: Swagger/OpenAPI at /toy/doc.html
 
 ## Success Criteria
-
-1. All endpoints from Spring Boot have Node.js equivalents
-2. Request/response formats match Spring Boot API
-3. All endpoints pass integration tests
-4. LiveKit workers can use Node.js API as drop-in replacement
+All manager-web frontend features work correctly with the Node.js API, matching Spring Boot behavior exactly.
 
 ---
 
@@ -314,178 +29,574 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
 ```json
 [
   {
-    "category": "feature",
-    "description": "Add Agent Template CRUD endpoints (/agent/template)",
+    "id": 1,
+    "category": "setup",
+    "description": "Start manager-web frontend and verify connection to Node.js API",
     "steps": [
-      "Create template routes in agent.routes.js",
-      "Add getTemplates, createTemplate, updateTemplate to agent.service.js",
-      "Test with Swagger"
+      "Navigate to main/manager-web directory",
+      "Run npm install if needed",
+      "Check .env.development or vue.config.js for API URL configuration",
+      "Update to point to http://localhost:8002/toy if needed",
+      "Run npm run serve to start the frontend",
+      "Verify frontend loads at http://localhost:8080 without errors"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Agent Memory and Mode endpoints",
+    "id": 2,
+    "category": "auth",
+    "description": "Test and fix POST /user/login endpoint",
+    "endpoints": ["POST /user/login"],
     "steps": [
-      "Add PUT /agent/saveMemory/:mac endpoint",
-      "Add PUT /agent/update-mode endpoint",
-      "Add GET /agent/device/:mac/agent-name endpoint"
+      "Test login on Spring Boot: curl -X POST http://localhost:8003/toy/user/login -d '{...}'",
+      "Test login on Node.js: curl -X POST http://localhost:8002/toy/user/login -d '{...}'",
+      "Compare response structures (fields, format, status codes)",
+      "Fix any differences in auth.service.js or auth.routes.js",
+      "Verify login works in frontend"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Agent Chat History batch endpoints",
+    "id": 3,
+    "category": "auth",
+    "description": "Test and fix GET /user/info endpoint",
+    "endpoints": ["GET /user/info"],
     "steps": [
-      "Add POST /agent/chat-history/report for single message",
-      "Add POST /agent/chat-history/session for batch upload",
-      "Add GET /agent/:id/chat-history/user for recent messages",
-      "Add GET /agent/:id/chat-history/audio for audio content"
+      "Test on both APIs with auth token",
+      "Compare response fields and format",
+      "Fix any differences",
+      "Verify user info displays correctly in frontend header"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Agent MCP Access Point endpoints (/agent/mcp)",
+    "id": 4,
+    "category": "auth",
+    "description": "Test and fix GET /user/pub-config endpoint",
+    "endpoints": ["GET /user/pub-config"],
     "steps": [
-      "Create mcp routes in agent.routes.js",
-      "Add getMcpAddress, getMcpTools to agent.service.js",
-      "Test MCP integration"
+      "Test on both APIs",
+      "Compare response structure",
+      "This endpoint provides public system configuration",
+      "Fix any differences"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Configuration endpoints (/config)",
+    "id": 5,
+    "category": "admin",
+    "description": "Test and fix GET /admin/users pagination endpoint",
+    "endpoints": ["GET /admin/users?page=1&limit=10"],
     "steps": [
-      "Create config.routes.js",
-      "Create config.service.js",
-      "Add all /config/* endpoints",
-      "Test with LiveKit worker"
+      "Test user listing on both APIs",
+      "Compare pagination format (page, limit, total, list)",
+      "Compare user object fields",
+      "Fix any differences",
+      "Verify user management page works in frontend"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Model Provider CRUD endpoints (/models/provider)",
-    "steps": [
-      "Add provider routes to model.routes.js",
-      "Add provider CRUD methods to model.service.js",
-      "Test with Swagger"
+    "id": 6,
+    "category": "admin",
+    "description": "Test and fix admin user CRUD operations",
+    "endpoints": [
+      "DELETE /admin/users/{id}",
+      "PUT /admin/users/{id}",
+      "PUT /admin/users/changeStatus/{status}"
     ],
-    "passes": true
+    "steps": [
+      "Test delete user on both APIs",
+      "Test reset password on both APIs",
+      "Test change status on both APIs",
+      "Fix any response format differences"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Extended Analytics endpoints",
+    "id": 7,
+    "category": "admin",
+    "description": "Test and fix GET /admin/params/page endpoint",
+    "endpoints": ["GET /admin/params/page?page=1&limit=10"],
     "steps": [
-      "Add media stats endpoint",
-      "Add user-progress endpoints",
-      "Add session/attempt/streak individual getters",
-      "Add today/month device count endpoints"
+      "Test params listing on both APIs",
+      "Compare pagination and field formats",
+      "Fix any differences",
+      "Verify system parameters page works"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Token Usage Analytics endpoints",
-    "steps": [
-      "Add session-specific usage endpoint",
-      "Add daily-summary, per-device, totals analytics",
-      "Consider adding /usage/* aliases for compatibility"
+    "id": 8,
+    "category": "admin",
+    "description": "Test and fix params CRUD operations",
+    "endpoints": [
+      "POST /admin/params",
+      "PUT /admin/params",
+      "POST /admin/params/delete"
     ],
-    "passes": true
+    "steps": [
+      "Test create param on both APIs",
+      "Test update param on both APIs",
+      "Test delete param on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add OTA root endpoints (/ota/)",
-    "steps": [
-      "Create ota.routes.js for root /ota/ endpoints",
-      "Add POST /ota/ for version check",
-      "Add POST /ota/activate for activation",
-      "Add GET /ota/ for status"
+    "id": 9,
+    "category": "admin",
+    "description": "Test and fix dictionary type endpoints",
+    "endpoints": [
+      "GET /admin/dict/type/page",
+      "GET /admin/dict/type/{id}",
+      "POST /admin/dict/type/save",
+      "PUT /admin/dict/type/update",
+      "POST /admin/dict/type/delete"
     ],
-    "passes": true
+    "steps": [
+      "Test dict type listing and CRUD on both APIs",
+      "Compare response formats",
+      "Fix any differences",
+      "Verify dictionary management page works"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add OTA Management endpoints (/otaMag)",
-    "steps": [
-      "Create otaMag routes",
-      "Add firmware CRUD with upload/download",
-      "Add forceUpdate endpoint",
-      "Test file upload"
+    "id": 10,
+    "category": "admin",
+    "description": "Test and fix dictionary data endpoints",
+    "endpoints": [
+      "GET /admin/dict/data/page",
+      "GET /admin/dict/data/{id}",
+      "GET /admin/dict/data/type/{dictType}",
+      "POST /admin/dict/data/save",
+      "PUT /admin/dict/data/update",
+      "POST /admin/dict/data/delete"
     ],
-    "passes": true
+    "steps": [
+      "Test dict data listing and CRUD on both APIs",
+      "Test getting data by dict type",
+      "Fix any differences"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add RFID Question CRUD endpoints (/admin/rfid/question)",
+    "id": 11,
+    "category": "device",
+    "description": "Test and fix GET /device/bind/{agentId} endpoint",
+    "endpoints": ["GET /device/bind/{agentId}"],
     "steps": [
-      "Create question routes in rfid.routes.js",
-      "Add question CRUD methods to rfid.service.js",
-      "Add pagination and filtering"
+      "Test getting devices bound to agent on both APIs",
+      "Compare response format (list of devices)",
+      "Fix any differences",
+      "Verify device list displays correctly in frontend"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Extended RFID Series endpoints",
-    "steps": [
-      "Add /series/active endpoint",
-      "Add /series/find/:uid endpoint",
-      "Add /series/pack/:packId endpoint",
-      "Add /series/question/:questionId endpoint"
+    "id": 12,
+    "category": "device",
+    "description": "Test and fix device bind/unbind operations",
+    "endpoints": [
+      "POST /device/bind/{agentId}/{deviceCode}",
+      "POST /device/unbind"
     ],
-    "passes": true
+    "steps": [
+      "Test binding device with activation code on both APIs",
+      "Test unbinding device on both APIs",
+      "Compare response formats",
+      "Fix any differences"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Content Items CRUD endpoints (/content/items)",
-    "steps": [
-      "Create content-items routes",
-      "Add full CRUD with batch operations",
-      "Add search and filter endpoints"
+    "id": 13,
+    "category": "device",
+    "description": "Test and fix device update and manual add",
+    "endpoints": [
+      "PUT /device/update/{id}",
+      "POST /device/manual-add"
     ],
-    "passes": true
+    "steps": [
+      "Test device update on both APIs",
+      "Test manual device addition on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Device Playlist path aliases",
+    "id": 14,
+    "category": "device",
+    "description": "Test and fix GET /admin/device/all endpoint",
+    "endpoints": ["GET /admin/device/all?page=1&limit=10"],
     "steps": [
-      "Add /device/:mac/playlist/music routes",
-      "Add /device/:mac/playlist/story routes",
-      "Reuse existing playlist service methods"
+      "Test admin device listing on both APIs",
+      "Compare pagination and device object format",
+      "Fix any differences"
     ],
-    "passes": true
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Password Recovery endpoint",
-    "steps": [
-      "Add PUT /user/retrieve-password endpoint",
-      "Implement password reset logic"
+    "id": 15,
+    "category": "agent",
+    "description": "Test and fix agent listing endpoints",
+    "endpoints": [
+      "GET /agent/all",
+      "GET /agent/list"
     ],
-    "passes": true
+    "steps": [
+      "Test /agent/all (admin view) on both APIs",
+      "Test /agent/list (user's agents) on both APIs",
+      "Compare response formats",
+      "Fix any differences",
+      "Verify agent list displays correctly in frontend"
+    ],
+    "passes": false
   },
   {
-    "category": "feature",
-    "description": "Add Server Management endpoints (/admin/server)",
-    "steps": [
-      "Create server.routes.js",
-      "Add server-list and emit-action endpoints"
+    "id": 16,
+    "category": "agent",
+    "description": "Test and fix agent CRUD operations",
+    "endpoints": [
+      "GET /agent/{agentId}",
+      "POST /agent",
+      "PUT /agent/{agentId}",
+      "DELETE /agent/{agentId}"
     ],
-    "passes": true
+    "steps": [
+      "Test getting single agent on both APIs",
+      "Test create, update, delete on both APIs",
+      "Compare response formats for each",
+      "Fix any differences",
+      "Verify agent config page works in frontend"
+    ],
+    "passes": false
   },
   {
-    "category": "testing",
-    "description": "Integration test all new endpoints",
-    "steps": [
-      "Test each endpoint with sample data",
-      "Verify response format matches Spring Boot",
-      "Test with LiveKit worker"
+    "id": 17,
+    "category": "agent",
+    "description": "Test and fix agent template endpoints",
+    "endpoints": [
+      "GET /agent/template",
+      "POST /agent/template",
+      "PUT /agent/template/{templateId}"
     ],
-    "passes": true
+    "steps": [
+      "Test template listing on both APIs",
+      "Test template CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 18,
+    "category": "agent",
+    "description": "Test and fix agent chat history endpoints",
+    "endpoints": [
+      "GET /agent/{agentId}/sessions",
+      "GET /agent/{agentId}/chat-history/{sessionId}",
+      "GET /agent/{agentId}/chat-history/user"
+    ],
+    "steps": [
+      "Test session listing on both APIs",
+      "Test chat history retrieval on both APIs",
+      "Test recent user messages on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 19,
+    "category": "agent",
+    "description": "Test and fix agent MCP endpoints",
+    "endpoints": [
+      "GET /agent/mcp/address/{agentId}",
+      "GET /agent/mcp/tools/{agentId}"
+    ],
+    "steps": [
+      "Test MCP address endpoint on both APIs",
+      "Test MCP tools endpoint on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 20,
+    "category": "analytics",
+    "description": "Test and fix device analytics endpoints",
+    "endpoints": [
+      "GET /analytics/today/device-count",
+      "GET /analytics/month/device-count",
+      "GET /analytics/today/active-devices",
+      "GET /analytics/month/active-devices"
+    ],
+    "steps": [
+      "Test all analytics endpoints on both APIs",
+      "Compare response formats",
+      "Fix any differences",
+      "Verify dashboard analytics display correctly"
+    ],
+    "passes": false
+  },
+  {
+    "id": 21,
+    "category": "analytics",
+    "description": "Test and fix usage/token analytics endpoints",
+    "endpoints": [
+      "GET /usage/analytics/daily-summary",
+      "GET /usage/analytics/per-device",
+      "GET /usage/analytics/totals"
+    ],
+    "steps": [
+      "Test all usage analytics endpoints on both APIs",
+      "Compare response formats",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 22,
+    "category": "model",
+    "description": "Test and fix model listing endpoints",
+    "endpoints": [
+      "GET /models/list?page=1&limit=10",
+      "GET /models/{id}",
+      "GET /models/names",
+      "GET /models/llm/names"
+    ],
+    "steps": [
+      "Test model listing on both APIs",
+      "Test getting single model on both APIs",
+      "Test model names endpoints on both APIs",
+      "Fix any differences",
+      "Verify model config page works"
+    ],
+    "passes": false
+  },
+  {
+    "id": 23,
+    "category": "model",
+    "description": "Test and fix model CRUD operations",
+    "endpoints": [
+      "POST /models/{modelType}/{provideCode}",
+      "PUT /models/{modelType}/{provideCode}/{id}",
+      "DELETE /models/{id}",
+      "PUT /models/enable/{id}/{status}",
+      "PUT /models/default/{id}"
+    ],
+    "steps": [
+      "Test model create, update, delete on both APIs",
+      "Test enable/disable on both APIs",
+      "Test set default on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 24,
+    "category": "model",
+    "description": "Test and fix model provider endpoints",
+    "endpoints": [
+      "GET /models/provider",
+      "POST /models/provider",
+      "PUT /models/provider",
+      "POST /models/provider/delete"
+    ],
+    "steps": [
+      "Test provider listing on both APIs",
+      "Test provider CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 25,
+    "category": "ota",
+    "description": "Test and fix OTA management endpoints",
+    "endpoints": [
+      "GET /otaMag",
+      "GET /otaMag/{id}",
+      "POST /otaMag",
+      "PUT /otaMag/{id}",
+      "DELETE /otaMag/{id}",
+      "PUT /otaMag/forceUpdate/{id}"
+    ],
+    "steps": [
+      "Test firmware listing on both APIs",
+      "Test firmware CRUD on both APIs",
+      "Test force update flag on both APIs",
+      "Fix any differences",
+      "Verify OTA management page works"
+    ],
+    "passes": false
+  },
+  {
+    "id": 26,
+    "category": "rfid",
+    "description": "Test and fix RFID question endpoints",
+    "endpoints": [
+      "GET /admin/rfid/question/page",
+      "GET /admin/rfid/question/list",
+      "GET /admin/rfid/question/{id}",
+      "POST /admin/rfid/question",
+      "PUT /admin/rfid/question",
+      "POST /admin/rfid/question/delete"
+    ],
+    "steps": [
+      "Test question listing on both APIs",
+      "Test question CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 27,
+    "category": "rfid",
+    "description": "Test and fix RFID pack endpoints",
+    "endpoints": [
+      "GET /admin/rfid/pack/page",
+      "GET /admin/rfid/pack/list",
+      "POST /admin/rfid/pack",
+      "PUT /admin/rfid/pack",
+      "POST /admin/rfid/pack/delete"
+    ],
+    "steps": [
+      "Test pack listing on both APIs",
+      "Test pack CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 28,
+    "category": "rfid",
+    "description": "Test and fix RFID card endpoints",
+    "endpoints": [
+      "GET /admin/rfid/card/page",
+      "GET /admin/rfid/card/uid/{rfidUid}",
+      "POST /admin/rfid/card",
+      "PUT /admin/rfid/card",
+      "POST /admin/rfid/card/delete"
+    ],
+    "steps": [
+      "Test card listing on both APIs",
+      "Test get card by UID on both APIs",
+      "Test card CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 29,
+    "category": "rfid",
+    "description": "Test and fix RFID series endpoints",
+    "endpoints": [
+      "GET /admin/rfid/series/page",
+      "GET /admin/rfid/series/list",
+      "POST /admin/rfid/series",
+      "PUT /admin/rfid/series",
+      "POST /admin/rfid/series/delete"
+    ],
+    "steps": [
+      "Test series listing on both APIs",
+      "Test series CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 30,
+    "category": "voice",
+    "description": "Test and fix TTS voice endpoints",
+    "endpoints": [
+      "GET /ttsVoice",
+      "POST /ttsVoice",
+      "PUT /ttsVoice/{id}",
+      "POST /ttsVoice/delete"
+    ],
+    "steps": [
+      "Test voice listing on both APIs",
+      "Test voice CRUD on both APIs",
+      "Fix any differences"
+    ],
+    "passes": false
+  },
+  {
+    "id": 31,
+    "category": "integration",
+    "description": "Full frontend test - Login and Dashboard",
+    "steps": [
+      "Open manager-web in browser",
+      "Login with test credentials",
+      "Verify dashboard loads with analytics data",
+      "Check browser console for any API errors"
+    ],
+    "passes": false
+  },
+  {
+    "id": 32,
+    "category": "integration",
+    "description": "Full frontend test - Device Management",
+    "steps": [
+      "Navigate to device management page",
+      "Verify device list loads",
+      "Test device binding with activation code",
+      "Test device unbinding",
+      "Test device update"
+    ],
+    "passes": false
+  },
+  {
+    "id": 33,
+    "category": "integration",
+    "description": "Full frontend test - Agent Configuration",
+    "steps": [
+      "Navigate to agent/role config page",
+      "Verify agent list loads",
+      "Test creating new agent",
+      "Test editing agent configuration",
+      "Test viewing chat history"
+    ],
+    "passes": false
+  },
+  {
+    "id": 34,
+    "category": "integration",
+    "description": "Full frontend test - Model Configuration",
+    "steps": [
+      "Navigate to model config page",
+      "Verify model list loads",
+      "Test model CRUD operations",
+      "Test enabling/disabling models",
+      "Test setting default model"
+    ],
+    "passes": false
+  },
+  {
+    "id": 35,
+    "category": "integration",
+    "description": "Full frontend test - RFID Management",
+    "steps": [
+      "Navigate to RFID management page",
+      "Test questions tab - list and CRUD",
+      "Test packs tab - list and CRUD",
+      "Test cards tab - list and CRUD",
+      "Test series tab - list and CRUD"
+    ],
+    "passes": false
+  },
+  {
+    "id": 36,
+    "category": "integration",
+    "description": "Full frontend test - Admin Settings",
+    "steps": [
+      "Navigate to user management",
+      "Navigate to system parameters",
+      "Navigate to dictionary management",
+      "Verify all admin pages work correctly"
+    ],
+    "passes": false
   }
 ]
 ```
@@ -496,16 +607,29 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
 
 1. Read `activity.md` first to understand current state
 2. Find next task with `"passes": false`
-3. Complete all steps for that task
-4. Verify endpoint works via Swagger at http://127.0.0.1:8002/toy/doc.html
-5. Update task to `"passes": true`
-6. Log completion in `activity.md`
-7. Repeat until all tasks pass
+3. For each task:
+   - Test endpoints against Spring Boot API (port 8003) to get expected behavior
+   - Test same endpoints against Node.js API (port 8002)
+   - Compare responses using curl
+   - Fix any differences in Node.js API code
+   - Verify fix works
+4. Update task to `"passes": true`
+5. Log completion in `activity.md`
+6. Repeat until all tasks pass
+
+**Testing Pattern:**
+```bash
+# Get auth token first
+TOKEN=$(curl -s -X POST http://localhost:8003/toy/user/login -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}' | jq -r '.data.token')
+
+# Compare responses
+echo "=== Spring Boot ===" && curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8003/toy/endpoint | jq
+echo "=== Node.js ===" && curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8002/toy/endpoint | jq
+```
 
 **Important:** Only modify the `passes` field. Do not remove or rewrite tasks.
 
 ---
 
 ## Completion Criteria
-
-All tasks marked with `"passes": true`
+All 36 tasks marked with `"passes": true`

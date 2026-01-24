@@ -1,10 +1,36 @@
 # Activity Log - manager-api-node
 
 ## Current Phase
-**Phase 3: Missing APIs Migration - IN PROGRESS**
+**Phase 4: API Compatibility Testing - IN PROGRESS**
 
 ## Status
-Migrating missing APIs from Spring Boot to Node.js Express.
+Testing and fixing Node.js API to match Spring Boot API behavior for manager-web frontend compatibility.
+
+**Reference APIs:**
+- Node.js: http://localhost:8002/toy
+- Spring Boot: http://localhost:8003/toy
+- Frontend: main/manager-web
+
+---
+
+## Phase 4 Task Summary (API Compatibility)
+| ID | Category | Description | Status |
+|----|----------|-------------|--------|
+| 1 | setup | Start manager-web frontend | Pending |
+| 2-4 | auth | Test auth endpoints (login, info, pub-config) | Pending |
+| 5-10 | admin | Test admin endpoints (users, params, dict) | Pending |
+| 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
+| 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
+| 20-21 | analytics | Test analytics endpoints | Pending |
+| 22-24 | model | Test model endpoints | Pending |
+| 25 | ota | Test OTA management endpoints | Pending |
+| 26-29 | rfid | Test RFID endpoints | Pending |
+| 30 | voice | Test TTS voice endpoints | Pending |
+| 31-36 | integration | Full frontend integration tests | Pending |
+
+---
+
+## Phase 3 Task Summary (Missing APIs - COMPLETE)
 
 ---
 

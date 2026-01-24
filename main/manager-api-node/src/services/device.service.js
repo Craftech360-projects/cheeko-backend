@@ -9,6 +9,26 @@ const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
 
 /**
+ * In-memory activation code cache
+ * In production, this should be replaced with Redis or database storage
+ * Map structure: activationCode -> { macAddress, board, appVersion, createdAt }
+ */
+const activationCodeCache = new Map();
+const activationMacCache = new Map(); // macAddress -> activationCode (reverse lookup)
+
+// Clean up expired activation codes (older than 24 hours)
+const ACTIVATION_CODE_TTL = 24 * 60 * 60 * 1000; // 24 hours in ms
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, data] of activationCodeCache.entries()) {
+    if (now - data.createdAt > ACTIVATION_CODE_TTL) {
+      activationCodeCache.delete(code);
+      activationMacCache.delete(data.macAddress);
+    }
+  }
+}, 60 * 60 * 1000); // Clean up every hour
+
+/**
  * Register a new device
  * @param {Object} data - Device data
  * @returns {Promise<Object>} Created device
@@ -76,27 +96,49 @@ const registerDevice = async ({ mac, board, appVersion }) => {
 const bindDevice = async (userId, agentId, deviceCode) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Find device by code or MAC
-  let query = supabaseAdmin.from('ai_device').select('*');
+  let device = null;
+  let macAddress = null;
+  let activationData = null;
 
+  // Check if it's a MAC address or an activation code
   if (deviceCode.includes(':') || deviceCode.length === 12) {
-    // It's a MAC address
-    const normalizedMac = normalizeMacAddress(deviceCode);
-    query = query.eq('mac_address', normalizedMac);
+    // It's a MAC address - find existing device
+    macAddress = normalizeMacAddress(deviceCode);
+    const { data: existingDevice, error: findError } = await supabaseAdmin
+      .from('ai_device')
+      .select('*')
+      .eq('mac_address', macAddress)
+      .single();
+
+    if (findError || !existingDevice) {
+      throw new Error('Device not found. Please use the 6-digit activation code.');
+    }
+    device = existingDevice;
+  } else if (/^\d{6}$/.test(deviceCode)) {
+    // It's a 6-digit activation code
+    activationData = activationCodeCache.get(deviceCode);
+
+    if (!activationData) {
+      throw new Error('Invalid or expired activation code');
+    }
+
+    macAddress = activationData.macAddress;
+
+    // Check if device already exists
+    const { data: existingDevice } = await supabaseAdmin
+      .from('ai_device')
+      .select('*')
+      .eq('mac_address', macAddress)
+      .single();
+
+    if (existingDevice) {
+      if (existingDevice.user_id && existingDevice.user_id !== userId) {
+        throw new Error('Device is already bound to another user');
+      }
+      device = existingDevice;
+    }
   } else {
-    // It's a device code - for now, we'll use MAC as identifier
-    // In production, you might have a separate validation code system
-    throw new Error('Device validation code system not implemented. Use MAC address.');
-  }
-
-  const { data: device, error: findError } = await query.single();
-
-  if (findError || !device) {
-    throw new Error('Device not found');
-  }
-
-  if (device.user_id && device.user_id !== userId) {
-    throw new Error('Device is already bound to another user');
+    throw new Error('Invalid device code format. Use 6-digit activation code or MAC address.');
   }
 
   // Verify agent belongs to user
@@ -111,23 +153,68 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     throw new Error('Agent not found or does not belong to user');
   }
 
-  // Bind device
-  const { data: updated, error: updateError } = await supabaseAdmin
-    .from('ai_device')
-    .update({
-      user_id: userId,
-      agent_id: agentId,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', device.id)
-    .select()
-    .single();
+  if (device) {
+    // Update existing device
+    if (device.user_id && device.user_id !== userId) {
+      throw new Error('Device is already bound to another user');
+    }
 
-  if (updateError) throw new Error('Failed to bind device');
+    const { data: updated, error: updateError } = await supabaseAdmin
+      .from('ai_device')
+      .update({
+        user_id: userId,
+        agent_id: agentId,
+        update_date: new Date().toISOString()
+      })
+      .eq('id', device.id)
+      .select()
+      .single();
 
-  return updated;
+    if (updateError) throw new Error('Failed to bind device');
+
+    // Clean up activation code cache
+    if (activationData) {
+      activationCodeCache.delete(deviceCode);
+      activationMacCache.delete(macAddress);
+      logger.info(`Device ${macAddress} activated and bound to agent ${agentId}`);
+    }
+
+    return updated;
+  } else {
+    // Create new device from activation data
+    const now = new Date().toISOString();
+    const { data: newDevice, error: createError } = await supabaseAdmin
+      .from('ai_device')
+      .insert({
+        mac_address: macAddress,
+        user_id: userId,
+        agent_id: agentId,
+        board: activationData.board,
+        app_version: activationData.appVersion,
+        auto_update: 1,
+        mode: 'conversation',
+        device_mode: 'auto',
+        create_date: now,
+        update_date: now,
+        last_connected_at: now,
+        creator: userId,
+        updater: userId
+      })
+      .select()
+      .single();
+
+    if (createError) throw new Error('Failed to create device: ' + createError.message);
+
+    // Clean up activation code cache
+    activationCodeCache.delete(deviceCode);
+    activationMacCache.delete(macAddress);
+    logger.info(`New device ${macAddress} created and bound to agent ${agentId}`);
+
+    return newDevice;
+  }
 };
 
+// Keep the old implementation structure for the rest
 /**
  * Get devices bound to an agent
  * @param {number} userId - User ID
@@ -522,69 +609,193 @@ const getForceUpdateFirmware = async (type) => {
  * @param {string} board - Device board type
  * @returns {Promise<Object>} OTA check response
  */
-const checkOtaVersion = async (mac, currentVersion, board) => {
+const checkOtaVersion = async (mac, clientId, deviceReport) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  // Get or create device record
-  let device = await getDeviceByMac(normalizedMac);
+  // Extract device info from report (Spring Boot DeviceReportReqDTO format)
+  const currentVersion = deviceReport?.application?.version || deviceReport?.version;
+  const board = deviceReport?.board?.type || deviceReport?.chipModelName;
+
+  // Build server_time (matches Spring Boot ServerTime)
+  const now = new Date();
+  const timezoneOffset = -now.getTimezoneOffset(); // In minutes, positive for east of UTC
+  const response = {
+    server_time: {
+      timestamp: Date.now(),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      timezone_offset: timezoneOffset
+    }
+  };
+
+  // Get device record
+  const device = await getDeviceByMac(normalizedMac);
+
+  // Build firmware info
+  const INVALID_FIRMWARE_URL = 'http://cheeko.server.com:8002/toy/otaMag/download/NOT_ACTIVATED_FIRMWARE_THIS_IS_A_INVALID_URL';
+
   if (!device) {
-    device = await registerDevice({ mac: normalizedMac, board, appVersion: currentVersion });
+    // Device not registered - return current version with invalid URL (Spring Boot behavior)
+    response.firmware = {
+      version: currentVersion || '0.0.0',
+      url: INVALID_FIRMWARE_URL
+    };
   } else {
-    // Update last connected time and current version
+    // Device registered - check for firmware update if autoUpdate is enabled
+    if (device.auto_update !== 0) {
+      const firmwareType = board || 'esp32';
+      let firmware = await getForceUpdateFirmware(firmwareType);
+      const isForceUpdate = !!firmware;
+
+      if (!firmware) {
+        firmware = await getLatestFirmware(firmwareType);
+      }
+
+      if (firmware && firmware.version !== currentVersion) {
+        // New firmware available
+        const otaUrl = await getSystemParam('server.ota') || 'http://cheeko.server.com:8002/toy';
+        response.firmware = {
+          version: firmware.version,
+          url: `${otaUrl}/otaMag/download/${firmware.id}`,
+          force: isForceUpdate ? 1 : 0
+        };
+      } else {
+        // No update needed - return current version with invalid URL
+        response.firmware = {
+          version: currentVersion || device.app_version || '0.0.0',
+          url: INVALID_FIRMWARE_URL
+        };
+      }
+    } else {
+      // autoUpdate disabled - return current version
+      response.firmware = {
+        version: currentVersion || device.app_version || '0.0.0',
+        url: INVALID_FIRMWARE_URL
+      };
+    }
+
+    // Update device last connection time
     await supabaseAdmin
       .from('ai_device')
       .update({
         last_connected_at: new Date().toISOString(),
-        app_version: currentVersion,
+        app_version: currentVersion || device.app_version,
         board: board || device.board
       })
       .eq('id', device.id);
   }
 
-  // Determine firmware type from board
-  const firmwareType = board || 'esp32';
-
-  // Check for force update firmware first
-  let firmware = await getForceUpdateFirmware(firmwareType);
-  const isForceUpdate = !!firmware;
-
-  // If no force update, get latest firmware
-  if (!firmware) {
-    firmware = await getLatestFirmware(firmwareType);
+  // Build WebSocket configuration
+  let wsUrl = await getSystemParam('server.websocket');
+  if (!wsUrl || wsUrl === 'null') {
+    wsUrl = 'ws://cheeko.server.com:8000/cheeko/v1/';
+  } else {
+    // If multiple URLs (semicolon separated), pick random one
+    const wsUrls = wsUrl.split(';');
+    wsUrl = wsUrls[Math.floor(Math.random() * wsUrls.length)];
   }
+  response.websocket = { url: wsUrl };
 
-  // Build response
-  const response = {
-    device: {
-      mac: normalizedMac,
-      currentVersion,
-      board: device.board,
-      autoUpdate: device.auto_update === 1
-    },
-    firmware: null,
-    serverTime: {
-      timestamp: Date.now(),
-      timezone: 'UTC',
-      offset: 0
+  // Build MQTT credentials (always included)
+  response.mqtt = await buildMqttCredentials(normalizedMac);
+
+  // Build activation code for unregistered OR unbound devices
+  // Unbound devices (user_id=null) need activation code so another user can bind them
+  if (!device || !device.user_id) {
+    const frontendUrl = await getSystemParam('server.frontend_url') || 'http://localhost:8001';
+
+    // Check if we already have an activation code for this MAC
+    let activationCode = activationMacCache.get(normalizedMac);
+
+    if (!activationCode) {
+      // Generate new 6-digit activation code
+      activationCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Store in cache
+      const activationData = {
+        macAddress: normalizedMac,
+        board: board || 'unknown',
+        appVersion: currentVersion,
+        createdAt: Date.now()
+      };
+
+      activationCodeCache.set(activationCode, activationData);
+      activationMacCache.set(normalizedMac, activationCode);
+
+      logger.info(`Generated activation code ${activationCode} for device ${normalizedMac}`);
     }
-  };
 
-  // Check if update is available
-  if (firmware && firmware.version !== currentVersion) {
-    response.firmware = {
-      version: firmware.version,
-      url: firmware.firmware_path,
-      size: firmware.size,
-      force: isForceUpdate ? 1 : 0,
-      name: firmware.firmware_name,
-      remark: firmware.remark
+    response.activation = {
+      code: activationCode,
+      message: `${frontendUrl}\n${activationCode}`,
+      challenge: normalizedMac
     };
   }
 
   return response;
+};
+
+/**
+ * Build MQTT credentials for device
+ * @param {string} macAddress - Device MAC address
+ * @returns {Object} MQTT configuration
+ */
+const buildMqttCredentials = async (macAddress) => {
+  // Get MQTT configuration from system parameters
+  let mqttBroker = await getSystemParam('mqtt.broker') || '192.168.1.236';
+  let mqttPort = await getSystemParam('mqtt.port') || '1883';
+  let mqttSignatureKey = await getSystemParam('mqtt.signature_key') || 'test-signature-key-12345';
+
+  // Convert MAC address format (replace colons with underscores)
+  const macFormatted = macAddress.replace(/:/g, '_');
+
+  // Generate UUID for this session
+  const { v4: uuidv4 } = require('uuid');
+  const clientUuid = uuidv4();
+
+  // Create client ID in format: GID_test@@@mac_address@@@uuid
+  const groupId = 'GID_test';
+  const clientId = `${groupId}@@@${macFormatted}@@@${clientUuid}`;
+
+  // Generate username (base64 encoded JSON with IP)
+  const clientIp = '127.0.0.1'; // In real scenario, get from request
+  const username = Buffer.from(JSON.stringify({ ip: clientIp })).toString('base64');
+
+  // Generate password (HMAC signature)
+  const crypto = require('crypto');
+  const content = `${clientId}${username}`;
+  const password = crypto.createHmac('sha256', mqttSignatureKey).update(content).digest('base64');
+
+  return {
+    broker: mqttBroker,
+    port: parseInt(mqttPort, 10),
+    endpoint: `${mqttBroker}:${mqttPort}`,
+    client_id: clientId,
+    username: username,
+    password: password,
+    publish_topic: 'device-server',
+    subscribe_topic: 'null'
+  };
+};
+
+/**
+ * Get system parameter value
+ * @param {string} paramCode - Parameter code
+ * @returns {Promise<string|null>} Parameter value or null
+ */
+const getSystemParam = async (paramCode) => {
+  if (!supabaseAdmin) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from('sys_params')
+    .select('param_value')
+    .eq('param_code', paramCode)
+    .single();
+
+  if (error || !data) return null;
+  return data.param_value;
 };
 
 /**

@@ -108,18 +108,43 @@ const logger = require('../utils/logger');
  */
 router.post('/',
   asyncHandler(async (req, res) => {
-    const { mac, version, board } = req.body;
+    // Spring Boot compatibility: MAC comes from Device-Id header, not body
+    const deviceId = req.headers['device-id'] || req.headers['Device-Id'];
+    const clientId = req.headers['client-id'] || req.headers['Client-Id'] || deviceId;
+
+    // Fallback to body for backwards compatibility
+    const mac = deviceId || req.body.mac || req.body.mac_address;
 
     if (!mac) {
-      return badRequest(res, 'MAC address is required');
+      return badRequest(res, 'Device ID is required (Device-Id header or mac in body)');
+    }
+
+    // Validate MAC address format
+    const macPattern = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
+    if (!macPattern.test(mac)) {
+      return badRequest(res, 'Invalid device ID format');
     }
 
     try {
-      const result = await deviceService.checkOtaVersion(mac, version, board);
-      success(res, result);
+      // Extract device info from body (Spring Boot DeviceReportReqDTO format)
+      const deviceReport = {
+        version: req.body.version,
+        flashSize: req.body.flash_size,
+        macAddress: req.body.mac_address || mac,
+        chipModelName: req.body.chip_model_name,
+        chipInfo: req.body.chip_info,
+        application: req.body.application,
+        board: req.body.board,
+        ota: req.body.ota
+      };
+
+      const result = await deviceService.checkOtaVersion(mac, clientId, deviceReport);
+      // Return raw response (Spring Boot doesn't wrap in {code, msg, data})
+      res.json(result);
     } catch (error) {
       logger.error('OTA check failed:', error);
-      badRequest(res, error.message);
+      // Spring Boot returns error in response body
+      res.json({ error: error.message });
     }
   })
 );
@@ -180,27 +205,29 @@ router.post('/',
  */
 router.post('/activate',
   asyncHandler(async (req, res) => {
-    const { mac } = req.body;
+    // Spring Boot compatibility: MAC comes from Device-Id header
+    const deviceId = req.headers['device-id'] || req.headers['Device-Id'];
+    const mac = deviceId || req.body.mac;
 
     if (!mac) {
-      return badRequest(res, 'MAC address is required');
+      // Spring Boot returns 202 for missing device ID
+      return res.status(202).end();
     }
 
     try {
       // Get device by MAC to check if it exists/activated
       const device = await deviceService.getDeviceByMac(mac);
 
-      const response = {
-        activated: !!device,
-        deviceId: device?.id || null,
-        mac: device?.mac_address || mac.toUpperCase().replace(/[:-]/g, ':'),
-        serverTime: Date.now()
-      };
+      if (!device) {
+        // Spring Boot returns 202 for unregistered devices
+        return res.status(202).end();
+      }
 
-      success(res, response);
+      // Spring Boot returns simple "success" string for activated devices
+      res.status(200).send('success');
     } catch (error) {
       logger.error('Activation check failed:', error);
-      badRequest(res, error.message);
+      res.status(202).end();
     }
   })
 );

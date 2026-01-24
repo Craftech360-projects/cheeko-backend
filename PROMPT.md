@@ -1,102 +1,80 @@
 @main/manager-api-node/prd.md @main/manager-api-node/activity.md
 
-We are building a Node.js/Express.js API to replace the existing Java Spring Boot manager-api.
+We are testing and fixing the Node.js API to ensure full compatibility with the Vue.js manager-web frontend.
 
 First read activity.md to see what was recently accomplished.
 
-## Project Location
+## Project Locations
 
-The new API is located at: `main/manager-api-node/`
+- **Node.js API**: `main/manager-api-node/` (being tested/fixed)
+- **Spring Boot API**: `main/manager-api/` (reference for expected behavior)
+- **Frontend**: `main/manager-web/` (Vue.js application)
 
-## Start the Application
+## Start the Applications
 
-Start the Express.js server locally:
+### 1. Start Node.js API (port 8002)
 ```bash
 cd main/manager-api-node
 npm run dev
 ```
 
-The server runs on port 8002 with context path `/toy`.
-API documentation available at: http://localhost:8002/toy/doc.html
+### 2. Start Spring Boot API (port 8003) - Reference
+```bash
+cd main/manager-api
+mvn spring-boot:run -Dspring-boot.run.profiles=dev -Dserver.port=8003
+```
 
-If port 8002 is taken, update the PORT in .env.
+### 3. Start Frontend (port 8080)
+```bash
+cd main/manager-web
+npm run serve
+```
 
-## Available Commands
+## Testing Pattern
+
+For each API endpoint, compare responses between both backends:
 
 ```bash
-# Development with auto-reload
-npm run dev
+# Get auth token from Spring Boot (reference)
+TOKEN=$(curl -s -X POST http://localhost:8003/toy/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' | jq -r '.data.token')
 
-# Production start
-npm start
+# Compare responses
+echo "=== Spring Boot (expected) ==="
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8003/toy/endpoint | jq
 
-# Run tests
-npm test
-
-# Run tests with coverage
-npm run test:coverage
-
-# Lint code
-npm run lint
-
-# Initialize Supabase migrations
-npx supabase init
-npx supabase migration new [name]
-npx supabase db push
+echo "=== Node.js (being tested) ==="
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8002/toy/endpoint | jq
 ```
 
 ## Work on Tasks
 
-Open prd.md and find the single highest priority task where `"passes": false`.
+Open prd.md and find the next task where `"passes": false`.
 
-Work on exactly ONE task:
-1. Implement the change according to the task steps
-2. Run verification checks:
-   ```bash
-   cd main/manager-api-node
-   npm run lint
-   npm test
-   ```
+For each task:
+1. Test the endpoint(s) on Spring Boot API (port 8003) to see expected behavior
+2. Test the same endpoint(s) on Node.js API (port 8002)
+3. Compare the responses (fields, format, status codes)
+4. If different, fix the Node.js API code to match Spring Boot
+5. Verify the fix works
+6. Test in the frontend if applicable
 
-## Verify API Endpoints
+## Verification
 
-After implementing, verify your work using curl or the test suite:
-
-1. Test health endpoint:
-   ```bash
-   curl http://localhost:8002/toy/health
-   ```
-
-2. Test specific endpoints:
-   ```bash
-   # Example: List agents (with auth token)
-   curl -H "Authorization: Bearer TOKEN" http://localhost:8002/toy/agent/list
-
-   # Example: Device lookup (public)
-   curl http://localhost:8002/toy/device/AA:BB:CC:DD:EE:FF/mode
-   ```
-
-3. Check Swagger documentation:
-   Open http://localhost:8002/toy/doc.html in browser
-
-4. Run integration tests:
-   ```bash
-   npm test -- --grep "agent"
-   ```
-
-5. Take a screenshot of Swagger for visual verification:
-   ```
-   agent-browser open http://localhost:8002/toy/doc.html
-   agent-browser screenshot screenshots/[task-name].png
-   ```
+After fixing an endpoint:
+1. Verify curl responses match between both APIs
+2. Check if frontend uses this endpoint
+3. If yes, test the feature in the frontend
+4. Check browser console for any errors
 
 ## Log Progress
 
 Append a dated progress entry to activity.md describing:
-- What you changed
-- What commands you ran
-- The screenshot filename
-- Any issues encountered and how you resolved them
+- Which endpoints were tested
+- What differences were found
+- What fixes were made
+- Verification results
 
 ## Update Task Status
 
@@ -104,10 +82,10 @@ When the task is confirmed working, update that task's `"passes"` field in prd.m
 
 ## Commit Changes
 
-Make one git commit for that task only with a clear, descriptive message:
+Make one git commit for that task only:
 ```
 git add .
-git commit -m "feat: [brief description of what was implemented]"
+git commit -m "fix: [brief description of what was fixed]"
 ```
 
 Do NOT run `git init`, do NOT change git remotes, and do NOT push.
@@ -115,7 +93,8 @@ Do NOT run `git init`, do NOT change git remotes, and do NOT push.
 ## Important Rules
 
 - ONLY work on a SINGLE task per iteration
-- Always verify in browser before marking a task as passing
+- Always compare with Spring Boot API before fixing
+- Always verify in frontend when applicable
 - Always log your progress in activity.md
 - Always commit after completing a task
 
