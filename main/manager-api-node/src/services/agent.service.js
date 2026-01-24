@@ -81,20 +81,20 @@ const getAgentById = async (agentId, userId = null) => {
 /**
  * Update agent
  * @param {string} agentId - Agent ID
- * @param {number} userId - User ID
+ * @param {number} userId - User ID (kept for backward compatibility but not used for filtering)
  * @param {Object} data - Update data
  * @returns {Promise<Object>} Updated agent
  */
-const updateAgent = async (agentId, userId, data) => {
+const updateAgent = async (agentId, _userId, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Verify ownership
-  const existing = await getAgentById(agentId, userId);
+  // Check if agent exists (Spring Boot doesn't filter by user ID)
+  const existing = await getAgentById(agentId);
   if (!existing) throw new Error('Agent not found');
 
   const updateData = {
-    updated_at: new Date().toISOString(),
-    updater: userId
+    updated_at: new Date().toISOString()
+    // Note: ai_agent table doesn't have an 'updater' column (unlike ai_device)
   };
 
   // Map fields
@@ -122,29 +122,55 @@ const updateAgent = async (agentId, userId, data) => {
     .select()
     .single();
 
-  if (error) throw new Error('Failed to update agent');
+  if (error) {
+    logger.error('Failed to update agent:', error);
+    throw new Error('Failed to update agent');
+  }
 
   return agent;
 };
 
 /**
- * Delete agent
+ * Delete agent and all associated records
+ * Matches Spring Boot behavior: deletes devices, chat history, and plugins first
  * @param {string} agentId - Agent ID
- * @param {number} userId - User ID
+ * @param {number} userId - User ID (kept for backward compatibility but not used for filtering)
  */
-const deleteAgent = async (agentId, userId) => {
+const deleteAgent = async (agentId, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Verify ownership
-  const existing = await getAgentById(agentId, userId);
+  // Check if agent exists (Spring Boot doesn't filter by user ID)
+  const existing = await getAgentById(agentId);
   if (!existing) throw new Error('Agent not found');
 
+  // Delete associated devices first
+  await supabaseAdmin
+    .from('ai_device')
+    .delete()
+    .eq('agent_id', agentId);
+
+  // Delete associated chat history
+  await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .delete()
+    .eq('agent_id', agentId);
+
+  // Delete associated plugin mappings
+  await supabaseAdmin
+    .from('ai_agent_plugin_mapping')
+    .delete()
+    .eq('agent_id', agentId);
+
+  // Finally delete the agent
   const { error } = await supabaseAdmin
     .from('ai_agent')
     .delete()
     .eq('id', agentId);
 
-  if (error) throw new Error('Failed to delete agent');
+  if (error) {
+    logger.error('Failed to delete agent:', error);
+    throw new Error('Failed to delete agent');
+  }
 };
 
 /**
@@ -1161,13 +1187,269 @@ const getMcpTools = async (agentId) => {
   }));
 };
 
+/**
+ * Get user's agents list (Spring Boot /agent/list format)
+ * Returns AgentDTO array with model names, device counts, etc.
+ * Admin sees all agents with owner info, user sees own agents
+ * @param {number} userId - User ID
+ * @param {boolean} isSuperAdmin - Whether user is super admin
+ * @returns {Promise<Array>} List of AgentDTO objects
+ */
+const getAgentListForUser = async (userId, isSuperAdmin) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query;
+
+  if (isSuperAdmin) {
+    // Admin sees all agents with owner information
+    query = supabaseAdmin
+      .from('ai_agent')
+      .select(`
+        *,
+        sys_user:user_id (username)
+      `)
+      .order('sort', { ascending: true })
+      .order('created_at', { ascending: false });
+  } else {
+    // Regular user sees only their own agents
+    query = supabaseAdmin
+      .from('ai_agent')
+      .select('*')
+      .eq('user_id', userId)
+      .order('sort', { ascending: true })
+      .order('created_at', { ascending: false });
+  }
+
+  const { data: agents, error } = await query;
+  if (error) {
+    logger.error('Failed to fetch agents for list:', error);
+    throw new Error('Failed to fetch agents');
+  }
+
+  // Transform to AgentDTO format with model names and device counts
+  const result = await Promise.all((agents || []).map(async (agent) => {
+    // Get model names
+    let ttsModelName = null;
+    let llmModelName = null;
+    let vllmModelName = null;
+    let ttsVoiceName = null;
+
+    // Get TTS model name
+    if (agent.tts_model_id) {
+      const { data: ttsModel } = await supabaseAdmin
+        .from('ai_model_config')
+        .select('model_name')
+        .eq('id', agent.tts_model_id)
+        .single();
+      ttsModelName = ttsModel?.model_name || null;
+    }
+
+    // Get LLM model name
+    if (agent.llm_model_id) {
+      const { data: llmModel } = await supabaseAdmin
+        .from('ai_model_config')
+        .select('model_name')
+        .eq('id', agent.llm_model_id)
+        .single();
+      llmModelName = llmModel?.model_name || null;
+    }
+
+    // Get VLLM model name
+    if (agent.vllm_model_id) {
+      const { data: vllmModel } = await supabaseAdmin
+        .from('ai_model_config')
+        .select('model_name')
+        .eq('id', agent.vllm_model_id)
+        .single();
+      vllmModelName = vllmModel?.model_name || null;
+    }
+
+    // Get TTS voice name
+    if (agent.tts_voice_id) {
+      const { data: ttsVoice } = await supabaseAdmin
+        .from('ai_tts_voice')
+        .select('voice_name')
+        .eq('id', agent.tts_voice_id)
+        .single();
+      ttsVoiceName = ttsVoice?.voice_name || null;
+    }
+
+    // Get device count
+    const { count: deviceCount } = await supabaseAdmin
+      .from('ai_device')
+      .select('id', { count: 'exact', head: true })
+      .eq('agent_id', agent.id);
+
+    // Get device MAC addresses
+    const { data: devices } = await supabaseAdmin
+      .from('ai_device')
+      .select('mac_address')
+      .eq('agent_id', agent.id);
+    const deviceMacAddresses = (devices || []).map(d => d.mac_address).join(',');
+
+    // Get latest last connection time from devices
+    const { data: latestDevice } = await supabaseAdmin
+      .from('ai_device')
+      .select('last_connected_at')
+      .eq('agent_id', agent.id)
+      .order('last_connected_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .single();
+
+    return {
+      id: agent.id,
+      agentName: agent.agent_name,
+      ttsModelName: ttsModelName,
+      ttsVoiceName: ttsVoiceName,
+      llmModelName: llmModelName,
+      vllmModelName: vllmModelName,
+      memModelId: agent.mem_model_id,
+      systemPrompt: agent.system_prompt,
+      summaryMemory: agent.summary_memory,
+      lastConnectedAt: latestDevice?.last_connected_at || null,
+      deviceCount: deviceCount || 0,
+      deviceMacAddresses: deviceMacAddresses,
+      ownerUsername: isSuperAdmin ? (agent.sys_user?.username || null) : undefined,
+      createDate: agent.created_at
+    };
+  }));
+
+  return result;
+};
+
+/**
+ * Admin agent list with pagination (Spring Boot /agent/all format)
+ * Returns PageData<AgentEntity> with pagination
+ * @param {Object} params - Query parameters with page, limit
+ * @returns {Promise<Object>} Paginated agents with {list, total, page, limit}
+ */
+const adminAgentListPaginated = async (params = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const page = parseInt(params.page) || 1;
+  const limit = parseInt(params.limit) || 10;
+  const offset = (page - 1) * limit;
+
+  // Get total count
+  const { count } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id', { count: 'exact', head: true });
+
+  // Get agents with pagination
+  const { data: agents, error } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .order('sort', { ascending: true })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch admin agent list:', error);
+    throw new Error('Failed to fetch agents');
+  }
+
+  // Transform to camelCase AgentEntity format
+  const list = (agents || []).map(agent => ({
+    id: agent.id,
+    userId: agent.user_id,
+    agentCode: agent.agent_code,
+    agentName: agent.agent_name,
+    asrModelId: agent.asr_model_id,
+    vadModelId: agent.vad_model_id,
+    llmModelId: agent.llm_model_id,
+    vllmModelId: agent.vllm_model_id,
+    ttsModelId: agent.tts_model_id,
+    ttsVoiceId: agent.tts_voice_id,
+    memModelId: agent.mem_model_id,
+    intentModelId: agent.intent_model_id,
+    chatHistoryConf: agent.chat_history_conf,
+    systemPrompt: agent.system_prompt,
+    summaryMemory: agent.summary_memory,
+    langCode: agent.lang_code,
+    language: agent.language,
+    sort: agent.sort,
+    creator: agent.creator,
+    createdAt: agent.created_at,
+    updater: agent.updater,
+    updatedAt: agent.updated_at
+  }));
+
+  return {
+    list,
+    total: count || 0
+  };
+};
+
+/**
+ * Get agent info by ID (Spring Boot AgentInfoVO format)
+ * Returns agent with plugin mappings (functions) - no user filtering
+ * @param {string} agentId - Agent ID
+ * @returns {Promise<Object|null>} Agent info with functions or null
+ */
+const getAgentInfoById = async (agentId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get agent without user filtering (matches Spring Boot behavior)
+  const { data: agent, error } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .eq('id', agentId)
+    .single();
+
+  if (error || !agent) return null;
+
+  // Get plugin mappings for this agent
+  const { data: pluginMappings } = await supabaseAdmin
+    .from('ai_agent_plugin_mapping')
+    .select('id, agent_id, plugin_id, param_info')
+    .eq('agent_id', agentId);
+
+  // Transform plugin mappings to camelCase
+  const functions = (pluginMappings || []).map(mapping => ({
+    id: mapping.id,
+    agentId: mapping.agent_id,
+    pluginId: mapping.plugin_id,
+    paramInfo: mapping.param_info
+  }));
+
+  // Transform agent to camelCase AgentInfoVO format
+  return {
+    id: agent.id,
+    userId: agent.user_id,
+    agentCode: agent.agent_code,
+    agentName: agent.agent_name,
+    asrModelId: agent.asr_model_id,
+    vadModelId: agent.vad_model_id,
+    llmModelId: agent.llm_model_id,
+    vllmModelId: agent.vllm_model_id,
+    ttsModelId: agent.tts_model_id,
+    ttsVoiceId: agent.tts_voice_id,
+    memModelId: agent.mem_model_id,
+    intentModelId: agent.intent_model_id,
+    chatHistoryConf: agent.chat_history_conf,
+    systemPrompt: agent.system_prompt,
+    summaryMemory: agent.summary_memory,
+    langCode: agent.lang_code,
+    language: agent.language,
+    sort: agent.sort,
+    creator: agent.creator,
+    createdAt: agent.created_at,
+    updater: agent.updater,
+    updatedAt: agent.updated_at,
+    functions: functions
+  };
+};
+
 module.exports = {
   createAgent,
   getAgentById,
+  getAgentInfoById,
   updateAgent,
   deleteAgent,
   listAgents,
   getAllAgents,
+  getAgentListForUser,
+  adminAgentListPaginated,
   getAgentSessions,
   getChatHistory,
   addChatMessage,

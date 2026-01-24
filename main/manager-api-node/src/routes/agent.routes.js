@@ -22,32 +22,64 @@ const { success, badRequest, notFound } = require('../utils/response');
  * /agent/list:
  *   get:
  *     tags: [Agent]
- *     summary: List user's agents (paginated)
+ *     summary: Get agents list (admin gets all agents, user gets own agents)
+ *     description: Returns array of AgentDTO objects. Admin sees all agents with owner info, regular user sees only their own agents.
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
  *     responses:
  *       200:
- *         description: Paginated list of agents
+ *         description: List of agents with model names and device counts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       agentName:
+ *                         type: string
+ *                       ttsModelName:
+ *                         type: string
+ *                       ttsVoiceName:
+ *                         type: string
+ *                       llmModelName:
+ *                         type: string
+ *                       vllmModelName:
+ *                         type: string
+ *                       memModelId:
+ *                         type: string
+ *                       systemPrompt:
+ *                         type: string
+ *                       summaryMemory:
+ *                         type: string
+ *                       lastConnectedAt:
+ *                         type: string
+ *                         format: date-time
+ *                       deviceCount:
+ *                         type: integer
+ *                       deviceMacAddresses:
+ *                         type: string
+ *                       ownerUsername:
+ *                         type: string
+ *                         description: Only present for admin users
+ *                       createDate:
+ *                         type: string
+ *                         format: date-time
  */
 router.get('/list',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-
-    const result = await agentService.listAgents(req.user.id, { page, limit });
-    success(res, result);
+    const isSuperAdmin = req.user.super_admin === 1;
+    const agents = await agentService.getAgentListForUser(req.user.id, isSuperAdmin);
+    success(res, agents);
   })
 );
 
@@ -56,18 +88,65 @@ router.get('/list',
  * /agent/all:
  *   get:
  *     tags: [Agent]
- *     summary: Get all agents for user (no pagination)
+ *     summary: Agent list (admin only) - paginated
+ *     description: Returns paginated list of all agents. Admin only endpoint.
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number starting from 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of records per page
  *     responses:
  *       200:
- *         description: List of all agents
+ *         description: Paginated list of AgentEntity objects
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     total:
+ *                       type: integer
+ *       403:
+ *         description: Not authorized - admin only
  */
 router.get('/all',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const agents = await agentService.getAllAgents(req.user.id);
-    success(res, agents);
+    // Check if user is super admin
+    if (req.user.super_admin !== 1) {
+      return res.status(403).json({
+        code: 403,
+        msg: 'Not authorized - admin only',
+        data: null
+      });
+    }
+
+    const params = {
+      page: req.query.page,
+      limit: req.query.limit
+    };
+
+    const result = await agentService.adminAgentListPaginated(params);
+    success(res, result);
   })
 );
 
@@ -972,7 +1051,8 @@ router.post('/',
   asyncHandler(async (req, res) => {
     try {
       const agent = await agentService.createAgent(req.user.id, req.body);
-      success(res, agent, 'Agent created successfully');
+      // Spring Boot returns just the agent ID, not the full object
+      success(res, agent.id);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1200,7 +1280,9 @@ router.get('/:id/chat-history/:sessionId',
 router.get('/:id',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const agent = await agentService.getAgentById(req.params.id, req.user.id);
+    // Use getAgentInfoById which returns AgentInfoVO format with functions (plugin mappings)
+    // Spring Boot does not filter by user ID - it uses Shiro permissions for authorization
+    const agent = await agentService.getAgentInfoById(req.params.id);
     if (!agent) {
       return notFound(res, 'Agent not found');
     }
@@ -1268,8 +1350,9 @@ router.put('/:id',
   requireAuth,
   asyncHandler(async (req, res) => {
     try {
-      const agent = await agentService.updateAgent(req.params.id, req.user.id, req.body);
-      success(res, agent, 'Agent updated successfully');
+      await agentService.updateAgent(req.params.id, req.user.id, req.body);
+      // Spring Boot returns Result<Void> (null data)
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }

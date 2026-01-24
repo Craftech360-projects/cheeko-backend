@@ -252,7 +252,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify agent list displays correctly in frontend"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 16,
@@ -271,7 +271,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify agent config page works in frontend"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 17,

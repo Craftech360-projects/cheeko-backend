@@ -94,9 +94,10 @@ const schemas = {
 
   // Login request
   login: Joi.object({
-    username: Joi.string().min(3).max(100).required(),
-    password: Joi.string().min(6).max(100).required(),
-    captcha: Joi.string()
+    username: Joi.string().min(1).max(100).required(),
+    password: Joi.string().min(1).max(100).required(),
+    captcha: Joi.string(),
+    captchaId: Joi.string()
   }),
 
   // Register request

@@ -25,7 +25,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 7-8 | admin | Test admin params endpoints | Complete |
 | 9-10 | admin | Test admin dict endpoints | Complete |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Complete |
-| 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
+| 15-16 | agent | Test agent listing and CRUD endpoints | Complete |
+| 17-19 | agent | Test agent templates, chat history, MCP | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
 | 22-24 | model | Test model endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
@@ -76,6 +77,62 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Tasks 15-16 Complete (Agent Listing and CRUD)
+
+**Task 15: Test and fix agent listing endpoints**
+**Task 16: Test and fix agent CRUD operations**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+
+1. **GET /agent/{id} user filtering** - Node.js filtered by user_id but Spring Boot doesn't (uses Shiro permissions)
+2. **Missing AgentInfoVO format** - GET /agent/{id} didn't return `functions` array (plugin mappings)
+3. **POST /agent response** - Node.js returned full agent object, Spring Boot returns just the agent ID
+4. **PUT /agent response** - Node.js returned full agent, Spring Boot returns `null` data (Result<Void>)
+5. **PUT /agent updater column** - ai_agent table doesn't have 'updater' column (unlike ai_device)
+6. **DELETE /agent cascade** - Spring Boot deletes associated devices, chat history, and plugins first
+
+**Fixes Applied:**
+
+**1. Added `getAgentInfoById` function (`src/services/agent.service.js`)**
+- New function that returns AgentInfoVO format with plugin mappings
+- Does not filter by user ID (matches Spring Boot behavior)
+- Transforms response to camelCase
+- Includes `functions` array from `ai_agent_plugin_mapping` table
+
+**2. Fixed GET /agent/{id} (`src/routes/agent.routes.js`)**
+- Now uses `getAgentInfoById` instead of `getAgentById`
+- Returns full AgentInfoVO format with functions array
+
+**3. Fixed POST /agent response (`src/routes/agent.routes.js`)**
+- Returns just the agent ID string (not full object)
+- Matches Spring Boot Result<String>
+
+**4. Fixed PUT /agent/{id} (`src/routes/agent.routes.js`, `src/services/agent.service.js`)**
+- Returns null data (Result<Void> format)
+- Removed 'updater' field from update (column doesn't exist)
+- Removed user filtering (matches Spring Boot behavior)
+
+**5. Fixed DELETE /agent/{id} (`src/services/agent.service.js`)**
+- Now deletes associated devices before agent
+- Deletes associated chat history
+- Deletes associated plugin mappings
+- Removed user filtering
+
+**Files Modified:**
+- `src/services/agent.service.js` - Added getAgentInfoById, fixed updateAgent/deleteAgent
+- `src/routes/agent.routes.js` - Fixed GET/POST/PUT route handlers
+
+**Verification:**
+- `npm run lint` - 4 pre-existing errors, 6 warnings (no new issues)
+- GET /agent/{id} returns camelCase with functions array
+- POST /agent returns agent ID string
+- PUT /agent returns null data
+- DELETE /agent cascades to related records
+
+---
 
 ### 2026-01-24 - Phase 4 Tasks 11-14 Complete (Device Endpoints)
 
