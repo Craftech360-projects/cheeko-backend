@@ -1046,22 +1046,607 @@ const getWeekStart = (date) => {
   return new Date(d.setDate(diff));
 };
 
+// =============================================
+// Extended Analytics - Individual Getters
+// =============================================
+
+/**
+ * Get session by ID (database ID)
+ * @param {number} id - Session database ID
+ * @returns {Promise<Object|null>} Session
+ */
+const getSessionById = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: session, error } = await supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !session) return null;
+  return session;
+};
+
+/**
+ * Get attempt by ID
+ * @param {number} id - Attempt database ID
+ * @returns {Promise<Object|null>} Attempt
+ */
+const getAttemptById = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: attempt, error } = await supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !attempt) return null;
+  return attempt;
+};
+
+/**
+ * Get media playback by ID
+ * @param {number} id - Media playback database ID
+ * @returns {Promise<Object|null>} Media playback
+ */
+const getMediaPlaybackById = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: playback, error } = await supabaseAdmin
+    .from('analytics_media_playback')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !playback) return null;
+  return playback;
+};
+
+/**
+ * Get streak by ID
+ * @param {number} id - Streak database ID
+ * @returns {Promise<Object|null>} Streak
+ */
+const getStreakById = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: streak, error } = await supabaseAdmin
+    .from('analytics_streaks')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error || !streak) return null;
+  return streak;
+};
+
+// =============================================
+// Extended Analytics - Paginated Lists
+// =============================================
+
+/**
+ * Get all sessions with pagination and filtering
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Paginated sessions
+ */
+const getAllSessions = async ({ page = 1, limit = 20, mac, modeType, startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('*');
+
+  if (mac) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (normalizedMac) {
+      countQuery = countQuery.eq('mac_address', normalizedMac);
+      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+    }
+  }
+
+  if (modeType) {
+    countQuery = countQuery.eq('mode_type', modeType);
+    dataQuery = dataQuery.eq('mode_type', modeType);
+  }
+
+  if (startDate) {
+    countQuery = countQuery.gte('started_at', startDate);
+    dataQuery = dataQuery.gte('started_at', startDate);
+  }
+
+  if (endDate) {
+    countQuery = countQuery.lte('started_at', endDate);
+    dataQuery = dataQuery.lte('started_at', endDate);
+  }
+
+  const { count } = await countQuery;
+  const { data: sessions, error } = await dataQuery
+    .order('started_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to get sessions:', error);
+    throw new Error('Failed to get sessions');
+  }
+
+  return {
+    list: sessions || [],
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
+/**
+ * Get all attempts with pagination and filtering
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Paginated attempts
+ */
+const getAllAttempts = async ({ page = 1, limit = 20, mac, gameType, questionType } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('*');
+
+  if (mac) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (normalizedMac) {
+      countQuery = countQuery.eq('mac_address', normalizedMac);
+      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+    }
+  }
+
+  if (gameType) {
+    countQuery = countQuery.eq('game_type', gameType);
+    dataQuery = dataQuery.eq('game_type', gameType);
+  }
+
+  if (questionType) {
+    countQuery = countQuery.eq('question_type', questionType);
+    dataQuery = dataQuery.eq('question_type', questionType);
+  }
+
+  const { count } = await countQuery;
+  const { data: attempts, error } = await dataQuery
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to get attempts:', error);
+    throw new Error('Failed to get attempts');
+  }
+
+  return {
+    list: attempts || [],
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
+/**
+ * Get all media playback with pagination and filtering
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Paginated media playback
+ */
+const getAllMediaPlayback = async ({ page = 1, limit = 20, mac, mediaType } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('analytics_media_playback')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('analytics_media_playback')
+    .select('*');
+
+  if (mac) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (normalizedMac) {
+      countQuery = countQuery.eq('mac_address', normalizedMac);
+      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+    }
+  }
+
+  if (mediaType) {
+    countQuery = countQuery.eq('media_type', mediaType);
+    dataQuery = dataQuery.eq('media_type', mediaType);
+  }
+
+  const { count } = await countQuery;
+  const { data: playback, error } = await dataQuery
+    .order('started_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to get media playback:', error);
+    throw new Error('Failed to get media playback');
+  }
+
+  return {
+    list: playback || [],
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
+/**
+ * Get all streaks with pagination and filtering
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Paginated streaks
+ */
+const getAllStreaks = async ({ page = 1, limit = 20, mac, gameType } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('analytics_streaks')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('analytics_streaks')
+    .select('*');
+
+  if (mac) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (normalizedMac) {
+      countQuery = countQuery.eq('mac_address', normalizedMac);
+      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+    }
+  }
+
+  if (gameType) {
+    countQuery = countQuery.eq('game_type', gameType);
+    dataQuery = dataQuery.eq('game_type', gameType);
+  }
+
+  const { count } = await countQuery;
+  const { data: streaks, error } = await dataQuery
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to get streaks:', error);
+    throw new Error('Failed to get streaks');
+  }
+
+  return {
+    list: streaks || [],
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
+// =============================================
+// Extended Analytics - Media Stats
+// =============================================
+
+/**
+ * Get media playback stats for a device
+ * @param {string} mac - Device MAC address
+ * @returns {Promise<Object>} Media stats
+ */
+const getMediaStats = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  // Get all media playback for this device
+  const { data: playback } = await supabaseAdmin
+    .from('analytics_media_playback')
+    .select('*')
+    .eq('mac_address', normalizedMac);
+
+  if (!playback || playback.length === 0) {
+    return {
+      music: { totalPlays: 0, totalDuration: 0, uniqueTracks: 0, favorites: [] },
+      story: { totalPlays: 0, totalDuration: 0, uniqueStories: 0, favorites: [] }
+    };
+  }
+
+  // Separate by media type
+  const musicPlays = playback.filter(p => p.media_type === 'music');
+  const storyPlays = playback.filter(p => p.media_type === 'story');
+
+  // Calculate music stats
+  const musicDuration = musicPlays.reduce((sum, p) => sum + (p.duration_played_seconds || 0), 0);
+  const uniqueMusicIds = [...new Set(musicPlays.map(p => p.media_id).filter(Boolean))];
+  const musicPlayCounts = {};
+  musicPlays.forEach(p => {
+    if (p.media_id) {
+      musicPlayCounts[p.media_id] = (musicPlayCounts[p.media_id] || 0) + 1;
+    }
+  });
+  const topMusic = Object.entries(musicPlayCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([mediaId, count]) => {
+      const play = musicPlays.find(p => p.media_id === mediaId);
+      return { mediaId, title: play?.media_title || 'Unknown', playCount: count };
+    });
+
+  // Calculate story stats
+  const storyDuration = storyPlays.reduce((sum, p) => sum + (p.duration_played_seconds || 0), 0);
+  const uniqueStoryIds = [...new Set(storyPlays.map(p => p.media_id).filter(Boolean))];
+  const storyPlayCounts = {};
+  storyPlays.forEach(p => {
+    if (p.media_id) {
+      storyPlayCounts[p.media_id] = (storyPlayCounts[p.media_id] || 0) + 1;
+    }
+  });
+  const topStories = Object.entries(storyPlayCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([mediaId, count]) => {
+      const play = storyPlays.find(p => p.media_id === mediaId);
+      return { mediaId, title: play?.media_title || 'Unknown', playCount: count };
+    });
+
+  return {
+    music: {
+      totalPlays: musicPlays.length,
+      totalDuration: musicDuration,
+      uniqueTracks: uniqueMusicIds.length,
+      favorites: topMusic
+    },
+    story: {
+      totalPlays: storyPlays.length,
+      totalDuration: storyDuration,
+      uniqueStories: uniqueStoryIds.length,
+      favorites: topStories
+    }
+  };
+};
+
+/**
+ * Get attempt statistics by question type for a device
+ * @param {string} mac - Device MAC address
+ * @returns {Promise<Object>} Attempt stats by question type
+ */
+const getAttemptStatsByQuestionType = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const { data: attempts } = await supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('question_type, is_correct, response_time_ms')
+    .eq('mac_address', normalizedMac);
+
+  if (!attempts || attempts.length === 0) {
+    return { stats: [], totalAttempts: 0, overallAccuracy: 0 };
+  }
+
+  // Group by question type
+  const statsByType = {};
+  attempts.forEach(attempt => {
+    const qType = attempt.question_type || 'unknown';
+    if (!statsByType[qType]) {
+      statsByType[qType] = {
+        questionType: qType,
+        total: 0,
+        correct: 0,
+        responseTimes: []
+      };
+    }
+    statsByType[qType].total++;
+    if (attempt.is_correct) statsByType[qType].correct++;
+    if (attempt.response_time_ms) {
+      statsByType[qType].responseTimes.push(attempt.response_time_ms);
+    }
+  });
+
+  // Calculate final stats
+  const stats = Object.values(statsByType).map(s => ({
+    questionType: s.questionType,
+    totalAttempts: s.total,
+    correctAttempts: s.correct,
+    accuracy: s.total > 0 ? Math.round((s.correct / s.total) * 100) : 0,
+    averageResponseTimeMs: s.responseTimes.length > 0
+      ? Math.round(s.responseTimes.reduce((a, b) => a + b, 0) / s.responseTimes.length)
+      : null
+  }));
+
+  const totalAttempts = attempts.length;
+  const totalCorrect = attempts.filter(a => a.is_correct).length;
+  const overallAccuracy = totalAttempts > 0 ? Math.round((totalCorrect / totalAttempts) * 100) : 0;
+
+  return {
+    stats,
+    totalAttempts,
+    overallAccuracy
+  };
+};
+
+// =============================================
+// Extended Analytics - Device Activity
+// =============================================
+
+/**
+ * Count devices that interacted today
+ * @returns {Promise<number>} Device count
+ */
+const getTodayDeviceCount = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { data: sessions, error } = await supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('mac_address')
+    .gte('started_at', today.toISOString());
+
+  if (error) {
+    logger.error('Failed to get today device count:', error);
+    throw new Error('Failed to get device count');
+  }
+
+  const uniqueDevices = [...new Set((sessions || []).map(s => s.mac_address))];
+  return uniqueDevices.length;
+};
+
+/**
+ * Count devices that interacted this month
+ * @returns {Promise<number>} Device count
+ */
+const getMonthDeviceCount = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const { data: sessions, error } = await supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('mac_address')
+    .gte('started_at', monthStart.toISOString());
+
+  if (error) {
+    logger.error('Failed to get month device count:', error);
+    throw new Error('Failed to get device count');
+  }
+
+  const uniqueDevices = [...new Set((sessions || []).map(s => s.mac_address))];
+  return uniqueDevices.length;
+};
+
+/**
+ * List active devices today
+ * @returns {Promise<Array>} List of active device info
+ */
+const getTodayActiveDevices = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { data: sessions, error } = await supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('mac_address, mode_type, started_at, duration_seconds')
+    .gte('started_at', today.toISOString())
+    .order('started_at', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to get today active devices:', error);
+    throw new Error('Failed to get active devices');
+  }
+
+  // Group by device
+  const deviceMap = {};
+  (sessions || []).forEach(session => {
+    const mac = session.mac_address;
+    if (!deviceMap[mac]) {
+      deviceMap[mac] = {
+        macAddress: mac,
+        sessionCount: 0,
+        totalDuration: 0,
+        lastSession: session.started_at,
+        modes: []
+      };
+    }
+    deviceMap[mac].sessionCount++;
+    deviceMap[mac].totalDuration += session.duration_seconds || 0;
+    if (!deviceMap[mac].modes.includes(session.mode_type)) {
+      deviceMap[mac].modes.push(session.mode_type);
+    }
+  });
+
+  return Object.values(deviceMap);
+};
+
+/**
+ * List active devices this month
+ * @returns {Promise<Array>} List of active device info
+ */
+const getMonthActiveDevices = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+
+  const { data: sessions, error } = await supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('mac_address, mode_type, started_at, duration_seconds')
+    .gte('started_at', monthStart.toISOString())
+    .order('started_at', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to get month active devices:', error);
+    throw new Error('Failed to get active devices');
+  }
+
+  // Group by device
+  const deviceMap = {};
+  (sessions || []).forEach(session => {
+    const mac = session.mac_address;
+    if (!deviceMap[mac]) {
+      deviceMap[mac] = {
+        macAddress: mac,
+        sessionCount: 0,
+        totalDuration: 0,
+        lastSession: session.started_at,
+        modes: []
+      };
+    }
+    deviceMap[mac].sessionCount++;
+    deviceMap[mac].totalDuration += session.duration_seconds || 0;
+    if (!deviceMap[mac].modes.includes(session.mode_type)) {
+      deviceMap[mac].modes.push(session.mode_type);
+    }
+  });
+
+  return Object.values(deviceMap);
+};
+
 module.exports = {
   // Sessions
   startSession,
   endSession,
   getSession,
   getSessionsByMac,
+  getSessionById,
+  getAllSessions,
   // Game attempts
   logGameAttempt,
   getAttemptsBySession,
   getAttemptsByMac,
+  getAttemptById,
+  getAllAttempts,
   // Media playback
   logMediaEvent,
   getMediaPlaybackByMac,
+  getMediaPlaybackById,
+  getAllMediaPlayback,
+  getMediaStats,
   // Streaks
   logStreak,
   getStreaksByMac,
+  getStreakById,
+  getAllStreaks,
   // User progress
   updateUserProgress,
   getUserProgress,
@@ -1070,5 +1655,11 @@ module.exports = {
   getGameStats,
   getDailyUsage,
   getWeeklyUsage,
-  getMonthlyUsage
+  getMonthlyUsage,
+  getAttemptStatsByQuestionType,
+  // Device activity
+  getTodayDeviceCount,
+  getMonthDeviceCount,
+  getTodayActiveDevices,
+  getMonthActiveDevices
 };

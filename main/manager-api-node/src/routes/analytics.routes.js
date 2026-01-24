@@ -1299,4 +1299,772 @@ router.get('/usage/monthly/:mac', requireAuth, asyncHandler(async (req, res) => 
   return success(res, usage);
 }));
 
+// =============================================
+// Extended Analytics - Individual Getters
+// =============================================
+
+/**
+ * @swagger
+ * /analytics/session-by-id/{id}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get session by ID
+ *     description: Returns a single session by its database ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Session database ID
+ *     responses:
+ *       200:
+ *         description: Session details
+ *       404:
+ *         description: Session not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/session-by-id/:id', requireAuth, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const session = await analyticsService.getSessionById(parseInt(id));
+  if (!session) {
+    return notFound(res, 'Session not found');
+  }
+
+  return success(res, session);
+}));
+
+/**
+ * @swagger
+ * /analytics/sessions:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get all sessions with pagination
+ *     description: Returns paginated list of all sessions with optional filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: mac
+ *         schema:
+ *           type: string
+ *         description: Filter by MAC address
+ *       - in: query
+ *         name: modeType
+ *         schema:
+ *           type: string
+ *         description: Filter by mode type
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *     responses:
+ *       200:
+ *         description: Paginated session list
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/sessions', requireAuth, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, mac, modeType, startDate, endDate } = req.query;
+
+  const sessions = await analyticsService.getAllSessions({
+    page: parseInt(page),
+    limit: parseInt(limit),
+    mac,
+    modeType,
+    startDate,
+    endDate
+  });
+
+  return success(res, sessions);
+}));
+
+/**
+ * @swagger
+ * /analytics/attempts/stats/{mac}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get attempt statistics by question type
+ *     description: Returns attempt statistics grouped by question type for a device
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: Attempt statistics by question type
+ *       400:
+ *         description: Invalid MAC address
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/attempts/stats/:mac', requireAuth, asyncHandler(async (req, res) => {
+  const { mac } = req.params;
+
+  if (!isValidMacAddress(mac)) {
+    return badRequest(res, 'Invalid MAC address format');
+  }
+
+  const stats = await analyticsService.getAttemptStatsByQuestionType(mac);
+  return success(res, stats);
+}));
+
+/**
+ * @swagger
+ * /analytics/attempts/{id}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get attempt by ID
+ *     description: Returns a single game attempt by its database ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Attempt database ID
+ *     responses:
+ *       200:
+ *         description: Attempt details
+ *       404:
+ *         description: Attempt not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/attempts/:id', requireAuth, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const attempt = await analyticsService.getAttemptById(parseInt(id));
+  if (!attempt) {
+    return notFound(res, 'Attempt not found');
+  }
+
+  return success(res, attempt);
+}));
+
+/**
+ * @swagger
+ * /analytics/attempts:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get all attempts with pagination
+ *     description: Returns paginated list of all game attempts with optional filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: mac
+ *         schema:
+ *           type: string
+ *         description: Filter by MAC address
+ *       - in: query
+ *         name: gameType
+ *         schema:
+ *           type: string
+ *         description: Filter by game type
+ *       - in: query
+ *         name: questionType
+ *         schema:
+ *           type: string
+ *         description: Filter by question type
+ *     responses:
+ *       200:
+ *         description: Paginated attempt list
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/attempts', requireAuth, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, mac, gameType, questionType } = req.query;
+
+  const attempts = await analyticsService.getAllAttempts({
+    page: parseInt(page),
+    limit: parseInt(limit),
+    mac,
+    gameType,
+    questionType
+  });
+
+  return success(res, attempts);
+}));
+
+/**
+ * @swagger
+ * /analytics/media-playback/{id}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get media playback by ID
+ *     description: Returns a single media playback record by its database ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Media playback database ID
+ *     responses:
+ *       200:
+ *         description: Media playback details
+ *       404:
+ *         description: Media playback not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/media-playback/:id', requireAuth, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const playback = await analyticsService.getMediaPlaybackById(parseInt(id));
+  if (!playback) {
+    return notFound(res, 'Media playback not found');
+  }
+
+  return success(res, playback);
+}));
+
+/**
+ * @swagger
+ * /analytics/media-playback:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get all media playback with pagination
+ *     description: Returns paginated list of all media playback records with optional filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: mac
+ *         schema:
+ *           type: string
+ *         description: Filter by MAC address
+ *       - in: query
+ *         name: mediaType
+ *         schema:
+ *           type: string
+ *           enum: [music, story]
+ *         description: Filter by media type
+ *     responses:
+ *       200:
+ *         description: Paginated media playback list
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/media-playback', requireAuth, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, mac, mediaType } = req.query;
+
+  const playback = await analyticsService.getAllMediaPlayback({
+    page: parseInt(page),
+    limit: parseInt(limit),
+    mac,
+    mediaType
+  });
+
+  return success(res, playback);
+}));
+
+/**
+ * @swagger
+ * /analytics/streaks/{id}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get streak by ID
+ *     description: Returns a single streak record by its database ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Streak database ID
+ *     responses:
+ *       200:
+ *         description: Streak details
+ *       404:
+ *         description: Streak not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/streaks/:id', requireAuth, asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const streak = await analyticsService.getStreakById(parseInt(id));
+  if (!streak) {
+    return notFound(res, 'Streak not found');
+  }
+
+  return success(res, streak);
+}));
+
+/**
+ * @swagger
+ * /analytics/streaks:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get all streaks with pagination
+ *     description: Returns paginated list of all streaks with optional filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: mac
+ *         schema:
+ *           type: string
+ *         description: Filter by MAC address
+ *       - in: query
+ *         name: gameType
+ *         schema:
+ *           type: string
+ *         description: Filter by game type
+ *     responses:
+ *       200:
+ *         description: Paginated streak list
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/streaks', requireAuth, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 20, mac, gameType } = req.query;
+
+  const streaks = await analyticsService.getAllStreaks({
+    page: parseInt(page),
+    limit: parseInt(limit),
+    mac,
+    gameType
+  });
+
+  return success(res, streaks);
+}));
+
+// =============================================
+// Extended Analytics - User Progress
+// =============================================
+
+/**
+ * @swagger
+ * /analytics/user-progress/{mac}/{modeType}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get user progress by mode
+ *     description: Returns user progress for a specific mode type
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *       - in: path
+ *         name: modeType
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Mode type (e.g., Math, Riddle, WordLadder)
+ *     responses:
+ *       200:
+ *         description: User progress for mode
+ *       400:
+ *         description: Invalid MAC address
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/user-progress/:mac/:modeType', requireAuth, asyncHandler(async (req, res) => {
+  const { mac, modeType } = req.params;
+
+  if (!isValidMacAddress(mac)) {
+    return badRequest(res, 'Invalid MAC address format');
+  }
+
+  const progress = await analyticsService.getUserProgress(mac, modeType);
+  return success(res, progress);
+}));
+
+/**
+ * @swagger
+ * /analytics/user-progress/{mac}:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get all user progress for device
+ *     description: Returns all user progress records for a device
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: All user progress for device
+ *       400:
+ *         description: Invalid MAC address
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/user-progress/:mac', requireAuth, asyncHandler(async (req, res) => {
+  const { mac } = req.params;
+
+  if (!isValidMacAddress(mac)) {
+    return badRequest(res, 'Invalid MAC address format');
+  }
+
+  const progress = await analyticsService.getUserProgress(mac);
+  return success(res, progress);
+}));
+
+/**
+ * @swagger
+ * /analytics/user-progress/update:
+ *   post:
+ *     tags: [Analytics]
+ *     summary: Update user progress
+ *     description: Updates aggregated user progress for a device/mode
+ *     security:
+ *       - serviceKey: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - mac
+ *               - modeType
+ *             properties:
+ *               mac:
+ *                 type: string
+ *                 description: Device MAC address
+ *               modeType:
+ *                 type: string
+ *                 description: Mode type
+ *               totalSessions:
+ *                 type: integer
+ *               totalTimeSeconds:
+ *                 type: integer
+ *               totalInteractions:
+ *                 type: integer
+ *               successRatePercentage:
+ *                 type: number
+ *               longestStreak:
+ *                 type: integer
+ *               skillLevel:
+ *                 type: string
+ *                 enum: [beginner, intermediate, advanced]
+ *     responses:
+ *       200:
+ *         description: Progress updated successfully
+ *       400:
+ *         description: Invalid request
+ *       401:
+ *         description: Unauthorized
+ */
+router.post('/user-progress/update', requireServiceKey, asyncHandler(async (req, res) => {
+  const { mac, modeType, ...progressData } = req.body;
+
+  if (!mac) {
+    return badRequest(res, 'MAC address is required');
+  }
+
+  if (!isValidMacAddress(mac)) {
+    return badRequest(res, 'Invalid MAC address format');
+  }
+
+  if (!modeType) {
+    return badRequest(res, 'Mode type is required');
+  }
+
+  const progress = await analyticsService.updateUserProgress(mac, modeType, progressData);
+  return success(res, progress, 'Progress updated successfully');
+}));
+
+// =============================================
+// Extended Analytics - Media Stats
+// =============================================
+
+/**
+ * @swagger
+ * /analytics/user/{mac}/media:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get media playback stats
+ *     description: Returns music and story playback statistics for a device
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: Media playback statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     music:
+ *                       type: object
+ *                       properties:
+ *                         totalPlays:
+ *                           type: integer
+ *                         totalDuration:
+ *                           type: integer
+ *                         uniqueTracks:
+ *                           type: integer
+ *                         favorites:
+ *                           type: array
+ *                     story:
+ *                       type: object
+ *                       properties:
+ *                         totalPlays:
+ *                           type: integer
+ *                         totalDuration:
+ *                           type: integer
+ *                         uniqueStories:
+ *                           type: integer
+ *                         favorites:
+ *                           type: array
+ *       400:
+ *         description: Invalid MAC address
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/user/:mac/media', requireAuth, asyncHandler(async (req, res) => {
+  const { mac } = req.params;
+
+  if (!isValidMacAddress(mac)) {
+    return badRequest(res, 'Invalid MAC address format');
+  }
+
+  const stats = await analyticsService.getMediaStats(mac);
+  return success(res, stats);
+}));
+
+// =============================================
+// Extended Analytics - Device Activity
+// =============================================
+
+/**
+ * @swagger
+ * /analytics/today/device-count:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Count devices interacted today
+ *     description: Returns the count of unique devices that have had sessions today
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Device count
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     count:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/today/device-count', requireAuth, asyncHandler(async (req, res) => {
+  const count = await analyticsService.getTodayDeviceCount();
+  return success(res, { count });
+}));
+
+/**
+ * @swagger
+ * /analytics/month/device-count:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Count devices interacted this month
+ *     description: Returns the count of unique devices that have had sessions this month
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Device count
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     count:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/month/device-count', requireAuth, asyncHandler(async (req, res) => {
+  const count = await analyticsService.getMonthDeviceCount();
+  return success(res, { count });
+}));
+
+/**
+ * @swagger
+ * /analytics/today/active-devices:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: List active devices today
+ *     description: Returns list of devices that have had sessions today with summary stats
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of active devices
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       macAddress:
+ *                         type: string
+ *                       sessionCount:
+ *                         type: integer
+ *                       totalDuration:
+ *                         type: integer
+ *                       lastSession:
+ *                         type: string
+ *                         format: date-time
+ *                       modes:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/today/active-devices', requireAuth, asyncHandler(async (req, res) => {
+  const devices = await analyticsService.getTodayActiveDevices();
+  return success(res, devices);
+}));
+
+/**
+ * @swagger
+ * /analytics/month/active-devices:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: List active devices this month
+ *     description: Returns list of devices that have had sessions this month with summary stats
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of active devices
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       macAddress:
+ *                         type: string
+ *                       sessionCount:
+ *                         type: integer
+ *                       totalDuration:
+ *                         type: integer
+ *                       lastSession:
+ *                         type: string
+ *                         format: date-time
+ *                       modes:
+ *                         type: array
+ *                         items:
+ *                           type: string
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/month/active-devices', requireAuth, asyncHandler(async (req, res) => {
+  const devices = await analyticsService.getMonthActiveDevices();
+  return success(res, devices);
+}));
+
 module.exports = router;

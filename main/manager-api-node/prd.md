@@ -384,7 +384,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add session/attempt/streak individual getters",
       "Add today/month device count endpoints"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

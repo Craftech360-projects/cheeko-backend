@@ -17,7 +17,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 4 | feature | Agent MCP Access Point endpoints | Complete |
 | 5 | feature | Configuration endpoints (/config) | Complete |
 | 6 | feature | Model Provider CRUD endpoints | Complete |
-| 7 | feature | Extended Analytics endpoints | Pending |
+| 7 | feature | Extended Analytics endpoints | Complete |
 | 8 | feature | Token Usage Analytics endpoints | Pending |
 | 9 | feature | OTA root endpoints (/ota/) | Pending |
 | 10 | feature | OTA Management endpoints (/otaMag) | Pending |
@@ -45,6 +45,78 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Extended Analytics Endpoints Complete
+
+**Task 7: Add Extended Analytics endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/analytics/user/:mac/media` - Get music/story playback statistics
+- `POST /toy/analytics/user-progress/update` - Update aggregated user progress
+- `GET /toy/analytics/session-by-id/:id` - Get session by database ID
+- `GET /toy/analytics/sessions` - Get sessions with filters and pagination
+- `GET /toy/analytics/attempts/:id` - Get game attempt by database ID
+- `GET /toy/analytics/attempts` - Get attempts list with pagination
+- `GET /toy/analytics/attempts/stats/:mac` - Get attempt statistics by question type
+- `GET /toy/analytics/media-playback/:id` - Get media playback by database ID
+- `GET /toy/analytics/media-playback` - Get media playback list with pagination
+- `GET /toy/analytics/streaks/:id` - Get streak by database ID
+- `GET /toy/analytics/streaks` - Get streaks list with pagination
+- `GET /toy/analytics/user-progress/:mac/:modeType` - Get user progress by mode
+- `GET /toy/analytics/user-progress/:mac` - Get all user progress for MAC
+- `GET /toy/analytics/today/device-count` - Count devices interacted today
+- `GET /toy/analytics/month/device-count` - Count devices interacted this month
+- `GET /toy/analytics/today/active-devices` - List active devices today
+- `GET /toy/analytics/month/active-devices` - List active devices this month
+
+**Service Methods Added to `analytics.service.js`:**
+- `getSessionById(id)` - Get session by database ID
+- `getAttemptById(id)` - Get attempt by database ID
+- `getMediaPlaybackById(id)` - Get media playback by database ID
+- `getStreakById(id)` - Get streak by database ID
+- `getAllSessions(options)` - Paginated sessions with filters
+- `getAllAttempts(options)` - Paginated attempts with filters
+- `getAllMediaPlayback(options)` - Paginated media playback with filters
+- `getAllStreaks(options)` - Paginated streaks with filters
+- `getMediaStats(mac)` - Music/story playback statistics
+- `getAttemptStatsByQuestionType(mac)` - Stats grouped by question type
+- `getTodayDeviceCount()` - Count unique devices today
+- `getMonthDeviceCount()` - Count unique devices this month
+- `getTodayActiveDevices()` - List active devices today with stats
+- `getMonthActiveDevices()` - List active devices this month with stats
+
+**Files Modified:**
+- `src/services/analytics.service.js` - Added 14 new service methods (~400 lines)
+- `src/routes/analytics.routes.js` - Added 17 route handlers with Swagger docs (~600 lines)
+
+**API Contract:**
+```
+GET    /toy/analytics/user/:mac/media           - Returns {music: {...}, story: {...}}
+POST   /toy/analytics/user-progress/update      - Updates progress, returns progress record
+GET    /toy/analytics/session-by-id/:id         - Returns session or 404
+GET    /toy/analytics/sessions                  - Returns {list, total, page, limit}
+GET    /toy/analytics/attempts/:id              - Returns attempt or 404
+GET    /toy/analytics/attempts                  - Returns {list, total, page, limit}
+GET    /toy/analytics/attempts/stats/:mac       - Returns {stats, totalAttempts, overallAccuracy}
+GET    /toy/analytics/media-playback/:id        - Returns playback or 404
+GET    /toy/analytics/media-playback            - Returns {list, total, page, limit}
+GET    /toy/analytics/streaks/:id               - Returns streak or 404
+GET    /toy/analytics/streaks                   - Returns {list, total, page, limit}
+GET    /toy/analytics/user-progress/:mac/:mode  - Returns progress record or null
+GET    /toy/analytics/user-progress/:mac        - Returns array of progress records
+GET    /toy/analytics/today/device-count        - Returns {count: N}
+GET    /toy/analytics/month/device-count        - Returns {count: N}
+GET    /toy/analytics/today/active-devices      - Returns array of device info
+GET    /toy/analytics/month/active-devices      - Returns array of device info
+```
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Model Provider CRUD Endpoints Complete
 
