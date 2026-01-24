@@ -1079,7 +1079,8 @@ router.post('/',
  * /agent/{id}/sessions:
  *   get:
  *     tags: [Agent]
- *     summary: Get agent chat sessions
+ *     summary: Get agent chat sessions (paginated)
+ *     description: Returns paginated list of unique chat sessions for an agent
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -1088,15 +1089,53 @@ router.post('/',
  *         required: true
  *         schema:
  *           type: string
+ *         description: Agent ID
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number (1-indexed)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
  *     responses:
  *       200:
- *         description: List of sessions
+ *         description: Paginated list of sessions
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           sessionId:
+ *                             type: string
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ *                           chatCount:
+ *                             type: integer
+ *                     total:
+ *                       type: integer
  */
 router.get('/:id/sessions',
   requireAuth,
   asyncHandler(async (req, res) => {
     try {
-      const sessions = await agentService.getAgentSessions(req.params.id);
+      const { page, limit } = req.query;
+      const sessions = await agentService.getAgentSessions(req.params.id, { page, limit });
       success(res, sessions);
     } catch (error) {
       badRequest(res, error.message);
@@ -1109,8 +1148,10 @@ router.get('/:id/sessions',
  * /agent/{id}/chat-history/user:
  *   get:
  *     tags: [Agent Chat History]
- *     summary: Get recent chat messages for mobile app
- *     description: Returns the most recent 50 chat messages for an agent (for mobile app display)
+ *     summary: Get recent user chat messages for mobile app
+ *     description: Returns the most recent 50 USER messages with audio for an agent (matches Spring Boot AgentChatHistoryUserVO)
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1118,45 +1159,35 @@ router.get('/:id/sessions',
  *         schema:
  *           type: string
  *         description: Agent ID
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 50
- *         description: Max messages to return (default 50)
  *     responses:
  *       200:
- *         description: Recent chat messages in chronological order
+ *         description: Recent user chat messages
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: integer
- *                   mac_address:
- *                     type: string
- *                   session_id:
- *                     type: string
- *                   chat_type:
- *                     type: integer
- *                   content:
- *                     type: string
- *                   audio_id:
- *                     type: string
- *                   created_at:
- *                     type: string
- *                     format: date-time
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       content:
+ *                         type: string
+ *                         description: Chat content text
+ *                       audioId:
+ *                         type: string
+ *                         description: Audio file ID
  *       400:
  *         description: Failed to get chat history
  */
 router.get('/:id/chat-history/user',
+  requireAuth,
   asyncHandler(async (req, res) => {
     try {
-      const limit = parseInt(req.query.limit) || 50;
-      const history = await agentService.getRecentUserChatHistory(req.params.id, limit);
+      const history = await agentService.getRecentUserChatHistory(req.params.id);
       success(res, history);
     } catch (error) {
       badRequest(res, error.message);
@@ -1170,62 +1201,40 @@ router.get('/:id/chat-history/user',
  *   get:
  *     tags: [Agent Chat History]
  *     summary: Get audio content by audio ID
- *     description: Retrieves the chat history record that contains a specific audio ID
+ *     description: Returns the content string for a specific audio ID (Spring Boot compatible - {id} is the audioId)
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
  *           type: string
- *         description: Agent ID
- *       - in: query
- *         name: audioId
- *         required: true
- *         schema:
- *           type: string
- *         description: Audio ID to look up
+ *         description: Audio ID (not Agent ID in this endpoint)
  *     responses:
  *       200:
- *         description: Audio content record
+ *         description: Content string for the audio
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 id:
+ *                 code:
  *                   type: integer
- *                 mac_address:
+ *                 data:
  *                   type: string
- *                 session_id:
- *                   type: string
- *                 chat_type:
- *                   type: integer
- *                 content:
- *                   type: string
- *                 audio_id:
- *                   type: string
- *                 created_at:
- *                   type: string
- *                   format: date-time
- *       400:
- *         description: audioId query parameter is required
+ *                   description: Content text associated with this audio ID
  *       404:
  *         description: Audio content not found
  */
 router.get('/:id/chat-history/audio',
+  requireAuth,
   asyncHandler(async (req, res) => {
-    const { audioId } = req.query;
-
-    if (!audioId) {
-      return badRequest(res, 'audioId query parameter is required');
-    }
-
     try {
-      const record = await agentService.getAudioContent(req.params.id, audioId);
-      if (!record) {
-        return notFound(res, 'Audio content not found');
-      }
-      success(res, record);
+      // In Spring Boot, the {id} path param is actually the audioId
+      const audioId = req.params.id;
+      const content = await agentService.getAudioContent(audioId);
+      success(res, content);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -1238,6 +1247,7 @@ router.get('/:id/chat-history/audio',
  *   get:
  *     tags: [Agent]
  *     summary: Get chat history for a session
+ *     description: Returns chat messages for a specific session (matches Spring Boot List<AgentChatHistoryDTO>)
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -1252,9 +1262,34 @@ router.get('/:id/chat-history/audio',
  *         required: true
  *         schema:
  *           type: string
+ *         description: Session ID
  *     responses:
  *       200:
- *         description: Chat messages
+ *         description: Chat messages for the session
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                       chatType:
+ *                         type: integer
+ *                         description: "1=User, 2=Agent"
+ *                       content:
+ *                         type: string
+ *                       audioId:
+ *                         type: string
+ *                       macAddress:
+ *                         type: string
  */
 router.get('/:id/chat-history/:sessionId',
   requireAuth,

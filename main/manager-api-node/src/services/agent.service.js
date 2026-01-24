@@ -229,55 +229,109 @@ const getAllAgents = async (userId) => {
 };
 
 /**
- * Get agent sessions (unique session IDs from chat history)
+ * Get agent sessions (unique session IDs from chat history) with pagination
+ * Matches Spring Boot PageData<AgentChatSessionDTO> format
  * @param {string} agentId - Agent ID
- * @returns {Promise<Array>} Sessions
+ * @param {Object} options - Pagination options
+ * @param {number} [options.page=1] - Page number (1-indexed)
+ * @param {number} [options.limit=10] - Items per page
+ * @returns {Promise<Object>} PageData with list, total
  */
-const getAgentSessions = async (agentId) => {
+const getAgentSessions = async (agentId, options = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
+  const page = parseInt(options.page) || 1;
+  const limit = parseInt(options.limit) || 10;
+
+  // Get all messages for this agent to group by session
   const { data, error } = await supabaseAdmin
     .from('ai_agent_chat_history')
-    .select('session_id, mac_address, created_at')
+    .select('session_id, created_at')
     .eq('agent_id', agentId)
     .order('created_at', { ascending: false });
 
   if (error) throw new Error('Failed to fetch sessions');
 
-  // Get unique sessions
-  const sessionsMap = new Map();
+  // Group by session ID and track message counts and earliest timestamp
+  const sessionGroups = new Map();
   (data || []).forEach(item => {
-    if (!sessionsMap.has(item.session_id)) {
-      sessionsMap.set(item.session_id, {
-        sessionId: item.session_id,
-        macAddress: item.mac_address,
-        startedAt: item.created_at
+    const sessionId = item.session_id;
+    if (!sessionGroups.has(sessionId)) {
+      sessionGroups.set(sessionId, {
+        sessionId,
+        messages: [],
+        earliestTime: new Date(item.created_at)
       });
+    }
+    const session = sessionGroups.get(sessionId);
+    session.messages.push(item);
+    const msgTime = new Date(item.created_at);
+    if (msgTime < session.earliestTime) {
+      session.earliestTime = msgTime;
     }
   });
 
-  return Array.from(sessionsMap.values());
+  // Convert to array, ordered by latest message (already sorted from query)
+  const sessionIds = Array.from(sessionGroups.keys());
+  const totalSessions = sessionIds.length;
+
+  // Calculate pagination
+  const startIndex = (page - 1) * limit;
+  const endIndex = Math.min(startIndex + limit, totalSessions);
+  const paginatedSessionIds = sessionIds.slice(startIndex, endIndex);
+
+  // Build result list matching AgentChatSessionDTO
+  const list = paginatedSessionIds.map(sessionId => {
+    const session = sessionGroups.get(sessionId);
+    return {
+      sessionId: session.sessionId,
+      createdAt: session.earliestTime.toISOString(),
+      chatCount: session.messages.length
+    };
+  });
+
+  return {
+    list,
+    total: totalSessions
+  };
 };
 
 /**
  * Get chat history for a session
+ * Matches Spring Boot List<AgentChatHistoryDTO> format
  * @param {string} agentId - Agent ID
  * @param {string} sessionId - Session ID
- * @returns {Promise<Array>} Chat messages
+ * @returns {Promise<Array>} Chat messages with camelCase fields
  */
 const getChatHistory = async (agentId, sessionId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data, error } = await supabaseAdmin
     .from('ai_agent_chat_history')
-    .select('*')
+    .select('created_at, chat_type, content, audio_id, mac_address')
     .eq('agent_id', agentId)
     .eq('session_id', sessionId)
     .order('created_at', { ascending: true });
 
   if (error) throw new Error('Failed to fetch chat history');
 
-  return data || [];
+  // Get session creation time (earliest message) to match Spring Boot behavior
+  const messages = data || [];
+  if (messages.length === 0) return [];
+
+  const sessionCreationTime = messages.reduce((min, msg) => {
+    const msgTime = new Date(msg.created_at);
+    return msgTime < min ? msgTime : min;
+  }, new Date(messages[0].created_at));
+
+  // Transform to camelCase matching AgentChatHistoryDTO
+  return messages.map(msg => ({
+    createdAt: sessionCreationTime.toISOString(),
+    chatType: msg.chat_type,
+    content: msg.content,
+    audioId: msg.audio_id,
+    macAddress: msg.mac_address
+  }));
 };
 
 /**
@@ -927,19 +981,23 @@ const batchUploadSession = async (data) => {
 };
 
 /**
- * Get recent chat history for user (mobile app) - returns last 50 messages
+ * Get recent chat history for user (mobile app)
+ * Matches Spring Boot List<AgentChatHistoryUserVO> format
+ * Returns only USER messages (chat_type=1) with audio_id
  * @param {string} agentId - Agent ID
  * @param {number} [limit=50] - Max messages to return (default 50)
- * @returns {Promise<Array>} Recent chat messages
+ * @returns {Promise<Array>} Recent chat messages with only content and audioId
  */
 const getRecentUserChatHistory = async (agentId, limit = 50) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: messages, error } = await supabaseAdmin
     .from('ai_agent_chat_history')
-    .select('id, mac_address, session_id, chat_type, content, audio_id, created_at')
+    .select('content, audio_id')
     .eq('agent_id', agentId)
-    .order('created_at', { ascending: false })
+    .eq('chat_type', 1) // USER messages only
+    .not('audio_id', 'is', null) // Only messages with audio
+    .order('id', { ascending: false }) // Use ID for efficient sorting
     .limit(limit);
 
   if (error) {
@@ -947,23 +1005,51 @@ const getRecentUserChatHistory = async (agentId, limit = 50) => {
     throw new Error('Failed to get recent chat history');
   }
 
-  // Return in chronological order (reverse the descending result)
-  return (messages || []).reverse();
+  // Transform to camelCase and extract content from JSON if needed
+  return (messages || []).map(msg => ({
+    content: extractContentFromString(msg.content),
+    audioId: msg.audio_id
+  }));
+};
+
+/**
+ * Extract chat content from content field
+ * If content is JSON format (e.g., {"speaker": "...", "content": "..."}), extract the content field
+ * If content is a plain string, return directly
+ * @param {string} content - Original content
+ * @returns {string} Extracted chat content
+ */
+const extractContentFromString = (content) => {
+  if (!content || typeof content !== 'string' || content.trim() === '') {
+    return content;
+  }
+
+  // Try to parse as JSON
+  try {
+    const jsonObj = JSON.parse(content);
+    if (jsonObj && typeof jsonObj === 'object' && jsonObj.content) {
+      return String(jsonObj.content);
+    }
+  } catch {
+    // If not valid JSON, return original content
+  }
+
+  return content;
 };
 
 /**
  * Get audio content by audio ID
- * @param {string} agentId - Agent ID
+ * Matches Spring Boot behavior: returns just the content string
+ * Note: Spring Boot's endpoint uses the path param as audioId, not agentId
  * @param {string} audioId - Audio ID
- * @returns {Promise<Object|null>} Audio content record or null
+ * @returns {Promise<string|null>} Content string or null
  */
-const getAudioContent = async (agentId, audioId) => {
+const getAudioContent = async (audioId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: record, error } = await supabaseAdmin
     .from('ai_agent_chat_history')
-    .select('id, mac_address, session_id, chat_type, content, audio_id, created_at')
-    .eq('agent_id', agentId)
+    .select('content')
     .eq('audio_id', audioId)
     .single();
 
@@ -976,7 +1062,7 @@ const getAudioContent = async (agentId, audioId) => {
     throw new Error('Failed to get audio content');
   }
 
-  return record;
+  return record ? record.content : null;
 };
 
 // =============================================

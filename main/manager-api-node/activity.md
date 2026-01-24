@@ -27,7 +27,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Complete |
 | 15-16 | agent | Test agent listing and CRUD endpoints | Complete |
 | 17 | agent | Test agent template endpoints | Complete |
-| 18-19 | agent | Test agent chat history, MCP endpoints | Pending |
+| 18 | agent | Test agent chat history endpoints | Complete |
+| 19 | agent | Test agent MCP endpoints | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
 | 22-24 | model | Test model endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
@@ -78,6 +79,79 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 18 Complete (Agent Chat History Endpoints)
+
+**Task 18: Test and fix agent chat history endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /agent/{agentId}/sessions`
+- `GET /agent/{agentId}/chat-history/{sessionId}`
+- `GET /agent/{agentId}/chat-history/user`
+- `GET /agent/{id}/chat-history/audio`
+
+**Issues Found:**
+
+1. **GET /agent/{id}/sessions** - No pagination support
+   - Node.js returned simple array
+   - Spring Boot returns `PageData<AgentChatSessionDTO>` with pagination
+   - Missing `chatCount` field, wrong field name (`startedAt` vs `createdAt`)
+
+2. **GET /agent/{id}/chat-history/{sessionId}** - Wrong response format
+   - Node.js returned snake_case fields
+   - Spring Boot returns `List<AgentChatHistoryDTO>` with camelCase
+
+3. **GET /agent/{id}/chat-history/user** - Wrong response format
+   - Node.js returned all fields
+   - Spring Boot returns `List<AgentChatHistoryUserVO>` with only `content` and `audioId`
+   - Missing filter for USER messages only (chat_type=1)
+   - Missing filter for messages with audio (audio_id IS NOT NULL)
+   - Missing JSON content extraction
+
+4. **GET /agent/{id}/chat-history/audio** - Different behavior
+   - Spring Boot uses `{id}` as audioId (not agentId)
+   - Spring Boot returns just the content string
+
+**Fixes Applied:**
+
+**1. Fixed `getAgentSessions()` (`src/services/agent.service.js`)**
+- Added pagination support (page, limit parameters)
+- Returns `{ list, total }` format matching Spring Boot PageData
+- Each session now includes: `sessionId`, `createdAt` (earliest message), `chatCount`
+- Sessions ordered by latest message first
+
+**2. Fixed `getChatHistory()` (`src/services/agent.service.js`)**
+- Selects only needed fields: created_at, chat_type, content, audio_id, mac_address
+- Transforms to camelCase matching AgentChatHistoryDTO
+- Uses session creation time (earliest message) for all messages to match sidebar
+
+**3. Fixed `getRecentUserChatHistory()` (`src/services/agent.service.js`)**
+- Filters by `chat_type = 1` (USER messages only)
+- Filters by `audio_id IS NOT NULL`
+- Returns only `content` and `audioId` fields
+- Added `extractContentFromString()` helper to extract content from JSON
+
+**4. Fixed `getAudioContent()` (`src/services/agent.service.js`)**
+- Now takes only audioId parameter (not agentId)
+- Returns just the content string (not full record)
+
+**5. Updated route handlers (`src/routes/agent.routes.js`)**
+- `/:id/sessions` - Added pagination params, updated Swagger docs
+- `/:id/chat-history/user` - Added requireAuth, removed limit param, updated docs
+- `/:id/chat-history/audio` - Uses path param as audioId, updated docs
+- `/:id/chat-history/:sessionId` - Updated Swagger docs
+
+**Files Modified:**
+- `src/services/agent.service.js` - Updated 4 service methods (~150 lines)
+- `src/routes/agent.routes.js` - Updated 4 route handlers (~120 lines)
+
+**Verification:**
+- `npm run lint` - 4 pre-existing errors, 6 warnings (no new issues)
+- All endpoints return correct format matching Spring Boot DTOs
+
+---
 
 ### 2026-01-24 - Phase 4 Task 17 Complete (Agent Template Endpoints)
 
