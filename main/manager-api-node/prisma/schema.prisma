@@ -1,0 +1,11 @@
+// Prisma Schema for Cheeko Manager API
+// Docs: https://pris.ly/d/prisma-schema
+// Note: Database URLs are configured in prisma.config.ts (Prisma 7.x requirement)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}

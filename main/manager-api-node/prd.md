@@ -106,13 +106,14 @@ The Cheeko Manager API is the central backend for the Cheeko AI companion system
 - **Runtime**: Node.js 20+
 - **Framework**: Express.js
 - **Language**: JavaScript (ES6+)
-- **Database**: Supabase (PostgreSQL)
-- **Schema Management**: Supabase CLI Migrations
+- **Database**: PostgreSQL via Supabase
+- **ORM**: Prisma (primary database access)
+- **Schema Management**: Prisma Migrations
 - **Authentication**: Supabase Auth + custom service key middleware
-- **ORM/Query**: Supabase JS Client (@supabase/supabase-js)
+- **Auth Client**: Supabase JS Client (@supabase/supabase-js) - for auth only
 - **Validation**: Joi or express-validator
 - **API Documentation**: Swagger/OpenAPI (swagger-jsdoc + swagger-ui-express)
-- **Testing**: Jest + Supertest
+- **Testing**: Jest + Supertest + Prisma test utilities
 - **Logging**: Winston or Pino
 - **Environment**: dotenv
 - **Vector Database**: Qdrant Cloud (existing)
@@ -146,10 +147,16 @@ The Cheeko Manager API is the central backend for the Cheeko AI companion system
 ├─────────────────────────────────────────────────────────────────┤
 │  Data Access Layer                                               │
 │  ┌──────────────────────────────────────────────────────────┐   │
+│  │                    Prisma Client                          │   │
+│  │  ┌─────────────────────────────────────────────────────┐ │   │
+│  │  │  Database Queries (all services)                    │ │   │
+│  │  └─────────────────────────────────────────────────────┘ │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐   │
 │  │                    Supabase Client                        │   │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────────────┐  │   │
-│  │  │  Auth   │ │Database │ │ Storage │ │  Realtime      │  │   │
-│  │  └─────────┘ └─────────┘ └─────────┘ └────────────────┘  │   │
+│  │  ┌─────────┐ ┌─────────┐ ┌────────────────┐              │   │
+│  │  │  Auth   │ │ Storage │ │  Realtime      │              │   │
+│  │  └─────────┘ └─────────┘ └────────────────┘              │   │
 │  └──────────────────────────────────────────────────────────┘   │
 ├─────────────────────────────────────────────────────────────────┤
 │  External Integrations                                           │
@@ -163,9 +170,14 @@ The Cheeko Manager API is the central backend for the Cheeko AI companion system
 
 ```
 manager-api-node/
+├── prisma/
+│   ├── schema.prisma         # Database schema (all models)
+│   ├── seed.js               # Seed data script
+│   └── migrations/           # Prisma migrations
 ├── src/
 │   ├── config/
-│   │   ├── database.js       # Supabase client setup
+│   │   ├── prisma.js         # Prisma client setup
+│   │   ├── database.js       # Supabase Auth client (no DB)
 │   │   ├── swagger.js        # OpenAPI config
 │   │   └── constants.js      # App constants
 │   ├── middleware/
@@ -200,11 +212,11 @@ manager-api-node/
 │   │   ├── response.js       # Standardized responses
 │   │   └── helpers.js
 │   └── app.js                # Express app setup
-├── supabase/
-│   └── migrations/           # Database migrations
 ├── tests/
 │   ├── unit/
-│   └── integration/
+│   ├── integration/
+│   └── utils/
+│       └── prisma-test-helper.js
 ├── .env.example
 ├── package.json
 └── server.js                 # Entry point
@@ -902,3 +914,315 @@ All tasks marked with `"passes": true`
 - All integration tests pass
 - Swagger documentation is complete
 - API can be used as drop-in replacement for Spring Boot API
+
+---
+
+## Phase 2: Prisma Migration
+
+### Overview
+Migrate manager-api-node from Supabase JS client to Prisma ORM for better schema management, type safety, and database migration tooling. This is a minimal setup that preserves existing functionality while improving the database layer.
+
+### Goals
+1. **Prisma Schema** - Define all tables in `prisma/schema.prisma`
+2. **Service Migration** - Replace Supabase queries with Prisma client in all services
+3. **Database Testing** - Add test utilities for database operations
+4. **Seed Data** - Migration of existing seed data to Prisma seeds
+
+### Architecture Changes
+Keep existing Express.js architecture. Replace only the database layer:
+- `src/config/database.js` → Keep Supabase Auth, remove DB client
+- `src/config/prisma.js` → New Prisma client
+- `src/services/*.js` → Update queries from Supabase to Prisma
+
+### Data Model (Prisma)
+Tables from `scripts/complete-schema.sql` and `src/config/migrations.js`:
+
+**Core Tables:**
+- `sys_user` - System users (BIGSERIAL id)
+- `ai_model` - AI model configurations (UUID id)
+- `ai_tts_voice` - TTS voice settings (UUID id)
+- `ai_agent` - Agent configurations (UUID id)
+- `ai_device` - ESP32 device registry (UUID id)
+
+**Content Tables:**
+- `ai_music` - Music library (UUID id)
+- `ai_story` - Story library (UUID id)
+- `ai_textbook` - Textbook metadata (UUID id)
+- `ai_textbook_chapter` - Textbook chapters (UUID id)
+- `content_library` - Generic content (BIGSERIAL id)
+
+**RFID Tables:**
+- `rfid_pack` - Content packs (BIGSERIAL id)
+- `rfid_card_mapping` - RFID to content mapping (BIGSERIAL id)
+- `rfid_series` - Learning sequences (BIGSERIAL id)
+- `rfid_scan_log` - Scan history (BIGSERIAL id)
+- `rfid_tags` - Legacy RFID tags (BIGSERIAL id)
+
+**Analytics Tables:**
+- `analytics_game_sessions` - Game play sessions (BIGSERIAL id)
+- `analytics_game_attempts` - Individual game attempts (BIGSERIAL id)
+- `analytics_media_playback` - Media playback events (BIGSERIAL id)
+- `analytics_streaks` - Streak records (BIGSERIAL id)
+- `analytics_user_progress` - Aggregated user stats (BIGSERIAL id)
+
+**Profile Tables:**
+- `kid_profile` - Child profiles (BIGSERIAL id)
+- `kid_learning_progress` - Learning progress (UUID id)
+- `kid_activity_log` - Activity logs (UUID id)
+- `parent_profile` - Parent info (BIGSERIAL id)
+
+**Other Tables:**
+- `ai_agent_chat_history` - Chat logs (UUID id)
+- `ai_ota` - OTA firmware updates (UUID id)
+- `device_token_usage` - Token usage tracking (BIGSERIAL id)
+- `music_playlist` - Music playlists (BIGSERIAL id)
+- `story_playlist` - Story playlists (BIGSERIAL id)
+
+### Environment Variables Required
+
+```bash
+# Prisma Database URLs
+DATABASE_URL="postgresql://postgres.[project-ref]:[password]@aws-0-ap-south-1.pooler.supabase.com:6543/postgres?pgbouncer=true"
+DIRECT_URL="postgresql://postgres.[project-ref]:[password]@aws-0-ap-south-1.pooler.supabase.com:5432/postgres"
+
+# Keep existing Supabase Auth variables
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+### Key Files to Modify
+
+| File | Action |
+|------|--------|
+| `prisma/schema.prisma` | Create - all models |
+| `prisma/seed.js` | Create - seed data |
+| `src/config/prisma.js` | Create - Prisma client |
+| `src/config/database.js` | Modify - remove DB client, keep Auth |
+| `src/config/migrations.js` | Delete - replaced by Prisma |
+| `src/services/*.service.js` | Modify - all service files |
+| `server.js` | Modify - remove migration calls |
+| `package.json` | Modify - add Prisma scripts |
+| `tests/utils/prisma-test-helper.js` | Create - test utilities |
+
+### Prisma Migration Task List
+
+```json
+[
+  {
+    "id": "prisma-1",
+    "category": "setup",
+    "description": "Install Prisma and initialize configuration",
+    "steps": [
+      "Run npm install prisma @prisma/client",
+      "Run npx prisma init",
+      "Configure DATABASE_URL and DIRECT_URL in .env for Supabase PostgreSQL"
+    ],
+    "passes": true
+  },
+  {
+    "id": "prisma-2",
+    "category": "setup",
+    "description": "Create Prisma schema with all database models",
+    "steps": [
+      "Read scripts/complete-schema.sql for table definitions",
+      "Read src/config/migrations.js for additional tables",
+      "Create prisma/schema.prisma with all models",
+      "Define relationships between models",
+      "Run npx prisma generate to create client"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-3",
+    "category": "setup",
+    "description": "Introspect existing database and baseline migration",
+    "steps": [
+      "Run npx prisma db pull to sync with existing schema",
+      "Run npx prisma migrate dev --name init to create baseline",
+      "Verify migration files are created"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-4",
+    "category": "setup",
+    "description": "Create Prisma client wrapper",
+    "steps": [
+      "Create src/config/prisma.js with PrismaClient initialization",
+      "Add error handling and logging",
+      "Export prisma instance for services"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-5",
+    "category": "feature",
+    "description": "Migrate device.service.js to Prisma",
+    "steps": [
+      "Replace supabaseAdmin import with prisma",
+      "Convert all .from().select().eq() queries to prisma.model.findMany()",
+      "Update error handling for Prisma errors",
+      "Test device endpoints: GET /toy/device/info/{mac}"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-6",
+    "category": "feature",
+    "description": "Migrate agent.service.js to Prisma",
+    "steps": [
+      "Replace supabaseAdmin import with prisma",
+      "Convert agent queries to Prisma syntax",
+      "Test agent endpoints: GET /toy/agent/config/{mac}"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-7",
+    "category": "feature",
+    "description": "Migrate auth.service.js to Prisma",
+    "steps": [
+      "Keep Supabase Auth for authentication",
+      "Replace user database queries with Prisma",
+      "Test auth endpoints: POST /toy/user/login"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-8",
+    "category": "feature",
+    "description": "Migrate content.service.js to Prisma",
+    "steps": [
+      "Replace music, story, textbook queries with Prisma",
+      "Test content endpoints"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-9",
+    "category": "feature",
+    "description": "Migrate rfid.service.js to Prisma",
+    "steps": [
+      "Replace RFID-related queries with Prisma",
+      "Test RFID endpoints: GET /toy/admin/rfid/*"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-10",
+    "category": "feature",
+    "description": "Migrate analytics.service.js to Prisma",
+    "steps": [
+      "Replace analytics queries with Prisma",
+      "Test analytics endpoints"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-11",
+    "category": "feature",
+    "description": "Migrate profile.service.js to Prisma",
+    "steps": [
+      "Replace profile queries with Prisma",
+      "Test profile endpoints: GET /toy/api/mobile/*"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-12",
+    "category": "feature",
+    "description": "Migrate model.service.js to Prisma",
+    "steps": [
+      "Replace AI model queries with Prisma",
+      "Test model endpoints"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-13",
+    "category": "feature",
+    "description": "Migrate admin.service.js to Prisma",
+    "steps": [
+      "Replace admin queries with Prisma",
+      "Test admin endpoints"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-14",
+    "category": "feature",
+    "description": "Migrate system.service.js to Prisma",
+    "steps": [
+      "Replace system queries with Prisma",
+      "Test system endpoints"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-15",
+    "category": "cleanup",
+    "description": "Remove old migration system",
+    "steps": [
+      "Update server.js to remove migration calls",
+      "Delete or archive src/config/migrations.js",
+      "Update database.js to remove Supabase DB client (keep Auth)"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-16",
+    "category": "setup",
+    "description": "Create seed data script",
+    "steps": [
+      "Create prisma/seed.js with default data",
+      "Add seed script to package.json",
+      "Test seeding with npx prisma db seed"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-17",
+    "category": "testing",
+    "description": "Add database testing utilities",
+    "steps": [
+      "Create tests/utils/prisma-test-helper.js",
+      "Add test database setup/teardown",
+      "Create sample integration tests for device service"
+    ],
+    "passes": false
+  },
+  {
+    "id": "prisma-18",
+    "category": "testing",
+    "description": "Run full test suite and verify all endpoints",
+    "steps": [
+      "Run npm test to execute all tests",
+      "Start server with npm run dev",
+      "Test critical endpoints manually or via integration tests",
+      "Verify no regressions from Supabase migration"
+    ],
+    "passes": false
+  }
+]
+```
+
+### Prisma Migration Success Criteria
+- All existing API endpoints work identically with Prisma
+- All tests pass
+- No regressions from Supabase client migration
+- Prisma Studio can browse all tables: `npx prisma studio`
+
+---
+
+## Agent Instructions (Updated)
+
+1. Read `activity.md` first to understand current state (create if not exists)
+2. Find next task with `"passes": false` (check both Phase 1 and Phase 2 tasks)
+3. Complete all steps for that task
+4. Verify in browser using agent-browser (for UI) or run tests
+5. Update task to `"passes": true`
+6. Log completion in `activity.md`
+7. Repeat until all tasks pass
+
+**Important:** Only modify the `passes` field. Do not remove or rewrite tasks.
