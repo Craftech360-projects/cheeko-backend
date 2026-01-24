@@ -452,19 +452,54 @@ router.get('/pub-config',
  *   get:
  *     tags: [User]
  *     summary: Get current user info
+ *     description: Returns user information matching Spring Boot UserDetail format
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: User information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       description: User ID
+ *                     username:
+ *                       type: string
+ *                       description: Username
+ *                     superAdmin:
+ *                       type: integer
+ *                       description: Super admin flag (0 or 1)
+ *                     token:
+ *                       type: string
+ *                       description: Current auth token
+ *                     status:
+ *                       type: integer
+ *                       description: User status (1 = active)
  *       401:
  *         description: Unauthorized
  */
 router.get('/info',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { password, ...userWithoutPassword } = req.user;
-    success(res, userWithoutPassword);
+    // Format response to match Spring Boot UserDetail class
+    // UserDetail has: id, username, superAdmin, token, status
+    const userInfo = {
+      id: req.user.id,
+      username: req.user.username,
+      superAdmin: req.user.role === 'admin' ? 1 : 0,
+      token: req.token,
+      status: req.user.status
+    };
+    success(res, userInfo);
   })
 );
 

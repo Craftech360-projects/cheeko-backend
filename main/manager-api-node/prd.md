@@ -67,7 +67,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify user info displays correctly in frontend header"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,

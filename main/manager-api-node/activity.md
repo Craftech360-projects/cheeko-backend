@@ -18,7 +18,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 |----|----------|-------------|--------|
 | 1 | setup | Start manager-web frontend | Complete |
 | 2 | auth | Test POST /user/login endpoint | Complete |
-| 3 | auth | Test GET /user/info endpoint | Pending |
+| 3 | auth | Test GET /user/info endpoint | Complete |
 | 4 | auth | Test GET /user/pub-config endpoint | Complete |
 | 5-10 | admin | Test admin endpoints (users, params, dict) | Pending |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
@@ -73,6 +73,51 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 3 Complete (GET /user/info)
+
+**Task 3: Test and fix GET /user/info endpoint**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+1. **Response format mismatch** - Node.js returned different fields than Spring Boot
+   - Node.js returned: `id, username, email, role, status, created_at`
+   - Spring Boot returns: `id, username, superAdmin, token, status`
+
+**Analysis:**
+- Spring Boot uses `UserDetail` class with fields: `id`, `username`, `superAdmin` (Integer: 0 or 1), `token`, `status`
+- Node.js database uses `role` (String: "admin" or "user") instead of `super_admin` (Integer)
+
+**Fixes Applied:**
+
+**1. `/user/info` Endpoint (`src/routes/auth.routes.js`)**
+- Modified response to match Spring Boot `UserDetail` format:
+  - `id` - User ID (from database)
+  - `username` - Username (from database)
+  - `superAdmin` - Mapped from `role`: 1 if role === 'admin', else 0
+  - `token` - Current auth token (from `req.token`)
+  - `status` - User status (from database)
+- Updated Swagger documentation with proper response schema
+
+**Before:**
+```json
+{"code":0,"data":{"id":20,"username":"admin","email":null,"role":"user","status":1,"created_at":"..."}}
+```
+
+**After:**
+```json
+{"code":0,"data":{"id":20,"username":"admin","superAdmin":0,"token":"xxxxx","status":1}}
+```
+
+**Files Modified:**
+- `src/routes/auth.routes.js` - Fixed `/user/info` response format (~30 lines changed)
+
+**Verification:**
+- `npm run lint` - 0 new errors (3 pre-existing errors, 6 warnings)
+- Endpoint returns correct format matching Spring Boot
+
+---
 
 ### 2026-01-24 - Phase 4 Task 2 Complete (Login & Pub-Config)
 
