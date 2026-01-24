@@ -23,7 +23,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 10 | feature | OTA Management endpoints (/otaMag) | Complete |
 | 11 | feature | RFID Question CRUD endpoints | Complete |
 | 12 | feature | Extended RFID Series endpoints | Complete |
-| 13 | feature | Content Items CRUD endpoints | Pending |
+| 13 | feature | Content Items CRUD endpoints | Complete |
 | 14 | feature | Device Playlist path aliases | Pending |
 | 15 | feature | Password Recovery endpoint | Pending |
 | 16 | feature | Server Management endpoints | Pending |
@@ -45,6 +45,73 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Content Items CRUD Endpoints Complete
+
+**Task 13: Add Content Items CRUD endpoints (/content/items)**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/content/items` - Get all content items with pagination and filters
+- `GET /toy/content/items/{id}` - Get content item by ID
+- `GET /toy/content/items/type/{contentType}` - Get items by type
+- `GET /toy/content/items/category/{category}` - Get items by category
+- `GET /toy/content/items/search` - Full-text search content items
+- `GET /toy/content/items/categories` - Get categories by type
+- `GET /toy/content/items/statistics` - Get content statistics
+- `POST /toy/content/items` - Create single content item (admin only)
+- `POST /toy/content/items/batch` - Batch create content items (admin only)
+- `PUT /toy/content/items/{id}` - Update content item (admin only)
+- `PATCH /toy/content/items/{id}` - Partial update content item (admin only)
+- `PUT /toy/content/items/batch` - Batch update content items (admin only)
+- `DELETE /toy/content/items/{id}` - Delete content item (admin only)
+- `DELETE /toy/content/items/batch` - Batch delete content items (admin only)
+
+**Service Methods Added to `content.service.js`:**
+- `getContentItems({ page, limit, contentType, category })` - Paginated items
+- `getContentItemById(id)` - Get item by ID
+- `getContentItemsByType(contentType, options)` - Get items by type
+- `getContentItemsByCategory(category, options)` - Get items by category
+- `searchContentItems(query, options)` - Full-text search
+- `getContentItemCategories(contentType)` - Get unique categories
+- `getContentItemStatistics()` - Get aggregate statistics
+- `createContentItem(data)` - Create single item
+- `batchCreateContentItems(items)` - Batch create items
+- `updateContentItem(id, data)` - Update item
+- `batchUpdateContentItems(updates)` - Batch update items
+- `deleteContentItem(id)` - Delete item
+- `batchDeleteContentItems(ids)` - Batch delete items
+
+**Files Modified:**
+- `src/services/content.service.js` - Added 13 content items methods (~350 lines)
+- `src/routes/content.routes.js` - Added 14 route handlers with Swagger docs (~550 lines)
+
+**API Contract:**
+```
+GET    /toy/content/items                      - Returns {list, total, page, limit, pages}
+GET    /toy/content/items/:id                  - Returns item or 404
+GET    /toy/content/items/type/:contentType    - Returns {list, total, page, limit, pages}
+GET    /toy/content/items/category/:category   - Returns {list, total, page, limit, pages}
+GET    /toy/content/items/search?q=            - Returns {list, total, page, limit, pages}
+GET    /toy/content/items/categories           - Returns array of category strings
+GET    /toy/content/items/statistics           - Returns {total, byType, byCategory}
+POST   /toy/content/items                      - Creates item, returns item object
+POST   /toy/content/items/batch                - Returns {created, items}
+PUT    /toy/content/items/:id                  - Updates item, returns item object
+PATCH  /toy/content/items/:id                  - Partial update, returns item object
+PUT    /toy/content/items/batch                - Returns {updated, items}
+DELETE /toy/content/items/:id                  - Deletes item
+DELETE /toy/content/items/batch                - Returns {deleted}
+```
+
+**Database Table Used:** `content_items` (already in Prisma schema)
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Extended RFID Series Endpoints Complete
 

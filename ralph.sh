@@ -36,15 +36,15 @@ if [ ! -f "PROMPT.md" ]; then
   exit 1
 fi
 
-if [ ! -f "prd.md" ]; then
+if [ ! -f "main/manager-api-node/prd.md" ]; then
   echo -e "${RED}Error: prd.md not found${NC}"
   echo "Please create your PRD or run /create-prd first"
   exit 1
 fi
 
-if [ ! -f "activity.md" ]; then
+if [ ! -f "main/manager-api-node/activity.md" ]; then
   echo -e "${YELLOW}Warning: activity.md not found, creating it...${NC}"
-  cat > activity.md << 'EOF'
+  cat > main/manager-api-node/activity.md << 'EOF'
 # Project Build - Activity Log
 
 ## Current Status

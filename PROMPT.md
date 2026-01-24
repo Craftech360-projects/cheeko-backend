@@ -1,4 +1,4 @@
-@main/manager-api-node/prd.md @activity.md
+@main/manager-api-node/prd.md @main/manager-api-node/activity.md
 
 We are building a Node.js/Express.js API to replace the existing Java Spring Boot manager-api.
 

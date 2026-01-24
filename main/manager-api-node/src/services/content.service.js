@@ -1082,6 +1082,414 @@ const getPlaylistItem = async (playlistItemId, playlistType) => {
   };
 };
 
+// ==================== CONTENT ITEMS METHODS ====================
+
+/**
+ * Get content items with pagination
+ * @param {Object} options - Filter and pagination options
+ * @returns {Promise<Object>} Paginated content items list
+ */
+const getContentItems = async ({ page = 1, limit = 10, contentType, category } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('content_items')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('content_items')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (contentType) {
+    countQuery = countQuery.eq('content_type', contentType);
+    dataQuery = dataQuery.eq('content_type', contentType);
+  }
+
+  if (category) {
+    countQuery = countQuery.eq('category', category);
+    dataQuery = dataQuery.eq('category', category);
+  }
+
+  const { count } = await countQuery;
+  const { data: items, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch content items', { error: error.message });
+    throw new Error('Failed to fetch content items');
+  }
+
+  return {
+    list: items || [],
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit)
+  };
+};
+
+/**
+ * Get content item by ID
+ * @param {string} id - Content item ID
+ * @returns {Promise<Object>} Content item
+ */
+const getContentItemById = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: item, error } = await supabaseAdmin
+    .from('content_items')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch content item', { error: error.message });
+    throw new Error('Failed to fetch content item');
+  }
+
+  return item || null;
+};
+
+/**
+ * Get content items by type
+ * @param {string} contentType - Content type (music, story, etc.)
+ * @param {Object} options - Pagination options
+ * @returns {Promise<Object>} Paginated items
+ */
+const getContentItemsByType = async (contentType, { page = 1, limit = 10 } = {}) => {
+  return getContentItems({ page, limit, contentType });
+};
+
+/**
+ * Get content items by category
+ * @param {string} category - Category name
+ * @param {Object} options - Pagination options
+ * @returns {Promise<Object>} Paginated items
+ */
+const getContentItemsByCategory = async (category, { page = 1, limit = 10 } = {}) => {
+  return getContentItems({ page, limit, category });
+};
+
+/**
+ * Search content items
+ * @param {string} query - Search query
+ * @param {Object} options - Filter and pagination options
+ * @returns {Promise<Object>} Search results
+ */
+const searchContentItems = async (query, { page = 1, limit = 20, contentType, category } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+  const searchPattern = `%${query}%`;
+
+  let countQuery = supabaseAdmin
+    .from('content_items')
+    .select('id', { count: 'exact', head: true })
+    .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`);
+
+  let dataQuery = supabaseAdmin
+    .from('content_items')
+    .select('*')
+    .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`)
+    .order('created_at', { ascending: false });
+
+  if (contentType) {
+    countQuery = countQuery.eq('content_type', contentType);
+    dataQuery = dataQuery.eq('content_type', contentType);
+  }
+
+  if (category) {
+    countQuery = countQuery.eq('category', category);
+    dataQuery = dataQuery.eq('category', category);
+  }
+
+  const { count } = await countQuery;
+  const { data: items, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to search content items', { error: error.message });
+    throw new Error('Failed to search content items');
+  }
+
+  return {
+    list: items || [],
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit)
+  };
+};
+
+/**
+ * Get categories for content items
+ * @param {string} [contentType] - Optional content type filter
+ * @returns {Promise<Array>} List of categories
+ */
+const getContentItemCategories = async (contentType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('content_items')
+    .select('category')
+    .not('category', 'is', null);
+
+  if (contentType) {
+    query = query.eq('content_type', contentType);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch categories', { error: error.message });
+    throw new Error('Failed to fetch categories');
+  }
+
+  // Extract unique categories
+  const categories = [...new Set(data.map(item => item.category).filter(Boolean))];
+  return categories.sort();
+};
+
+/**
+ * Get content statistics
+ * @returns {Promise<Object>} Statistics object
+ */
+const getContentItemStatistics = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get total count
+  const { count: total } = await supabaseAdmin
+    .from('content_items')
+    .select('id', { count: 'exact', head: true });
+
+  // Get count by type
+  const { data: typeData } = await supabaseAdmin
+    .from('content_items')
+    .select('content_type');
+
+  const byType = {};
+  if (typeData) {
+    typeData.forEach(item => {
+      byType[item.content_type] = (byType[item.content_type] || 0) + 1;
+    });
+  }
+
+  // Get count by category
+  const { data: categoryData } = await supabaseAdmin
+    .from('content_items')
+    .select('category');
+
+  const byCategory = {};
+  if (categoryData) {
+    categoryData.forEach(item => {
+      if (item.category) {
+        byCategory[item.category] = (byCategory[item.category] || 0) + 1;
+      }
+    });
+  }
+
+  return {
+    total: total || 0,
+    byType,
+    byCategory
+  };
+};
+
+/**
+ * Create content item
+ * @param {Object} data - Content item data
+ * @returns {Promise<Object>} Created item
+ */
+const createContentItem = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const insertData = {
+    title: data.title,
+    romanized: data.romanized || null,
+    filename: data.filename || null,
+    content_type: data.contentType,
+    category: data.category || null,
+    alternatives: data.alternatives || [],
+    file_url: data.fileUrl || null,
+    thumbnail_url: data.thumbnailUrl || null,
+    duration_seconds: data.durationSeconds || null
+  };
+
+  const { data: item, error } = await supabaseAdmin
+    .from('content_items')
+    .insert(insertData)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to create content item', { error: error.message });
+    throw new Error('Failed to create content item');
+  }
+
+  return item;
+};
+
+/**
+ * Batch create content items
+ * @param {Array} items - Array of content item data
+ * @returns {Promise<Object>} Result with created count
+ */
+const batchCreateContentItems = async (items) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Items array is required');
+  }
+
+  const insertData = items.map(item => ({
+    title: item.title,
+    romanized: item.romanized || null,
+    filename: item.filename || null,
+    content_type: item.contentType,
+    category: item.category || null,
+    alternatives: item.alternatives || [],
+    file_url: item.fileUrl || null,
+    thumbnail_url: item.thumbnailUrl || null,
+    duration_seconds: item.durationSeconds || null
+  }));
+
+  const { data, error } = await supabaseAdmin
+    .from('content_items')
+    .insert(insertData)
+    .select();
+
+  if (error) {
+    logger.error('Failed to batch create content items', { error: error.message });
+    throw new Error('Failed to batch create content items');
+  }
+
+  return {
+    created: data.length,
+    items: data
+  };
+};
+
+/**
+ * Update content item
+ * @param {string} id - Content item ID
+ * @param {Object} data - Update data
+ * @returns {Promise<Object>} Updated item
+ */
+const updateContentItem = async (id, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const updateData = {
+    updated_at: new Date().toISOString()
+  };
+
+  if (data.title !== undefined) updateData.title = data.title;
+  if (data.romanized !== undefined) updateData.romanized = data.romanized;
+  if (data.filename !== undefined) updateData.filename = data.filename;
+  if (data.contentType !== undefined) updateData.content_type = data.contentType;
+  if (data.category !== undefined) updateData.category = data.category;
+  if (data.alternatives !== undefined) updateData.alternatives = data.alternatives;
+  if (data.fileUrl !== undefined) updateData.file_url = data.fileUrl;
+  if (data.thumbnailUrl !== undefined) updateData.thumbnail_url = data.thumbnailUrl;
+  if (data.durationSeconds !== undefined) updateData.duration_seconds = data.durationSeconds;
+
+  const { data: item, error } = await supabaseAdmin
+    .from('content_items')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update content item', { error: error.message });
+    throw new Error('Failed to update content item');
+  }
+
+  return item;
+};
+
+/**
+ * Batch update content items
+ * @param {Array} updates - Array of {id, ...updateData} objects
+ * @returns {Promise<Object>} Result with updated count
+ */
+const batchUpdateContentItems = async (updates) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!Array.isArray(updates) || updates.length === 0) {
+    throw new Error('Updates array is required');
+  }
+
+  let updatedCount = 0;
+  const results = [];
+
+  for (const update of updates) {
+    const { id, ...data } = update;
+    if (!id) continue;
+
+    try {
+      const item = await updateContentItem(id, data);
+      results.push(item);
+      updatedCount++;
+    } catch (error) {
+      logger.warn(`Failed to update content item ${id}`, { error: error.message });
+    }
+  }
+
+  return {
+    updated: updatedCount,
+    items: results
+  };
+};
+
+/**
+ * Delete content item
+ * @param {string} id - Content item ID
+ * @returns {Promise<boolean>} Success status
+ */
+const deleteContentItem = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('content_items')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Failed to delete content item', { error: error.message });
+    throw new Error('Failed to delete content item');
+  }
+
+  return true;
+};
+
+/**
+ * Batch delete content items
+ * @param {Array} ids - Array of content item IDs
+ * @returns {Promise<Object>} Result with deleted count
+ */
+const batchDeleteContentItems = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    throw new Error('IDs array is required');
+  }
+
+  const { error, count } = await supabaseAdmin
+    .from('content_items')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to batch delete content items', { error: error.message });
+    throw new Error('Failed to batch delete content items');
+  }
+
+  return {
+    deleted: count || ids.length
+  };
+};
+
 module.exports = {
   // Content Library methods
   getLibraryList,
@@ -1119,5 +1527,19 @@ module.exports = {
   clearPlaylist,
   reorderPlaylist,
   movePlaylistItem,
-  getPlaylistItem
+  getPlaylistItem,
+  // Content Items methods
+  getContentItems,
+  getContentItemById,
+  getContentItemsByType,
+  getContentItemsByCategory,
+  searchContentItems,
+  getContentItemCategories,
+  getContentItemStatistics,
+  createContentItem,
+  batchCreateContentItems,
+  updateContentItem,
+  batchUpdateContentItems,
+  deleteContentItem,
+  batchDeleteContentItems
 };

@@ -17,6 +17,7 @@
       "Bash(npm init:*)",
       "Bash(npm start:*)",
       "Bash(npx:*)",
+      "Bash(npx prisma:*)",
       "Bash(npx supabase:*)",
       "Bash(npx jest:*)",
       "Bash(npx nodemon:*)",
@@ -33,14 +34,14 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(mkdir:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Read(./.env)",
+      "Read(./.env.*)"
     ],
     "deny": [
       "Bash(sudo:*)",
       "Bash(docker:*)",
       "Bash(rm -rf:*)",
-      "Read(./.env)",
-      "Read(./.env.*)",
       "Read(~/.ssh/**)",
       "Read(~/.aws/**)"
     ],

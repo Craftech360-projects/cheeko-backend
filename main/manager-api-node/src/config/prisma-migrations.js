@@ -1,0 +1,142 @@
+/**
+ * Prisma Migration Runner
+ *
+ * Runs Prisma migrations on server startup using `prisma migrate deploy`.
+ * This ensures the database schema is synchronized with the Prisma schema definition.
+ *
+ * Usage:
+ *   const { runPrismaMigrations } = require('./config/prisma-migrations');
+ *   await runPrismaMigrations(); // Throws on failure
+ */
+
+const { execSync } = require('child_process');
+const path = require('path');
+const logger = require('../utils/logger');
+
+/**
+ * Run Prisma migrations using `prisma migrate deploy`
+ *
+ * This command applies all pending migrations to the database.
+ * It is safe to run in production and will not create new migrations.
+ *
+ * @returns {Promise<boolean>} True if migrations succeeded
+ * @throws {Error} If migrations fail
+ */
+const runPrismaMigrations = async () => {
+  logger.info('Starting Prisma migrations...');
+
+  // Check if DIRECT_URL is set (required for Prisma migrations)
+  if (!process.env.DIRECT_URL && !process.env.DATABASE_URL) {
+    logger.warn('═══════════════════════════════════════════════════════════');
+    logger.warn('Neither DIRECT_URL nor DATABASE_URL is configured.');
+    logger.warn('Prisma migrations require a database connection URL.');
+    logger.warn('');
+    logger.warn('Add to your .env file:');
+    logger.warn('  DIRECT_URL="postgresql://user:password@host:5432/database"');
+    logger.warn('═══════════════════════════════════════════════════════════');
+    throw new Error('Database URL not configured for Prisma migrations');
+  }
+
+  try {
+    // Get the project root directory (where prisma.config.ts is located)
+    const projectRoot = path.resolve(__dirname, '../..');
+
+    // Run prisma migrate deploy
+    logger.info('Running: npx prisma migrate deploy');
+
+    const output = execSync('npx prisma migrate deploy', {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        // Ensure colors are disabled for cleaner logging
+        NO_COLOR: '1',
+        FORCE_COLOR: '0'
+      },
+      timeout: 60000 // 60 second timeout
+    });
+
+    // Log migration output
+    if (output) {
+      const lines = output.trim().split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          logger.info(`Prisma: ${line.trim()}`);
+        }
+      }
+    }
+
+    logger.info('Prisma migrations completed successfully!');
+    return true;
+
+  } catch (error) {
+    // Extract meaningful error message
+    let errorMessage = 'Migration failed';
+
+    if (error.stderr) {
+      errorMessage = error.stderr.toString().trim();
+    } else if (error.stdout) {
+      errorMessage = error.stdout.toString().trim();
+    } else if (error.message) {
+      errorMessage = error.message;
+    }
+
+    logger.error('═══════════════════════════════════════════════════════════');
+    logger.error('Prisma migration failed!');
+    logger.error('');
+    logger.error(`Error: ${errorMessage}`);
+    logger.error('');
+
+    // Provide helpful troubleshooting tips
+    if (errorMessage.includes('database') || errorMessage.includes('connection')) {
+      logger.error('Troubleshooting:');
+      logger.error('  1. Check your DIRECT_URL in .env is correct');
+      logger.error('  2. Ensure the database server is running');
+      logger.error('  3. Verify network connectivity to the database');
+    } else if (errorMessage.includes('migration') || errorMessage.includes('schema')) {
+      logger.error('Troubleshooting:');
+      logger.error('  1. Check prisma/migrations folder exists');
+      logger.error('  2. Verify migration files are not corrupted');
+      logger.error('  3. Run: npx prisma migrate status');
+    }
+
+    logger.error('═══════════════════════════════════════════════════════════');
+
+    throw new Error(`Prisma migration failed: ${errorMessage}`);
+  }
+};
+
+/**
+ * Check migration status without applying changes
+ *
+ * @returns {Promise<string>} Migration status output
+ */
+const getMigrationStatus = async () => {
+  try {
+    const projectRoot = path.resolve(__dirname, '../..');
+
+    const output = execSync('npx prisma migrate status', {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+        FORCE_COLOR: '0'
+      },
+      timeout: 30000
+    });
+
+    return output.trim();
+
+  } catch (error) {
+    const errorOutput = error.stderr?.toString() || error.stdout?.toString() || error.message;
+    return `Status check failed: ${errorOutput}`;
+  }
+};
+
+module.exports = {
+  runPrismaMigrations,
+  getMigrationStatus
+};

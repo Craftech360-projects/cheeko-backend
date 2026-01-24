@@ -2,14 +2,14 @@
  * Cheeko Manager API - Server Entry Point
  *
  * This is the main entry point for the Express.js server.
- * It loads environment variables, runs migrations, and starts the application.
+ * It loads environment variables, runs Prisma migrations, and starts the application.
  */
 
 require('dotenv').config();
 
 const app = require('./src/app');
 const logger = require('./src/utils/logger');
-const { runMigrations } = require('./src/config/migrations');
+const { runPrismaMigrations } = require('./src/config/prisma-migrations');
 
 const PORT = process.env.PORT || 8002;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -19,16 +19,16 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
  */
 const startServer = async () => {
   try {
-    // Run database migrations
-    logger.info('Initializing database...');
-    const migrationSuccess = await runMigrations();
-
-    if (!migrationSuccess) {
-      logger.warn('Database migrations incomplete. Some features may not work.');
-    }
+    // Run Prisma database migrations
+    // Server will exit with code 1 if migrations fail
+    logger.info('Running Prisma migrations...');
+    await runPrismaMigrations();
+    logger.info('Database schema synchronized.');
 
     // Start Express server
-    const server = app.listen(PORT, () => {
+    // Bind to 127.0.0.1 to avoid Windows EACCES permission issues
+    const HOST = process.env.HOST || '127.0.0.1';
+    const server = app.listen(PORT, HOST, () => {
       logger.info(`
 ╔═══════════════════════════════════════════════════════════╗
 ║           Cheeko Manager API (Node.js)                    ║
@@ -38,7 +38,7 @@ const startServer = async () => {
 ║  Port:        ${String(PORT).padEnd(43)}║
 ║  API Base:    http://localhost:${PORT}/toy${' '.repeat(23)}║
 ║  Swagger:     http://localhost:${PORT}/toy/doc.html${' '.repeat(14)}║
-║  Database:    ${migrationSuccess ? 'Connected & Migrated'.padEnd(43) : 'Check Configuration'.padEnd(43)}║
+║  Database:    Prisma Migrations Applied                   ║
 ╚═══════════════════════════════════════════════════════════╝
       `);
     });

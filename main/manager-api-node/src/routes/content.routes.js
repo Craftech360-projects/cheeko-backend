@@ -1705,4 +1705,763 @@ router.get('/search',
   })
 );
 
+// ==================== CONTENT ITEMS ROUTES ====================
+
+/**
+ * @swagger
+ * /content/items:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Get all content items
+ *     description: Returns paginated list of content items with optional filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: contentType
+ *         schema:
+ *           type: string
+ *         description: Filter by content type (music, story, etc.)
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by category
+ *     responses:
+ *       200:
+ *         description: Paginated content items list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/ContentItem'
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *                     pages:
+ *                       type: integer
+ */
+router.get('/items',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit, contentType, category } = req.query;
+    const result = await contentService.getContentItems({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      contentType,
+      category
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/search:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Search content items
+ *     description: Full-text search across content items
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Search query (min 2 characters)
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *       - in: query
+ *         name: contentType
+ *         schema:
+ *           type: string
+ *         description: Filter by content type
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *         description: Filter by category
+ *     responses:
+ *       200:
+ *         description: Search results
+ *       400:
+ *         description: Search query too short
+ */
+router.get('/items/search',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { q, page, limit, contentType, category } = req.query;
+
+    if (!q || q.length < 2) {
+      return badRequest(res, 'Search query must be at least 2 characters');
+    }
+
+    const result = await contentService.searchContentItems(q, {
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 20,
+      contentType,
+      category
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/categories:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Get categories
+ *     description: Get list of unique categories, optionally filtered by content type
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: contentType
+ *         schema:
+ *           type: string
+ *         description: Filter categories by content type
+ *     responses:
+ *       200:
+ *         description: List of categories
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ */
+router.get('/items/categories',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { contentType } = req.query;
+    const categories = await contentService.getContentItemCategories(contentType);
+    success(res, categories);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/statistics:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Get content statistics
+ *     description: Get aggregate statistics about content items
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Content statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                     byType:
+ *                       type: object
+ *                       additionalProperties:
+ *                         type: integer
+ *                     byCategory:
+ *                       type: object
+ *                       additionalProperties:
+ *                         type: integer
+ */
+router.get('/items/statistics',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const stats = await contentService.getContentItemStatistics();
+    success(res, stats);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/type/{contentType}:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Get items by type
+ *     description: Get content items filtered by content type
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: contentType
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content type (music, story, etc.)
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: Items of specified type
+ */
+router.get('/items/type/:contentType',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { contentType } = req.params;
+    const { page, limit } = req.query;
+    const result = await contentService.getContentItemsByType(contentType, {
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/category/{category}:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Get items by category
+ *     description: Get content items filtered by category
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: category
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Category name
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *     responses:
+ *       200:
+ *         description: Items in specified category
+ */
+router.get('/items/category/:category',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { category } = req.params;
+    const { page, limit } = req.query;
+    const result = await contentService.getContentItemsByCategory(category, {
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/{id}:
+ *   get:
+ *     tags: [Content Items]
+ *     summary: Get item by ID
+ *     description: Get a specific content item by its ID
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content item ID
+ *     responses:
+ *       200:
+ *         description: Content item details
+ *       404:
+ *         description: Item not found
+ */
+router.get('/items/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Skip special routes
+    if (['search', 'categories', 'statistics', 'type', 'category', 'batch'].includes(id)) {
+      return notFound(res, 'Content item not found');
+    }
+
+    const item = await contentService.getContentItemById(id);
+    if (!item) {
+      return notFound(res, 'Content item not found');
+    }
+    success(res, item);
+  })
+);
+
+/**
+ * @swagger
+ * /content/items:
+ *   post:
+ *     tags: [Content Items]
+ *     summary: Create content item
+ *     description: Create a new content item (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - title
+ *               - contentType
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 description: Item title
+ *               romanized:
+ *                 type: string
+ *                 description: Romanized title for search
+ *               filename:
+ *                 type: string
+ *                 description: Original filename
+ *               contentType:
+ *                 type: string
+ *                 description: Content type (music, story, etc.)
+ *               category:
+ *                 type: string
+ *                 description: Category name
+ *               alternatives:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Alternative titles/names
+ *               fileUrl:
+ *                 type: string
+ *                 description: URL to the file
+ *               thumbnailUrl:
+ *                 type: string
+ *                 description: URL to thumbnail image
+ *               durationSeconds:
+ *                 type: integer
+ *                 description: Duration in seconds
+ *     responses:
+ *       200:
+ *         description: Created content item
+ *       400:
+ *         description: Validation error
+ */
+router.post('/items',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { title, contentType } = req.body;
+
+    if (!title) {
+      return badRequest(res, 'Title is required');
+    }
+    if (!contentType) {
+      return badRequest(res, 'Content type is required');
+    }
+
+    try {
+      const item = await contentService.createContentItem(req.body);
+      success(res, item, 'Content item created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/batch:
+ *   post:
+ *     tags: [Content Items]
+ *     summary: Batch create content items
+ *     description: Create multiple content items at once (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - title
+ *                     - contentType
+ *                   properties:
+ *                     title:
+ *                       type: string
+ *                     contentType:
+ *                       type: string
+ *                     category:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Batch creation result
+ *       400:
+ *         description: Validation error
+ */
+router.post('/items/batch',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { items } = req.body;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return badRequest(res, 'Items array is required');
+    }
+
+    try {
+      const result = await contentService.batchCreateContentItems(items);
+      success(res, result, `Created ${result.created} content items`);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/{id}:
+ *   put:
+ *     tags: [Content Items]
+ *     summary: Update content item
+ *     description: Update a content item (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content item ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *               romanized:
+ *                 type: string
+ *               filename:
+ *                 type: string
+ *               contentType:
+ *                 type: string
+ *               category:
+ *                 type: string
+ *               alternatives:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               fileUrl:
+ *                 type: string
+ *               thumbnailUrl:
+ *                 type: string
+ *               durationSeconds:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Updated content item
+ *       400:
+ *         description: Validation error
+ */
+router.put('/items/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const item = await contentService.updateContentItem(id, req.body);
+      success(res, item, 'Content item updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/{id}:
+ *   patch:
+ *     tags: [Content Items]
+ *     summary: Partial update content item
+ *     description: Partial update a content item (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content item ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *               category:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Updated content item
+ */
+router.patch('/items/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      const item = await contentService.updateContentItem(id, req.body);
+      success(res, item, 'Content item updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/batch:
+ *   put:
+ *     tags: [Content Items]
+ *     summary: Batch update content items
+ *     description: Update multiple content items at once (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - updates
+ *             properties:
+ *               updates:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - id
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     title:
+ *                       type: string
+ *                     category:
+ *                       type: string
+ *     responses:
+ *       200:
+ *         description: Batch update result
+ */
+router.put('/items/batch',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { updates } = req.body;
+
+    if (!updates || !Array.isArray(updates) || updates.length === 0) {
+      return badRequest(res, 'Updates array is required');
+    }
+
+    try {
+      const result = await contentService.batchUpdateContentItems(updates);
+      success(res, result, `Updated ${result.updated} content items`);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/{id}:
+ *   delete:
+ *     tags: [Content Items]
+ *     summary: Delete content item
+ *     description: Delete a content item (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content item ID
+ *     responses:
+ *       200:
+ *         description: Item deleted
+ *       400:
+ *         description: Deletion failed
+ */
+router.delete('/items/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    try {
+      await contentService.deleteContentItem(id);
+      success(res, null, 'Content item deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /content/items/batch:
+ *   delete:
+ *     tags: [Content Items]
+ *     summary: Batch delete content items
+ *     description: Delete multiple content items at once (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - ids
+ *             properties:
+ *               ids:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 description: Array of content item IDs to delete
+ *     responses:
+ *       200:
+ *         description: Batch deletion result
+ *       400:
+ *         description: IDs array required
+ */
+router.delete('/items/batch',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'IDs array is required');
+    }
+
+    try {
+      const result = await contentService.batchDeleteContentItems(ids);
+      success(res, result, `Deleted ${result.deleted} content items`);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     ContentItem:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         title:
+ *           type: string
+ *         romanized:
+ *           type: string
+ *         filename:
+ *           type: string
+ *         content_type:
+ *           type: string
+ *         category:
+ *           type: string
+ *         alternatives:
+ *           type: array
+ *           items:
+ *             type: string
+ *         file_url:
+ *           type: string
+ *         thumbnail_url:
+ *           type: string
+ *         duration_seconds:
+ *           type: integer
+ *         created_at:
+ *           type: string
+ *           format: date-time
+ *         updated_at:
+ *           type: string
+ *           format: date-time
+ */
+
 module.exports = router;

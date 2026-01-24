@@ -447,7 +447,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add full CRUD with batch operations",
       "Add search and filter endpoints"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
