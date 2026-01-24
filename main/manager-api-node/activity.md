@@ -18,7 +18,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 5 | feature | Configuration endpoints (/config) | Complete |
 | 6 | feature | Model Provider CRUD endpoints | Complete |
 | 7 | feature | Extended Analytics endpoints | Complete |
-| 8 | feature | Token Usage Analytics endpoints | Pending |
+| 8 | feature | Token Usage Analytics endpoints | Complete |
 | 9 | feature | OTA root endpoints (/ota/) | Pending |
 | 10 | feature | OTA Management endpoints (/otaMag) | Pending |
 | 11 | feature | RFID Question CRUD endpoints | Pending |
@@ -45,6 +45,45 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Token Usage Analytics Endpoints Complete
+
+**Task 8: Add Token Usage Analytics endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Already Implemented:**
+- `GET /toy/usage/tokens/:macAddress/session/:sessionId` - Get token usage for specific session
+- `GET /toy/usage/analytics/daily-summary` - Get daily usage summary across all devices
+- `GET /toy/usage/analytics/per-device` - Get per-device daily usage
+- `GET /toy/usage/analytics/totals` - Get overall usage totals across all devices
+
+**Service Methods Already Implemented in `device.service.js`:**
+- `getSessionTokenUsage(mac, sessionId)` - Get usage for a specific session
+- `getDailyUsageSummary(options)` - Daily aggregated usage stats
+- `getPerDeviceDailyUsage(options)` - Per-device breakdown with sorting
+- `getUsageTotals(options)` - Overall totals across all devices
+
+**Files Already Complete:**
+- `src/routes/usage.routes.js` - All 4 route handlers with Swagger docs (~405 lines)
+- `src/services/device.service.js` - All service methods for token usage analytics
+- `src/routes/index.js` - Usage routes already mounted at `/usage`
+
+**API Contract:**
+```
+GET    /toy/usage/tokens/:mac/session/:sessionId - Returns session usage or 404
+GET    /toy/usage/analytics/daily-summary        - Returns {list, total, page, limit}
+GET    /toy/usage/analytics/per-device           - Returns {list, total, page, limit}
+GET    /toy/usage/analytics/totals               - Returns {period, totals}
+```
+
+**Note:** Endpoints were already fully implemented in a previous session. Verification confirms all functionality is working.
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Extended Analytics Endpoints Complete
 

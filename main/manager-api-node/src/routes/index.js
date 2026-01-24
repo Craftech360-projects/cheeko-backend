@@ -20,6 +20,7 @@ const analyticsRoutes = require('./analytics.routes');
 const systemRoutes = require('./system.routes');
 const adminRoutes = require('./admin.routes');
 const configRoutes = require('./config.routes');
+const usageRoutes = require('./usage.routes');
 
 /**
  * @swagger
@@ -187,5 +188,6 @@ router.use('/analytics', analyticsRoutes);
 router.use('/system', systemRoutes);
 router.use('/admin', adminRoutes);
 router.use('/config', configRoutes);
+router.use('/usage', usageRoutes);
 
 module.exports = router;

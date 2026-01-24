@@ -394,7 +394,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add daily-summary, per-device, totals analytics",
       "Consider adding /usage/* aliases for compatibility"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

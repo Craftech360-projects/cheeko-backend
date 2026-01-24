@@ -1132,6 +1132,279 @@ const getTokenUsageSummary = async ({ startDate, endDate, page = 1, limit = 20 }
 };
 
 /**
+ * Get token usage for a specific session
+ * @param {string} mac - Device MAC address
+ * @param {string} sessionId - Session identifier
+ * @returns {Promise<Object|null>} Session usage data or null
+ */
+const getSessionTokenUsage = async (mac, sessionId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const { data: record, error } = await supabaseAdmin
+    .from('device_token_usage')
+    .select('*')
+    .eq('mac_address', normalizedMac)
+    .eq('session_id', sessionId)
+    .single();
+
+  if (error || !record) return null;
+
+  return {
+    macAddress: record.mac_address,
+    sessionId: record.session_id,
+    usageDate: record.usage_date,
+    inputTokens: record.input_tokens,
+    outputTokens: record.output_tokens,
+    totalTokens: record.total_tokens,
+    inputAudioTokens: record.input_audio_tokens,
+    inputTextTokens: record.input_text_tokens,
+    inputCachedTokens: record.input_cached_tokens,
+    outputAudioTokens: record.output_audio_tokens,
+    outputTextTokens: record.output_text_tokens,
+    sessionDurationSeconds: record.session_duration_seconds,
+    avgTtftSeconds: record.avg_ttft_seconds,
+    messageCount: record.message_count,
+    totalResponseDurationSeconds: record.total_response_duration_seconds,
+    createdAt: record.created_at,
+    updatedAt: record.updated_at
+  };
+};
+
+/**
+ * Get daily usage summary across all devices
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Daily summary
+ */
+const getDailyUsageSummary = async ({ startDate, endDate, page = 1, limit = 30 } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*');
+
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+
+  const { data: records, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch daily usage summary:', error);
+    throw new Error('Failed to fetch daily usage summary');
+  }
+
+  // Group by date
+  const byDate = {};
+  for (const record of records || []) {
+    const date = record.usage_date;
+    if (!byDate[date]) {
+      byDate[date] = {
+        date,
+        inputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        deviceCount: new Set(),
+        sessionCount: 0,
+        messageCount: 0,
+        sessionDurationSeconds: 0
+      };
+    }
+    byDate[date].inputTokens += record.input_tokens || 0;
+    byDate[date].outputTokens += record.output_tokens || 0;
+    byDate[date].totalTokens += record.total_tokens || 0;
+    byDate[date].deviceCount.add(record.mac_address);
+    byDate[date].sessionCount += record.session_count || 0;
+    byDate[date].messageCount += record.message_count || 0;
+    byDate[date].sessionDurationSeconds += record.session_duration_seconds || 0;
+  }
+
+  // Convert device sets to counts and sort by date descending
+  const dailyData = Object.values(byDate)
+    .map(day => ({
+      ...day,
+      deviceCount: day.deviceCount.size
+    }))
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  // Paginate
+  const total = dailyData.length;
+  const offset = (page - 1) * limit;
+  const paginatedData = dailyData.slice(offset, offset + limit);
+
+  return {
+    list: paginatedData,
+    total,
+    page,
+    limit,
+    startDate: startDate || null,
+    endDate: endDate || null
+  };
+};
+
+/**
+ * Get per-device daily usage
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Per-device daily usage
+ */
+const getPerDeviceDailyUsage = async ({
+  startDate,
+  endDate,
+  page = 1,
+  limit = 20,
+  sortBy = 'totalTokens',
+  sortOrder = 'desc'
+} = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*');
+
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+
+  const { data: records, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch per-device usage:', error);
+    throw new Error('Failed to fetch per-device usage');
+  }
+
+  // Transform records
+  const usage = (records || []).map(record => ({
+    macAddress: record.mac_address,
+    date: record.usage_date,
+    inputTokens: record.input_tokens || 0,
+    outputTokens: record.output_tokens || 0,
+    totalTokens: record.total_tokens || 0,
+    sessionCount: record.session_count || 0,
+    messageCount: record.message_count || 0,
+    sessionDurationSeconds: record.session_duration_seconds || 0
+  }));
+
+  // Sort
+  const sortKey = sortBy === 'date' ? 'date' : sortBy;
+  usage.sort((a, b) => {
+    if (sortKey === 'date') {
+      return sortOrder === 'desc'
+        ? b.date.localeCompare(a.date)
+        : a.date.localeCompare(b.date);
+    }
+    return sortOrder === 'desc'
+      ? (b[sortKey] || 0) - (a[sortKey] || 0)
+      : (a[sortKey] || 0) - (b[sortKey] || 0);
+  });
+
+  // Paginate
+  const total = usage.length;
+  const offset = (page - 1) * limit;
+  const paginatedData = usage.slice(offset, offset + limit);
+
+  return {
+    list: paginatedData,
+    total,
+    page,
+    limit,
+    startDate: startDate || null,
+    endDate: endDate || null
+  };
+};
+
+/**
+ * Get overall usage totals across all devices
+ * @param {Object} options - Query options
+ * @returns {Promise<Object>} Usage totals
+ */
+const getUsageTotals = async ({ startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('device_token_usage')
+    .select('*');
+
+  if (startDate) {
+    query = query.gte('usage_date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('usage_date', endDate);
+  }
+
+  const { data: records, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch usage totals:', error);
+    throw new Error('Failed to fetch usage totals');
+  }
+
+  // Aggregate totals
+  const totals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    inputAudioTokens: 0,
+    inputTextTokens: 0,
+    inputCachedTokens: 0,
+    outputAudioTokens: 0,
+    outputTextTokens: 0,
+    sessionDurationSeconds: 0,
+    avgTtftSeconds: 0,
+    messageCount: 0,
+    totalResponseDurationSeconds: 0,
+    sessionCount: 0,
+    deviceCount: 0,
+    dayCount: 0
+  };
+
+  const devices = new Set();
+  const days = new Set();
+  let weightedTtftSum = 0;
+
+  for (const record of records || []) {
+    totals.inputTokens += record.input_tokens || 0;
+    totals.outputTokens += record.output_tokens || 0;
+    totals.totalTokens += record.total_tokens || 0;
+    totals.inputAudioTokens += record.input_audio_tokens || 0;
+    totals.inputTextTokens += record.input_text_tokens || 0;
+    totals.inputCachedTokens += record.input_cached_tokens || 0;
+    totals.outputAudioTokens += record.output_audio_tokens || 0;
+    totals.outputTextTokens += record.output_text_tokens || 0;
+    totals.sessionDurationSeconds += record.session_duration_seconds || 0;
+    totals.messageCount += record.message_count || 0;
+    totals.totalResponseDurationSeconds += record.total_response_duration_seconds || 0;
+    totals.sessionCount += record.session_count || 0;
+    weightedTtftSum += (record.avg_ttft_seconds || 0) * (record.message_count || 0);
+    devices.add(record.mac_address);
+    days.add(record.usage_date);
+  }
+
+  // Calculate weighted average TTFT
+  if (totals.messageCount > 0) {
+    totals.avgTtftSeconds = weightedTtftSum / totals.messageCount;
+  }
+
+  totals.deviceCount = devices.size;
+  totals.dayCount = days.size;
+
+  return {
+    period: {
+      startDate: startDate || null,
+      endDate: endDate || null
+    },
+    totals
+  };
+};
+
+/**
  * Delete token usage records for a device
  * @param {string} mac - Device MAC address
  * @param {Object} options - Delete options
@@ -1198,5 +1471,10 @@ module.exports = {
   getTokenUsageStats,
   listTokenUsage,
   getTokenUsageSummary,
-  deleteTokenUsage
+  deleteTokenUsage,
+  // Token usage analytics methods
+  getSessionTokenUsage,
+  getDailyUsageSummary,
+  getPerDeviceDailyUsage,
+  getUsageTotals
 };
