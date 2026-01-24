@@ -331,7 +331,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add PUT /agent/update-mode endpoint",
       "Add GET /agent/device/:mac/agent-name endpoint"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

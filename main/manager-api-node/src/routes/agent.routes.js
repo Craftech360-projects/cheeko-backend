@@ -439,6 +439,167 @@ router.post('/chat-message',
   })
 );
 
+// ==============================================
+// Agent Memory and Mode Routes
+// ==============================================
+
+/**
+ * @swagger
+ * /agent/saveMemory/{mac}:
+ *   put:
+ *     tags: [Agent Memory]
+ *     summary: Update agent summary memory by device MAC
+ *     description: Used by LiveKit workers to persist conversation summary
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - summaryMemory
+ *             properties:
+ *               summaryMemory:
+ *                 type: string
+ *                 description: Summary memory content to save
+ *     responses:
+ *       200:
+ *         description: Memory saved successfully
+ *       400:
+ *         description: Missing required fields or save failed
+ *       404:
+ *         description: Device or agent not found
+ */
+router.put('/saveMemory/:mac',
+  asyncHandler(async (req, res) => {
+    const { summaryMemory } = req.body;
+
+    if (summaryMemory === undefined) {
+      return badRequest(res, 'summaryMemory is required');
+    }
+
+    try {
+      const result = await agentService.saveMemory(req.params.mac, summaryMemory);
+      success(res, result, 'Memory saved successfully');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/update-mode:
+ *   put:
+ *     tags: [Agent Memory]
+ *     summary: Update agent mode from template
+ *     description: Copies template settings to agent. Used for switching agent modes/personalities.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - macAddress
+ *               - templateId
+ *             properties:
+ *               macAddress:
+ *                 type: string
+ *                 description: Device MAC address
+ *               templateId:
+ *                 type: string
+ *                 description: Template ID to apply
+ *               preserveMemory:
+ *                 type: boolean
+ *                 default: true
+ *                 description: Keep existing summary_memory if true
+ *     responses:
+ *       200:
+ *         description: Agent updated from template
+ *       400:
+ *         description: Missing required fields or update failed
+ *       404:
+ *         description: Device, agent, or template not found
+ */
+router.put('/update-mode',
+  asyncHandler(async (req, res) => {
+    const { macAddress, templateId, preserveMemory } = req.body;
+
+    if (!macAddress || !templateId) {
+      return badRequest(res, 'macAddress and templateId are required');
+    }
+
+    try {
+      const agent = await agentService.updateModeFromTemplate({
+        macAddress,
+        templateId,
+        preserveMemory
+      });
+      success(res, agent, 'Agent mode updated from template');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/device/{mac}/agent-name:
+ *   get:
+ *     tags: [Agent Memory]
+ *     summary: Get agent name for device
+ *     description: Used by game mode detection in LiveKit workers
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: Agent name and code
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 agentId:
+ *                   type: string
+ *                 agentName:
+ *                   type: string
+ *                 agentCode:
+ *                   type: string
+ *                 mode:
+ *                   type: string
+ *       404:
+ *         description: Device not found
+ */
+router.get('/device/:mac/agent-name',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getAgentNameByMac(req.params.mac);
+      success(res, result);
+    } catch (error) {
+      notFound(res, error.message);
+    }
+  })
+);
+
 /**
  * @swagger
  * /agent/cycle-character/{mac}:

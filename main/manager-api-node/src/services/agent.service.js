@@ -616,6 +616,176 @@ const clearMemoriesByMac = async (mac) => {
 };
 
 // =============================================
+// Agent Memory and Mode Methods
+// =============================================
+
+/**
+ * Save/update agent summary memory by device MAC
+ * Used by LiveKit workers to persist conversation summary
+ * @param {string} mac - Device MAC address
+ * @param {string} summaryMemory - Summary memory content to save
+ * @returns {Promise<Object>} Updated agent info
+ */
+const saveMemory = async (mac, summaryMemory) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+
+  // Get device with agent
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (deviceError || !device || !device.agent_id) {
+    throw new Error('Device or agent not found');
+  }
+
+  // Update agent's summary_memory field
+  const { data: agent, error: updateError } = await supabaseAdmin
+    .from('ai_agent')
+    .update({
+      summary_memory: summaryMemory,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', device.agent_id)
+    .select('id, agent_name, summary_memory')
+    .single();
+
+  if (updateError) {
+    logger.error('Failed to save memory:', updateError);
+    throw new Error('Failed to save memory');
+  }
+
+  return {
+    agentId: agent.id,
+    agentName: agent.agent_name,
+    summaryMemory: agent.summary_memory
+  };
+};
+
+/**
+ * Update agent mode from template
+ * Copies template settings to agent while optionally preserving some fields
+ * @param {Object} data - Update data
+ * @param {string} data.macAddress - Device MAC address
+ * @param {string} data.templateId - Template ID to apply
+ * @param {boolean} [data.preserveMemory=true] - Keep existing summary_memory
+ * @returns {Promise<Object>} Updated agent
+ */
+const updateModeFromTemplate = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { macAddress, templateId, preserveMemory = true } = data;
+  const normalizedMac = normalizeMacAddress(macAddress);
+
+  // Get device with current agent
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (deviceError || !device || !device.agent_id) {
+    throw new Error('Device or agent not found');
+  }
+
+  // Get the template
+  const { data: template, error: templateError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('id', templateId)
+    .single();
+
+  if (templateError || !template) {
+    throw new Error('Template not found');
+  }
+
+  // Build update data from template
+  const updateData = {
+    agent_code: template.agent_code,
+    agent_name: template.agent_name,
+    asr_model_id: template.asr_model_id,
+    vad_model_id: template.vad_model_id,
+    llm_model_id: template.llm_model_id,
+    vllm_model_id: template.vllm_model_id,
+    tts_model_id: template.tts_model_id,
+    tts_voice_id: template.tts_voice_id,
+    mem_model_id: template.mem_model_id,
+    intent_model_id: template.intent_model_id,
+    chat_history_conf: template.chat_history_conf,
+    system_prompt: template.system_prompt,
+    lang_code: template.lang_code,
+    language: template.language,
+    updated_at: new Date().toISOString()
+  };
+
+  // Optionally update summary_memory from template
+  if (!preserveMemory) {
+    updateData.summary_memory = template.summary_memory;
+  }
+
+  // Update the agent
+  const { data: agent, error: updateError } = await supabaseAdmin
+    .from('ai_agent')
+    .update(updateData)
+    .eq('id', device.agent_id)
+    .select()
+    .single();
+
+  if (updateError) {
+    logger.error('Failed to update mode from template:', updateError);
+    throw new Error('Failed to update mode from template');
+  }
+
+  return agent;
+};
+
+/**
+ * Get agent name by device MAC
+ * Used by game mode detection in LiveKit workers
+ * @param {string} mac - Device MAC address
+ * @returns {Promise<Object>} Agent name and code
+ */
+const getAgentNameByMac = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+
+  // Get device with agent name via join
+  const { data: device, error } = await supabaseAdmin
+    .from('ai_device')
+    .select(`
+      agent_id,
+      mode,
+      ai_agent:agent_id (id, agent_name, agent_code)
+    `)
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (error || !device) {
+    throw new Error('Device not found');
+  }
+
+  if (!device.ai_agent) {
+    return {
+      agentId: null,
+      agentName: null,
+      agentCode: null,
+      mode: device.mode
+    };
+  }
+
+  return {
+    agentId: device.ai_agent.id,
+    agentName: device.ai_agent.agent_name,
+    agentCode: device.ai_agent.agent_code,
+    mode: device.mode
+  };
+};
+
+// =============================================
 // Agent Template Methods
 // =============================================
 
@@ -774,6 +944,10 @@ module.exports = {
   addFactToMemory,
   getPromptWithMemories,
   clearMemoriesByMac,
+  // Agent memory and mode methods
+  saveMemory,
+  updateModeFromTemplate,
+  getAgentNameByMac,
   // Template methods
   getTemplates,
   getTemplateById,

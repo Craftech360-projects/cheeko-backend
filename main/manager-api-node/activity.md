@@ -12,7 +12,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | ID | Category | Description | Status |
 |----|----------|-------------|--------|
 | 1 | feature | Agent Template CRUD endpoints | Complete |
-| 2 | feature | Agent Memory and Mode endpoints | Pending |
+| 2 | feature | Agent Memory and Mode endpoints | Complete |
 | 3 | feature | Agent Chat History batch endpoints | Pending |
 | 4 | feature | Agent MCP Access Point endpoints | Pending |
 | 5 | feature | Configuration endpoints (/config) | Pending |
@@ -46,6 +46,39 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 
 ## Activity Log
 
+### 2026-01-24 - Agent Memory and Mode Endpoints Complete
+
+**Task 2: Add Agent Memory and Mode endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `PUT /toy/agent/saveMemory/:mac` - Update agent summary memory by device MAC (for LiveKit workers)
+- `PUT /toy/agent/update-mode` - Update agent mode from template (switches agent personalities)
+- `GET /toy/agent/device/:mac/agent-name` - Get agent name for game mode detection
+
+**Service Methods Implemented in `agent.service.js`:**
+- `saveMemory(mac, summaryMemory)` - Updates agent's summary_memory field by device MAC
+- `updateModeFromTemplate({ macAddress, templateId, preserveMemory })` - Copies template settings to agent
+- `getAgentNameByMac(mac)` - Returns agent name, code, and device mode
+
+**Files Modified:**
+- `src/services/agent.service.js` - Added 3 service methods (~100 lines)
+- `src/routes/agent.routes.js` - Added route handlers with Swagger docs (~130 lines)
+
+**API Contract:**
+```
+PUT    /toy/agent/saveMemory/:mac         - Updates summary memory, returns agent info
+PUT    /toy/agent/update-mode             - Applies template to agent, returns updated agent
+GET    /toy/agent/device/:mac/agent-name  - Returns agentId, agentName, agentCode, mode
+```
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
+
 ### 2026-01-24 - Agent Template CRUD Endpoints Complete
 
 **Task 1: Add Agent Template CRUD endpoints (/agent/template)**
@@ -53,27 +86,38 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 **Status:** COMPLETE
 
 **Endpoints Added:**
-- `GET /toy/agent/template` - Get all visible agent templates
+- `GET /toy/agent/template` - Get all visible agent templates (public)
 - `POST /toy/agent/template` - Create new agent template (authenticated)
-- `GET /toy/agent/template/:id` - Get template by ID
+- `GET /toy/agent/template/:id` - Get template by ID (public)
 - `PUT /toy/agent/template/:id` - Update agent template (authenticated)
 
-**Service Methods Implemented:**
-- `getTemplates()` - List all visible templates
+**Service Methods Implemented in `agent.service.js`:**
+- `getTemplates()` - List all visible templates (is_visible=1)
 - `getTemplateById(templateId)` - Get template by ID
-- `createTemplate(data)` - Create new template
-- `updateTemplate(templateId, data)` - Update template
+- `createTemplate(data)` - Create new template with all model IDs and settings
+- `updateTemplate(templateId, data)` - Update template with partial field updates
+
+**Validation Schema Added in `validation.js`:**
+- `agentTemplate` - Joi schema matching agent schema plus isVisible and sort fields
 
 **Files Modified:**
-- `src/services/agent.service.js` - Added template service methods
-- `src/routes/agent.routes.js` - Added template route handlers
-- `src/middleware/validation.js` - Added `agentTemplate` Joi schema
+- `src/services/agent.service.js` - Added 4 template service methods (~130 lines)
+- `src/routes/agent.routes.js` - Added template route handlers with Swagger docs (~100 lines)
+- `src/middleware/validation.js` - Added `agentTemplate` Joi schema (~20 lines)
 
-**Verification:**
-```bash
-npm run lint   # 0 errors, 8 warnings (pre-existing)
-npm test       # 796 tests passed
+**API Contract:**
 ```
+GET    /toy/agent/template       - Returns array of visible templates
+POST   /toy/agent/template       - Creates template, returns created object
+GET    /toy/agent/template/:id   - Returns single template or 404
+PUT    /toy/agent/template/:id   - Updates template, returns updated object
+```
+
+**Database Table Used:** `ai_agent_template` (already in Prisma schema)
+
+**Verification Status:**
+- Lint/tests pending (requires `npm run lint` and `npm test`)
+- Swagger documentation at http://localhost:8002/toy/doc.html
 
 ---
 
