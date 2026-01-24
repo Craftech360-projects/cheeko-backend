@@ -353,7 +353,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Compare response formats",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 22,

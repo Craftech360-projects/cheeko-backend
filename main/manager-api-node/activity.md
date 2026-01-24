@@ -30,7 +30,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 18 | agent | Test agent chat history endpoints | Complete |
 | 19 | agent | Test agent MCP endpoints | Complete |
 | 20 | analytics | Test device analytics endpoints | Complete |
-| 21 | analytics | Test usage/token analytics endpoints | Pending |
+| 21 | analytics | Test usage/token analytics endpoints | Complete |
 | 22-24 | model | Test model endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
 | 26-29 | rfid | Test RFID endpoints | Pending |
@@ -80,6 +80,69 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 21 Complete (Usage/Token Analytics Endpoints)
+
+**Task 21: Test and fix usage/token analytics endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /usage/analytics/daily-summary`
+- `GET /usage/analytics/per-device`
+- `GET /usage/analytics/totals`
+
+**Issues Found:**
+
+1. **Response format mismatch** - All three endpoints returned paginated responses
+   - Node.js returned: `{list: [], total, page, limit, ...}`
+   - Spring Boot returns: Just the array or flat map directly
+
+2. **Field naming mismatch** - Node.js used camelCase, Spring Boot uses snake_case
+   - Node.js: `inputTokens`, `outputTokens`, `macAddress`
+   - Spring Boot: `input_tokens`, `output_tokens`, `mac_address`
+
+3. **Missing cost_inr field** - Spring Boot calculates and includes cost in INR based on token rates:
+   - Text input: ₹6.25/1M tokens
+   - Audio input: ₹83.33/1M tokens
+   - Text output: ₹25/1M tokens
+   - Audio output: ₹333.33/1M tokens
+
+**Fixes Applied:**
+
+**1. Fixed `GET /usage/analytics/daily-summary` (`src/routes/usage.routes.js`, `src/services/device.service.js`)**
+- Returns array directly (not paginated) matching Spring Boot `List<Map<String, Object>>`
+- Uses snake_case field names
+- Includes `cost_inr` calculation for each day
+- Defaults to last 30 days if no date range provided (matching Spring Boot)
+
+**2. Fixed `GET /usage/analytics/per-device` (`src/routes/usage.routes.js`, `src/services/device.service.js`)**
+- Returns array directly (not paginated) matching Spring Boot `List<Map<String, Object>>`
+- Uses snake_case field names
+- Includes `cost_inr` calculation for each device/day record
+- Defaults to last 30 days if no date range provided
+
+**3. Fixed `GET /usage/analytics/totals` (`src/routes/usage.routes.js`)**
+- Returns flat map with snake_case keys matching Spring Boot `Map<String, Object>`
+- Includes `cost_inr` total calculation
+- Removed nested `period` and `totals` structure
+
+**4. Added cost calculation utility**
+- Added `calculateCostInINR()` function in device.service.js
+- Uses same pricing rates as Spring Boot
+- Rounds to 2 decimal places
+
+**Files Modified:**
+- `src/routes/usage.routes.js` - Updated 3 route handlers and Swagger docs (~150 lines)
+- `src/services/device.service.js` - Updated getDailyUsageSummary, getPerDeviceDailyUsage, added calculateCostInINR (~100 lines)
+
+**Verification:**
+- `npm run lint` - No new errors (4 pre-existing errors, 6 warnings)
+- `GET /usage/analytics/daily-summary` - Returns `[]` (empty array) or array of daily summaries
+- `GET /usage/analytics/per-device` - Returns `[]` (empty array) or array of per-device records
+- `GET /usage/analytics/totals` - Returns `{"input_tokens":0,"output_tokens":0,...,"cost_inr":0}`
+
+---
 
 ### 2026-01-24 - Phase 4 Task 20 Complete (Device Analytics Endpoints)
 

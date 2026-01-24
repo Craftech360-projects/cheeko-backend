@@ -1407,150 +1407,170 @@ const getSessionTokenUsage = async (mac, sessionId) => {
   };
 };
 
+// Gemini pricing in INR per token (same as Spring Boot)
+const TEXT_INPUT_RATE_INR = 6.25 / 1000000;      // ₹6.25/1M
+const AUDIO_INPUT_RATE_INR = 83.33 / 1000000;    // ₹83.33/1M
+const TEXT_OUTPUT_RATE_INR = 25.0 / 1000000;     // ₹25/1M
+const AUDIO_OUTPUT_RATE_INR = 333.33 / 1000000;  // ₹333.33/1M
+
+/**
+ * Calculate cost in INR based on token usage
+ * @param {number} inputTextTokens
+ * @param {number} inputAudioTokens
+ * @param {number} outputTextTokens
+ * @param {number} outputAudioTokens
+ * @returns {number} Cost in INR rounded to 2 decimals
+ */
+const calculateCostInINR = (inputTextTokens, inputAudioTokens, outputTextTokens, outputAudioTokens) => {
+  const cost = (inputTextTokens * TEXT_INPUT_RATE_INR) +
+               (inputAudioTokens * AUDIO_INPUT_RATE_INR) +
+               (outputTextTokens * TEXT_OUTPUT_RATE_INR) +
+               (outputAudioTokens * AUDIO_OUTPUT_RATE_INR);
+  return Math.round(cost * 100) / 100;
+};
+
 /**
  * Get daily usage summary across all devices
+ * Returns snake_case format to match Spring Boot
  * @param {Object} options - Query options
  * @returns {Promise<Object>} Daily summary
  */
-const getDailyUsageSummary = async ({ startDate, endDate, page = 1, limit = 30 } = {}) => {
+const getDailyUsageSummary = async ({ startDate, endDate } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  let query = supabaseAdmin
+  // Default to last 30 days if no dates provided (matching Spring Boot)
+  if (!startDate) {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    startDate = date.toISOString().split('T')[0];
+  }
+  if (!endDate) {
+    endDate = new Date().toISOString().split('T')[0];
+  }
+
+  const { data: records, error } = await supabaseAdmin
     .from('device_token_usage')
-    .select('*');
-
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
-  }
-
-  const { data: records, error } = await query;
+    .select('*')
+    .gte('usage_date', startDate)
+    .lte('usage_date', endDate);
 
   if (error) {
     logger.error('Failed to fetch daily usage summary:', error);
     throw new Error('Failed to fetch daily usage summary');
   }
 
-  // Group by date
+  // Group by date - use snake_case to match Spring Boot
   const byDate = {};
   for (const record of records || []) {
     const date = record.usage_date;
     if (!byDate[date]) {
       byDate[date] = {
-        date,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        deviceCount: new Set(),
-        sessionCount: 0,
-        messageCount: 0,
-        sessionDurationSeconds: 0
+        usage_date: date,
+        input_tokens: 0,
+        output_tokens: 0,
+        total_tokens: 0,
+        input_text_tokens: 0,
+        input_audio_tokens: 0,
+        output_text_tokens: 0,
+        output_audio_tokens: 0,
+        deviceSet: new Set(),
+        session_count: 0,
+        message_count: 0,
+        session_duration_seconds: 0
       };
     }
-    byDate[date].inputTokens += record.input_tokens || 0;
-    byDate[date].outputTokens += record.output_tokens || 0;
-    byDate[date].totalTokens += record.total_tokens || 0;
-    byDate[date].deviceCount.add(record.mac_address);
-    byDate[date].sessionCount += record.session_count || 0;
-    byDate[date].messageCount += record.message_count || 0;
-    byDate[date].sessionDurationSeconds += record.session_duration_seconds || 0;
+    byDate[date].input_tokens += record.input_tokens || 0;
+    byDate[date].output_tokens += record.output_tokens || 0;
+    byDate[date].total_tokens += record.total_tokens || 0;
+    byDate[date].input_text_tokens += record.input_text_tokens || 0;
+    byDate[date].input_audio_tokens += record.input_audio_tokens || 0;
+    byDate[date].output_text_tokens += record.output_text_tokens || 0;
+    byDate[date].output_audio_tokens += record.output_audio_tokens || 0;
+    byDate[date].deviceSet.add(record.mac_address);
+    byDate[date].session_count += record.session_count || 0;
+    byDate[date].message_count += record.message_count || 0;
+    byDate[date].session_duration_seconds += record.session_duration_seconds || 0;
   }
 
-  // Convert device sets to counts and sort by date descending
+  // Convert device sets to counts, add cost_inr, and sort by date descending
   const dailyData = Object.values(byDate)
-    .map(day => ({
-      ...day,
-      deviceCount: day.deviceCount.size
-    }))
-    .sort((a, b) => b.date.localeCompare(a.date));
-
-  // Paginate
-  const total = dailyData.length;
-  const offset = (page - 1) * limit;
-  const paginatedData = dailyData.slice(offset, offset + limit);
+    .map(day => {
+      const { deviceSet, ...rest } = day;
+      return {
+        ...rest,
+        device_count: deviceSet.size,
+        cost_inr: calculateCostInINR(
+          day.input_text_tokens,
+          day.input_audio_tokens,
+          day.output_text_tokens,
+          day.output_audio_tokens
+        )
+      };
+    })
+    .sort((a, b) => b.usage_date.localeCompare(a.usage_date));
 
   return {
-    list: paginatedData,
-    total,
-    page,
-    limit,
-    startDate: startDate || null,
-    endDate: endDate || null
+    list: dailyData
   };
 };
 
 /**
  * Get per-device daily usage
+ * Returns snake_case format to match Spring Boot
  * @param {Object} options - Query options
  * @returns {Promise<Object>} Per-device daily usage
  */
-const getPerDeviceDailyUsage = async ({
-  startDate,
-  endDate,
-  page = 1,
-  limit = 20,
-  sortBy = 'totalTokens',
-  sortOrder = 'desc'
-} = {}) => {
+const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  let query = supabaseAdmin
+  // Default to last 30 days if no dates provided (matching Spring Boot)
+  if (!startDate) {
+    const date = new Date();
+    date.setDate(date.getDate() - 30);
+    startDate = date.toISOString().split('T')[0];
+  }
+  if (!endDate) {
+    endDate = new Date().toISOString().split('T')[0];
+  }
+
+  const { data: records, error } = await supabaseAdmin
     .from('device_token_usage')
-    .select('*');
-
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
-  }
-
-  const { data: records, error } = await query;
+    .select('*')
+    .gte('usage_date', startDate)
+    .lte('usage_date', endDate);
 
   if (error) {
     logger.error('Failed to fetch per-device usage:', error);
     throw new Error('Failed to fetch per-device usage');
   }
 
-  // Transform records
+  // Transform records to snake_case format with cost_inr
   const usage = (records || []).map(record => ({
-    macAddress: record.mac_address,
-    date: record.usage_date,
-    inputTokens: record.input_tokens || 0,
-    outputTokens: record.output_tokens || 0,
-    totalTokens: record.total_tokens || 0,
-    sessionCount: record.session_count || 0,
-    messageCount: record.message_count || 0,
-    sessionDurationSeconds: record.session_duration_seconds || 0
+    mac_address: record.mac_address,
+    usage_date: record.usage_date,
+    input_tokens: record.input_tokens || 0,
+    output_tokens: record.output_tokens || 0,
+    total_tokens: record.total_tokens || 0,
+    input_text_tokens: record.input_text_tokens || 0,
+    input_audio_tokens: record.input_audio_tokens || 0,
+    output_text_tokens: record.output_text_tokens || 0,
+    output_audio_tokens: record.output_audio_tokens || 0,
+    session_count: record.session_count || 0,
+    message_count: record.message_count || 0,
+    session_duration_seconds: record.session_duration_seconds || 0,
+    cost_inr: calculateCostInINR(
+      record.input_text_tokens || 0,
+      record.input_audio_tokens || 0,
+      record.output_text_tokens || 0,
+      record.output_audio_tokens || 0
+    )
   }));
 
-  // Sort
-  const sortKey = sortBy === 'date' ? 'date' : sortBy;
-  usage.sort((a, b) => {
-    if (sortKey === 'date') {
-      return sortOrder === 'desc'
-        ? b.date.localeCompare(a.date)
-        : a.date.localeCompare(b.date);
-    }
-    return sortOrder === 'desc'
-      ? (b[sortKey] || 0) - (a[sortKey] || 0)
-      : (a[sortKey] || 0) - (b[sortKey] || 0);
-  });
-
-  // Paginate
-  const total = usage.length;
-  const offset = (page - 1) * limit;
-  const paginatedData = usage.slice(offset, offset + limit);
+  // Sort by date descending
+  usage.sort((a, b) => b.usage_date.localeCompare(a.usage_date));
 
   return {
-    list: paginatedData,
-    total,
-    page,
-    limit,
-    startDate: startDate || null,
-    endDate: endDate || null
+    list: usage
   };
 };
 

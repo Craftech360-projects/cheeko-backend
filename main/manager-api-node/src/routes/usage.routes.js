@@ -99,7 +99,7 @@ router.get('/tokens/:macAddress/session/:sessionId',
  *   get:
  *     tags: [Usage Analytics]
  *     summary: Get daily usage summary across all devices
- *     description: Returns aggregated daily token usage statistics
+ *     description: Returns aggregated daily token usage statistics (matches Spring Boot format)
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -108,28 +108,16 @@ router.get('/tokens/:macAddress/session/:sessionId',
  *         schema:
  *           type: string
  *           format: date
- *         description: Start date (YYYY-MM-DD)
+ *         description: Start date (YYYY-MM-DD). Defaults to 30 days ago.
  *       - in: query
  *         name: endDate
  *         schema:
  *           type: string
  *           format: date
- *         description: End date (YYYY-MM-DD)
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *         description: Page number
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 30
- *         description: Results per page
+ *         description: End date (YYYY-MM-DD). Defaults to today.
  *     responses:
  *       200:
- *         description: Daily usage summary
+ *         description: Daily usage summary (array)
  *         content:
  *           application/json:
  *             schema:
@@ -140,50 +128,48 @@ router.get('/tokens/:macAddress/session/:sessionId',
  *                 msg:
  *                   type: string
  *                 data:
- *                   type: object
- *                   properties:
- *                     list:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           date:
- *                             type: string
- *                             format: date
- *                           inputTokens:
- *                             type: integer
- *                           outputTokens:
- *                             type: integer
- *                           totalTokens:
- *                             type: integer
- *                           deviceCount:
- *                             type: integer
- *                           sessionCount:
- *                             type: integer
- *                           messageCount:
- *                             type: integer
- *                     total:
- *                       type: integer
- *                     page:
- *                       type: integer
- *                     limit:
- *                       type: integer
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       usage_date:
+ *                         type: string
+ *                         format: date
+ *                       input_tokens:
+ *                         type: integer
+ *                       output_tokens:
+ *                         type: integer
+ *                       total_tokens:
+ *                         type: integer
+ *                       input_text_tokens:
+ *                         type: integer
+ *                       input_audio_tokens:
+ *                         type: integer
+ *                       output_text_tokens:
+ *                         type: integer
+ *                       output_audio_tokens:
+ *                         type: integer
+ *                       device_count:
+ *                         type: integer
+ *                       session_count:
+ *                         type: integer
+ *                       message_count:
+ *                         type: integer
+ *                       cost_inr:
+ *                         type: number
  */
 router.get('/analytics/daily-summary',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 30;
     const { startDate, endDate } = req.query;
 
     try {
       const result = await deviceService.getDailyUsageSummary({
         startDate,
-        endDate,
-        page,
-        limit
+        endDate
       });
-      success(res, result);
+      // Return just the list to match Spring Boot format
+      success(res, result.list || []);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -196,7 +182,7 @@ router.get('/analytics/daily-summary',
  *   get:
  *     tags: [Usage Analytics]
  *     summary: Get per-device daily usage
- *     description: Returns daily token usage broken down by device
+ *     description: Returns daily token usage broken down by device (matches Spring Boot format)
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -205,42 +191,16 @@ router.get('/analytics/daily-summary',
  *         schema:
  *           type: string
  *           format: date
- *         description: Start date (YYYY-MM-DD)
+ *         description: Start date (YYYY-MM-DD). Defaults to 30 days ago.
  *       - in: query
  *         name: endDate
  *         schema:
  *           type: string
  *           format: date
- *         description: End date (YYYY-MM-DD)
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *         description: Page number
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 20
- *         description: Results per page
- *       - in: query
- *         name: sortBy
- *         schema:
- *           type: string
- *           enum: [totalTokens, sessionCount, messageCount, date]
- *           default: totalTokens
- *         description: Field to sort by
- *       - in: query
- *         name: sortOrder
- *         schema:
- *           type: string
- *           enum: [asc, desc]
- *           default: desc
- *         description: Sort order
+ *         description: End date (YYYY-MM-DD). Defaults to today.
  *     responses:
  *       200:
- *         description: Per-device daily usage
+ *         description: Per-device daily usage (array)
  *         content:
  *           application/json:
  *             schema:
@@ -251,52 +211,48 @@ router.get('/analytics/daily-summary',
  *                 msg:
  *                   type: string
  *                 data:
- *                   type: object
- *                   properties:
- *                     list:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           macAddress:
- *                             type: string
- *                           date:
- *                             type: string
- *                             format: date
- *                           inputTokens:
- *                             type: integer
- *                           outputTokens:
- *                             type: integer
- *                           totalTokens:
- *                             type: integer
- *                           sessionCount:
- *                             type: integer
- *                           messageCount:
- *                             type: integer
- *                     total:
- *                       type: integer
- *                     page:
- *                       type: integer
- *                     limit:
- *                       type: integer
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       mac_address:
+ *                         type: string
+ *                       usage_date:
+ *                         type: string
+ *                         format: date
+ *                       input_tokens:
+ *                         type: integer
+ *                       output_tokens:
+ *                         type: integer
+ *                       total_tokens:
+ *                         type: integer
+ *                       input_text_tokens:
+ *                         type: integer
+ *                       input_audio_tokens:
+ *                         type: integer
+ *                       output_text_tokens:
+ *                         type: integer
+ *                       output_audio_tokens:
+ *                         type: integer
+ *                       session_count:
+ *                         type: integer
+ *                       message_count:
+ *                         type: integer
+ *                       cost_inr:
+ *                         type: number
  */
 router.get('/analytics/per-device',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const { startDate, endDate, sortBy, sortOrder } = req.query;
+    const { startDate, endDate } = req.query;
 
     try {
       const result = await deviceService.getPerDeviceDailyUsage({
         startDate,
-        endDate,
-        page,
-        limit,
-        sortBy: sortBy || 'totalTokens',
-        sortOrder: sortOrder || 'desc'
+        endDate
       });
-      success(res, result);
+      // Return just the list to match Spring Boot format
+      success(res, result.list || []);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -309,25 +265,12 @@ router.get('/analytics/per-device',
  *   get:
  *     tags: [Usage Analytics]
  *     summary: Get overall usage totals
- *     description: Returns aggregated token usage totals across all devices
+ *     description: Returns aggregated token usage totals across all devices (matches Spring Boot format)
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date
- *         description: Start date (YYYY-MM-DD)
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date
- *         description: End date (YYYY-MM-DD)
  *     responses:
  *       200:
- *         description: Overall usage totals
+ *         description: Overall usage totals (flat map)
  *         content:
  *           application/json:
  *             schema:
@@ -340,62 +283,65 @@ router.get('/analytics/per-device',
  *                 data:
  *                   type: object
  *                   properties:
- *                     period:
- *                       type: object
- *                       properties:
- *                         startDate:
- *                           type: string
- *                           format: date
- *                           nullable: true
- *                         endDate:
- *                           type: string
- *                           format: date
- *                           nullable: true
- *                     totals:
- *                       type: object
- *                       properties:
- *                         inputTokens:
- *                           type: integer
- *                         outputTokens:
- *                           type: integer
- *                         totalTokens:
- *                           type: integer
- *                         inputAudioTokens:
- *                           type: integer
- *                         inputTextTokens:
- *                           type: integer
- *                         inputCachedTokens:
- *                           type: integer
- *                         outputAudioTokens:
- *                           type: integer
- *                         outputTextTokens:
- *                           type: integer
- *                         sessionDurationSeconds:
- *                           type: number
- *                         avgTtftSeconds:
- *                           type: number
- *                         messageCount:
- *                           type: integer
- *                         totalResponseDurationSeconds:
- *                           type: number
- *                         sessionCount:
- *                           type: integer
- *                         deviceCount:
- *                           type: integer
- *                         dayCount:
- *                           type: integer
+ *                     input_tokens:
+ *                       type: integer
+ *                     output_tokens:
+ *                       type: integer
+ *                     total_tokens:
+ *                       type: integer
+ *                     input_text_tokens:
+ *                       type: integer
+ *                     input_audio_tokens:
+ *                       type: integer
+ *                     input_cached_tokens:
+ *                       type: integer
+ *                     output_text_tokens:
+ *                       type: integer
+ *                     output_audio_tokens:
+ *                       type: integer
+ *                     session_duration_seconds:
+ *                       type: number
+ *                     message_count:
+ *                       type: integer
+ *                     session_count:
+ *                       type: integer
+ *                     device_count:
+ *                       type: integer
+ *                     day_count:
+ *                       type: integer
+ *                     cost_inr:
+ *                       type: number
  */
 router.get('/analytics/totals',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { startDate, endDate } = req.query;
-
     try {
-      const result = await deviceService.getUsageTotals({
-        startDate,
-        endDate
-      });
-      success(res, result);
+      const result = await deviceService.getUsageTotals({});
+      // Transform to flat snake_case format to match Spring Boot
+      const totals = result.totals || {};
+      const flatResult = {
+        input_tokens: totals.inputTokens || 0,
+        output_tokens: totals.outputTokens || 0,
+        total_tokens: totals.totalTokens || 0,
+        input_text_tokens: totals.inputTextTokens || 0,
+        input_audio_tokens: totals.inputAudioTokens || 0,
+        input_cached_tokens: totals.inputCachedTokens || 0,
+        output_text_tokens: totals.outputTextTokens || 0,
+        output_audio_tokens: totals.outputAudioTokens || 0,
+        session_duration_seconds: totals.sessionDurationSeconds || 0,
+        message_count: totals.messageCount || 0,
+        session_count: totals.sessionCount || 0,
+        device_count: totals.deviceCount || 0,
+        day_count: totals.dayCount || 0,
+        // Calculate cost in INR (matching Spring Boot pricing)
+        cost_inr: Math.round((
+          (totals.inputTextTokens || 0) * 6.25 / 1000000 +      // ₹6.25/1M text input
+          (totals.inputAudioTokens || 0) * 83.33 / 1000000 +    // ₹83.33/1M audio input
+          (totals.outputTextTokens || 0) * 25.0 / 1000000 +     // ₹25/1M text output
+          (totals.outputAudioTokens || 0) * 333.33 / 1000000    // ₹333.33/1M audio output
+        ) * 100) / 100  // Round to 2 decimals
+      };
+      success(res, flatResult);
     } catch (error) {
       badRequest(res, error.message);
     }
