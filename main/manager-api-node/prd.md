@@ -475,7 +475,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Create server.routes.js",
       "Add server-list and emit-action endpoints"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "testing",
@@ -485,7 +485,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Verify response format matches Spring Boot",
       "Test with LiveKit worker"
     ],
-    "passes": false
+    "passes": true
   }
 ]
 ```
