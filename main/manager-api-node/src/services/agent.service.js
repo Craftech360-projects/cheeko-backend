@@ -615,6 +615,144 @@ const clearMemoriesByMac = async (mac) => {
   }
 };
 
+// =============================================
+// Agent Template Methods
+// =============================================
+
+/**
+ * Get all visible agent templates
+ * @returns {Promise<Array>} List of visible templates
+ */
+const getTemplates = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: templates, error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('is_visible', 1)
+    .order('sort', { ascending: true })
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch templates:', error);
+    throw new Error('Failed to fetch templates');
+  }
+
+  return templates || [];
+};
+
+/**
+ * Get agent template by ID
+ * @param {string} templateId - Template ID
+ * @returns {Promise<Object|null>} Template or null
+ */
+const getTemplateById = async (templateId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: template, error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('id', templateId)
+    .single();
+
+  if (error || !template) return null;
+
+  return template;
+};
+
+/**
+ * Create a new agent template
+ * @param {Object} data - Template data
+ * @returns {Promise<Object>} Created template
+ */
+const createTemplate = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const templateData = {
+    agent_code: data.agentCode,
+    agent_name: data.agentName,
+    asr_model_id: data.asrModelId,
+    vad_model_id: data.vadModelId,
+    llm_model_id: data.llmModelId,
+    vllm_model_id: data.vllmModelId,
+    tts_model_id: data.ttsModelId,
+    tts_voice_id: data.ttsVoiceId,
+    mem_model_id: data.memModelId,
+    intent_model_id: data.intentModelId,
+    chat_history_conf: data.chatHistoryConf || 0,
+    system_prompt: data.systemPrompt,
+    summary_memory: data.summaryMemory,
+    lang_code: data.langCode || 'en',
+    language: data.language || 'English',
+    is_visible: data.isVisible !== undefined ? data.isVisible : 1,
+    sort: data.sort || 0
+  };
+
+  const { data: template, error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .insert(templateData)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to create template:', error);
+    throw new Error('Failed to create template');
+  }
+
+  return template;
+};
+
+/**
+ * Update an agent template
+ * @param {string} templateId - Template ID
+ * @param {Object} data - Update data
+ * @returns {Promise<Object>} Updated template
+ */
+const updateTemplate = async (templateId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Verify template exists
+  const existing = await getTemplateById(templateId);
+  if (!existing) throw new Error('Template not found');
+
+  const updateData = {
+    updated_at: new Date().toISOString()
+  };
+
+  // Map fields conditionally
+  if (data.agentCode !== undefined) updateData.agent_code = data.agentCode;
+  if (data.agentName !== undefined) updateData.agent_name = data.agentName;
+  if (data.asrModelId !== undefined) updateData.asr_model_id = data.asrModelId;
+  if (data.vadModelId !== undefined) updateData.vad_model_id = data.vadModelId;
+  if (data.llmModelId !== undefined) updateData.llm_model_id = data.llmModelId;
+  if (data.vllmModelId !== undefined) updateData.vllm_model_id = data.vllmModelId;
+  if (data.ttsModelId !== undefined) updateData.tts_model_id = data.ttsModelId;
+  if (data.ttsVoiceId !== undefined) updateData.tts_voice_id = data.ttsVoiceId;
+  if (data.memModelId !== undefined) updateData.mem_model_id = data.memModelId;
+  if (data.intentModelId !== undefined) updateData.intent_model_id = data.intentModelId;
+  if (data.chatHistoryConf !== undefined) updateData.chat_history_conf = data.chatHistoryConf;
+  if (data.systemPrompt !== undefined) updateData.system_prompt = data.systemPrompt;
+  if (data.summaryMemory !== undefined) updateData.summary_memory = data.summaryMemory;
+  if (data.langCode !== undefined) updateData.lang_code = data.langCode;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.isVisible !== undefined) updateData.is_visible = data.isVisible;
+  if (data.sort !== undefined) updateData.sort = data.sort;
+
+  const { data: template, error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .update(updateData)
+    .eq('id', templateId)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update template:', error);
+    throw new Error('Failed to update template');
+  }
+
+  return template;
+};
+
 module.exports = {
   createAgent,
   getAgentById,
@@ -635,5 +773,10 @@ module.exports = {
   addConversationToMemory,
   addFactToMemory,
   getPromptWithMemories,
-  clearMemoriesByMac
+  clearMemoriesByMac,
+  // Template methods
+  getTemplates,
+  getTemplateById,
+  createTemplate,
+  updateTemplate
 };

@@ -133,6 +133,27 @@ const schemas = {
     language: Joi.string().max(50)
   }),
 
+  // Agent template create/update
+  agentTemplate: Joi.object({
+    agentCode: Joi.string().max(100),
+    agentName: Joi.string().max(255).required(),
+    asrModelId: Joi.string().uuid().allow(null, ''),
+    vadModelId: Joi.string().uuid().allow(null, ''),
+    llmModelId: Joi.string().uuid().allow(null, ''),
+    vllmModelId: Joi.string().uuid().allow(null, ''),
+    ttsModelId: Joi.string().uuid().allow(null, ''),
+    ttsVoiceId: Joi.string().uuid().allow(null, ''),
+    memModelId: Joi.string().uuid().allow(null, ''),
+    intentModelId: Joi.string().uuid().allow(null, ''),
+    chatHistoryConf: Joi.number().integer().min(0).max(2),
+    systemPrompt: Joi.string().allow(null, ''),
+    summaryMemory: Joi.string().allow(null, ''),
+    langCode: Joi.string().max(10),
+    language: Joi.string().max(50),
+    isVisible: Joi.number().integer().valid(0, 1).default(1),
+    sort: Joi.number().integer().default(0)
+  }),
+
   // Kid profile
   kidProfile: Joi.object({
     name: Joi.string().max(255).required(),

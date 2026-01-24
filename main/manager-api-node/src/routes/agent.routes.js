@@ -71,6 +71,204 @@ router.get('/all',
   })
 );
 
+// ==============================================
+// Agent Template Routes
+// ==============================================
+
+/**
+ * @swagger
+ * /agent/template:
+ *   get:
+ *     tags: [Agent Template]
+ *     summary: Get all visible agent templates
+ *     description: Public endpoint to get list of agent templates
+ *     responses:
+ *       200:
+ *         description: List of visible agent templates
+ */
+router.get('/template',
+  asyncHandler(async (req, res) => {
+    try {
+      const templates = await agentService.getTemplates();
+      success(res, templates);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/template:
+ *   post:
+ *     tags: [Agent Template]
+ *     summary: Create a new agent template
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - agentName
+ *             properties:
+ *               agentCode:
+ *                 type: string
+ *               agentName:
+ *                 type: string
+ *               asrModelId:
+ *                 type: string
+ *               vadModelId:
+ *                 type: string
+ *               llmModelId:
+ *                 type: string
+ *               vllmModelId:
+ *                 type: string
+ *               ttsModelId:
+ *                 type: string
+ *               ttsVoiceId:
+ *                 type: string
+ *               memModelId:
+ *                 type: string
+ *               intentModelId:
+ *                 type: string
+ *               chatHistoryConf:
+ *                 type: integer
+ *               systemPrompt:
+ *                 type: string
+ *               summaryMemory:
+ *                 type: string
+ *               langCode:
+ *                 type: string
+ *               language:
+ *                 type: string
+ *               isVisible:
+ *                 type: integer
+ *                 enum: [0, 1]
+ *               sort:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Template created successfully
+ */
+router.post('/template',
+  requireAuth,
+  validate({ body: schemas.agentTemplate }),
+  asyncHandler(async (req, res) => {
+    try {
+      const template = await agentService.createTemplate(req.body);
+      success(res, template, 'Template created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/template/{id}:
+ *   get:
+ *     tags: [Agent Template]
+ *     summary: Get agent template by ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Template details
+ *       404:
+ *         description: Template not found
+ */
+router.get('/template/:id',
+  asyncHandler(async (req, res) => {
+    const template = await agentService.getTemplateById(req.params.id);
+    if (!template) {
+      return notFound(res, 'Template not found');
+    }
+    success(res, template);
+  })
+);
+
+/**
+ * @swagger
+ * /agent/template/{id}:
+ *   put:
+ *     tags: [Agent Template]
+ *     summary: Update agent template
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               agentCode:
+ *                 type: string
+ *               agentName:
+ *                 type: string
+ *               asrModelId:
+ *                 type: string
+ *               vadModelId:
+ *                 type: string
+ *               llmModelId:
+ *                 type: string
+ *               vllmModelId:
+ *                 type: string
+ *               ttsModelId:
+ *                 type: string
+ *               ttsVoiceId:
+ *                 type: string
+ *               memModelId:
+ *                 type: string
+ *               intentModelId:
+ *                 type: string
+ *               chatHistoryConf:
+ *                 type: integer
+ *               systemPrompt:
+ *                 type: string
+ *               summaryMemory:
+ *                 type: string
+ *               langCode:
+ *                 type: string
+ *               language:
+ *                 type: string
+ *               isVisible:
+ *                 type: integer
+ *                 enum: [0, 1]
+ *               sort:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Template updated
+ */
+router.put('/template/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      const template = await agentService.updateTemplate(req.params.id, req.body);
+      success(res, template, 'Template updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==============================================
+// Other Static Routes
+// ==============================================
+
 /**
  * @swagger
  * /agent/prompt/{mac}:
