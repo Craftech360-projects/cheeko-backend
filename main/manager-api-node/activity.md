@@ -24,7 +24,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 6 | admin | Test admin user CRUD operations | Complete |
 | 7-8 | admin | Test admin params endpoints | Complete |
 | 9-10 | admin | Test admin dict endpoints | Complete |
-| 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
+| 11-14 | device | Test device endpoints (bind, unbind, list) | Complete |
 | 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
 | 22-24 | model | Test model endpoints | Pending |
@@ -76,6 +76,70 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Tasks 11-14 Complete (Device Endpoints)
+
+**Task 11: Test and fix GET /device/bind/{agentId} endpoint**
+**Task 12: Test and fix device bind/unbind operations**
+**Task 13: Test and fix device update and manual add**
+**Task 14: Test and fix GET /admin/device/all endpoint**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+
+1. **Super admin bypass missing** - `/device/bind/{agentId}` didn't check for super admin to show all devices
+2. **Response format mismatch** - Node.js returned snake_case fields, Spring Boot returns camelCase
+3. **Unbind permission check** - Super admins should be able to unbind any device
+4. **Missing admin device endpoint** - `/admin/device/all` didn't exist in Node.js API
+5. **Manual add field mismatch** - Node.js used `mac`, Spring Boot uses `macAddress`
+
+**Fixes Applied:**
+
+**1. Fixed GET /device/bind/{agentId} (`src/routes/device.routes.js`, `src/services/device.service.js`)**
+- Added `isSuperAdmin` parameter to `getDevicesByAgent` function
+- Super admin can see all devices for any agent (not filtered by user_id)
+- Response transformed to camelCase to match Spring Boot DeviceEntity format
+
+**2. Fixed POST /device/bind/{agentId}/{deviceCode} (`src/routes/device.routes.js`)**
+- Response transformed to DeviceResponseDTO format (id, macAddress, agentId, alias, board, kidId, appVersion)
+
+**3. Fixed POST /device/unbind (`src/routes/device.routes.js`, `src/services/device.service.js`)**
+- Added `isSuperAdmin` parameter to `unbindDevice` function
+- Super admin can unbind any device, regular users can only unbind their own
+- Error response format matches Spring Boot (code: 500, msg: "...")
+
+**4. Fixed PUT /device/update/{id} (`src/routes/device.routes.js`)**
+- Returns null data to match Spring Boot Result<Void>
+- Error responses match Spring Boot format
+
+**5. Fixed POST /device/manual-add (`src/routes/device.routes.js`, `src/services/device.service.js`)**
+- Supports both `mac` and `macAddress` for compatibility
+- Added `board` and `appVersion` fields to match Spring Boot DeviceManualAddDTO
+- Returns null data to match Spring Boot Result<Void>
+
+**6. Added GET /admin/device/all (`src/routes/admin.routes.js`, `src/services/admin.service.js`)**
+- Created new endpoint for paginated device search (super admin only)
+- Added `getAllDevices` service method
+- Response matches Spring Boot UserShowDeviceListVO format:
+  - id, macAddress, deviceType, appVersion, agentId
+  - bindUserName, otaUpgrade, recentChatTime
+- Supports keyword search on MAC address and alias
+
+**Files Modified:**
+- `src/routes/device.routes.js` - Updated 4 device route handlers
+- `src/services/device.service.js` - Updated getDevicesByAgent, unbindDevice, manualAddDevice
+- `src/routes/admin.routes.js` - Added /device/all endpoint
+- `src/services/admin.service.js` - Added getAllDevices method
+
+**Verification:**
+- `npm run lint` - 0 new errors (4 pre-existing errors, 6 warnings)
+- GET /device/bind/{agentId} returns camelCase devices
+- POST /device/bind returns DeviceResponseDTO format
+- POST /device/unbind supports super admin bypass
+- GET /admin/device/all returns paginated device list with user info
+
+---
 
 ### 2026-01-24 - Phase 4 Tasks 9-10 Complete (Admin Dict Endpoints)
 

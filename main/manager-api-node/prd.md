@@ -192,7 +192,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify device list displays correctly in frontend"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 12,
@@ -208,7 +208,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Compare response formats",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 13,
@@ -223,7 +223,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test manual device addition on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 14,
@@ -235,7 +235,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Compare pagination and device object format",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 15,

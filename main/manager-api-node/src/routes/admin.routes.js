@@ -1162,4 +1162,88 @@ router.get('/stats/active',
   })
 );
 
+/**
+ * @swagger
+ * /admin/device/all:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Paginated device search (admin)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *       - in: query
+ *         name: keywords
+ *         schema:
+ *           type: string
+ *         description: Search by MAC address or device alias
+ *     responses:
+ *       200:
+ *         description: Paginated device list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           macAddress:
+ *                             type: string
+ *                           deviceType:
+ *                             type: string
+ *                           appVersion:
+ *                             type: string
+ *                           agentId:
+ *                             type: string
+ *                           bindUserName:
+ *                             type: string
+ *                           otaUpgrade:
+ *                             type: integer
+ *                           recentChatTime:
+ *                             type: string
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Super admin access required
+ */
+router.get('/device/all',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const keywords = req.query.keywords || '';
+
+    const result = await adminService.getAllDevices({ page, limit, keywords });
+    success(res, result);
+  })
+);
+
 module.exports = router;

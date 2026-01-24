@@ -90,7 +90,19 @@ router.post('/bind/:agentId/:deviceCode',
 
     try {
       const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode);
-      success(res, device, 'Device bound successfully');
+
+      // Transform to DeviceResponseDTO format (matching Spring Boot)
+      const response = {
+        id: device.id,
+        macAddress: device.mac_address,
+        agentId: device.agent_id,
+        alias: device.alias,
+        board: device.board,
+        kidId: device.kid_id,
+        appVersion: device.app_version
+      };
+
+      success(res, response);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -120,8 +132,33 @@ router.get('/bind/:agentId',
   asyncHandler(async (req, res) => {
     const { agentId } = req.params;
 
-    const devices = await deviceService.getDevicesByAgent(req.user.id, agentId);
-    success(res, devices);
+    // Check if user is super admin
+    const isSuperAdmin = req.user.super_admin === 1;
+
+    const devices = await deviceService.getDevicesByAgent(req.user.id, agentId, isSuperAdmin);
+
+    // Transform to camelCase for Spring Boot compatibility
+    const transformedDevices = devices.map(device => ({
+      id: device.id,
+      userId: device.user_id,
+      macAddress: device.mac_address,
+      lastConnectedAt: device.last_connected_at,
+      autoUpdate: device.auto_update,
+      board: device.board,
+      alias: device.alias,
+      agentId: device.agent_id,
+      kidId: device.kid_id,
+      mode: device.mode,
+      deviceMode: device.device_mode,
+      appVersion: device.app_version,
+      sort: device.sort,
+      updater: device.updater,
+      updateDate: device.update_date,
+      creator: device.creator,
+      createDate: device.create_date
+    }));
+
+    success(res, transformedDevices);
   })
 );
 
@@ -154,14 +191,18 @@ router.post('/unbind',
     const { deviceId } = req.body;
 
     if (!deviceId) {
-      return badRequest(res, 'Device ID is required');
+      return res.status(200).json({ code: 500, msg: 'Device ID cannot be empty', data: null });
     }
 
+    // Check if user is super admin
+    const isSuperAdmin = req.user.super_admin === 1;
+
     try {
-      await deviceService.unbindDevice(req.user.id, deviceId);
-      success(res, null, 'Device unbound successfully');
+      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin);
+      success(res, null);
     } catch (error) {
-      badRequest(res, error.message);
+      // Match Spring Boot error response format
+      return res.status(200).json({ code: 500, msg: error.message, data: null });
     }
   })
 );
@@ -202,10 +243,12 @@ router.put('/update/:id',
     const { id } = req.params;
 
     try {
-      const device = await deviceService.updateDevice(req.user.id, id, req.body);
-      success(res, device, 'Device updated successfully');
+      await deviceService.updateDevice(req.user.id, id, req.body);
+      // Spring Boot returns Result<Void> (no data)
+      success(res, null);
     } catch (error) {
-      badRequest(res, error.message);
+      // Match Spring Boot error response format
+      return res.status(200).json({ code: 500, msg: error.message, data: null });
     }
   })
 );
@@ -240,15 +283,24 @@ router.put('/update/:id',
 router.post('/manual-add',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { mac, alias, agentId } = req.body;
+    // Support both 'mac' and 'macAddress' for compatibility
+    const { mac, macAddress, board, appVersion, agentId, alias } = req.body;
+    const deviceMac = macAddress || mac;
 
-    if (!mac) {
+    if (!deviceMac) {
       return badRequest(res, 'MAC address is required');
     }
 
     try {
-      const device = await deviceService.manualAddDevice(req.user.id, { mac, alias, agentId });
-      success(res, device, 'Device added successfully');
+      await deviceService.manualAddDevice(req.user.id, {
+        macAddress: deviceMac,
+        board,
+        appVersion,
+        agentId,
+        alias
+      });
+      // Spring Boot returns Result<Void> (no data)
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }

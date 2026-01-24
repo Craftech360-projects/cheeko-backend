@@ -734,6 +734,98 @@ const getActiveSessions = async () => {
   };
 };
 
+/**
+ * Get all devices (paginated) with user info
+ * Matches Spring Boot UserShowDeviceListVO format
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated device list
+ */
+const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  // Build query with optional keyword search
+  let countQuery = supabaseAdmin
+    .from('ai_device')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('ai_device')
+    .select(`
+      id,
+      mac_address,
+      board,
+      app_version,
+      agent_id,
+      auto_update,
+      last_connected_at,
+      user_id
+    `);
+
+  // Apply keyword filter if provided
+  if (keywords) {
+    countQuery = countQuery.or(`mac_address.ilike.%${keywords}%,alias.ilike.%${keywords}%`);
+    dataQuery = dataQuery.or(`mac_address.ilike.%${keywords}%,alias.ilike.%${keywords}%`);
+  }
+
+  // Get count
+  const { count, error: countError } = await countQuery;
+  if (countError) {
+    logger.error('Failed to count devices:', countError);
+    throw new Error('Failed to fetch devices');
+  }
+
+  // Get paginated data
+  const { data: devices, error: dataError } = await dataQuery
+    .order('create_date', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (dataError) {
+    logger.error('Failed to fetch devices:', dataError);
+    throw new Error('Failed to fetch devices');
+  }
+
+  // Get usernames for each device
+  const userIds = [...new Set(devices?.filter(d => d.user_id).map(d => d.user_id) || [])];
+  let userMap = {};
+
+  if (userIds.length > 0) {
+    const { data: users } = await supabaseAdmin
+      .from('sys_user')
+      .select('id, username')
+      .in('id', userIds);
+
+    if (users) {
+      userMap = users.reduce((acc, u) => {
+        acc[u.id] = u.username;
+        return acc;
+      }, {});
+    }
+  }
+
+  // Transform to Spring Boot UserShowDeviceListVO format
+  const list = (devices || []).map(device => ({
+    id: device.id,
+    macAddress: device.mac_address,
+    deviceType: device.board,
+    appVersion: device.app_version,
+    agentId: device.agent_id,
+    bindUserName: userMap[device.user_id] || null,
+    otaUpgrade: device.auto_update,
+    recentChatTime: device.last_connected_at
+      ? new Date(device.last_connected_at).toISOString().replace('T', ' ').slice(0, 19)
+      : null
+  }));
+
+  return {
+    list,
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
 module.exports = {
   // User Management
   listUsers,
@@ -750,6 +842,9 @@ module.exports = {
   resetUserPassword,
   resetPasswordAndReturn,
   setUserSuperAdmin,
+
+  // Device Management
+  getAllDevices,
 
   // System Statistics
   getSystemOverview,

@@ -221,17 +221,26 @@ const bindDevice = async (userId, agentId, deviceCode) => {
  * @param {string} agentId - Agent ID
  * @returns {Promise<Array>} List of devices
  */
-const getDevicesByAgent = async (userId, agentId) => {
+const getDevicesByAgent = async (userId, agentId, isSuperAdmin = false) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data: devices, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('ai_device')
     .select('*')
-    .eq('user_id', userId)
-    .eq('agent_id', agentId)
-    .order('create_date', { ascending: false });
+    .eq('agent_id', agentId);
 
-  if (error) throw new Error('Failed to fetch devices');
+  // Super admin can see all devices for any agent
+  // Regular users can only see their own devices
+  if (!isSuperAdmin) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data: devices, error } = await query.order('create_date', { ascending: false });
+
+  if (error) {
+    logger.error('Failed to fetch devices:', error);
+    throw new Error('Failed to fetch devices: ' + error.message);
+  }
 
   return devices || [];
 };
@@ -241,7 +250,7 @@ const getDevicesByAgent = async (userId, agentId) => {
  * @param {number} userId - User ID
  * @param {string} deviceId - Device ID
  */
-const unbindDevice = async (userId, deviceId) => {
+const unbindDevice = async (userId, deviceId, isSuperAdmin = false) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: device } = await supabaseAdmin
@@ -251,7 +260,11 @@ const unbindDevice = async (userId, deviceId) => {
     .single();
 
   if (!device) throw new Error('Device not found');
-  if (device.user_id !== userId) throw new Error('Device does not belong to user');
+
+  // Check ownership if not super admin
+  if (!isSuperAdmin && device.user_id !== userId) {
+    throw new Error("You don't have permission to unbind this device");
+  }
 
   const { error } = await supabaseAdmin
     .from('ai_device')
@@ -522,10 +535,12 @@ const listDevices = async (userId, { page = 1, limit = 10 } = {}) => {
  * @param {Object} data - Device data
  * @returns {Promise<Object>} Created device
  */
-const manualAddDevice = async (userId, { mac, alias, agentId }) => {
+const manualAddDevice = async (userId, { macAddress, mac, alias, agentId, board, appVersion }) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const normalizedMac = normalizeMacAddress(mac);
+  // Support both 'mac' and 'macAddress' for compatibility
+  const deviceMac = macAddress || mac;
+  const normalizedMac = normalizeMacAddress(deviceMac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   // Check if device exists
@@ -537,6 +552,7 @@ const manualAddDevice = async (userId, { mac, alias, agentId }) => {
 
   if (existing) throw new Error('Device already exists');
 
+  const now = new Date().toISOString();
   const { data: device, error } = await supabaseAdmin
     .from('ai_device')
     .insert({
@@ -544,8 +560,15 @@ const manualAddDevice = async (userId, { mac, alias, agentId }) => {
       user_id: userId,
       alias,
       agent_id: agentId,
+      board,
+      app_version: appVersion,
       mode: 'conversation',
-      device_mode: 'auto'
+      device_mode: 'auto',
+      auto_update: 1,
+      create_date: now,
+      update_date: now,
+      creator: userId,
+      updater: userId
     })
     .select()
     .single();
