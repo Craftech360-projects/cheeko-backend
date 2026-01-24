@@ -22,6 +22,7 @@ const adminRoutes = require('./admin.routes');
 const configRoutes = require('./config.routes');
 const usageRoutes = require('./usage.routes');
 const otaRoutes = require('./ota.routes');
+const otaMagRoutes = require('./otaMag.routes');
 
 /**
  * @swagger
@@ -191,5 +192,6 @@ router.use('/admin', adminRoutes);
 router.use('/config', configRoutes);
 router.use('/usage', usageRoutes);
 router.use('/ota', otaRoutes);
+router.use('/otaMag', otaMagRoutes);
 
 module.exports = router;

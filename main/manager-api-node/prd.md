@@ -416,7 +416,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add forceUpdate endpoint",
       "Test file upload"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

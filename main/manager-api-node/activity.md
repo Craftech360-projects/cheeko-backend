@@ -20,7 +20,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 7 | feature | Extended Analytics endpoints | Complete |
 | 8 | feature | Token Usage Analytics endpoints | Complete |
 | 9 | feature | OTA root endpoints (/ota/) | Complete |
-| 10 | feature | OTA Management endpoints (/otaMag) | Pending |
+| 10 | feature | OTA Management endpoints (/otaMag) | Complete |
 | 11 | feature | RFID Question CRUD endpoints | Pending |
 | 12 | feature | Extended RFID Series endpoints | Pending |
 | 13 | feature | Content Items CRUD endpoints | Pending |
@@ -45,6 +45,67 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - OTA Management Endpoints Complete
+
+**Task 10: Add OTA Management endpoints (/otaMag)**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/otaMag` - Paginated firmware query (admin only)
+- `GET /toy/otaMag/:id` - Get firmware info by ID (admin only)
+- `POST /toy/otaMag` - Create firmware record (admin only)
+- `PUT /toy/otaMag/:id` - Update firmware record (admin only)
+- `DELETE /toy/otaMag/:id` - Delete firmware record (admin only)
+- `PUT /toy/otaMag/forceUpdate/:id` - Set force update flag (admin only)
+- `GET /toy/otaMag/getDownloadUrl/:id` - Get firmware download URL (admin only)
+- `GET /toy/otaMag/download/:uuid` - Download firmware file (public for OTA updates)
+- `POST /toy/otaMag/upload` - Upload firmware file (admin only)
+
+**Service Methods Already Implemented in `device.service.js`:**
+- `listFirmware({ page, limit, type })` - Paginated firmware list
+- `getFirmwareById(id)` - Get firmware by ID
+- `createFirmware(data)` - Create firmware record
+- `updateFirmware(id, data)` - Update firmware record
+- `deleteFirmware(ids)` - Delete firmware records
+- `setForceUpdate(id, forceUpdate)` - Set force update flag
+
+**Dependencies Added:**
+- `multer` - For multipart file uploads
+
+**Files Created:**
+- `src/routes/otaMag.routes.js` - All 9 OTA management endpoints with Swagger docs (~500 lines)
+
+**Files Modified:**
+- `src/routes/index.js` - Added otaMag routes import and mount at `/otaMag`
+- `package.json` - Added multer dependency
+
+**API Contract:**
+```
+GET    /toy/otaMag                   - Returns {list, total, page, limit}
+GET    /toy/otaMag/:id               - Returns firmware object or 404
+POST   /toy/otaMag                   - Creates firmware, returns created object
+PUT    /toy/otaMag/:id               - Updates firmware, returns updated object
+DELETE /toy/otaMag/:id               - Deletes firmware
+PUT    /toy/otaMag/forceUpdate/:id   - Sets force update flag, returns updated object
+GET    /toy/otaMag/getDownloadUrl/:id - Returns {downloadUrl, filename, size}
+GET    /toy/otaMag/download/:uuid    - Returns binary file (public endpoint)
+POST   /toy/otaMag/upload            - Returns {filename, originalName, size, path}
+```
+
+**Features:**
+- File upload with multer (50MB limit, .bin/.ota/.hex files)
+- Automatic UUID-based filename generation for uploads
+- File cleanup on firmware record deletion
+- Force update flag management (only one per type can be active)
+- Duplicate type+version checking
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - OTA Root Endpoints Complete
 
