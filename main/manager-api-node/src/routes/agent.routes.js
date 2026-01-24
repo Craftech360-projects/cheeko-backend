@@ -160,12 +160,17 @@ router.get('/all',
  *   get:
  *     tags: [Agent Template]
  *     summary: Get all visible agent templates
- *     description: Public endpoint to get list of agent templates
+ *     description: Requires authentication. Returns list of visible agent templates.
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: List of visible agent templates
+ *       401:
+ *         description: Unauthorized
  */
 router.get('/template',
+  requireAuth,
   asyncHandler(async (req, res) => {
     try {
       const templates = await agentService.getTemplates();
@@ -251,6 +256,9 @@ router.post('/template',
  *   get:
  *     tags: [Agent Template]
  *     summary: Get agent template by ID
+ *     description: Requires authentication. Gets template details. (Extra endpoint not in Spring Boot)
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -260,10 +268,13 @@ router.post('/template',
  *     responses:
  *       200:
  *         description: Template details
+ *       401:
+ *         description: Unauthorized
  *       404:
  *         description: Template not found
  */
 router.get('/template/:id',
+  requireAuth,
   asyncHandler(async (req, res) => {
     const template = await agentService.getTemplateById(req.params.id);
     if (!template) {

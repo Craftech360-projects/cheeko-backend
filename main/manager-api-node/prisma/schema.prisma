@@ -50,6 +50,34 @@ model ai_agent_chat_history {
   @@index([session_id], map: "idx_chat_history_session")
 }
 
+model ai_agent_template {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  agent_code       String?   @db.VarChar(100)
+  agent_name       String    @db.VarChar(200)
+  asr_model_id     String?   @db.Uuid
+  vad_model_id     String?   @db.Uuid
+  llm_model_id     String?   @db.Uuid
+  vllm_model_id    String?   @db.Uuid
+  tts_model_id     String?   @db.Uuid
+  tts_voice_id     String?   @db.Uuid
+  mem_model_id     String?   @db.Uuid
+  intent_model_id  String?   @db.Uuid
+  chat_history_conf Int?     @default(1)
+  system_prompt    String?
+  summary_memory   String?
+  lang_code        String?   @default("en") @db.VarChar(10)
+  language         String?   @default("English") @db.VarChar(50)
+  sort             Int?      @default(0)
+  is_visible       Int?      @default(1)
+  creator          BigInt?
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  updater          BigInt?
+  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([agent_code], map: "ai_agent_template_agent_code_idx")
+  @@index([is_visible], map: "ai_agent_template_is_visible_idx")
+}
+
 model ai_device {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id           BigInt?

@@ -26,7 +26,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 9-10 | admin | Test admin dict endpoints | Complete |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Complete |
 | 15-16 | agent | Test agent listing and CRUD endpoints | Complete |
-| 17-19 | agent | Test agent templates, chat history, MCP | Pending |
+| 17 | agent | Test agent template endpoints | Complete |
+| 18-19 | agent | Test agent chat history, MCP endpoints | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
 | 22-24 | model | Test model endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
@@ -77,6 +78,65 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 17 Complete (Agent Template Endpoints)
+
+**Task 17: Test and fix agent template endpoints**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+
+1. **Missing `ai_agent_template` table** - The table was defined in Prisma migrations but not in the schema.prisma file
+2. **Authentication required** - Spring Boot requires auth (`@RequiresPermissions("sys:role:normal")`) but Node.js had it as public
+3. **Response format mismatch** - Node.js returned snake_case fields, Spring Boot returns camelCase
+4. **POST /template response** - Node.js returned full template object, Spring Boot returns just the ID
+5. **PUT /template response** - Node.js returned full template, Spring Boot returns `null` data (Result<Void>)
+
+**Fixes Applied:**
+
+**1. Added `ai_agent_template` model to Prisma schema (`prisma/schema.prisma`)**
+- Added complete model definition with all fields:
+  - id, agent_code, agent_name, all model IDs
+  - chat_history_conf, system_prompt, summary_memory
+  - lang_code, language, sort, is_visible
+  - creator, created_at, updater, updated_at
+- Added indexes on agent_code and is_visible
+- Ran `npx prisma db push` to create table
+
+**2. Added authentication to GET /agent/template (`src/routes/agent.routes.js`)**
+- Added `requireAuth` middleware to match Spring Boot's permission requirement
+- Updated Swagger docs to indicate auth required
+
+**3. Added authentication to GET /agent/template/:id**
+- Added `requireAuth` middleware
+- This is an extra endpoint not in Spring Boot but made consistent
+
+**4. Fixed response format (`src/services/agent.service.js`)**
+- Added import for `transformKeysToCamel` from helpers
+- `getTemplates()` - Now transforms array to camelCase
+- `getTemplateById()` - Now transforms single template to camelCase
+
+**5. Fixed POST /template response**
+- `createTemplate()` - Now returns just the template ID string
+- Matches Spring Boot `Result<String>.ok(template.getId())`
+
+**6. Fixed PUT /template response**
+- `updateTemplate()` - Now returns `null`
+- Matches Spring Boot `Result<Void>`
+
+**Files Modified:**
+- `prisma/schema.prisma` - Added ai_agent_template model
+- `src/services/agent.service.js` - Added transformKeysToCamel, fixed all template methods
+- `src/routes/agent.routes.js` - Added requireAuth to GET /template and GET /template/:id
+
+**Verification:**
+- `npm run lint` - 4 pre-existing errors, 6 warnings (no new issues)
+- GET /agent/template - Returns camelCase, requires auth
+- POST /agent/template - Returns just ID string
+- PUT /agent/template/:id - Returns null data
+
+---
 
 ### 2026-01-24 - Phase 4 Tasks 15-16 Complete (Agent Listing and CRUD)
 

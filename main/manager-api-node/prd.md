@@ -287,7 +287,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test template CRUD on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 18,

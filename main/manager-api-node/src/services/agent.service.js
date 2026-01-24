@@ -6,7 +6,7 @@
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
-const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
 
 /**
@@ -985,7 +985,7 @@ const getAudioContent = async (agentId, audioId) => {
 
 /**
  * Get all visible agent templates
- * @returns {Promise<Array>} List of visible templates
+ * @returns {Promise<Array>} List of visible templates (camelCase keys for Spring Boot compatibility)
  */
 const getTemplates = async () => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1002,13 +1002,14 @@ const getTemplates = async () => {
     throw new Error('Failed to fetch templates');
   }
 
-  return templates || [];
+  // Transform to camelCase for Spring Boot compatibility
+  return (templates || []).map(transformKeysToCamel);
 };
 
 /**
  * Get agent template by ID
  * @param {string} templateId - Template ID
- * @returns {Promise<Object|null>} Template or null
+ * @returns {Promise<Object|null>} Template or null (camelCase keys for Spring Boot compatibility)
  */
 const getTemplateById = async (templateId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1021,13 +1022,14 @@ const getTemplateById = async (templateId) => {
 
   if (error || !template) return null;
 
-  return template;
+  // Transform to camelCase for Spring Boot compatibility
+  return transformKeysToCamel(template);
 };
 
 /**
  * Create a new agent template
  * @param {Object} data - Template data
- * @returns {Promise<Object>} Created template
+ * @returns {Promise<string>} Created template ID (matches Spring Boot Result<String>)
  */
 const createTemplate = async (data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -1055,7 +1057,7 @@ const createTemplate = async (data) => {
   const { data: template, error } = await supabaseAdmin
     .from('ai_agent_template')
     .insert(templateData)
-    .select()
+    .select('id')
     .single();
 
   if (error) {
@@ -1063,21 +1065,27 @@ const createTemplate = async (data) => {
     throw new Error('Failed to create template');
   }
 
-  return template;
+  // Return just the ID (matches Spring Boot Result<String>)
+  return template.id;
 };
 
 /**
  * Update an agent template
  * @param {string} templateId - Template ID
  * @param {Object} data - Update data
- * @returns {Promise<Object>} Updated template
+ * @returns {Promise<null>} null (matches Spring Boot Result<Void>)
  */
 const updateTemplate = async (templateId, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Verify template exists
-  const existing = await getTemplateById(templateId);
-  if (!existing) throw new Error('Template not found');
+  // Verify template exists (using raw query since getTemplateById now transforms)
+  const { data: existing, error: existsError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('id')
+    .eq('id', templateId)
+    .single();
+
+  if (existsError || !existing) throw new Error('Template not found');
 
   const updateData = {
     updated_at: new Date().toISOString()
@@ -1102,19 +1110,18 @@ const updateTemplate = async (templateId, data) => {
   if (data.isVisible !== undefined) updateData.is_visible = data.isVisible;
   if (data.sort !== undefined) updateData.sort = data.sort;
 
-  const { data: template, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('ai_agent_template')
     .update(updateData)
-    .eq('id', templateId)
-    .select()
-    .single();
+    .eq('id', templateId);
 
   if (error) {
     logger.error('Failed to update template:', error);
     throw new Error('Failed to update template');
   }
 
-  return template;
+  // Return null (matches Spring Boot Result<Void>)
+  return null;
 };
 
 // ==============================================
