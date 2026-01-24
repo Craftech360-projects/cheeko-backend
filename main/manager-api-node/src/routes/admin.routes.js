@@ -160,6 +160,146 @@ const { success, badRequest, notFound } = require('../utils/response');
 
 /**
  * @swagger
+ * /admin/users:
+ *   get:
+ *     tags: [Admin - User Management]
+ *     summary: List users (Spring Boot compatible)
+ *     description: Returns a paginated list of users in Spring Boot format for manager-web frontend
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Items per page
+ *       - in: query
+ *         name: mobile
+ *         schema:
+ *           type: string
+ *         description: Filter by mobile/username
+ *     responses:
+ *       200:
+ *         description: Paginated user list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 msg:
+ *                   type: string
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           userid:
+ *                             type: integer
+ *                           mobile:
+ *                             type: string
+ *                           deviceCount:
+ *                             type: string
+ *                           status:
+ *                             type: integer
+ *                           createDate:
+ *                             type: string
+ *                             format: date-time
+ *                     total:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Super admin access required
+ */
+router.get('/users',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, mobile } = req.query;
+    const result = await adminService.listUsersForAdmin({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      mobile
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/users/changeStatus/{status}:
+ *   put:
+ *     tags: [Admin - User Management]
+ *     summary: Batch update user status
+ *     description: Enable or disable multiple users at once (super admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: status
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           enum: [0, 1]
+ *         description: New status (0=disabled, 1=enabled)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             description: Array of user IDs to update
+ *     responses:
+ *       200:
+ *         description: User status updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Super admin access required
+ */
+router.put('/users/changeStatus/:status',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const status = parseInt(req.params.status);
+    const userIds = req.body;
+
+    if (status !== 0 && status !== 1) {
+      return badRequest(res, 'Status must be 0 or 1');
+    }
+
+    if (!Array.isArray(userIds) || userIds.length === 0) {
+      return badRequest(res, 'User IDs array is required');
+    }
+
+    try {
+      await adminService.batchUpdateUserStatus(userIds, status);
+      success(res, null, 'User status updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
  * /admin/users/page:
  *   get:
  *     tags: [Admin - User Management]
@@ -498,11 +638,9 @@ router.put('/users/:id',
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
     try {
-      const user = await adminService.updateUser(req.params.id, {
-        ...req.body,
-        updater: req.user.id
-      });
-      success(res, user, 'User updated successfully');
+      // Spring Boot behavior: reset password and return new password
+      const newPassword = await adminService.resetPasswordAndReturn(req.params.id);
+      success(res, newPassword);
     } catch (error) {
       badRequest(res, error.message);
     }

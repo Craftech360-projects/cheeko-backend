@@ -94,7 +94,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify user management page works in frontend"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -111,7 +111,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test change status on both APIs",
       "Fix any response format differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,

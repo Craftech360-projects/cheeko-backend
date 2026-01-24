@@ -65,6 +65,93 @@ const listUsers = async ({ page = 1, limit = 20, status, superAdmin, search } = 
 };
 
 /**
+ * Get users for admin page (paginated) - Spring Boot compatible format
+ * Returns data in the format expected by manager-web frontend:
+ * { userid, mobile, deviceCount, status, createDate }
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated user list in Spring Boot format
+ */
+const listUsersForAdmin = async ({ page = 1, limit = 20, mobile } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  // Build count query
+  let countQuery = supabaseAdmin
+    .from('sys_user')
+    .select('id', { count: 'exact', head: true });
+
+  // Build data query
+  let dataQuery = supabaseAdmin
+    .from('sys_user')
+    .select('id, username, status, created_at')
+    .order('created_at', { ascending: false });
+
+  // Apply mobile filter (searches username since we use username as mobile)
+  if (mobile) {
+    countQuery = countQuery.ilike('username', `%${mobile}%`);
+    dataQuery = dataQuery.ilike('username', `%${mobile}%`);
+  }
+
+  const { count } = await countQuery;
+  const { data: users, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch users for admin:', error);
+    throw new Error('Failed to fetch users');
+  }
+
+  // Get device counts for each user
+  const userIds = (users || []).map(u => u.id);
+  let deviceCounts = {};
+
+  if (userIds.length > 0) {
+    const { data: devices } = await supabaseAdmin
+      .from('ai_device')
+      .select('user_id')
+      .in('user_id', userIds);
+
+    // Count devices per user
+    (devices || []).forEach(d => {
+      deviceCounts[d.user_id] = (deviceCounts[d.user_id] || 0) + 1;
+    });
+  }
+
+  // Transform to Spring Boot format
+  const list = (users || []).map(user => ({
+    userid: user.id,
+    mobile: user.username, // Spring Boot uses mobile, we use username
+    deviceCount: String(deviceCounts[user.id] || 0),
+    status: user.status,
+    createDate: user.created_at
+  }));
+
+  return {
+    list,
+    total: count || 0
+  };
+};
+
+/**
+ * Batch update user status
+ * @param {Array<number>} userIds - User IDs to update
+ * @param {number} status - New status (0=disabled, 1=enabled)
+ */
+const batchUpdateUserStatus = async (userIds, status) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('sys_user')
+    .update({ status, updated_at: new Date().toISOString() })
+    .in('id', userIds);
+
+  if (error) {
+    logger.error('Failed to batch update user status:', error);
+    throw new Error('Failed to update user status');
+  }
+};
+
+/**
  * Get all users without pagination
  * @returns {Promise<Array>} All users
  */
@@ -273,6 +360,38 @@ const updateUserStatus = async (id, status) => {
  */
 const resetUserPassword = async (id, newPassword) => {
   return updateUser(id, { password: newPassword });
+};
+
+/**
+ * Reset user password and return the new password (Spring Boot compatible)
+ * Generates a random 6-digit password, updates the user, and returns the password
+ * @param {string} id - User ID
+ * @returns {Promise<string>} The new password
+ */
+const resetPasswordAndReturn = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Generate random 6-digit password (matches Spring Boot behavior)
+  const newPassword = String(Math.floor(100000 + Math.random() * 900000));
+
+  // Hash and update
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+  const { error } = await supabaseAdmin
+    .from('sys_user')
+    .update({
+      password: hashedPassword,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', id);
+
+  if (error) {
+    logger.error('Failed to reset password:', error);
+    throw new Error('Failed to reset password');
+  }
+
+  return newPassword;
 };
 
 /**
@@ -618,6 +737,7 @@ const getActiveSessions = async () => {
 module.exports = {
   // User Management
   listUsers,
+  listUsersForAdmin,
   getAllUsers,
   getUserById,
   getUserByUsername,
@@ -626,7 +746,9 @@ module.exports = {
   deleteUser,
   deleteUsers,
   updateUserStatus,
+  batchUpdateUserStatus,
   resetUserPassword,
+  resetPasswordAndReturn,
   setUserSuperAdmin,
 
   // System Statistics

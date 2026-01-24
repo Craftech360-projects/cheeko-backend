@@ -82,6 +82,9 @@ const verifyCustomToken = async (token) => {
       return null;
     }
 
+    // Map role to super_admin for compatibility with Spring Boot format
+    user.super_admin = user.role === 'admin' ? 1 : 0;
+
     return user;
   } catch (error) {
     logger.error('Token verification error:', error);
@@ -231,10 +234,12 @@ const requireSuperAdmin = async (req, res, next) => {
     return unauthorized(res, 'Authentication required');
   }
 
-  // Check super_admin flag in user metadata or database
-  // For now, check if user has admin role in metadata
-  const isSuperAdmin = req.user.user_metadata?.super_admin === true ||
-                       req.user.app_metadata?.super_admin === true;
+  // Check super_admin flag in database (1 = super admin)
+  // Also check metadata for backward compatibility
+  const isSuperAdmin = req.user.super_admin === 1 ||
+                       req.user.user_metadata?.super_admin === true ||
+                       req.user.app_metadata?.super_admin === true ||
+                       req.user.role === 'admin'; // Fallback: treat 'admin' role as super admin
 
   if (!isSuperAdmin) {
     return forbidden(res, 'Super admin access required');

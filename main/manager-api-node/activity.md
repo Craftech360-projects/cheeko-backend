@@ -20,7 +20,9 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 2 | auth | Test POST /user/login endpoint | Complete |
 | 3 | auth | Test GET /user/info endpoint | Complete |
 | 4 | auth | Test GET /user/pub-config endpoint | Complete |
-| 5-10 | admin | Test admin endpoints (users, params, dict) | Pending |
+| 5 | admin | Test GET /admin/users pagination endpoint | Complete |
+| 6 | admin | Test admin user CRUD operations | Complete |
+| 7-10 | admin | Test admin endpoints (params, dict) | Pending |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
 | 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
@@ -73,6 +75,49 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Tasks 5-6 Complete (Admin User Endpoints)
+
+**Task 5: Test and fix GET /admin/users pagination endpoint**
+**Task 6: Test and fix admin user CRUD operations**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+
+1. **Token authentication failing** - The `verifyCustomToken` function was querying for `super_admin` column which doesn't exist in Supabase table (table uses `role` instead)
+
+2. **PUT /admin/users/{id}** - Node.js expected body with password, Spring Boot resets password and returns it (no body required)
+
+**Fixes Applied:**
+
+**1. Fixed token authentication (`src/middleware/auth.js`)**
+- Removed `super_admin` from SELECT query (column doesn't exist)
+- Map `role === 'admin'` to `super_admin = 1` for Spring Boot compatibility
+- Added error handling for token storage in `auth.service.js`
+
+**2. Fixed PUT /admin/users/{id} (`src/routes/admin.routes.js`)**
+- Changed to match Spring Boot behavior: reset password and return new password
+- Added `resetPasswordAndReturn` method to `admin.service.js`
+- Generates random 6-digit password, hashes and stores it, returns the plain password
+
+**Endpoints Verified:**
+- `GET /admin/users?page=1&limit=10` - Returns `{list, total}` matching Spring Boot format
+- `PUT /admin/users/{id}` - Resets password, returns 6-digit password
+- `DELETE /admin/users/{id}` - Deletes user (fails if foreign key constraints)
+- `PUT /admin/users/changeStatus/{status}` - Batch updates user statuses
+
+**Files Modified:**
+- `src/middleware/auth.js` - Fixed user lookup to use correct columns, map role to super_admin
+- `src/services/auth.service.js` - Added error handling for token storage
+- `src/routes/admin.routes.js` - Fixed PUT /users/:id to reset password
+- `src/services/admin.service.js` - Added `resetPasswordAndReturn` method
+
+**Verification:**
+- All admin user endpoints working correctly
+- Token authentication working properly
+
+---
 
 ### 2026-01-24 - Phase 4 Task 3 Complete (GET /user/info)
 

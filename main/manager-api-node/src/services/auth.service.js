@@ -105,13 +105,18 @@ const login = async (username, password) => {
   expireDate.setSeconds(expireDate.getSeconds() + expireSeconds);
 
   // Store token
-  await supabaseAdmin
+  const { error: tokenError } = await supabaseAdmin
     .from('sys_user_token')
     .insert({
       user_id: user.id,
       token,
       expire_date: expireDate.toISOString()
     });
+
+  if (tokenError) {
+    logger.error('Failed to store token:', tokenError);
+    throw new Error('Failed to create session');
+  }
 
   // Return token info matching Spring Boot TokenDTO format
   // Spring Boot returns: {token, expire (int seconds), clientHash}
