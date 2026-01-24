@@ -31,7 +31,9 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 19 | agent | Test agent MCP endpoints | Complete |
 | 20 | analytics | Test device analytics endpoints | Complete |
 | 21 | analytics | Test usage/token analytics endpoints | Complete |
-| 22-24 | model | Test model endpoints | Pending |
+| 22 | model | Test model listing endpoints | Complete |
+| 23 | model | Test model CRUD operations | Complete |
+| 24 | model | Test model provider endpoints | Pending |
 | 25 | ota | Test OTA management endpoints | Pending |
 | 26-29 | rfid | Test RFID endpoints | Pending |
 | 30 | voice | Test TTS voice endpoints | Pending |
@@ -80,6 +82,132 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 23 Complete (Model CRUD Operations)
+
+**Task 23: Test and fix model CRUD operations**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `POST /models/{modelType}/{provideCode}` - Create model
+- `PUT /models/{modelType}/{provideCode}/{id}` - Update model
+- `DELETE /models/{id}` - Delete model
+- `PUT /models/enable/{id}/{status}` - Enable/disable model
+- `PUT /models/default/{id}` - Set default model
+
+**Issues Found:**
+
+1. **DELETE /models/:id missing referential integrity checks** - Node.js allowed unrestricted deletion
+   - Spring Boot checks if model is default (prevents deletion if is_default=1)
+   - Spring Boot checks all agent model references (vad_model_id, asr_model_id, llm_model_id, tts_model_id, mem_model_id, vllm_model_id, intent_model_id)
+   - Spring Boot checks if LLM is referenced by intent configurations
+
+2. **UPDATE missing intent LLM validation** - Spring Boot validates LLM configuration when updating intent models
+   - If configJson contains "llm" key, validates that the referenced LLM exists
+   - Validates that the LLM type is "openai" or "ollama" (required for intent recognition)
+
+**Fixes Applied:**
+
+**1. Fixed `deleteModel()` (`src/services/model.service.js`)**
+- Added check for default model (is_default=1 prevents deletion)
+- Added agent reference check across all model ID columns
+- Added intent config reference check for LLM models
+- Error messages match Spring Boot format exactly
+
+**2. Fixed `updateModelByTypeProvider()` (`src/services/model.service.js`)**
+- Added validation for intent LLM configuration
+- Checks if configJson.llm exists and validates the referenced LLM
+- Validates LLM model_type is "llm"
+- Validates LLM config_json.type is "openai" or "ollama"
+
+**Files Modified:**
+- `src/services/model.service.js` - Updated deleteModel (~55 lines) and updateModelByTypeProvider (~20 lines)
+
+**Verification:**
+- `npm run lint` - No new errors (4 pre-existing errors, 6 warnings)
+
+---
+
+### 2026-01-24 - Phase 4 Task 22 Complete (Model Listing Endpoints)
+
+**Task 22: Test and fix model listing endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /models/list?page=1&limit=10`
+- `GET /models/{id}`
+- `GET /models/names`
+- `GET /models/llm/names`
+- `PUT /models/enable/{id}/{status}`
+- `PUT /models/default/{id}`
+
+**Issues Found:**
+
+1. **Wrong table name** - Node.js was using `ai_model` table which doesn't exist
+   - Should use `ai_model_config` table matching Spring Boot structure
+   - Prisma schema had incorrect model definition
+
+2. **Field naming mismatch** - Database uses snake_case, responses should be camelCase
+   - Node.js returned: `model_type`, `model_name`, `is_default`, etc.
+   - Spring Boot returns: `modelType`, `modelName`, `isDefault`, etc. (ModelConfigDTO)
+
+3. **Auth middleware issue** - `requireAdmin` didn't check `user.super_admin` property
+   - Custom tokens set `user.super_admin = 1` for admins (from verifyCustomToken)
+   - But requireAdmin only checked `user_metadata` and `app_metadata` (Supabase Auth)
+   - Admin users with custom tokens got 403 "Admin access required"
+
+4. **Route ordering issue** - `/enable/:id/:status` defined AFTER `/:type/:provider/:id`
+   - Express matched `/enable/test-id/1` as `/:type/:provider/:id`
+   - Returned "Invalid model type" instead of reaching enable handler
+
+**Fixes Applied:**
+
+**1. Fixed Prisma schema (`prisma/schema.prisma`)**
+- Renamed `ai_model` to `ai_model_config`
+- Updated fields to match Spring Boot structure:
+  - `model_type`, `model_code`, `model_name`
+  - `is_default`, `is_enabled`, `config_json`
+  - `doc_link`, `remark`, `sort`
+  - `creator`, `create_date`, `updater`, `update_date`
+- Regenerated Prisma client
+
+**2. Rewrote model service (`src/services/model.service.js`)**
+- Changed all queries from 'ai_model' to 'ai_model_config'
+- Added `transformToCamelCase()` helper function for response transformation
+- Updated all getter methods to return camelCase responses
+- Added `enableModel()` and `setDefaultModel()` functions
+- Added `getVoicesByModelId()` for /{modelId}/voices endpoint
+- Updated `getModelNames()` to accept modelType and modelName params
+- Updated `getLlmNames()` to accept modelName param and return type field
+
+**3. Fixed requireAdmin middleware (`src/middleware/auth.js`)**
+- Added check for `user.super_admin === 1`
+- Added check for `user.role === 'admin'`
+- Now supports both custom tokens and Supabase Auth tokens
+
+**4. Fixed route ordering (`src/routes/model.routes.js`)**
+- Moved `/enable/:id/:status` and `/default/:id` routes BEFORE `/:type/:provider` routes
+- Specific path patterns must be defined before parameterized patterns
+
+**Files Modified:**
+- `prisma/schema.prisma` - Renamed model and updated fields (~30 lines)
+- `src/services/model.service.js` - Major rewrite (~300 lines)
+- `src/middleware/auth.js` - Fixed isAdmin check (~10 lines)
+- `src/routes/model.routes.js` - Reorganized route order (~80 lines)
+
+**Verification:**
+- `npm run lint` - No new errors (4 pre-existing errors, 6 warnings)
+- `npx prisma generate` - Client regenerated successfully
+- `GET /models/list?modelType=llm` - Returns `{"code":0,"data":{"list":[...],"total":1,"page":1,"limit":20}}`
+- `GET /models/{id}` - Returns model with camelCase fields
+- `GET /models/names?modelType=llm` - Returns `[{"id":"...","modelName":"..."}]`
+- `GET /models/llm/names` - Returns `[{"id":"...","modelName":"...","type":null}]`
+- `POST /models/create` - Creates model with correct field mapping
+- Admin check passes for users with `role='admin'` in database
+
+---
 
 ### 2026-01-24 - Phase 4 Task 21 Complete (Usage/Token Analytics Endpoints)
 

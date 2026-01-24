@@ -2,10 +2,32 @@
  * Model Service
  *
  * Handles AI model configuration (ASR, TTS, LLM, VAD, etc.)
+ * Uses ai_model_config table to match Spring Boot structure
  */
 
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
+
+// Helper to transform snake_case to camelCase
+const transformToCamelCase = (obj) => {
+  if (!obj) return null;
+  return {
+    id: obj.id,
+    modelType: obj.model_type,
+    modelCode: obj.model_code,
+    modelName: obj.model_name,
+    isDefault: obj.is_default,
+    isEnabled: obj.is_enabled,
+    configJson: obj.config_json,
+    docLink: obj.doc_link,
+    remark: obj.remark,
+    sort: obj.sort,
+    creator: obj.creator,
+    createDate: obj.create_date,
+    updater: obj.updater,
+    updateDate: obj.update_date
+  };
+};
 
 /**
  * Get all models by type
@@ -16,15 +38,15 @@ const getModelsByType = async (modelType) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: models, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .select('*')
     .eq('model_type', modelType)
-    .eq('status', 1)
+    .eq('is_enabled', 1)
     .order('sort', { ascending: true });
 
   if (error) throw new Error('Failed to fetch models');
 
-  return models || [];
+  return (models || []).map(transformToCamelCase);
 };
 
 /**
@@ -36,39 +58,44 @@ const getModelById = async (modelId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: model, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .select('*')
     .eq('id', modelId)
     .single();
 
   if (error || !model) return null;
 
-  return model;
+  return transformToCamelCase(model);
 };
 
 /**
  * Get all models (paginated)
+ * Matches Spring Boot: PageData<ModelConfigDTO>
  * @param {Object} options - Pagination and filter options
  * @returns {Promise<Object>} Paginated models
  */
-const listModels = async ({ page = 1, limit = 20, modelType } = {}) => {
+const listModels = async ({ page = 1, limit = 20, modelType, modelName } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const offset = (page - 1) * limit;
 
   let countQuery = supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .select('id', { count: 'exact', head: true });
 
   let dataQuery = supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .select('*')
-    .order('model_type', { ascending: true })
     .order('sort', { ascending: true });
 
   if (modelType) {
     countQuery = countQuery.eq('model_type', modelType);
     dataQuery = dataQuery.eq('model_type', modelType);
+  }
+
+  if (modelName) {
+    countQuery = countQuery.ilike('model_name', `%${modelName}%`);
+    dataQuery = dataQuery.ilike('model_name', `%${modelName}%`);
   }
 
   const { count } = await countQuery;
@@ -77,7 +104,7 @@ const listModels = async ({ page = 1, limit = 20, modelType } = {}) => {
   if (error) throw new Error('Failed to fetch models');
 
   return {
-    list: models || [],
+    list: (models || []).map(transformToCamelCase),
     total: count || 0,
     page,
     limit
@@ -88,24 +115,23 @@ const listModels = async ({ page = 1, limit = 20, modelType } = {}) => {
  * Create model
  * @param {number} userId - User ID
  * @param {Object} data - Model data
- * @returns {Promise<Object>} Created model
+ * @returns {Promise<Object>} Created model (camelCase)
  */
 const createModel = async (userId, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: model, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .insert({
       model_type: data.modelType,
       model_name: data.modelName,
-      model_code: data.modelCode,
-      provider: data.provider,
-      api_key: data.apiKey,
-      api_url: data.apiUrl,
-      config: data.config || {},
-      description: data.description,
+      model_code: data.modelCode || data.modelName,
+      is_default: data.isDefault || 0,
+      is_enabled: data.isEnabled !== undefined ? data.isEnabled : 1,
+      config_json: data.configJson || {},
+      doc_link: data.docLink,
+      remark: data.remark,
       sort: data.sort || 0,
-      status: data.status || 1,
       creator: userId
     })
     .select()
@@ -113,32 +139,32 @@ const createModel = async (userId, data) => {
 
   if (error) throw new Error('Failed to create model');
 
-  return model;
+  return transformToCamelCase(model);
 };
 
 /**
  * Update model
  * @param {string} modelId - Model ID
  * @param {Object} data - Update data
- * @returns {Promise<Object>} Updated model
+ * @returns {Promise<Object>} Updated model (camelCase)
  */
 const updateModel = async (modelId, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { update_date: new Date().toISOString() };
 
   if (data.modelName !== undefined) updateData.model_name = data.modelName;
   if (data.modelCode !== undefined) updateData.model_code = data.modelCode;
-  if (data.provider !== undefined) updateData.provider = data.provider;
-  if (data.apiKey !== undefined) updateData.api_key = data.apiKey;
-  if (data.apiUrl !== undefined) updateData.api_url = data.apiUrl;
-  if (data.config !== undefined) updateData.config = data.config;
-  if (data.description !== undefined) updateData.description = data.description;
+  if (data.isDefault !== undefined) updateData.is_default = data.isDefault;
+  if (data.isEnabled !== undefined) updateData.is_enabled = data.isEnabled;
+  if (data.configJson !== undefined) updateData.config_json = data.configJson;
+  if (data.docLink !== undefined) updateData.doc_link = data.docLink;
+  if (data.remark !== undefined) updateData.remark = data.remark;
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.status !== undefined) updateData.status = data.status;
+  if (data.updater !== undefined) updateData.updater = data.updater;
 
   const { data: model, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .update(updateData)
     .eq('id', modelId)
     .select()
@@ -146,18 +172,60 @@ const updateModel = async (modelId, data) => {
 
   if (error) throw new Error('Failed to update model');
 
-  return model;
+  return transformToCamelCase(model);
 };
 
 /**
  * Delete model
+ * Matches Spring Boot: checks for default model and agent references before deleting
  * @param {string} modelId - Model ID
  */
 const deleteModel = async (modelId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
+  // First, check if the model exists and if it's a default model
+  const { data: model, error: fetchError } = await supabaseAdmin
+    .from('ai_model_config')
+    .select('id, model_type, is_default')
+    .eq('id', modelId)
+    .single();
+
+  if (fetchError || !model) {
+    throw new Error('Model not found');
+  }
+
+  // Check if it's the default model - Spring Boot: "This is a default model, please set another model as default first"
+  if (model.is_default === 1) {
+    throw new Error('This is a default model, please set another model as default first');
+  }
+
+  // Check if any agents reference this model
+  const { data: agents, error: agentError } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id, agent_name')
+    .or(`vad_model_id.eq.${modelId},asr_model_id.eq.${modelId},llm_model_id.eq.${modelId},tts_model_id.eq.${modelId},mem_model_id.eq.${modelId},vllm_model_id.eq.${modelId},intent_model_id.eq.${modelId}`);
+
+  if (!agentError && agents && agents.length > 0) {
+    const agentNames = agents.map(a => a.agent_name).join('、');
+    throw new Error(`This model configuration is referenced by agent(s) [${agentNames}] and cannot be deleted`);
+  }
+
+  // Check if this LLM is referenced by any intent configurations
+  if (model.model_type && model.model_type.toLowerCase() === 'llm') {
+    const { data: intentConfigs, error: intentError } = await supabaseAdmin
+      .from('ai_model_config')
+      .select('id')
+      .eq('model_type', 'intent')
+      .ilike('config_json', `%${modelId}%`);
+
+    if (!intentError && intentConfigs && intentConfigs.length > 0) {
+      throw new Error('This LLM model is referenced by intent recognition configuration and cannot be deleted');
+    }
+  }
+
+  // All checks passed, delete the model
   const { error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .delete()
     .eq('id', modelId);
 
@@ -175,7 +243,6 @@ const getTtsVoices = async (ttsModelId = null) => {
   let query = supabaseAdmin
     .from('ai_tts_voice')
     .select('*')
-    .eq('status', 1)
     .order('sort', { ascending: true });
 
   if (ttsModelId) {
@@ -221,17 +288,14 @@ const createTtsVoice = async (userId, data) => {
     .from('ai_tts_voice')
     .insert({
       tts_model_id: data.ttsModelId,
-      voice_name: data.voiceName,
-      voice_code: data.voiceCode,
-      gender: data.gender,
-      language: data.language,
-      accent: data.accent,
-      age_group: data.ageGroup,
-      style: data.style,
-      preview_url: data.previewUrl,
-      config: data.config || {},
+      tts_voice: data.ttsVoice || data.voiceCode,
+      name: data.name || data.voiceName,
+      languages: data.languages || data.language,
+      remark: data.remark,
+      reference_audio: data.referenceAudio,
+      reference_text: data.referenceText,
+      voice_demo: data.voiceDemo || data.previewUrl,
       sort: data.sort || 0,
-      status: data.status || 1,
       creator: userId
     })
     .select()
@@ -251,19 +315,25 @@ const createTtsVoice = async (userId, data) => {
 const updateTtsVoice = async (voiceId, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { update_date: new Date().toISOString() };
 
-  if (data.voiceName !== undefined) updateData.voice_name = data.voiceName;
-  if (data.voiceCode !== undefined) updateData.voice_code = data.voiceCode;
-  if (data.gender !== undefined) updateData.gender = data.gender;
-  if (data.language !== undefined) updateData.language = data.language;
-  if (data.accent !== undefined) updateData.accent = data.accent;
-  if (data.ageGroup !== undefined) updateData.age_group = data.ageGroup;
-  if (data.style !== undefined) updateData.style = data.style;
-  if (data.previewUrl !== undefined) updateData.preview_url = data.previewUrl;
-  if (data.config !== undefined) updateData.config = data.config;
+  if (data.ttsVoice !== undefined || data.voiceCode !== undefined) {
+    updateData.tts_voice = data.ttsVoice || data.voiceCode;
+  }
+  if (data.name !== undefined || data.voiceName !== undefined) {
+    updateData.name = data.name || data.voiceName;
+  }
+  if (data.languages !== undefined || data.language !== undefined) {
+    updateData.languages = data.languages || data.language;
+  }
+  if (data.remark !== undefined) updateData.remark = data.remark;
+  if (data.referenceAudio !== undefined) updateData.reference_audio = data.referenceAudio;
+  if (data.referenceText !== undefined) updateData.reference_text = data.referenceText;
+  if (data.voiceDemo !== undefined || data.previewUrl !== undefined) {
+    updateData.voice_demo = data.voiceDemo || data.previewUrl;
+  }
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.status !== undefined) updateData.status = data.status;
+  if (data.updater !== undefined) updateData.updater = data.updater;
 
   const { data: voice, error } = await supabaseAdmin
     .from('ai_tts_voice')
@@ -300,9 +370,9 @@ const getModelOptions = async () => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: models, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .select('id, model_type, model_name, model_code')
-    .eq('status', 1)
+    .eq('is_enabled', 1)
     .order('model_type', { ascending: true })
     .order('sort', { ascending: true });
 
@@ -326,102 +396,134 @@ const getModelOptions = async () => {
 
 /**
  * Get model names (simple list of all model names)
- * @returns {Promise<Array>} Model names
+ * Matches Spring Boot: List<ModelBasicInfoDTO>
+ * @param {string} modelType - Model type (required by Spring Boot)
+ * @param {string} modelName - Optional model name filter
+ * @returns {Promise<Array>} Model names with {id, modelName}
  */
-const getModelNames = async () => {
+const getModelNames = async (modelType, modelName) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data: models, error } = await supabaseAdmin
-    .from('ai_model')
-    .select('id, model_type, model_name, model_code, provider')
-    .eq('status', 1)
-    .order('model_type', { ascending: true })
+  let query = supabaseAdmin
+    .from('ai_model_config')
+    .select('id, model_name')
+    .eq('is_enabled', 1)
     .order('sort', { ascending: true });
+
+  if (modelType) {
+    query = query.eq('model_type', modelType);
+  }
+
+  if (modelName) {
+    query = query.ilike('model_name', `%${modelName}%`);
+  }
+
+  const { data: models, error } = await query;
 
   if (error) throw new Error('Failed to fetch model names');
 
+  // Return format matching ModelBasicInfoDTO: {id, modelName}
   return (models || []).map(model => ({
     id: model.id,
-    modelType: model.model_type,
-    modelName: model.model_name,
-    modelCode: model.model_code,
-    provider: model.provider
+    modelName: model.model_name
   }));
 };
 
 /**
  * Get LLM model names
- * @returns {Promise<Array>} LLM model names
+ * Matches Spring Boot: List<LlmModelBasicInfoDTO>
+ * @param {string} modelName - Optional model name filter
+ * @returns {Promise<Array>} LLM model names with {id, modelName, type}
  */
-const getLlmNames = async () => {
+const getLlmNames = async (modelName) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data: models, error } = await supabaseAdmin
-    .from('ai_model')
-    .select('id, model_name, model_code, provider')
+  let query = supabaseAdmin
+    .from('ai_model_config')
+    .select('id, model_name, config_json')
     .eq('model_type', 'llm')
-    .eq('status', 1)
+    .eq('is_enabled', 1)
     .order('sort', { ascending: true });
+
+  if (modelName) {
+    query = query.ilike('model_name', `%${modelName}%`);
+  }
+
+  const { data: models, error } = await query;
 
   if (error) throw new Error('Failed to fetch LLM names');
 
+  // Return format matching LlmModelBasicInfoDTO: {id, modelName, type}
   return (models || []).map(model => ({
     id: model.id,
     modelName: model.model_name,
-    modelCode: model.model_code,
-    provider: model.provider
+    type: model.config_json?.type || null
   }));
 };
 
 /**
  * Get provider types for a given model type
+ * Matches Spring Boot: List<ModelProviderDTO>
  * @param {string} modelType - Model type (asr, tts, llm, vad, mem, intent, vllm)
  * @returns {Promise<Array>} Provider types
  */
 const getProviderTypes = async (modelType) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data: models, error } = await supabaseAdmin
-    .from('ai_model')
-    .select('provider')
+  const { data: providers, error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .select('*')
     .eq('model_type', modelType)
-    .eq('status', 1);
+    .order('sort', { ascending: true });
 
   if (error) throw new Error('Failed to fetch provider types');
 
-  // Get unique providers
-  const providers = [...new Set((models || []).map(m => m.provider).filter(Boolean))];
-
-  return providers.map(provider => ({
-    provider,
-    name: provider.charAt(0).toUpperCase() + provider.slice(1)
+  // Return full provider objects matching ModelProviderDTO
+  return (providers || []).map(p => ({
+    id: p.id,
+    modelType: p.model_type,
+    providerCode: p.provider_code,
+    name: p.name,
+    fields: p.fields,
+    sort: p.sort
   }));
 };
 
 /**
  * Create model with type and provider in path
+ * Matches Spring Boot: ModelConfigDTO
  * @param {number} userId - User ID
  * @param {string} modelType - Model type
- * @param {string} provider - Provider name
- * @param {Object} data - Model data
+ * @param {string} provideCode - Provider code
+ * @param {Object} data - Model data (ModelConfigBodyDTO)
  * @returns {Promise<Object>} Created model
  */
-const createModelByTypeProvider = async (userId, modelType, provider, data) => {
+const createModelByTypeProvider = async (userId, modelType, provideCode, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
+  // First verify if provider exists (matching Spring Boot behavior)
+  const { data: providers } = await supabaseAdmin
+    .from('ai_model_provider')
+    .select('id')
+    .eq('model_type', modelType)
+    .eq('provider_code', provideCode);
+
+  if (!providers || providers.length === 0) {
+    throw new Error('Provider does not exist');
+  }
+
   const { data: model, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .insert({
       model_type: modelType,
-      provider: provider,
       model_name: data.modelName,
-      model_code: data.modelCode,
-      api_key: data.apiKey,
-      api_url: data.apiUrl,
-      config: data.config || {},
-      description: data.description,
+      model_code: data.modelCode || data.modelName,
+      is_default: 0, // New models are never default
+      is_enabled: data.isEnabled !== undefined ? data.isEnabled : 1,
+      config_json: data.configJson || {},
+      doc_link: data.docLink,
+      remark: data.remark,
       sort: data.sort || 0,
-      status: data.status !== undefined ? data.status : 1,
       creator: userId
     })
     .select()
@@ -432,46 +534,80 @@ const createModelByTypeProvider = async (userId, modelType, provider, data) => {
     throw new Error('Failed to create model');
   }
 
-  return model;
+  return transformToCamelCase(model);
 };
 
 /**
  * Update model with type and provider in path
+ * Matches Spring Boot: validates provider, checks intent LLM config
  * @param {string} modelId - Model ID
  * @param {string} modelType - Model type
- * @param {string} provider - Provider name
+ * @param {string} provideCode - Provider code
  * @param {Object} data - Update data
  * @returns {Promise<Object>} Updated model
  */
-const updateModelByTypeProvider = async (modelId, modelType, provider, data) => {
+const updateModelByTypeProvider = async (modelId, modelType, provideCode, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // First verify the model exists and matches type/provider
+  // First verify if provider exists (matching Spring Boot behavior)
+  const { data: providers } = await supabaseAdmin
+    .from('ai_model_provider')
+    .select('id')
+    .eq('model_type', modelType)
+    .eq('provider_code', provideCode);
+
+  if (!providers || providers.length === 0) {
+    throw new Error('Provider does not exist');
+  }
+
+  // Then verify the model exists
   const { data: existing, error: fetchError } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .select('id')
     .eq('id', modelId)
-    .eq('model_type', modelType)
-    .eq('provider', provider)
     .single();
 
   if (fetchError || !existing) {
-    throw new Error('Model not found or type/provider mismatch');
+    throw new Error('Model not found');
   }
 
-  const updateData = { updated_at: new Date().toISOString() };
+  // Spring Boot: validate intent LLM configuration
+  // If configJson contains "llm" key, verify the referenced LLM is valid
+  if (data.configJson && data.configJson.llm) {
+    const llmId = data.configJson.llm;
+    const { data: llmModel, error: llmError } = await supabaseAdmin
+      .from('ai_model_config')
+      .select('id, model_type, config_json')
+      .eq('id', llmId)
+      .single();
+
+    if (llmError || !llmModel) {
+      throw new Error('The configured LLM does not exist');
+    }
+
+    if (!llmModel.model_type || llmModel.model_type.toLowerCase() !== 'llm') {
+      throw new Error('The configured LLM does not exist');
+    }
+
+    // Check if the LLM type is openai or ollama
+    const llmType = llmModel.config_json?.type;
+    if (llmType !== 'openai' && llmType !== 'ollama') {
+      throw new Error('The configured LLM is not openai or ollama');
+    }
+  }
+
+  const updateData = { update_date: new Date().toISOString() };
 
   if (data.modelName !== undefined) updateData.model_name = data.modelName;
   if (data.modelCode !== undefined) updateData.model_code = data.modelCode;
-  if (data.apiKey !== undefined) updateData.api_key = data.apiKey;
-  if (data.apiUrl !== undefined) updateData.api_url = data.apiUrl;
-  if (data.config !== undefined) updateData.config = data.config;
-  if (data.description !== undefined) updateData.description = data.description;
+  if (data.isEnabled !== undefined) updateData.is_enabled = data.isEnabled;
+  if (data.configJson !== undefined) updateData.config_json = data.configJson;
+  if (data.docLink !== undefined) updateData.doc_link = data.docLink;
+  if (data.remark !== undefined) updateData.remark = data.remark;
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.status !== undefined) updateData.status = data.status;
 
   const { data: model, error } = await supabaseAdmin
-    .from('ai_model')
+    .from('ai_model_config')
     .update(updateData)
     .eq('id', modelId)
     .select()
@@ -482,7 +618,74 @@ const updateModelByTypeProvider = async (modelId, modelType, provider, data) => 
     throw new Error('Failed to update model');
   }
 
-  return model;
+  return transformToCamelCase(model);
+};
+
+/**
+ * Enable/disable model configuration
+ * @param {string} modelId - Model ID
+ * @param {number} status - Enable status (0 or 1)
+ * @returns {Promise<void>}
+ */
+const enableModel = async (modelId, status) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: model, error: fetchError } = await supabaseAdmin
+    .from('ai_model_config')
+    .select('id')
+    .eq('id', modelId)
+    .single();
+
+  if (fetchError || !model) {
+    throw new Error('Model configuration does not exist');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('ai_model_config')
+    .update({
+      is_enabled: status,
+      update_date: new Date().toISOString()
+    })
+    .eq('id', modelId);
+
+  if (error) throw new Error('Failed to update model status');
+};
+
+/**
+ * Set default model
+ * @param {string} modelId - Model ID
+ * @returns {Promise<void>}
+ */
+const setDefaultModel = async (modelId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: model, error: fetchError } = await supabaseAdmin
+    .from('ai_model_config')
+    .select('id, model_type')
+    .eq('id', modelId)
+    .single();
+
+  if (fetchError || !model) {
+    throw new Error('Model configuration does not exist');
+  }
+
+  // Set other models of the same type as non-default
+  await supabaseAdmin
+    .from('ai_model_config')
+    .update({ is_default: 0, update_date: new Date().toISOString() })
+    .eq('model_type', model.model_type);
+
+  // Set this model as default and enabled
+  const { error } = await supabaseAdmin
+    .from('ai_model_config')
+    .update({
+      is_default: 1,
+      is_enabled: 1,
+      update_date: new Date().toISOString()
+    })
+    .eq('id', modelId);
+
+  if (error) throw new Error('Failed to set default model');
 };
 
 // =============================================
@@ -652,6 +855,41 @@ const getProviderPluginNames = async () => {
   }));
 };
 
+/**
+ * Get voices for a model (for Spring Boot /models/{modelId}/voices)
+ * @param {string} modelId - Model ID
+ * @param {string} voiceName - Optional voice name filter
+ * @returns {Promise<Array>} Voice list
+ */
+const getVoicesByModelId = async (modelId, voiceName) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('ai_tts_voice')
+    .select('id, tts_voice, name, languages, remark, voice_demo, sort')
+    .eq('tts_model_id', modelId)
+    .order('sort', { ascending: true });
+
+  if (voiceName) {
+    query = query.ilike('name', `%${voiceName}%`);
+  }
+
+  const { data: voices, error } = await query;
+
+  if (error) throw new Error('Failed to fetch voices');
+
+  // Return format matching VoiceDTO
+  return (voices || []).map(v => ({
+    id: v.id,
+    ttsVoice: v.tts_voice,
+    name: v.name,
+    languages: v.languages,
+    remark: v.remark,
+    voiceDemo: v.voice_demo,
+    sort: v.sort
+  }));
+};
+
 module.exports = {
   getModelsByType,
   getModelById,
@@ -670,11 +908,15 @@ module.exports = {
   getProviderTypes,
   createModelByTypeProvider,
   updateModelByTypeProvider,
+  enableModel,
+  setDefaultModel,
   // Provider CRUD
   getProviders,
   getProviderById,
   createProvider,
   updateProvider,
   deleteProvider,
-  getProviderPluginNames
+  getProviderPluginNames,
+  // Voice by model
+  getVoicesByModelId
 };

@@ -372,7 +372,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify model config page works"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Changed table from ai_model to ai_model_config, 2) Added camelCase transformation for response fields, 3) Fixed requireAdmin middleware to check user.super_admin, 4) Fixed route ordering for /enable and /default endpoints"
   },
   {
     "id": 23,
@@ -391,7 +392,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test set default on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Added referential integrity checks to DELETE (default model check, agent references, intent config references), 2) Added intent LLM validation to UPDATE (validates LLM exists and is openai/ollama type)"
   },
   {
     "id": 24,
