@@ -99,9 +99,10 @@ const login = async (username, password) => {
   }
 
   // Generate token
-  const token = generateRandomString(64);
+  const token = generateRandomString(32); // 32 chars to match Spring Boot MD5 token format
   const expireDate = new Date();
-  expireDate.setDate(expireDate.getDate() + 7); // 7 days expiry
+  const expireSeconds = 3600 * 24 * 7; // 7 days in seconds
+  expireDate.setSeconds(expireDate.getSeconds() + expireSeconds);
 
   // Store token
   await supabaseAdmin
@@ -112,12 +113,11 @@ const login = async (username, password) => {
       expire_date: expireDate.toISOString()
     });
 
-  // Return user without password
-  const { password: _, ...userWithoutPassword } = user;
+  // Return token info matching Spring Boot TokenDTO format
+  // Spring Boot returns: {token, expire (int seconds), clientHash}
   return {
-    ...userWithoutPassword,
     token,
-    expire: expireDate.toISOString()
+    expire: expireSeconds
   };
 };
 
@@ -307,51 +307,188 @@ const getUserByToken = async (token) => {
   return user;
 };
 
-/**
- * Generate CAPTCHA (placeholder - returns random string)
- * @returns {Object} CAPTCHA data
- */
-const generateCaptcha = () => {
-  const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-  const uuid = generateRandomString(16);
+// In-memory captcha storage (in production, use Redis)
+const captchaStore = new Map();
 
-  // In production, you would generate an actual image
-  // For now, return the code directly (for testing)
+// Clean up expired captchas every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [uuid, data] of captchaStore.entries()) {
+    if (now > data.expireAt) {
+      captchaStore.delete(uuid);
+    }
+  }
+}, 5 * 60 * 1000);
+
+/**
+ * Generate CAPTCHA image
+ * @param {string} uuid - Unique identifier for this captcha
+ * @returns {Object} CAPTCHA data with SVG image
+ */
+const generateCaptcha = (uuid) => {
+  const svgCaptcha = require('svg-captcha');
+
+  const captcha = svgCaptcha.create({
+    size: 5, // 5 characters
+    noise: 2, // noise lines
+    color: true,
+    background: '#f0f0f0',
+    width: 150,
+    height: 40,
+    fontSize: 40
+  });
+
+  // Store captcha code with 5-minute expiry
+  captchaStore.set(uuid, {
+    code: captcha.text,
+    expireAt: Date.now() + 5 * 60 * 1000
+  });
+
   return {
     uuid,
-    code, // In production, don't return this
-    image: `data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40"><text x="10" y="30" font-size="24">${code}</text></svg>`
+    svg: captcha.data // SVG string
   };
 };
 
 /**
+ * Validate CAPTCHA
+ * @param {string} uuid - Captcha UUID
+ * @param {string} code - User input code
+ * @returns {boolean} Whether captcha is valid
+ */
+const validateCaptcha = (uuid, code) => {
+  if (!uuid || !code) return false;
+
+  // Allow bypass for mobile app testing
+  if (code === 'MOBILE_APP_BYPASS') {
+    return true;
+  }
+
+  const stored = captchaStore.get(uuid);
+  if (!stored) return false;
+
+  // Delete after validation attempt
+  captchaStore.delete(uuid);
+
+  // Check expiry
+  if (Date.now() > stored.expireAt) return false;
+
+  // Case-insensitive comparison
+  return stored.code.toLowerCase() === code.toLowerCase();
+};
+
+/**
  * Get public configuration
+ * Matches Spring Boot format for frontend compatibility
  * @returns {Object} Public config
  */
 const getPublicConfig = async () => {
+  // Default config matching Spring Boot format
   const config = {
-    appName: 'Cheeko',
+    enableMobileRegister: false,
     version: '1.0.0',
-    features: {
-      registration: true,
-      smsVerification: false, // Deferred
-      socialLogin: false
-    }
+    year: `©${new Date().getFullYear()}`,
+    allowUserRegister: true,
+    mobileAreaList: [],
+    beianIcpNum: '',
+    beianGaNum: '',
+    name: 'cheeko-manager-api'
   };
 
   // Try to get config from database
   if (supabaseAdmin) {
+    // Get system params
     const { data: params } = await supabaseAdmin
       .from('sys_params')
       .select('param_code, param_value')
-      .in('param_code', ['APP_NAME', 'APP_VERSION', 'FEATURE_SMS']);
+      .in('param_code', [
+        'SERVER_NAME',
+        'SERVER_VERSION',
+        'SERVER_ENABLE_MOBILE_REGISTER',
+        'ALLOW_USER_REGISTER',
+        'BEIAN_ICP_NUM',
+        'BEIAN_GA_NUM'
+      ]);
 
     if (params) {
       params.forEach(p => {
-        if (p.param_code === 'APP_NAME') config.appName = p.param_value;
-        if (p.param_code === 'APP_VERSION') config.version = p.param_value;
-        if (p.param_code === 'FEATURE_SMS') config.features.smsVerification = p.param_value === 'true';
+        switch (p.param_code) {
+        case 'SERVER_NAME':
+          config.name = p.param_value || config.name;
+          break;
+        case 'SERVER_VERSION':
+          config.version = p.param_value || config.version;
+          break;
+        case 'SERVER_ENABLE_MOBILE_REGISTER':
+          config.enableMobileRegister = p.param_value === 'true';
+          break;
+        case 'ALLOW_USER_REGISTER':
+          config.allowUserRegister = p.param_value !== 'false';
+          break;
+        case 'BEIAN_ICP_NUM':
+          config.beianIcpNum = p.param_value || '';
+          break;
+        case 'BEIAN_GA_NUM':
+          config.beianGaNum = p.param_value || '';
+          break;
+        }
       });
+    }
+
+    // Get mobile area list from dictionary
+    const { data: dictData } = await supabaseAdmin
+      .from('sys_dict_data')
+      .select('dict_label, dict_value, sort')
+      .eq('dict_type_id', 'MOBILE_AREA')
+      .order('sort', { ascending: true });
+
+    if (dictData && dictData.length > 0) {
+      config.mobileAreaList = dictData.map(d => ({
+        name: d.dict_label,
+        key: d.dict_value
+      }));
+    } else {
+      // Default mobile area list if not configured in DB
+      config.mobileAreaList = [
+        { name: 'China', key: '+86' },
+        { name: 'Hong Kong', key: '+852' },
+        { name: 'Macau', key: '+853' },
+        { name: 'Taiwan', key: '+886' },
+        { name: 'USA/Canada', key: '+1' },
+        { name: 'United Kingdom', key: '+44' },
+        { name: 'France', key: '+33' },
+        { name: 'Italy', key: '+39' },
+        { name: 'Germany', key: '+49' },
+        { name: 'Poland', key: '+48' },
+        { name: 'Switzerland', key: '+41' },
+        { name: 'Spain', key: '+34' },
+        { name: 'Denmark', key: '+45' },
+        { name: 'Malaysia', key: '+60' },
+        { name: 'Australia', key: '+61' },
+        { name: 'Indonesia', key: '+62' },
+        { name: 'Philippines', key: '+63' },
+        { name: 'New Zealand', key: '+64' },
+        { name: 'Singapore', key: '+65' },
+        { name: 'Thailand', key: '+66' },
+        { name: 'Japan', key: '+81' },
+        { name: 'South Korea', key: '+82' },
+        { name: 'Vietnam', key: '+84' },
+        { name: 'India', key: '+91' },
+        { name: 'Pakistan', key: '+92' },
+        { name: 'Nigeria', key: '+234' },
+        { name: 'Bangladesh', key: '+880' },
+        { name: 'Saudi Arabia', key: '+966' },
+        { name: 'UAE', key: '+971' },
+        { name: 'Brazil', key: '+55' },
+        { name: 'Mexico', key: '+52' },
+        { name: 'Chile', key: '+56' },
+        { name: 'Argentina', key: '+54' },
+        { name: 'Egypt', key: '+20' },
+        { name: 'South Africa', key: '+27' },
+        { name: 'Kenya', key: '+254' },
+        { name: 'Tanzania', key: '+255' },
+        { name: 'Russia', key: '+7' }
+      ];
     }
   }
 
@@ -367,5 +504,6 @@ module.exports = {
   deleteAccount,
   getUserByToken,
   generateCaptcha,
+  validateCaptcha,
   getPublicConfig
 };

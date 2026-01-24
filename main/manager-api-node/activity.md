@@ -17,7 +17,9 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | ID | Category | Description | Status |
 |----|----------|-------------|--------|
 | 1 | setup | Start manager-web frontend | Complete |
-| 2-4 | auth | Test auth endpoints (login, info, pub-config) | Pending |
+| 2 | auth | Test POST /user/login endpoint | Complete |
+| 3 | auth | Test GET /user/info endpoint | Pending |
+| 4 | auth | Test GET /user/pub-config endpoint | Complete |
 | 5-10 | admin | Test admin endpoints (users, params, dict) | Pending |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
 | 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
@@ -71,6 +73,49 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 2 Complete (Login & Pub-Config)
+
+**Task 2: Test and fix POST /user/login endpoint**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+1. **Captcha endpoint** - Returned JSON with SVG, frontend expected image blob
+2. **Login validation** - Node.js didn't validate captcha, Spring Boot requires captchaId/captcha
+3. **pub-config format** - Node.js returned different structure than Spring Boot
+
+**Fixes Applied:**
+
+**1. Captcha Endpoint (`/user/captcha`)**
+- Changed to accept `uuid` query parameter (matching Spring Boot)
+- Returns SVG image directly with `Content-Type: image/svg+xml`
+- Added cache-control headers
+
+**2. Login Endpoint (`/user/login`)**
+- Added captcha validation before password check
+- Returns `{code: 500, msg: "Invalid captcha, please try again"}` for invalid captcha (matching Spring Boot)
+- Kept MOBILE_APP_BYPASS code for testing purposes
+
+**3. Pub-Config Endpoint (`/user/pub-config`)**
+- Updated response format to match Spring Boot exactly:
+  - `enableMobileRegister`, `version`, `year`, `allowUserRegister`
+  - `mobileAreaList` array with `{name, key}` objects
+  - `beianIcpNum`, `beianGaNum`, `name` fields
+- Reads config from sys_params table if available
+- Default mobile area list included for fallback
+
+**Files Modified:**
+- `src/routes/auth.routes.js` - Fixed captcha and login endpoints
+- `src/services/auth.service.js` - Fixed getPublicConfig to match Spring Boot format
+
+**Verification:**
+- `npm run lint` - 0 new errors (3 pre-existing errors, 7 warnings)
+- Both APIs now return matching captcha response (image)
+- Both APIs require captcha for login
+- pub-config now returns identical structure
+
+---
 
 ### 2026-01-24 - Phase 4 Task 1 Complete
 

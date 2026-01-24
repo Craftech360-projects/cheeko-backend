@@ -88,6 +88,10 @@ router.post('/register',
  *                 type: string
  *               captcha:
  *                 type: string
+ *                 description: Captcha code entered by user
+ *               captchaId:
+ *                 type: string
+ *                 description: UUID of the captcha
  *     responses:
  *       200:
  *         description: Login successful
@@ -102,22 +106,31 @@ router.post('/register',
  *                 data:
  *                   type: object
  *                   properties:
- *                     id:
- *                       type: integer
- *                     username:
- *                       type: string
  *                     token:
  *                       type: string
  *                     expire:
- *                       type: string
- *                       format: date-time
+ *                       type: integer
+ *                       description: Token expiry in seconds
  *       400:
- *         description: Invalid credentials
+ *         description: Invalid credentials or captcha
+ *       500:
+ *         description: Invalid captcha, please try again
  */
 router.post('/login',
   validate({ body: schemas.login }),
   asyncHandler(async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password, captcha, captchaId } = req.body;
+
+    // Validate captcha first (matching Spring Boot behavior)
+    const isValidCaptcha = authService.validateCaptcha(captchaId, captcha);
+    if (!isValidCaptcha) {
+      // Spring Boot returns code 500 for invalid captcha
+      return res.status(200).json({
+        code: 500,
+        msg: 'Invalid captcha, please try again',
+        data: null
+      });
+    }
 
     try {
       const result = await authService.login(username, password);
@@ -155,32 +168,38 @@ router.post('/logout',
  *   get:
  *     tags: [User]
  *     summary: Get CAPTCHA image
+ *     parameters:
+ *       - in: query
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Unique identifier for this captcha
  *     responses:
  *       200:
- *         description: CAPTCHA data
+ *         description: CAPTCHA image (SVG)
  *         content:
- *           application/json:
+ *           image/svg+xml:
  *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                   example: 0
- *                 data:
- *                   type: object
- *                   properties:
- *                     uuid:
- *                       type: string
- *                     image:
- *                       type: string
- *                       description: Base64 encoded image
+ *               type: string
+ *       400:
+ *         description: UUID is required
  */
 router.get('/captcha', (req, res) => {
-  const captcha = authService.generateCaptcha();
-  success(res, {
-    uuid: captcha.uuid,
-    image: captcha.image
-  });
+  const { uuid } = req.query;
+
+  if (!uuid) {
+    return res.status(400).json({ code: 400, msg: 'UUID is required', data: null });
+  }
+
+  const captcha = authService.generateCaptcha(uuid);
+
+  // Return SVG as image - browser can display SVG natively
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.send(captcha.svg);
 });
 
 /**

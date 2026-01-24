@@ -54,7 +54,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences in auth.service.js or auth.routes.js",
       "Verify login works in frontend"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -80,7 +80,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "This endpoint provides public system configuration",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
