@@ -479,9 +479,13 @@ All manager-web frontend features work correctly with the Node.js API, matching 
     "description": "Test and fix RFID card endpoints",
     "endpoints": [
       "GET /admin/rfid/card/page",
+      "GET /admin/rfid/card/{id}",
       "GET /admin/rfid/card/uid/{rfidUid}",
+      "GET /admin/rfid/card/pack/{packCode}",
+      "GET /admin/rfid/card/question/{questionId}",
       "POST /admin/rfid/card",
       "PUT /admin/rfid/card",
+      "DELETE /admin/rfid/card",
       "POST /admin/rfid/card/delete"
     ],
     "steps": [
@@ -490,7 +494,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test card CRUD on both APIs",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Added transformCardMappingToCamelCase helper, 2) Added missing endpoints (/{id}, /uid/{rfidUid}, /pack/{packCode}, /question/{questionId}), 3) Fixed broken DELETE /card route (undefined variables), 4) Added POST /card/delete endpoint, 5) Changed auth to requireAdmin, 6) CUD operations return null (Result<Void>)"
   },
   {
     "id": 29,

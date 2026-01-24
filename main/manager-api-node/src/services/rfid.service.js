@@ -61,15 +61,35 @@ const transformPackToCamelCase = (pack) => {
 };
 
 // =============================================
+// Helper: Transform RFID Card Mapping to camelCase (RfidCardMappingDTO)
+// =============================================
+const transformCardMappingToCamelCase = (card) => {
+  if (!card) return null;
+  return {
+    id: card.id ? Number(card.id) : null,
+    rfidUid: card.rfid_uid,
+    questionId: card.question_id ? Number(card.question_id) : null,
+    questionIds: card.question_ids || [],
+    packCode: card.pack_code,
+    packId: card.pack_id ? Number(card.pack_id) : null,
+    contentPackId: card.content_pack_id ? Number(card.content_pack_id) : null,
+    notes: card.notes,
+    active: card.active,
+    createDate: formatDate(card.create_date || card.created_at),
+    updateDate: formatDate(card.update_date || card.updated_at)
+  };
+};
+
+// =============================================
 // Card Mapping Methods (PRD-specified)
 // =============================================
 
 /**
- * Get card mappings with pagination
+ * Get card mappings with pagination (matches Spring Boot /page endpoint)
  * @param {Object} options - Pagination and filter options
- * @returns {Promise<Object>} Paginated card mapping list
+ * @returns {Promise<Object>} Paginated card mapping list with camelCase fields
  */
-const getCardMappingPage = async ({ page = 1, limit = 10, packCode, active } = {}) => {
+const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, questionId, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const offset = (page - 1) * limit;
@@ -79,21 +99,26 @@ const getCardMappingPage = async ({ page = 1, limit = 10, packCode, active } = {
     .from('rfid_card_mapping')
     .select('id', { count: 'exact', head: true });
 
-  // Build data query with joins to related tables
+  // Build data query
   let dataQuery = supabaseAdmin
     .from('rfid_card_mapping')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language),
-      pack:pack_id(id, pack_code, name),
-      content_pack:content_pack_id(id, pack_code, name, content_type)
-    `)
-    .order('created_at', { ascending: false });
+    .select('*')
+    .order('create_date', { ascending: false });
 
-  // Apply filters
+  // Apply filters (LIKE search matching Spring Boot)
+  if (rfidUid) {
+    countQuery = countQuery.ilike('rfid_uid', `%${rfidUid}%`);
+    dataQuery = dataQuery.ilike('rfid_uid', `%${rfidUid}%`);
+  }
+
   if (packCode) {
-    countQuery = countQuery.eq('pack_code', packCode);
-    dataQuery = dataQuery.eq('pack_code', packCode);
+    countQuery = countQuery.ilike('pack_code', `%${packCode}%`);
+    dataQuery = dataQuery.ilike('pack_code', `%${packCode}%`);
+  }
+
+  if (questionId) {
+    countQuery = countQuery.eq('question_id', questionId);
+    dataQuery = dataQuery.eq('question_id', questionId);
   }
 
   if (active !== undefined) {
@@ -110,7 +135,7 @@ const getCardMappingPage = async ({ page = 1, limit = 10, packCode, active } = {
   }
 
   return {
-    list: cards || [],
+    list: (cards || []).map(transformCardMappingToCamelCase),
     total: count || 0,
     page,
     limit,
@@ -119,25 +144,24 @@ const getCardMappingPage = async ({ page = 1, limit = 10, packCode, active } = {
 };
 
 /**
- * Get all card mappings (no pagination)
+ * Get all card mappings (no pagination, matches Spring Boot /list endpoint)
  * @param {Object} options - Filter options
- * @returns {Promise<Array>} All card mappings
+ * @returns {Promise<Array>} All card mappings with camelCase fields
  */
-const getCardMappingList = async ({ packCode, active } = {}) => {
+const getCardMappingList = async ({ packCode, questionId, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   let query = supabaseAdmin
     .from('rfid_card_mapping')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language),
-      pack:pack_id(id, pack_code, name),
-      content_pack:content_pack_id(id, pack_code, name, content_type)
-    `)
-    .order('created_at', { ascending: false });
+    .select('*')
+    .order('create_date', { ascending: false });
 
   if (packCode) {
-    query = query.eq('pack_code', packCode);
+    query = query.ilike('pack_code', `%${packCode}%`);
+  }
+
+  if (questionId) {
+    query = query.eq('question_id', questionId);
   }
 
   if (active !== undefined) {
@@ -151,7 +175,98 @@ const getCardMappingList = async ({ packCode, active } = {}) => {
     throw new Error('Failed to fetch card mappings');
   }
 
-  return cards || [];
+  return (cards || []).map(transformCardMappingToCamelCase);
+};
+
+/**
+ * Get card mapping by ID (matches Spring Boot GET /{id} endpoint)
+ * @param {number} id - Card mapping ID
+ * @returns {Promise<Object>} Card mapping with camelCase fields
+ */
+const getCardMappingById = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: card, error } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch card mapping:', error);
+    throw new Error('Failed to fetch card mapping');
+  }
+
+  return transformCardMappingToCamelCase(card);
+};
+
+/**
+ * Get card mapping by RFID UID (matches Spring Boot GET /uid/{rfidUid} endpoint)
+ * Admin endpoint - returns single card mapping
+ * @param {string} rfidUid - RFID UID
+ * @returns {Promise<Object>} Card mapping with camelCase fields
+ */
+const getCardMappingByRfidUid = async (rfidUid) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = rfidUid.toUpperCase().replace(/[:-]/g, '');
+
+  const { data: card, error } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .select('*')
+    .eq('rfid_uid', normalizedUid)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch card mapping by UID:', error);
+    throw new Error('Failed to fetch card mapping by UID');
+  }
+
+  return transformCardMappingToCamelCase(card);
+};
+
+/**
+ * Get cards by pack code (matches Spring Boot GET /pack/{packCode} endpoint)
+ * @param {string} packCode - Pack code
+ * @returns {Promise<Array>} Card mappings with camelCase fields
+ */
+const getCardsByPackCode = async (packCode) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: cards, error } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .select('*')
+    .eq('pack_code', packCode)
+    .order('rfid_uid', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch cards by pack code:', error);
+    throw new Error('Failed to fetch cards by pack code');
+  }
+
+  return (cards || []).map(transformCardMappingToCamelCase);
+};
+
+/**
+ * Get cards by question ID (matches Spring Boot GET /question/{questionId} endpoint)
+ * @param {number} questionId - Question ID
+ * @returns {Promise<Array>} Card mappings with camelCase fields
+ */
+const getCardsByQuestionId = async (questionId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: cards, error } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .select('*')
+    .eq('question_id', questionId)
+    .order('rfid_uid', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch cards by question ID:', error);
+    throw new Error('Failed to fetch cards by question ID');
+  }
+
+  return (cards || []).map(transformCardMappingToCamelCase);
 };
 
 /**
@@ -244,20 +359,20 @@ const lookupCardByUid = async (rfidUid) => {
 };
 
 /**
- * Create card mapping
+ * Create card mapping (matches Spring Boot POST /card)
  * @param {Object} data - Card mapping data
  * @param {number} userId - Creator user ID
- * @returns {Promise<Object>} Created card mapping
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
-const createCardMapping = async (data, userId) => {
+const createCardMapping = async (data, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   // Normalize UID
   const normalizedUid = data.rfidUid.toUpperCase().replace(/[:-]/g, '');
 
   // Check for duplicate
-  const existing = await lookupCardByUid(normalizedUid);
-  if (existing && existing.id) {
+  const existing = await getCardMappingByRfidUid(normalizedUid);
+  if (existing) {
     throw new Error('Card mapping already exists for this UID');
   }
 
@@ -269,36 +384,31 @@ const createCardMapping = async (data, userId) => {
     pack_id: data.packId || null,
     content_pack_id: data.contentPackId || null,
     notes: data.notes || null,
-    active: data.active !== false,
-    creator: userId
+    active: data.active !== false
   };
 
-  const { data: card, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('rfid_card_mapping')
-    .insert(insertData)
-    .select(`
-      *,
-      question:question_id(id, code, title),
-      pack:pack_id(id, pack_code, name),
-      content_pack:content_pack_id(id, pack_code, name)
-    `)
-    .single();
+    .insert(insertData);
 
   if (error) {
     logger.error('Failed to create card mapping:', error);
+    if (error.code === '23505') {
+      throw new Error('Card mapping already exists for this UID');
+    }
     throw new Error('Failed to create card mapping');
   }
 
-  return card;
+  return null;  // Spring Boot returns Result<Void>
 };
 
 /**
- * Update card mapping
+ * Update card mapping (matches Spring Boot PUT /card)
  * @param {Object} data - Update data (must include id)
  * @param {number} userId - Updater user ID
- * @returns {Promise<Object>} Updated card mapping
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
-const updateCardMapping = async (data, userId) => {
+const updateCardMapping = async (data, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   if (!data.id) {
@@ -306,8 +416,7 @@ const updateCardMapping = async (data, userId) => {
   }
 
   const updateData = {
-    updater: userId,
-    updated_at: new Date().toISOString()
+    update_date: new Date().toISOString()
   };
 
   // Only update provided fields
@@ -322,30 +431,23 @@ const updateCardMapping = async (data, userId) => {
   if (data.notes !== undefined) updateData.notes = data.notes;
   if (data.active !== undefined) updateData.active = data.active;
 
-  const { data: card, error } = await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from('rfid_card_mapping')
     .update(updateData)
-    .eq('id', data.id)
-    .select(`
-      *,
-      question:question_id(id, code, title),
-      pack:pack_id(id, pack_code, name),
-      content_pack:content_pack_id(id, pack_code, name)
-    `)
-    .single();
+    .eq('id', data.id);
 
   if (error) {
     logger.error('Failed to update card mapping:', error);
     throw new Error('Failed to update card mapping');
   }
 
-  return card;
+  return null;  // Spring Boot returns Result<Void>
 };
 
 /**
- * Delete card mapping
+ * Delete card mapping (single)
  * @param {Object} data - Delete criteria (id or rfidUid)
- * @returns {Promise<boolean>} Success status
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
  */
 const deleteCardMapping = async (data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
@@ -370,7 +472,32 @@ const deleteCardMapping = async (data) => {
     throw new Error('Failed to delete card mapping');
   }
 
-  return true;
+  return null;  // Spring Boot returns Result<Void>
+};
+
+/**
+ * Delete multiple card mappings (matches Spring Boot DELETE /card and POST /card/delete)
+ * @param {number[]} ids - Array of card mapping IDs
+ * @returns {Promise<null>} Returns null for Spring Boot compatibility (Result<Void>)
+ */
+const deleteCardMappings = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Card mapping IDs are required');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to delete card mappings:', error);
+    throw new Error('Failed to delete card mappings');
+  }
+
+  return null;  // Spring Boot returns Result<Void>
 };
 
 // =============================================
@@ -1877,10 +2004,15 @@ module.exports = {
   // PRD-specified card mapping methods
   getCardMappingPage,
   getCardMappingList,
+  getCardMappingById,
+  getCardMappingByRfidUid,
+  getCardsByPackCode,
+  getCardsByQuestionId,
   lookupCardByUid,
   createCardMapping,
   updateCardMapping,
   deleteCardMapping,
+  deleteCardMappings,
 
   // RAG-powered search
   ragSearch,

@@ -37,7 +37,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 25 | ota | Test OTA management endpoints | Complete |
 | 26 | rfid | Test RFID question endpoints | Complete |
 | 27 | rfid | Test RFID pack endpoints | Complete |
-| 28-29 | rfid | Test remaining RFID endpoints (card, series) | Pending |
+| 28 | rfid | Test RFID card endpoints | Complete |
+| 29 | rfid | Test RFID series endpoints | Pending |
 | 30 | voice | Test TTS voice endpoints | Pending |
 | 31-36 | integration | Full frontend integration tests | Pending |
 
@@ -84,6 +85,66 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 28 Complete (RFID Card Endpoints)
+
+**Task 28: Test and fix RFID card endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /admin/rfid/card/page` - Paginated card listing
+- `GET /admin/rfid/card/list` - List all cards
+- `GET /admin/rfid/card/{id}` - Get card by ID (NEW)
+- `GET /admin/rfid/card/uid/{rfidUid}` - Get card by RFID UID (NEW)
+- `GET /admin/rfid/card/lookup/{rfidUid}` - Public lookup for ESP32 devices
+- `GET /admin/rfid/card/pack/{packCode}` - Get cards by pack code (NEW)
+- `GET /admin/rfid/card/question/{questionId}` - Get cards by question ID (NEW)
+- `POST /admin/rfid/card` - Create card mapping
+- `PUT /admin/rfid/card` - Update card mapping
+- `DELETE /admin/rfid/card` - Delete cards (accepts Long[] array) - FIXED
+- `POST /admin/rfid/card/delete` - Batch delete cards (NEW)
+
+**Issues Found & Fixed:**
+
+1. **Missing endpoints compared to Spring Boot**
+   - Spring Boot RfidCardMappingController has: /{id}, /uid/{rfidUid}, /pack/{packCode}, /question/{questionId}
+   - Added all missing endpoints to match Spring Boot controller
+
+2. **Response format (snake_case vs camelCase)**
+   - Spring Boot returns RfidCardMappingDTO with camelCase fields
+   - Added `transformCardMappingToCamelCase()` helper in rfid.service.js
+   - Maps: rfid_uid→rfidUid, question_id→questionId, pack_id→packId, content_pack_id→contentPackId, create_date→createDate
+
+3. **DELETE /card route broken**
+   - Route handler referenced undefined variables `id` and `rfidUid` from old implementation
+   - Error: "ReferenceError: id is not defined"
+   - Fix: Rewrote handler to use the `ids` array and call `deleteCardMappings()`
+
+4. **Missing POST /card/delete endpoint**
+   - Spring Boot provides POST alternative for DELETE
+   - Added POST /card/delete endpoint matching DELETE /card behavior
+
+5. **Authentication level**
+   - Changed from `requireAuth` to `requireAdmin` for all CRUD endpoints
+   - Matches Spring Boot `sys:role:superAdmin` annotation
+
+6. **Service methods added:**
+   - `getCardMappingById()` - Get single card by ID
+   - `getCardMappingByRfidUid()` - Get single card by RFID UID
+   - `getCardsByPackCode()` - Get all cards for a pack
+   - `getCardsByQuestionId()` - Get all cards for a question
+   - `deleteCardMappings()` - Batch delete by IDs
+
+**Files Modified:**
+- `src/services/rfid.service.js` - Added transformCardMappingToCamelCase, new service methods
+- `src/routes/rfid.routes.js` - Added missing endpoints, fixed DELETE /card, added POST /card/delete
+
+**Verification:**
+- `npm run lint` - No new errors in rfid files
+- All endpoints match Spring Boot RfidCardMappingController signature
+
+---
 
 ### 2026-01-24 - Phase 4 Task 27 Complete (RFID Pack Endpoints)
 

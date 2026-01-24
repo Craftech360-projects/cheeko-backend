@@ -90,13 +90,15 @@ const { success, badRequest, notFound } = require('../utils/response');
  *                       type: integer
  */
 router.get('/card/page',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, packCode, active } = req.query;
+    const { page, limit, rfidUid, packCode, questionId, active } = req.query;
     const result = await rfidService.getCardMappingPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
+      rfidUid,
       packCode,
+      questionId: questionId ? parseInt(questionId) : undefined,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
@@ -119,6 +121,11 @@ router.get('/card/page',
  *           type: string
  *         description: Filter by pack code
  *       - in: query
+ *         name: questionId
+ *         schema:
+ *           type: integer
+ *         description: Filter by question ID
+ *       - in: query
  *         name: active
  *         schema:
  *           type: boolean
@@ -126,29 +133,46 @@ router.get('/card/page',
  *     responses:
  *       200:
  *         description: Card mapping list
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/CardMapping'
  */
 router.get('/card/list',
-  requireAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { packCode, active } = req.query;
+    const { packCode, questionId, active } = req.query;
     const result = await rfidService.getCardMappingList({
       packCode,
+      questionId: questionId ? parseInt(questionId) : undefined,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/uid/{rfidUid}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get card mapping by RFID UID
+ *     description: Admin endpoint to get card mapping by RFID UID (matches Spring Boot)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string)
+ *     responses:
+ *       200:
+ *         description: Card mapping details
+ */
+router.get('/card/uid/:rfidUid',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+    const card = await rfidService.getCardMappingByRfidUid(rfidUid);
+    success(res, card);
   })
 );
 
@@ -170,17 +194,6 @@ router.get('/card/list',
  *     responses:
  *       200:
  *         description: Card mapping with question data
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   $ref: '#/components/schemas/CardMappingLookup'
  *       404:
  *         description: Card mapping not found
  */
@@ -196,6 +209,93 @@ router.get('/card/lookup/:rfidUid',
     if (!card) {
       return notFound(res, 'Card mapping not found');
     }
+    success(res, card);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/pack/{packCode}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get all cards by pack code
+ *     description: Get all card mappings for a specific pack code (matches Spring Boot)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: packCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Pack code
+ *     responses:
+ *       200:
+ *         description: List of card mappings
+ */
+router.get('/card/pack/:packCode',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { packCode } = req.params;
+    const result = await rfidService.getCardsByPackCode(packCode);
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/question/{questionId}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get all cards mapped to a question
+ *     description: Get all card mappings for a specific question ID (matches Spring Boot)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: questionId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Question ID
+ *     responses:
+ *       200:
+ *         description: List of card mappings
+ */
+router.get('/card/question/:questionId',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { questionId } = req.params;
+    const result = await rfidService.getCardsByQuestionId(parseInt(questionId));
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/{id}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get card mapping by ID
+ *     description: Get card mapping by ID (matches Spring Boot)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Card mapping ID
+ *     responses:
+ *       200:
+ *         description: Card mapping details
+ */
+router.get('/card/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const card = await rfidService.getCardMappingById(parseInt(id));
     success(res, card);
   })
 );
@@ -493,8 +593,8 @@ router.post('/card',
     }
 
     try {
-      const card = await rfidService.createCardMapping(req.body, req.user.id);
-      success(res, card, 'Card mapping created successfully');
+      await rfidService.createCardMapping(req.body, req.user.id);
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -507,7 +607,7 @@ router.post('/card',
  *   put:
  *     tags: [RFID]
  *     summary: Update card mapping
- *     description: Update an existing RFID card mapping (admin only)
+ *     description: Update an existing RFID card mapping (admin only). Returns Result<Void>.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -524,7 +624,6 @@ router.post('/card',
  *                 description: Card mapping ID
  *               rfidUid:
  *                 type: string
- *                 description: RFID UID (hex string)
  *               questionId:
  *                 type: integer
  *               questionIds:
@@ -543,7 +642,7 @@ router.post('/card',
  *                 type: boolean
  *     responses:
  *       200:
- *         description: Card mapping updated
+ *         description: Card mapping updated (data is null)
  *       400:
  *         description: Validation error
  */
@@ -557,8 +656,8 @@ router.put('/card',
     }
 
     try {
-      const card = await rfidService.updateCardMapping(req.body, req.user.id);
-      success(res, card, 'Card mapping updated successfully');
+      await rfidService.updateCardMapping(req.body, req.user.id);
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -570,8 +669,8 @@ router.put('/card',
  * /admin/rfid/card:
  *   delete:
  *     tags: [RFID]
- *     summary: Delete card mapping
- *     description: Delete an RFID card mapping (admin only). Provide either id or rfidUid.
+ *     summary: Delete card mappings
+ *     description: Delete one or more RFID card mappings (admin only). Accepts Long[] array in body.
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -579,32 +678,78 @@ router.put('/card',
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               id:
- *                 type: integer
- *                 description: Card mapping ID
- *               rfidUid:
- *                 type: string
- *                 description: RFID UID (alternative to id)
+ *             type: array
+ *             items:
+ *               type: integer
+ *             example: [1, 2, 3]
  *     responses:
  *       200:
- *         description: Card mapping deleted
+ *         description: Card mappings deleted (data is null)
  *       400:
- *         description: ID or RFID UID required
+ *         description: Card mapping IDs required
  */
 router.delete('/card',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { id, rfidUid } = req.body;
+    // Accept raw array or {ids: [...]} format
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
 
-    if (!id && !rfidUid) {
-      return badRequest(res, 'Card mapping ID or RFID UID is required');
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Card mapping IDs are required');
     }
 
     try {
-      await rfidService.deleteCardMapping({ id, rfidUid });
-      success(res, null, 'Card mapping deleted successfully');
+      await rfidService.deleteCardMappings(ids.map(id => parseInt(id)));
+      success(res, null);  // Spring Boot returns Result<Void>
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/delete:
+ *   post:
+ *     tags: [RFID]
+ *     summary: Delete card mappings (POST)
+ *     description: Delete one or more RFID card mappings (admin only). POST alternative for DELETE. Accepts Long[] array in body.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *             example: [1, 2, 3]
+ *     responses:
+ *       200:
+ *         description: Card mappings deleted (data is null)
+ *       400:
+ *         description: Card mapping IDs required
+ */
+router.post('/card/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    // Accept raw array or {ids: [...]} format
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Card mapping IDs are required');
+    }
+
+    try {
+      await rfidService.deleteCardMappings(ids.map(id => parseInt(id)));
+      success(res, null);  // Spring Boot returns Result<Void>
     } catch (error) {
       badRequest(res, error.message);
     }
