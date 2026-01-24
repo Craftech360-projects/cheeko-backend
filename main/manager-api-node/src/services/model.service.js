@@ -485,6 +485,173 @@ const updateModelByTypeProvider = async (modelId, modelType, provider, data) => 
   return model;
 };
 
+// =============================================
+// Model Provider CRUD Methods
+// =============================================
+
+/**
+ * Get model providers with pagination
+ * @param {Object} options - Pagination and filter options
+ * @returns {Promise<Object>} Paginated providers
+ */
+const getProviders = async ({ page = 1, limit = 20, modelType } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('ai_model_provider')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('ai_model_provider')
+    .select('*')
+    .order('model_type', { ascending: true })
+    .order('sort', { ascending: true });
+
+  if (modelType) {
+    countQuery = countQuery.eq('model_type', modelType);
+    dataQuery = dataQuery.eq('model_type', modelType);
+  }
+
+  const { count } = await countQuery;
+  const { data: providers, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) throw new Error('Failed to fetch providers');
+
+  return {
+    list: providers || [],
+    total: count || 0,
+    page,
+    limit
+  };
+};
+
+/**
+ * Get provider by ID
+ * @param {string} providerId - Provider ID
+ * @returns {Promise<Object|null>} Provider or null
+ */
+const getProviderById = async (providerId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: provider, error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .select('*')
+    .eq('id', providerId)
+    .single();
+
+  if (error || !provider) return null;
+
+  return provider;
+};
+
+/**
+ * Create model provider
+ * @param {number} userId - User ID (creator)
+ * @param {Object} data - Provider data
+ * @returns {Promise<Object>} Created provider
+ */
+const createProvider = async (userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: provider, error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .insert({
+      model_type: data.modelType,
+      provider_code: data.providerCode,
+      name: data.name,
+      fields: data.fields || [],
+      sort: data.sort || 0,
+      creator: userId
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to create provider:', error);
+    throw new Error('Failed to create provider');
+  }
+
+  return provider;
+};
+
+/**
+ * Update model provider
+ * @param {string} providerId - Provider ID
+ * @param {Object} data - Update data
+ * @returns {Promise<Object>} Updated provider
+ */
+const updateProvider = async (providerId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const updateData = { update_date: new Date().toISOString() };
+
+  if (data.modelType !== undefined) updateData.model_type = data.modelType;
+  if (data.providerCode !== undefined) updateData.provider_code = data.providerCode;
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.fields !== undefined) updateData.fields = data.fields;
+  if (data.sort !== undefined) updateData.sort = data.sort;
+  if (data.updater !== undefined) updateData.updater = data.updater;
+
+  const { data: provider, error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .update(updateData)
+    .eq('id', providerId)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update provider:', error);
+    throw new Error('Failed to update provider');
+  }
+
+  return provider;
+};
+
+/**
+ * Delete model provider
+ * @param {string} providerId - Provider ID
+ */
+const deleteProvider = async (providerId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .delete()
+    .eq('id', providerId);
+
+  if (error) {
+    logger.error('Failed to delete provider:', error);
+    throw new Error('Failed to delete provider');
+  }
+};
+
+/**
+ * Get provider plugin names
+ * Returns unique provider codes grouped by model type
+ * @returns {Promise<Array>} Plugin names
+ */
+const getProviderPluginNames = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: providers, error } = await supabaseAdmin
+    .from('ai_model_provider')
+    .select('id, model_type, provider_code, name')
+    .order('model_type', { ascending: true })
+    .order('sort', { ascending: true });
+
+  if (error) throw new Error('Failed to fetch provider plugin names');
+
+  // Return as simple list with model type context
+  return (providers || []).map(p => ({
+    id: p.id,
+    modelType: p.model_type,
+    providerCode: p.provider_code,
+    name: p.name
+  }));
+};
+
 module.exports = {
   getModelsByType,
   getModelById,
@@ -502,5 +669,12 @@ module.exports = {
   getLlmNames,
   getProviderTypes,
   createModelByTypeProvider,
-  updateModelByTypeProvider
+  updateModelByTypeProvider,
+  // Provider CRUD
+  getProviders,
+  getProviderById,
+  createProvider,
+  updateProvider,
+  deleteProvider,
+  getProviderPluginNames
 };

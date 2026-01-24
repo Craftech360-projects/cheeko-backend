@@ -16,7 +16,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 | 3 | feature | Agent Chat History batch endpoints | Complete |
 | 4 | feature | Agent MCP Access Point endpoints | Complete |
 | 5 | feature | Configuration endpoints (/config) | Complete |
-| 6 | feature | Model Provider CRUD endpoints | Pending |
+| 6 | feature | Model Provider CRUD endpoints | Complete |
 | 7 | feature | Extended Analytics endpoints | Pending |
 | 8 | feature | Token Usage Analytics endpoints | Pending |
 | 9 | feature | OTA root endpoints (/ota/) | Pending |
@@ -45,6 +45,48 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Model Provider CRUD Endpoints Complete
+
+**Task 6: Add Model Provider CRUD endpoints (/models/provider)**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `GET /toy/models/provider` - Get provider list with pagination
+- `POST /toy/models/provider` - Add model provider
+- `PUT /toy/models/provider` - Edit model provider
+- `POST /toy/models/provider/delete` - Delete model provider
+- `GET /toy/models/provider/plugin/names` - Get plugin name list
+
+**Service Methods Implemented in `model.service.js`:**
+- `getProviders({ page, limit, modelType })` - Get paginated provider list
+- `getProviderById(providerId)` - Get single provider
+- `createProvider(userId, data)` - Create new provider
+- `updateProvider(providerId, data)` - Update existing provider
+- `deleteProvider(providerId)` - Delete provider
+- `getProviderPluginNames()` - Get all plugin names
+
+**Files Modified:**
+- `src/services/model.service.js` - Added 6 provider service methods (~140 lines)
+- `src/routes/model.routes.js` - Added 5 provider route handlers with Swagger docs (~200 lines)
+
+**API Contract:**
+```
+GET    /toy/models/provider              - Returns {list, total, page, limit}
+POST   /toy/models/provider              - Creates provider, returns provider object
+PUT    /toy/models/provider              - Updates provider (id in body), returns provider
+POST   /toy/models/provider/delete       - Deletes provider (id in body)
+GET    /toy/models/provider/plugin/names - Returns array of {id, modelType, providerCode, name}
+```
+
+**Database Table Used:** `ai_model_provider` (already in Prisma schema)
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Configuration Endpoints Complete
 

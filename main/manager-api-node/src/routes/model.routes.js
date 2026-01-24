@@ -559,6 +559,287 @@ router.get('/tts-voices/:id',
   })
 );
 
+// ==================== MODEL PROVIDER ROUTES ====================
+
+/**
+ * @swagger
+ * /models/provider:
+ *   get:
+ *     tags: [Models - Provider]
+ *     summary: Get provider list
+ *     description: Returns paginated list of model providers
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Items per page
+ *       - in: query
+ *         name: modelType
+ *         schema:
+ *           type: string
+ *           enum: [asr, tts, llm, vad, mem, intent, vllm]
+ *         description: Filter by model type
+ *     responses:
+ *       200:
+ *         description: Paginated provider list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           model_type:
+ *                             type: string
+ *                           provider_code:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           fields:
+ *                             type: array
+ *                           sort:
+ *                             type: integer
+ *                     total:
+ *                       type: integer
+ *                     page:
+ *                       type: integer
+ *                     limit:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ *   post:
+ *     tags: [Models - Provider]
+ *     summary: Add model provider
+ *     description: Create a new model provider
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - modelType
+ *               - providerCode
+ *               - name
+ *             properties:
+ *               modelType:
+ *                 type: string
+ *                 enum: [asr, tts, llm, vad, mem, intent, vllm]
+ *               providerCode:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               fields:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *               sort:
+ *                 type: integer
+ *                 default: 0
+ *     responses:
+ *       200:
+ *         description: Provider created successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *   put:
+ *     tags: [Models - Provider]
+ *     summary: Edit model provider
+ *     description: Update an existing model provider
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: string
+ *               modelType:
+ *                 type: string
+ *               providerCode:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               fields:
+ *                 type: array
+ *               sort:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Provider updated successfully
+ *       400:
+ *         description: Validation error or provider not found
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/provider',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { page, limit, modelType } = req.query;
+    const result = await modelService.getProviders({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 20,
+      modelType
+    });
+    success(res, result);
+  })
+);
+
+router.post('/provider',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { modelType, providerCode, name } = req.body;
+
+    if (!modelType || !providerCode || !name) {
+      return badRequest(res, 'modelType, providerCode, and name are required');
+    }
+
+    try {
+      const provider = await modelService.createProvider(req.user.id, req.body);
+      success(res, provider, 'Provider created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.put('/provider',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.body;
+
+    if (!id) {
+      return badRequest(res, 'Provider id is required');
+    }
+
+    try {
+      // Add updater info
+      const updateData = { ...req.body, updater: req.user.id };
+      const provider = await modelService.updateProvider(id, updateData);
+      success(res, provider, 'Provider updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /models/provider/delete:
+ *   post:
+ *     tags: [Models - Provider]
+ *     summary: Delete model provider
+ *     description: Delete a model provider by ID
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Provider deleted successfully
+ *       400:
+ *         description: Error deleting provider
+ *       401:
+ *         description: Unauthorized
+ */
+router.post('/provider/delete',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.body;
+
+    if (!id) {
+      return badRequest(res, 'Provider id is required');
+    }
+
+    try {
+      await modelService.deleteProvider(id);
+      success(res, null, 'Provider deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /models/provider/plugin/names:
+ *   get:
+ *     tags: [Models - Provider]
+ *     summary: Get plugin name list
+ *     description: Returns list of all provider plugin names
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of plugin names
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                       modelType:
+ *                         type: string
+ *                       providerCode:
+ *                         type: string
+ *                       name:
+ *                         type: string
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/provider/plugin/names',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const names = await modelService.getProviderPluginNames();
+    success(res, names);
+  })
+);
+
 // ==================== LEGACY MODEL ROUTES (backward compatibility) ====================
 
 /**

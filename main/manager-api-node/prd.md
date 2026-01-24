@@ -373,7 +373,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add provider CRUD methods to model.service.js",
       "Test with Swagger"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",
