@@ -18,48 +18,76 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const deviceService = require('../services/device.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
-const { success, badRequest, notFound } = require('../utils/response');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { success, error: errorResponse, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
 
+// In-memory cache for OTA download URLs (simulates Redis)
+// Format: { uuid: { id: firmwareId, downloadCount: number, createdAt: timestamp } }
+const otaDownloadCache = new Map();
+
+// Cleanup expired cache entries (5 minute expiry)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of otaDownloadCache.entries()) {
+    if (now - value.createdAt > 5 * 60 * 1000) {
+      otaDownloadCache.delete(key);
+    }
+  }
+}, 60000);
+
+/**
+ * Transform snake_case firmware to camelCase for Spring Boot compatibility
+ */
+const transformFirmwareToCamelCase = (firmware) => {
+  if (!firmware) return null;
+  return {
+    id: firmware.id,
+    firmwareName: firmware.firmware_name,
+    type: firmware.type,
+    version: firmware.version,
+    size: firmware.size,
+    remark: firmware.remark,
+    firmwarePath: firmware.firmware_path,
+    forceUpdate: firmware.force_update,
+    sort: firmware.sort,
+    creator: firmware.creator,
+    createDate: firmware.create_date,
+    updater: firmware.updater,
+    updateDate: firmware.update_date
+  };
+};
+
 // Configure multer for firmware uploads
-const UPLOAD_DIR = process.env.FIRMWARE_UPLOAD_DIR || path.join(__dirname, '../../uploads/firmware');
+const UPLOAD_DIR = process.env.FIRMWARE_UPLOAD_DIR || path.join(__dirname, '../../uploadfile');
 
 // Ensure upload directory exists
 if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, UPLOAD_DIR);
-  },
-  filename: (req, file, cb) => {
-    // Generate unique filename with UUID
-    const ext = path.extname(file.originalname);
-    const uuid = uuidv4();
-    cb(null, `${uuid}${ext}`);
-  }
-});
+// Use memory storage first to calculate MD5, then write to disk
+const memStorage = multer.memoryStorage();
 
 const upload = multer({
-  storage,
+  storage: memStorage,
   limits: {
     fileSize: 50 * 1024 * 1024 // 50MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Accept .bin files for firmware
-    const allowedExts = ['.bin', '.ota', '.hex'];
+    // Accept .bin and .apk files (matching Spring Boot)
+    const allowedExts = ['.bin', '.apk'];
     const ext = path.extname(file.originalname).toLowerCase();
     if (allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error(`Invalid file type. Allowed: ${allowedExts.join(', ')}`));
+      cb(new Error('Only .bin and .apk format files are allowed'));
     }
   }
 });
@@ -75,47 +103,12 @@ const upload = multer({
  * @swagger
  * components:
  *   schemas:
- *     Firmware:
+ *     OtaEntity:
  *       type: object
  *       properties:
  *         id:
  *           type: string
  *           description: Firmware UUID
- *         firmware_name:
- *           type: string
- *           description: Firmware display name
- *         type:
- *           type: string
- *           description: Board type (esp32, esp32s3, esp32c3)
- *         version:
- *           type: string
- *           description: Firmware version
- *         size:
- *           type: integer
- *           description: File size in bytes
- *         remark:
- *           type: string
- *           description: Notes about this firmware
- *         firmware_path:
- *           type: string
- *           description: Path or URL to firmware file
- *         force_update:
- *           type: integer
- *           enum: [0, 1]
- *           description: Force update flag (0=no, 1=yes)
- *         create_date:
- *           type: string
- *           format: date-time
- *         update_date:
- *           type: string
- *           format: date-time
- *     FirmwareInput:
- *       type: object
- *       required:
- *         - firmwareName
- *         - type
- *         - version
- *       properties:
  *         firmwareName:
  *           type: string
  *           description: Firmware display name
@@ -137,16 +130,327 @@ const upload = multer({
  *         forceUpdate:
  *           type: integer
  *           enum: [0, 1]
- *           default: 0
- *           description: Force update flag
+ *           description: Force update flag (0=no, 1=yes)
+ *         createDate:
+ *           type: string
+ *           format: date-time
+ *         updateDate:
+ *           type: string
+ *           format: date-time
  */
+
+// =============================================
+// SPECIFIC ROUTES MUST BE DEFINED BEFORE /:id
+// =============================================
+
+/**
+ * @swagger
+ * /otaMag/forceUpdate/{id}:
+ *   put:
+ *     tags: [OTA Management]
+ *     summary: Set firmware force update
+ *     description: Enable or disable force update for a firmware (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Firmware UUID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - forceUpdate
+ *               - type
+ *             properties:
+ *               forceUpdate:
+ *                 type: integer
+ *                 enum: [0, 1]
+ *                 description: 0=disable, 1=enable
+ *               type:
+ *                 type: string
+ *                 description: Firmware type
+ *     responses:
+ *       200:
+ *         description: Force update flag set successfully
+ *       400:
+ *         description: Parameters incomplete
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.put('/forceUpdate/:id',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { forceUpdate, type } = req.body;
+
+    // Match Spring Boot validation
+    if (forceUpdate === undefined || type === undefined) {
+      return errorResponse(res, 'Parameters incomplete');
+    }
+
+    try {
+      await deviceService.setForceUpdate(req.params.id, forceUpdate);
+      // Return null data (Result<Void>) matching Spring Boot
+      success(res, null);
+    } catch (error) {
+      errorResponse(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /otaMag/getDownloadUrl/{id}:
+ *   get:
+ *     tags: [OTA Management]
+ *     summary: Get OTA firmware download link
+ *     description: Generates a temporary download URL with UUID (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Firmware UUID
+ *     responses:
+ *       200:
+ *         description: Download UUID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: string
+ *                   description: UUID for download endpoint
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.get('/getDownloadUrl/:id',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    // Generate UUID and store mapping (like Spring Boot's Redis key)
+    const uuid = uuidv4();
+    otaDownloadCache.set(uuid, {
+      id,
+      downloadCount: 0,
+      createdAt: Date.now()
+    });
+
+    // Return just the UUID string (matching Spring Boot)
+    success(res, uuid);
+  })
+);
+
+/**
+ * @swagger
+ * /otaMag/download/{uuid}:
+ *   get:
+ *     tags: [OTA Management]
+ *     summary: Download firmware file
+ *     description: Download a firmware file by UUID. Public endpoint for device OTA updates.
+ *     parameters:
+ *       - in: path
+ *         name: uuid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Download UUID from getDownloadUrl
+ *     responses:
+ *       200:
+ *         description: Firmware binary file
+ *         content:
+ *           application/octet-stream:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       404:
+ *         description: Firmware file not found
+ */
+router.get('/download/:uuid',
+  asyncHandler(async (req, res) => {
+    const { uuid } = req.params;
+
+    // Look up firmware ID from cache
+    const cacheEntry = otaDownloadCache.get(uuid);
+    if (!cacheEntry) {
+      return res.status(404).send();
+    }
+
+    // Check download count (max 3 times like Spring Boot)
+    if (cacheEntry.downloadCount >= 3) {
+      otaDownloadCache.delete(uuid);
+      return res.status(404).send();
+    }
+
+    // Increment download count
+    cacheEntry.downloadCount++;
+
+    try {
+      // Get firmware information
+      const firmware = await deviceService.getFirmwareById(cacheEntry.id);
+      if (!firmware || !firmware.firmware_path) {
+        return res.status(404).send();
+      }
+
+      // Get file path
+      let filePath;
+      const firmwarePath = firmware.firmware_path;
+
+      if (path.isAbsolute(firmwarePath)) {
+        filePath = firmwarePath;
+      } else {
+        filePath = path.join(process.cwd(), firmwarePath);
+      }
+
+      if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+        // Try to find in uploadfile directory
+        const fileName = path.basename(firmwarePath);
+        const altPath = path.join(process.cwd(), 'uploadfile', fileName);
+
+        if (fs.existsSync(altPath) && fs.statSync(altPath).isFile()) {
+          filePath = altPath;
+        } else {
+          logger.error('Firmware file not found:', firmwarePath);
+          return res.status(404).send();
+        }
+      }
+
+      // Read file content
+      const fileContent = fs.readFileSync(filePath);
+
+      // Set response headers
+      let originalFilename = firmware.type + '_' + firmware.version;
+      if (firmwarePath.includes('.')) {
+        const extension = firmwarePath.substring(firmwarePath.lastIndexOf('.'));
+        originalFilename += extension;
+      }
+
+      const safeFilename = originalFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+      res.send(fileContent);
+    } catch (error) {
+      logger.error('Failed to read firmware file', error);
+      return res.status(500).send();
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /otaMag/upload:
+ *   post:
+ *     tags: [OTA Management]
+ *     summary: Upload firmware file
+ *     description: Upload a firmware binary file (admin only). Uses MD5 as filename.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Firmware file (.bin, .apk)
+ *     responses:
+ *       200:
+ *         description: File path
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: string
+ *                   description: File path
+ *       400:
+ *         description: Upload error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.post('/upload',
+  requireAuth,
+  requireAdmin,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return errorResponse(res, 'UploadFileCannot beEmpty');
+    }
+
+    const originalFilename = req.file.originalname;
+    if (!originalFilename) {
+      return errorResponse(res, 'FileNameCannot beEmpty');
+    }
+
+    const extension = path.extname(originalFilename).toLowerCase();
+
+    // Calculate MD5 hash of file content
+    const md5 = crypto.createHash('md5').update(req.file.buffer).digest('hex');
+
+    // Use MD5 as filename with original extension
+    const uniqueFileName = md5 + extension;
+    const filePath = path.join(UPLOAD_DIR, uniqueFileName);
+
+    // Check if file already exists
+    if (fs.existsSync(filePath)) {
+      // Return existing file path (matching Spring Boot)
+      return success(res, `uploadfile/${uniqueFileName}`);
+    }
+
+    // Save file
+    fs.writeFileSync(filePath, req.file.buffer);
+
+    logger.info('Firmware uploaded:', {
+      filename: uniqueFileName,
+      originalName: originalFilename,
+      size: req.file.size
+    });
+
+    // Return file path (matching Spring Boot)
+    success(res, `uploadfile/${uniqueFileName}`);
+  })
+);
+
+// =============================================
+// GENERIC ROUTES (AFTER SPECIFIC ROUTES)
+// =============================================
 
 /**
  * @swagger
  * /otaMag:
  *   get:
  *     tags: [OTA Management]
- *     summary: List firmware (paginated)
+ *     summary: Pagination query OTA firmware information
  *     description: Returns a paginated list of firmware entries (admin only)
  *     security:
  *       - bearerAuth: []
@@ -171,29 +475,6 @@ const upload = multer({
  *     responses:
  *       200:
  *         description: Paginated firmware list
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                   example: 0
- *                 msg:
- *                   type: string
- *                 data:
- *                   type: object
- *                   properties:
- *                     list:
- *                       type: array
- *                       items:
- *                         $ref: '#/components/schemas/Firmware'
- *                     total:
- *                       type: integer
- *                     page:
- *                       type: integer
- *                     limit:
- *                       type: integer
  *       401:
  *         description: Unauthorized
  *       403:
@@ -201,7 +482,7 @@ const upload = multer({
  */
 router.get('/',
   requireAuth,
-  requireSuperAdmin,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { page, limit, type } = req.query;
     const result = await deviceService.listFirmware({
@@ -209,7 +490,74 @@ router.get('/',
       limit: parseInt(limit) || 10,
       type
     });
-    success(res, result);
+    // Transform to camelCase for Spring Boot compatibility
+    success(res, {
+      ...result,
+      list: (result.list || []).map(transformFirmwareToCamelCase)
+    });
+  })
+);
+
+/**
+ * @swagger
+ * /otaMag:
+ *   post:
+ *     tags: [OTA Management]
+ *     summary: Save OTA firmware information
+ *     description: Create a new firmware entry (admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/OtaEntity'
+ *     responses:
+ *       200:
+ *         description: Success (Result<Void>)
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
+router.post('/',
+  requireAuth,
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const entity = req.body;
+
+    // Match Spring Boot validation exactly
+    if (!entity) {
+      return errorResponse(res, 'FirmwareInformationCannot beEmpty');
+    }
+    if (!entity.firmwareName) {
+      return errorResponse(res, 'FirmwareNameCannot beEmpty');
+    }
+    if (!entity.type) {
+      return errorResponse(res, 'FirmwareTypeCannot beEmpty');
+    }
+    if (!entity.version) {
+      return errorResponse(res, 'Version number cannot be empty');
+    }
+
+    try {
+      await deviceService.createFirmware({
+        firmwareName: entity.firmwareName,
+        type: entity.type,
+        version: entity.version,
+        size: entity.size,
+        remark: entity.remark,
+        firmwarePath: entity.firmwarePath,
+        forceUpdate: entity.forceUpdate || 0
+      });
+      // Return null data (Result<Void>) matching Spring Boot
+      success(res, null);
+    } catch (error) {
+      errorResponse(res, error.message);
+    }
   })
 );
 
@@ -218,7 +566,7 @@ router.get('/',
  * /otaMag/{id}:
  *   get:
  *     tags: [OTA Management]
- *     summary: Get firmware by ID
+ *     summary: Get OTA firmware information by ID
  *     description: Retrieve firmware info by ID (admin only)
  *     security:
  *       - bearerAuth: []
@@ -232,15 +580,6 @@ router.get('/',
  *     responses:
  *       200:
  *         description: Firmware details
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 data:
- *                   $ref: '#/components/schemas/Firmware'
  *       404:
  *         description: Firmware not found
  *       401:
@@ -250,76 +589,14 @@ router.get('/',
  */
 router.get('/:id',
   requireAuth,
-  requireSuperAdmin,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const firmware = await deviceService.getFirmwareById(req.params.id);
     if (!firmware) {
       return notFound(res, 'Firmware not found');
     }
-    success(res, firmware);
-  })
-);
-
-/**
- * @swagger
- * /otaMag:
- *   post:
- *     tags: [OTA Management]
- *     summary: Create firmware
- *     description: Create a new firmware entry (admin only)
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             $ref: '#/components/schemas/FirmwareInput'
- *     responses:
- *       200:
- *         description: Firmware created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   $ref: '#/components/schemas/Firmware'
- *       400:
- *         description: Validation error
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Admin access required
- */
-router.post('/',
-  requireAuth,
-  requireSuperAdmin,
-  asyncHandler(async (req, res) => {
-    const { firmwareName, type, version, size, remark, firmwarePath, forceUpdate } = req.body;
-
-    if (!firmwareName || !type || !version) {
-      return badRequest(res, 'firmwareName, type, and version are required');
-    }
-
-    try {
-      const firmware = await deviceService.createFirmware({
-        firmwareName,
-        type,
-        version,
-        size,
-        remark,
-        firmwarePath,
-        forceUpdate: forceUpdate || 0
-      });
-      success(res, firmware, 'Firmware created successfully');
-    } catch (error) {
-      badRequest(res, error.message);
-    }
+    // Transform to camelCase for Spring Boot compatibility
+    success(res, transformFirmwareToCamelCase(firmware));
   })
 );
 
@@ -328,7 +605,7 @@ router.post('/',
  * /otaMag/{id}:
  *   put:
  *     tags: [OTA Management]
- *     summary: Update firmware
+ *     summary: Update OTA firmware information
  *     description: Update an existing firmware entry (admin only)
  *     security:
  *       - bearerAuth: []
@@ -344,47 +621,12 @@ router.post('/',
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/FirmwareInput'
+ *             $ref: '#/components/schemas/OtaEntity'
  *     responses:
  *       200:
- *         description: Firmware updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   $ref: '#/components/schemas/Firmware'
+ *         description: Success (Result<Void>)
  *       400:
  *         description: Validation error
- *       404:
- *         description: Firmware not found
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Admin access required
- *   delete:
- *     tags: [OTA Management]
- *     summary: Delete firmware
- *     description: Delete a firmware entry by ID (admin only)
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Firmware UUID
- *     responses:
- *       200:
- *         description: Firmware deleted successfully
- *       400:
- *         description: Error deleting firmware
  *       401:
  *         description: Unauthorized
  *       403:
@@ -392,327 +634,91 @@ router.post('/',
  */
 router.put('/:id',
   requireAuth,
-  requireSuperAdmin,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const { firmwareName, type, version, size, remark, firmwarePath, forceUpdate } = req.body;
+    const entity = req.body;
+
+    // Match Spring Boot validation
+    if (!entity) {
+      return errorResponse(res, 'FirmwareInformationCannot beEmpty');
+    }
 
     try {
-      const firmware = await deviceService.updateFirmware(req.params.id, {
-        firmwareName,
-        type,
-        version,
-        size,
-        remark,
-        firmwarePath,
-        forceUpdate
+      await deviceService.updateFirmware(req.params.id, {
+        firmwareName: entity.firmwareName,
+        type: entity.type,
+        version: entity.version,
+        size: entity.size,
+        remark: entity.remark,
+        firmwarePath: entity.firmwarePath,
+        forceUpdate: entity.forceUpdate
       });
-      success(res, firmware, 'Firmware updated successfully');
+      // Return null data (Result<Void>) matching Spring Boot
+      success(res, null);
     } catch (error) {
-      if (error.message === 'Firmware not found') {
-        return notFound(res, error.message);
-      }
-      badRequest(res, error.message);
+      errorResponse(res, error.message);
     }
   })
 );
 
+/**
+ * @swagger
+ * /otaMag/{id}:
+ *   delete:
+ *     tags: [OTA Management]
+ *     summary: OTA Delete
+ *     description: Delete firmware entry by ID (admin only). Supports multiple IDs.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Firmware UUID(s) - can be comma-separated
+ *     responses:
+ *       200:
+ *         description: Success (Result<Void>)
+ *       400:
+ *         description: Error deleting firmware
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Admin access required
+ */
 router.delete('/:id',
   requireAuth,
-  requireSuperAdmin,
+  requireAdmin,
   asyncHandler(async (req, res) => {
+    const ids = req.params.id.split(',');
+
+    // Match Spring Boot validation
+    if (!ids || ids.length === 0) {
+      return errorResponse(res, 'Deletes FirmwareIDCannot beEmpty');
+    }
+
     try {
-      // Get firmware to find file path before deletion
-      const firmware = await deviceService.getFirmwareById(req.params.id);
-      if (!firmware) {
-        return notFound(res, 'Firmware not found');
+      // Optionally delete firmware files
+      for (const id of ids) {
+        const firmware = await deviceService.getFirmwareById(id.trim());
+        if (firmware && firmware.firmware_path) {
+          const filePath = path.join(UPLOAD_DIR, path.basename(firmware.firmware_path));
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            logger.info('Deleted firmware file:', filePath);
+          }
+        }
       }
 
       // Delete from database
-      await deviceService.deleteFirmware(req.params.id);
+      await deviceService.deleteFirmware(ids.map(id => id.trim()));
 
-      // Optionally delete the file if it exists locally
-      if (firmware.firmware_path) {
-        const filePath = path.join(UPLOAD_DIR, path.basename(firmware.firmware_path));
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-          logger.info('Deleted firmware file:', filePath);
-        }
-      }
-
-      success(res, null, 'Firmware deleted successfully');
+      // Return null data (Result<Void>) matching Spring Boot
+      success(res, null);
     } catch (error) {
-      badRequest(res, error.message);
+      errorResponse(res, error.message);
     }
-  })
-);
-
-/**
- * @swagger
- * /otaMag/forceUpdate/{id}:
- *   put:
- *     tags: [OTA Management]
- *     summary: Set force update flag
- *     description: Enable or disable force update for a firmware (admin only)
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Firmware UUID
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               forceUpdate:
- *                 type: integer
- *                 enum: [0, 1]
- *                 description: 0=disable, 1=enable
- *     responses:
- *       200:
- *         description: Force update flag set successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   $ref: '#/components/schemas/Firmware'
- *       400:
- *         description: Validation error
- *       404:
- *         description: Firmware not found
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Admin access required
- */
-router.put('/forceUpdate/:id',
-  requireAuth,
-  requireSuperAdmin,
-  asyncHandler(async (req, res) => {
-    const { forceUpdate } = req.body;
-
-    if (forceUpdate === undefined || (forceUpdate !== 0 && forceUpdate !== 1)) {
-      return badRequest(res, 'forceUpdate must be 0 or 1');
-    }
-
-    try {
-      const firmware = await deviceService.setForceUpdate(req.params.id, forceUpdate);
-      success(res, firmware, 'Force update flag set successfully');
-    } catch (error) {
-      if (error.message === 'Firmware not found') {
-        return notFound(res, error.message);
-      }
-      badRequest(res, error.message);
-    }
-  })
-);
-
-/**
- * @swagger
- * /otaMag/getDownloadUrl/{id}:
- *   get:
- *     tags: [OTA Management]
- *     summary: Get firmware download URL
- *     description: Get the download URL for a firmware file (admin only)
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Firmware UUID
- *     responses:
- *       200:
- *         description: Download URL
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 data:
- *                   type: object
- *                   properties:
- *                     downloadUrl:
- *                       type: string
- *                     filename:
- *                       type: string
- *                     size:
- *                       type: integer
- *       404:
- *         description: Firmware not found
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Admin access required
- */
-router.get('/getDownloadUrl/:id',
-  requireAuth,
-  requireSuperAdmin,
-  asyncHandler(async (req, res) => {
-    const firmware = await deviceService.getFirmwareById(req.params.id);
-    if (!firmware) {
-      return notFound(res, 'Firmware not found');
-    }
-
-    if (!firmware.firmware_path) {
-      return badRequest(res, 'No firmware file associated with this entry');
-    }
-
-    // Generate download URL
-    const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 8002}`;
-    const filename = path.basename(firmware.firmware_path);
-    const downloadUrl = `${baseUrl}/toy/otaMag/download/${filename}`;
-
-    success(res, {
-      downloadUrl,
-      filename: firmware.firmware_name || filename,
-      size: firmware.size
-    });
-  })
-);
-
-/**
- * @swagger
- * /otaMag/download/{uuid}:
- *   get:
- *     tags: [OTA Management]
- *     summary: Download firmware file
- *     description: Download a firmware file by UUID/filename. Public endpoint for device OTA updates.
- *     parameters:
- *       - in: path
- *         name: uuid
- *         required: true
- *         schema:
- *           type: string
- *         description: Firmware file UUID or filename
- *     responses:
- *       200:
- *         description: Firmware binary file
- *         content:
- *           application/octet-stream:
- *             schema:
- *               type: string
- *               format: binary
- *       404:
- *         description: Firmware file not found
- */
-router.get('/download/:uuid',
-  asyncHandler(async (req, res) => {
-    const { uuid } = req.params;
-
-    // Sanitize filename to prevent directory traversal
-    const sanitizedFilename = path.basename(uuid);
-    const filePath = path.join(UPLOAD_DIR, sanitizedFilename);
-
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      // Try to find in database by ID
-      const firmware = await deviceService.getFirmwareById(uuid);
-      if (firmware && firmware.firmware_path) {
-        const dbFilePath = path.join(UPLOAD_DIR, path.basename(firmware.firmware_path));
-        if (fs.existsSync(dbFilePath)) {
-          return res.download(dbFilePath, firmware.firmware_name || path.basename(dbFilePath));
-        }
-      }
-      return notFound(res, 'Firmware file not found');
-    }
-
-    // Send the file
-    res.download(filePath);
-  })
-);
-
-/**
- * @swagger
- * /otaMag/upload:
- *   post:
- *     tags: [OTA Management]
- *     summary: Upload firmware file
- *     description: Upload a firmware binary file (admin only)
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         multipart/form-data:
- *           schema:
- *             type: object
- *             required:
- *               - file
- *             properties:
- *               file:
- *                 type: string
- *                 format: binary
- *                 description: Firmware file (.bin, .ota, .hex)
- *     responses:
- *       200:
- *         description: File uploaded successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 code:
- *                   type: integer
- *                 msg:
- *                   type: string
- *                 data:
- *                   type: object
- *                   properties:
- *                     filename:
- *                       type: string
- *                     originalName:
- *                       type: string
- *                     size:
- *                       type: integer
- *                     path:
- *                       type: string
- *       400:
- *         description: Upload error
- *       401:
- *         description: Unauthorized
- *       403:
- *         description: Admin access required
- */
-router.post('/upload',
-  requireAuth,
-  requireSuperAdmin,
-  upload.single('file'),
-  asyncHandler(async (req, res) => {
-    if (!req.file) {
-      return badRequest(res, 'No file uploaded');
-    }
-
-    const { filename, originalname, size } = req.file;
-    const filePath = `/firmware/${filename}`;
-
-    logger.info('Firmware uploaded:', {
-      filename,
-      originalName: originalname,
-      size
-    });
-
-    success(res, {
-      filename,
-      originalName: originalname,
-      size,
-      path: filePath
-    }, 'File uploaded successfully');
   })
 );
 
@@ -720,12 +726,12 @@ router.post('/upload',
 router.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return badRequest(res, 'File too large. Maximum size is 50MB');
+      return errorResponse(res, 'File too large. Maximum size is 50MB');
     }
-    return badRequest(res, err.message);
+    return errorResponse(res, err.message);
   }
-  if (err.message && err.message.includes('Invalid file type')) {
-    return badRequest(res, err.message);
+  if (err.message && err.message.includes('.bin and .apk')) {
+    return errorResponse(res, err.message);
   }
   next(err);
 });

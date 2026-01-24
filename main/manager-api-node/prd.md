@@ -432,7 +432,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify OTA management page works"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Route ordering - specific routes before /:id, 2) Response camelCase transformation, 3) POST/PUT/DELETE return null data (Result<Void>), 4) forceUpdate endpoint expects both forceUpdate and type, 5) getDownloadUrl returns just UUID, 6) download endpoint uses cache with 3x limit, 7) upload uses MD5 filename"
   },
   {
     "id": 26,

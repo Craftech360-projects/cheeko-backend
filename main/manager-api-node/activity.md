@@ -34,7 +34,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 22 | model | Test model listing endpoints | Complete |
 | 23 | model | Test model CRUD operations | Complete |
 | 24 | model | Test model provider endpoints | Complete |
-| 25 | ota | Test OTA management endpoints | Pending |
+| 25 | ota | Test OTA management endpoints | Complete |
 | 26-29 | rfid | Test RFID endpoints | Pending |
 | 30 | voice | Test TTS voice endpoints | Pending |
 | 31-36 | integration | Full frontend integration tests | Pending |
@@ -82,6 +82,90 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Task 25 Complete (OTA Management Endpoints)
+
+**Task 25: Test and fix OTA management endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Fixed:**
+- `GET /otaMag` - Paginated firmware query
+- `GET /otaMag/{id}` - Get firmware info by ID
+- `POST /otaMag` - Save/create firmware info
+- `PUT /otaMag/{id}` - Update firmware info
+- `DELETE /otaMag/{id}` - Delete firmware
+- `PUT /otaMag/forceUpdate/{id}` - Set firmware force update
+- `GET /otaMag/getDownloadUrl/{id}` - Get firmware download link
+- `GET /otaMag/download/{uuid}` - Download firmware file
+- `POST /otaMag/upload` - Upload firmware file
+
+**Issues Found:**
+
+1. **Route ordering issue** - Node.js defined `/:id` routes before specific routes like `/forceUpdate/:id`
+   - Express matched `/forceUpdate/test-id` as `/:id` instead of `/forceUpdate/:id`
+   - Moved specific routes BEFORE generic `/:id` routes
+
+2. **Response format mismatch** - Node.js returned snake_case fields, Spring Boot returns camelCase (OtaEntity)
+   - Added `transformFirmwareToCamelCase()` helper function
+   - Updated all GET methods to return camelCase responses
+
+3. **POST/PUT/DELETE response** - Spring Boot returns `Result<Void>` (null data), Node.js returned firmware object
+   - Changed POST, PUT, DELETE to return null data
+
+4. **PUT /forceUpdate/:id body format** - Spring Boot expects both `forceUpdate` AND `type` in body
+   - Node.js only expected `forceUpdate`
+   - Added validation for both parameters
+
+5. **GET /getDownloadUrl/:id response** - Spring Boot returns just UUID string
+   - Node.js returned `{downloadUrl, filename, size}` object
+   - Changed to return just UUID string for use with download endpoint
+
+6. **GET /download/:uuid behavior** - Spring Boot uses Redis cache with 3-download limit
+   - Added in-memory cache with 5-minute expiry
+   - Implemented download count limit (max 3)
+
+7. **POST /upload file naming** - Spring Boot uses MD5 hash as filename
+   - Changed from UUID to MD5 hash for deduplication
+   - Files stored in `uploadfile/` directory (matching Spring Boot)
+
+8. **File extension validation** - Spring Boot allows `.bin` and `.apk` only
+   - Updated allowed extensions list
+
+**Fixes Applied:**
+
+**1. Route reordering (`src/routes/otaMag.routes.js`)**
+- Moved `/forceUpdate/:id`, `/getDownloadUrl/:id`, `/download/:uuid`, `/upload` BEFORE `/:id` routes
+- Comment added explaining route ordering requirement
+
+**2. CamelCase transformation**
+- Added `transformFirmwareToCamelCase()` function
+- Maps: firmware_name→firmwareName, firmware_path→firmwarePath, force_update→forceUpdate, etc.
+
+**3. Download cache system**
+- Added `otaDownloadCache` Map simulating Redis
+- Stores mapping: uuid → {id, downloadCount, createdAt}
+- Auto-cleanup of expired entries (5-minute timeout)
+
+**4. MD5 file upload**
+- Changed from UUID to MD5 hash for filename
+- Uses `crypto.createHash('md5')` on file buffer
+- Returns file path string (e.g., `uploadfile/abc123.bin`)
+
+**Files Modified:**
+- `src/routes/otaMag.routes.js` - Complete rewrite (~740 lines)
+
+**Verification:**
+- `npm run lint` - 4 pre-existing errors, 6 warnings (no new issues)
+- `GET /otaMag` - Returns paginated list with camelCase fields
+- `GET /otaMag/:id` - Returns firmware with camelCase fields
+- `POST /otaMag` - Returns `{code:0, data:null}` (Result<Void>)
+- `PUT /otaMag/:id` - Returns `{code:0, data:null}` (Result<Void>)
+- `DELETE /otaMag/:id` - Returns `{code:0, data:null}` (Result<Void>)
+- `PUT /otaMag/forceUpdate/:id` - Validates forceUpdate AND type, returns null
+- `GET /otaMag/getDownloadUrl/:id` - Returns just UUID string
+
+---
 
 ### 2026-01-24 - Phase 4 Task 24 Complete (Model Provider Endpoints)
 
