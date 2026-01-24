@@ -9,3 +9,902 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// =============================================
+// System Tables
+// =============================================
+
+/// System user accounts
+model sys_user {
+  id          BigInt    @id @default(autoincrement())
+  username    String    @unique @db.VarChar(100)
+  password    String    @db.VarChar(255)
+  super_admin Int       @default(0) @db.SmallInt
+  status      Int       @default(1) @db.SmallInt
+  creator     BigInt?
+  create_date DateTime  @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user_tokens   sys_user_token[]
+  parent_profile parent_profile?
+  kid_profiles  kid_profile[]
+  agents        ai_agent[]
+  devices       ai_device[]
+
+  @@index([username])
+  @@index([status])
+}
+
+/// User authentication tokens
+model sys_user_token {
+  id          BigInt   @id @default(autoincrement())
+  user_id     BigInt
+  token       String   @db.VarChar(500)
+  expire_date DateTime @db.Timestamptz(6)
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user sys_user @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([token])
+  @@index([expire_date])
+}
+
+/// System configuration parameters
+model sys_params {
+  id          BigInt   @id @default(autoincrement())
+  param_code  String   @unique @db.VarChar(100)
+  param_value String?  @db.Text
+  value_type  String   @default("string") @db.VarChar(50)
+  param_type  Int      @default(1) @db.SmallInt
+  remark      String?  @db.VarChar(500)
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([param_code])
+}
+
+/// Dictionary type definitions
+model sys_dict_type {
+  id          BigInt   @id @default(autoincrement())
+  dict_type   String   @unique @db.VarChar(100)
+  dict_name   String   @db.VarChar(255)
+  remark      String?  @db.VarChar(500)
+  sort        Int      @default(0)
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  dict_data sys_dict_data[]
+
+  @@index([dict_type])
+}
+
+/// Dictionary values
+model sys_dict_data {
+  id           BigInt   @id @default(autoincrement())
+  dict_type_id BigInt
+  dict_label   String   @db.VarChar(255)
+  dict_value   String   @db.VarChar(255)
+  remark       String?  @db.VarChar(500)
+  sort         Int      @default(0)
+  creator      BigInt?
+  create_date  DateTime @default(now()) @db.Timestamptz(6)
+  updater      BigInt?
+  update_date  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  dict_type sys_dict_type @relation(fields: [dict_type_id], references: [id], onDelete: Cascade)
+
+  @@index([dict_type_id])
+}
+
+// =============================================
+// Profile Tables
+// =============================================
+
+/// Parent/Guardian profile information
+model parent_profile {
+  id                            BigInt    @id @default(autoincrement())
+  user_id                       BigInt?   @unique
+  supabase_user_id              String?   @db.VarChar(100)
+  full_name                     String?   @db.VarChar(255)
+  email                         String?   @db.VarChar(255)
+  phone_number                  String?   @db.VarChar(50)
+  preferred_language            String    @default("en") @db.VarChar(10)
+  timezone                      String?   @db.VarChar(100)
+  notification_preferences      Json      @default("{}")
+  onboarding_completed          Boolean   @default(false)
+  terms_accepted_at             DateTime? @db.Timestamptz(6)
+  privacy_policy_accepted_at    DateTime? @db.Timestamptz(6)
+  creator                       BigInt?
+  create_date                   DateTime  @default(now()) @db.Timestamptz(6)
+  updater                       BigInt?
+  update_date                   DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user sys_user? @relation(fields: [user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id])
+  @@index([supabase_user_id])
+  @@index([email])
+}
+
+/// Child profile information
+model kid_profile {
+  id               BigInt    @id @default(autoincrement())
+  user_id          BigInt?
+  name             String    @db.VarChar(255)
+  date_of_birth    DateTime? @db.Date
+  gender           String?   @db.VarChar(20)
+  interests        Json      @default("[]")
+  avatar_url       String?   @db.VarChar(500)
+  primary_language String    @default("en") @db.VarChar(10)
+  additional_notes String?   @db.Text
+  creator          BigInt?
+  create_date      DateTime  @default(now()) @db.Timestamptz(6)
+  updater          BigInt?
+  update_date      DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user                   sys_user?                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  devices                ai_device[]
+  learning_progress      kid_learning_progress[]
+  activity_logs          kid_activity_log[]
+  analytics_user_progress analytics_user_progress[]
+
+  @@index([user_id])
+}
+
+/// Kid learning progress
+model kid_learning_progress {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kid_id     BigInt?
+  subject    String   @db.VarChar(100)
+  topic      String   @db.VarChar(200)
+  score      Int?
+  time_spent Int?
+  completed  Boolean  @default(false)
+  metadata   Json     @default("{}")
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  kid kid_profile? @relation(fields: [kid_id], references: [id])
+
+  @@unique([kid_id, subject, topic])
+}
+
+/// Kid activity log
+model kid_activity_log {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kid_id        BigInt?
+  activity_type String   @db.VarChar(50)
+  content_type  String?  @db.VarChar(50)
+  content_id    String?  @db.Uuid
+  duration      Int?
+  metadata      Json     @default("{}")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  kid kid_profile? @relation(fields: [kid_id], references: [id])
+}
+
+// =============================================
+// AI Model Tables
+// =============================================
+
+/// AI model provider definitions
+model ai_model_provider {
+  id            String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  model_type    String   @db.VarChar(50)
+  provider_code String   @db.VarChar(100)
+  name          String   @db.VarChar(255)
+  fields        Json     @default("[]")
+  sort          Int      @default(0)
+  creator       BigInt?
+  create_date   DateTime @default(now()) @db.Timestamptz(6)
+  updater       BigInt?
+  update_date   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([model_type, provider_code])
+  @@index([model_type])
+  @@index([provider_code])
+}
+
+/// AI model configurations
+model ai_model_config {
+  id          String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  model_type  String   @db.VarChar(50)
+  model_code  String   @db.VarChar(100)
+  model_name  String   @db.VarChar(255)
+  is_default  Int      @default(0) @db.SmallInt
+  is_enabled  Int      @default(1) @db.SmallInt
+  config_json Json     @default("{}")
+  doc_link    String?  @db.VarChar(500)
+  remark      String?  @db.VarChar(500)
+  sort        Int      @default(0)
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  tts_voices ai_tts_voice[]
+
+  @@index([model_type])
+  @@index([model_code])
+  @@index([is_default])
+}
+
+/// TTS voice/timbre configurations
+model ai_tts_voice {
+  id              String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  tts_model_id    String?  @db.VarChar(36)
+  tts_voice       String?  @db.VarChar(100)
+  name            String   @db.VarChar(255)
+  languages       String?  @db.VarChar(255)
+  remark          String?  @db.VarChar(500)
+  reference_audio String?  @db.VarChar(500)
+  reference_text  String?  @db.Text
+  voice_demo      String?  @db.VarChar(500)
+  sort            Int      @default(0)
+  creator         BigInt?
+  create_date     DateTime @default(now()) @db.Timestamptz(6)
+  updater         BigInt?
+  update_date     DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  tts_model ai_model_config? @relation(fields: [tts_model_id], references: [id], onDelete: SetNull)
+
+  @@index([tts_model_id])
+  @@index([name])
+}
+
+// =============================================
+// AI Agent Tables
+// =============================================
+
+/// AI agent configurations
+model ai_agent {
+  id                String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  user_id           BigInt?
+  agent_code        String?  @db.VarChar(100)
+  agent_name        String   @db.VarChar(255)
+  asr_model_id      String?  @db.VarChar(36)
+  vad_model_id      String?  @db.VarChar(36)
+  llm_model_id      String?  @db.VarChar(36)
+  vllm_model_id     String?  @db.VarChar(36)
+  tts_model_id      String?  @db.VarChar(36)
+  tts_voice_id      String?  @db.VarChar(36)
+  mem_model_id      String?  @db.VarChar(36)
+  intent_model_id   String?  @db.VarChar(36)
+  chat_history_conf Int      @default(0) @db.SmallInt
+  system_prompt     String?  @db.Text
+  summary_memory    String?  @db.Text
+  lang_code         String   @default("en") @db.VarChar(10)
+  language          String   @default("English") @db.VarChar(50)
+  sort              Int      @default(0)
+  creator           BigInt?
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  updated_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user           sys_user?                   @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  devices        ai_device[]
+  chat_history   ai_agent_chat_history[]
+  plugin_mappings ai_agent_plugin_mapping[]
+  mcp_access_points ai_agent_mcp_access_point[]
+
+  @@index([user_id])
+  @@index([agent_code])
+}
+
+/// Predefined agent templates
+model ai_agent_template {
+  id                String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  agent_code        String?  @db.VarChar(100)
+  agent_name        String   @db.VarChar(255)
+  asr_model_id      String?  @db.VarChar(36)
+  vad_model_id      String?  @db.VarChar(36)
+  llm_model_id      String?  @db.VarChar(36)
+  vllm_model_id     String?  @db.VarChar(36)
+  tts_model_id      String?  @db.VarChar(36)
+  tts_voice_id      String?  @db.VarChar(36)
+  mem_model_id      String?  @db.VarChar(36)
+  intent_model_id   String?  @db.VarChar(36)
+  chat_history_conf Int      @default(0) @db.SmallInt
+  system_prompt     String?  @db.Text
+  summary_memory    String?  @db.Text
+  lang_code         String   @default("en") @db.VarChar(10)
+  language          String   @default("English") @db.VarChar(50)
+  is_visible        Int      @default(1) @db.SmallInt
+  sort              Int      @default(0)
+  creator           BigInt?
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  updated_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([agent_code])
+  @@index([is_visible])
+}
+
+/// Agent conversation history
+model ai_agent_chat_history {
+  id          BigInt   @id @default(autoincrement())
+  mac_address String   @db.VarChar(20)
+  agent_id    String?  @db.VarChar(36)
+  session_id  String   @db.VarChar(100)
+  chat_type   Int      @db.SmallInt
+  content     String?  @db.Text
+  audio_id    String?  @db.VarChar(255)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  agent ai_agent? @relation(fields: [agent_id], references: [id], onDelete: SetNull)
+
+  @@index([mac_address])
+  @@index([agent_id])
+  @@index([session_id])
+  @@index([created_at])
+}
+
+/// Agent to plugin/tool mappings
+model ai_agent_plugin_mapping {
+  id          BigInt   @id @default(autoincrement())
+  agent_id    String   @db.VarChar(36)
+  plugin_id   String   @db.VarChar(100)
+  param_info  Json     @default("{}")
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  agent ai_agent @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_id])
+  @@index([plugin_id])
+}
+
+/// Model Context Protocol access points
+model ai_agent_mcp_access_point {
+  id              BigInt   @id @default(autoincrement())
+  agent_id        String?  @db.VarChar(36)
+  mcp_server_url  String?  @db.VarChar(500)
+  mcp_server_name String?  @db.VarChar(255)
+  is_enabled      Int      @default(1) @db.SmallInt
+  config_json     Json     @default("{}")
+  creator         BigInt?
+  create_date     DateTime @default(now()) @db.Timestamptz(6)
+  updater         BigInt?
+  update_date     DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  agent ai_agent? @relation(fields: [agent_id], references: [id], onDelete: Cascade)
+
+  @@index([agent_id])
+}
+
+// =============================================
+// Device Tables
+// =============================================
+
+/// ESP32 device information
+model ai_device {
+  id                String    @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  user_id           BigInt?
+  mac_address       String    @unique @db.VarChar(20)
+  last_connected_at DateTime? @db.Timestamptz(6)
+  auto_update       Int       @default(1) @db.SmallInt
+  board             String?   @db.VarChar(100)
+  alias             String?   @db.VarChar(255)
+  agent_id          String?   @db.VarChar(36)
+  kid_id            BigInt?
+  mode              String    @default("conversation") @db.VarChar(50)
+  device_mode       String    @default("auto") @db.VarChar(50)
+  app_version       String?   @db.VarChar(50)
+  sort              Int       @default(0)
+  creator           BigInt?
+  create_date       DateTime  @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  update_date       DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  user           sys_user?        @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  agent          ai_agent?        @relation(fields: [agent_id], references: [id], onDelete: SetNull)
+  kid            kid_profile?     @relation(fields: [kid_id], references: [id], onDelete: SetNull)
+  music_playlist music_playlist[]
+  story_playlist story_playlist[]
+
+  @@index([user_id])
+  @@index([mac_address])
+  @@index([agent_id])
+  @@index([kid_id])
+}
+
+/// LLM token usage tracking per device
+model device_token_usage {
+  id                             BigInt   @id @default(autoincrement())
+  mac_address                    String   @db.VarChar(20)
+  session_id                     String?  @db.VarChar(100)
+  usage_date                     DateTime @db.Date
+  input_tokens                   BigInt   @default(0)
+  output_tokens                  BigInt   @default(0)
+  // Note: total_tokens is computed in queries, not stored
+  input_audio_tokens             BigInt   @default(0)
+  input_text_tokens              BigInt   @default(0)
+  input_cached_tokens            BigInt   @default(0)
+  output_audio_tokens            BigInt   @default(0)
+  output_text_tokens             BigInt   @default(0)
+  session_duration_seconds       Float    @default(0)
+  avg_ttft_seconds               Float    @default(0)
+  message_count                  Int      @default(0)
+  total_response_duration_seconds Float   @default(0)
+  session_count                  Int      @default(1)
+  created_at                     DateTime @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address])
+  @@index([usage_date])
+  @@index([session_id])
+}
+
+/// Firmware update packages
+model ai_ota {
+  id            String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  firmware_name String   @db.VarChar(255)
+  type          String?  @db.VarChar(100)
+  version       String   @db.VarChar(50)
+  size          BigInt?
+  remark        String?  @db.Text
+  firmware_path String?  @db.VarChar(500)
+  force_update  Int      @default(0) @db.SmallInt
+  sort          Int      @default(0)
+  creator       BigInt?
+  create_date   DateTime @default(now()) @db.Timestamptz(6)
+  updater       BigInt?
+  update_date   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([version])
+  @@index([type])
+}
+
+// =============================================
+// Content Tables
+// =============================================
+
+/// Music and story content repository
+model content_library {
+  id               String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  title            String   @db.VarChar(500)
+  romanized        String?  @db.VarChar(500)
+  filename         String?  @db.VarChar(500)
+  content_type     String   @db.VarChar(50)
+  category         String?  @db.VarChar(255)
+  alternatives     Json     @default("[]")
+  aws_s3_url       String?  @db.VarChar(1000)
+  duration_seconds Int?
+  file_size_bytes  BigInt?
+  is_active        Int      @default(1) @db.SmallInt
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  music_playlist music_playlist[]
+  story_playlist story_playlist[]
+
+  @@index([content_type])
+  @@index([category])
+  @@index([is_active])
+  @@index([title])
+}
+
+/// Individual content items (legacy)
+model content_items {
+  id               String   @id @default(dbgenerated("gen_random_uuid()::text")) @db.VarChar(36)
+  title            String   @db.VarChar(500)
+  romanized        String?  @db.VarChar(500)
+  filename         String?  @db.VarChar(500)
+  content_type     String   @db.VarChar(50)
+  category         String?  @db.VarChar(255)
+  alternatives     Json     @default("[]")
+  file_url         String?  @db.VarChar(1000)
+  thumbnail_url    String?  @db.VarChar(1000)
+  duration_seconds Int?
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([content_type])
+  @@index([category])
+}
+
+/// Device music playlists
+model music_playlist {
+  id         BigInt   @id @default(autoincrement())
+  device_id  String   @db.VarChar(36)
+  content_id String   @db.VarChar(36)
+  position   Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  device  ai_device       @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  content content_library @relation(fields: [content_id], references: [id], onDelete: Cascade)
+
+  @@unique([device_id, content_id])
+  @@index([device_id])
+  @@index([device_id, position])
+}
+
+/// Device story playlists
+model story_playlist {
+  id         BigInt   @id @default(autoincrement())
+  device_id  String   @db.VarChar(36)
+  content_id String   @db.VarChar(36)
+  position   Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  device  ai_device       @relation(fields: [device_id], references: [id], onDelete: Cascade)
+  content content_library @relation(fields: [content_id], references: [id], onDelete: Cascade)
+
+  @@unique([device_id, content_id])
+  @@index([device_id])
+  @@index([device_id, position])
+}
+
+/// Music library (legacy)
+model ai_music {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title      String   @db.VarChar(300)
+  artist     String?  @db.VarChar(200)
+  album      String?  @db.VarChar(200)
+  category   String?  @db.VarChar(100)
+  language   String?  @db.VarChar(50)
+  duration   Int?
+  file_url   String?  @db.VarChar(500)
+  cover_url  String?  @db.VarChar(500)
+  lyrics     String?  @db.Text
+  sort       Int      @default(0)
+  status     Int      @default(1)
+  creator    BigInt?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Story library (legacy)
+model ai_story {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title      String   @db.VarChar(300)
+  author     String?  @db.VarChar(200)
+  category   String?  @db.VarChar(100)
+  language   String?  @db.VarChar(50)
+  age_group  String?  @db.VarChar(50)
+  duration   Int?
+  content    String?  @db.Text
+  audio_url  String?  @db.VarChar(500)
+  cover_url  String?  @db.VarChar(500)
+  sort       Int      @default(0)
+  status     Int      @default(1)
+  creator    BigInt?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Textbook metadata (legacy)
+model ai_textbook {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title       String   @db.VarChar(300)
+  subject     String?  @db.VarChar(100)
+  grade       String?  @db.VarChar(50)
+  language    String?  @db.VarChar(50)
+  publisher   String?  @db.VarChar(200)
+  cover_url   String?  @db.VarChar(500)
+  description String?  @db.Text
+  sort        Int      @default(0)
+  status      Int      @default(1)
+  creator     BigInt?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  chapters ai_textbook_chapter[]
+}
+
+/// Textbook chapters (legacy)
+model ai_textbook_chapter {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  textbook_id String?  @db.Uuid
+  title       String   @db.VarChar(300)
+  content     String?  @db.Text
+  audio_url   String?  @db.VarChar(500)
+  sort        Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  textbook ai_textbook? @relation(fields: [textbook_id], references: [id], onDelete: Cascade)
+}
+
+// =============================================
+// RFID Tables
+// =============================================
+
+/// RFID product packs/SKUs
+model rfid_pack {
+  id          BigInt   @id @default(autoincrement())
+  pack_code   String   @unique @db.VarChar(100)
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  age_min     Int?
+  age_max     Int?
+  active      Boolean  @default(true)
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  card_mappings rfid_card_mapping[]
+  series        rfid_series[]
+
+  @@index([pack_code])
+  @@index([active])
+}
+
+/// RFID question templates
+model rfid_question {
+  id          BigInt   @id @default(autoincrement())
+  code        String   @unique @db.VarChar(100)
+  title       String   @db.VarChar(255)
+  prompt_text String   @db.Text
+  language    String   @default("en") @db.VarChar(10)
+  category    String?  @db.VarChar(100)
+  difficulty  Int      @default(1)
+  active      Boolean  @default(true)
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  card_mappings rfid_card_mapping[]
+  series        rfid_series[]
+
+  @@index([code])
+  @@index([category])
+  @@index([language])
+  @@index([active])
+}
+
+/// RFID content for RAG/TTS
+model rfid_content_pack {
+  id           BigInt   @id @default(autoincrement())
+  pack_code    String   @unique @db.VarChar(100)
+  name         String   @db.VarChar(255)
+  description  String?  @db.Text
+  content_type String   @default("prompt") @db.VarChar(50)
+  content_md   String?  @db.Text
+  total_items  Int      @default(0)
+  language     String   @default("en") @db.VarChar(10)
+  active       Boolean  @default(true)
+  creator      BigInt?
+  create_date  DateTime @default(now()) @db.Timestamptz(6)
+  updater      BigInt?
+  update_date  DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  card_mappings rfid_card_mapping[]
+
+  @@index([pack_code])
+  @@index([content_type])
+  @@index([active])
+}
+
+/// RFID UID range mappings
+model rfid_series {
+  id          BigInt   @id @default(autoincrement())
+  start_uid   String   @db.VarChar(50)
+  end_uid     String   @db.VarChar(50)
+  question_id BigInt?
+  pack_id     BigInt?
+  priority    Int      @default(0)
+  notes       String?  @db.VarChar(500)
+  active      Boolean  @default(true)
+  creator     BigInt?
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  updater     BigInt?
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  question rfid_question? @relation(fields: [question_id], references: [id], onDelete: SetNull)
+  pack     rfid_pack?     @relation(fields: [pack_id], references: [id], onDelete: SetNull)
+
+  @@index([start_uid, end_uid])
+  @@index([question_id])
+  @@index([pack_id])
+  @@index([active])
+}
+
+/// RFID card to content mappings
+model rfid_card_mapping {
+  id              BigInt   @id @default(autoincrement())
+  rfid_uid        String   @unique @db.VarChar(50)
+  question_id     BigInt?
+  question_ids    Json     @default("[]")
+  pack_code       String?  @db.VarChar(100)
+  pack_id         BigInt?
+  content_pack_id BigInt?
+  notes           String?  @db.VarChar(500)
+  active          Boolean  @default(true)
+  creator         BigInt?
+  create_date     DateTime @default(now()) @db.Timestamptz(6)
+  updater         BigInt?
+  update_date     DateTime @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  question     rfid_question?     @relation(fields: [question_id], references: [id], onDelete: SetNull)
+  pack         rfid_pack?         @relation(fields: [pack_id], references: [id], onDelete: SetNull)
+  content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onDelete: SetNull)
+
+  @@index([rfid_uid])
+  @@index([question_id])
+  @@index([pack_id])
+  @@index([content_pack_id])
+  @@index([active])
+}
+
+/// RFID scan log
+model rfid_scan_log {
+  id           BigInt   @id @default(autoincrement())
+  mac_address  String   @db.VarChar(50)
+  rfid_uid     String   @db.VarChar(100)
+  action_taken String?  @db.VarChar(100)
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Legacy RFID tags table
+model rfid_tags {
+  id           BigInt   @id @default(autoincrement())
+  uid          String   @unique @db.VarChar(100)
+  name         String?  @db.VarChar(255)
+  description  String?  @db.Text
+  content_type String?  @db.VarChar(50)
+  content_id   BigInt?
+  status       Int      @default(1)
+  creator      BigInt?
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime @default(now()) @db.Timestamptz(6)
+}
+
+// =============================================
+// Analytics Tables
+// =============================================
+
+/// Game session tracking
+model analytics_game_sessions {
+  id                BigInt    @id @default(autoincrement())
+  session_id        String    @unique @db.VarChar(100)
+  mac_address       String    @db.VarChar(20)
+  agent_id          String?   @db.VarChar(36)
+  mode_type         String    @db.VarChar(50)
+  started_at        DateTime  @db.Timestamptz(6)
+  ended_at          DateTime? @db.Timestamptz(6)
+  duration_seconds  Int?
+  interaction_count Int       @default(0)
+  completion_status String?   @db.VarChar(50)
+  metadata          Json      @default("{}")
+  created_at        DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id])
+  @@index([mac_address])
+  @@index([agent_id])
+  @@index([mode_type])
+  @@index([started_at])
+}
+
+/// Individual game answer attempts
+model analytics_game_attempts {
+  id               BigInt    @id @default(autoincrement())
+  session_id       String    @db.VarChar(100)
+  mac_address      String    @db.VarChar(20)
+  game_type        String    @db.VarChar(50)
+  question_text    String?   @db.Text
+  question_type    String?   @db.VarChar(100)
+  difficulty_level String?   @db.VarChar(20)
+  correct_answer   String?   @db.VarChar(500)
+  user_answer      String?   @db.VarChar(500)
+  is_correct       Boolean?
+  attempt_number   Int       @default(1) @db.SmallInt
+  response_time_ms Int?
+  answered_at      DateTime? @db.Timestamptz(6)
+  metadata         Json      @default("{}")
+  created_at       DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id])
+  @@index([mac_address])
+  @@index([game_type])
+  @@index([is_correct])
+}
+
+/// Music and story playback tracking
+model analytics_media_playback {
+  id                      BigInt    @id @default(autoincrement())
+  session_id              String?   @db.VarChar(100)
+  mac_address             String    @db.VarChar(20)
+  media_type              String    @db.VarChar(50)
+  media_id                String?   @db.VarChar(100)
+  media_title             String?   @db.VarChar(500)
+  started_at              DateTime  @db.Timestamptz(6)
+  ended_at                DateTime? @db.Timestamptz(6)
+  duration_played_seconds Int?
+  total_duration_seconds  Int?
+  completion_percentage   Decimal?  @db.Decimal(5, 2)
+  skip_action             String?   @db.VarChar(50)
+  skipped_at              DateTime? @db.Timestamptz(6)
+  metadata                Json      @default("{}")
+  created_at              DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id])
+  @@index([mac_address])
+  @@index([media_type])
+  @@index([started_at])
+}
+
+/// Game streak records
+model analytics_streaks {
+  id                  BigInt    @id @default(autoincrement())
+  session_id          String    @db.VarChar(100)
+  mac_address         String    @db.VarChar(20)
+  game_type           String    @db.VarChar(50)
+  streak_number       Int
+  questions_in_streak Int
+  started_at          DateTime  @db.Timestamptz(6)
+  ended_at            DateTime? @db.Timestamptz(6)
+  duration_seconds    Int?
+  created_at          DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([session_id])
+  @@index([mac_address])
+  @@index([game_type])
+}
+
+/// Aggregated user progress statistics
+model analytics_user_progress {
+  id                         BigInt    @id @default(autoincrement())
+  mac_address                String    @db.VarChar(20)
+  mode_type                  String    @db.VarChar(50)
+  kid_id                     BigInt?
+  total_sessions             Int       @default(0)
+  total_time_seconds         BigInt    @default(0)
+  total_interactions         Int       @default(0)
+  success_rate_percentage    Decimal?  @db.Decimal(5, 2)
+  longest_streak             Int       @default(0)
+  total_streaks_completed    Int       @default(0)
+  average_streak_time_seconds Int      @default(0)
+  skill_level                String    @default("beginner") @db.VarChar(50)
+  last_played_at             DateTime? @db.Timestamptz(6)
+  weekly_summary_json        Json      @default("{}")
+  created_at                 DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime  @default(now()) @db.Timestamptz(6)
+
+  // Relations
+  kid kid_profile? @relation(fields: [kid_id], references: [id])
+
+  @@unique([mac_address, mode_type])
+  @@index([mac_address])
+  @@index([mode_type])
+  @@index([skill_level])
+}

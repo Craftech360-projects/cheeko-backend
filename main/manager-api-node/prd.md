@@ -1031,7 +1031,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
       "Define relationships between models",
       "Run npx prisma generate to create client"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": "prisma-3",
