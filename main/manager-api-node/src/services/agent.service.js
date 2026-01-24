@@ -786,6 +786,174 @@ const getAgentNameByMac = async (mac) => {
 };
 
 // =============================================
+// Agent Chat History Batch Methods
+// =============================================
+
+/**
+ * Report a single chat message (used by cheeko service)
+ * Similar to addChatMessage but with slightly different structure
+ * @param {Object} data - Message data
+ * @param {string} data.macAddress - Device MAC address
+ * @param {string} [data.agentId] - Agent ID (optional)
+ * @param {string} data.sessionId - Session ID
+ * @param {number} data.chatType - Chat type (1=user, 2=agent)
+ * @param {string} data.content - Message content
+ * @param {string} [data.audioId] - Audio ID (optional)
+ * @returns {Promise<Object>} Created message
+ */
+const reportChatMessage = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { macAddress, agentId, sessionId, chatType, content, audioId } = data;
+  const normalizedMac = normalizeMacAddress(macAddress);
+
+  // If agentId not provided, try to get it from the device
+  let resolvedAgentId = agentId;
+  if (!resolvedAgentId) {
+    try {
+      resolvedAgentId = await getAgentIdByMac(normalizedMac);
+    } catch {
+      // Agent ID is optional, continue without it
+      resolvedAgentId = null;
+    }
+  }
+
+  const { data: message, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .insert({
+      mac_address: normalizedMac,
+      agent_id: resolvedAgentId,
+      session_id: sessionId,
+      chat_type: chatType,
+      content,
+      audio_id: audioId
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to report chat message:', error);
+    throw new Error('Failed to report chat message');
+  }
+
+  return message;
+};
+
+/**
+ * Batch upload all session messages (used by LiveKit workers at end of session)
+ * @param {Object} data - Session data
+ * @param {string} data.macAddress - Device MAC address
+ * @param {string} [data.agentId] - Agent ID (optional)
+ * @param {string} data.sessionId - Session ID
+ * @param {Array} data.messages - Array of {chatType, content, audioId, timestamp}
+ * @returns {Promise<Object>} Result with count of inserted messages
+ */
+const batchUploadSession = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { macAddress, agentId, sessionId, messages } = data;
+
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    throw new Error('messages array is required and must not be empty');
+  }
+
+  const normalizedMac = normalizeMacAddress(macAddress);
+
+  // If agentId not provided, try to get it from the device
+  let resolvedAgentId = agentId;
+  if (!resolvedAgentId) {
+    try {
+      resolvedAgentId = await getAgentIdByMac(normalizedMac);
+    } catch {
+      // Agent ID is optional, continue without it
+      resolvedAgentId = null;
+    }
+  }
+
+  // Prepare batch insert data
+  const insertData = messages.map((msg, index) => ({
+    mac_address: normalizedMac,
+    agent_id: resolvedAgentId,
+    session_id: sessionId,
+    chat_type: msg.chatType,
+    content: msg.content,
+    audio_id: msg.audioId || null,
+    // Use provided timestamp or current time with offset to maintain order
+    created_at: msg.timestamp || new Date(Date.now() + index).toISOString()
+  }));
+
+  const { data: inserted, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .insert(insertData)
+    .select('id');
+
+  if (error) {
+    logger.error('Failed to batch upload session:', error);
+    throw new Error('Failed to batch upload session messages');
+  }
+
+  return {
+    sessionId,
+    macAddress: normalizedMac,
+    agentId: resolvedAgentId,
+    insertedCount: inserted ? inserted.length : 0
+  };
+};
+
+/**
+ * Get recent chat history for user (mobile app) - returns last 50 messages
+ * @param {string} agentId - Agent ID
+ * @param {number} [limit=50] - Max messages to return (default 50)
+ * @returns {Promise<Array>} Recent chat messages
+ */
+const getRecentUserChatHistory = async (agentId, limit = 50) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: messages, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .select('id, mac_address, session_id, chat_type, content, audio_id, created_at')
+    .eq('agent_id', agentId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    logger.error('Failed to get recent chat history:', error);
+    throw new Error('Failed to get recent chat history');
+  }
+
+  // Return in chronological order (reverse the descending result)
+  return (messages || []).reverse();
+};
+
+/**
+ * Get audio content by audio ID
+ * @param {string} agentId - Agent ID
+ * @param {string} audioId - Audio ID
+ * @returns {Promise<Object|null>} Audio content record or null
+ */
+const getAudioContent = async (agentId, audioId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: record, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .select('id, mac_address, session_id, chat_type, content, audio_id, created_at')
+    .eq('agent_id', agentId)
+    .eq('audio_id', audioId)
+    .single();
+
+  if (error) {
+    // Not found is not an error, return null
+    if (error.code === 'PGRST116') {
+      return null;
+    }
+    logger.error('Failed to get audio content:', error);
+    throw new Error('Failed to get audio content');
+  }
+
+  return record;
+};
+
+// =============================================
 // Agent Template Methods
 // =============================================
 
@@ -948,6 +1116,11 @@ module.exports = {
   saveMemory,
   updateModeFromTemplate,
   getAgentNameByMac,
+  // Chat history batch methods
+  reportChatMessage,
+  batchUploadSession,
+  getRecentUserChatHistory,
+  getAudioContent,
   // Template methods
   getTemplates,
   getTemplateById,

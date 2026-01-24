@@ -342,7 +342,7 @@ All tables already exist in `prisma/schema.prisma`. No new migrations needed.
       "Add GET /agent/:id/chat-history/user for recent messages",
       "Add GET /agent/:id/chat-history/audio for audio content"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "category": "feature",

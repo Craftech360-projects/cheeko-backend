@@ -440,6 +440,152 @@ router.post('/chat-message',
 );
 
 // ==============================================
+// Chat History Batch Routes
+// ==============================================
+
+/**
+ * @swagger
+ * /agent/chat-history/report:
+ *   post:
+ *     tags: [Agent Chat History]
+ *     summary: Report a single chat message
+ *     description: Used by cheeko service to report individual messages in real-time
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - macAddress
+ *               - sessionId
+ *               - chatType
+ *               - content
+ *             properties:
+ *               macAddress:
+ *                 type: string
+ *                 description: Device MAC address
+ *               agentId:
+ *                 type: string
+ *                 description: Agent ID (optional, resolved from device if not provided)
+ *               sessionId:
+ *                 type: string
+ *                 description: Session identifier
+ *               chatType:
+ *                 type: integer
+ *                 description: 1=user message, 2=agent message
+ *                 enum: [1, 2]
+ *               content:
+ *                 type: string
+ *                 description: Message content
+ *               audioId:
+ *                 type: string
+ *                 description: Audio file ID (optional)
+ *     responses:
+ *       200:
+ *         description: Message reported successfully
+ *       400:
+ *         description: Missing required fields or report failed
+ */
+router.post('/chat-history/report',
+  asyncHandler(async (req, res) => {
+    const { macAddress, agentId, sessionId, chatType, content, audioId } = req.body;
+
+    if (!macAddress || !sessionId || chatType === undefined || !content) {
+      return badRequest(res, 'macAddress, sessionId, chatType, and content are required');
+    }
+
+    try {
+      const message = await agentService.reportChatMessage({
+        macAddress,
+        agentId,
+        sessionId,
+        chatType,
+        content,
+        audioId
+      });
+      success(res, message, 'Message reported successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/chat-history/session:
+ *   post:
+ *     tags: [Agent Chat History]
+ *     summary: Batch upload all session messages
+ *     description: Used by LiveKit workers at end of session to upload all messages at once
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - macAddress
+ *               - sessionId
+ *               - messages
+ *             properties:
+ *               macAddress:
+ *                 type: string
+ *                 description: Device MAC address
+ *               agentId:
+ *                 type: string
+ *                 description: Agent ID (optional, resolved from device if not provided)
+ *               sessionId:
+ *                 type: string
+ *                 description: Session identifier
+ *               messages:
+ *                 type: array
+ *                 description: Array of chat messages
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - chatType
+ *                     - content
+ *                   properties:
+ *                     chatType:
+ *                       type: integer
+ *                       description: 1=user, 2=agent
+ *                     content:
+ *                       type: string
+ *                     audioId:
+ *                       type: string
+ *                     timestamp:
+ *                       type: string
+ *                       format: date-time
+ *     responses:
+ *       200:
+ *         description: Session messages uploaded successfully
+ *       400:
+ *         description: Missing required fields or upload failed
+ */
+router.post('/chat-history/session',
+  asyncHandler(async (req, res) => {
+    const { macAddress, agentId, sessionId, messages } = req.body;
+
+    if (!macAddress || !sessionId || !messages) {
+      return badRequest(res, 'macAddress, sessionId, and messages are required');
+    }
+
+    try {
+      const result = await agentService.batchUploadSession({
+        macAddress,
+        agentId,
+        sessionId,
+        messages
+      });
+      success(res, result, 'Session messages uploaded successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==============================================
 // Agent Memory and Mode Routes
 // ==============================================
 
@@ -758,6 +904,134 @@ router.get('/:id/sessions',
     try {
       const sessions = await agentService.getAgentSessions(req.params.id);
       success(res, sessions);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/{id}/chat-history/user:
+ *   get:
+ *     tags: [Agent Chat History]
+ *     summary: Get recent chat messages for mobile app
+ *     description: Returns the most recent 50 chat messages for an agent (for mobile app display)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Agent ID
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 50
+ *         description: Max messages to return (default 50)
+ *     responses:
+ *       200:
+ *         description: Recent chat messages in chronological order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   mac_address:
+ *                     type: string
+ *                   session_id:
+ *                     type: string
+ *                   chat_type:
+ *                     type: integer
+ *                   content:
+ *                     type: string
+ *                   audio_id:
+ *                     type: string
+ *                   created_at:
+ *                     type: string
+ *                     format: date-time
+ *       400:
+ *         description: Failed to get chat history
+ */
+router.get('/:id/chat-history/user',
+  asyncHandler(async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const history = await agentService.getRecentUserChatHistory(req.params.id, limit);
+      success(res, history);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/{id}/chat-history/audio:
+ *   get:
+ *     tags: [Agent Chat History]
+ *     summary: Get audio content by audio ID
+ *     description: Retrieves the chat history record that contains a specific audio ID
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Agent ID
+ *       - in: query
+ *         name: audioId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Audio ID to look up
+ *     responses:
+ *       200:
+ *         description: Audio content record
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 mac_address:
+ *                   type: string
+ *                 session_id:
+ *                   type: string
+ *                 chat_type:
+ *                   type: integer
+ *                 content:
+ *                   type: string
+ *                 audio_id:
+ *                   type: string
+ *                 created_at:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: audioId query parameter is required
+ *       404:
+ *         description: Audio content not found
+ */
+router.get('/:id/chat-history/audio',
+  asyncHandler(async (req, res) => {
+    const { audioId } = req.query;
+
+    if (!audioId) {
+      return badRequest(res, 'audioId query parameter is required');
+    }
+
+    try {
+      const record = await agentService.getAudioContent(req.params.id, audioId);
+      if (!record) {
+        return notFound(res, 'Audio content not found');
+      }
+      success(res, record);
     } catch (error) {
       badRequest(res, error.message);
     }

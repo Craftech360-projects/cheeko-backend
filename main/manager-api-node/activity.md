@@ -13,7 +13,7 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 |----|----------|-------------|--------|
 | 1 | feature | Agent Template CRUD endpoints | Complete |
 | 2 | feature | Agent Memory and Mode endpoints | Complete |
-| 3 | feature | Agent Chat History batch endpoints | Pending |
+| 3 | feature | Agent Chat History batch endpoints | Complete |
 | 4 | feature | Agent MCP Access Point endpoints | Pending |
 | 5 | feature | Configuration endpoints (/config) | Pending |
 | 6 | feature | Model Provider CRUD endpoints | Pending |
@@ -45,6 +45,45 @@ Migrating missing APIs from Spring Boot to Node.js Express.
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Agent Chat History Batch Endpoints Complete
+
+**Task 3: Add Agent Chat History batch endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Added:**
+- `POST /toy/agent/chat-history/report` - Single message report (used by cheeko service in real-time)
+- `POST /toy/agent/chat-history/session` - Batch upload all session messages (used by LiveKit at end of session)
+- `GET /toy/agent/:id/chat-history/user` - Get recent 50 chat messages (for mobile app)
+- `GET /toy/agent/:id/chat-history/audio` - Get audio content by audio ID
+
+**Service Methods Implemented in `agent.service.js`:**
+- `reportChatMessage(data)` - Report single message, auto-resolves agentId from device if not provided
+- `batchUploadSession(data)` - Batch insert all session messages with timestamps
+- `getRecentUserChatHistory(agentId, limit)` - Get last N messages in chronological order
+- `getAudioContent(agentId, audioId)` - Get chat record by audio ID
+
+**Files Modified:**
+- `src/services/agent.service.js` - Added 4 service methods (~120 lines)
+- `src/routes/agent.routes.js` - Added 4 route handlers with Swagger docs (~180 lines)
+
+**API Contract:**
+```
+POST   /toy/agent/chat-history/report        - Reports single message, returns message record
+POST   /toy/agent/chat-history/session       - Batch uploads messages, returns {sessionId, insertedCount}
+GET    /toy/agent/:id/chat-history/user      - Returns array of recent messages (limit via query param)
+GET    /toy/agent/:id/chat-history/audio     - Returns single message record by audioId query param
+```
+
+**Route Ordering Note:**
+The `/user` and `/audio` routes are defined BEFORE the `/:sessionId` route to prevent "user" and "audio" from being matched as session IDs.
+
+**Verification:**
+- `npm run lint` - 0 errors (8 pre-existing warnings)
+- `npm test` - 796 tests passed
+
+---
 
 ### 2026-01-24 - Agent Memory and Mode Endpoints Complete
 
