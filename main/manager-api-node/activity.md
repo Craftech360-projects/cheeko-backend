@@ -23,7 +23,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 5 | admin | Test GET /admin/users pagination endpoint | Complete |
 | 6 | admin | Test admin user CRUD operations | Complete |
 | 7-8 | admin | Test admin params endpoints | Complete |
-| 9-10 | admin | Test admin dict endpoints | Pending |
+| 9-10 | admin | Test admin dict endpoints | Complete |
 | 11-14 | device | Test device endpoints (bind, unbind, list) | Pending |
 | 15-19 | agent | Test agent endpoints (CRUD, templates, MCP) | Pending |
 | 20-21 | analytics | Test analytics endpoints | Pending |
@@ -76,6 +76,70 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-24 - Phase 4 Tasks 9-10 Complete (Admin Dict Endpoints)
+
+**Task 9: Test and fix dictionary type endpoints**
+**Task 10: Test and fix dictionary data endpoints**
+
+**Status:** COMPLETE
+
+**Issues Found:**
+
+1. **Missing endpoints** - `/admin/dict/*` endpoints didn't exist in Node.js API (only `/system/dict/*` existed)
+2. **Path mismatch** - Spring Boot uses `/admin/dict/type/save`, `/admin/dict/type/update`, `/admin/dict/type/delete` (POST/PUT/POST methods); Node.js had different paths
+3. **Response format mismatch** - Node.js used snake_case, Spring Boot uses camelCase
+4. **Delete endpoint format** - Spring Boot expects array of IDs directly in request body (not wrapped in `{ids: []}`)
+
+**Fixes Applied:**
+
+**1. Created `/admin/dict/*` routes (`src/routes/dict.routes.js`)**
+- Added Spring Boot compatible endpoints:
+  - `GET /admin/dict/type/page` - Paginated dictionary type query
+  - `GET /admin/dict/type/{id}` - Get dictionary type by ID
+  - `POST /admin/dict/type/save` - Create dictionary type
+  - `PUT /admin/dict/type/update` - Update dictionary type (id in body)
+  - `POST /admin/dict/type/delete` - Delete dictionary types (array of IDs in body)
+  - `GET /admin/dict/data/page` - Paginated dictionary data query (requires dictTypeId)
+  - `GET /admin/dict/data/{id}` - Get dictionary data by ID
+  - `GET /admin/dict/data/type/{dictType}` - Get data by type code (returns `{name, key}` format)
+  - `POST /admin/dict/data/save` - Create dictionary data
+  - `PUT /admin/dict/data/update` - Update dictionary data (id in body)
+  - `POST /admin/dict/data/delete` - Delete dictionary data (array of IDs in body)
+
+**2. Response transformation functions:**
+- `transformDictType()` - Converts snake_case to camelCase, formats dates
+- `transformDictData()` - Converts snake_case to camelCase, formats dates
+- `transformDictDataItem()` - Converts to Spring Boot SysDictDataItem format: `{name, key}`
+- `formatDate()` - Formats dates to `yyyy-MM-dd HH:mm:ss` format
+
+**3. Updated `src/routes/index.js`**
+- Added import for dict.routes.js
+- Mounted dict routes at `/admin/dict`
+
+**Response Format Transformation:**
+```json
+// DictType: Before (database)
+{"id": 1, "dict_type": "X", "dict_name": "Y", "created_at": "2026-01-24T17:49:18Z"}
+
+// DictType: After (API response)
+{"id": 1, "dictType": "X", "dictName": "Y", "createDate": "2026-01-24 17:49:18"}
+
+// DictDataItem: For /type/{dictType} endpoint
+{"name": "Label Text", "key": "stored_value"}
+```
+
+**Files Created:**
+- `src/routes/dict.routes.js` - Spring Boot compatible dict endpoints (~500 lines)
+
+**Files Modified:**
+- `src/routes/index.js` - Added dict routes import and mount
+
+**Verification:**
+- `npm run lint` - 0 new errors (4 pre-existing errors, 6 warnings)
+- Module loads successfully
+
+---
 
 ### 2026-01-24 - Phase 4 Tasks 7-8 Complete (Admin Params Endpoints)
 

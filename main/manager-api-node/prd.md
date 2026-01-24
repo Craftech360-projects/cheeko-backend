@@ -160,7 +160,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Fix any differences",
       "Verify dictionary management page works"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,
@@ -179,7 +179,7 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test getting data by dict type",
       "Fix any differences"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 11,
