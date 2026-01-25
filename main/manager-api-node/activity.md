@@ -44,7 +44,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 32 | integration | Full frontend test - Device Management | Complete |
 | 33 | integration | Full frontend test - Agent Configuration | Complete |
 | 34 | integration | Full frontend test - Model Configuration | Complete |
-| 35-36 | integration | Full frontend integration tests | Pending |
+| 35 | integration | Full frontend test - RFID Management | Complete |
+| 36 | integration | Full frontend test - Admin Settings | Pending |
 
 ---
 
@@ -89,6 +90,39 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-25 - Phase 4 Task 35 Complete (RFID Management Integration)
+
+**Task 35: Full frontend test - RFID Management**
+
+**Status:** COMPLETE
+
+**Issues Found & Fixed:**
+1. **Prisma schema out of sync with database**
+   - Ran `prisma db pull` to sync schema with actual database
+   - Fixed rfid_card_mapping table column definitions
+
+**Endpoints Tested:**
+
+1. **RFID Questions:**
+   - `GET /toy/admin/rfid/question/page` - Paginated question list
+
+2. **RFID Packs:**
+   - `GET /toy/admin/rfid/pack/page` - Paginated pack list
+   - `POST /toy/admin/rfid/pack` - Create pack
+
+3. **RFID Cards:**
+   - `GET /toy/admin/rfid/card/page` - Paginated card list
+
+4. **RFID Series:**
+   - `GET /toy/admin/rfid/series/page` - Paginated series list
+
+**Verification:**
+- All RFID endpoints returning correct data
+- Prisma schema now matches actual database structure
+- Response formats match frontend expectations
+
+---
 
 ### 2026-01-25 - Phase 4 Task 34 Complete (Model Configuration Integration)
 

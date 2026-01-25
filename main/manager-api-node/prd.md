@@ -607,7 +607,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test cards tab - list and CRUD",
       "Test series tab - list and CRUD"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Synced Prisma schema with database via db pull, 2) Verified all RFID endpoints (question/page, pack/page, card/page, series/page), 3) Verified pack CRUD operation"
   },
   {
     "id": 36,

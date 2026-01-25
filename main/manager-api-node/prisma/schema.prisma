@@ -507,17 +507,19 @@ model parent_profile {
 }
 
 model rfid_card_mapping {
-  id              BigInt    @id @default(autoincrement())
-  rfid_uid        String    @db.VarChar(100)
+  id              BigInt   @id @default(autoincrement())
+  rfid_uid        String   @db.VarChar(50)
   content_pack_id BigInt?
-  question_ids    Json?     @default("[]")
-  action_type     String?   @default("content") @db.VarChar(50)
-  action_data     Json?     @default("{}")
-  emotions        Json?     @default("[]")
-  priority        Int?      @default(0)
-  status          Int?      @default(1)
-  created_at      DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
+  question_ids    Json     @default("[]")
+  active          Boolean  @default(true)
+  create_date     DateTime @default(now()) @db.Timestamptz(6)
+  creator         BigInt?
+  notes           String?  @db.VarChar(500)
+  pack_code       String?  @db.VarChar(100)
+  pack_id         BigInt?
+  question_id     BigInt?
+  update_date     DateTime @default(now()) @db.Timestamptz(6)
+  updater         BigInt?
 
   @@index([content_pack_id], map: "idx_rfid_card_mapping_pack")
   @@index([rfid_uid], map: "idx_rfid_card_mapping_uid")
