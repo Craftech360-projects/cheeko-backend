@@ -565,7 +565,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test device unbinding",
       "Test device update"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "All device management endpoints working: device/bind/{agentId}, admin/device/all, device/manual-add, device/update/{id}, device/unbind"
   },
   {
     "id": 33,

@@ -41,7 +41,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 29 | rfid | Test RFID series endpoints | Complete |
 | 30 | voice | Test TTS voice endpoints | Complete |
 | 31 | integration | Full frontend test - Login and Dashboard | Complete |
-| 32-36 | integration | Full frontend integration tests | Pending |
+| 32 | integration | Full frontend test - Device Management | Complete |
+| 33-36 | integration | Full frontend integration tests | Pending |
 
 ---
 
@@ -86,6 +87,34 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-25 - Phase 4 Task 32 Complete (Device Management Integration)
+
+**Task 32: Full frontend test - Device Management**
+
+**Status:** COMPLETE
+
+**Endpoints Tested:**
+
+1. **Device Listing:**
+   - `GET /toy/device/bind/{agentId}` - Returns list of devices bound to agent
+   - `GET /toy/admin/device/all?page=1&limit=10` - Admin paginated device list
+
+2. **Device Binding:**
+   - `POST /toy/device/bind/{agentId}/{deviceCode}` - Bind device with activation code
+   - `POST /toy/device/manual-add` - Manual device addition (admin feature)
+
+3. **Device Management:**
+   - `PUT /toy/device/update/{id}` - Update device (alias, autoUpdate)
+   - `POST /toy/device/unbind` - Unbind device from user/agent
+
+**Verification:**
+- All device CRUD operations working correctly
+- Device ownership validation working (users can only update their own devices)
+- Admin device listing returns all devices with user information
+- Response formats match frontend expectations
+
+---
 
 ### 2026-01-25 - Phase 4 Task 31 Complete (Login and Dashboard Integration)
 
