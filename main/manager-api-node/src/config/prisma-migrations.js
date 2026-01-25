@@ -14,6 +14,56 @@ const path = require('path');
 const logger = require('../utils/logger');
 
 /**
+ * Run database seed to insert initial data
+ *
+ * Only inserts records that don't exist (safe to run multiple times)
+ */
+const runSeed = async () => {
+  try {
+    logger.info('Running database seed...');
+
+    const projectRoot = path.resolve(__dirname, '../..');
+
+    const output = execSync('node prisma/seed.js', {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+        FORCE_COLOR: '0'
+      },
+      timeout: 60000
+    });
+
+    // Log seed output
+    if (output) {
+      const lines = output.trim().split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          logger.info(`Seed: ${line.trim()}`);
+        }
+      }
+    }
+
+    logger.info('Database seed completed.');
+  } catch (error) {
+    // Extract error message
+    let errorMessage = error.message;
+    if (error.stderr) {
+      errorMessage = error.stderr.toString().trim();
+    } else if (error.stdout) {
+      errorMessage = error.stdout.toString().trim();
+    }
+
+    logger.warn(`Database seed warning: ${errorMessage}`);
+    // Don't throw - seed failures shouldn't prevent server startup
+    // The seed only inserts missing data, so failures usually mean
+    // the data already exists or there's a non-critical issue
+  }
+};
+
+/**
  * Run Prisma migrations/schema sync
  *
  * In DEVELOPMENT: Uses `prisma db push` to auto-sync schema changes (creates missing tables/columns)
@@ -81,6 +131,10 @@ const runPrismaMigrations = async () => {
     }
 
     logger.info('Prisma migrations completed successfully!');
+
+    // Run seed to ensure initial data exists
+    await runSeed();
+
     return true;
 
   } catch (error) {
