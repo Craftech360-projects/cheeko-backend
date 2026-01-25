@@ -551,7 +551,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Verify dashboard loads with analytics data",
       "Check browser console for any API errors"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Installed missing express-async-handler package, 2) Verified all login endpoints (login, pub-config, user/info), 3) Verified all dashboard endpoints (agent/list, analytics/today/device-count, analytics/month/device-count, analytics/today/active-devices, analytics/month/active-devices)"
   },
   {
     "id": 32,

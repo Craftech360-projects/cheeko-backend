@@ -40,7 +40,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 28 | rfid | Test RFID card endpoints | Complete |
 | 29 | rfid | Test RFID series endpoints | Complete |
 | 30 | voice | Test TTS voice endpoints | Complete |
-| 31-36 | integration | Full frontend integration tests | Pending |
+| 31 | integration | Full frontend test - Login and Dashboard | Complete |
+| 32-36 | integration | Full frontend integration tests | Pending |
 
 ---
 
@@ -85,6 +86,37 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-25 - Phase 4 Task 31 Complete (Login and Dashboard Integration)
+
+**Task 31: Full frontend test - Login and Dashboard**
+
+**Status:** COMPLETE
+
+**Dependencies Fixed:**
+- Installed missing `express-async-handler` package (required by ttsVoice.routes.js)
+
+**Endpoints Tested:**
+
+1. **Login Flow:**
+   - `POST /toy/user/login` - Returns token correctly
+   - `GET /toy/user/pub-config` - Returns public config (allowUserRegister, mobileAreaList)
+   - `GET /toy/user/info` - Returns user info with token validation
+
+2. **Dashboard Data:**
+   - `GET /toy/agent/list` - Returns user's agents with device counts
+   - `GET /toy/analytics/today/device-count` - Returns today's active device count
+   - `GET /toy/analytics/month/device-count` - Returns monthly device count
+   - `GET /toy/analytics/today/active-devices` - Returns list of today's active devices
+   - `GET /toy/analytics/month/active-devices` - Returns list of monthly active devices
+
+**Verification:**
+- Node.js API running at http://localhost:8002
+- Frontend running at http://localhost:8001
+- All login and dashboard API endpoints responding correctly
+- Response formats match frontend expectations (code, msg, data structure)
+
+---
 
 ### 2026-01-25 - Phase 4 Task 30 Complete (TTS Voice Endpoints)
 
