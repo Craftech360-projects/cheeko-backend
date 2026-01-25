@@ -579,7 +579,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test editing agent configuration",
       "Test viewing chat history"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "All agent endpoints working: agent/list, agent/all, agent/{id} (GET/PUT/DELETE), agent/sessions, agent/chat-history/user, agent/template"
   },
   {
     "id": 34,

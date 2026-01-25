@@ -42,7 +42,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 30 | voice | Test TTS voice endpoints | Complete |
 | 31 | integration | Full frontend test - Login and Dashboard | Complete |
 | 32 | integration | Full frontend test - Device Management | Complete |
-| 33-36 | integration | Full frontend integration tests | Pending |
+| 33 | integration | Full frontend test - Agent Configuration | Complete |
+| 34-36 | integration | Full frontend integration tests | Pending |
 
 ---
 
@@ -87,6 +88,39 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-25 - Phase 4 Task 33 Complete (Agent Configuration Integration)
+
+**Task 33: Full frontend test - Agent Configuration**
+
+**Status:** COMPLETE
+
+**Endpoints Tested:**
+
+1. **Agent Listing:**
+   - `GET /toy/agent/list` - User's own agents
+   - `GET /toy/agent/all` - Admin view all agents
+
+2. **Agent CRUD:**
+   - `POST /toy/agent` - Create new agent
+   - `GET /toy/agent/{agentId}` - Get agent configuration
+   - `PUT /toy/agent/{agentId}` - Update agent configuration
+   - `DELETE /toy/agent/{agentId}` - Delete agent
+
+3. **Chat History:**
+   - `GET /toy/agent/{agentId}/sessions` - Get sessions list
+   - `GET /toy/agent/{agentId}/chat-history/user` - Get recent user messages
+
+4. **Templates:**
+   - `GET /toy/agent/template` - Get agent templates
+
+**Verification:**
+- All agent CRUD operations working correctly
+- Agent ownership validation working
+- Chat history endpoints returning proper data structure
+- Template listing working correctly
+
+---
 
 ### 2026-01-25 - Phase 4 Task 32 Complete (Device Management Integration)
 
