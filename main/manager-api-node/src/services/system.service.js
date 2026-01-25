@@ -349,8 +349,8 @@ const createDictType = async (userId, data) => {
       dict_type: data.dictType,
       dict_name: data.dictName,
       remark: data.remark,
-      sort: data.sort || 0,
-      creator: userId
+      sort: data.sort || 0
+      // Note: creator column removed as it doesn't exist in current schema
     })
     .select()
     .single();
@@ -554,8 +554,8 @@ const createDictData = async (userId, data) => {
       dict_label: data.dictLabel,
       dict_value: data.dictValue,
       remark: data.remark,
-      sort: data.sort || 0,
-      creator: userId
+      sort: data.sort || 0
+      // Note: creator column removed as it doesn't exist in current schema
     })
     .select('*, dict_type:sys_dict_type(id, dict_type, dict_name)')
     .single();
