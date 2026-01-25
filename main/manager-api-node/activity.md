@@ -39,7 +39,7 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 27 | rfid | Test RFID pack endpoints | Complete |
 | 28 | rfid | Test RFID card endpoints | Complete |
 | 29 | rfid | Test RFID series endpoints | Complete |
-| 30 | voice | Test TTS voice endpoints | Pending |
+| 30 | voice | Test TTS voice endpoints | Complete |
 | 31-36 | integration | Full frontend integration tests | Pending |
 
 ---
@@ -85,6 +85,65 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-25 - Phase 4 Task 30 Complete (TTS Voice Endpoints)
+
+**Task 30: Test and fix TTS voice endpoints**
+
+**Status:** COMPLETE
+
+**Endpoints Created:**
+- `GET /ttsVoice` - Paginated search (ttsModelId required, name optional)
+- `POST /ttsVoice` - Save timbre (create new TTS voice)
+- `PUT /ttsVoice/{id}` - Modify timbre (update existing TTS voice)
+- `POST /ttsVoice/delete` - Delete timbre (batch delete with String[] ids)
+
+**Issues Found & Fixed:**
+
+1. **Missing endpoint path**
+   - Spring Boot uses `/ttsVoice` endpoint (TimbreController)
+   - Node.js only had `/models/tts-voices/*` endpoints
+   - Created new `ttsVoice.routes.js` to match Spring Boot path
+
+2. **Response format (snake_case vs camelCase)**
+   - Spring Boot returns TimbreDetailsVO with camelCase fields
+   - Added `transformTimbreToCamelCase()` helper for response transformation
+   - Maps: reference_audio→referenceAudio, reference_text→referenceText, tts_model_id→ttsModelId, tts_voice→ttsVoice, voice_demo→voiceDemo
+
+3. **Pagination support**
+   - Spring Boot uses PageData format with `list`, `total`, `page`, `limit`
+   - Added `getTtsVoicesPage()` service method with count and fuzzy name match
+   - Uses existing `paginated()` response helper
+
+4. **CUD operations response format**
+   - Spring Boot returns `Result<Void>` (null data) for POST, PUT, DELETE
+   - All CUD endpoints return `success(res, null)`
+
+5. **Authentication level**
+   - All endpoints require `requireAdmin` middleware
+   - Matches Spring Boot `sys:role:superAdmin` annotation
+
+6. **Validation requirements**
+   - POST/PUT require: languages, name, ttsModelId, ttsVoice (per TimbreDataDTO)
+   - Added validation checks matching Spring Boot @NotBlank annotations
+
+7. **Batch delete support**
+   - Spring Boot accepts String[] body for batch delete
+   - Added `deleteTimbreBatch()` service method with `.in('id', ids)` query
+
+**New Files:**
+- `src/routes/ttsVoice.routes.js` - New route file matching Spring Boot TimbreController
+
+**Files Modified:**
+- `src/services/model.service.js` - Added getTtsVoicesPage, createTimbre, updateTimbre, deleteTimbreBatch
+- `src/routes/index.js` - Added ttsVoice routes mount
+
+**Verification:**
+- `npm run lint` - No new errors in ttsVoice files
+- All endpoints match Spring Boot TimbreController signature
+- Response format matches TimbreDetailsVO and PageData
+
+---
 
 ### 2026-01-24 - Phase 4 Task 29 Complete (RFID Series Endpoints)
 

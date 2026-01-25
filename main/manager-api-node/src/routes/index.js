@@ -26,6 +26,7 @@ const otaMagRoutes = require('./otaMag.routes');
 const serverRoutes = require('./server.routes');
 const paramsRoutes = require('./params.routes');
 const dictRoutes = require('./dict.routes');
+const ttsVoiceRoutes = require('./ttsVoice.routes');
 
 /**
  * @swagger
@@ -199,5 +200,6 @@ router.use('/otaMag', otaMagRoutes);
 router.use('/admin/server', serverRoutes);
 router.use('/admin/params', paramsRoutes);
 router.use('/admin/dict', dictRoutes);
+router.use('/ttsVoice', ttsVoiceRoutes);
 
 module.exports = router;

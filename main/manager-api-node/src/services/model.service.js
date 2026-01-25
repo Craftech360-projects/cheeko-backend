@@ -935,6 +935,120 @@ const getVoicesByModelId = async (modelId, voiceName) => {
   }));
 };
 
+/**
+ * Get TTS voices with pagination (for /ttsVoice endpoint)
+ * Matches Spring Boot TimbreService.page()
+ * @param {string} ttsModelId - TTS model ID (required)
+ * @param {string} name - Timbre name filter (optional, fuzzy match)
+ * @param {number} page - Page number (1-indexed)
+ * @param {number} limit - Items per page
+ * @returns {Promise<Object>} PageData with list, total
+ */
+const getTtsVoicesPage = async (ttsModelId, name, page = 1, limit = 10) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  // Build query with filters
+  let query = supabaseAdmin
+    .from('ai_tts_voice')
+    .select('*', { count: 'exact' })
+    .eq('tts_model_id', ttsModelId);
+
+  // Fuzzy match on name if provided
+  if (name) {
+    query = query.ilike('name', `%${name}%`);
+  }
+
+  // Add pagination and ordering
+  query = query
+    .order('sort', { ascending: true })
+    .range(offset, offset + limit - 1);
+
+  const { data: voices, count, error } = await query;
+
+  if (error) throw new Error('Failed to fetch TTS voices');
+
+  return {
+    list: voices || [],
+    total: count || 0
+  };
+};
+
+/**
+ * Create timbre (for /ttsVoice POST endpoint)
+ * Matches Spring Boot TimbreService.save()
+ * @param {number} userId - User ID (creator)
+ * @param {Object} dto - TimbreDataDTO
+ */
+const createTimbre = async (userId, dto) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('ai_tts_voice')
+    .insert({
+      tts_model_id: dto.ttsModelId,
+      tts_voice: dto.ttsVoice,
+      name: dto.name,
+      languages: dto.languages,
+      remark: dto.remark,
+      reference_audio: dto.referenceAudio,
+      reference_text: dto.referenceText,
+      voice_demo: dto.voiceDemo,
+      sort: dto.sort || 0,
+      creator: userId,
+      create_date: new Date().toISOString()
+    });
+
+  if (error) throw new Error('Failed to create timbre');
+};
+
+/**
+ * Update timbre (for /ttsVoice/{id} PUT endpoint)
+ * Matches Spring Boot TimbreService.update()
+ * @param {string} timbreId - Timbre ID
+ * @param {number} userId - User ID (updater)
+ * @param {Object} dto - TimbreDataDTO
+ */
+const updateTimbre = async (timbreId, userId, dto) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('ai_tts_voice')
+    .update({
+      tts_model_id: dto.ttsModelId,
+      tts_voice: dto.ttsVoice,
+      name: dto.name,
+      languages: dto.languages,
+      remark: dto.remark,
+      reference_audio: dto.referenceAudio,
+      reference_text: dto.referenceText,
+      voice_demo: dto.voiceDemo,
+      sort: dto.sort || 0,
+      updater: userId,
+      update_date: new Date().toISOString()
+    })
+    .eq('id', timbreId);
+
+  if (error) throw new Error('Failed to update timbre');
+};
+
+/**
+ * Delete timbres in batch (for /ttsVoice/delete POST endpoint)
+ * Matches Spring Boot TimbreService.delete()
+ * @param {string[]} ids - Array of timbre IDs to delete
+ */
+const deleteTimbreBatch = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('ai_tts_voice')
+    .delete()
+    .in('id', ids);
+
+  if (error) throw new Error('Failed to delete timbres');
+};
+
 module.exports = {
   getModelsByType,
   getModelById,
@@ -964,5 +1078,10 @@ module.exports = {
   deleteProviders,
   getProviderPluginNames,
   // Voice by model
-  getVoicesByModelId
+  getVoicesByModelId,
+  // Timbre management (Spring Boot compatible)
+  getTtsVoicesPage,
+  createTimbre,
+  updateTimbre,
+  deleteTimbreBatch
 };
