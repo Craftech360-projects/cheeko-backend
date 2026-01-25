@@ -593,7 +593,8 @@ All manager-web frontend features work correctly with the Node.js API, matching 
       "Test enabling/disabling models",
       "Test setting default model"
     ],
-    "passes": false
+    "passes": true,
+    "notes": "Fixed: 1) Added missing ai_model_provider model to Prisma schema, 2) Verified all model endpoints (list, names, CRUD, enable, default), 3) Verified provider endpoints"
   },
   {
     "id": 35,

@@ -104,6 +104,23 @@ model ai_device {
   @@index([user_id], map: "idx_ai_device_user")
 }
 
+model ai_model_provider {
+  id            String   @id @default(dbgenerated("(gen_random_uuid())::text")) @db.VarChar(36)
+  model_type    String   @db.VarChar(50)
+  provider_code String   @db.VarChar(100)
+  name          String   @db.VarChar(255)
+  fields        Json     @default("[]")
+  sort          Int      @default(0)
+  creator       BigInt?
+  create_date   DateTime @default(now()) @db.Timestamptz(6)
+  updater       BigInt?
+  update_date   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([model_type, provider_code])
+  @@index([model_type])
+  @@index([provider_code])
+}
+
 model ai_model_config {
   id           String         @id @default(dbgenerated("(gen_random_uuid())::text")) @db.VarChar(36)
   model_type   String         @db.VarChar(50)

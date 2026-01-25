@@ -43,7 +43,8 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 | 31 | integration | Full frontend test - Login and Dashboard | Complete |
 | 32 | integration | Full frontend test - Device Management | Complete |
 | 33 | integration | Full frontend test - Agent Configuration | Complete |
-| 34-36 | integration | Full frontend integration tests | Pending |
+| 34 | integration | Full frontend test - Model Configuration | Complete |
+| 35-36 | integration | Full frontend integration tests | Pending |
 
 ---
 
@@ -88,6 +89,42 @@ Testing and fixing Node.js API to match Spring Boot API behavior for manager-web
 ---
 
 ## Activity Log
+
+### 2026-01-25 - Phase 4 Task 34 Complete (Model Configuration Integration)
+
+**Task 34: Full frontend test - Model Configuration**
+
+**Status:** COMPLETE
+
+**Issues Found & Fixed:**
+1. **Missing ai_model_provider table in Prisma schema**
+   - Added `ai_model_provider` model to prisma/schema.prisma
+   - Ran `prisma db push` to create the missing table
+   - Fixed model provider endpoints returning 500 error
+
+**Endpoints Tested:**
+
+1. **Model Provider CRUD:**
+   - `GET /toy/models/provider` - List providers (paginated)
+   - `POST /toy/models/provider` - Create provider
+
+2. **Model CRUD:**
+   - `GET /toy/models/list` - List models (paginated)
+   - `GET /toy/models/names` - Get model names
+   - `POST /toy/models/{modelType}/{providerCode}` - Create model
+   - `PUT /toy/models/{modelType}/{providerCode}/{id}` - Update model
+   - `DELETE /toy/models/{id}` - Delete model (with default check)
+
+3. **Model Status:**
+   - `PUT /toy/models/enable/{id}/{status}` - Enable/disable model
+   - `PUT /toy/models/default/{id}` - Set default model
+
+**Verification:**
+- All model CRUD operations working correctly
+- Default model validation working (can't delete default models)
+- Response formats match frontend expectations
+
+---
 
 ### 2026-01-25 - Phase 4 Task 33 Complete (Agent Configuration Integration)
 
