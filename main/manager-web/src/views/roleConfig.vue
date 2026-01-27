@@ -2,281 +2,112 @@
   <div class="welcome">
     <HeaderBar />
 
-    <div class="operation-bar">
-      <h2 class="page-title">Role Configuration</h2>
-    </div>
-
     <div class="main-wrapper">
       <div class="content-panel">
         <div class="content-area">
           <el-card class="config-card" shadow="never">
             <div class="config-header">
-              <div class="header-icon">
-                <img
-                  loading="lazy"
-                  src="@/assets/home/setting-user.png"
-                  alt=""
-                />
-              </div>
-              <span class="header-title">{{ form.agentName }}</span>
-              <div class="header-actions">
-                <div class="hint-text">
-                  <img loading="lazy" src="@/assets/home/info.png" alt="" />
-                  <span
-                    >After saving the configuration, you need to restart the
-                    device for the new configuration to take effect.</span
-                  >
+              <div class="header-left">
+                <div class="header-icon">
+                  <img loading="lazy" src="@/assets/home/setting-user.png" alt="" />
                 </div>
-                <el-button type="primary" class="save-btn" @click="saveConfig"
-                  >Save Configuration</el-button
-                >
-                <el-button class="reset-btn" @click="resetConfig"
-                  >Reset</el-button
-                >
+                <span class="header-title">{{ form.agentName || 'Role Configuration' }}</span>
+              </div>
+              <div class="header-actions">
+                <el-button type="primary" class="save-btn" @click="saveConfig">
+                  <i class="el-icon-check"></i> Save
+                </el-button>
+                <el-button class="reset-btn" @click="resetConfig">
+                  <i class="el-icon-refresh"></i> Reset
+                </el-button>
                 <button class="custom-close-btn" @click="goToHome">×</button>
               </div>
             </div>
+
             <div class="divider"></div>
 
-            <el-form ref="form" :model="form" label-width="72px">
-              <div class="form-content">
-                <div class="form-grid">
-                  <div class="form-column">
-                    <el-form-item label="Assistant Name:">
-                      <el-input
-                        v-model="form.agentName"
-                        class="form-input"
-                        maxlength="10"
-                      />
-                    </el-form-item>
-                    <el-form-item label="Role Template:">
-                      <div class="template-container">
-                        <div
-                          v-for="(template, index) in templates"
-                          :key="`template-${index}`"
-                          class="template-item"
-                          :class="{ 'template-loading': loadingTemplate }"
-                          @click="selectTemplate(template)"
-                        >
-                          {{ template.agentName }}
-                        </div>
-                      </div>
-                    </el-form-item>
-                    <el-form-item label="Role Description:">
-                      <el-input
-                        type="textarea"
-                        rows="9"
-                        resize="none"
-                        placeholder="Enter content"
-                        v-model="form.systemPrompt"
-                        maxlength="10000"
-                        show-word-limit
-                        class="form-textarea"
-                      />
-                    </el-form-item>
+            <el-form ref="form" :model="form" label-position="top" class="config-form">
+              <!-- Assistant Name -->
+              <el-form-item label="Assistant Name" class="form-item-card">
+                <el-input
+                  v-model="form.agentName"
+                  placeholder="Enter assistant name"
+                  maxlength="30"
+                  show-word-limit
+                  class="form-input"
+                />
+              </el-form-item>
 
-                    <el-form-item label="Memory:">
-                      <el-input
-                        type="textarea"
-                        rows="6"
-                        resize="none"
-                        v-model="form.summaryMemory"
-                        maxlength="2000"
-                        show-word-limit
-                        class="form-textarea"
-                        :disabled="
-                          form.model.memModelId !== 'Memory_mem_local_short'
-                        "
-                      />
-                    </el-form-item>
-                    <el-form-item label="Language Code:" style="display: none">
-                      <el-input
-                        v-model="form.langCode"
-                        placeholder="Enter language code, e.g. zh_CN"
-                        maxlength="10"
-                        show-word-limit
-                        class="form-input"
-                      />
-                    </el-form-item>
-                    <el-form-item
-                      label="Interaction Language:"
-                      style="display: none"
-                    >
-                      <el-input
-                        v-model="form.language"
-                        placeholder="Enter interaction language, e.g. Chinese"
-                        maxlength="10"
-                        show-word-limit
-                        class="form-input"
-                      />
-                    </el-form-item>
+              <!-- Role Template -->
+              <el-form-item label="Apply Template" class="form-item-card">
+                <div class="template-container">
+                  <div
+                    v-for="(template, index) in templates"
+                    :key="`template-${index}`"
+                    class="template-item"
+                    :class="{
+                      'template-loading': loadingTemplate,
+                      'template-active': selectedTemplate && selectedTemplate.id === template.id
+                    }"
+                    @click="selectTemplate(template)"
+                  >
+                    <i class="el-icon-document"></i>
+                    {{ template.agentName }}
                   </div>
-                  <div class="form-column">
-                    <div class="model-row">
-                      <el-form-item
-                        label="Voice Activity Detection (VAD)"
-                        class="model-item"
-                      >
-                        <div class="model-select-wrapper">
-                          <el-select
-                            v-model="form.model.vadModelId"
-                            filterable
-                            placeholder="Please select"
-                            class="form-select"
-                            @change="handleModelChange('VAD', $event)"
-                          >
-                            <el-option
-                              v-for="(item, optionIndex) in modelOptions['VAD']"
-                              :key="`option-vad-${optionIndex}`"
-                              :label="item.label"
-                              :value="item.value"
-                            />
-                          </el-select>
-                        </div>
-                      </el-form-item>
-                      <el-form-item
-                        label="Speech Recognition (ASR)"
-                        class="model-item"
-                      >
-                        <div class="model-select-wrapper">
-                          <el-select
-                            v-model="form.model.asrModelId"
-                            filterable
-                            placeholder="Please select"
-                            class="form-select"
-                            @change="handleModelChange('ASR', $event)"
-                          >
-                            <el-option
-                              v-for="(item, optionIndex) in modelOptions['ASR']"
-                              :key="`option-asr-${optionIndex}`"
-                              :label="item.label"
-                              :value="item.value"
-                            />
-                          </el-select>
-                        </div>
-                      </el-form-item>
-                    </div>
-                    <el-form-item
-                      v-for="(model, index) in models
-                        .slice(2)
-                        .filter((m) => m.type !== 'VLLM')"
-                      :key="`model-${index}`"
-                      :label="model.label"
-                      class="model-item"
-                    >
-                      <div class="model-select-wrapper">
-                        <el-select
-                          v-model="form.model[model.key]"
-                          filterable
-                          placeholder="Please select"
-                          class="form-select"
-                          @change="handleModelChange(model.type, $event)"
-                        >
-                          <el-option
-                            v-for="(item, optionIndex) in modelOptions[
-                              model.type
-                            ]"
-                            v-if="!item.isHidden"
-                            :key="`option-${index}-${optionIndex}`"
-                            :label="item.label"
-                            :value="item.value"
-                          />
-                        </el-select>
-                        <div
-                          v-if="showFunctionIcons(model.type)"
-                          class="function-icons"
-                        >
-                          <el-tooltip
-                            v-for="func in currentFunctions"
-                            :key="func.name"
-                            effect="dark"
-                            placement="top"
-                            popper-class="custom-tooltip"
-                          >
-                            <div slot="content">
-                              <div>
-                                <strong>Function Name:</strong> {{ func.name }}
-                              </div>
-                            </div>
-                            <div
-                              class="icon-dot"
-                              :style="{
-                                backgroundColor: getFunctionColor(func.name),
-                              }"
-                            >
-                              {{ func.name.charAt(0) }}
-                            </div>
-                          </el-tooltip>
-                          <el-button
-                            class="edit-function-btn"
-                            @click="openFunctionDialog"
-                            :class="{ 'active-btn': showFunctionDialog }"
-                          >
-                            Edit Functions
-                          </el-button>
-                        </div>
-                        <div
-                          v-if="
-                            model.type === 'Memory' &&
-                            form.model.memModelId !== 'Memory_nomem'
-                          "
-                          class="chat-history-options"
-                        >
-                          <el-radio-group
-                            v-model="form.chatHistoryConf"
-                            @change="updateChatHistoryConf"
-                          >
-                            <el-radio-button :label="1"
-                              >Report Text</el-radio-button
-                            >
-                            <el-radio-button :label="2"
-                              >Report Text + Audio</el-radio-button
-                            >
-                          </el-radio-group>
-                        </div>
-                      </div>
-                    </el-form-item>
-                    <el-form-item label="Voice Type:">
-                      <el-select
-                        v-model="form.ttsVoiceId"
-                        placeholder="Please select"
-                        class="form-select"
-                      >
-                        <el-option
-                          v-for="(item, index) in voiceOptions"
-                          :key="`voice-${index}`"
-                          :label="item.label"
-                          :value="item.value"
-                        />
-                      </el-select>
-                    </el-form-item>
+                  <div v-if="templates.length === 0" class="no-templates">
+                    No templates available
                   </div>
                 </div>
+              </el-form-item>
+
+              <!-- System Prompt / Role Description -->
+              <el-form-item label="Role Description" class="form-item-card">
+                <el-input
+                  type="textarea"
+                  :rows="5"
+                  resize="vertical"
+                  placeholder="Describe the assistant's personality, behavior, and how it should respond..."
+                  v-model="form.systemPrompt"
+                  maxlength="10000"
+                  show-word-limit
+                  class="form-textarea"
+                />
+              </el-form-item>
+
+              <!-- Memory / Summary -->
+              <el-form-item label="Memory Notes" class="form-item-card">
+                <el-input
+                  type="textarea"
+                  :rows="3"
+                  resize="vertical"
+                  placeholder="Add any persistent memory or context the assistant should remember..."
+                  v-model="form.summaryMemory"
+                  maxlength="2000"
+                  show-word-limit
+                  class="form-textarea"
+                />
+              </el-form-item>
+
+              <!-- Info hint -->
+              <div class="info-hint">
+                <i class="el-icon-info"></i>
+                <span>After saving, restart the device for changes to take effect.</span>
               </div>
             </el-form>
           </el-card>
         </div>
       </div>
     </div>
-    <function-dialog
-      v-model="showFunctionDialog"
-      :functions="currentFunctions"
-      :all-functions="allFunctions"
-      :agent-id="$route.query.agentId"
-      @update-functions="handleUpdateFunctions"
-      @dialog-closed="handleDialogClosed"
-    />
   </div>
 </template>
 
 <script>
 import Api from "@/apis/api";
-import FunctionDialog from "@/components/FunctionDialog.vue";
 import HeaderBar from "@/components/HeaderBar.vue";
 
 export default {
   name: "RoleConfigPage",
-  components: { HeaderBar, FunctionDialog },
+  components: { HeaderBar },
   data() {
     return {
       form: {
@@ -299,46 +130,9 @@ export default {
           intentModelId: "",
         },
       },
-      models: [
-        {
-          label: "Voice Activity Detection (VAD)",
-          key: "vadModelId",
-          type: "VAD",
-        },
-        { label: "Speech Recognition (ASR)", key: "asrModelId", type: "ASR" },
-        { label: "Large Language Model (LLM)", key: "llmModelId", type: "LLM" },
-        {
-          label: "Vision Language Model (VLLM)",
-          key: "vllmModelId",
-          type: "VLLM",
-        },
-        {
-          label: "Intent Recognition (Intent)",
-          key: "intentModelId",
-          type: "Intent",
-        },
-        { label: "Memory", key: "memModelId", type: "Memory" },
-        { label: "Text-to-Speech (TTS)", key: "ttsModelId", type: "TTS" },
-      ],
-      llmModeTypeMap: new Map(),
-      modelOptions: {},
       templates: [],
       loadingTemplate: false,
-      selectedTemplate: null, // Track currently selected template
-      voiceOptions: [],
-      showFunctionDialog: false,
-      currentFunctions: [],
-      functionColorMap: [
-        "#FF6B6B",
-        "#4ECDC4",
-        "#45B7D1",
-        "#96CEB4",
-        "#FFEEAD",
-        "#D4A5A5",
-        "#A2836E",
-      ],
-      allFunctions: [],
-      originalFunctions: [],
+      selectedTemplate: null,
     };
   },
   methods: {
@@ -346,6 +140,11 @@ export default {
       this.$router.push("/home");
     },
     saveConfig() {
+      if (!this.form.agentName?.trim()) {
+        this.$message.warning("Please enter an assistant name");
+        return;
+      }
+
       const configData = {
         agentCode: this.form.agentCode,
         agentName: this.form.agentName,
@@ -363,227 +162,74 @@ export default {
         langCode: this.form.langCode,
         language: this.form.language,
         sort: this.form.sort,
-        functions: this.currentFunctions.map((item) => {
-          return {
-            pluginId: item.id,
-            paramInfo: item.params,
-          };
-        }),
       };
 
-      // Check if we need to update template
-      if (this.selectedTemplate && this.hasTemplateChanges()) {
-        this.$confirm(
-          "Do you want to save changes to the template as well? This will affect all future uses of this template.",
-          "Update Template",
-          {
-            confirmButtonText: "Update Template",
-            cancelButtonText: "Keep Template Unchanged",
-            type: "question",
-            distinguishCancelAndClose: true,
-          }
-        )
-          .then(() => {
-            // User wants to update template
-            this.saveConfigAndTemplate(configData);
-          })
-          .catch((action) => {
-            if (action === "cancel") {
-              // User wants to save config only
-              this.saveConfigOnly(configData);
-            }
-          });
-      } else {
-        // No template changes, save config only
-        this.saveConfigOnly(configData);
-      }
-    },
-
-    saveConfigOnly(configData) {
       Api.agent.updateAgentConfig(
         this.$route.query.agentId,
         configData,
         ({ data }) => {
           if (data.code === 0) {
-            this.$message.success({
-              message: "Configuration saved successfully",
-              showClose: true,
-            });
+            this.$message.success("Configuration saved successfully");
           } else {
-            this.$message.error({
-              message: data.msg || "Failed to save configuration",
-              showClose: true,
-            });
+            this.$message.error(data.msg || "Failed to save configuration");
           }
         }
-      );
-    },
-
-    saveConfigAndTemplate(configData) {
-      // First save the agent config
-      Api.agent.updateAgentConfig(
-        this.$route.query.agentId,
-        configData,
-        ({ data }) => {
-          if (data.code === 0) {
-            // Then update the template
-            const templateData = {
-              agentName: this.form.agentName,
-              systemPrompt: this.form.systemPrompt,
-              summaryMemory: this.form.summaryMemory,
-              asrModelId: this.form.model.asrModelId,
-              vadModelId: this.form.model.vadModelId,
-              llmModelId: this.form.model.llmModelId,
-              vllmModelId: this.form.model.vllmModelId,
-              ttsModelId: this.form.model.ttsModelId,
-              ttsVoiceId: this.form.ttsVoiceId,
-              memModelId: this.form.model.memModelId,
-              intentModelId: this.form.model.intentModelId,
-              chatHistoryConf: this.form.chatHistoryConf,
-              langCode: this.form.langCode,
-              language: this.form.language,
-            };
-
-            Api.agent.updateAgentTemplate(
-              this.selectedTemplate.id,
-              templateData,
-              ({ data: templateResult }) => {
-                if (templateResult.code === 0) {
-                  this.$message.success({
-                    message: "Configuration and template saved successfully",
-                    showClose: true,
-                  });
-                  // Refresh templates to reflect changes
-                  this.fetchTemplates();
-                } else {
-                  this.$message.warning({
-                    message:
-                      "Configuration saved but template update failed: " +
-                      (templateResult.msg || "Unknown error"),
-                    showClose: true,
-                  });
-                }
-              }
-            );
-          } else {
-            this.$message.error({
-              message: data.msg || "Failed to save configuration",
-              showClose: true,
-            });
-          }
-        }
-      );
-    },
-
-    hasTemplateChanges() {
-      if (!this.selectedTemplate) return false;
-
-      return (
-        // Agent name changes are not tracked since we preserve original names
-        this.form.systemPrompt !== this.selectedTemplate.systemPrompt ||
-        this.form.summaryMemory !== this.selectedTemplate.summaryMemory ||
-        this.form.model.asrModelId !== this.selectedTemplate.asrModelId ||
-        this.form.model.vadModelId !== this.selectedTemplate.vadModelId ||
-        this.form.model.llmModelId !== this.selectedTemplate.llmModelId ||
-        this.form.model.vllmModelId !== this.selectedTemplate.vllmModelId ||
-        this.form.model.ttsModelId !== this.selectedTemplate.ttsModelId ||
-        this.form.ttsVoiceId !== this.selectedTemplate.ttsVoiceId ||
-        this.form.model.memModelId !== this.selectedTemplate.memModelId ||
-        this.form.model.intentModelId !== this.selectedTemplate.intentModelId ||
-        this.form.chatHistoryConf !== this.selectedTemplate.chatHistoryConf ||
-        this.form.langCode !== this.selectedTemplate.langCode ||
-        this.form.language !== this.selectedTemplate.language
       );
     },
     resetConfig() {
       this.$confirm(
-        "Are you sure you want to reset the configuration?",
-        "Confirm",
+        "Are you sure you want to reset? Unsaved changes will be lost.",
+        "Reset Configuration",
         {
-          confirmButtonText: "Confirm",
+          confirmButtonText: "Reset",
           cancelButtonText: "Cancel",
           type: "warning",
         }
       )
         .then(() => {
-          this.form = {
-            agentCode: "",
-            agentName: "",
-            ttsVoiceId: "",
-            chatHistoryConf: 1,
-            systemPrompt: "",
-            summaryMemory: "",
-            langCode: "",
-            language: "",
-            sort: "",
-            model: {
-              ttsModelId: "",
-              vadModelId: "",
-              asrModelId: "",
-              llmModelId: "",
-              vllmModelId: "",
-              memModelId: "Memory_mem_local_short",
-              intentModelId: "",
-            },
-          };
-          this.currentFunctions = [];
-          this.$message.success({
-            message: "Configuration has been reset",
-            showClose: true,
-          });
+          // Reload from server
+          this.fetchAgentConfig(this.$route.query.agentId);
+          this.selectedTemplate = null;
+          this.$message.success("Configuration reset");
         })
         .catch(() => {});
     },
     fetchTemplates() {
       Api.agent.getAgentTemplate(({ data }) => {
         if (data.code === 0) {
-          this.templates = data.data;
-        } else {
-          this.$message.error(data.msg || "Failed to get template list");
+          this.templates = data.data || [];
         }
       });
     },
     selectTemplate(template) {
       if (this.loadingTemplate) return;
       this.loadingTemplate = true;
+
       try {
-        this.selectedTemplate = template; // Track selected template
-        this.applyTemplateData(template);
-        this.$message.success({
-          message: `"${template.agentName}" template applied`,
-          showClose: true,
-        });
+        this.selectedTemplate = template;
+        // Apply template data but keep the agent name
+        this.form.systemPrompt = template.systemPrompt || this.form.systemPrompt;
+        this.form.summaryMemory = template.summaryMemory || this.form.summaryMemory;
+        this.form.ttsVoiceId = template.ttsVoiceId || this.form.ttsVoiceId;
+        this.form.chatHistoryConf = template.chatHistoryConf !== undefined ? template.chatHistoryConf : 1;
+        this.form.langCode = template.langCode || this.form.langCode;
+        this.form.model = {
+          ttsModelId: template.ttsModelId || this.form.model.ttsModelId,
+          vadModelId: template.vadModelId || this.form.model.vadModelId,
+          asrModelId: template.asrModelId || this.form.model.asrModelId,
+          llmModelId: template.llmModelId || this.form.model.llmModelId,
+          vllmModelId: template.vllmModelId || this.form.model.vllmModelId,
+          memModelId: template.memModelId || this.form.model.memModelId,
+          intentModelId: template.intentModelId || this.form.model.intentModelId,
+        };
+
+        this.$message.success(`Template "${template.agentName}" applied`);
       } catch (error) {
-        this.$message.error({
-          message: "Failed to apply template",
-          showClose: true,
-        });
+        this.$message.error("Failed to apply template");
         console.error("Failed to apply template:", error);
       } finally {
         this.loadingTemplate = false;
       }
-    },
-    applyTemplateData(templateData) {
-      this.form = {
-        ...this.form,
-        // Keep original agent name - don't override with template name
-        ttsVoiceId: templateData.ttsVoiceId || this.form.ttsVoiceId,
-        chatHistoryConf:
-          templateData.chatHistoryConf !== undefined ? templateData.chatHistoryConf : 1,
-        systemPrompt: templateData.systemPrompt || this.form.systemPrompt,
-        summaryMemory: templateData.summaryMemory || this.form.summaryMemory,
-        langCode: templateData.langCode || this.form.langCode,
-        model: {
-          ttsModelId: templateData.ttsModelId || this.form.model.ttsModelId,
-          vadModelId: templateData.vadModelId || this.form.model.vadModelId,
-          asrModelId: templateData.asrModelId || this.form.model.asrModelId,
-          llmModelId: templateData.llmModelId || this.form.model.llmModelId,
-          vllmModelId: templateData.vllmModelId || this.form.model.vllmModelId,
-          memModelId: templateData.memModelId || this.form.model.memModelId,
-          intentModelId:
-            templateData.intentModelId || this.form.model.intentModelId,
-        },
-      };
     },
     fetchAgentConfig(agentId) {
       Api.agent.getDeviceConfig(agentId, ({ data }) => {
@@ -601,270 +247,17 @@ export default {
               intentModelId: data.data.intentModelId,
             },
           };
-          // Backend only provides minimal mapping: [{ id, agentId, pluginId }, ...]
-          const savedMappings = data.data.functions || [];
-
-          // Ensure allFunctions is loaded first (if not, fetch it first)
-          const ensureFuncs = this.allFunctions.length
-            ? Promise.resolve()
-            : this.fetchAllFunctions();
-
-          ensureFuncs.then(() => {
-            // Merge: Fill in complete metadata by pluginId (id field)
-            this.currentFunctions = savedMappings.map((mapping) => {
-              const meta = this.allFunctions.find(
-                (f) => f.id === mapping.pluginId
-              );
-              if (!meta) {
-                // Plugin definition not found, fallback handling
-                return {
-                  id: mapping.pluginId,
-                  name: mapping.pluginId,
-                  params: {},
-                };
-              }
-              return {
-                id: mapping.pluginId,
-                name: meta.name,
-                // Use mapping.paramInfo if backend provides it, otherwise use meta.params default
-                params: mapping.paramInfo || { ...meta.params },
-                fieldsMeta: meta.fieldsMeta, // Keep for dialog tooltip rendering
-              };
-            });
-            // Backup original for restore on cancel
-            this.originalFunctions = JSON.parse(
-              JSON.stringify(this.currentFunctions)
-            );
-
-            // Ensure intent recognition options visibility is correct
-            this.updateIntentOptionsVisibility();
-          });
         } else {
-          this.$message.error(data.msg || "Failed to get configuration");
+          this.$message.error(data.msg || "Failed to load configuration");
         }
       });
-    },
-    fetchModelOptions() {
-      this.models.forEach((model) => {
-        if (model.type != "LLM") {
-          Api.model.getModelNames(model.type, "", ({ data }) => {
-            if (data.code === 0) {
-              this.$set(
-                this.modelOptions,
-                model.type,
-                data.data.map((item) => ({
-                  value: item.id,
-                  label: item.modelName,
-                  isHidden: false,
-                }))
-              );
-
-              // For intent recognition options, update visibility based on current LLM type
-              if (model.type === "Intent") {
-                this.updateIntentOptionsVisibility();
-              }
-            } else {
-              this.$message.error(data.msg || "Failed to get model list");
-            }
-          });
-        } else {
-          Api.model.getLlmModelCodeList("", ({ data }) => {
-            if (data.code === 0) {
-              let LLMdata = [];
-              data.data.forEach((item) => {
-                LLMdata.push({
-                  value: item.id,
-                  label: item.modelName,
-                  isHidden: false,
-                });
-                this.llmModeTypeMap.set(item.id, item.type);
-              });
-              this.$set(this.modelOptions, model.type, LLMdata);
-            } else {
-              this.$message.error(data.msg || "Failed to get LLM model list");
-            }
-          });
-        }
-      });
-    },
-    fetchVoiceOptions(modelId) {
-      if (!modelId) {
-        this.voiceOptions = [];
-        return;
-      }
-      Api.model.getModelVoices(modelId, "", ({ data }) => {
-        if (data.code === 0 && data.data) {
-          this.voiceOptions = data.data.map((voice) => ({
-            value: voice.id,
-            label: voice.name,
-          }));
-        } else {
-          this.voiceOptions = [];
-        }
-      });
-    },
-    getFunctionColor(name) {
-      const hash = [...name].reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      return this.functionColorMap[hash % this.functionColorMap.length];
-    },
-    showFunctionIcons(type) {
-      return (
-        type === "Intent" && this.form.model.intentModelId !== "Intent_nointent"
-      );
-    },
-    handleModelChange(type, value) {
-      if (type === "Intent" && value !== "Intent_nointent") {
-        this.fetchAllFunctions();
-      }
-      if (type === "Memory" && value === "Memory_nomem") {
-        this.form.chatHistoryConf = 0;
-      }
-      if (type === "Memory" && value !== "Memory_nomem") {
-        // For any enabled memory type (Local Short Term or Mem0AI), default to Report Text
-        if (this.form.chatHistoryConf === 0 || this.form.chatHistoryConf === null || this.form.chatHistoryConf === undefined) {
-          this.form.chatHistoryConf = 1;
-        }
-        // Explicitly ensure Mem0AI also defaults to Report Text
-        if (value === "Memory_mem0ai" && (this.form.chatHistoryConf === 0 || this.form.chatHistoryConf === null || this.form.chatHistoryConf === undefined)) {
-          this.form.chatHistoryConf = 1;
-        }
-      }
-      if (type === "LLM") {
-        // Update intent recognition options visibility when LLM type changes
-        this.updateIntentOptionsVisibility();
-      }
-    },
-    fetchAllFunctions() {
-      return new Promise((resolve, reject) => {
-        Api.model.getPluginFunctionList(null, ({ data }) => {
-          if (data.code === 0) {
-            this.allFunctions = data.data.map((item) => {
-              const meta = JSON.parse(item.fields || "[]");
-              const params = meta.reduce((m, f) => {
-                m[f.key] = f.default;
-                return m;
-              }, {});
-              return { ...item, fieldsMeta: meta, params };
-            });
-            resolve();
-          } else {
-            this.$message.error(data.msg || "Failed to get plugin list");
-            reject();
-          }
-        });
-      });
-    },
-    openFunctionDialog() {
-      // Ensure allFunctions is loaded when showing edit dialog
-      if (this.allFunctions.length === 0) {
-        this.fetchAllFunctions().then(() => (this.showFunctionDialog = true));
-      } else {
-        this.showFunctionDialog = true;
-      }
-    },
-    handleUpdateFunctions(selected) {
-      this.currentFunctions = selected;
-    },
-    handleDialogClosed(saved) {
-      if (!saved) {
-        this.currentFunctions = JSON.parse(
-          JSON.stringify(this.originalFunctions)
-        );
-      } else {
-        this.originalFunctions = JSON.parse(
-          JSON.stringify(this.currentFunctions)
-        );
-      }
-      this.showFunctionDialog = false;
-    },
-    updateIntentOptionsVisibility() {
-      // Update intent recognition options visibility based on selected LLM type
-      const currentLlmId = this.form.model.llmModelId;
-      if (!currentLlmId || !this.modelOptions["Intent"]) return;
-
-      const llmType = this.llmModeTypeMap.get(currentLlmId);
-      if (!llmType) return;
-
-      this.modelOptions["Intent"].forEach((item) => {
-        if (item.value === "Intent_function_call") {
-          // If llmType is openai or ollama, allow function_call selection
-          // Otherwise hide function_call option
-          if (llmType === "openai" || llmType === "ollama") {
-            item.isHidden = false;
-          } else {
-            item.isHidden = true;
-          }
-        } else {
-          // Other intent recognition options are always visible
-          item.isHidden = false;
-        }
-      });
-
-      // If current intent recognition is function_call but LLM type doesn't support it, set to first available option
-      if (
-        this.form.model.intentModelId === "Intent_function_call" &&
-        llmType !== "openai" &&
-        llmType !== "ollama"
-      ) {
-        // Find first visible option
-        const firstVisibleOption = this.modelOptions["Intent"].find(
-          (item) => !item.isHidden
-        );
-        if (firstVisibleOption) {
-          this.form.model.intentModelId = firstVisibleOption.value;
-        } else {
-          // If no visible options, set to Intent_nointent
-          this.form.model.intentModelId = "Intent_nointent";
-        }
-      }
-    },
-    updateChatHistoryConf() {
-      if (this.form.model.memModelId === "Memory_nomem") {
-        this.form.chatHistoryConf = 0;
-      } else if (this.form.model.memModelId === "Memory_mem0ai" || this.form.model.memModelId === "Memory_mem_local_short") {
-        // Ensure enabled memory types default to Report Text if not already set
-        if (this.form.chatHistoryConf === 0 || this.form.chatHistoryConf === null || this.form.chatHistoryConf === undefined) {
-          this.form.chatHistoryConf = 1;
-        }
-      }
-    },
-  },
-  watch: {
-    "form.model.ttsModelId": {
-      handler(newVal, oldVal) {
-        if (oldVal && newVal !== oldVal) {
-          this.form.ttsVoiceId = "";
-          this.fetchVoiceOptions(newVal);
-        } else {
-          this.fetchVoiceOptions(newVal);
-        }
-      },
-      immediate: true,
-    },
-    "form.model.memModelId": {
-      handler(newVal, oldVal) {
-        if (newVal && newVal !== oldVal) {
-          this.updateChatHistoryConf();
-        }
-      },
-      immediate: true,
-    },
-    voiceOptions: {
-      handler(newVal) {
-        if (newVal && newVal.length > 0 && !this.form.ttsVoiceId) {
-          this.form.ttsVoiceId = newVal[0].value;
-        }
-      },
-      immediate: true,
     },
   },
   mounted() {
     const agentId = this.$route.query.agentId;
     if (agentId) {
       this.fetchAgentConfig(agentId);
-      this.fetchAllFunctions();
     }
-    this.fetchModelOptions();
     this.fetchTemplates();
   },
 };
@@ -874,312 +267,286 @@ export default {
 @import '@/styles/theme.scss';
 
 .welcome {
-  min-width: 900px;
+  min-width: 600px;
   height: 100vh;
   display: flex;
-  position: relative;
   flex-direction: column;
-  background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6);
-  background-size: cover;
-  -webkit-background-size: cover;
-  -o-background-size: cover;
+  background: linear-gradient(135deg, #fff5eb 0%, #fff7f0 50%, #ffe8d6 100%);
   overflow: hidden;
 }
 
-.operation-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5vh 24px;
-}
-
-.page-title {
-  font-size: 24px;
-  margin: 0;
-  color: #2c3e50;
-}
-
 .main-wrapper {
-  margin: 1vh 22px;
-  border-radius: 15px;
-  height: calc(100vh - 24vh);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-  position: relative;
-  background: rgba(237, 242, 255, 0.5);
+  flex: 1;
+  margin: 12px;
+  margin-top: 8px;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.9);
   display: flex;
-  flex-direction: column;
+  overflow: hidden;
 }
 
 .content-panel {
   flex: 1;
   display: flex;
   overflow: hidden;
-  height: 100%;
-  border-radius: 15px;
-  background: transparent;
-  border: 1px solid #fff;
 }
 
 .content-area {
   flex: 1;
-  height: 100%;
-  min-width: 600px;
   overflow: auto;
-  background-color: white;
-  display: flex;
-  flex-direction: column;
+  padding: 16px;
+  max-width: 700px;
+  margin: 0 auto;
 }
 
 .config-card {
-  background: white;
+  background: transparent;
   border: none;
   box-shadow: none;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  overflow-y: auto;
+}
+
+::v-deep .config-card .el-card__body {
+  padding: 0;
 }
 
 .config-header {
-  position: relative;
   display: flex;
   align-items: center;
-  gap: 13px;
-  padding: 0 0 5px 0;
-  font-weight: 700;
-  font-size: 19px;
-  color: #3d4566;
+  justify-content: space-between;
+  padding-bottom: 10px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .header-icon {
-  width: 37px;
-  height: 37px;
-  background: $primary;
-  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, $primary, darken($primary, 10%));
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 4px 12px rgba($primary, 0.3);
 }
 
 .header-icon img {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
+  filter: brightness(0) invert(1);
 }
 
-.divider {
-  height: 1px;
-  background: #e8f0ff;
-}
-
-.form-content {
-  padding: 2vh 0;
-}
-
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-
-.form-column {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.form-input {
-  width: 100%;
-}
-
-.form-select {
-  width: 100%;
-}
-
-.form-textarea {
-  width: 100%;
-}
-
-.template-container {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.template-item {
-  height: 4vh;
-  width: auto;
-  border-radius: 8px;
-  background: rgba($primary, 0.15);
-  line-height: 4vh;
-  font-weight: 400;
-  font-size: 14px;
-  text-align: center;
-  color: $primary;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-  padding-left: 10px;
-  padding-right: 10px;
-}
-
-.template-item:hover {
-  background-color: rgba($primary, 0.25);
-}
-
-.model-select-wrapper {
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.model-row {
-  display: flex;
-  gap: 20px;
-  margin-bottom: 6px;
-}
-
-.model-row .model-item {
-  flex: 1;
-  margin-bottom: 0;
-}
-
-.model-row .el-form-item__label {
-  font-size: 12px !important;
-  color: #3d4566 !important;
-  font-weight: 400;
-  line-height: 22px;
-  padding-bottom: 2px;
-}
-
-.function-icons {
-  display: flex;
-  align-items: center;
-  margin-left: auto;
-  padding-left: 10px;
-}
-
-.icon-dot {
-  width: 25px;
-  height: 25px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-  font-weight: bold;
-  font-size: 12px;
-  margin-right: 8px;
-  position: relative;
-}
-
-::v-deep .el-form-item__label {
-  font-size: 12px !important;
-  color: #3d4566 !important;
-  font-weight: 400;
-  line-height: 22px;
-  padding-bottom: 2px;
-}
-
-::v-deep .el-textarea .el-input__count {
-  color: #909399;
-  background: none;
-  position: absolute;
-  font-size: 12px;
-  right: 3%;
-}
-
-.custom-close-btn {
-  position: absolute;
-  top: 25%;
-  right: 0;
-  transform: translateY(-50%);
-  width: 35px;
-  height: 35px;
-  border-radius: 50%;
-  border: 2px solid #cfcfcf;
-  background: none;
-  font-size: 30px;
-  font-weight: lighter;
-  color: #cfcfcf;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-  padding: 0;
-  outline: none;
-}
-
-.custom-close-btn:hover {
-  color: #409eff;
-  border-color: #409eff;
-}
-
-.edit-function-btn {
-  background: rgba($primary, 0.15);
-  color: $primary;
-  border: 1px solid rgba($primary, 0.4);
-  border-radius: 18px;
-  padding: 10px 20px;
-  transition: all 0.3s;
-}
-
-.edit-function-btn.active-btn {
-  background: $primary;
-  color: white;
-}
-
-.chat-history-options {
-  display: flex;
-  gap: 10px;
-  min-width: 250px;
-  justify-content: flex-end;
+.header-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2c3e50;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-left: auto;
+  gap: 10px;
 }
 
-.header-actions .hint-text {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: #979db1;
-  font-size: 12px;
-  margin-right: 8px;
-}
-
-.header-actions .hint-text img {
-  width: 16px;
-  height: 16px;
-}
-
-.header-actions .save-btn {
-  background: $primary;
-  color: white;
+.save-btn {
+  background: linear-gradient(135deg, $primary, darken($primary, 8%));
   border: none;
-  border-radius: 18px;
+  border-radius: 8px;
   padding: 8px 16px;
-  height: 32px;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba($primary, 0.3);
+  transition: all 0.3s;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba($primary, 0.4);
+  }
 }
 
-.header-actions .reset-btn {
-  background: rgba($primary, 0.15);
-  color: $primary;
-  border: 1px solid rgba($primary, 0.4);
-  border-radius: 18px;
+.reset-btn {
+  background: white;
+  color: #666;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
   padding: 8px 16px;
-  height: 32px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.3s;
+
+  &:hover {
+    background: #f5f5f5;
+    border-color: #ccc;
+  }
 }
 
-.header-actions .custom-close-btn {
-  position: static;
-  transform: none;
+.custom-close-btn {
   width: 32px;
   height: 32px;
-  margin-left: 8px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  background: white;
+  font-size: 18px;
+  color: #999;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+
+  &:hover {
+    background: #fff5f5;
+    border-color: #ffccc7;
+    color: #ff4d4f;
+  }
+}
+
+.divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #e8e8e8, transparent);
+  margin-bottom: 12px;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-item-card {
+  background: white;
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  border: 1px solid #f0f0f0;
+  margin-bottom: 0;
+  transition: all 0.3s;
+
+  &:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    border-color: rgba($primary, 0.2);
+  }
+}
+
+::v-deep .form-item-card .el-form-item__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2c3e50;
+  padding-bottom: 6px;
+}
+
+.form-input {
+  ::v-deep .el-input__inner {
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
+    padding: 8px 12px;
+    height: 38px;
+    font-size: 14px;
+    transition: all 0.3s;
+
+    &:focus {
+      border-color: $primary;
+      box-shadow: 0 0 0 3px rgba($primary, 0.1);
+    }
+  }
+}
+
+.form-textarea {
+  ::v-deep .el-textarea__inner {
+    border-radius: 8px;
+    border: 1px solid #e8e8e8;
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    transition: all 0.3s;
+
+    &:focus {
+      border-color: $primary;
+      box-shadow: 0 0 0 3px rgba($primary, 0.1);
+    }
+  }
+
+  ::v-deep .el-input__count {
+    background: transparent;
+    font-size: 11px;
+    color: #999;
+  }
+}
+
+.template-container {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.template-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  font-size: 13px;
+  color: #555;
+  cursor: pointer;
+  transition: all 0.3s;
+
+  i {
+    font-size: 13px;
+    color: #999;
+  }
+
+  &:hover {
+    background: rgba($primary, 0.08);
+    border-color: rgba($primary, 0.3);
+    color: $primary;
+
+    i {
+      color: $primary;
+    }
+  }
+
+  &.template-active {
+    background: rgba($primary, 0.15);
+    border-color: $primary;
+    color: $primary;
+
+    i {
+      color: $primary;
+    }
+  }
+
+  &.template-loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+}
+
+.no-templates {
+  color: #999;
+  font-size: 14px;
+  padding: 8px 0;
+}
+
+.info-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  color: #ad8b00;
+  font-size: 12px;
+
+  i {
+    font-size: 14px;
+    color: #faad14;
+  }
 }
 </style>

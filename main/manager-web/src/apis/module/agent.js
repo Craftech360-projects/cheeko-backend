@@ -45,7 +45,7 @@ export default {
                 });
             }).send();
     },
-    // Add agent
+    // Add agent (legacy - only agent name)
     addAgent(agentName, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent`)
@@ -58,6 +58,22 @@ export default {
             .networkFail(() => {
                 RequestService.reAjaxFun(() => {
                     this.addAgent(agentName, callback);
+                });
+            }).send();
+    },
+    // Create agent from template data (full agent data)
+    createAgent(agentData, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent`)
+            .method('POST')
+            .data(agentData)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail(() => {
+                RequestService.reAjaxFun(() => {
+                    this.createAgent(agentData, callback);
                 });
             }).send();
     },
