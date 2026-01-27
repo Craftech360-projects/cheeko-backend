@@ -207,12 +207,15 @@ export default {
 
       try {
         this.selectedTemplate = template;
-        // Apply template data but keep the agent name
+        // Apply template data including agentCode (critical for backend behavior)
+        this.form.agentCode = template.agentCode || this.form.agentCode;
+        this.form.agentName = template.agentName || this.form.agentName;
         this.form.systemPrompt = template.systemPrompt || this.form.systemPrompt;
         this.form.summaryMemory = template.summaryMemory || this.form.summaryMemory;
         this.form.ttsVoiceId = template.ttsVoiceId || this.form.ttsVoiceId;
         this.form.chatHistoryConf = template.chatHistoryConf !== undefined ? template.chatHistoryConf : 1;
         this.form.langCode = template.langCode || this.form.langCode;
+        this.form.language = template.language || this.form.language;
         this.form.model = {
           ttsModelId: template.ttsModelId || this.form.model.ttsModelId,
           vadModelId: template.vadModelId || this.form.model.vadModelId,
