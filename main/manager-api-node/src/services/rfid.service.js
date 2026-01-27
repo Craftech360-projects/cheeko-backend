@@ -85,17 +85,20 @@ const transformCardMappingToCamelCase = (card) => {
 // =============================================
 const transformSeriesToCamelCase = (series) => {
   if (!series) return null;
+  // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
+  // and 'content_pack_id' instead of 'question_id'/'pack_id'
   return {
     id: series.id ? Number(series.id) : null,
+    seriesName: series.series_name,
     startUid: series.start_uid,
     endUid: series.end_uid,
-    questionId: series.question_id ? Number(series.question_id) : null,
-    packId: series.pack_id ? Number(series.pack_id) : null,
+    contentPackId: series.content_pack_id ? Number(series.content_pack_id) : null,
+    // Keep packId for backward compatibility with frontend
+    packId: series.content_pack_id ? Number(series.content_pack_id) : null,
     priority: series.priority,
-    notes: series.notes,
-    active: series.active,
-    createDate: formatDate(series.create_date || series.created_at),
-    updateDate: formatDate(series.update_date || series.updated_at)
+    active: series.status === 1,
+    createDate: formatDate(series.created_at),
+    updateDate: formatDate(series.updated_at)
   };
 };
 
@@ -300,15 +303,10 @@ const lookupCardByUid = async (rfidUid) => {
   // Normalize UID (uppercase, no separators)
   const normalizedUid = rfidUid.toUpperCase().replace(/[:-]/g, '');
 
-  // First try exact match
+  // First try exact match - query without relationship joins
   const { data: card, error } = await supabaseAdmin
     .from('rfid_card_mapping')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description),
-      content_pack:content_pack_id(id, pack_code, name, content_type, content_md)
-    `)
+    .select('*')
     .eq('rfid_uid', normalizedUid)
     .eq('active', true)
     .single();
@@ -318,12 +316,50 @@ const lookupCardByUid = async (rfidUid) => {
   }
 
   if (card) {
-    // Get multiple questions if question_ids is populated
+    // Fetch related data separately
     const questions = [];
-    if (card.question) {
-      questions.push(card.question);
+    let question = null;
+    let pack = null;
+    let contentPack = null;
+
+    // Fetch question if question_id exists
+    if (card.question_id) {
+      const { data: questionData } = await supabaseAdmin
+        .from('rfid_question')
+        .select('id, code, title, prompt_text, language, category, difficulty')
+        .eq('id', card.question_id)
+        .single();
+      if (questionData) {
+        question = questionData;
+        questions.push(questionData);
+      }
     }
 
+    // Fetch pack if pack_id exists
+    if (card.pack_id) {
+      const { data: packData } = await supabaseAdmin
+        .from('rfid_pack')
+        .select('id, pack_code, name, description')
+        .eq('id', card.pack_id)
+        .single();
+      if (packData) {
+        pack = packData;
+      }
+    }
+
+    // Fetch content_pack if content_pack_id exists
+    if (card.content_pack_id) {
+      const { data: contentPackData } = await supabaseAdmin
+        .from('rfid_content_pack')
+        .select('id, pack_code, name, content_type, content_md')
+        .eq('id', card.content_pack_id)
+        .single();
+      if (contentPackData) {
+        contentPack = contentPackData;
+      }
+    }
+
+    // Get additional questions if question_ids is populated
     if (card.question_ids && Array.isArray(card.question_ids) && card.question_ids.length > 0) {
       const { data: additionalQuestions } = await supabaseAdmin
         .from('rfid_question')
@@ -344,33 +380,46 @@ const lookupCardByUid = async (rfidUid) => {
 
     return {
       ...card,
+      question,
+      pack,
+      content_pack: contentPack,
       questions: questions.length > 0 ? questions : undefined
     };
   }
 
   // If no exact match, try series lookup (UID range)
+  // Note: Actual DB uses 'status' (Int, 1=active) instead of 'active' (Boolean)
   const { data: series } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .lte('start_uid', normalizedUid)
     .gte('end_uid', normalizedUid)
-    .eq('active', true)
+    .eq('status', 1)
     .order('priority', { ascending: false })
     .limit(1)
     .single();
 
   if (series) {
+    // Fetch related content pack for series
+    let seriesContentPack = null;
+
+    if (series.content_pack_id) {
+      const { data: packData } = await supabaseAdmin
+        .from('rfid_pack')
+        .select('id, pack_code, name, description')
+        .eq('id', series.content_pack_id)
+        .single();
+      if (packData) {
+        seriesContentPack = packData;
+      }
+    }
+
     return {
       rfid_uid: normalizedUid,
       source: 'series',
       series_id: series.id,
-      question: series.question,
-      pack: series.pack,
-      questions: series.question ? [series.question] : []
+      series_name: series.series_name,
+      content_pack: seriesContentPack
     };
   }
 
@@ -745,16 +794,14 @@ const lookupSeriesByUid = async (uid) => {
 
   const normalizedUid = uid.toUpperCase().replace(/[:-]/g, '');
 
+  // Query series without relationship joins
+  // Note: Actual DB uses 'status' (Int, 1=active) instead of 'active' (Boolean)
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select(`
-      *,
-      question:question_id(id, code, title, prompt_text, language, category, difficulty),
-      pack:pack_id(id, pack_code, name, description)
-    `)
+    .select('*')
     .lte('start_uid', normalizedUid)
     .gte('end_uid', normalizedUid)
-    .eq('active', true)
+    .eq('status', 1)
     .order('priority', { ascending: false })
     .limit(1)
     .single();
@@ -764,7 +811,26 @@ const lookupSeriesByUid = async (uid) => {
     throw new Error('Failed to lookup series');
   }
 
-  return series || null;
+  if (!series) return null;
+
+  // Fetch related content pack if content_pack_id exists
+  let contentPack = null;
+
+  if (series.content_pack_id) {
+    const { data: packData } = await supabaseAdmin
+      .from('rfid_pack')
+      .select('id, pack_code, name, description')
+      .eq('id', series.content_pack_id)
+      .single();
+    if (packData) {
+      contentPack = packData;
+    }
+  }
+
+  return {
+    ...series,
+    content_pack: contentPack
+  };
 };
 
 // =============================================
@@ -1105,20 +1171,20 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
     .select('*')
     .order('priority', { ascending: false });
 
-  // Apply filters (matching Spring Boot params)
+  // Apply filters
+  // Note: Actual DB uses 'content_pack_id' instead of 'pack_id'/'question_id'
+  // and 'status' (Int) instead of 'active' (Boolean)
   if (packId) {
-    countQuery = countQuery.eq('pack_id', packId);
-    dataQuery = dataQuery.eq('pack_id', packId);
+    countQuery = countQuery.eq('content_pack_id', packId);
+    dataQuery = dataQuery.eq('content_pack_id', packId);
   }
 
-  if (questionId) {
-    countQuery = countQuery.eq('question_id', questionId);
-    dataQuery = dataQuery.eq('question_id', questionId);
-  }
+  // questionId filter not applicable - rfid_series doesn't have question_id column
 
   if (active !== undefined) {
-    countQuery = countQuery.eq('active', active);
-    dataQuery = dataQuery.eq('active', active);
+    const statusValue = active === true || active === 'true' ? 1 : 0;
+    countQuery = countQuery.eq('status', statusValue);
+    dataQuery = dataQuery.eq('status', statusValue);
   }
 
   const { count } = await countQuery;
@@ -1151,16 +1217,17 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
     .select('*')
     .order('priority', { ascending: false });
 
+  // Note: Actual DB uses 'content_pack_id' instead of 'pack_id'/'question_id'
+  // and 'status' (Int) instead of 'active' (Boolean)
   if (packId) {
-    query = query.eq('pack_id', packId);
+    query = query.eq('content_pack_id', packId);
   }
 
-  if (questionId) {
-    query = query.eq('question_id', questionId);
-  }
+  // questionId filter not applicable - rfid_series doesn't have question_id column
 
   if (active !== undefined) {
-    query = query.eq('active', active);
+    const statusValue = active === true || active === 'true' ? 1 : 0;
+    query = query.eq('status', statusValue);
   }
 
   const { data: series, error } = await query;
@@ -1213,14 +1280,15 @@ const createSeries = async (data, _userId) => {
     throw new Error('Start UID must be less than or equal to End UID');
   }
 
+  // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
+  // and 'content_pack_id' instead of 'question_id'/'pack_id'
   const insertData = {
+    series_name: data.seriesName || data.notes || `Series ${startUid}-${endUid}`,
     start_uid: startUid,
     end_uid: endUid,
-    question_id: data.questionId || null,
-    pack_id: data.packId || null,
+    content_pack_id: data.contentPackId || data.packId || null,
     priority: data.priority || 0,
-    notes: data.notes || null,
-    active: data.active !== false
+    status: data.active !== false ? 1 : 0
   };
 
   const { error } = await supabaseAdmin
@@ -1249,21 +1317,23 @@ const updateSeries = async (data, _userId) => {
   }
 
   const updateData = {
-    update_date: new Date().toISOString()
+    updated_at: new Date().toISOString()
   };
 
   // Only update provided fields
+  // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
+  // and 'content_pack_id' instead of 'question_id'/'pack_id'
   if (data.startUid !== undefined) {
     updateData.start_uid = data.startUid.toUpperCase().replace(/[:-]/g, '');
   }
   if (data.endUid !== undefined) {
     updateData.end_uid = data.endUid.toUpperCase().replace(/[:-]/g, '');
   }
-  if (data.questionId !== undefined) updateData.question_id = data.questionId;
-  if (data.packId !== undefined) updateData.pack_id = data.packId;
+  if (data.seriesName !== undefined) updateData.series_name = data.seriesName;
+  if (data.contentPackId !== undefined) updateData.content_pack_id = data.contentPackId;
+  if (data.packId !== undefined) updateData.content_pack_id = data.packId;
   if (data.priority !== undefined) updateData.priority = data.priority;
-  if (data.notes !== undefined) updateData.notes = data.notes;
-  if (data.active !== undefined) updateData.active = data.active;
+  if (data.active !== undefined) updateData.status = data.active ? 1 : 0;
 
   // Validate UID order if both are being updated
   if (updateData.start_uid && updateData.end_uid && updateData.start_uid > updateData.end_uid) {
@@ -1331,6 +1401,7 @@ const deleteSeries = async (seriesId) => {
 
 /**
  * Get all active series (matches Spring Boot /active endpoint)
+ * Note: Actual DB uses 'status' (Int, 1=active) instead of 'active' (Boolean)
  * @returns {Promise<Array>} All active series with camelCase fields
  */
 const getActiveSeries = async () => {
@@ -1339,7 +1410,7 @@ const getActiveSeries = async () => {
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
     .select('*')
-    .eq('active', true)
+    .eq('status', 1)
     .order('priority', { ascending: false });
 
   if (error) {
@@ -1377,7 +1448,8 @@ const findSeriesByUid = async (uid) => {
 
 /**
  * Get series by pack ID (matches Spring Boot /pack/{packId} endpoint)
- * @param {number} packId - Pack ID
+ * Note: Actual DB uses 'content_pack_id' instead of 'pack_id'
+ * @param {number} packId - Pack ID (mapped to content_pack_id)
  * @returns {Promise<Array>} Series in the pack with camelCase fields
  */
 const getSeriesByPackId = async (packId) => {
@@ -1386,7 +1458,7 @@ const getSeriesByPackId = async (packId) => {
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
     .select('*')
-    .eq('pack_id', packId)
+    .eq('content_pack_id', packId)
     .order('priority', { ascending: false });
 
   if (error) {
@@ -1399,24 +1471,15 @@ const getSeriesByPackId = async (packId) => {
 
 /**
  * Get series by question ID (matches Spring Boot /question/{questionId} endpoint)
- * @param {number} questionId - Question ID
- * @returns {Promise<Array>} Series with the question with camelCase fields
+ * Note: rfid_series doesn't have question_id column - returns empty array for compatibility
+ * @param {number} questionId - Question ID (not used - column doesn't exist)
+ * @returns {Promise<Array>} Empty array (column doesn't exist in actual DB)
  */
 const getSeriesByQuestionId = async (questionId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: series, error } = await supabaseAdmin
-    .from('rfid_series')
-    .select('*')
-    .eq('question_id', questionId)
-    .order('priority', { ascending: false });
-
-  if (error) {
-    logger.error('Failed to fetch series by question:', error);
-    throw new Error('Failed to fetch series');
-  }
-
-  return (series || []).map(transformSeriesToCamelCase);
+  // Note: rfid_series table doesn't have question_id column
+  // Return empty array for backward compatibility
+  logger.warn(`getSeriesByQuestionId called but rfid_series has no question_id column. questionId: ${questionId}`);
+  return [];
 };
 
 // =============================================

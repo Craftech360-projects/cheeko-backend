@@ -196,11 +196,8 @@ CREATE TABLE IF NOT EXISTS rfid_series (
     start_uid VARCHAR(100) NOT NULL,
     end_uid VARCHAR(100) NOT NULL,
     content_pack_id BIGINT REFERENCES rfid_pack(id),
-    pack_id BIGINT,
-    question_id BIGINT,
     priority INTEGER DEFAULT 0,
-    active BOOLEAN DEFAULT true,
-    status INTEGER DEFAULT 1,
+    status INTEGER DEFAULT 1,  -- 1=active, 0=inactive (no 'active' Boolean column)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

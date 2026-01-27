@@ -172,6 +172,17 @@ const routes = [
       title: 'Device Management'
     }
   },
+  {
+    path: '/content-library',
+    name: 'ContentLibrary',
+    component: function () {
+      return import('../views/ContentLibrary.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Content Library'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -193,7 +204,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary']
 
 // Route guard
 router.beforeEach((to, from, next) => {

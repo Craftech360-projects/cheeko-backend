@@ -479,5 +479,37 @@ export default {
                     this.deleteSeries(ids, callback)
                 })
             }).send()
+    },
+
+    // ==================== LOOKUP (Console) ====================
+
+    // Lookup card by RFID UID
+    lookupCard(rfidUid, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to lookup card:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+
+    // Lookup series by RFID UID
+    lookupSeries(rfidUid, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/series/lookup/${encodeURIComponent(rfidUid)}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to lookup series:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
     }
 }

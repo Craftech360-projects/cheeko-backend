@@ -25,6 +25,14 @@
             </div>
             <!-- Stats Boxes Container -->
             <div class="stats-container">
+              <div v-if="isAdmin" class="stats-box">
+                <div class="stats-count">{{ systemStats.totalUsers }}</div>
+                <div class="stats-label">Total Users</div>
+              </div>
+              <div v-if="isAdmin" class="stats-box">
+                <div class="stats-count">{{ systemStats.totalDevices }}</div>
+                <div class="stats-label">Total Devices</div>
+              </div>
               <el-popover
                 placement="bottom"
                 width="280"
@@ -41,7 +49,7 @@
                 </div>
                 <div slot="reference" class="stats-box hoverable">
                   <div class="stats-count">{{ todayDeviceCount }}</div>
-                  <div class="stats-label">Active Devices Today</div>
+                  <div class="stats-label">Active Today</div>
                 </div>
               </el-popover>
               <el-popover
@@ -60,7 +68,7 @@
                 </div>
                 <div slot="reference" class="stats-box hoverable">
                   <div class="stats-count">{{ monthDeviceCount }}</div>
-                  <div class="stats-label">Active Devices This Month</div>
+                  <div class="stats-label">Active This Month</div>
                 </div>
               </el-popover>
             </div>
@@ -241,7 +249,14 @@ export default {
       currentMonth: '',
       // Active devices lists for tooltips
       todayActiveDevices: [],
-      monthActiveDevices: []
+      monthActiveDevices: [],
+      // System-wide stats (admin only)
+      systemStats: {
+        totalUsers: 0,
+        totalDevices: 0,
+        totalAgents: 0,
+        totalSessions: 0
+      }
     }
   },
 
@@ -289,6 +304,9 @@ export default {
     this.fetchAgentList();
     this.fetchTodayDeviceCount();
     this.fetchMonthDeviceCount();
+    if (this.isAdmin) {
+      this.fetchSystemStats();
+    }
   },
 
   activated() {
@@ -348,6 +366,19 @@ export default {
       Api.agent.getMonthActiveDevices((response) => {
         if (response.data && response.data.code === 0) {
           this.monthActiveDevices = response.data.data || [];
+        }
+      });
+    },
+    // Fetch system-wide statistics (admin only)
+    fetchSystemStats() {
+      Api.admin.getSystemStats((response) => {
+        if (response.data && response.data.code === 0) {
+          this.systemStats = {
+            totalUsers: response.data.data.totalUsers || 0,
+            totalDevices: response.data.data.totalDevices || 0,
+            totalAgents: response.data.data.totalAgents || 0,
+            totalSessions: response.data.data.totalSessions || 0
+          };
         }
       });
     },

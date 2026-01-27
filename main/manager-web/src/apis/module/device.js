@@ -101,4 +101,19 @@ export default {
                 });
             }).send();
     },
+    // Get device current mode
+    getDeviceMode(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/mode`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device mode:', err);
+                // Don't retry for mode - just fail silently
+                callback({ data: { code: -1, data: { mode: 'idle' } } });
+            }).send();
+    },
 }

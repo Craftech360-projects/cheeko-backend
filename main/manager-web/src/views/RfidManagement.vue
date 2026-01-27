@@ -26,6 +26,9 @@
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     Series
                 </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'console' }" @click="switchTab('console')">
+                    <i class="el-icon-search"></i> Console
+                </div>
             </div>
 
             <div class="content-panel">
@@ -258,6 +261,52 @@
                                 </div>
                             </div>
                         </template>
+
+                        <!-- Console Tab -->
+                        <template v-if="activeTab === 'console'">
+                            <div class="console-container">
+                                <div class="console-header">
+                                    <h3>RFID Lookup Console</h3>
+                                    <p class="console-description">Test RFID card lookups to verify card-to-content mappings</p>
+                                </div>
+
+                                <div class="console-input-section">
+                                    <el-input
+                                        v-model="consoleLookupUid"
+                                        placeholder="Enter RFID UID (e.g., 04A1B2C3D4E5F6)"
+                                        class="console-input"
+                                        clearable
+                                        @keyup.enter.native="handleConsoleLookup"
+                                    >
+                                        <template slot="prepend">RFID UID</template>
+                                    </el-input>
+                                    <el-button type="primary" :loading="consoleLookupLoading" @click="handleConsoleLookup">
+                                        <i class="el-icon-search"></i> Lookup Card
+                                    </el-button>
+                                    <el-button type="info" :loading="consoleSeriesLoading" @click="handleSeriesLookup">
+                                        <i class="el-icon-files"></i> Lookup Series
+                                    </el-button>
+                                </div>
+
+                                <div class="console-result" v-if="consoleLookupResult">
+                                    <div class="result-header">
+                                        <span class="result-label">
+                                            <i :class="consoleLookupResult.success ? 'el-icon-success' : 'el-icon-error'"></i>
+                                            {{ consoleLookupResult.success ? 'Card Found' : 'Card Not Found' }}
+                                        </span>
+                                        <el-tag :type="consoleLookupResult.success ? 'success' : 'danger'" size="small">
+                                            {{ consoleLookupResult.type || 'card' }}
+                                        </el-tag>
+                                    </div>
+                                    <pre class="result-json">{{ JSON.stringify(consoleLookupResult.data, null, 2) }}</pre>
+                                </div>
+
+                                <div class="console-empty" v-else>
+                                    <i class="el-icon-postcard"></i>
+                                    <p>Enter an RFID UID and click Lookup to test card mappings</p>
+                                </div>
+                            </div>
+                        </template>
                     </el-card>
                 </div>
             </div>
@@ -369,7 +418,13 @@ export default {
 
             // Dropdown data
             questionsDropdown: [],
-            packsDropdown: []
+            packsDropdown: [],
+
+            // Console
+            consoleLookupUid: '',
+            consoleLookupLoading: false,
+            consoleSeriesLoading: false,
+            consoleLookupResult: null
         };
     },
     created() {
@@ -838,6 +893,59 @@ export default {
                 return;
             }
             this.deleteSeries(selected);
+        },
+
+        // ==================== CONSOLE ====================
+        handleConsoleLookup() {
+            if (!this.consoleLookupUid.trim()) {
+                this.$message.warning('Please enter an RFID UID');
+                return;
+            }
+            this.consoleLookupLoading = true;
+            this.consoleLookupResult = null;
+
+            Api.rfid.lookupCard(this.consoleLookupUid.trim(), ({ data }) => {
+                this.consoleLookupLoading = false;
+                if (data.code === 0 && data.data) {
+                    this.consoleLookupResult = {
+                        success: true,
+                        type: 'card',
+                        data: data.data
+                    };
+                } else {
+                    this.consoleLookupResult = {
+                        success: false,
+                        type: 'card',
+                        data: { error: data.msg || 'Card not found', uid: this.consoleLookupUid }
+                    };
+                }
+            });
+        },
+
+        handleSeriesLookup() {
+            if (!this.consoleLookupUid.trim()) {
+                this.$message.warning('Please enter an RFID UID');
+                return;
+            }
+            this.consoleSeriesLoading = true;
+            this.consoleLookupResult = null;
+
+            Api.rfid.lookupSeries(this.consoleLookupUid.trim(), ({ data }) => {
+                this.consoleSeriesLoading = false;
+                if (data.code === 0 && data.data) {
+                    this.consoleLookupResult = {
+                        success: true,
+                        type: 'series',
+                        data: data.data
+                    };
+                } else {
+                    this.consoleLookupResult = {
+                        success: false,
+                        type: 'series',
+                        data: { error: data.msg || 'Series not found for this UID', uid: this.consoleLookupUid }
+                    };
+                }
+            });
         }
     }
 };
@@ -1123,5 +1231,110 @@ export default {
 
 :deep(.el-loading-text) {
     color: #6b8cff !important;
+}
+
+/* Console Tab Styles */
+.console-container {
+    padding: 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.console-header {
+    margin-bottom: 20px;
+
+    h3 {
+        margin: 0 0 8px 0;
+        color: #3d4566;
+        font-size: 18px;
+    }
+
+    .console-description {
+        margin: 0;
+        color: #909399;
+        font-size: 13px;
+    }
+}
+
+.console-input-section {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    align-items: center;
+
+    .console-input {
+        flex: 1;
+        max-width: 500px;
+    }
+}
+
+.console-result {
+    flex: 1;
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 16px;
+    overflow: auto;
+
+    .result-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid #e8e8e8;
+
+        .result-label {
+            font-weight: 600;
+            font-size: 14px;
+            color: #3d4566;
+
+            i {
+                margin-right: 6px;
+            }
+
+            .el-icon-success {
+                color: #67c23a;
+            }
+
+            .el-icon-error {
+                color: #f56c6c;
+            }
+        }
+    }
+
+    .result-json {
+        background: #2d2d2d;
+        color: #f8f8f2;
+        padding: 16px;
+        border-radius: 6px;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow: auto;
+        margin: 0;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+}
+
+.console-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #909399;
+
+    i {
+        font-size: 64px;
+        margin-bottom: 16px;
+        color: #ddd;
+    }
+
+    p {
+        margin: 0;
+        font-size: 14px;
+    }
 }
 </style>

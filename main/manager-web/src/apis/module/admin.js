@@ -340,6 +340,32 @@ export default {
                     this.assignKidToDeviceAdmin(deviceId, kidId, callback)
                 })
             }).send();
+    },
+
+    // Get system-wide statistics (Admin only)
+    getSystemStats(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/stats/overview`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get system stats:', err)
+                // Return default values on failure
+                callback({
+                    data: {
+                        code: 0,
+                        data: {
+                            totalUsers: 0,
+                            totalDevices: 0,
+                            totalAgents: 0,
+                            totalSessions: 0
+                        }
+                    }
+                })
+            }).send();
     }
 
 }

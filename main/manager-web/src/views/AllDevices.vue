@@ -60,6 +60,18 @@
               {{ formatDate(scope.row.lastConnectedAt) }}
             </template>
           </el-table-column>
+          <el-table-column label="Active Mode" min-width="120" align="center">
+            <template slot-scope="scope">
+              <el-tag
+                :type="getModeTagType(scope.row.activeMode)"
+                size="small"
+                effect="plain"
+              >
+                <i :class="getModeIcon(scope.row.activeMode)"></i>
+                {{ scope.row.activeMode || 'idle' }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="Mode" min-width="100" align="center">
             <template slot-scope="scope">
               <el-switch
@@ -188,8 +200,11 @@ export default {
             kidId: device.kidId || device.kid_id,
             deviceMode: device.deviceMode || device.device_mode || 'manual',
             modeSwitch: (device.deviceMode || device.device_mode || 'manual') === 'auto',
-            otaSwitch: (device.autoUpdate || device.otaUpgrade || device.auto_update) === 1
+            otaSwitch: (device.autoUpdate || device.otaUpgrade || device.auto_update) === 1,
+            activeMode: device.activeMode || device.active_mode || device.currentMode || 'idle'
           }));
+          // Fetch active modes for all devices
+          this.fetchActiveModes();
         } else {
           this.$message.error(data.msg || 'Failed to load devices');
         }
@@ -289,6 +304,42 @@ export default {
           }
         });
       }).catch(() => {});
+    },
+    fetchActiveModes() {
+      // Fetch active mode for each device that has a MAC address
+      this.deviceList.forEach(device => {
+        if (device.macAddress) {
+          Api.device.getDeviceMode(device.macAddress, ({ data }) => {
+            if (data.code === 0 && data.data) {
+              const mode = data.data.mode || data.data.currentMode || 'idle';
+              const index = this.deviceList.findIndex(d => d.macAddress === device.macAddress);
+              if (index !== -1) {
+                this.$set(this.deviceList[index], 'activeMode', mode);
+              }
+            }
+          });
+        }
+      });
+    },
+    getModeTagType(mode) {
+      const types = {
+        conversation: 'primary',
+        music: 'success',
+        story: 'warning',
+        game: 'danger',
+        idle: 'info'
+      };
+      return types[mode] || 'info';
+    },
+    getModeIcon(mode) {
+      const icons = {
+        conversation: 'el-icon-chat-dot-round',
+        music: 'el-icon-headset',
+        story: 'el-icon-reading',
+        game: 'el-icon-trophy',
+        idle: 'el-icon-moon'
+      };
+      return icons[mode] || 'el-icon-question';
     }
   }
 }

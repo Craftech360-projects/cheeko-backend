@@ -46,6 +46,12 @@
             :style="{ fontSize: '15px', color: $route.path === '/rfid-management' ? '#fff' : '#3d4566' }"></i>
           RFID Management
         </div>
+        <div v-if="isSuperAdmin" class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/content-library' }" @click="goContentLibrary">
+          <i class="el-icon-folder-opened"
+            :style="{ fontSize: '15px', color: $route.path === '/content-library' ? '#fff' : '#3d4566' }"></i>
+          Content Library
+        </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
           :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' || $route.path === '/template-management' }"
           @visible-change="handleParamDropdownVisibleChange">
@@ -174,6 +180,9 @@ export default {
     },
     goTemplateManagement() {
       this.$router.push('/template-management')
+    },
+    goContentLibrary() {
+      this.$router.push('/content-library')
     },
     // Get user information
     fetchUserInfo() {
