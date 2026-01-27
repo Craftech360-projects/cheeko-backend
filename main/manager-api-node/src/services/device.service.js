@@ -284,9 +284,10 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false) => {
  * @param {number} userId - User ID
  * @param {string} deviceId - Device ID
  * @param {Object} data - Update data
+ * @param {boolean} isSuperAdmin - Whether user is super admin
  * @returns {Promise<Object>} Updated device
  */
-const updateDevice = async (userId, deviceId, data) => {
+const updateDevice = async (userId, deviceId, data, isSuperAdmin = false) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: device } = await supabaseAdmin
@@ -296,7 +297,8 @@ const updateDevice = async (userId, deviceId, data) => {
     .single();
 
   if (!device) throw new Error('Device not found');
-  if (device.user_id && device.user_id !== userId) {
+  // Super admin can update any device, regular users can only update their own
+  if (!isSuperAdmin && device.user_id && device.user_id !== userId) {
     throw new Error('Device does not belong to user');
   }
 

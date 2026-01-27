@@ -242,8 +242,11 @@ router.put('/update/:id',
   asyncHandler(async (req, res) => {
     const { id } = req.params;
 
+    // Check if user is super admin
+    const isSuperAdmin = req.user.super_admin === 1;
+
     try {
-      await deviceService.updateDevice(req.user.id, id, req.body);
+      await deviceService.updateDevice(req.user.id, id, req.body, isSuperAdmin);
       // Spring Boot returns Result<Void> (no data)
       success(res, null);
     } catch (error) {

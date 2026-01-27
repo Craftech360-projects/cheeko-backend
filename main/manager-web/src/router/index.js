@@ -157,6 +157,17 @@ const routes = [
       title: 'Kid Profiles'
     }
   },
+  {
+    path: '/all-devices',
+    name: 'AllDevices',
+    component: function () {
+      return import('../views/AllDevices.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Device Management'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -178,7 +189,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics', 'RfidManagement', 'KidProfiles']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices']
 
 // Route guard
 router.beforeEach((to, from, next) => {

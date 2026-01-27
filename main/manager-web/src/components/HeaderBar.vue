@@ -29,6 +29,12 @@
          User Management
         </div>
         <div v-if="isSuperAdmin" class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/all-devices' }" @click="goAllDevices">
+          <i class="el-icon-monitor"
+            :style="{ fontSize: '15px', color: $route.path === '/all-devices' ? '#fff' : '#3d4566' }"></i>
+          Device Management
+        </div>
+        <div v-if="isSuperAdmin" class="equipment-management"
           :class="{ 'active-tab': $route.path === '/ota-management' }" @click="goOtaManagement">
           <img loading="lazy" alt="" src="@/assets/header/firmware_update.png"
             :style="{ filter: $route.path === '/ota-management' ? 'brightness(0) invert(1)' : 'None' }" />
@@ -168,6 +174,9 @@ export default {
     },
     goTokenAnalytics() {
       this.$router.push('/token-analytics')
+    },
+    goAllDevices() {
+      this.$router.push('/all-devices')
     },
     // Get user information
     fetchUserInfo() {

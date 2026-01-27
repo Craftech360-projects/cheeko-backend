@@ -25,7 +25,30 @@
               </el-table-column>
               <el-table-column label="User ID" prop="userid" align="center"></el-table-column>
               <el-table-column label="User Name" prop="mobile" align="center"></el-table-column>
-              <el-table-column label="Device Count" prop="deviceCount" align="center"></el-table-column>
+              <el-table-column label="Device Count" align="center" min-width="120">
+                <template slot-scope="scope">
+                  <el-popover
+                    v-if="scope.row.devices && scope.row.devices.length > 0"
+                    placement="bottom"
+                    trigger="hover"
+                    popper-class="device-list-popover"
+                  >
+                    <div class="device-mac-list">
+                      <div class="device-mac-title">Devices ({{ scope.row.devices.length }})</div>
+                      <div
+                        v-for="device in scope.row.devices"
+                        :key="device.id"
+                        class="device-mac-item"
+                        @click="goToDeviceManagement(device)"
+                      >
+                        {{ device.macAddress }}
+                      </div>
+                    </div>
+                    <span slot="reference" class="device-count-link">{{ scope.row.deviceCount }}</span>
+                  </el-popover>
+                  <span v-else>{{ scope.row.deviceCount }}</span>
+                </template>
+              </el-table-column>
               <el-table-column label="Registration Time" prop="createDate" align="center"></el-table-column>
               <el-table-column label="Status" prop="status" align="center">
                 <template slot-scope="scope">
@@ -404,6 +427,12 @@ export default {
       }
       return age > 0 ? age : '-';
     },
+    goToDeviceManagement(device) {
+      this.$router.push({
+        path: '/device-management',
+        query: { macAddress: device.macAddress, deviceId: device.id }
+      });
+    },
   },
 };
 </script>
@@ -780,5 +809,43 @@ export default {
   color: #6b8cff !important;
   font-size: 14px;
   margin-top: 8px;
+}
+
+.device-count-link {
+  color: #5f70f3;
+  cursor: pointer;
+  text-decoration: underline;
+
+  &:hover {
+    color: #6d7cf5;
+  }
+}
+
+.device-mac-list {
+  max-height: 200px;
+  overflow-y: auto;
+
+  .device-mac-title {
+    font-weight: 600;
+    color: #303133;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #ebeef5;
+    margin-bottom: 8px;
+  }
+
+  .device-mac-item {
+    padding: 6px 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 13px;
+    color: #606266;
+    transition: all 0.2s;
+
+    &:hover {
+      background: #f0f5ff;
+      color: #5f70f3;
+    }
+  }
 }
 </style>

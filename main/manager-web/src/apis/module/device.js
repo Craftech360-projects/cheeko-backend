@@ -85,4 +85,20 @@ export default {
                 });
             }).send();
     },
+    // Get device by MAC address
+    getDeviceByMac(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device:', err);
+                RequestService.reAjaxFun(() => {
+                    this.getDeviceByMac(macAddress, callback);
+                });
+            }).send();
+    },
 }

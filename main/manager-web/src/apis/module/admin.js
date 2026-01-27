@@ -269,6 +269,77 @@ export default {
                     this.getUserKidProfiles(userId, callback)
                 })
             }).send();
+    },
+
+    // Create kid profile for a user (Admin only)
+    createKidProfileForUser(userId, data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/users/${userId}/kids`)
+            .method('POST')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to create kid profile:', err)
+                RequestService.reAjaxFun(() => {
+                    this.createKidProfileForUser(userId, data, callback)
+                })
+            }).send();
+    },
+
+    // Update kid profile (Admin only)
+    updateKidProfile(kidId, data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/kids/${kidId}`)
+            .method('PUT')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to update kid profile:', err)
+                RequestService.reAjaxFun(() => {
+                    this.updateKidProfile(kidId, data, callback)
+                })
+            }).send();
+    },
+
+    // Delete kid profile (Admin only)
+    deleteKidProfile(kidId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/kids/${kidId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete kid profile:', err)
+                RequestService.reAjaxFun(() => {
+                    this.deleteKidProfile(kidId, callback)
+                })
+            }).send();
+    },
+
+    // Assign kid to device (Admin only)
+    assignKidToDeviceAdmin(deviceId, kidId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/devices/${deviceId}/kid`)
+            .method('PUT')
+            .data({ kidId })
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to assign kid to device:', err)
+                RequestService.reAjaxFun(() => {
+                    this.assignKidToDeviceAdmin(deviceId, kidId, callback)
+                })
+            }).send();
     }
 
 }

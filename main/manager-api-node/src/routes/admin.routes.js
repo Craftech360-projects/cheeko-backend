@@ -874,6 +874,110 @@ router.get('/users/:id/kids',
   })
 );
 
+/**
+ * @swagger
+ * /admin/users/{id}/kids:
+ *   post:
+ *     tags: [Admin - User Management]
+ *     summary: Create kid profile for user
+ *     description: Creates a new kid profile for a specific user (super admin only)
+ *     security:
+ *       - bearerAuth: []
+ */
+router.post('/users/:id/kids',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const userId = parseInt(req.params.id);
+
+    if (isNaN(userId)) {
+      return badRequest(res, 'Invalid user ID');
+    }
+
+    try {
+      const profile = await adminService.createKidProfileForUser(userId, req.body);
+      success(res, profile, 'Kid profile created successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/kids/{kidId}:
+ *   put:
+ *     tags: [Admin - User Management]
+ *     summary: Update kid profile (admin)
+ */
+router.put('/kids/:kidId',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const kidId = parseInt(req.params.kidId);
+
+    if (isNaN(kidId)) {
+      return badRequest(res, 'Invalid kid ID');
+    }
+
+    try {
+      const profile = await adminService.updateKidProfile(kidId, req.body);
+      success(res, profile, 'Kid profile updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/kids/{kidId}:
+ *   delete:
+ *     tags: [Admin - User Management]
+ *     summary: Delete kid profile (admin)
+ */
+router.delete('/kids/:kidId',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const kidId = parseInt(req.params.kidId);
+
+    if (isNaN(kidId)) {
+      return badRequest(res, 'Invalid kid ID');
+    }
+
+    try {
+      await adminService.deleteKidProfile(kidId);
+      success(res, null, 'Kid profile deleted successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/devices/{deviceId}/kid:
+ *   put:
+ *     tags: [Admin - Device Management]
+ *     summary: Assign kid to device (admin)
+ */
+router.put('/devices/:deviceId/kid',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { deviceId } = req.params;
+    const { kidId } = req.body;
+
+    try {
+      const device = await adminService.assignKidToDeviceAdmin(deviceId, kidId);
+      success(res, device, kidId ? 'Kid assigned to device' : 'Kid unassigned from device');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 // ==================== SYSTEM STATISTICS ====================
 
 /**

@@ -101,19 +101,25 @@ const listUsersForAdmin = async ({ page = 1, limit = 20, mobile } = {}) => {
     throw new Error('Failed to fetch users');
   }
 
-  // Get device counts for each user
+  // Get device info for each user (MAC addresses and IDs)
   const userIds = (users || []).map(u => u.id);
-  let deviceCounts = {};
+  let devicesByUser = {};
 
   if (userIds.length > 0) {
     const { data: devices } = await supabaseAdmin
       .from('ai_device')
-      .select('user_id')
+      .select('id, user_id, mac_address')
       .in('user_id', userIds);
 
-    // Count devices per user
+    // Group devices by user
     (devices || []).forEach(d => {
-      deviceCounts[d.user_id] = (deviceCounts[d.user_id] || 0) + 1;
+      if (!devicesByUser[d.user_id]) {
+        devicesByUser[d.user_id] = [];
+      }
+      devicesByUser[d.user_id].push({
+        id: d.id,
+        macAddress: d.mac_address
+      });
     });
   }
 
@@ -121,7 +127,8 @@ const listUsersForAdmin = async ({ page = 1, limit = 20, mobile } = {}) => {
   const list = (users || []).map(user => ({
     userid: user.id,
     mobile: user.username, // Spring Boot uses mobile, we use username
-    deviceCount: String(deviceCounts[user.id] || 0),
+    deviceCount: String((devicesByUser[user.id] || []).length),
+    devices: devicesByUser[user.id] || [], // Include device list with MAC addresses
     status: user.status,
     createDate: user.created_at
   }));
@@ -760,7 +767,10 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
       agent_id,
       auto_update,
       last_connected_at,
-      user_id
+      user_id,
+      alias,
+      kid_id,
+      device_mode
     `);
 
   // Apply keyword filter if provided
@@ -809,10 +819,17 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
     id: device.id,
     macAddress: device.mac_address,
     deviceType: device.board,
+    board: device.board, // Also include as 'board' for frontend compatibility
     appVersion: device.app_version,
     agentId: device.agent_id,
+    userId: device.user_id, // Include user_id for admin operations
+    kidId: device.kid_id, // Include kid_id for kid profile navigation
+    alias: device.alias, // Include alias for display/edit
+    deviceMode: device.device_mode || 'manual', // Include device mode (auto/manual)
     bindUserName: userMap[device.user_id] || null,
+    autoUpdate: device.auto_update, // Also include as autoUpdate for frontend
     otaUpgrade: device.auto_update,
+    lastConnectedAt: device.last_connected_at, // Also include for frontend
     recentChatTime: device.last_connected_at
       ? new Date(device.last_connected_at).toISOString().replace('T', ' ').slice(0, 19)
       : null
@@ -848,6 +865,116 @@ const getKidProfilesByUserId = async (userId) => {
   return data || [];
 };
 
+/**
+ * Create kid profile for a user (admin)
+ * @param {number} userId - User ID
+ * @param {Object} data - Profile data
+ * @returns {Promise<Object>} Created profile
+ */
+const createKidProfileForUser = async (userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .insert({
+      user_id: userId,
+      name: data.name,
+      nickname: data.nickname,
+      avatar_url: data.avatarUrl,
+      birth_date: data.birthDate,
+      gender: data.gender,
+      grade: data.grade,
+      school: data.school,
+      interests: data.interests,
+      language: data.language || 'en',
+      timezone: data.timezone,
+      preferences: data.preferences || {}
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to create kid profile');
+
+  return profile;
+};
+
+/**
+ * Update kid profile (admin - no ownership check)
+ * @param {number} kidId - Kid ID
+ * @param {Object} data - Update data
+ * @returns {Promise<Object>} Updated profile
+ */
+const updateKidProfile = async (kidId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const updateData = { updated_at: new Date().toISOString() };
+
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.nickname !== undefined) updateData.nickname = data.nickname;
+  if (data.avatarUrl !== undefined) updateData.avatar_url = data.avatarUrl;
+  if (data.birthDate !== undefined) updateData.birth_date = data.birthDate;
+  if (data.gender !== undefined) updateData.gender = data.gender;
+  if (data.grade !== undefined) updateData.grade = data.grade;
+  if (data.school !== undefined) updateData.school = data.school;
+  if (data.interests !== undefined) updateData.interests = data.interests;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.preferences !== undefined) updateData.preferences = data.preferences;
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .update(updateData)
+    .eq('id', kidId)
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to update kid profile');
+
+  return profile;
+};
+
+/**
+ * Delete kid profile (admin - no ownership check)
+ * @param {number} kidId - Kid ID
+ */
+const deleteKidProfile = async (kidId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // First unassign from any devices
+  await supabaseAdmin
+    .from('ai_device')
+    .update({ kid_id: null })
+    .eq('kid_id', kidId);
+
+  const { error } = await supabaseAdmin
+    .from('kid_profile')
+    .delete()
+    .eq('id', kidId);
+
+  if (error) throw new Error('Failed to delete kid profile');
+};
+
+/**
+ * Assign kid to device (admin - no ownership check)
+ * @param {string} deviceId - Device ID
+ * @param {number|null} kidId - Kid ID or null to unassign
+ * @returns {Promise<Object>} Updated device
+ */
+const assignKidToDeviceAdmin = async (deviceId, kidId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: device, error } = await supabaseAdmin
+    .from('ai_device')
+    .update({ kid_id: kidId })
+    .eq('id', deviceId)
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to assign kid to device');
+
+  return device;
+};
+
 module.exports = {
   // User Management
   listUsers,
@@ -870,6 +997,10 @@ module.exports = {
 
   // Kid Profiles
   getKidProfilesByUserId,
+  createKidProfileForUser,
+  updateKidProfile,
+  deleteKidProfile,
+  assignKidToDeviceAdmin,
 
   // System Statistics
   getSystemOverview,

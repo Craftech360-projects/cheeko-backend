@@ -5,6 +5,9 @@
       <div class="page-header">
         <h2>Kid Profiles</h2>
         <p class="subtitle" v-if="macAddress">Device: {{ macAddress }}</p>
+        <p class="subtitle admin-notice" v-if="isAdminMode">
+          <i class="el-icon-setting"></i> Managing user's kid profiles (Admin mode)
+        </p>
       </div>
 
       <div class="toolbar">
@@ -136,6 +139,7 @@ export default {
       deviceId: null,
       macAddress: '',
       assignedKidId: null,
+      userId: null, // If set, we're viewing another user's profiles (admin mode)
       form: {
         name: '',
         nickname: '',
@@ -149,23 +153,43 @@ export default {
       }
     }
   },
+  computed: {
+    isAdminMode() {
+      return !!this.userId
+    }
+  },
   created() {
     this.deviceId = this.$route.query.deviceId
     this.macAddress = this.$route.query.macAddress || ''
     this.assignedKidId = this.$route.query.kidId ? parseInt(this.$route.query.kidId) : null
+    this.userId = this.$route.query.userId ? parseInt(this.$route.query.userId) : null
     this.loadKidProfiles()
   },
   methods: {
     loadKidProfiles() {
       this.loading = true
-      Api.profile.getKidProfiles((res) => {
-        this.loading = false
-        if (res.code === 0) {
-          this.kidProfiles = res.data || []
-        } else {
-          this.$message.error(res.msg || 'Failed to load kid profiles')
-        }
-      })
+
+      // If userId is provided (admin mode), use admin API to get that user's kid profiles
+      if (this.userId) {
+        Api.admin.getUserKidProfiles(this.userId, ({ data }) => {
+          this.loading = false
+          if (data.code === 0) {
+            this.kidProfiles = data.data || []
+          } else {
+            this.$message.error(data.msg || 'Failed to load kid profiles')
+          }
+        })
+      } else {
+        // Regular user - get their own kid profiles
+        Api.profile.getKidProfiles((res) => {
+          this.loading = false
+          if (res.code === 0) {
+            this.kidProfiles = res.data || []
+          } else {
+            this.$message.error(res.msg || 'Failed to load kid profiles')
+          }
+        })
+      }
     },
 
     calculateAge(birthDate) {
@@ -220,27 +244,55 @@ export default {
         const data = { ...this.form }
 
         if (this.editMode) {
-          Api.profile.updateKid(this.editingId, data, (res) => {
-            this.submitting = false
-            if (res.code === 0) {
-              this.$message.success('Kid profile updated successfully')
-              this.dialogVisible = false
-              this.loadKidProfiles()
-            } else {
-              this.$message.error(res.msg || 'Failed to update kid profile')
-            }
-          })
+          // Use admin API if in admin mode
+          if (this.isAdminMode) {
+            Api.admin.updateKidProfile(this.editingId, data, ({ data: res }) => {
+              this.submitting = false
+              if (res.code === 0) {
+                this.$message.success('Kid profile updated successfully')
+                this.dialogVisible = false
+                this.loadKidProfiles()
+              } else {
+                this.$message.error(res.msg || 'Failed to update kid profile')
+              }
+            })
+          } else {
+            Api.profile.updateKid(this.editingId, data, (res) => {
+              this.submitting = false
+              if (res.code === 0) {
+                this.$message.success('Kid profile updated successfully')
+                this.dialogVisible = false
+                this.loadKidProfiles()
+              } else {
+                this.$message.error(res.msg || 'Failed to update kid profile')
+              }
+            })
+          }
         } else {
-          Api.profile.createKid(data, (res) => {
-            this.submitting = false
-            if (res.code === 0) {
-              this.$message.success('Kid profile created successfully')
-              this.dialogVisible = false
-              this.loadKidProfiles()
-            } else {
-              this.$message.error(res.msg || 'Failed to create kid profile')
-            }
-          })
+          // Use admin API if in admin mode
+          if (this.isAdminMode) {
+            Api.admin.createKidProfileForUser(this.userId, data, ({ data: res }) => {
+              this.submitting = false
+              if (res.code === 0) {
+                this.$message.success('Kid profile created successfully')
+                this.dialogVisible = false
+                this.loadKidProfiles()
+              } else {
+                this.$message.error(res.msg || 'Failed to create kid profile')
+              }
+            })
+          } else {
+            Api.profile.createKid(data, (res) => {
+              this.submitting = false
+              if (res.code === 0) {
+                this.$message.success('Kid profile created successfully')
+                this.dialogVisible = false
+                this.loadKidProfiles()
+              } else {
+                this.$message.error(res.msg || 'Failed to create kid profile')
+              }
+            })
+          }
         }
       })
     },
@@ -252,14 +304,27 @@ export default {
       }
 
       const kidId = this.isAssigned(row.id) ? null : row.id
-      Api.profile.assignKidToDevice(this.deviceId, kidId, (res) => {
-        if (res.code === 0) {
-          this.assignedKidId = kidId
-          this.$message.success(kidId ? 'Kid assigned to device' : 'Kid unassigned from device')
-        } else {
-          this.$message.error(res.msg || 'Failed to assign kid to device')
-        }
-      })
+
+      // Use admin API if in admin mode
+      if (this.isAdminMode) {
+        Api.admin.assignKidToDeviceAdmin(this.deviceId, kidId, ({ data: res }) => {
+          if (res.code === 0) {
+            this.assignedKidId = kidId
+            this.$message.success(kidId ? 'Kid assigned to device' : 'Kid unassigned from device')
+          } else {
+            this.$message.error(res.msg || 'Failed to assign kid to device')
+          }
+        })
+      } else {
+        Api.profile.assignKidToDevice(this.deviceId, kidId, (res) => {
+          if (res.code === 0) {
+            this.assignedKidId = kidId
+            this.$message.success(kidId ? 'Kid assigned to device' : 'Kid unassigned from device')
+          } else {
+            this.$message.error(res.msg || 'Failed to assign kid to device')
+          }
+        })
+      }
     },
 
     handleDelete(row) {
@@ -268,14 +333,26 @@ export default {
         cancelButtonText: 'Cancel',
         type: 'warning'
       }).then(() => {
-        Api.profile.deleteKid(row.id, (res) => {
-          if (res.code === 0) {
-            this.$message.success('Kid profile deleted')
-            this.loadKidProfiles()
-          } else {
-            this.$message.error(res.msg || 'Failed to delete kid profile')
-          }
-        })
+        // Use admin API if in admin mode
+        if (this.isAdminMode) {
+          Api.admin.deleteKidProfile(row.id, ({ data: res }) => {
+            if (res.code === 0) {
+              this.$message.success('Kid profile deleted')
+              this.loadKidProfiles()
+            } else {
+              this.$message.error(res.msg || 'Failed to delete kid profile')
+            }
+          })
+        } else {
+          Api.profile.deleteKid(row.id, (res) => {
+            if (res.code === 0) {
+              this.$message.success('Kid profile deleted')
+              this.loadKidProfiles()
+            } else {
+              this.$message.error(res.msg || 'Failed to delete kid profile')
+            }
+          })
+        }
       }).catch(() => {})
     },
 
@@ -310,6 +387,16 @@ export default {
     margin: 0;
     color: #909399;
     font-size: 14px;
+  }
+
+  .admin-notice {
+    margin-top: 8px;
+    color: #409eff;
+    font-weight: 500;
+
+    i {
+      margin-right: 4px;
+    }
   }
 }
 

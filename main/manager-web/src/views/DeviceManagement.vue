@@ -187,8 +187,13 @@ export default {
   },
   mounted() {
     const agentId = this.$route.query.agentId;
+    const macAddress = this.$route.query.macAddress;
+
     if (agentId) {
       this.fetchBindDevices(agentId);
+    } else if (macAddress) {
+      // Fetch single device by MAC (from User Management navigation)
+      this.fetchDeviceByMac(macAddress);
     }
   },
   created() {
@@ -371,6 +376,35 @@ export default {
           this.searchKeyword = "";
         } else {
           this.$message.error(data.msg || 'Failed to get device list');
+        }
+      });
+    },
+    fetchDeviceByMac(macAddress) {
+      this.loading = true;
+      Api.device.getDeviceByMac(macAddress, ({data}) => {
+        this.loading = false;
+        if (data.code === 0 && data.data) {
+          const device = data.data;
+          this.deviceList = [{
+            device_id: device.id,
+            model: device.board,
+            firmwareVersion: device.app_version,
+            macAddress: device.mac_address,
+            bindTime: device.create_date,
+            lastConversation: device.last_connected_at,
+            remark: device.alias,
+            _originalRemark: device.alias,
+            isEdit: false,
+            _submitting: false,
+            otaSwitch: device.auto_update === 1,
+            rawBindTime: device.create_date ? new Date(device.create_date).getTime() : 0,
+            selected: false,
+            kidId: device.kid_id || null
+          }];
+          this.activeSearchKeyword = "";
+          this.searchKeyword = "";
+        } else {
+          this.$message.error(data.msg || 'Device not found');
         }
       });
     },
