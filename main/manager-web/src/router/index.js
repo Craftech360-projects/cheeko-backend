@@ -118,6 +118,17 @@ const routes = [
     }
   },
   {
+    path: '/template-management',
+    name: 'TemplateManagement',
+    component: function () {
+      return import('../views/TemplateManagement.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Template Management'
+    }
+  },
+  {
     path: '/token-analytics',
     name: 'TokenAnalytics',
     component: function () {
@@ -182,7 +193,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement']
 
 // Route guard
 router.beforeEach((to, from, next) => {

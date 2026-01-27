@@ -124,10 +124,13 @@ export default {
                 });
             }).send();
     },
-    // Get agent template
-    getAgentTemplate(callback) {
+    // Get agent template (includeHidden=true for admin management)
+    getAgentTemplate(callback, includeHidden = false) {
+        const url = includeHidden
+            ? `${getServiceUrl()}/agent/template?includeHidden=true`
+            : `${getServiceUrl()}/agent/template`;
         RequestService.sendRequest()
-            .url(`${getServiceUrl()}/agent/template`)
+            .url(url)
             .method('GET')
             .success((res) => {
                 RequestService.clearRequestTime();
@@ -136,7 +139,7 @@ export default {
             .networkFail((err) => {
                 console.error('Failed to get template:', err);
                 RequestService.reAjaxFun(() => {
-                    this.getAgentTemplate(callback);
+                    this.getAgentTemplate(callback, includeHidden);
                 });
             }).send();
     },
@@ -171,6 +174,22 @@ export default {
                 console.error('Failed to create template:', err);
                 RequestService.reAjaxFun(() => {
                     this.createAgentTemplate(templateData, callback);
+                });
+            }).send();
+    },
+    // Delete agent template
+    deleteAgentTemplate(templateId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/template/${templateId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete template:', err);
+                RequestService.reAjaxFun(() => {
+                    this.deleteAgentTemplate(templateId, callback);
                 });
             }).send();
     },

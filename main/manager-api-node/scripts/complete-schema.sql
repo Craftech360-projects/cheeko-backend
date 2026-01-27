@@ -462,6 +462,29 @@ BEGIN
 END $$;
 
 -- =====================================================
+-- SEED DATA - Agent Templates (ai_agent_template)
+-- Note: UUIDs are deterministically generated from template names
+-- Model IDs are NULL (can be configured via Template Management UI)
+-- =====================================================
+INSERT INTO ai_agent_template (id, agent_code, agent_name, asr_model_id, vad_model_id, llm_model_id, vllm_model_id, tts_model_id, tts_voice_id, mem_model_id, intent_model_id, chat_history_conf, system_prompt, summary_memory, lang_code, language, is_visible, sort, created_at, updated_at) VALUES
+('5482b215-8701-4319-8f0b-53e325aafa64', 'Cheeko', 'Cheeko', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 'You are CHEEKO, a fun, witty, and slightly mischievous AI friend for kids. Be energetic, dramatic, and expressive. Use Indian cultural references and expressions. Always be supportive and warm.', NULL, 'en', 'English', 1, 0, NOW(), NOW()),
+('b00cb68d-b69b-4a04-8f4f-84bf4ef10f7b', 'math_tutor', 'Math Tutor', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 'You are CHEEKO the Math Commander. Create fun math adventures with story-based problems. Use Indian contexts like cricket, festivals, and food. Celebrate correct answers enthusiastically!', NULL, 'en', 'English', 1, 10, NOW(), NOW()),
+('4a6780d2-3ed0-419b-bb23-736c4a8f9df3', 'word_ladder', 'Word Ladder', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 'You are CHEEKO the Word Engine Pilot. Play word chain games where each word must start with the last letter of the previous word. Build chains of 10 words to win!', NULL, 'en', 'English', 1, 11, NOW(), NOW()),
+('3b4001ef-03df-4f6e-8ee7-392399356e01', 'riddle_solver', 'Riddle Solver', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 'You are CHEEKO the Master of Mysteries. Present riddles in mysterious locations. Use Indian objects and cultural references. Celebrate when riddles are solved!', NULL, 'en', 'English', 1, 12, NOW(), NOW()),
+('8ce4a93a-8937-4167-a1e0-d7598e1270da', 'storyteller', 'StoryTeller', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 2, 'You are CHEEKO the Storyteller. Read stories expressively with different voices for characters. Use sound effects and dramatic pauses. Also recite shlokas and mantras peacefully.', NULL, 'en', 'English', 1, 13, NOW(), NOW())
+ON CONFLICT (id) DO UPDATE SET
+  agent_code = EXCLUDED.agent_code,
+  agent_name = EXCLUDED.agent_name,
+  chat_history_conf = EXCLUDED.chat_history_conf,
+  system_prompt = EXCLUDED.system_prompt,
+  summary_memory = EXCLUDED.summary_memory,
+  lang_code = EXCLUDED.lang_code,
+  language = EXCLUDED.language,
+  is_visible = EXCLUDED.is_visible,
+  sort = EXCLUDED.sort,
+  updated_at = NOW();
+
+-- =====================================================
 -- DONE!
 -- =====================================================
 SELECT 'Schema migration completed successfully!' as status;

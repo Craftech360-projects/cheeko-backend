@@ -47,11 +47,11 @@
           RFID Management
         </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
-          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' }"
+          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' || $route.path === '/template-management' }"
           @visible-change="handleParamDropdownVisibleChange">
           <span class="el-dropdown-link">
             <img loading="lazy" alt="" src="@/assets/header/param_management.png"
-              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' ? 'brightness(0) invert(1)' : 'None' }" />
+              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' || $route.path === '/template-management' ? 'brightness(0) invert(1)' : 'None' }" />
             Parameter Dictionary
             <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': paramDropdownVisible }"></i>
           </span>
@@ -67,6 +67,9 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="goServerSideManagement">
               Server Side Management
+            </el-dropdown-item>
+            <el-dropdown-item @click.native="goTemplateManagement">
+              Template Management
             </el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown>
@@ -168,6 +171,9 @@ export default {
     },
     goAllDevices() {
       this.$router.push('/all-devices')
+    },
+    goTemplateManagement() {
+      this.$router.push('/template-management')
     },
     // Get user information
     fetchUserInfo() {

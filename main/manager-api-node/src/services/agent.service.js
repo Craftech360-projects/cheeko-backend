@@ -1159,15 +1159,21 @@ const getAudioContent = async (audioId) => {
  * Get all visible agent templates
  * @returns {Promise<Array>} List of visible templates (camelCase keys for Spring Boot compatibility)
  */
-const getTemplates = async () => {
+const getTemplates = async (includeHidden = false) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const { data: templates, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('ai_agent_template')
     .select('*')
-    .eq('is_visible', 1)
     .order('sort', { ascending: true })
     .order('created_at', { ascending: false });
+
+  // Only filter by visible if not including hidden templates
+  if (!includeHidden) {
+    query = query.eq('is_visible', 1);
+  }
+
+  const { data: templates, error } = await query;
 
   if (error) {
     logger.error('Failed to fetch templates:', error);
@@ -1294,6 +1300,34 @@ const updateTemplate = async (templateId, data) => {
 
   // Return null (matches Spring Boot Result<Void>)
   return null;
+};
+
+/**
+ * Delete an agent template
+ * @param {string} templateId - Template ID
+ * @returns {Promise<void>}
+ */
+const deleteTemplate = async (templateId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Verify template exists
+  const { data: existing, error: existsError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('id')
+    .eq('id', templateId)
+    .single();
+
+  if (existsError || !existing) throw new Error('Template not found');
+
+  const { error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .delete()
+    .eq('id', templateId);
+
+  if (error) {
+    logger.error('Failed to delete template:', error);
+    throw new Error('Failed to delete template');
+  }
 };
 
 // ==============================================
@@ -1811,6 +1845,7 @@ module.exports = {
   getTemplateById,
   createTemplate,
   updateTemplate,
+  deleteTemplate,
   // MCP Access Point methods
   getMcpAddress,
   getMcpTools

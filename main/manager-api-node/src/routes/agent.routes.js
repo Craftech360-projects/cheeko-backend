@@ -185,7 +185,9 @@ router.get('/template',
   requireAuth,
   asyncHandler(async (req, res) => {
     try {
-      const templates = await agentService.getTemplates();
+      // includeHidden=true shows all templates (for admin management)
+      const includeHidden = req.query.includeHidden === 'true';
+      const templates = await agentService.getTemplates(includeHidden);
       success(res, templates);
     } catch (error) {
       badRequest(res, error.message);
@@ -361,6 +363,40 @@ router.put('/template/:id',
     try {
       const template = await agentService.updateTemplate(req.params.id, req.body);
       success(res, template, 'Template updated successfully');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/template/{id}:
+ *   delete:
+ *     tags: [Agent]
+ *     summary: Delete agent template
+ *     description: Requires authentication. Deletes a template by ID.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Template ID
+ *     responses:
+ *       200:
+ *         description: Template deleted successfully
+ *       404:
+ *         description: Template not found
+ */
+router.delete('/template/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      await agentService.deleteTemplate(req.params.id);
+      success(res, null, 'Template deleted successfully');
     } catch (error) {
       badRequest(res, error.message);
     }

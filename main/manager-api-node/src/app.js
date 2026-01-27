@@ -40,6 +40,10 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 
+// Trust proxy - required when behind reverse proxy (nginx, load balancer, etc.)
+// This enables express-rate-limit to correctly identify clients via X-Forwarded-For
+app.set('trust proxy', 1);
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
