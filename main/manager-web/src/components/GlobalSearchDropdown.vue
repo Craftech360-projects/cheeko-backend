@@ -86,26 +86,6 @@
             </div>
           </div>
 
-          <!-- Models (Admin only) -->
-          <div v-if="isSuperAdmin && results.models.length" class="result-category">
-            <div class="category-header">
-              <i class="el-icon-cpu"></i>
-              <span>Models</span>
-              <span class="category-count">{{ results.models.length }}</span>
-            </div>
-            <div
-              v-for="(item, idx) in results.models.slice(0, 5)"
-              :key="'model-' + item.id"
-              class="result-item"
-              :class="{ highlighted: isHighlighted('models', idx) }"
-              @click="navigateToResult('model', item)"
-              @mouseenter="setHighlight('models', idx)"
-            >
-              <span class="result-name">{{ item.modelName }}</span>
-              <span class="result-meta">{{ item.modelType }}</span>
-            </div>
-          </div>
-
           <!-- RFID Questions (Admin only) -->
           <div v-if="isSuperAdmin && results.rfidQuestions.length" class="result-category">
             <div class="category-header">
@@ -290,7 +270,6 @@ export default {
         agents: [],
         devices: [],
         users: [],
-        models: [],
         rfidQuestions: [],
         rfidPacks: [],
         rfidCards: [],
@@ -321,9 +300,6 @@ export default {
         }
         if (this.results.users.length) {
           categories.push({ key: 'users', items: this.results.users.slice(0, 5) })
-        }
-        if (this.results.models.length) {
-          categories.push({ key: 'models', items: this.results.models.slice(0, 5) })
         }
         if (this.results.rfidQuestions.length) {
           categories.push({ key: 'rfidQuestions', items: this.results.rfidQuestions.slice(0, 5) })
@@ -429,22 +405,6 @@ export default {
                 this.results.users = list.filter(u =>
                   searchRegex.test(u.username || '') ||
                   searchRegex.test(u.mobile || '')
-                ).slice(0, 10)
-              }
-              resolve()
-            })
-          })
-        )
-
-        // Models
-        promises.push(
-          new Promise((resolve) => {
-            Api.model.getModelList({ modelType: '', modelName: '', page: 1, limit: 100 }, (res) => {
-              if (res.data?.code === 0) {
-                const list = res.data.data?.list || []
-                this.results.models = list.filter(m =>
-                  searchRegex.test(m.modelName || '') ||
-                  searchRegex.test(m.modelCode || '')
                 ).slice(0, 10)
               }
               resolve()
@@ -587,7 +547,6 @@ export default {
         agent: { path: '/role-config', query: { agentId: item.agentId || item.id } },
         device: { path: '/device-management', query: { agentId: item.agentId, deviceId: item.id } },
         user: { path: '/user-management', query: { userId: item.userid } },
-        model: { path: '/model-config', query: { modelId: item.id, modelType: item.modelType } },
         rfidQuestion: { path: '/rfid-management', query: { tab: 'questions', id: item.id } },
         rfidPack: { path: '/rfid-management', query: { tab: 'packs', id: item.id } },
         rfidCard: { path: '/rfid-management', query: { tab: 'cards', id: item.id } },
@@ -667,7 +626,6 @@ export default {
             agents: 'agent',
             devices: 'device',
             users: 'user',
-            models: 'model',
             rfidQuestions: 'rfidQuestion',
             rfidPacks: 'rfidPack',
             rfidCards: 'rfidCard',

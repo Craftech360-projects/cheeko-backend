@@ -24,12 +24,25 @@ const logger = require('../utils/logger');
  *   get:
  *     tags: [Agent]
  *     summary: Get agents list (admin gets all agents, user gets own agents)
- *     description: Returns array of AgentDTO objects. Admin sees all agents with owner info, regular user sees only their own agents.
+ *     description: Returns paginated AgentDTO objects. Admin sees all agents with owner info, regular user sees only their own agents.
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number starting from 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *         description: Number of records per page
  *     responses:
  *       200:
- *         description: List of agents with model names and device counts
+ *         description: Paginated list of agents with device counts
  *         content:
  *           application/json:
  *             schema:
@@ -39,48 +52,46 @@ const logger = require('../utils/logger');
  *                   type: integer
  *                   example: 0
  *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: string
- *                       agentName:
- *                         type: string
- *                       ttsModelName:
- *                         type: string
- *                       ttsVoiceName:
- *                         type: string
- *                       llmModelName:
- *                         type: string
- *                       vllmModelName:
- *                         type: string
- *                       memModelId:
- *                         type: string
- *                       systemPrompt:
- *                         type: string
- *                       summaryMemory:
- *                         type: string
- *                       lastConnectedAt:
- *                         type: string
- *                         format: date-time
- *                       deviceCount:
- *                         type: integer
- *                       deviceMacAddresses:
- *                         type: string
- *                       ownerUsername:
- *                         type: string
- *                         description: Only present for admin users
- *                       createDate:
- *                         type: string
- *                         format: date-time
+ *                   type: object
+ *                   properties:
+ *                     list:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           agentName:
+ *                             type: string
+ *                           memModelId:
+ *                             type: string
+ *                           systemPrompt:
+ *                             type: string
+ *                           summaryMemory:
+ *                             type: string
+ *                           lastConnectedAt:
+ *                             type: string
+ *                             format: date-time
+ *                           deviceCount:
+ *                             type: integer
+ *                           deviceMacAddresses:
+ *                             type: string
+ *                           ownerUsername:
+ *                             type: string
+ *                             description: Only present for admin users
+ *                           createDate:
+ *                             type: string
+ *                             format: date-time
+ *                     total:
+ *                       type: integer
  */
 router.get('/list',
   requireAuth,
   asyncHandler(async (req, res) => {
     const isSuperAdmin = req.user.super_admin === 1;
-    const agents = await agentService.getAgentListForUser(req.user.id, isSuperAdmin);
-    success(res, agents);
+    const { page, limit } = req.query;
+    const result = await agentService.getAgentListForUser(req.user.id, isSuperAdmin, { page, limit });
+    success(res, result);
   })
 );
 

@@ -25,17 +25,23 @@ export default {
             }).send();
     },
     // Get user's own agent list (User - shows only current user's agents)
-    getUserAgentList(callback) {
+    getUserAgentList(params, callback) {
+        // Support both old callback-only format and new params format
+        if (typeof params === 'function') {
+            callback = params;
+            params = {}; // Use backend defaults (page: 1, limit: 20)
+        }
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/agent/list`)
             .method('GET')
+            .data(params)
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
             })
             .networkFail(() => {
                 RequestService.reAjaxFun(() => {
-                    this.getUserAgentList(callback);
+                    this.getUserAgentList(params, callback);
                 });
             }).send();
     },

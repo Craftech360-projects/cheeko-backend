@@ -1546,35 +1546,52 @@ const getMcpTools = async (agentId) => {
 
 /**
  * Get user's agents list (Spring Boot /agent/list format)
- * Returns AgentDTO array with model names, device counts, etc.
+ * Returns AgentDTO array with device counts, etc.
  * Admin sees all agents with owner info, user sees own agents
+ * Optimized: batch fetches all device data in 1 query instead of N+1
  * @param {number} userId - User ID
  * @param {boolean} isSuperAdmin - Whether user is super admin
- * @returns {Promise<Array>} List of AgentDTO objects
+ * @param {Object} options - Pagination options
+ * @param {number} [options.page=1] - Page number (1-indexed)
+ * @param {number} [options.limit=20] - Items per page
+ * @returns {Promise<Object>} Object with list and total
  */
-const getAgentListForUser = async (userId, isSuperAdmin) => {
+const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  let query;
+  const page = parseInt(options.page) || 1;
+  const limit = parseInt(options.limit) || 10;
+  const offset = (page - 1) * limit;
 
+  // Build base query for count
+  let countQuery = supabaseAdmin.from('ai_agent').select('id', { count: 'exact', head: true });
+  if (!isSuperAdmin) {
+    countQuery = countQuery.eq('user_id', userId);
+  }
+  const { count: totalCount } = await countQuery;
+
+  // Build query for agents with pagination
+  let query;
   if (isSuperAdmin) {
     // Admin sees all agents with owner information
     query = supabaseAdmin
       .from('ai_agent')
       .select(`
-        *,
+        id, agent_name, mem_model_id, system_prompt, summary_memory, created_at, user_id,
         sys_user:user_id (username)
       `)
       .order('sort', { ascending: true })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
   } else {
     // Regular user sees only their own agents
     query = supabaseAdmin
       .from('ai_agent')
-      .select('*')
+      .select('id, agent_name, mem_model_id, system_prompt, summary_memory, created_at, user_id')
       .eq('user_id', userId)
       .order('sort', { ascending: true })
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
   }
 
   const { data: agents, error } = await query;
@@ -1583,95 +1600,53 @@ const getAgentListForUser = async (userId, isSuperAdmin) => {
     throw new Error('Failed to fetch agents');
   }
 
-  // Transform to AgentDTO format with model names and device counts
-  const result = await Promise.all((agents || []).map(async (agent) => {
-    // Get model names
-    let ttsModelName = null;
-    let llmModelName = null;
-    let vllmModelName = null;
-    let ttsVoiceName = null;
+  if (!agents || agents.length === 0) {
+    return { list: [], total: totalCount || 0 };
+  }
 
-    // Get TTS model name
-    if (agent.tts_model_id) {
-      const { data: ttsModel } = await supabaseAdmin
-        .from('ai_model_config')
-        .select('model_name')
-        .eq('id', agent.tts_model_id)
-        .single();
-      ttsModelName = ttsModel?.model_name || null;
+  // Batch fetch all device data for these agents in one query
+  const agentIds = agents.map(a => a.id);
+  const { data: allDevices } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id, mac_address, last_connected_at')
+    .in('agent_id', agentIds);
+
+  // Build device stats map: { agentId: { count, macs, lastConnected } }
+  const deviceStatsMap = {};
+  (allDevices || []).forEach(device => {
+    const aid = device.agent_id;
+    if (!deviceStatsMap[aid]) {
+      deviceStatsMap[aid] = { count: 0, macs: [], lastConnected: null };
     }
-
-    // Get LLM model name
-    if (agent.llm_model_id) {
-      const { data: llmModel } = await supabaseAdmin
-        .from('ai_model_config')
-        .select('model_name')
-        .eq('id', agent.llm_model_id)
-        .single();
-      llmModelName = llmModel?.model_name || null;
+    deviceStatsMap[aid].count++;
+    deviceStatsMap[aid].macs.push(device.mac_address);
+    // Track most recent connection
+    if (device.last_connected_at) {
+      const connTime = new Date(device.last_connected_at);
+      if (!deviceStatsMap[aid].lastConnected || connTime > new Date(deviceStatsMap[aid].lastConnected)) {
+        deviceStatsMap[aid].lastConnected = device.last_connected_at;
+      }
     }
+  });
 
-    // Get VLLM model name
-    if (agent.vllm_model_id) {
-      const { data: vllmModel } = await supabaseAdmin
-        .from('ai_model_config')
-        .select('model_name')
-        .eq('id', agent.vllm_model_id)
-        .single();
-      vllmModelName = vllmModel?.model_name || null;
-    }
-
-    // Get TTS voice name
-    if (agent.tts_voice_id) {
-      const { data: ttsVoice } = await supabaseAdmin
-        .from('ai_tts_voice')
-        .select('voice_name')
-        .eq('id', agent.tts_voice_id)
-        .single();
-      ttsVoiceName = ttsVoice?.voice_name || null;
-    }
-
-    // Get device count
-    const { count: deviceCount } = await supabaseAdmin
-      .from('ai_device')
-      .select('id', { count: 'exact', head: true })
-      .eq('agent_id', agent.id);
-
-    // Get device MAC addresses
-    const { data: devices } = await supabaseAdmin
-      .from('ai_device')
-      .select('mac_address')
-      .eq('agent_id', agent.id);
-    const deviceMacAddresses = (devices || []).map(d => d.mac_address).join(',');
-
-    // Get latest last connection time from devices
-    const { data: latestDevice } = await supabaseAdmin
-      .from('ai_device')
-      .select('last_connected_at')
-      .eq('agent_id', agent.id)
-      .order('last_connected_at', { ascending: false, nullsFirst: false })
-      .limit(1)
-      .single();
-
+  // Transform to AgentDTO format
+  const list = agents.map(agent => {
+    const stats = deviceStatsMap[agent.id] || { count: 0, macs: [], lastConnected: null };
     return {
       id: agent.id,
       agentName: agent.agent_name,
-      ttsModelName: ttsModelName,
-      ttsVoiceName: ttsVoiceName,
-      llmModelName: llmModelName,
-      vllmModelName: vllmModelName,
       memModelId: agent.mem_model_id,
       systemPrompt: agent.system_prompt,
       summaryMemory: agent.summary_memory,
-      lastConnectedAt: latestDevice?.last_connected_at || null,
-      deviceCount: deviceCount || 0,
-      deviceMacAddresses: deviceMacAddresses,
+      lastConnectedAt: stats.lastConnected,
+      deviceCount: stats.count,
+      deviceMacAddresses: stats.macs.join(','),
       ownerUsername: isSuperAdmin ? (agent.sys_user?.username || null) : undefined,
       createDate: agent.created_at
     };
-  }));
+  });
 
-  return result;
+  return { list, total: totalCount || 0 };
 };
 
 /**

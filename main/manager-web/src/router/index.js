@@ -70,13 +70,6 @@ const routes = [
     }
   },
   {
-    path: '/model-config',
-    name: 'ModelConfig',
-    component: function () {
-      return import('../views/ModelConfig.vue')
-    }
-  },
-  {
     path: '/params-management',
     name: 'ParamsManagement',
     component: function () {
@@ -189,7 +182,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices']
 
 // Route guard
 router.beforeEach((to, from, next) => {

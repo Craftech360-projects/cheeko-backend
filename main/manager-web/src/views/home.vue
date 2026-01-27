@@ -233,6 +233,7 @@ export default {
       currentPage: 1,
       pageSize: 10,
       pageSizeOptions: [10, 20, 50, 100],
+      totalAgents: 0, // Total count from server for pagination
       // Today's device count
       todayDeviceCount: 0,
       // Month's device count
@@ -249,12 +250,12 @@ export default {
       return this.$store.getters.getIsSuperAdmin;
     },
     paginatedDevices() {
-      const start = (this.currentPage - 1) * this.pageSize;
-      const end = start + this.pageSize;
-      return this.devices.slice(start, end);
+      // Data is already paginated from server, return as-is
+      return this.devices;
     },
     pageCount() {
-      return Math.ceil(this.devices.length / this.pageSize) || 1;
+      // Use totalAgents from server response for pagination
+      return Math.ceil(this.totalAgents / this.pageSize) || 1;
     },
     visiblePages() {
       const pages = [];
@@ -378,7 +379,17 @@ export default {
       this.isSearching = false;
       this.searchRegex = null;
       this.devices = [...this.originalDevices];
-      this.currentPage = 1; // Reset to first page
+      // Reset to first page and refetch when search is cleared
+      if (this.currentPage !== 1) {
+        this.currentPage = 1;
+        this.fetchAgentList();
+      }
+    },
+    // Set devices without resetting page (used after API fetch)
+    setDevicesFromOriginal() {
+      this.isSearching = false;
+      this.searchRegex = null;
+      this.devices = [...this.originalDevices];
     },
     applySearchFilter() {
       if (!this.isSearching || !this.searchRegex) {
@@ -401,7 +412,11 @@ export default {
 
       // Use /agent/list for both admin and regular users
       // Backend handles role-based filtering and includes ownerUsername for admins
-      Api.agent.getUserAgentList((response) => {
+      const params = {
+        page: this.currentPage,
+        limit: this.pageSize
+      };
+      Api.agent.getUserAgentList(params, (response) => {
         console.log('API response received:', response); // Debug log
         this.handleAgentListResponse(response.data);
       }, (error) => {
@@ -414,27 +429,32 @@ export default {
     // Handle agent list response
     handleAgentListResponse(data) {
       console.log('Raw API Response:', data); // Debug log
-      
+
       if (data) {
         // The parameter 'data' is already response.data from the API call
         let agentList = [];
-        
-        // The API response structure is nested: response.data.data.list
+        let total = 0;
+
+        // The API response structure is nested: response.data.data.list with total
         if (data.data && data.data.list && Array.isArray(data.data.list)) {
           // For admin API: data.data.list (nested structure)
           agentList = data.data.list;
-          console.log('Using data.data.list structure'); // Debug log
+          total = data.data.total || agentList.length;
+          console.log('Using data.data.list structure, total:', total); // Debug log
         } else if (data.list && Array.isArray(data.list)) {
           // For fallback: data.list
           agentList = data.list;
-          console.log('Using data.list structure'); // Debug log
+          total = data.total || agentList.length;
+          console.log('Using data.list structure, total:', total); // Debug log
         } else if (Array.isArray(data.data)) {
           // For user API: data.data (direct array)
           agentList = data.data;
+          total = agentList.length;
           console.log('Using data.data array structure'); // Debug log
         } else if (Array.isArray(data)) {
           // For direct array: data
           agentList = data;
+          total = agentList.length;
           console.log('Using direct array structure'); // Debug log
         } else {
           console.error('Unexpected API response structure:', data);
@@ -443,6 +463,9 @@ export default {
           this.isLoading = false;
           return;
         }
+
+        // Store total for pagination
+        this.totalAgents = total;
 
         console.log('Agent list before processing:', agentList); // Debug log
 
@@ -457,7 +480,7 @@ export default {
           10 // Maximum 10
         );
 
-        this.handleSearchReset();
+        this.setDevicesFromOriginal();
       } else {
         console.error('No data in API response:', data);
         this.$message.error('Failed to load agent list: No data received');
@@ -510,7 +533,7 @@ export default {
 
       // Set basic data for initial display
       this.originalDevices = basicDevices;
-      this.handleSearchReset();
+      this.setDevicesFromOriginal();
 
       // Asynchronously fetch device count and MAC addresses
       this.fetchDeviceDataForAgents();
@@ -615,25 +638,41 @@ export default {
       }
     },
 
-    // Pagination methods
+    // Pagination methods - fetch from server when page changes
     handlePageSizeChange(val) {
       this.pageSize = val;
       this.currentPage = 1;
+      this.fetchAgentList();
     },
     goFirst() {
-      this.currentPage = 1;
+      if (this.currentPage !== 1) {
+        this.currentPage = 1;
+        this.fetchAgentList();
+      }
     },
     goPrev() {
-      if (this.currentPage > 1) this.currentPage--;
+      if (this.currentPage > 1) {
+        this.currentPage--;
+        this.fetchAgentList();
+      }
     },
     goNext() {
-      if (this.currentPage < this.pageCount) this.currentPage++;
+      if (this.currentPage < this.pageCount) {
+        this.currentPage++;
+        this.fetchAgentList();
+      }
     },
     goLast() {
-      this.currentPage = this.pageCount;
+      if (this.currentPage !== this.pageCount) {
+        this.currentPage = this.pageCount;
+        this.fetchAgentList();
+      }
     },
     goToPage(page) {
-      this.currentPage = page;
+      if (this.currentPage !== page) {
+        this.currentPage = page;
+        this.fetchAgentList();
+      }
     }
   }
 }

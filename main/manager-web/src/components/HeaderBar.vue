@@ -16,12 +16,6 @@
             :style="{ filter: $route.path === '/home' || $route.path === '/role-config' || $route.path === '/device-management' ? 'brightness(0) invert(1)' : 'None' }" />
          Agent Management
         </div>
-        <div v-if="isSuperAdmin" class="equipment-management" :class="{ 'active-tab': $route.path === '/model-config' }"
-          @click="goModelConfig">
-          <img loading="lazy" alt="" src="@/assets/header/model_config.png"
-            :style="{ filter: $route.path === '/model-config' ? 'brightness(0) invert(1)' : 'None' }" />
-         Model Configuration
-        </div>
         <div v-if="isSuperAdmin" class="equipment-management"
           :class="{ 'active-tab': $route.path === '/user-management' }" @click="goUserManagement">
           <img loading="lazy" alt="" src="@/assets/header/user_management.png"
@@ -150,9 +144,6 @@ export default {
     },
     goUserManagement() {
       this.$router.push('/user-management')
-    },
-    goModelConfig() {
-      this.$router.push('/model-config')
     },
     goParamManagement() {
       this.$router.push('/params-management')
