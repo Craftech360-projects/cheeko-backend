@@ -1494,18 +1494,32 @@ const getTodayDeviceCount = async () => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const { data: sessions, error } = await supabaseAdmin
+  // Get devices that connected today (via OTA check or any API call)
+  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('mac_address')
+    .gte('last_connected_at', today.toISOString());
+
+  if (deviceError) {
+    logger.error('Failed to get today connected devices:', deviceError);
+  }
+
+  // Get game sessions for today
+  const { data: sessions, error: sessionError } = await supabaseAdmin
     .from('analytics_game_sessions')
     .select('mac_address')
     .gte('started_at', today.toISOString());
 
-  if (error) {
-    logger.error('Failed to get today device count:', error);
-    throw new Error('Failed to get device count');
+  if (sessionError) {
+    logger.error('Failed to get today game sessions:', sessionError);
   }
 
-  const uniqueDevices = [...new Set((sessions || []).map(s => s.mac_address))];
-  return uniqueDevices.length;
+  // Combine unique MAC addresses from both sources
+  const allMacs = new Set();
+  (connectedDevices || []).forEach(d => allMacs.add(d.mac_address));
+  (sessions || []).forEach(s => allMacs.add(s.mac_address));
+
+  return allMacs.size;
 };
 
 /**
@@ -1519,18 +1533,32 @@ const getMonthDeviceCount = async () => {
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  const { data: sessions, error } = await supabaseAdmin
+  // Get devices that connected this month (via OTA check or any API call)
+  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('mac_address')
+    .gte('last_connected_at', monthStart.toISOString());
+
+  if (deviceError) {
+    logger.error('Failed to get month connected devices:', deviceError);
+  }
+
+  // Get game sessions for this month
+  const { data: sessions, error: sessionError } = await supabaseAdmin
     .from('analytics_game_sessions')
     .select('mac_address')
     .gte('started_at', monthStart.toISOString());
 
-  if (error) {
-    logger.error('Failed to get month device count:', error);
-    throw new Error('Failed to get device count');
+  if (sessionError) {
+    logger.error('Failed to get month game sessions:', sessionError);
   }
 
-  const uniqueDevices = [...new Set((sessions || []).map(s => s.mac_address))];
-  return uniqueDevices.length;
+  // Combine unique MAC addresses from both sources
+  const allMacs = new Set();
+  (connectedDevices || []).forEach(d => allMacs.add(d.mac_address));
+  (sessions || []).forEach(s => allMacs.add(s.mac_address));
+
+  return allMacs.size;
 };
 
 /**
@@ -1543,33 +1571,76 @@ const getTodayActiveDevices = async () => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const { data: sessions, error } = await supabaseAdmin
+  // Get devices that connected today (via OTA check or any API call)
+  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, mac_address, alias, board, app_version, last_connected_at, user_id')
+    .gte('last_connected_at', today.toISOString())
+    .order('last_connected_at', { ascending: false });
+
+  if (deviceError) {
+    logger.error('Failed to get today connected devices:', deviceError);
+  }
+
+  // Get game sessions for today
+  const { data: sessions, error: sessionError } = await supabaseAdmin
     .from('analytics_game_sessions')
     .select('mac_address, mode_type, started_at, duration_seconds')
     .gte('started_at', today.toISOString())
     .order('started_at', { ascending: false });
 
-  if (error) {
-    logger.error('Failed to get today active devices:', error);
-    throw new Error('Failed to get active devices');
+  if (sessionError) {
+    logger.error('Failed to get today game sessions:', sessionError);
   }
 
-  // Group by device
+  // Get unique user IDs to fetch usernames
+  const userIds = [...new Set((connectedDevices || []).map(d => d.user_id).filter(Boolean))];
+  let userMap = {};
+  if (userIds.length > 0) {
+    const { data: users } = await supabaseAdmin
+      .from('sys_user')
+      .select('id, username')
+      .in('id', userIds);
+    (users || []).forEach(u => {
+      userMap[u.id] = u.username;
+    });
+  }
+
+  // Build device map from connected devices
   const deviceMap = {};
+  (connectedDevices || []).forEach(device => {
+    const mac = device.mac_address;
+    if (!deviceMap[mac]) {
+      deviceMap[mac] = {
+        macAddress: mac,
+        alias: device.alias,
+        board: device.board,
+        appVersion: device.app_version,
+        lastConnected: device.last_connected_at,
+        userId: device.user_id,
+        ownerName: userMap[device.user_id] || null,
+        sessionCount: 0,
+        totalDuration: 0,
+        modes: []
+      };
+    }
+  });
+
+  // Add session data to devices
   (sessions || []).forEach(session => {
     const mac = session.mac_address;
     if (!deviceMap[mac]) {
       deviceMap[mac] = {
         macAddress: mac,
+        lastConnected: session.started_at,
         sessionCount: 0,
         totalDuration: 0,
-        lastSession: session.started_at,
         modes: []
       };
     }
     deviceMap[mac].sessionCount++;
     deviceMap[mac].totalDuration += session.duration_seconds || 0;
-    if (!deviceMap[mac].modes.includes(session.mode_type)) {
+    if (session.mode_type && !deviceMap[mac].modes.includes(session.mode_type)) {
       deviceMap[mac].modes.push(session.mode_type);
     }
   });
@@ -1588,33 +1659,76 @@ const getMonthActiveDevices = async () => {
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  const { data: sessions, error } = await supabaseAdmin
+  // Get devices that connected this month (via OTA check or any API call)
+  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, mac_address, alias, board, app_version, last_connected_at, user_id')
+    .gte('last_connected_at', monthStart.toISOString())
+    .order('last_connected_at', { ascending: false });
+
+  if (deviceError) {
+    logger.error('Failed to get month connected devices:', deviceError);
+  }
+
+  // Get game sessions for this month
+  const { data: sessions, error: sessionError } = await supabaseAdmin
     .from('analytics_game_sessions')
     .select('mac_address, mode_type, started_at, duration_seconds')
     .gte('started_at', monthStart.toISOString())
     .order('started_at', { ascending: false });
 
-  if (error) {
-    logger.error('Failed to get month active devices:', error);
-    throw new Error('Failed to get active devices');
+  if (sessionError) {
+    logger.error('Failed to get month game sessions:', sessionError);
   }
 
-  // Group by device
+  // Get unique user IDs to fetch usernames
+  const userIds = [...new Set((connectedDevices || []).map(d => d.user_id).filter(Boolean))];
+  let userMap = {};
+  if (userIds.length > 0) {
+    const { data: users } = await supabaseAdmin
+      .from('sys_user')
+      .select('id, username')
+      .in('id', userIds);
+    (users || []).forEach(u => {
+      userMap[u.id] = u.username;
+    });
+  }
+
+  // Build device map from connected devices
   const deviceMap = {};
+  (connectedDevices || []).forEach(device => {
+    const mac = device.mac_address;
+    if (!deviceMap[mac]) {
+      deviceMap[mac] = {
+        macAddress: mac,
+        alias: device.alias,
+        board: device.board,
+        appVersion: device.app_version,
+        lastConnected: device.last_connected_at,
+        userId: device.user_id,
+        ownerName: userMap[device.user_id] || null,
+        sessionCount: 0,
+        totalDuration: 0,
+        modes: []
+      };
+    }
+  });
+
+  // Add session data to devices
   (sessions || []).forEach(session => {
     const mac = session.mac_address;
     if (!deviceMap[mac]) {
       deviceMap[mac] = {
         macAddress: mac,
+        lastConnected: session.started_at,
         sessionCount: 0,
         totalDuration: 0,
-        lastSession: session.started_at,
         modes: []
       };
     }
     deviceMap[mac].sessionCount++;
     deviceMap[mac].totalDuration += session.duration_seconds || 0;
-    if (!deviceMap[mac].modes.includes(session.mode_type)) {
+    if (session.mode_type && !deviceMap[mac].modes.includes(session.mode_type)) {
       deviceMap[mac].modes.push(session.mode_type);
     }
   });
