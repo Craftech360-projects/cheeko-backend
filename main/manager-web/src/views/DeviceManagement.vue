@@ -62,8 +62,11 @@
                              @change="handleOtaSwitchChange(scope.row)"></el-switch>
                 </template>
               </el-table-column>
-              <el-table-column label="Actions" align="center">
+              <el-table-column label="Actions" align="center" min-width="150">
                 <template slot-scope="scope">
+                  <el-button size="mini" type="text" @click="handleKidProfile(scope.row)">
+                    Kid Profile
+                  </el-button>
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
                     Unbind
                   </el-button>
@@ -359,7 +362,8 @@ export default {
               _submitting: false,
               otaSwitch: device.autoUpdate === 1,
               rawBindTime: new Date(device.createDate).getTime(),
-              selected: false
+              selected: false,
+              kidId: device.kidId || device.kid_id || null
             };
           })
               .sort((a, b) => a.rawBindTime - b.rawBindTime);
@@ -394,6 +398,16 @@ export default {
         row.otaSwitch = !row.otaSwitch
         this.$message.error(msg || 'Operation failed')
       })
+    },
+    handleKidProfile(row) {
+      this.$router.push({
+        path: '/kid-profiles',
+        query: {
+          deviceId: row.device_id,
+          macAddress: row.macAddress,
+          kidId: row.kidId
+        }
+      });
     },
   }
 };

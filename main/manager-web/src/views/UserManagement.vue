@@ -33,8 +33,9 @@
                   <el-tag v-else type="danger">Disabled</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column label="Actions" align="center">
+              <el-table-column label="Actions" align="center" min-width="280">
                 <template slot-scope="scope">
+                  <el-button size="mini" type="text" @click="viewKidProfiles(scope.row)">Kid Profiles</el-button>
                   <el-button size="mini" type="text" @click="resetPassword(scope.row)">Reset Password</el-button>
                   <el-button size="mini" type="text" v-if="scope.row.status === 1"
                     @click="handleChangeStatus(scope.row, 0)">Disable Account</el-button>
@@ -82,6 +83,40 @@
     </div>
 
     <view-password-dialog :visible.sync="showViewPassword" :password="currentPassword" />
+
+    <!-- Kid Profiles Dialog -->
+    <el-dialog :title="`Kid Profiles - ${selectedUserName}`" :visible.sync="showKidProfiles" width="700px">
+      <el-table :data="kidProfilesList" v-loading="loadingKidProfiles" style="width: 100%">
+        <el-table-column prop="name" label="Name" min-width="120" />
+        <el-table-column prop="nickname" label="Nickname" min-width="100" />
+        <el-table-column label="Age" min-width="60">
+          <template slot-scope="scope">
+            {{ calculateAge(scope.row.date_of_birth || scope.row.birth_date || scope.row.birthDate) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="gender" label="Gender" min-width="70" />
+        <el-table-column label="Interests" min-width="180">
+          <template slot-scope="scope">
+            <el-tag v-for="interest in (scope.row.interests || [])" :key="interest" size="mini" style="margin-right: 3px;">
+              {{ interest }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="Language" min-width="80">
+          <template slot-scope="scope">
+            {{ scope.row.primary_language || scope.row.language || '-' }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="kidProfilesList.length === 0 && !loadingKidProfiles" style="text-align: center; padding: 30px; color: #909399;">
+        <i class="el-icon-user" style="font-size: 32px; margin-bottom: 10px; display: block;"></i>
+        No kid profiles found for this user
+      </div>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="showKidProfiles = false">Close</el-button>
+      </span>
+    </el-dialog>
+
     <el-footer>
       <version-footer />
     </el-footer>
@@ -107,6 +142,11 @@ export default {
       total: 0,
       isAllSelected: false,
       loading: false,
+      // Kid profiles
+      showKidProfiles: false,
+      loadingKidProfiles: false,
+      kidProfilesList: [],
+      selectedUserName: '',
     };
   },
   created() {
@@ -337,6 +377,32 @@ export default {
       }).catch(() => {
         // User cancelled operation
       });
+    },
+    viewKidProfiles(row) {
+      this.selectedUserName = row.mobile || `User #${row.userid}`;
+      this.showKidProfiles = true;
+      this.loadingKidProfiles = true;
+      this.kidProfilesList = [];
+
+      Api.admin.getUserKidProfiles(row.userid, ({ data }) => {
+        this.loadingKidProfiles = false;
+        if (data.code === 0) {
+          this.kidProfilesList = data.data || [];
+        } else {
+          this.$message.error(data.msg || 'Failed to load kid profiles');
+        }
+      });
+    },
+    calculateAge(birthDate) {
+      if (!birthDate) return '-';
+      const birth = new Date(birthDate);
+      const now = new Date();
+      let age = now.getFullYear() - birth.getFullYear();
+      const monthDiff = now.getMonth() - birth.getMonth();
+      if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) {
+        age--;
+      }
+      return age > 0 ? age : '-';
     },
   },
 };

@@ -587,6 +587,13 @@ export default {
       this.showChatHistory = true;
     },
 
+    handleKidProfilesRow(row) {
+      this.$router.push({
+        path: '/kid-profiles',
+        query: { agentId: row.agentId, agentName: row.agentName }
+      });
+    },
+
     // Format last connected time
     formatLastConnected(lastConnectedAt) {
       if (!lastConnectedAt) return 'No conversations yet';

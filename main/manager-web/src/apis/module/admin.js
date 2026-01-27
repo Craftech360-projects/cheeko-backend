@@ -252,6 +252,23 @@ export default {
                     this.sendWsServerAction(data, callback)
                 })
             }).send();
+    },
+
+    // Get kid profiles for a user (Admin only)
+    getUserKidProfiles(userId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/users/${userId}/kids`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get kid profiles:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getUserKidProfiles(userId, callback)
+                })
+            }).send();
     }
 
 }

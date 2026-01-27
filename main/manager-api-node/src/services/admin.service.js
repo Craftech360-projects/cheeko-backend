@@ -826,6 +826,28 @@ const getAllDevices = async ({ page = 1, limit = 10, keywords = '' } = {}) => {
   };
 };
 
+/**
+ * Get kid profiles by user ID (admin only)
+ */
+const getKidProfilesByUserId = async (userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  console.log('[admin.service] Fetching kid profiles for userId:', userId);
+
+  const { data, error } = await supabaseAdmin
+    .from('kid_profile')
+    .select('*')
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('[admin.service] Error fetching kid profiles:', error);
+    throw new Error(`Failed to get kid profiles: ${error.message}`);
+  }
+
+  console.log('[admin.service] Found kid profiles:', data?.length || 0);
+  return data || [];
+};
+
 module.exports = {
   // User Management
   listUsers,
@@ -845,6 +867,9 @@ module.exports = {
 
   // Device Management
   getAllDevices,
+
+  // Kid Profiles
+  getKidProfilesByUserId,
 
   // System Statistics
   getSystemOverview,

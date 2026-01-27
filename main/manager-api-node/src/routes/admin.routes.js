@@ -827,6 +827,53 @@ router.put('/users/:id/super-admin',
   })
 );
 
+// ==================== KID PROFILES ====================
+
+/**
+ * @swagger
+ * /admin/users/{id}/kids:
+ *   get:
+ *     tags: [Admin - User Management]
+ *     summary: Get user's kid profiles
+ *     description: Returns all kid profiles for a specific user (super admin only)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: User ID
+ *     responses:
+ *       200:
+ *         description: List of kid profiles
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Super admin access required
+ */
+router.get('/users/:id/kids',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const userId = parseInt(req.params.id);
+    console.log('[admin.routes] GET /users/:id/kids - userId:', userId);
+
+    if (isNaN(userId)) {
+      return badRequest(res, 'Invalid user ID');
+    }
+
+    try {
+      const profiles = await adminService.getKidProfilesByUserId(userId);
+      success(res, profiles);
+    } catch (error) {
+      console.error('[admin.routes] Error:', error.message);
+      badRequest(res, error.message);
+    }
+  })
+);
+
 // ==================== SYSTEM STATISTICS ====================
 
 /**

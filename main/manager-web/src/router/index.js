@@ -146,6 +146,17 @@ const routes = [
       title: 'RFID Management'
     }
   },
+  {
+    path: '/kid-profiles',
+    name: 'KidProfiles',
+    component: function () {
+      return import('../views/KidProfiles.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Kid Profiles'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -167,7 +178,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics', 'RfidManagement']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'ModelConfig', 'TokenAnalytics', 'RfidManagement', 'KidProfiles']
 
 // Route guard
 router.beforeEach((to, from, next) => {
