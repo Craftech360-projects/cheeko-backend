@@ -150,12 +150,8 @@
                       type="text"
                       size="small"
                       @click="handleChatHistoryRow(scope.row)"
-                      :disabled="scope.row.memModelId === 'Memory_nomem'"
                     >
-                      <el-tooltip v-if="scope.row.memModelId === 'Memory_nomem'" content="Enable memory in 'Configure Role' first" placement="top">
-                        <span>Chat History</span>
-                      </el-tooltip>
-                      <span v-else>Chat History</span>
+                      Chat History
                     </el-button>
                     <el-button type="text" size="small" class="delete-btn" @click="handleDeleteAgent(scope.row.agentId)">
                       <i class="el-icon-delete"></i>
@@ -586,9 +582,6 @@ export default {
     },
 
     handleChatHistoryRow(row) {
-      if (row.memModelId === 'Memory_nomem') {
-        return;
-      }
       this.currentAgentId = row.agentId;
       this.currentAgentName = row.agentName;
       this.showChatHistory = true;

@@ -35,12 +35,8 @@
       <div class="settings-btn" @click="handleDeviceManage">
         Devices ({{ device.deviceCount }})
       </div>
-      <div class="settings-btn" @click="handleChatHistory"
-        :class="{ 'disabled-btn': device.memModelId === 'Memory_nomem' }">
-        <el-tooltip v-if="device.memModelId === 'Memory_nomem'" content="Please enable memory in 'Configure Role' first" placement="top">
-          <span>Chat History</span>
-        </el-tooltip>
-        <span v-else>Chat History</span>
+      <div class="settings-btn" @click="handleChatHistory">
+        Chat History
       </div>
     </div>
     <div class="version-info">
@@ -96,9 +92,6 @@ export default {
       this.$router.push({ path: '/device-management', query: { agentId: this.device.agentId } });
     },
     handleChatHistory() {
-      if (this.device.memModelId === 'Memory_nomem') {
-        return
-      }
       this.$emit('chat-history', { agentId: this.device.agentId, agentName: this.device.agentName })
     }
   }
