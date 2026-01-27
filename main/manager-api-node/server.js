@@ -10,6 +10,7 @@ require('dotenv').config();
 const app = require('./src/app');
 const logger = require('./src/utils/logger');
 const { runPrismaMigrations } = require('./src/config/prisma-migrations');
+const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
 
 const PORT = process.env.PORT || 8002;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -41,11 +42,20 @@ const startServer = async () => {
 ║  Database:    Prisma Migrations Applied                   ║
 ╚═══════════════════════════════════════════════════════════╝
       `);
+
+      // Start background jobs
+      startEmailReportCron().catch(err => {
+        logger.warn('Failed to start email report cron:', err.message);
+      });
     });
 
     // Graceful shutdown
     const gracefulShutdown = (signal) => {
       logger.info(`${signal} received. Shutting down gracefully...`);
+
+      // Stop background jobs
+      stopEmailReportCron();
+
       server.close(() => {
         logger.info('Server closed.');
         process.exit(0);

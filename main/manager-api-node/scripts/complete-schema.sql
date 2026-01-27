@@ -272,6 +272,36 @@ CREATE INDEX IF NOT EXISTS idx_content_library_type ON content_library(content_t
 CREATE INDEX IF NOT EXISTS idx_content_library_category ON content_library(category);
 
 -- =====================================================
+-- EMAIL REPORT TABLES
+-- =====================================================
+
+-- Email report configuration (singleton table - one row for system config)
+CREATE TABLE IF NOT EXISTS email_report_config (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    enabled BOOLEAN DEFAULT false,
+    schedule_hour INTEGER DEFAULT 8,
+    schedule_timezone VARCHAR(50) DEFAULT 'Asia/Kolkata',
+    recipients JSONB DEFAULT '[]',
+    sections JSONB DEFAULT '{"summary":true,"devices":true,"learning":true,"content":true,"tokens":true,"alerts":true}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Email report send history
+CREATE TABLE IF NOT EXISTS email_report_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_date DATE NOT NULL,
+    recipients TEXT[] NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    error_message TEXT,
+    report_data JSONB DEFAULT '{}',
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_report_history_date ON email_report_history(report_date);
+CREATE INDEX IF NOT EXISTS idx_email_report_history_status ON email_report_history(status);
+
+-- =====================================================
 -- SEED DATA - Dictionary Types (sys_dict_type)
 -- =====================================================
 INSERT INTO sys_dict_type (id, dict_type, dict_name, remark, sort) VALUES

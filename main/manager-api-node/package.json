@@ -52,6 +52,8 @@
     "joi": "^17.11.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^7.0.12",
     "pg": "^8.17.2",
     "svg-captcha": "^1.4.0",
     "swagger-jsdoc": "^6.2.8",

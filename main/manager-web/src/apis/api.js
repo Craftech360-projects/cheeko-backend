@@ -10,6 +10,7 @@ import timbre from "./module/timbre.js"
 import user from './module/user.js'
 import rfid from './module/rfid.js'
 import profile from './module/profile.js'
+import emailReport from './module/emailReport.js'
 
 /**
  * API URL
@@ -46,5 +47,6 @@ export default {
     ota,
     dict,
     rfid,
-    profile
+    profile,
+    emailReport
 }

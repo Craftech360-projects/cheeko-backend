@@ -674,3 +674,24 @@ model sys_user_token {
   @@index([token], map: "idx_sys_user_token_token")
   @@index([user_id], map: "idx_sys_user_token_user_id")
 }
+
+model email_report_config {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  enabled           Boolean   @default(false)
+  schedule_hour     Int       @default(8)
+  schedule_timezone String    @default("Asia/Kolkata") @db.VarChar(50)
+  recipients        Json      @default("[]")
+  sections          Json      @default("{\"summary\":true,\"devices\":true,\"learning\":true,\"content\":true,\"tokens\":true,\"alerts\":true}")
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model email_report_history {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  report_date   DateTime  @db.Date
+  recipients    String[]
+  status        String    @db.VarChar(50)
+  error_message String?
+  report_data   Json?     @default("{}")
+  sent_at       DateTime? @default(now()) @db.Timestamptz(6)
+}

@@ -27,6 +27,7 @@ const serverRoutes = require('./server.routes');
 const paramsRoutes = require('./params.routes');
 const dictRoutes = require('./dict.routes');
 const ttsVoiceRoutes = require('./ttsVoice.routes');
+const emailReportRoutes = require('./emailReport.routes');
 
 /**
  * @swagger
@@ -201,5 +202,6 @@ router.use('/admin/server', serverRoutes);
 router.use('/admin/params', paramsRoutes);
 router.use('/admin/dict', dictRoutes);
 router.use('/ttsVoice', ttsVoiceRoutes);
+router.use('/admin/email-reports', emailReportRoutes);
 
 module.exports = router;

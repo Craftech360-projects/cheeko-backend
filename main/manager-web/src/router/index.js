@@ -183,6 +183,17 @@ const routes = [
       title: 'Content Library'
     }
   },
+  {
+    path: '/email-reports',
+    name: 'EmailReportSettings',
+    component: function () {
+      return import('../views/EmailReportSettings.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Email Report Settings'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -204,7 +215,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings']
 
 // Route guard
 router.beforeEach((to, from, next) => {
