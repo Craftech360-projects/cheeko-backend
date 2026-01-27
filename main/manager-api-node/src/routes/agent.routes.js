@@ -12,6 +12,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest, notFound } = require('../utils/response');
+const logger = require('../utils/logger');
 
 // ==============================================
 // Static routes must come before dynamic :id routes
@@ -443,6 +444,37 @@ router.get('/agent-id/:mac',
 
 /**
  * @swagger
+ * /agent/device/{mac}/agent-id:
+ *   get:
+ *     tags: [Agent]
+ *     summary: Get agent ID for device (gateway alias)
+ *     description: Alias for /agent/agent-id/{mac} - used by LiveKit server
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Agent ID
+ */
+router.get('/device/:mac/agent-id',
+  asyncHandler(async (req, res) => {
+    try {
+      const agentId = await agentService.getAgentIdByMac(req.params.mac);
+      // LiveKit agent expects: { code: 0, data: "agent-id-string" }
+      logger.info(`[AGENT] GET /device/${req.params.mac}/agent-id response: ${agentId}`);
+      success(res, agentId);
+    } catch (error) {
+      logger.info(`[AGENT] GET /device/${req.params.mac}/agent-id error: ${error.message}`);
+      notFound(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
  * /agent/current-character/{mac}:
  *   get:
  *     tags: [Agent]
@@ -461,9 +493,125 @@ router.get('/current-character/:mac',
   asyncHandler(async (req, res) => {
     try {
       const result = await agentService.getCurrentCharacter(req.params.mac);
-      success(res, result);
+      // Return same format as /device/:mac/current-character for consistency
+      const response = { characterName: result.agentName || 'Cheeko' };
+      logger.info(`[AGENT] GET /current-character/${req.params.mac} response: ${JSON.stringify(response)}`);
+      success(res, response);
     } catch (error) {
+      logger.info(`[AGENT] GET /current-character/${req.params.mac} error: ${error.message}`);
       notFound(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/device/{mac}/current-character:
+ *   get:
+ *     tags: [Agent]
+ *     summary: Get current character for device (gateway alias)
+ *     description: Alias for /agent/current-character/{mac} - used by MQTT gateway
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Current character info
+ */
+router.get('/device/:mac/current-character',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getCurrentCharacter(req.params.mac);
+      // Gateway expects either:
+      // Format 1: { code: 0, data: "Character Name" }
+      // Format 2: { code: 0, data: { characterName: "Character Name" } }
+      const response = { characterName: result.agentName || 'Cheeko' };
+      logger.info(`[AGENT] GET /device/${req.params.mac}/current-character response: ${JSON.stringify(response)}`);
+      success(res, response);
+    } catch (error) {
+      logger.info(`[AGENT] GET /device/${req.params.mac}/current-character error: ${error.message}`);
+      notFound(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/device/{mac}/set-character:
+ *   post:
+ *     tags: [Agent]
+ *     summary: Set character for device (gateway format)
+ *     description: Alias for /agent/set-character - used by MQTT gateway
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               characterName:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Character set
+ */
+router.post('/device/:mac/set-character',
+  asyncHandler(async (req, res) => {
+    try {
+      const { characterName } = req.body;
+      if (!characterName) {
+        return badRequest(res, 'characterName is required');
+      }
+      // Find agent by name
+      const result = await agentService.setCharacterByName(req.params.mac, characterName);
+      // Gateway expects: { success: true, newModeName: "Character Name" }
+      const response = { success: true, newModeName: result.agentName };
+      logger.info(`[AGENT] POST /device/${req.params.mac}/set-character response: ${JSON.stringify(response)}`);
+      success(res, response);
+    } catch (error) {
+      logger.info(`[AGENT] POST /device/${req.params.mac}/set-character error: ${error.message}`);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/device/{mac}/cycle-character:
+ *   post:
+ *     tags: [Agent]
+ *     summary: Cycle to next character for device (gateway format)
+ *     description: Alias for /agent/cycle-character - used by MQTT gateway
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Character cycled
+ */
+router.post('/device/:mac/cycle-character',
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.cycleCharacter(req.params.mac);
+      // Gateway expects: { success: true, newModeName: "Character Name" }
+      const response = { success: true, newModeName: result.agentName };
+      logger.info(`[AGENT] POST /device/${req.params.mac}/cycle-character response: ${JSON.stringify(response)}`);
+      success(res, response);
+    } catch (error) {
+      logger.info(`[AGENT] POST /device/${req.params.mac}/cycle-character error: ${error.message}`);
+      badRequest(res, error.message);
     }
   })
 );

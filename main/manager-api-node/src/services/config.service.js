@@ -239,10 +239,11 @@ const getChildProfileByMac = async (macAddress) => {
     return null;
   }
 
-  // Calculate age from date_of_birth
+  // Calculate age from date_of_birth or birth_date
   let age = null;
-  if (kid.date_of_birth) {
-    const dob = new Date(kid.date_of_birth);
+  const birthDate = kid.date_of_birth || kid.birth_date;
+  if (birthDate) {
+    const dob = new Date(birthDate);
     const now = new Date();
     age = Math.floor((now - dob) / (365.25 * 24 * 60 * 60 * 1000));
   }
@@ -250,11 +251,11 @@ const getChildProfileByMac = async (macAddress) => {
   return {
     id: kid.id,
     name: kid.name,
-    dateOfBirth: kid.date_of_birth,
+    dateOfBirth: birthDate,
     age,
     gender: kid.gender,
     interests: kid.interests,
-    primaryLanguage: kid.primary_language,
+    primaryLanguage: kid.primary_language || kid.language,
     additionalNotes: kid.additional_notes
   };
 };

@@ -108,6 +108,16 @@ const logger = require('../utils/logger');
  */
 router.post('/',
   asyncHandler(async (req, res) => {
+    // Log incoming request
+    logger.info('[OTA] Incoming request: ' + JSON.stringify({
+      headers: {
+        'device-id': req.headers['device-id'],
+        'client-id': req.headers['client-id'],
+        'content-type': req.headers['content-type']
+      },
+      body: req.body
+    }, null, 2));
+
     // Spring Boot compatibility: MAC comes from Device-Id header, not body
     const deviceId = req.headers['device-id'] || req.headers['Device-Id'];
     const clientId = req.headers['client-id'] || req.headers['Client-Id'] || deviceId;
@@ -116,12 +126,14 @@ router.post('/',
     const mac = deviceId || req.body.mac || req.body.mac_address;
 
     if (!mac) {
+      logger.info('[OTA] Outgoing response: { code: 400, msg: "Device ID is required" }');
       return badRequest(res, 'Device ID is required (Device-Id header or mac in body)');
     }
 
     // Validate MAC address format
     const macPattern = /^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/;
     if (!macPattern.test(mac)) {
+      logger.info('[OTA] Outgoing response: { code: 400, msg: "Invalid device ID format" }');
       return badRequest(res, 'Invalid device ID format');
     }
 
@@ -139,10 +151,13 @@ router.post('/',
       };
 
       const result = await deviceService.checkOtaVersion(mac, clientId, deviceReport);
+      // Log outgoing response
+      logger.info('[OTA] Outgoing response: ' + JSON.stringify(result, null, 2));
       // Return raw response (Spring Boot doesn't wrap in {code, msg, data})
       res.json(result);
     } catch (error) {
       logger.error('OTA check failed:', error);
+      logger.info('[OTA] Outgoing response (error): ' + JSON.stringify({ error: error.message }));
       // Spring Boot returns error in response body
       res.json({ error: error.message });
     }

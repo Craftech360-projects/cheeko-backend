@@ -443,9 +443,12 @@ router.get('/:mac/mode',
     const { mac } = req.params;
 
     try {
-      const mode = await deviceService.getMode(mac);
-      success(res, mode);
+      const modeResult = await deviceService.getMode(mac);
+      // Gateway expects just the mode string: { code: 0, data: "conversation" }
+      logger.info(`[DEVICE] GET /${mac}/mode response: ${modeResult.mode}`);
+      success(res, modeResult.mode);
     } catch (error) {
+      logger.info(`[DEVICE] GET /${mac}/mode error: ${error.message}`);
       notFound(res, error.message);
     }
   })
@@ -473,9 +476,12 @@ router.get('/:mac/device-mode',
     const { mac } = req.params;
 
     try {
-      const mode = await deviceService.getMode(mac);
-      success(res, { deviceMode: mode.deviceMode });
+      const modeResult = await deviceService.getMode(mac);
+      // Gateway expects just the device mode string: { code: 0, data: "auto" }
+      logger.info(`[DEVICE] GET /${mac}/device-mode response: ${modeResult.deviceMode}`);
+      success(res, modeResult.deviceMode);
     } catch (error) {
+      logger.info(`[DEVICE] GET /${mac}/device-mode error: ${error.message}`);
       notFound(res, error.message);
     }
   })

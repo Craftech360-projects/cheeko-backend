@@ -14,9 +14,7 @@ const htmlEntities = {
   '>': '&gt;',
   '"': '&quot;',
   "'": '&#x27;',
-  '/': '&#x2F;',
-  '`': '&#x60;',
-  '=': '&#x3D;'
+  '`': '&#x60;'
 };
 
 /**
@@ -26,7 +24,7 @@ const htmlEntities = {
  */
 const escapeHtml = (str) => {
   if (typeof str !== 'string') return str;
-  return str.replace(/[&<>"'`=/]/g, (char) => htmlEntities[char]);
+  return str.replace(/[&<>"'`]/g, (char) => htmlEntities[char]);
 };
 
 /**

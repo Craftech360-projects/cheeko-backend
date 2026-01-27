@@ -72,7 +72,7 @@ const registerDevice = async ({ mac, board, appVersion }) => {
       board,
       app_version: appVersion,
       mode: 'conversation',
-      device_mode: 'auto',
+      device_mode: 'manual',
       last_connected_at: new Date().toISOString()
     })
     .select()
@@ -193,7 +193,7 @@ const bindDevice = async (userId, agentId, deviceCode) => {
         app_version: activationData.appVersion,
         auto_update: 1,
         mode: 'conversation',
-        device_mode: 'auto',
+        device_mode: 'manual',
         create_date: now,
         update_date: now,
         last_connected_at: now,
@@ -307,6 +307,8 @@ const updateDevice = async (userId, deviceId, data) => {
   if (data.alias !== undefined) updateData.alias = data.alias;
   if (data.autoUpdate !== undefined) updateData.auto_update = data.autoUpdate ? 1 : 0;
   if (data.agentId !== undefined) updateData.agent_id = data.agentId;
+  if (data.deviceMode !== undefined) updateData.device_mode = data.deviceMode;
+  if (data.mode !== undefined) updateData.mode = data.mode;
 
   const { data: updated, error } = await supabaseAdmin
     .from('ai_device')
@@ -563,7 +565,7 @@ const manualAddDevice = async (userId, { macAddress, mac, alias, agentId, board,
       board,
       app_version: appVersion,
       mode: 'conversation',
-      device_mode: 'auto',
+      device_mode: 'manual',
       auto_update: 1,
       create_date: now,
       update_date: now,
@@ -656,50 +658,36 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
   // Get device record
   const device = await getDeviceByMac(normalizedMac);
 
-  // Build firmware info
-  const INVALID_FIRMWARE_URL = 'http://cheeko.server.com:8002/toy/otaMag/download/NOT_ACTIVATED_FIRMWARE_THIS_IS_A_INVALID_URL';
+  // Only include firmware section if there's an actual update available
+  if (device && device.auto_update !== 0) {
+    const firmwareType = board || 'esp32';
+    const forceUpdateFirmware = await getForceUpdateFirmware(firmwareType);
+    const latestFirmware = await getLatestFirmware(firmwareType);
 
-  if (!device) {
-    // Device not registered - return current version with invalid URL (Spring Boot behavior)
-    response.firmware = {
-      version: currentVersion || '0.0.0',
-      url: INVALID_FIRMWARE_URL
-    };
-  } else {
-    // Device registered - check for firmware update if autoUpdate is enabled
-    if (device.auto_update !== 0) {
-      const firmwareType = board || 'esp32';
-      let firmware = await getForceUpdateFirmware(firmwareType);
-      const isForceUpdate = !!firmware;
-
-      if (!firmware) {
-        firmware = await getLatestFirmware(firmwareType);
-      }
-
-      if (firmware && firmware.version !== currentVersion) {
-        // New firmware available
-        const otaUrl = await getSystemParam('server.ota') || 'http://cheeko.server.com:8002/toy';
-        response.firmware = {
-          version: firmware.version,
-          url: `${otaUrl}/otaMag/download/${firmware.id}`,
-          force: isForceUpdate ? 1 : 0
-        };
-      } else {
-        // No update needed - return current version with invalid URL
-        response.firmware = {
-          version: currentVersion || device.app_version || '0.0.0',
-          url: INVALID_FIRMWARE_URL
-        };
-      }
-    } else {
-      // autoUpdate disabled - return current version
+    // Include firmware if:
+    // 1. Force update is enabled (regardless of version), OR
+    // 2. There's a newer version available
+    if (forceUpdateFirmware) {
+      // Force update - always include, version doesn't matter
+      const otaUrl = await getSystemParam('server.ota');
       response.firmware = {
-        version: currentVersion || device.app_version || '0.0.0',
-        url: INVALID_FIRMWARE_URL
+        version: forceUpdateFirmware.version,
+        url: `${otaUrl}/otaMag/download/${forceUpdateFirmware.id}`,
+        force: 1
+      };
+    } else if (latestFirmware && latestFirmware.version !== currentVersion) {
+      // New version available (no force)
+      const otaUrl = await getSystemParam('server.ota');
+      response.firmware = {
+        version: latestFirmware.version,
+        url: `${otaUrl}/otaMag/download/${latestFirmware.id}`,
+        force: 0
       };
     }
+  }
 
-    // Update device last connection time
+  // Update device last connection time if device exists
+  if (device) {
     await supabaseAdmin
       .from('ai_device')
       .update({
@@ -713,7 +701,7 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
   // Build WebSocket configuration
   let wsUrl = await getSystemParam('server.websocket');
   if (!wsUrl || wsUrl === 'null') {
-    wsUrl = 'ws://cheeko.server.com:8000/cheeko/v1/';
+    wsUrl = 'ws://192.168.1.99:8000/cheeko/v1/';
   } else {
     // If multiple URLs (semicolon separated), pick random one
     const wsUrls = wsUrl.split(';');

@@ -514,6 +514,51 @@ const setCharacter = async (mac, agentId) => {
 };
 
 /**
+ * Set character (agent) for device by name
+ * @param {string} mac - Device MAC address
+ * @param {string} characterName - Agent name to set
+ * @returns {Promise<Object>} Agent info
+ */
+const setCharacterByName = async (mac, characterName) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(mac);
+
+  // Get device to find user
+  const { data: device } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, user_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (!device) throw new Error('Device not found');
+
+  // Find agent by name (case-insensitive) for this user
+  const { data: agent } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id, agent_name')
+    .eq('user_id', device.user_id)
+    .ilike('agent_name', characterName)
+    .single();
+
+  if (!agent) throw new Error(`Agent "${characterName}" not found`);
+
+  // Update device
+  const { error } = await supabaseAdmin
+    .from('ai_device')
+    .update({ agent_id: agent.id })
+    .eq('id', device.id);
+
+  if (error) throw new Error('Failed to set character');
+
+  logger.info(`[setCharacterByName] Device ${normalizedMac} set to agent: ${agent.agent_name}`);
+  return {
+    agentId: agent.id,
+    agentName: agent.agent_name
+  };
+};
+
+/**
  * Get current character for device
  * @param {string} mac - Device MAC address
  * @returns {Promise<Object>} Current agent info
@@ -522,26 +567,50 @@ const getCurrentCharacter = async (mac) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const normalizedMac = normalizeMacAddress(mac);
+  logger.info(`[getCurrentCharacter] Looking up device: ${mac} -> normalized: ${normalizedMac}`);
 
+  // First check if device exists
   const { data: device, error } = await supabaseAdmin
     .from('ai_device')
-    .select(`
-      agent_id,
-      ai_agent:agent_id (id, agent_name, agent_code)
-    `)
+    .select('id, mac_address, agent_id')
     .eq('mac_address', normalizedMac)
     .single();
 
-  if (error || !device) throw new Error('Device not found');
-
-  if (!device.ai_agent) {
-    return { agentId: null, agentName: null };
+  if (error) {
+    logger.info(`[getCurrentCharacter] Device query error: ${error.message}`);
+    throw new Error('Device not found');
   }
 
+  if (!device) {
+    logger.info(`[getCurrentCharacter] Device not found for MAC: ${normalizedMac}`);
+    throw new Error('Device not found');
+  }
+
+  logger.info(`[getCurrentCharacter] Device found: id=${device.id}, agent_id=${device.agent_id}`);
+
+  // If no agent assigned, return null values
+  if (!device.agent_id) {
+    logger.info(`[getCurrentCharacter] Device has no agent assigned`);
+    return { agentId: null, agentName: null, agentCode: null };
+  }
+
+  // Get agent details
+  const { data: agent, error: agentError } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id, agent_name, agent_code')
+    .eq('id', device.agent_id)
+    .single();
+
+  if (agentError || !agent) {
+    logger.info(`[getCurrentCharacter] Agent not found: ${device.agent_id}`);
+    return { agentId: device.agent_id, agentName: null, agentCode: null };
+  }
+
+  logger.info(`[getCurrentCharacter] Agent found: ${agent.agent_name}`);
   return {
-    agentId: device.ai_agent.id,
-    agentName: device.ai_agent.agent_name,
-    agentCode: device.ai_agent.agent_code
+    agentId: agent.id,
+    agentName: agent.agent_name,
+    agentCode: agent.agent_code
   };
 };
 
@@ -951,16 +1020,33 @@ const batchUploadSession = async (data) => {
   }
 
   // Prepare batch insert data
-  const insertData = messages.map((msg, index) => ({
-    mac_address: normalizedMac,
-    agent_id: resolvedAgentId,
-    session_id: sessionId,
-    chat_type: msg.chatType,
-    content: msg.content,
-    audio_id: msg.audioId || null,
-    // Use provided timestamp or current time with offset to maintain order
-    created_at: msg.timestamp || new Date(Date.now() + index).toISOString()
-  }));
+  const insertData = messages.map((msg, index) => {
+    // Convert Unix timestamp (seconds) to ISO date string
+    // Python sends int(datetime.now().timestamp()) which is seconds since epoch
+    let createdAt;
+    if (msg.timestamp) {
+      // If timestamp is a number (Unix seconds), convert to ISO string
+      if (typeof msg.timestamp === 'number') {
+        createdAt = new Date(msg.timestamp * 1000).toISOString();
+      } else {
+        // Already a string, use as-is
+        createdAt = msg.timestamp;
+      }
+    } else {
+      // Default: current time with offset to maintain order
+      createdAt = new Date(Date.now() + index).toISOString();
+    }
+
+    return {
+      mac_address: normalizedMac,
+      agent_id: resolvedAgentId,
+      session_id: sessionId,
+      chat_type: msg.chatType,
+      content: msg.content,
+      audio_id: msg.audioId || null,
+      created_at: createdAt
+    };
+  });
 
   const { data: inserted, error } = await supabaseAdmin
     .from('ai_agent_chat_history')
@@ -1728,6 +1814,7 @@ module.exports = {
   getAgentIdByMac,
   cycleCharacter,
   setCharacter,
+  setCharacterByName,
   getCurrentCharacter,
   // Memory integration
   getMemoriesByMac,

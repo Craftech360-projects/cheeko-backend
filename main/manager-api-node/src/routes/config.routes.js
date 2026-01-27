@@ -10,6 +10,7 @@ const router = express.Router();
 const configService = require('../services/config.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { success, badRequest, notFound } = require('../utils/response');
+const logger = require('../utils/logger');
 
 /**
  * @swagger
@@ -206,6 +207,7 @@ router.post('/agent-prompt',
 router.post('/child-profile-by-mac',
   asyncHandler(async (req, res) => {
     const { macAddress } = req.body;
+    logger.info(`[CONFIG] POST /child-profile-by-mac request: macAddress=${macAddress}`);
 
     if (!macAddress) {
       return badRequest(res, 'macAddress is required');
@@ -213,8 +215,10 @@ router.post('/child-profile-by-mac',
 
     try {
       const profile = await configService.getChildProfileByMac(macAddress);
+      logger.info(`[CONFIG] POST /child-profile-by-mac response: ${JSON.stringify(profile)}`);
       success(res, profile);
     } catch (error) {
+      logger.info(`[CONFIG] POST /child-profile-by-mac error: ${error.message}`);
       if (error.message.includes('not found')) {
         return notFound(res, error.message);
       }
@@ -442,6 +446,71 @@ router.post('/weather',
       const weather = await configService.getWeather({ latitude, longitude, city });
       success(res, weather);
     } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /config/assign-child-profile:
+ *   post:
+ *     tags: [Config]
+ *     summary: Create and assign child profile to device (service endpoint)
+ *     description: Internal endpoint for creating and assigning a child profile to a device
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - macAddress
+ *               - name
+ *             properties:
+ *               macAddress:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               dateOfBirth:
+ *                 type: string
+ *                 format: date
+ *               gender:
+ *                 type: string
+ *               interests:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *     responses:
+ *       200:
+ *         description: Child profile created and assigned
+ */
+router.post('/assign-child-profile',
+  asyncHandler(async (req, res) => {
+    const { macAddress, name, dateOfBirth, gender, interests, additionalNotes } = req.body;
+
+    // Verify service secret header
+    const secret = req.headers['secret'];
+    if (!secret || secret !== process.env.SERVICE_SECRET_KEY) {
+      return badRequest(res, 'Invalid or missing service secret');
+    }
+
+    if (!macAddress || !name) {
+      return badRequest(res, 'macAddress and name are required');
+    }
+
+    try {
+      const result = await configService.createAndAssignChildProfile(macAddress, {
+        name,
+        dateOfBirth,
+        gender,
+        interests,
+        additionalNotes
+      });
+      logger.info(`[CONFIG] POST /assign-child-profile response: ${JSON.stringify(result)}`);
+      success(res, result, 'Child profile created and assigned');
+    } catch (error) {
+      logger.info(`[CONFIG] POST /assign-child-profile error: ${error.message}`);
       badRequest(res, error.message);
     }
   })
