@@ -141,78 +141,20 @@
             show-word-limit
           />
         </el-form-item>
-
-        <el-collapse v-model="advancedExpanded">
-          <el-collapse-item title="Advanced Settings" name="advanced">
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item label="Agent Code">
-                  <el-input v-model="form.agentCode" placeholder="e.g., cheeko_default" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Chat History">
-                  <el-input-number v-model="form.chatHistoryConf" :min="0" :max="100" style="width: 100%" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item label="LLM Model ID">
-                  <el-input v-model="form.llmModelId" placeholder="LLM model identifier" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="TTS Model ID">
-                  <el-input v-model="form.ttsModelId" placeholder="TTS model identifier" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item label="TTS Voice ID">
-                  <el-input v-model="form.ttsVoiceId" placeholder="Voice identifier" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="ASR Model ID">
-                  <el-input v-model="form.asrModelId" placeholder="ASR model identifier" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item label="VAD Model ID">
-                  <el-input v-model="form.vadModelId" placeholder="VAD model identifier" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="Memory Model ID">
-                  <el-input v-model="form.memModelId" placeholder="Memory model identifier" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-            <el-row :gutter="16">
-              <el-col :span="12">
-                <el-form-item label="Intent Model ID">
-                  <el-input v-model="form.intentModelId" placeholder="Intent model identifier" />
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item label="VLLM Model ID">
-                  <el-input v-model="form.vllmModelId" placeholder="VLLM model identifier" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </el-collapse-item>
-        </el-collapse>
       </el-form>
 
       <div slot="footer" class="dialog-footer">
-        <el-button size="small" @click="dialogVisible = false">Cancel</el-button>
-        <el-button type="primary" size="small" :loading="submitting" @click="handleSubmit">
-          {{ editMode ? 'Update' : 'Create' }}
-        </el-button>
+        <div class="footer-left" v-if="editMode">
+          <el-checkbox v-model="applyToAgents">
+            Apply changes to all agents using this template
+          </el-checkbox>
+        </div>
+        <div class="footer-right">
+          <el-button size="small" @click="dialogVisible = false">Cancel</el-button>
+          <el-button type="primary" size="small" :loading="submitting" @click="handleSubmit">
+            {{ editMode ? 'Update' : 'Create' }}
+          </el-button>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -233,7 +175,7 @@ export default {
       editMode: false,
       editingId: null,
       submitting: false,
-      advancedExpanded: [],
+      applyToAgents: false,
       form: this.getEmptyForm(),
       rules: {
         agentName: [
@@ -259,15 +201,7 @@ export default {
         summaryMemory: "",
         chatHistoryConf: 1,
         sort: 0,
-        visible: true,
-        llmModelId: "",
-        ttsModelId: "",
-        ttsVoiceId: "",
-        asrModelId: "",
-        vadModelId: "",
-        memModelId: "",
-        intentModelId: "",
-        vllmModelId: ""
+        visible: true
       };
     },
     goToHome() {
@@ -296,7 +230,6 @@ export default {
       this.editMode = false;
       this.editingId = null;
       this.form = this.getEmptyForm();
-      this.advancedExpanded = [];
       this.dialogVisible = true;
       this.$nextTick(() => {
         this.$refs.templateForm?.clearValidate();
@@ -305,6 +238,7 @@ export default {
     handleEdit(row) {
       this.editMode = true;
       this.editingId = row.id;
+      this.applyToAgents = false;
       this.form = {
         agentName: row.agentName || "",
         agentCode: row.agentCode || "",
@@ -314,17 +248,8 @@ export default {
         summaryMemory: row.summaryMemory || "",
         chatHistoryConf: row.chatHistoryConf ?? 1,
         sort: row.sort ?? 0,
-        visible: row.isVisible === 1 || row.isVisible === true,
-        llmModelId: row.llmModelId || "",
-        ttsModelId: row.ttsModelId || "",
-        ttsVoiceId: row.ttsVoiceId || "",
-        asrModelId: row.asrModelId || "",
-        vadModelId: row.vadModelId || "",
-        memModelId: row.memModelId || "",
-        intentModelId: row.intentModelId || "",
-        vllmModelId: row.vllmModelId || ""
+        visible: row.isVisible === 1 || row.isVisible === true
       };
-      this.advancedExpanded = [];
       this.dialogVisible = true;
     },
     handleSubmit() {
@@ -340,12 +265,28 @@ export default {
 
         if (this.editMode) {
           Api.agent.updateAgentTemplate(this.editingId, data, ({ data: res }) => {
-            this.submitting = false;
             if (res.code === 0) {
-              this.$message.success("Template updated successfully");
-              this.dialogVisible = false;
-              this.fetchTemplates();
+              // If checkbox is checked, also apply to all agents
+              if (this.applyToAgents) {
+                Api.agent.applyTemplateToAgents(this.editingId, ({ data: applyRes }) => {
+                  this.submitting = false;
+                  this.dialogVisible = false;
+                  this.fetchTemplates();
+                  if (applyRes.code === 0) {
+                    const count = applyRes.data?.updatedCount || 0;
+                    this.$message.success(`Template updated and applied to ${count} agent(s)`);
+                  } else {
+                    this.$message.warning("Template updated but failed to apply to agents");
+                  }
+                });
+              } else {
+                this.submitting = false;
+                this.$message.success("Template updated successfully");
+                this.dialogVisible = false;
+                this.fetchTemplates();
+              }
             } else {
+              this.submitting = false;
               this.$message.error(res.msg || "Failed to update template");
             }
           });
@@ -533,19 +474,22 @@ export default {
     font-size: 13px;
     color: #606266;
   }
-
-  ::v-deep .el-collapse-item__header {
-    font-size: 13px;
-    color: #909399;
-  }
-
-  ::v-deep .el-collapse-item__content {
-    padding-bottom: 0;
-  }
 }
 
 .dialog-footer {
-  text-align: right;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .footer-left {
+    font-size: 12px;
+    color: #606266;
+  }
+
+  .footer-right {
+    display: flex;
+    gap: 8px;
+  }
 }
 
 ::v-deep .el-table {

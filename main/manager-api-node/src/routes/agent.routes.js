@@ -403,6 +403,56 @@ router.delete('/template/:id',
   })
 );
 
+/**
+ * @swagger
+ * /agent/template/{id}/apply-to-agents:
+ *   post:
+ *     tags: [Agent Template]
+ *     summary: Apply template changes to all agents using this template
+ *     description: Finds all agents with matching agent_code and updates them with template settings
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Template ID
+ *     responses:
+ *       200:
+ *         description: Template applied to agents
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     updatedCount:
+ *                       type: integer
+ *                       description: Number of agents updated
+ *                     agentCode:
+ *                       type: string
+ *                       description: The agent code that was matched
+ *                 msg:
+ *                   type: string
+ */
+router.post('/template/:id/apply-to-agents',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.applyTemplateToAgents(req.params.id);
+      success(res, result, `Template applied to ${result.updatedCount} agent(s)`);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 // ==============================================
 // Other Static Routes
 // ==============================================

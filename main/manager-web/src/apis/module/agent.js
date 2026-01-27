@@ -193,6 +193,22 @@ export default {
                 });
             }).send();
     },
+    // Apply template changes to all agents using this template
+    applyTemplateToAgents(templateId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/agent/template/${templateId}/apply-to-agents`)
+            .method('POST')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to apply template to agents:', err);
+                RequestService.reAjaxFun(() => {
+                    this.applyTemplateToAgents(templateId, callback);
+                });
+            }).send();
+    },
     // Get agent sessions list
     getAgentSessions(agentId, params, callback) {
         RequestService.sendRequest()

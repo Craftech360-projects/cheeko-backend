@@ -1212,17 +1212,20 @@ const getTemplateById = async (templateId) => {
 const createTemplate = async (data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
+  // Helper to convert empty strings to null for UUID fields
+  const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
+
   const templateData = {
-    agent_code: data.agentCode,
+    agent_code: data.agentCode || null,
     agent_name: data.agentName,
-    asr_model_id: data.asrModelId,
-    vad_model_id: data.vadModelId,
-    llm_model_id: data.llmModelId,
-    vllm_model_id: data.vllmModelId,
-    tts_model_id: data.ttsModelId,
-    tts_voice_id: data.ttsVoiceId,
-    mem_model_id: data.memModelId,
-    intent_model_id: data.intentModelId,
+    asr_model_id: toNullIfEmpty(data.asrModelId),
+    vad_model_id: toNullIfEmpty(data.vadModelId),
+    llm_model_id: toNullIfEmpty(data.llmModelId),
+    vllm_model_id: toNullIfEmpty(data.vllmModelId),
+    tts_model_id: toNullIfEmpty(data.ttsModelId),
+    tts_voice_id: toNullIfEmpty(data.ttsVoiceId),
+    mem_model_id: toNullIfEmpty(data.memModelId),
+    intent_model_id: toNullIfEmpty(data.intentModelId),
     chat_history_conf: data.chatHistoryConf || 0,
     system_prompt: data.systemPrompt,
     summary_memory: data.summaryMemory,
@@ -1265,21 +1268,24 @@ const updateTemplate = async (templateId, data) => {
 
   if (existsError || !existing) throw new Error('Template not found');
 
+  // Helper to convert empty strings to null for UUID fields
+  const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
+
   const updateData = {
     updated_at: new Date().toISOString()
   };
 
-  // Map fields conditionally
-  if (data.agentCode !== undefined) updateData.agent_code = data.agentCode;
+  // Map fields conditionally (UUID fields use toNullIfEmpty to handle empty strings)
+  if (data.agentCode !== undefined) updateData.agent_code = data.agentCode || null;
   if (data.agentName !== undefined) updateData.agent_name = data.agentName;
-  if (data.asrModelId !== undefined) updateData.asr_model_id = data.asrModelId;
-  if (data.vadModelId !== undefined) updateData.vad_model_id = data.vadModelId;
-  if (data.llmModelId !== undefined) updateData.llm_model_id = data.llmModelId;
-  if (data.vllmModelId !== undefined) updateData.vllm_model_id = data.vllmModelId;
-  if (data.ttsModelId !== undefined) updateData.tts_model_id = data.ttsModelId;
-  if (data.ttsVoiceId !== undefined) updateData.tts_voice_id = data.ttsVoiceId;
-  if (data.memModelId !== undefined) updateData.mem_model_id = data.memModelId;
-  if (data.intentModelId !== undefined) updateData.intent_model_id = data.intentModelId;
+  if (data.asrModelId !== undefined) updateData.asr_model_id = toNullIfEmpty(data.asrModelId);
+  if (data.vadModelId !== undefined) updateData.vad_model_id = toNullIfEmpty(data.vadModelId);
+  if (data.llmModelId !== undefined) updateData.llm_model_id = toNullIfEmpty(data.llmModelId);
+  if (data.vllmModelId !== undefined) updateData.vllm_model_id = toNullIfEmpty(data.vllmModelId);
+  if (data.ttsModelId !== undefined) updateData.tts_model_id = toNullIfEmpty(data.ttsModelId);
+  if (data.ttsVoiceId !== undefined) updateData.tts_voice_id = toNullIfEmpty(data.ttsVoiceId);
+  if (data.memModelId !== undefined) updateData.mem_model_id = toNullIfEmpty(data.memModelId);
+  if (data.intentModelId !== undefined) updateData.intent_model_id = toNullIfEmpty(data.intentModelId);
   if (data.chatHistoryConf !== undefined) updateData.chat_history_conf = data.chatHistoryConf;
   if (data.systemPrompt !== undefined) updateData.system_prompt = data.systemPrompt;
   if (data.summaryMemory !== undefined) updateData.summary_memory = data.summaryMemory;
@@ -1300,6 +1306,90 @@ const updateTemplate = async (templateId, data) => {
 
   // Return null (matches Spring Boot Result<Void>)
   return null;
+};
+
+/**
+ * Apply template changes to all agents using this template (by agent_code OR agent_name)
+ * @param {string} templateId - Template ID
+ * @returns {Promise<Object>} Result with updatedCount
+ */
+const applyTemplateToAgents = async (templateId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get the template
+  const { data: template, error: templateError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('id', templateId)
+    .single();
+
+  if (templateError || !template) throw new Error('Template not found');
+
+  // Build OR conditions for agent_code and agent_name (only include non-null values)
+  const orConditions = [];
+  if (template.agent_code) {
+    orConditions.push(`agent_code.eq.${template.agent_code}`);
+  }
+  if (template.agent_name) {
+    orConditions.push(`agent_name.eq.${template.agent_name}`);
+  }
+
+  // If no conditions to match, return early
+  if (orConditions.length === 0) {
+    return { updatedCount: 0, agentCode: template.agent_code, agentName: template.agent_name };
+  }
+
+  // Find all agents with matching agent_code OR agent_name
+  const { data: agents, error: agentsError } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id')
+    .or(orConditions.join(','));
+
+  if (agentsError) {
+    logger.error('Failed to find agents for template:', agentsError);
+    throw new Error('Failed to find agents');
+  }
+
+  if (!agents || agents.length === 0) {
+    return { updatedCount: 0, agentCode: template.agent_code, agentName: template.agent_name };
+  }
+
+  // Build update data from template (excluding id, timestamps, and is_visible)
+  const updateData = {
+    agent_name: template.agent_name,
+    asr_model_id: template.asr_model_id,
+    vad_model_id: template.vad_model_id,
+    llm_model_id: template.llm_model_id,
+    vllm_model_id: template.vllm_model_id,
+    tts_model_id: template.tts_model_id,
+    tts_voice_id: template.tts_voice_id,
+    mem_model_id: template.mem_model_id,
+    intent_model_id: template.intent_model_id,
+    chat_history_conf: template.chat_history_conf,
+    system_prompt: template.system_prompt,
+    lang_code: template.lang_code,
+    language: template.language,
+    updated_at: new Date().toISOString()
+  };
+
+  // Update all matching agents
+  const agentIds = agents.map(a => a.id);
+  const { error: updateError } = await supabaseAdmin
+    .from('ai_agent')
+    .update(updateData)
+    .in('id', agentIds);
+
+  if (updateError) {
+    logger.error('Failed to apply template to agents:', updateError);
+    throw new Error('Failed to apply template to agents');
+  }
+
+  logger.info(`Applied template "${template.agent_name}" (code: ${template.agent_code}) to ${agentIds.length} agents`);
+  return {
+    updatedCount: agentIds.length,
+    agentCode: template.agent_code,
+    agentName: template.agent_name
+  };
 };
 
 /**
@@ -1846,6 +1936,7 @@ module.exports = {
   createTemplate,
   updateTemplate,
   deleteTemplate,
+  applyTemplateToAgents,
   // MCP Access Point methods
   getMcpAddress,
   getMcpTools
