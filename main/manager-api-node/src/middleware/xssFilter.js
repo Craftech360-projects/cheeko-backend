@@ -76,7 +76,7 @@ const sanitize = (obj, options = {}) => {
  */
 const xssFilter = (options = {}) => {
   const {
-    skipFields = ['systemPrompt', 'contentMd', 'promptText', 'content'],
+    skipFields = ['systemPrompt', 'contentMd', 'promptText', 'content', 'firmwarePath'],
     sanitizeQuery = true,
     sanitizeBody = true,
     sanitizeParams = true

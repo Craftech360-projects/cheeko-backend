@@ -307,7 +307,13 @@ router.get('/download/:uuid',
     try {
       // Get firmware information
       const firmware = await deviceService.getFirmwareById(cacheEntry.id);
-      if (!firmware || !firmware.firmware_path) {
+      logger.info(`Download firmware lookup: id=${cacheEntry.id}, firmware=${JSON.stringify(firmware)}`);
+      if (!firmware) {
+        logger.error(`Firmware not found in database: ${cacheEntry.id}`);
+        return res.status(404).send();
+      }
+      if (!firmware.firmware_path) {
+        logger.error(`Firmware has no firmware_path: id=${cacheEntry.id}, record=${JSON.stringify(firmware)}`);
         return res.status(404).send();
       }
 
@@ -318,18 +324,19 @@ router.get('/download/:uuid',
       if (path.isAbsolute(firmwarePath)) {
         filePath = firmwarePath;
       } else {
-        filePath = path.join(process.cwd(), firmwarePath);
+        // Try relative to UPLOAD_DIR first (matches upload logic)
+        const fileName = path.basename(firmwarePath);
+        filePath = path.join(UPLOAD_DIR, fileName);
       }
 
       if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-        // Try to find in uploadfile directory
-        const fileName = path.basename(firmwarePath);
-        const altPath = path.join(process.cwd(), 'uploadfile', fileName);
+        // Fallback: try the stored path relative to cwd
+        const altPath = path.join(process.cwd(), firmwarePath);
 
         if (fs.existsSync(altPath) && fs.statSync(altPath).isFile()) {
           filePath = altPath;
         } else {
-          logger.error('Firmware file not found:', firmwarePath);
+          logger.error('Firmware file not found:', firmwarePath, 'Tried:', filePath, 'and', altPath);
           return res.status(404).send();
         }
       }
@@ -544,6 +551,12 @@ router.post('/',
     }
 
     try {
+      logger.info('Creating firmware with data:', {
+        firmwareName: entity.firmwareName,
+        type: entity.type,
+        version: entity.version,
+        firmwarePath: entity.firmwarePath
+      });
       await deviceService.createFirmware({
         firmwareName: entity.firmwareName,
         type: entity.type,
