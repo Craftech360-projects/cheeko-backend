@@ -782,6 +782,7 @@ const getHistory = async ({ page = 1, limit = 20 } = {}) => {
       recipients: h.recipients,
       status: h.status,
       errorMessage: h.error_message,
+      reportData: h.report_data || null,
       sentAt: h.sent_at
     })),
     total: count || 0,

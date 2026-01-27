@@ -151,6 +151,18 @@
               {{ formatDateTime(scope.row.sentAt) }}
             </template>
           </el-table-column>
+          <el-table-column label="Actions" min-width="100" align="center">
+            <template slot-scope="scope">
+              <el-button
+                type="text"
+                size="small"
+                @click="viewHistoryReport(scope.row)"
+                :disabled="!scope.row.reportData"
+              >
+                <i class="el-icon-view"></i> View
+              </el-button>
+            </template>
+          </el-table-column>
         </el-table>
 
         <div class="pagination-container" v-if="historyTotal > historyLimit">
@@ -187,6 +199,91 @@
       </div>
       <div slot="footer">
         <el-button @click="previewDialogVisible = false">Close</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- History Report Dialog -->
+    <el-dialog :title="'Report - ' + (selectedHistoryReport.reportDate || '')" :visible.sync="historyReportDialogVisible" width="700px" top="5vh">
+      <div class="report-data-container" v-if="selectedHistoryReport.reportData">
+        <!-- Summary -->
+        <div class="report-section" v-if="selectedHistoryReport.reportData.summary">
+          <h4>Executive Summary</h4>
+          <div class="report-stats">
+            <div class="report-stat">
+              <span class="stat-value">{{ selectedHistoryReport.reportData.summary.totalUsers || 0 }}</span>
+              <span class="stat-label">Total Users</span>
+            </div>
+            <div class="report-stat">
+              <span class="stat-value">{{ selectedHistoryReport.reportData.summary.totalDevices || 0 }}</span>
+              <span class="stat-label">Total Devices</span>
+            </div>
+            <div class="report-stat">
+              <span class="stat-value">{{ selectedHistoryReport.reportData.summary.totalAgents || 0 }}</span>
+              <span class="stat-label">AI Agents</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Devices -->
+        <div class="report-section" v-if="selectedHistoryReport.reportData.devices">
+          <h4>Device Activity</h4>
+          <p>Active Today: <strong>{{ selectedHistoryReport.reportData.devices.activeToday || 0 }}</strong></p>
+        </div>
+
+        <!-- Learning -->
+        <div class="report-section" v-if="selectedHistoryReport.reportData.learning">
+          <h4>Learning Progress</h4>
+          <div class="report-stats">
+            <div class="report-stat">
+              <span class="stat-value">{{ selectedHistoryReport.reportData.learning.totalSessions || 0 }}</span>
+              <span class="stat-label">Sessions</span>
+            </div>
+            <div class="report-stat">
+              <span class="stat-value">{{ selectedHistoryReport.reportData.learning.accuracy || 0 }}%</span>
+              <span class="stat-label">Accuracy</span>
+            </div>
+            <div class="report-stat">
+              <span class="stat-value">{{ selectedHistoryReport.reportData.learning.totalAttempts || 0 }}</span>
+              <span class="stat-label">Attempts</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tokens -->
+        <div class="report-section" v-if="selectedHistoryReport.reportData.tokens">
+          <h4>Token Usage</h4>
+          <div class="report-stats">
+            <div class="report-stat">
+              <span class="stat-value">{{ (selectedHistoryReport.reportData.tokens.totalTokens || 0).toLocaleString() }}</span>
+              <span class="stat-label">Total Tokens</span>
+            </div>
+            <div class="report-stat">
+              <span class="stat-value">${{ selectedHistoryReport.reportData.tokens.estimatedCost || '0.00' }}</span>
+              <span class="stat-label">Est. Cost</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Alerts -->
+        <div class="report-section" v-if="selectedHistoryReport.reportData.alerts && selectedHistoryReport.reportData.alerts.length > 0">
+          <h4>Alerts</h4>
+          <div v-for="(alert, index) in selectedHistoryReport.reportData.alerts" :key="index" class="alert-item">
+            <el-tag :type="alert.type === 'warning' ? 'warning' : 'info'" size="small">{{ alert.title }}</el-tag>
+            <span style="margin-left: 8px;">{{ alert.message }}</span>
+          </div>
+        </div>
+
+        <!-- Test indicator -->
+        <div class="report-section" v-if="selectedHistoryReport.reportData.test">
+          <el-tag type="info">Test Email</el-tag>
+        </div>
+      </div>
+      <div v-else class="no-data">
+        <i class="el-icon-warning-outline"></i>
+        <p>No report data available</p>
+      </div>
+      <div slot="footer">
+        <el-button @click="historyReportDialogVisible = false">Close</el-button>
       </div>
     </el-dialog>
   </div>
@@ -231,7 +328,9 @@ export default {
       testEmailRecipient: '',
       sendingTest: false,
       previewDialogVisible: false,
-      previewHtml: ''
+      previewHtml: '',
+      historyReportDialogVisible: false,
+      selectedHistoryReport: { reportData: null }
     };
   },
   created() {
@@ -389,6 +488,14 @@ export default {
           this.previewHtml = '<p style="color: red;">Failed to load preview</p>';
         }
       });
+    },
+
+    viewHistoryReport(row) {
+      this.selectedHistoryReport = {
+        reportDate: row.reportDate,
+        reportData: row.reportData || null
+      };
+      this.historyReportDialogVisible = true;
     },
 
     formatHour(hour) {
@@ -598,6 +705,84 @@ export default {
     font-size: 24px;
     margin-bottom: 12px;
     display: block;
+  }
+}
+
+.report-data-container {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.report-section {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eee;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  h4 {
+    margin: 0 0 12px 0;
+    color: #3d4566;
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  p {
+    margin: 0;
+    color: #606266;
+    font-size: 13px;
+  }
+}
+
+.report-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.report-stat {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 12px 16px;
+  min-width: 100px;
+  text-align: center;
+
+  .stat-value {
+    display: block;
+    font-size: 20px;
+    font-weight: 700;
+    color: #FF6B35;
+  }
+
+  .stat-label {
+    display: block;
+    font-size: 11px;
+    color: #909399;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+}
+
+.alert-item {
+  margin-bottom: 8px;
+}
+
+.no-data {
+  text-align: center;
+  padding: 40px;
+  color: #909399;
+
+  i {
+    font-size: 48px;
+    margin-bottom: 12px;
+    display: block;
+  }
+
+  p {
+    margin: 0;
+    font-size: 14px;
   }
 }
 </style>
