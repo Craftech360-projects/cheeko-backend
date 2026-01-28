@@ -53,11 +53,11 @@
           Content Library
         </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
-          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' }"
+          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' }"
           @visible-change="handleParamDropdownVisibleChange">
           <span class="el-dropdown-link">
             <img loading="lazy" alt="" src="@/assets/header/param_management.png"
-              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/provider-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' ? 'brightness(0) invert(1)' : 'None' }" />
+              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' ? 'brightness(0) invert(1)' : 'None' }" />
             Parameter Dictionary
             <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': paramDropdownVisible }"></i>
           </span>
@@ -67,9 +67,6 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="goDictManagement">
               Dictionary Management
-            </el-dropdown-item>
-            <el-dropdown-item @click.native="goProviderManagement">
-              Provider
             </el-dropdown-item>
             <el-dropdown-item @click.native="goServerSideManagement">
               Server Side Management
@@ -165,9 +162,6 @@ export default {
     },
     goDictManagement() {
       this.$router.push('/dict-management')
-    },
-    goProviderManagement() {
-      this.$router.push('/provider-management')
     },
     goServerSideManagement() {
       this.$router.push('/server-side-management')

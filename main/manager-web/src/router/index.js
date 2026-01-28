@@ -111,13 +111,6 @@ const routes = [
     }
   },
   {
-    path: '/provider-management',
-    name: 'ProviderManagement',
-    component: function () {
-      return import('../views/ProviderManagement.vue')
-    }
-  },
-  {
     path: '/template-management',
     name: 'TemplateManagement',
     component: function () {

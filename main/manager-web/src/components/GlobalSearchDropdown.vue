@@ -206,25 +206,6 @@
             </div>
           </div>
 
-          <!-- Providers (Admin only) -->
-          <div v-if="isSuperAdmin && results.providers.length" class="result-category">
-            <div class="category-header">
-              <i class="el-icon-connection"></i>
-              <span>Providers</span>
-              <span class="category-count">{{ results.providers.length }}</span>
-            </div>
-            <div
-              v-for="(item, idx) in results.providers.slice(0, 5)"
-              :key="'provider-' + item.id"
-              class="result-item"
-              :class="{ highlighted: isHighlighted('providers', idx) }"
-              @click="navigateToResult('provider', item)"
-              @mouseenter="setHighlight('providers', idx)"
-            >
-              <span class="result-name">{{ item.name }}</span>
-              <span class="result-meta">{{ item.modelType }}</span>
-            </div>
-          </div>
         </div>
 
         <!-- No Results -->
@@ -275,8 +256,7 @@ export default {
         rfidCards: [],
         dictTypes: [],
         params: [],
-        ota: [],
-        providers: []
+        ota: []
       }
     }
   },
@@ -318,9 +298,6 @@ export default {
         }
         if (this.results.ota.length) {
           categories.push({ key: 'ota', items: this.results.ota.slice(0, 5) })
-        }
-        if (this.results.providers.length) {
-          categories.push({ key: 'providers', items: this.results.providers.slice(0, 5) })
         }
       }
       return categories
@@ -510,20 +487,6 @@ export default {
         )
 
         // Providers
-        promises.push(
-          new Promise((resolve) => {
-            Api.model.getModelProvidersPage({ page: 1, limit: 100 }, (res) => {
-              if (res.data?.code === 0) {
-                const list = res.data.data?.list || []
-                this.results.providers = list.filter(p =>
-                  searchRegex.test(p.name || '') ||
-                  searchRegex.test(p.providerCode || '')
-                ).slice(0, 10)
-              }
-              resolve()
-            })
-          })
-        )
       }
 
       try {
@@ -552,8 +515,7 @@ export default {
         rfidCard: { path: '/rfid-management', query: { tab: 'cards', id: item.id } },
         dictType: { path: '/dict-management', query: { typeId: item.id } },
         param: { path: '/params-management', query: { paramId: item.id } },
-        ota: { path: '/ota-management', query: { otaId: item.id } },
-        provider: { path: '/provider-management', query: { providerId: item.id } }
+        ota: { path: '/ota-management', query: { otaId: item.id } }
       }
 
       const route = routes[type]
@@ -631,8 +593,7 @@ export default {
             rfidCards: 'rfidCard',
             dictTypes: 'dictType',
             params: 'param',
-            ota: 'ota',
-            providers: 'provider'
+            ota: 'ota'
           }
           this.navigateToResult(typeMap[this.highlightedCategory], cat.items[this.highlightedIndex])
         }
