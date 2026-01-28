@@ -206,4 +206,36 @@ export default {
                 callback({ data: { code: -1, msg: 'Network error' } });
             }).send();
     },
+
+    // Add to music playlist
+    addToMusicPlaylist(macAddress, contentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/music`)
+            .method('POST')
+            .data({ contentId })
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to add to music playlist:', err);
+                callback({ data: { code: -1, msg: 'Network error' } });
+            }).send();
+    },
+
+    // Add to story playlist
+    addToStoryPlaylist(macAddress, contentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/story`)
+            .method('POST')
+            .data({ contentId })
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to add to story playlist:', err);
+                callback({ data: { code: -1, msg: 'Network error' } });
+            }).send();
+    },
 }

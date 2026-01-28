@@ -124,9 +124,14 @@
         <el-tab-pane label="Music Playlist" name="music">
           <div class="playlist-header">
             <span class="playlist-count">{{ musicPlaylist.length }} items</span>
-            <el-button type="danger" size="mini" @click="handleClearPlaylist('music')" :disabled="musicPlaylist.length === 0">
-              <i class="el-icon-delete"></i> Clear All
-            </el-button>
+            <div class="playlist-actions">
+              <el-button type="primary" size="mini" @click="openContentPicker('music')">
+                <i class="el-icon-plus"></i> Add Music
+              </el-button>
+              <el-button type="danger" size="mini" @click="handleClearPlaylist('music')" :disabled="musicPlaylist.length === 0">
+                <i class="el-icon-delete"></i> Clear All
+              </el-button>
+            </div>
           </div>
           <el-table :data="musicPlaylist" v-loading="playlistLoading" max-height="350" empty-text="No music in playlist">
             <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
@@ -134,18 +139,18 @@
               <template slot-scope="scope">
                 <div class="playlist-item-title">
                   <i class="el-icon-video-play music-icon"></i>
-                  {{ scope.row.title || scope.row.content_title || 'Untitled' }}
+                  {{ scope.row.content?.title || scope.row.title || 'Untitled' }}
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="artist" label="Artist" min-width="120">
+            <el-table-column prop="category" label="Category" min-width="120">
               <template slot-scope="scope">
-                {{ scope.row.artist || scope.row.content_artist || '-' }}
+                {{ scope.row.content?.category || '-' }}
               </template>
             </el-table-column>
             <el-table-column prop="duration" label="Duration" width="80" align="center">
               <template slot-scope="scope">
-                {{ formatDuration(scope.row.duration || scope.row.content_duration) }}
+                {{ formatDuration(scope.row.content?.duration_seconds) }}
               </template>
             </el-table-column>
             <el-table-column label="Actions" width="80" align="center">
@@ -161,9 +166,14 @@
         <el-tab-pane label="Story Playlist" name="story">
           <div class="playlist-header">
             <span class="playlist-count">{{ storyPlaylist.length }} items</span>
-            <el-button type="danger" size="mini" @click="handleClearPlaylist('story')" :disabled="storyPlaylist.length === 0">
-              <i class="el-icon-delete"></i> Clear All
-            </el-button>
+            <div class="playlist-actions">
+              <el-button type="primary" size="mini" @click="openContentPicker('story')">
+                <i class="el-icon-plus"></i> Add Story
+              </el-button>
+              <el-button type="danger" size="mini" @click="handleClearPlaylist('story')" :disabled="storyPlaylist.length === 0">
+                <i class="el-icon-delete"></i> Clear All
+              </el-button>
+            </div>
           </div>
           <el-table :data="storyPlaylist" v-loading="playlistLoading" max-height="350" empty-text="No stories in playlist">
             <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
@@ -171,18 +181,18 @@
               <template slot-scope="scope">
                 <div class="playlist-item-title">
                   <i class="el-icon-reading story-icon"></i>
-                  {{ scope.row.title || scope.row.content_title || 'Untitled' }}
+                  {{ scope.row.content?.title || scope.row.title || 'Untitled' }}
                 </div>
               </template>
             </el-table-column>
-            <el-table-column prop="author" label="Author" min-width="120">
+            <el-table-column prop="category" label="Category" min-width="120">
               <template slot-scope="scope">
-                {{ scope.row.author || scope.row.content_author || '-' }}
+                {{ scope.row.content?.category || '-' }}
               </template>
             </el-table-column>
             <el-table-column prop="duration" label="Duration" width="80" align="center">
               <template slot-scope="scope">
-                {{ formatDuration(scope.row.duration || scope.row.content_duration) }}
+                {{ formatDuration(scope.row.content?.duration_seconds) }}
               </template>
             </el-table-column>
             <el-table-column label="Actions" width="80" align="center">
@@ -197,6 +207,56 @@
       </el-tabs>
       <div slot="footer">
         <el-button @click="playlistDialogVisible = false">Close</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- Content Picker Dialog -->
+    <el-dialog title="Add Content to Playlist" :visible.sync="contentPickerVisible" width="700px" top="5vh" append-to-body>
+      <div class="content-picker-header">
+        <el-input v-model="contentSearchQuery" placeholder="Search content..." size="small" clearable @input="searchContent" style="width: 250px;">
+          <i slot="prefix" class="el-icon-search"></i>
+        </el-input>
+        <el-select v-model="contentFilterCategory" placeholder="Category" size="small" clearable @change="fetchAvailableContent" style="width: 150px; margin-left: 10px;">
+          <el-option v-for="cat in contentCategories" :key="cat" :label="cat" :value="cat"></el-option>
+        </el-select>
+      </div>
+      <el-table :data="availableContent" v-loading="contentPickerLoading" max-height="400" @selection-change="handleContentSelection">
+        <el-table-column type="selection" width="45"></el-table-column>
+        <el-table-column label="Thumbnail" width="60" align="center">
+          <template slot-scope="scope">
+            <img v-if="scope.row.thumbnail_url" :src="scope.row.thumbnail_url" class="content-thumbnail" />
+            <i v-else :class="contentPickerType === 'music' ? 'el-icon-headset' : 'el-icon-reading'" class="content-icon"></i>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" label="Title" min-width="180">
+          <template slot-scope="scope">
+            <div>{{ scope.row.title }}</div>
+            <div class="content-desc" v-if="scope.row.description">{{ scope.row.description }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="category" label="Category" width="100"></el-table-column>
+        <el-table-column prop="duration_seconds" label="Duration" width="80" align="center">
+          <template slot-scope="scope">
+            {{ formatDuration(scope.row.duration_seconds) }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="content-picker-footer">
+        <span class="selected-count">{{ selectedContent.length }} selected</span>
+        <el-pagination
+          small
+          layout="prev, pager, next"
+          :total="contentTotalCount"
+          :page-size="contentPageSize"
+          :current-page.sync="contentCurrentPage"
+          @current-change="fetchAvailableContent">
+        </el-pagination>
+      </div>
+      <div slot="footer">
+        <el-button @click="contentPickerVisible = false">Cancel</el-button>
+        <el-button type="primary" @click="addSelectedToPlaylist" :disabled="selectedContent.length === 0" :loading="addingToPlaylist">
+          Add {{ selectedContent.length }} Item(s)
+        </el-button>
       </div>
     </el-dialog>
 
@@ -236,6 +296,19 @@ export default {
       playlistLoading: false,
       musicPlaylist: [],
       storyPlaylist: [],
+      // Content picker
+      contentPickerVisible: false,
+      contentPickerType: 'music',
+      contentPickerLoading: false,
+      availableContent: [],
+      selectedContent: [],
+      contentSearchQuery: '',
+      contentFilterCategory: '',
+      contentCategories: [],
+      contentTotalCount: 0,
+      contentCurrentPage: 1,
+      contentPageSize: 10,
+      addingToPlaylist: false,
     };
   },
   computed: {
@@ -580,10 +653,11 @@ export default {
     },
 
     handleRemoveFromPlaylist(type, item) {
-      const contentId = item.content_id || item.id;
+      const contentId = item.contentId || item.content_id || item.id;
       const mac = this.playlistDevice.macAddress;
+      const title = item.content?.title || item.title || 'this item';
 
-      this.$confirm(`Remove "${item.title || item.content_title || 'this item'}" from ${type} playlist?`, 'Confirm', {
+      this.$confirm(`Remove "${title}" from ${type} playlist?`, 'Confirm', {
         confirmButtonText: 'Remove',
         cancelButtonText: 'Cancel',
         type: 'warning'
@@ -646,6 +720,115 @@ export default {
       const mins = Math.floor(seconds / 60);
       const secs = Math.floor(seconds % 60);
       return `${mins}:${secs.toString().padStart(2, '0')}`;
+    },
+
+    // Content picker methods
+    openContentPicker(type) {
+      this.contentPickerType = type;
+      this.contentPickerVisible = true;
+      this.selectedContent = [];
+      this.contentSearchQuery = '';
+      this.contentFilterCategory = '';
+      this.contentCurrentPage = 1;
+      this.fetchAvailableContent();
+      this.fetchContentCategories();
+    },
+
+    fetchContentCategories() {
+      // getLibraryCategories expects contentType as string, not object
+      Api.content.getLibraryCategories(this.contentPickerType, ({ data }) => {
+        if (data.code === 0 && data.data) {
+          this.contentCategories = [...new Set(data.data.map(c => c.category).filter(Boolean))];
+        }
+      });
+    },
+
+    fetchAvailableContent() {
+      this.contentPickerLoading = true;
+      const params = {
+        page: this.contentCurrentPage,
+        limit: this.contentPageSize,
+        contentType: this.contentPickerType,
+        search: this.contentSearchQuery || undefined,
+        category: this.contentFilterCategory || undefined,
+      };
+
+      Api.content.getLibraryList(params, ({ data }) => {
+        this.contentPickerLoading = false;
+        if (data.code === 0) {
+          // API returns { list, total, page, limit }
+          this.availableContent = data.data?.list || data.data?.items || [];
+          this.contentTotalCount = data.data?.total || this.availableContent.length;
+        } else {
+          this.availableContent = [];
+          this.contentTotalCount = 0;
+        }
+      });
+    },
+
+    searchContent() {
+      // Debounce search
+      clearTimeout(this._searchTimeout);
+      this._searchTimeout = setTimeout(() => {
+        this.contentCurrentPage = 1;
+        this.fetchAvailableContent();
+      }, 300);
+    },
+
+    handleContentSelection(selection) {
+      this.selectedContent = selection;
+    },
+
+    async addSelectedToPlaylist() {
+      if (this.selectedContent.length === 0) return;
+
+      this.addingToPlaylist = true;
+      const mac = this.playlistDevice.macAddress;
+      const type = this.contentPickerType;
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const content of this.selectedContent) {
+        try {
+          await new Promise((resolve, reject) => {
+            if (type === 'music') {
+              Api.device.addToMusicPlaylist(mac, content.id, ({ data }) => {
+                if (data.code === 0) {
+                  successCount++;
+                  resolve();
+                } else {
+                  errorCount++;
+                  resolve(); // Continue even on error
+                }
+              });
+            } else {
+              Api.device.addToStoryPlaylist(mac, content.id, ({ data }) => {
+                if (data.code === 0) {
+                  successCount++;
+                  resolve();
+                } else {
+                  errorCount++;
+                  resolve();
+                }
+              });
+            }
+          });
+        } catch (e) {
+          errorCount++;
+        }
+      }
+
+      this.addingToPlaylist = false;
+
+      if (successCount > 0) {
+        this.$message.success(`Added ${successCount} item(s) to playlist`);
+        this.fetchPlaylists();
+      }
+      if (errorCount > 0) {
+        this.$message.warning(`${errorCount} item(s) failed (may already exist)`);
+      }
+
+      this.contentPickerVisible = false;
     },
   }
 };
@@ -1071,5 +1254,49 @@ export default {
 
 ::v-deep .el-tabs__active-bar {
   background-color: #5f70f3;
+}
+
+.playlist-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Content Picker Styles */
+.content-picker-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.content-thumbnail {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.content-icon {
+  font-size: 24px;
+  color: #909399;
+}
+
+.content-desc {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 2px;
+}
+
+.content-picker-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #ebeef5;
+}
+
+.selected-count {
+  font-size: 13px;
+  color: #606266;
 }
 </style>

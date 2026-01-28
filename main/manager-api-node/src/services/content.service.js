@@ -859,40 +859,66 @@ const getPlaylist = async (deviceId, playlistType) => {
 
   const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
 
-  const { data, error } = await supabaseAdmin
+  // First, get playlist items (no FK join - tables may not have relationships)
+  const { data: playlistItems, error: playlistError } = await supabaseAdmin
     .from(table)
-    .select(`
-      id,
-      position,
-      created_at,
-      content_id,
-      content_library (
-        id,
-        title,
-        romanized,
-        filename,
-        content_type,
-        category,
-        aws_s3_url,
-        duration_seconds,
-        status
-      )
-    `)
+    .select('id, position, created_at, content_id')
     .eq('device_id', deviceId)
     .order('position', { ascending: true });
 
-  if (error) {
-    logger.error(`Failed to fetch ${playlistType} playlist`, { error: error.message, deviceId });
+  if (playlistError) {
+    logger.error(`Failed to fetch ${playlistType} playlist`, { error: playlistError.message, deviceId });
     throw new Error(`Failed to fetch ${playlistType} playlist`);
   }
 
-  // Flatten the response
-  return (data || []).map(item => ({
+  if (!playlistItems || playlistItems.length === 0) {
+    return [];
+  }
+
+  // Get unique content IDs
+  const contentIds = [...new Set(playlistItems.map(item => item.content_id).filter(Boolean))];
+
+  if (contentIds.length === 0) {
+    return playlistItems.map(item => ({
+      id: item.id,
+      position: item.position,
+      contentId: item.content_id,
+      createdAt: item.created_at,
+      content: null
+    }));
+  }
+
+  // Fetch content details from content_library
+  const { data: contentItems, error: contentError } = await supabaseAdmin
+    .from('content_library')
+    .select('id, title, description, content_type, category, url, thumbnail_url, duration_seconds, metadata, status')
+    .in('id', contentIds);
+
+  if (contentError) {
+    logger.warn(`Failed to fetch content for playlist`, { error: contentError.message });
+    // Return playlist without content details
+    return playlistItems.map(item => ({
+      id: item.id,
+      position: item.position,
+      contentId: item.content_id,
+      createdAt: item.created_at,
+      content: null
+    }));
+  }
+
+  // Create content lookup map
+  const contentMap = {};
+  (contentItems || []).forEach(content => {
+    contentMap[content.id] = content;
+  });
+
+  // Merge playlist with content
+  return playlistItems.map(item => ({
     id: item.id,
     position: item.position,
     contentId: item.content_id,
     createdAt: item.created_at,
-    content: item.content_library
+    content: contentMap[item.content_id] || null
   }));
 };
 
@@ -922,6 +948,7 @@ const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
     position = maxData ? maxData.position + 1 : 0;
   }
 
+  // Insert playlist item
   const { data, error } = await supabaseAdmin
     .from(table)
     .insert({
@@ -929,22 +956,7 @@ const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
       content_id: contentId,
       position
     })
-    .select(`
-      id,
-      position,
-      created_at,
-      content_id,
-      content_library (
-        id,
-        title,
-        romanized,
-        filename,
-        content_type,
-        category,
-        aws_s3_url,
-        duration_seconds
-      )
-    `)
+    .select('id, position, created_at, content_id')
     .single();
 
   if (error) {
@@ -956,12 +968,23 @@ const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
     throw new Error(`Failed to add to ${playlistType} playlist`);
   }
 
+  // Fetch content details separately
+  let content = null;
+  if (contentId) {
+    const { data: contentData } = await supabaseAdmin
+      .from('content_library')
+      .select('id, title, description, content_type, category, url, thumbnail_url, duration_seconds, metadata, status')
+      .eq('id', contentId)
+      .single();
+    content = contentData;
+  }
+
   return {
     id: data.id,
     position: data.position,
     contentId: data.content_id,
     createdAt: data.created_at,
-    content: data.content_library
+    content
   };
 };
 
@@ -1119,29 +1142,25 @@ const getPlaylistItem = async (playlistItemId, playlistType) => {
 
   const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
 
+  // Get playlist item
   const { data, error } = await supabaseAdmin
     .from(table)
-    .select(`
-      id,
-      device_id,
-      position,
-      created_at,
-      content_id,
-      content_library (
-        id,
-        title,
-        romanized,
-        filename,
-        content_type,
-        category,
-        aws_s3_url,
-        duration_seconds
-      )
-    `)
+    .select('id, device_id, position, created_at, content_id')
     .eq('id', playlistItemId)
     .single();
 
   if (error || !data) return null;
+
+  // Fetch content details separately
+  let content = null;
+  if (data.content_id) {
+    const { data: contentData } = await supabaseAdmin
+      .from('content_library')
+      .select('id, title, description, content_type, category, url, thumbnail_url, duration_seconds, metadata, status')
+      .eq('id', data.content_id)
+      .single();
+    content = contentData;
+  }
 
   return {
     id: data.id,
@@ -1149,7 +1168,7 @@ const getPlaylistItem = async (playlistItemId, playlistType) => {
     position: data.position,
     contentId: data.content_id,
     createdAt: data.created_at,
-    content: data.content_library
+    content
   };
 };
 
