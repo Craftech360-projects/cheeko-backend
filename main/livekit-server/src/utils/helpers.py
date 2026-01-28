@@ -205,9 +205,9 @@ class UsageManager:
     async def _send_usage_to_api(self, session_duration: float, avg_ttft: float):
         """Send usage data to Manager API"""
         try:
-            url = f"{MANAGER_API_URL}/usage/tokens"
+            url = f"{MANAGER_API_URL}/device/token-usage"
             payload = {
-                "macAddress": self.mac_address,
+                "mac": self.mac_address,
                 "sessionId": self.session_id,
                 "inputAudioTokens": self.input_audio_tokens,
                 "inputTextTokens": self.input_text_tokens,

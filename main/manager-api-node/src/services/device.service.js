@@ -1075,18 +1075,14 @@ const recordTokenUsage = async ({
 
   const today = new Date().toISOString().split('T')[0];
 
-  // Check if we have an existing record for this mac + date (or mac + sessionId)
-  let query = supabaseAdmin
+  // Check if we have an existing record for this mac + date
+  // Note: unique constraint is on (mac_address, usage_date), so we aggregate all sessions per day
+  const { data: existing } = await supabaseAdmin
     .from('device_token_usage')
     .select('*')
     .eq('mac_address', normalizedMac)
-    .eq('usage_date', today);
-
-  if (sessionId) {
-    query = query.eq('session_id', sessionId);
-  }
-
-  const { data: existing } = await query.single();
+    .eq('usage_date', today)
+    .single();
 
   if (existing) {
     // Update existing record - accumulate values
@@ -1108,7 +1104,7 @@ const recordTokenUsage = async ({
           : avgTtftSeconds,
         message_count: existing.message_count + messageCount,
         total_response_duration_seconds: existing.total_response_duration_seconds + totalResponseDurationSeconds,
-        session_count: sessionId && !existing.session_id ? existing.session_count + 1 : existing.session_count,
+        session_count: sessionId ? existing.session_count + 1 : existing.session_count,
         update_date: new Date().toISOString()
       })
       .eq('id', existing.id)

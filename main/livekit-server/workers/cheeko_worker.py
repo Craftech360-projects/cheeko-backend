@@ -40,6 +40,7 @@ from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
 from src.utils.loki_agent_logger import logger
+from src.utils.helpers import UsageManager
 from src.shared.base_assistant import BaseAssistant
 from src.shared.entrypoint_utils import (
     parse_room_name,
@@ -357,6 +358,13 @@ async def entrypoint(ctx: JobContext):
     logger.info("State management registered")
 
     # ============================================================================
+    # USAGE TRACKING: Capture prompt_tokens, completion_tokens, TTFT per response
+    # ============================================================================
+    usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
+    usage_manager.setup_metrics_collection(session)
+    logger.info("Usage tracking initialized - subscribed to metrics_collected event")
+
+    # ============================================================================
     # DEBUG: Track user speech and function calls
     # ============================================================================
 
@@ -428,6 +436,15 @@ async def entrypoint(ctx: JobContext):
         cleanup_completed = True
         try:
             logger.info("Initiating cleanup")
+
+            # Log usage summary before closing session (sends to Manager API)
+            try:
+                if usage_manager:
+                    await asyncio.shield(usage_manager.log_session_summary())
+            except asyncio.CancelledError:
+                logger.warning("Usage logging was cancelled but should complete")
+            except Exception as e:
+                logger.warning(f"Failed to log usage summary: {e}")
 
             # Extract and send chat history before closing session (also sends to Mem0)
             # Use asyncio.shield to protect from cancellation during job shutdown
