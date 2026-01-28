@@ -333,12 +333,13 @@ router.get('/analytics/totals',
         session_count: totals.sessionCount || 0,
         device_count: totals.deviceCount || 0,
         day_count: totals.dayCount || 0,
-        // Calculate cost in INR (matching Spring Boot pricing)
+        // Calculate cost in INR for Gemini 2.5 Flash Native Audio (USD rates × ₹91.99)
+        // USD: Text In=$0.50, Audio In=$3.00, Text Out=$2.00, Audio Out=$12.00
         cost_inr: Math.round((
-          (totals.inputTextTokens || 0) * 6.25 / 1000000 +      // ₹6.25/1M text input
-          (totals.inputAudioTokens || 0) * 83.33 / 1000000 +    // ₹83.33/1M audio input
-          (totals.outputTextTokens || 0) * 25.0 / 1000000 +     // ₹25/1M text output
-          (totals.outputAudioTokens || 0) * 333.33 / 1000000    // ₹333.33/1M audio output
+          (totals.inputTextTokens || 0) * 46.00 / 1000000 +     // ₹46.00/1M text input ($0.50 × 91.99)
+          (totals.inputAudioTokens || 0) * 276.00 / 1000000 +   // ₹276.00/1M audio input ($3.00 × 91.99)
+          (totals.outputTextTokens || 0) * 184.00 / 1000000 +   // ₹184.00/1M text output ($2.00 × 91.99)
+          (totals.outputAudioTokens || 0) * 1104.00 / 1000000   // ₹1104.00/1M audio output ($12.00 × 91.99)
         ) * 100) / 100  // Round to 2 decimals
       };
       success(res, flatResult);

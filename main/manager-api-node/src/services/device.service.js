@@ -1393,11 +1393,12 @@ const getSessionTokenUsage = async (mac, sessionId) => {
   };
 };
 
-// Gemini pricing in INR per token (same as Spring Boot)
-const TEXT_INPUT_RATE_INR = 6.25 / 1000000;      // ₹6.25/1M
-const AUDIO_INPUT_RATE_INR = 83.33 / 1000000;    // ₹83.33/1M
-const TEXT_OUTPUT_RATE_INR = 25.0 / 1000000;     // ₹25/1M
-const AUDIO_OUTPUT_RATE_INR = 333.33 / 1000000;  // ₹333.33/1M
+// Gemini 2.5 Flash Native Audio pricing in INR per token (USD × ₹91.99)
+// USD rates: Text In=$0.50, Audio In=$3.00, Text Out=$2.00, Audio Out=$12.00
+const TEXT_INPUT_RATE_INR = 46.00 / 1000000;     // ₹46.00/1M ($0.50 × 91.99)
+const AUDIO_INPUT_RATE_INR = 276.00 / 1000000;   // ₹276.00/1M ($3.00 × 91.99)
+const TEXT_OUTPUT_RATE_INR = 184.00 / 1000000;   // ₹184.00/1M ($2.00 × 91.99)
+const AUDIO_OUTPUT_RATE_INR = 1104.00 / 1000000; // ₹1104.00/1M ($12.00 × 91.99)
 
 /**
  * Calculate cost in INR based on token usage
