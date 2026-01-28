@@ -205,6 +205,48 @@ router.get('/library/categories',
 
 /**
  * @swagger
+ * /content/library/statistics:
+ *   get:
+ *     tags: [Content Library]
+ *     summary: Get content library statistics
+ *     description: Get aggregate statistics about content library items (total, by type, by category)
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Content library statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                     byType:
+ *                       type: object
+ *                       additionalProperties:
+ *                         type: integer
+ *                     byCategory:
+ *                       type: object
+ *                       additionalProperties:
+ *                         type: integer
+ */
+router.get('/library/statistics',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const stats = await contentService.getLibraryStatistics();
+    success(res, stats);
+  })
+);
+
+/**
+ * @swagger
  * /content/library/batch:
  *   post:
  *     tags: [Content Library]

@@ -77,13 +77,13 @@ const searchLibrary = async (query, { page = 1, limit = 20, contentType, categor
     .from('content_library')
     .select('id', { count: 'exact', head: true })
     .eq('status', 1)
-    .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`);
+    .or(`title.ilike.${searchPattern},description.ilike.${searchPattern}`);
 
   let dataQuery = supabaseAdmin
     .from('content_library')
     .select('*')
     .eq('status', 1)
-    .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`)
+    .or(`title.ilike.${searchPattern},description.ilike.${searchPattern}`)
     .order('created_at', { ascending: false });
 
   if (contentType) {
@@ -182,19 +182,24 @@ const getLibraryById = async (contentId) => {
 const createLibraryItem = async (data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
+  // Build metadata object if filename is provided
+  const metadata = {};
+  if (data.filename) metadata.filename = data.filename;
+
   const { data: content, error } = await supabaseAdmin
     .from('content_library')
     .insert({
       title: data.title,
-      romanized: data.romanized,
-      filename: data.filename,
-      content_type: data.contentType,
-      category: data.category,
-      alternatives: data.alternatives || [],
-      aws_s3_url: data.awsS3Url,
-      duration_seconds: data.durationSeconds,
-      file_size_bytes: data.fileSizeBytes,
-      status: data.isActive !== undefined ? data.isActive : 1
+      description: data.description || null,
+      content_type: data.content_type || data.contentType,
+      category: data.category || null,
+      url: data.url || null,
+      thumbnail_url: data.thumbnail_url || null,
+      duration_seconds: data.duration_seconds || null,
+      tags: data.tags || [],
+      language: data.language || 'en',
+      metadata: Object.keys(metadata).length > 0 ? metadata : null,
+      status: data.status !== undefined ? data.status : 1
     })
     .select()
     .single();
@@ -219,15 +224,30 @@ const updateLibraryItem = async (contentId, data) => {
   const updateData = { updated_at: new Date().toISOString() };
 
   if (data.title !== undefined) updateData.title = data.title;
-  if (data.romanized !== undefined) updateData.romanized = data.romanized;
-  if (data.filename !== undefined) updateData.filename = data.filename;
-  if (data.contentType !== undefined) updateData.content_type = data.contentType;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.content_type !== undefined) updateData.content_type = data.content_type;
   if (data.category !== undefined) updateData.category = data.category;
-  if (data.alternatives !== undefined) updateData.alternatives = data.alternatives;
-  if (data.awsS3Url !== undefined) updateData.aws_s3_url = data.awsS3Url;
-  if (data.durationSeconds !== undefined) updateData.duration_seconds = data.durationSeconds;
-  if (data.fileSizeBytes !== undefined) updateData.file_size_bytes = data.fileSizeBytes;
-  if (data.isActive !== undefined) updateData.status = data.isActive;
+  if (data.url !== undefined) updateData.url = data.url;
+  if (data.thumbnail_url !== undefined) updateData.thumbnail_url = data.thumbnail_url;
+  if (data.duration_seconds !== undefined) updateData.duration_seconds = data.duration_seconds;
+  if (data.tags !== undefined) updateData.tags = data.tags;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.status !== undefined) updateData.status = data.status;
+
+  // Handle metadata/filename update
+  if (data.filename !== undefined) {
+    // First get current metadata
+    const { data: current } = await supabaseAdmin
+      .from('content_library')
+      .select('metadata')
+      .eq('id', contentId)
+      .single();
+
+    updateData.metadata = {
+      ...(current?.metadata || {}),
+      filename: data.filename
+    };
+  }
 
   const { data: content, error } = await supabaseAdmin
     .from('content_library')
@@ -274,18 +294,24 @@ const batchCreateLibraryItems = async (items) => {
     throw new Error('Items must be a non-empty array');
   }
 
-  const insertData = items.map(item => ({
-    title: item.title,
-    romanized: item.romanized,
-    filename: item.filename,
-    content_type: item.contentType,
-    category: item.category,
-    alternatives: item.alternatives || [],
-    aws_s3_url: item.awsS3Url,
-    duration_seconds: item.durationSeconds,
-    file_size_bytes: item.fileSizeBytes,
-    status: item.isActive !== undefined ? item.isActive : 1
-  }));
+  const insertData = items.map(item => {
+    const metadata = {};
+    if (item.filename) metadata.filename = item.filename;
+
+    return {
+      title: item.title,
+      description: item.description || null,
+      content_type: item.content_type || item.contentType,
+      category: item.category || null,
+      url: item.url || null,
+      thumbnail_url: item.thumbnail_url || null,
+      duration_seconds: item.duration_seconds || null,
+      tags: item.tags || [],
+      language: item.language || 'en',
+      metadata: Object.keys(metadata).length > 0 ? metadata : null,
+      status: item.status !== undefined ? item.status : 1
+    };
+  });
 
   const { data: content, error } = await supabaseAdmin
     .from('content_library')
@@ -300,6 +326,51 @@ const batchCreateLibraryItems = async (items) => {
   return {
     created: content?.length || 0,
     items: content || []
+  };
+};
+
+/**
+ * Get content library statistics
+ * @returns {Promise<Object>} Statistics object
+ */
+const getLibraryStatistics = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get total count
+  const { count: total } = await supabaseAdmin
+    .from('content_library')
+    .select('id', { count: 'exact', head: true });
+
+  // Get count by type
+  const { data: typeData } = await supabaseAdmin
+    .from('content_library')
+    .select('content_type');
+
+  const byType = {};
+  if (typeData) {
+    typeData.forEach(item => {
+      byType[item.content_type] = (byType[item.content_type] || 0) + 1;
+    });
+  }
+
+  // Get count by category
+  const { data: categoryData } = await supabaseAdmin
+    .from('content_library')
+    .select('category');
+
+  const byCategory = {};
+  if (categoryData) {
+    categoryData.forEach(item => {
+      if (item.category) {
+        byCategory[item.category] = (byCategory[item.category] || 0) + 1;
+      }
+    });
+  }
+
+  return {
+    total: total || 0,
+    byType,
+    byCategory
   };
 };
 
@@ -1500,6 +1571,7 @@ module.exports = {
   updateLibraryItem,
   deleteLibraryItem,
   batchCreateLibraryItems,
+  getLibraryStatistics,
   // Legacy music methods
   getMusicList,
   getMusicById,

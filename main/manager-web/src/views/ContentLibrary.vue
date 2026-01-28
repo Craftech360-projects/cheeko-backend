@@ -13,10 +13,10 @@
               <span class="header-title">Content Library</span>
             </div>
             <div class="header-actions">
-              <el-button type="primary" size="small" @click="showAddDialog" disabled>
+              <el-button type="primary" size="small" @click="showAddDialog">
                 <i class="el-icon-plus"></i> Add Content
               </el-button>
-              <button class="custom-close-btn" @click="goToHome">×</button>
+              <button class="custom-close-btn" @click="goToHome">x</button>
             </div>
           </div>
 
@@ -44,13 +44,13 @@
 
           <!-- Filters -->
           <div class="filter-row">
-            <el-select v-model="filters.type" placeholder="Type" size="small" clearable @change="fetchContent">
+            <el-select v-model="filters.type" placeholder="Type" size="small" clearable @change="handleFilterChange">
               <el-option label="All Types" value="" />
               <el-option label="Music" value="music" />
               <el-option label="Story" value="story" />
               <el-option label="Textbook" value="textbook" />
             </el-select>
-            <el-select v-model="filters.category" placeholder="Category" size="small" clearable @change="fetchContent">
+            <el-select v-model="filters.category" placeholder="Category" size="small" clearable @change="handleFilterChange">
               <el-option label="All Categories" value="" />
               <el-option v-for="cat in categories" :key="cat" :label="cat" :value="cat" />
             </el-select>
@@ -61,6 +61,7 @@
               clearable
               prefix-icon="el-icon-search"
               @input="handleSearchDebounced"
+              @clear="handleFilterChange"
               style="width: 240px;"
             />
           </div>
@@ -73,34 +74,54 @@
             size="small"
             :row-class-name="tableRowClassName"
           >
-            <el-table-column label="Type" width="80" align="center">
+            <el-table-column label="Type" width="90" align="center">
               <template slot-scope="scope">
-                <el-tag :type="getTypeTagColor(scope.row.type)" size="mini">
-                  {{ scope.row.type }}
+                <el-tag :type="getTypeTagColor(scope.row.content_type)" size="mini">
+                  {{ scope.row.content_type }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="title" label="Title" min-width="200" />
+            <el-table-column prop="title" label="Title" min-width="200">
+              <template slot-scope="scope">
+                <div class="title-cell">
+                  <span class="main-title">{{ scope.row.title }}</span>
+                  <span v-if="scope.row.description" class="romanized">{{ scope.row.description }}</span>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column prop="category" label="Category" width="120" />
-            <el-table-column prop="language" label="Language" width="100" />
+            <el-table-column label="Filename" width="150" show-overflow-tooltip>
+              <template slot-scope="scope">
+                {{ scope.row.metadata && scope.row.metadata.filename ? scope.row.metadata.filename : '-' }}
+              </template>
+            </el-table-column>
             <el-table-column label="Duration" width="100" align="center">
               <template slot-scope="scope">
-                {{ formatDuration(scope.row.duration) }}
+                {{ formatDuration(scope.row.duration_seconds) }}
               </template>
             </el-table-column>
             <el-table-column label="Status" width="90" align="center">
               <template slot-scope="scope">
-                <el-tag :type="scope.row.status === 'active' ? 'success' : 'info'" size="mini">
-                  {{ scope.row.status || 'active' }}
+                <el-tag :type="scope.row.status === 1 ? 'success' : 'info'" size="mini">
+                  {{ scope.row.status === 1 ? 'Active' : 'Inactive' }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="Actions" width="120" align="center" fixed="right">
+            <el-table-column label="Actions" width="180" align="center" fixed="right">
               <template slot-scope="scope">
-                <el-button type="text" size="mini" @click="handleEdit(scope.row)" disabled>
+                <el-button
+                  type="text"
+                  size="mini"
+                  :class="currentlyPlaying === scope.row.id ? 'playing-btn' : 'play-btn'"
+                  @click="handlePlay(scope.row)"
+                  :disabled="!scope.row.url"
+                >
+                  <i :class="currentlyPlaying === scope.row.id ? 'el-icon-video-pause' : 'el-icon-video-play'"></i>
+                </el-button>
+                <el-button type="text" size="mini" @click="handleEdit(scope.row)">
                   Edit
                 </el-button>
-                <el-button type="text" size="mini" class="delete-btn" @click="handleDelete(scope.row)" disabled>
+                <el-button type="text" size="mini" class="delete-btn" @click="handleDelete(scope.row)">
                   Delete
                 </el-button>
               </template>
@@ -109,7 +130,7 @@
 
           <div v-if="content.length === 0 && !loading" class="empty-state">
             <i class="el-icon-folder-opened"></i>
-            <p>No content found. Content management coming soon!</p>
+            <p>No content found</p>
           </div>
 
           <!-- Pagination -->
@@ -128,6 +149,64 @@
         </div>
       </div>
     </div>
+
+    <!-- Add/Edit Content Dialog -->
+    <el-dialog
+      :title="dialogMode === 'add' ? 'Add Content' : 'Edit Content'"
+      :visible.sync="dialogVisible"
+      width="550px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="contentForm" :rules="formRules" ref="contentForm" label-width="110px" size="small">
+        <el-form-item label="Title" prop="title">
+          <el-input v-model="contentForm.title" placeholder="Enter title" />
+        </el-form-item>
+        <el-form-item label="Description">
+          <el-input v-model="contentForm.description" placeholder="Description or romanized title" />
+        </el-form-item>
+        <el-form-item label="Content Type" prop="content_type">
+          <el-select v-model="contentForm.content_type" placeholder="Select type" style="width: 100%">
+            <el-option label="Music" value="music" />
+            <el-option label="Story" value="story" />
+            <el-option label="Textbook" value="textbook" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Category">
+          <el-select v-model="contentForm.category" placeholder="Select or enter category" filterable allow-create style="width: 100%">
+            <el-option v-for="cat in categories" :key="cat" :label="cat" :value="cat" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Filename">
+          <el-input v-model="contentForm.filename" placeholder="e.g., song_001.mp3" />
+        </el-form-item>
+        <el-form-item label="URL">
+          <el-input v-model="contentForm.url" placeholder="https://cdn.example.com/..." />
+        </el-form-item>
+        <el-form-item label="Thumbnail">
+          <el-input v-model="contentForm.thumbnail_url" placeholder="https://..." />
+        </el-form-item>
+        <el-form-item label="Duration (sec)">
+          <el-input-number v-model="contentForm.duration_seconds" :min="0" :max="36000" />
+        </el-form-item>
+        <el-form-item label="Status">
+          <el-switch v-model="contentForm.status" :active-value="1" :inactive-value="0" active-text="Active" inactive-text="Inactive" />
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="dialogVisible = false" size="small">Cancel</el-button>
+        <el-button type="primary" @click="handleSubmit" :loading="submitting" size="small">
+          {{ dialogMode === 'add' ? 'Add' : 'Save' }}
+        </el-button>
+      </span>
+    </el-dialog>
+
+    <!-- Hidden Audio Player -->
+    <audio
+      ref="audioPlayer"
+      @ended="handleAudioEnded"
+      @error="handleAudioError"
+      style="display: none;"
+    ></audio>
   </div>
 </template>
 
@@ -159,11 +238,35 @@ export default {
         page: 1,
         limit: 20,
         total: 0
+      },
+      dialogVisible: false,
+      dialogMode: 'add',
+      submitting: false,
+      currentlyPlaying: null,
+      contentForm: {
+        id: null,
+        title: '',
+        description: '',
+        content_type: '',
+        category: '',
+        filename: '',
+        url: '',
+        thumbnail_url: '',
+        duration_seconds: null,
+        status: 1
+      },
+      formRules: {
+        title: [
+          { required: true, message: 'Please enter title', trigger: 'blur' }
+        ],
+        content_type: [
+          { required: true, message: 'Please select content type', trigger: 'change' }
+        ]
       }
     };
   },
   created() {
-    this.handleSearchDebounced = debounce(this.fetchContent, 300);
+    this.handleSearchDebounced = debounce(this.handleSearch, 300);
   },
   methods: {
     goToHome() {
@@ -171,28 +274,76 @@ export default {
     },
     fetchContent() {
       this.loading = true;
-      // API call to fetch content - to be implemented
-      // For now, show placeholder data
-      setTimeout(() => {
-        this.content = [];
-        this.stats = {
-          total: 0,
-          music: 0,
-          stories: 0,
-          textbooks: 0
-        };
-        this.loading = false;
-        this.$message.info("Content Library API integration pending");
-      }, 500);
+
+      if (this.filters.search) {
+        // Use search API
+        Api.content.searchLibrary({
+          query: this.filters.search,
+          page: this.pagination.page,
+          limit: this.pagination.limit,
+          contentType: this.filters.type,
+          category: this.filters.category
+        }, (res) => {
+          this.loading = false;
+          if (res.data && res.data.code === 0) {
+            this.content = res.data.data.list || [];
+            this.pagination.total = res.data.data.total || 0;
+          } else {
+            this.content = [];
+            this.pagination.total = 0;
+          }
+        });
+      } else {
+        // Use list API
+        Api.content.getLibraryList({
+          page: this.pagination.page,
+          limit: this.pagination.limit,
+          contentType: this.filters.type,
+          category: this.filters.category
+        }, (res) => {
+          this.loading = false;
+          if (res.data && res.data.code === 0) {
+            this.content = res.data.data.list || [];
+            this.pagination.total = res.data.data.total || 0;
+          } else {
+            this.content = [];
+            this.pagination.total = 0;
+            if (res.data && res.data.msg) {
+              this.$message.error(res.data.msg);
+            }
+          }
+        });
+      }
     },
     fetchStats() {
-      // Fetch content statistics
-      // To be implemented when API is ready
+      Api.content.getStatistics((res) => {
+        if (res.data && res.data.code === 0) {
+          const data = res.data.data;
+          this.stats = {
+            total: data.total || 0,
+            music: data.byType?.music || 0,
+            stories: data.byType?.story || 0,
+            textbooks: data.byType?.textbook || 0
+          };
+        }
+      });
     },
     fetchCategories() {
-      // Fetch available categories
-      // To be implemented when API is ready
-      this.categories = ["Kids", "Education", "Entertainment", "Bedtime", "Learning"];
+      Api.content.getLibraryCategories(null, (res) => {
+        if (res.data && res.data.code === 0) {
+          // Extract unique category names
+          const categoryData = res.data.data || [];
+          this.categories = [...new Set(categoryData.map(c => c.category))].filter(Boolean);
+        }
+      });
+    },
+    handleFilterChange() {
+      this.pagination.page = 1;
+      this.fetchContent();
+    },
+    handleSearch() {
+      this.pagination.page = 1;
+      this.fetchContent();
     },
     tableRowClassName({ rowIndex }) {
       return rowIndex % 2 === 0 ? "even-row" : "odd-row";
@@ -220,19 +371,147 @@ export default {
       this.pagination.page = val;
       this.fetchContent();
     },
+    resetForm() {
+      this.contentForm = {
+        id: null,
+        title: '',
+        description: '',
+        content_type: '',
+        category: '',
+        filename: '',
+        url: '',
+        thumbnail_url: '',
+        duration_seconds: null,
+        status: 1
+      };
+    },
     showAddDialog() {
-      this.$message.info("Add Content feature coming soon");
+      this.dialogMode = 'add';
+      this.resetForm();
+      this.dialogVisible = true;
+      this.$nextTick(() => {
+        this.$refs.contentForm && this.$refs.contentForm.clearValidate();
+      });
     },
     handleEdit(row) {
-      this.$message.info("Edit feature coming soon");
+      this.dialogMode = 'edit';
+      this.contentForm = {
+        id: row.id,
+        title: row.title || '',
+        description: row.description || '',
+        content_type: row.content_type || '',
+        category: row.category || '',
+        filename: row.metadata?.filename || '',
+        url: row.url || '',
+        thumbnail_url: row.thumbnail_url || '',
+        duration_seconds: row.duration_seconds || null,
+        status: row.status ?? 1
+      };
+      this.dialogVisible = true;
+    },
+    handleSubmit() {
+      this.$refs.contentForm.validate((valid) => {
+        if (!valid) return;
+
+        this.submitting = true;
+        const formData = { ...this.contentForm };
+
+        if (this.dialogMode === 'add') {
+          Api.content.createLibraryItem(formData, (res) => {
+            this.submitting = false;
+            if (res.data && res.data.code === 0) {
+              this.$message.success('Content added successfully');
+              this.dialogVisible = false;
+              this.fetchContent();
+              this.fetchStats();
+              this.fetchCategories();
+            } else {
+              this.$message.error(res.data?.msg || 'Failed to add content');
+            }
+          });
+        } else {
+          Api.content.updateLibraryItem(formData.id, formData, (res) => {
+            this.submitting = false;
+            if (res.data && res.data.code === 0) {
+              this.$message.success('Content updated successfully');
+              this.dialogVisible = false;
+              this.fetchContent();
+              this.fetchStats();
+              this.fetchCategories();
+            } else {
+              this.$message.error(res.data?.msg || 'Failed to update content');
+            }
+          });
+        }
+      });
     },
     handleDelete(row) {
-      this.$message.info("Delete feature coming soon");
+      this.$confirm(`Are you sure you want to delete "${row.title}"?`, 'Confirm Delete', {
+        confirmButtonText: 'Delete',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(() => {
+        Api.content.deleteLibraryItem(row.id, (res) => {
+          if (res.data && res.data.code === 0) {
+            this.$message.success('Content deleted successfully');
+            this.fetchContent();
+            this.fetchStats();
+          } else {
+            this.$message.error(res.data?.msg || 'Failed to delete content');
+          }
+        });
+      }).catch(() => {});
+    },
+    handlePlay(row) {
+      if (!row.url) {
+        this.$message.warning('No audio URL available for this content');
+        return;
+      }
+
+      const audio = this.$refs.audioPlayer;
+
+      // If same content is playing, pause it
+      if (this.currentlyPlaying === row.id) {
+        audio.pause();
+        this.currentlyPlaying = null;
+        return;
+      }
+
+      // Stop any current playback
+      audio.pause();
+
+      // Set new source and play
+      audio.src = row.url;
+      audio.play()
+        .then(() => {
+          this.currentlyPlaying = row.id;
+          this.$message.success(`Playing: ${row.title}`);
+        })
+        .catch(err => {
+          console.error('Failed to play audio:', err);
+          this.$message.error('Failed to play audio');
+          this.currentlyPlaying = null;
+        });
+    },
+    handleAudioEnded() {
+      this.currentlyPlaying = null;
+    },
+    handleAudioError() {
+      this.$message.error('Audio playback error');
+      this.currentlyPlaying = null;
     }
   },
   mounted() {
     this.fetchContent();
+    this.fetchStats();
     this.fetchCategories();
+  },
+  beforeDestroy() {
+    // Stop audio when leaving page
+    if (this.$refs.audioPlayer) {
+      this.$refs.audioPlayer.pause();
+      this.$refs.audioPlayer.src = '';
+    }
   }
 };
 </script>
@@ -381,6 +660,21 @@ export default {
   align-items: center;
 }
 
+.title-cell {
+  display: flex;
+  flex-direction: column;
+
+  .main-title {
+    font-weight: 500;
+  }
+
+  .romanized {
+    font-size: 11px;
+    color: #999;
+    margin-top: 2px;
+  }
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -411,6 +705,22 @@ export default {
   color: #f56c6c !important;
 }
 
+.play-btn {
+  color: #67c23a !important;
+  font-size: 16px !important;
+}
+
+.playing-btn {
+  color: #409eff !important;
+  font-size: 16px !important;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 ::v-deep .el-table {
   font-size: 13px;
 
@@ -426,6 +736,24 @@ export default {
     background: #f5f7fa !important;
     color: #606266;
     font-weight: 600;
+  }
+}
+
+::v-deep .el-dialog {
+  border-radius: 12px;
+
+  .el-dialog__header {
+    border-bottom: 1px solid #f0f0f0;
+    padding: 16px 20px;
+  }
+
+  .el-dialog__body {
+    padding: 20px;
+  }
+
+  .el-dialog__footer {
+    border-top: 1px solid #f0f0f0;
+    padding: 12px 20px;
   }
 }
 </style>

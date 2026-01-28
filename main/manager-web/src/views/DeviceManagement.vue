@@ -62,8 +62,11 @@
                              @change="handleOtaSwitchChange(scope.row)"></el-switch>
                 </template>
               </el-table-column>
-              <el-table-column label="Actions" align="center" min-width="150">
+              <el-table-column label="Actions" align="center" min-width="200">
                 <template slot-scope="scope">
+                  <el-button size="mini" type="text" @click="handlePlaylist(scope.row)">
+                    Playlist
+                  </el-button>
                   <el-button size="mini" type="text" @click="handleKidProfile(scope.row)">
                     Kid Profile
                   </el-button>
@@ -115,6 +118,88 @@
     <ManualAddDeviceDialog :visible.sync="manualAddDeviceDialogVisible" :agent-id="currentAgentId"
                      @refresh="fetchBindDevices(currentAgentId)"/>
 
+    <!-- Playlist Dialog -->
+    <el-dialog :title="'Playlist - ' + (playlistDevice.macAddress || '')" :visible.sync="playlistDialogVisible" width="650px" top="5vh">
+      <el-tabs v-model="playlistActiveTab" @tab-click="handlePlaylistTabClick">
+        <el-tab-pane label="Music Playlist" name="music">
+          <div class="playlist-header">
+            <span class="playlist-count">{{ musicPlaylist.length }} items</span>
+            <el-button type="danger" size="mini" @click="handleClearPlaylist('music')" :disabled="musicPlaylist.length === 0">
+              <i class="el-icon-delete"></i> Clear All
+            </el-button>
+          </div>
+          <el-table :data="musicPlaylist" v-loading="playlistLoading" max-height="350" empty-text="No music in playlist">
+            <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
+            <el-table-column prop="title" label="Title" min-width="180">
+              <template slot-scope="scope">
+                <div class="playlist-item-title">
+                  <i class="el-icon-video-play music-icon"></i>
+                  {{ scope.row.title || scope.row.content_title || 'Untitled' }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="artist" label="Artist" min-width="120">
+              <template slot-scope="scope">
+                {{ scope.row.artist || scope.row.content_artist || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="duration" label="Duration" width="80" align="center">
+              <template slot-scope="scope">
+                {{ formatDuration(scope.row.duration || scope.row.content_duration) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="80" align="center">
+              <template slot-scope="scope">
+                <el-button type="text" size="mini" class="remove-btn" @click="handleRemoveFromPlaylist('music', scope.row)">
+                  <i class="el-icon-close"></i>
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="Story Playlist" name="story">
+          <div class="playlist-header">
+            <span class="playlist-count">{{ storyPlaylist.length }} items</span>
+            <el-button type="danger" size="mini" @click="handleClearPlaylist('story')" :disabled="storyPlaylist.length === 0">
+              <i class="el-icon-delete"></i> Clear All
+            </el-button>
+          </div>
+          <el-table :data="storyPlaylist" v-loading="playlistLoading" max-height="350" empty-text="No stories in playlist">
+            <el-table-column type="index" label="#" width="50" align="center"></el-table-column>
+            <el-table-column prop="title" label="Title" min-width="200">
+              <template slot-scope="scope">
+                <div class="playlist-item-title">
+                  <i class="el-icon-reading story-icon"></i>
+                  {{ scope.row.title || scope.row.content_title || 'Untitled' }}
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="author" label="Author" min-width="120">
+              <template slot-scope="scope">
+                {{ scope.row.author || scope.row.content_author || '-' }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="duration" label="Duration" width="80" align="center">
+              <template slot-scope="scope">
+                {{ formatDuration(scope.row.duration || scope.row.content_duration) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="Actions" width="80" align="center">
+              <template slot-scope="scope">
+                <el-button type="text" size="mini" class="remove-btn" @click="handleRemoveFromPlaylist('story', scope.row)">
+                  <i class="el-icon-close"></i>
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
+      <div slot="footer">
+        <el-button @click="playlistDialogVisible = false">Close</el-button>
+      </div>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -144,6 +229,13 @@ export default {
       loading: false,
       userApi: null,
       firmwareTypes: [],
+      // Playlist dialog
+      playlistDialogVisible: false,
+      playlistDevice: {},
+      playlistActiveTab: 'music',
+      playlistLoading: false,
+      musicPlaylist: [],
+      storyPlaylist: [],
     };
   },
   computed: {
@@ -442,6 +534,118 @@ export default {
           kidId: row.kidId
         }
       });
+    },
+
+    // Playlist methods
+    handlePlaylist(row) {
+      this.playlistDevice = row;
+      this.playlistDialogVisible = true;
+      this.playlistActiveTab = 'music';
+      this.fetchPlaylists();
+    },
+
+    handlePlaylistTabClick() {
+      // Tab already changed, data is pre-fetched
+    },
+
+    fetchPlaylists() {
+      this.playlistLoading = true;
+      const mac = this.playlistDevice.macAddress;
+
+      // Fetch both playlists in parallel
+      Promise.all([
+        new Promise(resolve => {
+          Api.device.getMusicPlaylist(mac, ({ data }) => {
+            if (data.code === 0) {
+              this.musicPlaylist = data.data || [];
+            } else {
+              this.musicPlaylist = [];
+            }
+            resolve();
+          });
+        }),
+        new Promise(resolve => {
+          Api.device.getStoryPlaylist(mac, ({ data }) => {
+            if (data.code === 0) {
+              this.storyPlaylist = data.data || [];
+            } else {
+              this.storyPlaylist = [];
+            }
+            resolve();
+          });
+        })
+      ]).finally(() => {
+        this.playlistLoading = false;
+      });
+    },
+
+    handleRemoveFromPlaylist(type, item) {
+      const contentId = item.content_id || item.id;
+      const mac = this.playlistDevice.macAddress;
+
+      this.$confirm(`Remove "${item.title || item.content_title || 'this item'}" from ${type} playlist?`, 'Confirm', {
+        confirmButtonText: 'Remove',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(() => {
+        if (type === 'music') {
+          Api.device.removeFromMusicPlaylist(mac, contentId, ({ data }) => {
+            if (data.code === 0) {
+              this.$message.success('Removed from playlist');
+              this.fetchPlaylists();
+            } else {
+              this.$message.error(data.msg || 'Failed to remove');
+            }
+          });
+        } else {
+          Api.device.removeFromStoryPlaylist(mac, contentId, ({ data }) => {
+            if (data.code === 0) {
+              this.$message.success('Removed from playlist');
+              this.fetchPlaylists();
+            } else {
+              this.$message.error(data.msg || 'Failed to remove');
+            }
+          });
+        }
+      }).catch(() => {});
+    },
+
+    handleClearPlaylist(type) {
+      const mac = this.playlistDevice.macAddress;
+      const count = type === 'music' ? this.musicPlaylist.length : this.storyPlaylist.length;
+
+      this.$confirm(`Clear all ${count} items from ${type} playlist?`, 'Clear Playlist', {
+        confirmButtonText: 'Clear All',
+        cancelButtonText: 'Cancel',
+        type: 'warning'
+      }).then(() => {
+        if (type === 'music') {
+          Api.device.clearMusicPlaylist(mac, ({ data }) => {
+            if (data.code === 0) {
+              this.$message.success('Music playlist cleared');
+              this.musicPlaylist = [];
+            } else {
+              this.$message.error(data.msg || 'Failed to clear playlist');
+            }
+          });
+        } else {
+          Api.device.clearStoryPlaylist(mac, ({ data }) => {
+            if (data.code === 0) {
+              this.$message.success('Story playlist cleared');
+              this.storyPlaylist = [];
+            } else {
+              this.$message.error(data.msg || 'Failed to clear playlist');
+            }
+          });
+        }
+      }).catch(() => {});
+    },
+
+    formatDuration(seconds) {
+      if (!seconds) return '-';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
     },
   }
 };
@@ -807,5 +1011,65 @@ export default {
 ::v-deep .el-table--group::after,
 ::v-deep .el-table::before {
   display: none !important;
+}
+
+/* Playlist Dialog Styles */
+.playlist-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.playlist-count {
+  font-size: 13px;
+  color: #909399;
+}
+
+.playlist-item-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.music-icon {
+  color: #409EFF;
+  font-size: 16px;
+}
+
+.story-icon {
+  color: #67C23A;
+  font-size: 16px;
+}
+
+.remove-btn {
+  color: #F56C6C !important;
+}
+
+.remove-btn:hover {
+  color: #f78989 !important;
+}
+
+::v-deep .el-dialog__body {
+  padding-top: 10px;
+}
+
+::v-deep .el-tabs__nav-wrap::after {
+  height: 1px;
+}
+
+::v-deep .el-tabs__item {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+::v-deep .el-tabs__item.is-active {
+  color: #5f70f3;
+}
+
+::v-deep .el-tabs__active-bar {
+  background-color: #5f70f3;
 }
 </style>

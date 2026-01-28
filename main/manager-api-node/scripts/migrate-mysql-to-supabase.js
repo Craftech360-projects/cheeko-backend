@@ -1,515 +1,299 @@
-#!/usr/bin/env node
-
 /**
- * MySQL to Supabase Data Migration Script
+ * Migration Script: MySQL (Railway) to Supabase
  *
- * Migrates data from the Spring Boot MySQL database to Supabase PostgreSQL.
- *
- * Tables migrated:
- * - sys_dict_type
- * - sys_dict_data
- * - sys_params
- * - sys_user
+ * Copies content data from Railway MySQL to Supabase content_library table
  *
  * Usage:
- *   node scripts/migrate-mysql-to-supabase.js [--dry-run] [--table=TABLE_NAME]
+ *   cd main/manager-api-node
+ *   npm install mysql2  (if not already installed)
+ *   node scripts/migrate-mysql-to-supabase.js
  *
- * Options:
- *   --dry-run       Preview what would be migrated without making changes
- *   --table=NAME    Migrate only a specific table (sys_dict_type, sys_dict_data, sys_params, sys_user)
- *   --clear         Clear target tables before migration (WARNING: destructive)
- *
- * Environment:
- *   Requires .env with DATABASE_URL (Supabase) configured
- *   MySQL connection is configured in this script or via environment variables
+ * Environment variables needed:
+ *   - SUPABASE_URL
+ *   - SUPABASE_SERVICE_ROLE_KEY
  */
 
-require('dotenv').config();
 const mysql = require('mysql2/promise');
-const { PrismaClient } = require('@prisma/client');
+const { createClient } = require('@supabase/supabase-js');
+require('dotenv').config();
 
-// MySQL connection config (from manager-api Spring Boot)
+// MySQL Configuration (Railway)
 const MYSQL_CONFIG = {
-  host: process.env.MYSQL_HOST || 'localhost',
-  port: parseInt(process.env.MYSQL_PORT || '3307'),
-  user: process.env.MYSQL_USER || 'manager',
-  password: process.env.MYSQL_PASSWORD || 'managerpassword',
-  database: process.env.MYSQL_DATABASE || 'manager_api',
-  charset: 'utf8mb4',
+  host: 'nozomi.proxy.rlwy.net',
+  port: 25037,
+  database: 'railway',
+  user: 'root',
+  password: 'OcaVNLKcwNdyElfaeUPqvvfYZiiEHgdm',
+  ssl: { rejectUnauthorized: false }
 };
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-const DRY_RUN = args.includes('--dry-run');
-const CLEAR_TABLES = args.includes('--clear');
-const tableArg = args.find(a => a.startsWith('--table='));
-const SPECIFIC_TABLE = tableArg ? tableArg.split('=')[1] : null;
-
-// Initialize Prisma client
-const prisma = new PrismaClient({
-  log: DRY_RUN ? ['query'] : ['error'],
-});
-
-// Colors for console output
-const colors = {
-  reset: '\x1b[0m',
-  bright: '\x1b[1m',
-  red: '\x1b[31m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  blue: '\x1b[34m',
-  cyan: '\x1b[36m',
-};
-
-function log(message, color = '') {
-  console.log(`${color}${message}${colors.reset}`);
-}
-
-function logHeader(message) {
-  console.log('\n' + '='.repeat(60));
-  log(message, colors.bright + colors.cyan);
-  console.log('='.repeat(60));
-}
-
-function logSuccess(message) {
-  log(`✓ ${message}`, colors.green);
-}
-
-function logWarning(message) {
-  log(`⚠ ${message}`, colors.yellow);
-}
-
-function logError(message) {
-  log(`✗ ${message}`, colors.red);
-}
-
-function logInfo(message) {
-  log(`  ${message}`, colors.blue);
-}
-
-/**
- * Convert MySQL datetime to ISO string for PostgreSQL
- */
-function convertDate(mysqlDate) {
-  if (!mysqlDate) return null;
-  if (mysqlDate instanceof Date) {
-    return mysqlDate.toISOString();
-  }
-  return new Date(mysqlDate).toISOString();
-}
-
-/**
- * Migrate sys_dict_type table
- */
-async function migrateDictType(mysqlConn) {
-  logHeader('Migrating sys_dict_type');
-
-  const [rows] = await mysqlConn.execute('SELECT * FROM sys_dict_type ORDER BY id');
-  logInfo(`Found ${rows.length} records in MySQL`);
-
-  if (rows.length === 0) {
-    logWarning('No records to migrate');
-    return { migrated: 0, skipped: 0, errors: 0 };
-  }
-
-  let migrated = 0, skipped = 0, errors = 0;
-
-  if (CLEAR_TABLES && !DRY_RUN) {
-    logWarning('Clearing sys_dict_type table...');
-    await prisma.sys_dict_data.deleteMany({});
-    await prisma.sys_dict_type.deleteMany({});
-  }
-
-  for (const row of rows) {
-    const data = {
-      id: BigInt(row.id),
-      dict_type: row.dict_type,
-      dict_name: row.dict_name,
-      remark: row.remark,
-      sort: row.sort || 0,
-      created_at: convertDate(row.create_date),
-      updated_at: convertDate(row.update_date),
-    };
-
-    if (DRY_RUN) {
-      logInfo(`Would insert: id=${data.id}, dict_type=${data.dict_type}, dict_name=${data.dict_name}`);
-      migrated++;
-      continue;
-    }
-
-    try {
-      // Check if already exists
-      const existing = await prisma.sys_dict_type.findUnique({
-        where: { id: data.id }
-      });
-
-      if (existing && !CLEAR_TABLES) {
-        logInfo(`Skipping existing: id=${data.id}, dict_type=${data.dict_type}`);
-        skipped++;
-        continue;
-      }
-
-      await prisma.sys_dict_type.upsert({
-        where: { id: data.id },
-        create: data,
-        update: data,
-      });
-      logSuccess(`Migrated: id=${data.id}, dict_type=${data.dict_type}`);
-      migrated++;
-    } catch (err) {
-      logError(`Failed to migrate id=${data.id}: ${err.message}`);
-      errors++;
-    }
-  }
-
-  return { migrated, skipped, errors };
-}
-
-/**
- * Migrate sys_dict_data table
- */
-async function migrateDictData(mysqlConn) {
-  logHeader('Migrating sys_dict_data');
-
-  // Join with sys_dict_type to get dict_type string
-  const [rows] = await mysqlConn.execute(`
-    SELECT d.*, t.dict_type
-    FROM sys_dict_data d
-    LEFT JOIN sys_dict_type t ON d.dict_type_id = t.id
-    ORDER BY d.id
-  `);
-  logInfo(`Found ${rows.length} records in MySQL`);
-
-  if (rows.length === 0) {
-    logWarning('No records to migrate');
-    return { migrated: 0, skipped: 0, errors: 0 };
-  }
-
-  let migrated = 0, skipped = 0, errors = 0;
-
-  if (CLEAR_TABLES && !DRY_RUN) {
-    logWarning('Clearing sys_dict_data table...');
-    await prisma.sys_dict_data.deleteMany({});
-  }
-
-  for (const row of rows) {
-    const data = {
-      id: BigInt(row.id),
-      dict_type_id: row.dict_type_id ? BigInt(row.dict_type_id) : null,
-      dict_type: row.dict_type,
-      dict_label: row.dict_label,
-      dict_value: row.dict_value,
-      remark: row.remark,
-      sort: row.sort || 0,
-      created_at: convertDate(row.create_date),
-      updated_at: convertDate(row.update_date),
-    };
-
-    if (DRY_RUN) {
-      logInfo(`Would insert: id=${data.id}, dict_type=${data.dict_type}, label=${data.dict_label}, value=${data.dict_value}`);
-      migrated++;
-      continue;
-    }
-
-    try {
-      const existing = await prisma.sys_dict_data.findUnique({
-        where: { id: data.id }
-      });
-
-      if (existing && !CLEAR_TABLES) {
-        logInfo(`Skipping existing: id=${data.id}`);
-        skipped++;
-        continue;
-      }
-
-      await prisma.sys_dict_data.upsert({
-        where: { id: data.id },
-        create: data,
-        update: data,
-      });
-      logSuccess(`Migrated: id=${data.id}, label=${data.dict_label}`);
-      migrated++;
-    } catch (err) {
-      logError(`Failed to migrate id=${data.id}: ${err.message}`);
-      errors++;
-    }
-  }
-
-  return { migrated, skipped, errors };
-}
-
-/**
- * Migrate sys_params table
- */
-async function migrateParams(mysqlConn) {
-  logHeader('Migrating sys_params');
-
-  const [rows] = await mysqlConn.execute('SELECT * FROM sys_params ORDER BY id');
-  logInfo(`Found ${rows.length} records in MySQL`);
-
-  if (rows.length === 0) {
-    logWarning('No records to migrate');
-    return { migrated: 0, skipped: 0, errors: 0 };
-  }
-
-  let migrated = 0, skipped = 0, errors = 0;
-
-  if (CLEAR_TABLES && !DRY_RUN) {
-    logWarning('Clearing sys_params table...');
-    await prisma.sys_params.deleteMany({});
-  }
-
-  for (const row of rows) {
-    const data = {
-      id: BigInt(row.id),
-      param_code: row.param_code,
-      param_value: row.param_value,
-      value_type: row.value_type || 'string',
-      param_type: row.param_type || 1,
-      remark: row.remark,
-      created_at: convertDate(row.create_date),
-      updated_at: convertDate(row.update_date),
-    };
-
-    if (DRY_RUN) {
-      logInfo(`Would insert: id=${data.id}, param_code=${data.param_code}, value=${data.param_value?.substring(0, 50)}...`);
-      migrated++;
-      continue;
-    }
-
-    try {
-      const existing = await prisma.sys_params.findUnique({
-        where: { id: data.id }
-      });
-
-      if (existing && !CLEAR_TABLES) {
-        logInfo(`Skipping existing: id=${data.id}, param_code=${data.param_code}`);
-        skipped++;
-        continue;
-      }
-
-      await prisma.sys_params.upsert({
-        where: { id: data.id },
-        create: data,
-        update: data,
-      });
-      logSuccess(`Migrated: id=${data.id}, param_code=${data.param_code}`);
-      migrated++;
-    } catch (err) {
-      logError(`Failed to migrate id=${data.id}: ${err.message}`);
-      errors++;
-    }
-  }
-
-  return { migrated, skipped, errors };
-}
-
-/**
- * Migrate sys_user table
- */
-async function migrateUsers(mysqlConn) {
-  logHeader('Migrating sys_user');
-
-  const [rows] = await mysqlConn.execute('SELECT * FROM sys_user ORDER BY id');
-  logInfo(`Found ${rows.length} records in MySQL`);
-
-  if (rows.length === 0) {
-    logWarning('No records to migrate');
-    return { migrated: 0, skipped: 0, errors: 0 };
-  }
-
-  let migrated = 0, skipped = 0, errors = 0;
-
-  if (CLEAR_TABLES && !DRY_RUN) {
-    logWarning('Clearing sys_user table (and related)...');
-    await prisma.sys_user_token.deleteMany({});
-    await prisma.sys_user.deleteMany({});
-  }
-
-  for (const row of rows) {
-    // Map superAdmin to role
-    const role = row.super_admin === 1 ? 'admin' : 'user';
-
-    const data = {
-      id: BigInt(row.id),
-      username: row.username,
-      password: row.password,
-      email: row.email || null,
-      phone: row.phone || null,
-      nickname: row.nickname || row.username,
-      avatar: row.avatar || null,
-      gender: row.gender || 0,
-      status: row.status ?? 1,
-      role: role,
-      last_login_at: null,
-      created_at: convertDate(row.create_date),
-      updated_at: convertDate(row.update_date),
-    };
-
-    if (DRY_RUN) {
-      logInfo(`Would insert: id=${data.id}, username=${data.username}, role=${data.role}`);
-      migrated++;
-      continue;
-    }
-
-    try {
-      const existing = await prisma.sys_user.findUnique({
-        where: { id: data.id }
-      });
-
-      if (existing && !CLEAR_TABLES) {
-        logInfo(`Skipping existing: id=${data.id}, username=${data.username}`);
-        skipped++;
-        continue;
-      }
-
-      await prisma.sys_user.upsert({
-        where: { id: data.id },
-        create: data,
-        update: data,
-      });
-      logSuccess(`Migrated: id=${data.id}, username=${data.username}, role=${data.role}`);
-      migrated++;
-    } catch (err) {
-      logError(`Failed to migrate id=${data.id}: ${err.message}`);
-      errors++;
-    }
-  }
-
-  return { migrated, skipped, errors };
-}
-
-/**
- * Reset PostgreSQL sequences after migration
- */
-async function resetSequences() {
-  logHeader('Resetting PostgreSQL sequences');
-
-  const tables = ['sys_dict_type', 'sys_dict_data', 'sys_params', 'sys_user'];
-
-  for (const table of tables) {
-    if (SPECIFIC_TABLE && table !== SPECIFIC_TABLE) continue;
-
-    try {
-      // Get max ID
-      const result = await prisma.$queryRawUnsafe(`SELECT MAX(id) as max_id FROM ${table}`);
-      const maxId = result[0]?.max_id || 0;
-
-      if (maxId > 0) {
-        // Reset sequence to max_id + 1
-        await prisma.$executeRawUnsafe(`SELECT setval(pg_get_serial_sequence('${table}', 'id'), ${maxId}, true)`);
-        logSuccess(`Reset ${table}_id_seq to ${maxId}`);
-      }
-    } catch (err) {
-      logWarning(`Could not reset sequence for ${table}: ${err.message}`);
-    }
-  }
-}
-
-/**
- * Main migration function
- */
-async function main() {
-  console.log('\n');
-  log('╔═══════════════════════════════════════════════════════════╗', colors.cyan);
-  log('║     MySQL to Supabase Data Migration                      ║', colors.cyan);
-  log('╚═══════════════════════════════════════════════════════════╝', colors.cyan);
-
-  if (DRY_RUN) {
-    logWarning('\n*** DRY RUN MODE - No changes will be made ***\n');
-  }
-
-  if (CLEAR_TABLES) {
-    logWarning('\n*** CLEAR MODE - Target tables will be cleared before migration ***\n');
-  }
-
-  if (SPECIFIC_TABLE) {
-    logInfo(`Migrating only: ${SPECIFIC_TABLE}\n`);
-  }
-
-  // Connect to MySQL
-  logInfo('Connecting to MySQL...');
-  logInfo(`  Host: ${MYSQL_CONFIG.host}:${MYSQL_CONFIG.port}`);
-  logInfo(`  Database: ${MYSQL_CONFIG.database}`);
-
-  let mysqlConn;
-  try {
-    mysqlConn = await mysql.createConnection(MYSQL_CONFIG);
-    logSuccess('Connected to MySQL');
-  } catch (err) {
-    logError(`Failed to connect to MySQL: ${err.message}`);
-    process.exit(1);
-  }
-
-  // Connect to Supabase via Prisma
-  logInfo('Connecting to Supabase via Prisma...');
-  try {
-    await prisma.$connect();
-    logSuccess('Connected to Supabase');
-  } catch (err) {
-    logError(`Failed to connect to Supabase: ${err.message}`);
-    await mysqlConn.end();
-    process.exit(1);
-  }
-
-  // Migration results
-  const results = {};
-  const tables = [
-    { name: 'sys_dict_type', fn: migrateDictType },
-    { name: 'sys_dict_data', fn: migrateDictData },
-    { name: 'sys_params', fn: migrateParams },
-    { name: 'sys_user', fn: migrateUsers },
-  ];
-
-  try {
-    for (const { name, fn } of tables) {
-      if (SPECIFIC_TABLE && name !== SPECIFIC_TABLE) continue;
-      results[name] = await fn(mysqlConn);
-    }
-
-    // Reset sequences after migration
-    if (!DRY_RUN) {
-      await resetSequences();
-    }
-
-  } finally {
-    // Close connections
-    await mysqlConn.end();
-    await prisma.$disconnect();
-  }
-
-  // Print summary
-  logHeader('Migration Summary');
-
-  let totalMigrated = 0, totalSkipped = 0, totalErrors = 0;
-
-  for (const [table, { migrated, skipped, errors }] of Object.entries(results)) {
-    console.log(`  ${table}:`);
-    console.log(`    Migrated: ${migrated}, Skipped: ${skipped}, Errors: ${errors}`);
-    totalMigrated += migrated;
-    totalSkipped += skipped;
-    totalErrors += errors;
-  }
-
-  console.log('\n  ' + '-'.repeat(40));
-  console.log(`  Total: Migrated=${totalMigrated}, Skipped=${totalSkipped}, Errors=${totalErrors}`);
-
-  if (DRY_RUN) {
-    logWarning('\n*** This was a DRY RUN - No changes were made ***');
-    logInfo('Run without --dry-run to perform actual migration');
-  }
-
-  if (totalErrors > 0) {
-    logError('\nMigration completed with errors!');
-    process.exit(1);
-  } else {
-    logSuccess('\nMigration completed successfully!');
-  }
-}
-
-// Run migration
-main().catch(err => {
-  logError(`Migration failed: ${err.message}`);
-  console.error(err);
+// Supabase Configuration
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables');
   process.exit(1);
-});
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+async function migrateContentItems(mysqlConnection) {
+  console.log('\n--- Migrating Content Items ---');
+
+  const [rows] = await mysqlConnection.query('SELECT * FROM content_items');
+  console.log(`Found ${rows.length} content items in MySQL`);
+
+  if (rows.length === 0) return 0;
+
+  // Supabase content_library schema:
+  // id, content_type, title, description, url, thumbnail_url, duration_seconds,
+  // category, tags, age_min, age_max, language, metadata, status, created_at, updated_at
+  const contentItems = rows.map(row => ({
+    title: row.title,
+    content_type: row.content_type || 'music',
+    description: row.romanized || null,
+    url: row.file_url || null,
+    thumbnail_url: row.thumbnail_url || null,
+    duration_seconds: row.duration_seconds || null,
+    category: row.category || null,
+    tags: row.alternatives || [],
+    language: 'en',
+    metadata: { filename: row.filename, romanized: row.romanized },
+    status: 1
+  }));
+
+  // Insert in batches of 100
+  let inserted = 0;
+  for (let i = 0; i < contentItems.length; i += 100) {
+    const batch = contentItems.slice(i, i + 100);
+    const { data, error } = await supabase
+      .from('content_library')
+      .insert(batch)
+      .select();
+
+    if (error) {
+      console.error(`Error inserting batch ${i}:`, error.message);
+      // Try inserting one by one to find problematic records
+      for (const item of batch) {
+        const { error: singleError } = await supabase
+          .from('content_library')
+          .insert(item);
+        if (singleError) {
+          console.error(`  Failed to insert: ${item.title} - ${singleError.message}`);
+        } else {
+          inserted++;
+        }
+      }
+    } else {
+      inserted += batch.length;
+      console.log(`Inserted batch ${Math.floor(i/100) + 1}: ${batch.length} items`);
+    }
+  }
+
+  return inserted;
+}
+
+async function migrateStories(mysqlConnection) {
+  console.log('\n--- Migrating Stories ---');
+
+  const [rows] = await mysqlConnection.query('SELECT * FROM ai_story WHERE status = 1');
+  console.log(`Found ${rows.length} story items in MySQL`);
+
+  if (rows.length === 0) return 0;
+
+  const contentItems = rows.map(row => ({
+    title: row.title,
+    romanized: row.romanized || null,
+    filename: row.file_name || row.filename || null,
+    content_type: 'story',
+    category: row.category || row.age_group || null,
+    alternatives: row.alternatives ? (typeof row.alternatives === 'string' ? JSON.parse(row.alternatives) : row.alternatives) : [],
+    aws_s3_url: row.audio_url || row.file_url || row.url || null,
+    duration_seconds: row.duration || null,
+    file_size_bytes: row.file_size || null,
+    status: 1,
+    created_at: row.created_at || new Date().toISOString(),
+    updated_at: row.updated_at || new Date().toISOString()
+  }));
+
+  // Insert in batches of 100
+  let inserted = 0;
+  for (let i = 0; i < contentItems.length; i += 100) {
+    const batch = contentItems.slice(i, i + 100);
+    const { data, error } = await supabase
+      .from('content_library')
+      .insert(batch)
+      .select();
+
+    if (error) {
+      console.error(`Error inserting story batch ${i}:`, error.message);
+      // Try inserting one by one
+      for (const item of batch) {
+        const { error: singleError } = await supabase
+          .from('content_library')
+          .insert(item);
+        if (singleError) {
+          console.error(`  Failed to insert: ${item.title} - ${singleError.message}`);
+        } else {
+          inserted++;
+        }
+      }
+    } else {
+      inserted += batch.length;
+      console.log(`Inserted story batch ${Math.floor(i/100) + 1}: ${batch.length} items`);
+    }
+  }
+
+  return inserted;
+}
+
+async function migrateTextbooks(mysqlConnection) {
+  console.log('\n--- Migrating Textbooks ---');
+
+  try {
+    const [rows] = await mysqlConnection.query('SELECT * FROM ai_textbook WHERE status = 1');
+    console.log(`Found ${rows.length} textbook items in MySQL`);
+
+    if (rows.length === 0) return 0;
+
+    const contentItems = rows.map(row => ({
+      title: row.title,
+      romanized: null,
+      filename: null,
+      content_type: 'textbook',
+      category: row.subject || row.grade || null,
+      alternatives: [],
+      aws_s3_url: row.cover_url || null,
+      duration_seconds: null,
+      file_size_bytes: null,
+      status: 1,
+      created_at: row.created_at || new Date().toISOString(),
+      updated_at: row.updated_at || new Date().toISOString()
+    }));
+
+    // Insert in batches of 100
+    let inserted = 0;
+    for (let i = 0; i < contentItems.length; i += 100) {
+      const batch = contentItems.slice(i, i + 100);
+      const { data, error } = await supabase
+        .from('content_library')
+        .insert(batch)
+        .select();
+
+      if (error) {
+        console.error(`Error inserting textbook batch ${i}:`, error.message);
+      } else {
+        inserted += batch.length;
+        console.log(`Inserted textbook batch ${Math.floor(i/100) + 1}: ${batch.length} items`);
+      }
+    }
+
+    return inserted;
+  } catch (err) {
+    console.log('No ai_textbook table found or error:', err.message);
+    return 0;
+  }
+}
+
+async function showMySQLTables(mysqlConnection) {
+  console.log('\n--- MySQL Tables ---');
+  const [tables] = await mysqlConnection.query('SHOW TABLES');
+  console.log('Available tables:');
+  tables.forEach(t => {
+    const tableName = Object.values(t)[0];
+    console.log(`  - ${tableName}`);
+  });
+  return tables;
+}
+
+async function showMusicSchema(mysqlConnection) {
+  console.log('\n--- ai_music Schema ---');
+  try {
+    const [columns] = await mysqlConnection.query('DESCRIBE ai_music');
+    columns.forEach(col => {
+      console.log(`  ${col.Field}: ${col.Type}`);
+    });
+  } catch (err) {
+    console.log('Could not describe ai_music:', err.message);
+  }
+}
+
+async function showStorySchema(mysqlConnection) {
+  console.log('\n--- ai_story Schema ---');
+  try {
+    const [columns] = await mysqlConnection.query('DESCRIBE ai_story');
+    columns.forEach(col => {
+      console.log(`  ${col.Field}: ${col.Type}`);
+    });
+  } catch (err) {
+    console.log('Could not describe ai_story:', err.message);
+  }
+}
+
+async function previewData(mysqlConnection) {
+  console.log('\n--- Preview Data ---');
+
+  try {
+    const [contentSample] = await mysqlConnection.query('SELECT * FROM content_items LIMIT 3');
+    console.log('\nSample content_items data:');
+    console.log(JSON.stringify(contentSample, null, 2));
+
+    const [countResult] = await mysqlConnection.query('SELECT COUNT(*) as total FROM content_items');
+    console.log(`\nTotal content_items: ${countResult[0].total}`);
+
+    const [typeCount] = await mysqlConnection.query('SELECT content_type, COUNT(*) as count FROM content_items GROUP BY content_type');
+    console.log('\nBy content_type:');
+    typeCount.forEach(t => console.log(`  ${t.content_type}: ${t.count}`));
+  } catch (err) {
+    console.log('Could not preview content_items:', err.message);
+  }
+}
+
+async function main() {
+  console.log('='.repeat(60));
+  console.log('MySQL to Supabase Content Migration');
+  console.log('='.repeat(60));
+
+  let mysqlConnection;
+
+  try {
+    // Connect to MySQL
+    console.log('\nConnecting to MySQL (Railway)...');
+    mysqlConnection = await mysql.createConnection(MYSQL_CONFIG);
+    console.log('Connected to MySQL successfully!');
+
+    // Show available tables
+    await showMySQLTables(mysqlConnection);
+
+    // Show schemas
+    await showMusicSchema(mysqlConnection);
+    await showStorySchema(mysqlConnection);
+
+    // Preview some data
+    await previewData(mysqlConnection);
+
+    // Ask for confirmation (in a real scenario, you might want to add readline here)
+    console.log('\n--- Starting Migration ---');
+
+    // Migrate data from content_items table
+    const contentCount = await migrateContentItems(mysqlConnection);
+
+    console.log('\n' + '='.repeat(60));
+    console.log('Migration Summary:');
+    console.log('='.repeat(60));
+    console.log(`  Content items migrated: ${contentCount}`);
+    console.log('='.repeat(60));
+
+  } catch (error) {
+    console.error('Migration failed:', error.message);
+    console.error(error);
+  } finally {
+    if (mysqlConnection) {
+      await mysqlConnection.end();
+      console.log('\nMySQL connection closed.');
+    }
+  }
+}
+
+main();

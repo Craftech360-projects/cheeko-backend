@@ -138,6 +138,141 @@
         </div>
       </el-card>
 
+      <!-- Charts Section -->
+      <div class="charts-grid">
+        <!-- Daily Token Usage Chart -->
+        <el-card class="chart-card" shadow="never">
+          <div slot="header" class="card-header">
+            <span>Daily Token Usage</span>
+            <span class="chart-legend">
+              <span class="legend-item input"><span class="dot"></span> Input</span>
+              <span class="legend-item output"><span class="dot"></span> Output</span>
+            </span>
+          </div>
+          <div class="bar-chart-container" v-if="dailySummary.length > 0">
+            <div class="chart-y-axis">
+              <span>{{ formatTokensShort(maxDailyTokens) }}</span>
+              <span>{{ formatTokensShort(maxDailyTokens / 2) }}</span>
+              <span>0</span>
+            </div>
+            <div class="bar-chart">
+              <div
+                v-for="(day, index) in chartData"
+                :key="index"
+                class="bar-group"
+                :title="`${day.date}: Input ${formatTokens(day.input)} / Output ${formatTokens(day.output)}`"
+              >
+                <div class="bars">
+                  <div
+                    class="bar input-bar"
+                    :style="{ height: getBarHeight(day.input) + '%' }"
+                  ></div>
+                  <div
+                    class="bar output-bar"
+                    :style="{ height: getBarHeight(day.output) + '%' }"
+                  ></div>
+                </div>
+                <span class="bar-label">{{ day.shortDate }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="no-chart-data">
+            <i class="el-icon-data-analysis"></i>
+            <p>No data available for selected period</p>
+          </div>
+        </el-card>
+
+        <!-- Daily Cost Trend Chart -->
+        <el-card class="chart-card" shadow="never">
+          <div slot="header" class="card-header">
+            <span>Daily Cost Trend (INR)</span>
+          </div>
+          <div class="bar-chart-container single-series" v-if="dailySummary.length > 0">
+            <div class="chart-y-axis">
+              <span>₹{{ formatCostShort(maxDailyCost) }}</span>
+              <span>₹{{ formatCostShort(maxDailyCost / 2) }}</span>
+              <span>₹0</span>
+            </div>
+            <div class="bar-chart">
+              <div
+                v-for="(day, index) in chartData"
+                :key="index"
+                class="bar-group single"
+                :title="`${day.date}: ₹${formatCost(day.cost)}`"
+              >
+                <div class="bars">
+                  <div
+                    class="bar cost-bar"
+                    :style="{ height: getCostBarHeight(day.cost) + '%' }"
+                  ></div>
+                </div>
+                <span class="bar-label">{{ day.shortDate }}</span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="no-chart-data">
+            <i class="el-icon-money"></i>
+            <p>No data available for selected period</p>
+          </div>
+        </el-card>
+      </div>
+
+      <!-- Token Distribution Chart -->
+      <el-card class="distribution-card" shadow="never" v-if="hasTokenData">
+        <div slot="header" class="card-header">
+          <span>Token Distribution</span>
+        </div>
+        <div class="distribution-container">
+          <div class="donut-chart">
+            <svg viewBox="0 0 100 100" class="donut-svg">
+              <circle
+                v-for="(segment, index) in tokenDistribution"
+                :key="index"
+                cx="50"
+                cy="50"
+                r="40"
+                fill="none"
+                :stroke="segment.color"
+                stroke-width="15"
+                :stroke-dasharray="segment.dashArray"
+                :stroke-dashoffset="segment.offset"
+                :class="['donut-segment', segment.type]"
+              />
+            </svg>
+            <div class="donut-center">
+              <span class="total-label">Total</span>
+              <span class="total-value">{{ formatTokens(totalTokens) }}</span>
+            </div>
+          </div>
+          <div class="distribution-legend">
+            <div class="legend-row">
+              <span class="legend-color input-audio"></span>
+              <span class="legend-text">Input Audio</span>
+              <span class="legend-value">{{ formatTokens(overallTotals.input_audio_tokens || 0) }}</span>
+              <span class="legend-percent">{{ getPercent(overallTotals.input_audio_tokens) }}%</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-color input-text"></span>
+              <span class="legend-text">Input Text</span>
+              <span class="legend-value">{{ formatTokens(overallTotals.input_text_tokens || 0) }}</span>
+              <span class="legend-percent">{{ getPercent(overallTotals.input_text_tokens) }}%</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-color output-audio"></span>
+              <span class="legend-text">Output Audio</span>
+              <span class="legend-value">{{ formatTokens(overallTotals.output_audio_tokens || 0) }}</span>
+              <span class="legend-percent">{{ getPercent(overallTotals.output_audio_tokens) }}%</span>
+            </div>
+            <div class="legend-row">
+              <span class="legend-color output-text"></span>
+              <span class="legend-text">Output Text</span>
+              <span class="legend-value">{{ formatTokens(overallTotals.output_text_tokens || 0) }}</span>
+              <span class="legend-percent">{{ getPercent(overallTotals.output_text_tokens) }}%</span>
+            </div>
+          </div>
+        </div>
+      </el-card>
+
       <!-- Daily Summary Table -->
       <el-card class="table-card" shadow="never">
         <div slot="header" class="card-header">
@@ -293,6 +428,62 @@ export default {
   computed: {
     totalTokens() {
       return (this.overallTotals.input_tokens || 0) + (this.overallTotals.output_tokens || 0);
+    },
+    hasTokenData() {
+      return this.totalTokens > 0;
+    },
+    chartData() {
+      // Limit to last 14 days for better readability
+      const data = [...this.dailySummary].slice(-14);
+      return data.map(day => ({
+        date: this.formatDate(day.usage_date),
+        shortDate: this.formatShortDate(day.usage_date),
+        input: day.input_tokens || 0,
+        output: day.output_tokens || 0,
+        cost: parseFloat(day.cost_inr) || 0
+      }));
+    },
+    maxDailyTokens() {
+      if (this.chartData.length === 0) return 100;
+      const max = Math.max(...this.chartData.map(d => Math.max(d.input, d.output)));
+      return max || 100;
+    },
+    maxDailyCost() {
+      if (this.chartData.length === 0) return 10;
+      const max = Math.max(...this.chartData.map(d => d.cost));
+      return max || 10;
+    },
+    tokenDistribution() {
+      const total = this.totalTokens;
+      if (total === 0) return [];
+
+      const inputAudio = this.overallTotals.input_audio_tokens || 0;
+      const inputText = this.overallTotals.input_text_tokens || 0;
+      const outputAudio = this.overallTotals.output_audio_tokens || 0;
+      const outputText = this.overallTotals.output_text_tokens || 0;
+
+      const circumference = 2 * Math.PI * 40; // r=40
+      let offset = 0;
+
+      const segments = [
+        { type: 'input-audio', value: inputAudio, color: '#fa8c16' },
+        { type: 'input-text', value: inputText, color: '#1890ff' },
+        { type: 'output-audio', value: outputAudio, color: '#52c41a' },
+        { type: 'output-text', value: outputText, color: '#722ed1' }
+      ].filter(s => s.value > 0);
+
+      return segments.map(segment => {
+        const percent = segment.value / total;
+        const dashLength = percent * circumference;
+        const gapLength = circumference - dashLength;
+        const result = {
+          ...segment,
+          dashArray: `${dashLength} ${gapLength}`,
+          offset: -offset + circumference * 0.25 // Start from top
+        };
+        offset += dashLength;
+        return result;
+      });
     }
   },
   mounted() {
@@ -400,6 +591,35 @@ export default {
         month: 'short',
         day: 'numeric'
       });
+    },
+    formatShortDate(dateStr) {
+      if (!dateStr) return '';
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-IN', {
+        month: 'short',
+        day: 'numeric'
+      });
+    },
+    formatTokensShort(tokens) {
+      if (tokens >= 1000000) return (tokens / 1000000).toFixed(1) + 'M';
+      if (tokens >= 1000) return (tokens / 1000).toFixed(0) + 'K';
+      return Math.round(tokens).toString();
+    },
+    formatCostShort(cost) {
+      if (cost >= 1000) return (cost / 1000).toFixed(1) + 'K';
+      return cost.toFixed(0);
+    },
+    getBarHeight(value) {
+      if (this.maxDailyTokens === 0) return 0;
+      return Math.max(2, (value / this.maxDailyTokens) * 100);
+    },
+    getCostBarHeight(value) {
+      if (this.maxDailyCost === 0) return 0;
+      return Math.max(2, (value / this.maxDailyCost) * 100);
+    },
+    getPercent(value) {
+      if (this.totalTokens === 0) return 0;
+      return ((value || 0) / this.totalTokens * 100).toFixed(1);
     }
   }
 };
@@ -605,6 +825,271 @@ export default {
     background: #fafafa !important;
     color: #3d4566;
     font-weight: 600;
+  }
+}
+
+/* Charts Section */
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.chart-card {
+  border-radius: 12px;
+  border: none;
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .chart-legend {
+    display: flex;
+    gap: 15px;
+    font-size: 12px;
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      color: #818cae;
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+
+      &.input .dot { background: #1890ff; }
+      &.output .dot { background: #52c41a; }
+    }
+  }
+}
+
+.bar-chart-container {
+  display: flex;
+  gap: 10px;
+  height: 250px;
+  padding: 10px 0;
+
+  .chart-y-axis {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #818cae;
+    width: 50px;
+    text-align: right;
+    padding: 5px 0;
+  }
+}
+
+.bar-chart {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding-bottom: 25px;
+  border-bottom: 1px solid #e8e8e8;
+  border-left: 1px solid #e8e8e8;
+  position: relative;
+  overflow-x: auto;
+}
+
+.bar-group {
+  flex: 1;
+  min-width: 30px;
+  max-width: 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  cursor: pointer;
+  transition: opacity 0.2s;
+
+  &:hover {
+    opacity: 0.8;
+  }
+
+  .bars {
+    display: flex;
+    gap: 2px;
+    align-items: flex-end;
+    height: 200px;
+  }
+
+  &.single .bars {
+    justify-content: center;
+  }
+
+  .bar {
+    width: 12px;
+    border-radius: 3px 3px 0 0;
+    transition: height 0.3s ease;
+    min-height: 2px;
+
+    &.input-bar {
+      background: linear-gradient(180deg, #1890ff, #40a9ff);
+    }
+
+    &.output-bar {
+      background: linear-gradient(180deg, #52c41a, #73d13d);
+    }
+
+    &.cost-bar {
+      width: 20px;
+      background: linear-gradient(180deg, #fa8c16, #ffa940);
+    }
+  }
+
+  .bar-label {
+    font-size: 10px;
+    color: #818cae;
+    margin-top: 8px;
+    white-space: nowrap;
+    transform: rotate(-45deg);
+    transform-origin: top left;
+    position: absolute;
+    bottom: -20px;
+  }
+}
+
+.no-chart-data {
+  height: 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #bfbfbf;
+
+  i {
+    font-size: 48px;
+    margin-bottom: 15px;
+  }
+
+  p {
+    font-size: 14px;
+    margin: 0;
+  }
+}
+
+/* Token Distribution Chart */
+.distribution-card {
+  border-radius: 12px;
+  border: none;
+  margin-bottom: 20px;
+}
+
+.distribution-container {
+  display: flex;
+  align-items: center;
+  gap: 40px;
+  padding: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.donut-chart {
+  position: relative;
+  width: 200px;
+  height: 200px;
+
+  .donut-svg {
+    transform: rotate(-90deg);
+    width: 100%;
+    height: 100%;
+  }
+
+  .donut-segment {
+    transition: stroke-dasharray 0.5s ease, stroke-dashoffset 0.5s ease;
+  }
+
+  .donut-center {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+
+    .total-label {
+      display: block;
+      font-size: 12px;
+      color: #818cae;
+    }
+
+    .total-value {
+      display: block;
+      font-size: 20px;
+      font-weight: 700;
+      color: #3d4566;
+    }
+  }
+}
+
+.distribution-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+
+    .legend-color {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+
+      &.input-audio { background: #fa8c16; }
+      &.input-text { background: #1890ff; }
+      &.output-audio { background: #52c41a; }
+      &.output-text { background: #722ed1; }
+    }
+
+    .legend-text {
+      color: #3d4566;
+      min-width: 100px;
+    }
+
+    .legend-value {
+      color: #3d4566;
+      font-weight: 500;
+      min-width: 80px;
+      text-align: right;
+    }
+
+    .legend-percent {
+      color: #818cae;
+      min-width: 50px;
+      text-align: right;
+    }
+  }
+}
+
+/* Responsive adjustments for charts */
+@media (max-width: 768px) {
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .distribution-container {
+    flex-direction: column;
+  }
+
+  .bar-group {
+    min-width: 20px;
+
+    .bar {
+      width: 8px;
+    }
+
+    .bar.cost-bar {
+      width: 14px;
+    }
   }
 }
 </style>

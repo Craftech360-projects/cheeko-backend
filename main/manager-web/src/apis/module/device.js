@@ -116,4 +116,94 @@ export default {
                 callback({ data: { code: -1, data: { mode: 'idle' } } });
             }).send();
     },
+
+    // Get device music playlist
+    getMusicPlaylist(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/music`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to get music playlist:', err);
+                callback({ data: { code: -1, data: [] } });
+            }).send();
+    },
+
+    // Get device story playlist
+    getStoryPlaylist(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/story`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to get story playlist:', err);
+                callback({ data: { code: -1, data: [] } });
+            }).send();
+    },
+
+    // Remove item from music playlist
+    removeFromMusicPlaylist(macAddress, contentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/music/${contentId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to remove from music playlist:', err);
+                callback({ data: { code: -1, msg: 'Network error' } });
+            }).send();
+    },
+
+    // Remove item from story playlist
+    removeFromStoryPlaylist(macAddress, contentId, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/story/${contentId}`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to remove from story playlist:', err);
+                callback({ data: { code: -1, msg: 'Network error' } });
+            }).send();
+    },
+
+    // Clear music playlist
+    clearMusicPlaylist(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/music/clear`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to clear music playlist:', err);
+                callback({ data: { code: -1, msg: 'Network error' } });
+            }).send();
+    },
+
+    // Clear story playlist
+    clearStoryPlaylist(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/device/${encodeURIComponent(macAddress)}/playlist/story/clear`)
+            .method('DELETE')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to clear story playlist:', err);
+                callback({ data: { code: -1, msg: 'Network error' } });
+            }).send();
+    },
 }
