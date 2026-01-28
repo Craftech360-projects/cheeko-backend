@@ -1,0 +1,148 @@
+/**
+ * Upload Service
+ * Handles file uploads to AWS S3
+ */
+
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const logger = require('../utils/logger');
+const path = require('path');
+
+// S3 Configuration
+const AWS_REGION = process.env.AWS_DEFAULT_REGION || 'eu-north-1';
+const S3_BUCKET = process.env.S3_BUCKET_NAME || 'cheeko-music-files';
+const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'd23u4d6oyrni77.cloudfront.net';
+
+logger.info('S3 Upload Service initialized', {
+  region: AWS_REGION,
+  bucket: S3_BUCKET,
+  cloudfront: CLOUDFRONT_DOMAIN,
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID ? `${process.env.AWS_ACCESS_KEY_ID.substring(0, 8)}...` : 'NOT SET',
+  secretKeySet: !!process.env.AWS_SECRET_ACCESS_KEY
+});
+
+const s3Client = new S3Client({
+  region: AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+});
+
+/**
+ * Upload content file to S3
+ * @param {Buffer} fileBuffer - File buffer
+ * @param {string} filename - Original filename
+ * @param {string} contentType - 'music' or 'story'
+ * @param {string} category - Category/language (e.g., 'English', 'Hindi')
+ * @param {string} mimeType - File MIME type
+ * @returns {Promise<Object>} Upload result with URL
+ */
+const uploadContentFile = async (fileBuffer, filename, contentType, category, mimeType) => {
+  try {
+    // Determine S3 folder based on content type
+    const folder = contentType === 'music' ? 'music' : 'stories';
+    const categoryFolder = category || 'English';
+
+    // Clean filename (remove special chars but keep extension)
+    const ext = path.extname(filename);
+    const baseName = path.basename(filename, ext)
+      .replace(/[^a-zA-Z0-9\s\-\_]/g, '')
+      .trim();
+    const cleanFilename = `${baseName}${ext}`;
+
+    // S3 key: music/English/filename.mp3 or stories/Fantasy/filename.mp3
+    const s3Key = `${folder}/${categoryFolder}/${cleanFilename}`;
+
+    logger.info('Attempting S3 upload', {
+      bucket: S3_BUCKET,
+      key: s3Key,
+      fileSize: fileBuffer.length,
+      mimeType: mimeType || 'audio/mpeg'
+    });
+
+    // Upload to S3
+    const command = new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: s3Key,
+      Body: fileBuffer,
+      ContentType: mimeType || 'audio/mpeg',
+      CacheControl: 'max-age=31536000' // 1 year cache
+    });
+
+    await s3Client.send(command);
+
+    // Generate CloudFront URL
+    const encodedFilename = encodeURIComponent(cleanFilename);
+    const url = `https://${CLOUDFRONT_DOMAIN}/${folder}/${categoryFolder}/${encodedFilename}`;
+
+    logger.info('File uploaded to S3', { s3Key, url });
+
+    return {
+      success: true,
+      url,
+      s3Key,
+      filename: cleanFilename,
+      folder,
+      category: categoryFolder
+    };
+  } catch (error) {
+    logger.error('Failed to upload file to S3', { error: error.message });
+    throw new Error(`Upload failed: ${error.message}`);
+  }
+};
+
+/**
+ * Upload thumbnail image to S3
+ * @param {Buffer} fileBuffer - Image buffer
+ * @param {string} filename - Original filename
+ * @param {string} contentType - 'music' or 'story'
+ * @param {string} mimeType - File MIME type
+ * @returns {Promise<Object>} Upload result with URL
+ */
+const uploadThumbnail = async (fileBuffer, filename, contentType, mimeType) => {
+  try {
+    // Determine S3 folder for thumbnails
+    const folder = contentType === 'music' ? 'songs_thumbnails' : 'stories_thumbnails';
+
+    // Clean filename
+    const ext = path.extname(filename);
+    const baseName = path.basename(filename, ext)
+      .replace(/[^a-zA-Z0-9\s\-\_]/g, '')
+      .trim();
+    const cleanFilename = `${baseName}${ext}`;
+
+    const s3Key = `${folder}/${cleanFilename}`;
+
+    // Upload to S3
+    const command = new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: s3Key,
+      Body: fileBuffer,
+      ContentType: mimeType || 'image/png',
+      CacheControl: 'max-age=31536000'
+    });
+
+    await s3Client.send(command);
+
+    // Generate CloudFront URL
+    const encodedFilename = encodeURIComponent(cleanFilename);
+    const url = `https://${CLOUDFRONT_DOMAIN}/${folder}/${encodedFilename}`;
+
+    logger.info('Thumbnail uploaded to S3', { s3Key, url });
+
+    return {
+      success: true,
+      url,
+      s3Key,
+      filename: cleanFilename
+    };
+  } catch (error) {
+    logger.error('Failed to upload thumbnail to S3', { error: error.message });
+    throw new Error(`Thumbnail upload failed: ${error.message}`);
+  }
+};
+
+module.exports = {
+  uploadContentFile,
+  uploadThumbnail
+};

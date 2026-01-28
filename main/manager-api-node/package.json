@@ -39,6 +39,7 @@
   "author": "Cheeko Team",
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.975.0",
     "@prisma/client": "^7.3.0",
     "@qdrant/js-client-rest": "^1.9.0",
     "@supabase/supabase-js": "^2.39.0",

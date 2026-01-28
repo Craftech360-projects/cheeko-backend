@@ -194,8 +194,8 @@ const createLibraryItem = async (data) => {
       content_type: data.content_type || data.contentType,
       category: data.category || null,
       url: data.url || null,
-      thumbnail_url: data.thumbnail_url || null,
-      duration_seconds: data.duration_seconds || null,
+      thumbnail_url: data.thumbnail_url || data.thumbnailUrl || null,
+      duration_seconds: data.duration_seconds || data.durationSeconds || null,
       tags: data.tags || [],
       language: data.language || 'en',
       metadata: Object.keys(metadata).length > 0 ? metadata : null,
@@ -225,11 +225,11 @@ const updateLibraryItem = async (contentId, data) => {
 
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
-  if (data.content_type !== undefined) updateData.content_type = data.content_type;
+  if (data.content_type !== undefined || data.contentType !== undefined) updateData.content_type = data.content_type || data.contentType;
   if (data.category !== undefined) updateData.category = data.category;
   if (data.url !== undefined) updateData.url = data.url;
-  if (data.thumbnail_url !== undefined) updateData.thumbnail_url = data.thumbnail_url;
-  if (data.duration_seconds !== undefined) updateData.duration_seconds = data.duration_seconds;
+  if (data.thumbnail_url !== undefined || data.thumbnailUrl !== undefined) updateData.thumbnail_url = data.thumbnail_url || data.thumbnailUrl;
+  if (data.duration_seconds !== undefined || data.durationSeconds !== undefined) updateData.duration_seconds = data.duration_seconds || data.durationSeconds;
   if (data.tags !== undefined) updateData.tags = data.tags;
   if (data.language !== undefined) updateData.language = data.language;
   if (data.status !== undefined) updateData.status = data.status;

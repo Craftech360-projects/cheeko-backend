@@ -74,14 +74,30 @@
             size="small"
             :row-class-name="tableRowClassName"
           >
-            <el-table-column label="Type" width="90" align="center">
+            <el-table-column label="Thumbnail" width="70" align="center">
+              <template slot-scope="scope">
+                <div class="thumbnail-cell">
+                  <img
+                    v-if="scope.row.thumbnail_url"
+                    :src="scope.row.thumbnail_url"
+                    :alt="scope.row.title"
+                    class="thumbnail-img"
+                    @error="handleThumbnailError($event)"
+                  />
+                  <div v-else class="thumbnail-placeholder">
+                    <i :class="scope.row.content_type === 'music' ? 'el-icon-headset' : 'el-icon-reading'"></i>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="Type" width="80" align="center">
               <template slot-scope="scope">
                 <el-tag :type="getTypeTagColor(scope.row.content_type)" size="mini">
                   {{ scope.row.content_type }}
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="title" label="Title" min-width="200">
+            <el-table-column prop="title" label="Title" min-width="180">
               <template slot-scope="scope">
                 <div class="title-cell">
                   <span class="main-title">{{ scope.row.title }}</span>
@@ -176,10 +192,28 @@
             <el-option v-for="cat in categories" :key="cat" :label="cat" :value="cat" />
           </el-select>
         </el-form-item>
-        <el-form-item label="Filename">
-          <el-input v-model="contentForm.filename" placeholder="e.g., song_001.mp3" />
+        <el-form-item label="Audio File" v-if="dialogMode === 'add'">
+          <el-upload
+            class="audio-uploader"
+            action=""
+            :auto-upload="false"
+            :show-file-list="false"
+            :on-change="handleFileChange"
+            accept="audio/*"
+          >
+            <el-button size="small" type="primary" :loading="uploading">
+              <i class="el-icon-upload2"></i> {{ uploadedFile ? uploadedFile.name : 'Select Audio File' }}
+            </el-button>
+          </el-upload>
+          <div v-if="uploadedFile" class="upload-info">
+            <span class="file-name">{{ uploadedFile.name }}</span>
+            <span class="file-size">({{ formatFileSize(uploadedFile.size) }})</span>
+            <el-button type="text" size="mini" @click="clearUpload" class="clear-btn">
+              <i class="el-icon-close"></i>
+            </el-button>
+          </div>
         </el-form-item>
-        <el-form-item label="URL">
+        <el-form-item label="URL" v-else>
           <el-input v-model="contentForm.url" placeholder="https://cdn.example.com/..." />
         </el-form-item>
         <el-form-item label="Thumbnail">
@@ -242,6 +276,8 @@ export default {
       dialogVisible: false,
       dialogMode: 'add',
       submitting: false,
+      uploading: false,
+      uploadedFile: null,
       currentlyPlaying: null,
       contentForm: {
         id: null,
@@ -362,6 +398,90 @@ export default {
       const secs = seconds % 60;
       return `${mins}:${secs.toString().padStart(2, "0")}`;
     },
+    formatFileSize(bytes) {
+      if (!bytes) return '0 B';
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(1024));
+      return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
+    },
+    handleThumbnailError(event) {
+      // Hide broken image and show placeholder
+      event.target.style.display = 'none';
+    },
+    handleFileChange(file) {
+      if (file && file.raw) {
+        this.uploadedFile = file.raw;
+        // Auto-fill title from filename if empty
+        if (!this.contentForm.title) {
+          const nameWithoutExt = file.raw.name.replace(/\.[^/.]+$/, '');
+          this.contentForm.title = nameWithoutExt;
+        }
+      }
+    },
+    clearUpload() {
+      this.uploadedFile = null;
+    },
+    async uploadFile() {
+      if (!this.uploadedFile) return null;
+
+      const formData = new FormData();
+      formData.append('file', this.uploadedFile);
+      formData.append('contentType', this.contentForm.content_type);
+      formData.append('category', this.contentForm.category || 'English');
+
+      const uploadUrl = `${Api.getServiceUrl()}/content/library/upload`;
+      const storedToken = localStorage.getItem('token');
+      // Token is stored as JSON object like {"token": "actual-value"}
+      let token = null;
+      try {
+        const parsed = JSON.parse(storedToken);
+        token = parsed.token;
+      } catch (e) {
+        token = storedToken; // Fallback if not JSON
+      }
+
+      console.log('=== Upload Debug Info ===');
+      console.log('Upload URL:', uploadUrl);
+      console.log('File:', this.uploadedFile.name, this.uploadedFile.size, 'bytes');
+      console.log('Content Type:', this.contentForm.content_type);
+      console.log('Category:', this.contentForm.category || 'English');
+      console.log('Token present:', !!token);
+      console.log('Token preview:', token ? token.substring(0, 20) + '...' : 'none');
+
+      try {
+        this.uploading = true;
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: formData
+        });
+
+        console.log('Response status:', response.status, response.statusText);
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Response error:', errorText);
+          throw new Error(`Server error: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        console.log('Response data:', result);
+
+        if (result.code === 0) {
+          return result.data;
+        } else {
+          throw new Error(result.msg || 'Upload failed');
+        }
+      } catch (error) {
+        console.error('Upload error:', error);
+        this.$message.error(`Upload failed: ${error.message}`);
+        return null;
+      } finally {
+        this.uploading = false;
+      }
+    },
     handleSizeChange(val) {
       this.pagination.limit = val;
       this.pagination.page = 1;
@@ -384,6 +504,7 @@ export default {
         duration_seconds: null,
         status: 1
       };
+      this.uploadedFile = null;
     },
     showAddDialog() {
       this.dialogMode = 'add';
@@ -409,39 +530,69 @@ export default {
       };
       this.dialogVisible = true;
     },
-    handleSubmit() {
-      this.$refs.contentForm.validate((valid) => {
+    async handleSubmit() {
+      this.$refs.contentForm.validate(async (valid) => {
         if (!valid) return;
 
         this.submitting = true;
-        const formData = { ...this.contentForm };
 
-        if (this.dialogMode === 'add') {
-          Api.content.createLibraryItem(formData, (res) => {
-            this.submitting = false;
-            if (res.data && res.data.code === 0) {
-              this.$message.success('Content added successfully');
-              this.dialogVisible = false;
-              this.fetchContent();
-              this.fetchStats();
-              this.fetchCategories();
-            } else {
-              this.$message.error(res.data?.msg || 'Failed to add content');
+        try {
+          // If adding new content with a file, upload to S3 first
+          if (this.dialogMode === 'add' && this.uploadedFile) {
+            const uploadResult = await this.uploadFile();
+            if (!uploadResult) {
+              this.submitting = false;
+              return; // Upload failed, error already shown
             }
-          });
-        } else {
-          Api.content.updateLibraryItem(formData.id, formData, (res) => {
-            this.submitting = false;
-            if (res.data && res.data.code === 0) {
-              this.$message.success('Content updated successfully');
-              this.dialogVisible = false;
-              this.fetchContent();
-              this.fetchStats();
-              this.fetchCategories();
-            } else {
-              this.$message.error(res.data?.msg || 'Failed to update content');
-            }
-          });
+            // Set URL and filename from upload result
+            this.contentForm.url = uploadResult.url;
+            this.contentForm.filename = uploadResult.filename;
+          }
+
+          // Transform snake_case to camelCase for API
+          const formData = {
+            id: this.contentForm.id,
+            title: this.contentForm.title,
+            description: this.contentForm.description,
+            contentType: this.contentForm.content_type,
+            category: this.contentForm.category,
+            filename: this.contentForm.filename,
+            url: this.contentForm.url,
+            thumbnailUrl: this.contentForm.thumbnail_url,
+            durationSeconds: this.contentForm.duration_seconds,
+            status: this.contentForm.status
+          };
+
+          if (this.dialogMode === 'add') {
+            Api.content.createLibraryItem(formData, (res) => {
+              this.submitting = false;
+              if (res.data && res.data.code === 0) {
+                this.$message.success('Content added successfully');
+                this.dialogVisible = false;
+                this.fetchContent();
+                this.fetchStats();
+                this.fetchCategories();
+              } else {
+                this.$message.error(res.data?.msg || 'Failed to add content');
+              }
+            });
+          } else {
+            Api.content.updateLibraryItem(formData.id, formData, (res) => {
+              this.submitting = false;
+              if (res.data && res.data.code === 0) {
+                this.$message.success('Content updated successfully');
+                this.dialogVisible = false;
+                this.fetchContent();
+                this.fetchStats();
+                this.fetchCategories();
+              } else {
+                this.$message.error(res.data?.msg || 'Failed to update content');
+              }
+            });
+          }
+        } catch (error) {
+          this.submitting = false;
+          this.$message.error(`Error: ${error.message}`);
         }
       });
     },
@@ -675,6 +826,35 @@ export default {
   }
 }
 
+.thumbnail-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.thumbnail-img {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #ebeef5;
+}
+
+.thumbnail-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e7ed 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  i {
+    font-size: 18px;
+    color: #909399;
+  }
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -703,6 +883,45 @@ export default {
 
 .delete-btn {
   color: #f56c6c !important;
+}
+
+.audio-uploader {
+  display: inline-block;
+}
+
+.upload-info {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+
+  .file-name {
+    font-size: 13px;
+    color: #606266;
+    max-width: 250px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file-size {
+    font-size: 12px;
+    color: #909399;
+    margin-left: 8px;
+  }
+
+  .clear-btn {
+    margin-left: auto;
+    padding: 0;
+    color: #909399 !important;
+
+    &:hover {
+      color: #f56c6c !important;
+    }
+  }
 }
 
 .play-btn {

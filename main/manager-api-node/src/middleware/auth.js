@@ -46,6 +46,8 @@ const verifyCustomToken = async (token) => {
   }
 
   try {
+    logger.debug('Verifying token:', token ? `${token.substring(0, 20)}...` : 'empty');
+
     // Find valid token in sys_user_token table
     const { data: tokenData, error: tokenError } = await supabaseAdmin
       .from('sys_user_token')
@@ -54,7 +56,8 @@ const verifyCustomToken = async (token) => {
       .single();
 
     if (tokenError || !tokenData) {
-      logger.debug('Token not found:', tokenError?.message);
+      logger.debug('Token not found in sys_user_token:', tokenError?.message || 'no match');
+      logger.debug('Token length:', token?.length);
       return null;
     }
 

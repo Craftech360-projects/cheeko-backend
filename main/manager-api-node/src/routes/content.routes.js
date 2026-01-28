@@ -7,10 +7,32 @@
 
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const contentService = require('../services/content.service');
+const uploadService = require('../services/upload.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
+
+// Configure multer for memory storage (files go to buffer, then to S3)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 50 * 1024 * 1024, // 50MB max file size
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow audio and image files
+    const allowedMimes = [
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a',
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp'
+    ];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only audio and image files are allowed.'));
+    }
+  }
+});
 
 // ==================== CONTENT LIBRARY ROUTES ====================
 
@@ -430,6 +452,88 @@ router.get('/library/:id',
  *       403:
  *         description: Admin access required
  */
+
+/**
+ * @swagger
+ * /content/library/upload:
+ *   post:
+ *     tags: [Content Library]
+ *     summary: Upload content file to S3
+ *     description: Upload audio file to AWS S3 and get the CloudFront URL
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *               - contentType
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Audio file (mp3, wav, ogg, m4a)
+ *               contentType:
+ *                 type: string
+ *                 enum: [music, story]
+ *                 description: Type of content
+ *               category:
+ *                 type: string
+ *                 description: Category/language (e.g., English, Hindi)
+ *     responses:
+ *       200:
+ *         description: File uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                   example: 0
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     url:
+ *                       type: string
+ *                     filename:
+ *                       type: string
+ *       400:
+ *         description: Invalid file or missing parameters
+ */
+router.post('/library/upload',
+  requireAdmin,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return badRequest(res, 'No file uploaded');
+    }
+
+    const { contentType, category } = req.body;
+
+    if (!contentType || !['music', 'story'].includes(contentType)) {
+      return badRequest(res, 'Content type must be music or story');
+    }
+
+    try {
+      const result = await uploadService.uploadContentFile(
+        req.file.buffer,
+        req.file.originalname,
+        contentType,
+        category || 'English',
+        req.file.mimetype
+      );
+
+      return success(res, result);
+    } catch (error) {
+      return badRequest(res, error.message);
+    }
+  })
+);
+
 router.post('/library',
   requireAdmin,
   asyncHandler(async (req, res) => {
