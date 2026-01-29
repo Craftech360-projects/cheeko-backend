@@ -42,10 +42,10 @@ from src.shared.entrypoint_utils import (
     init_chat_history_service,
     extract_and_send_chat_history,
 )
-from src.features.game_tools import validate_word_ladder_move, set_word_ladder_state
+from src.features.game_tools import validate_word_ladder_move, set_word_ladder_state, set_game_analytics_manager
 from src.games.word_ladder_game import pick_valid_word_pair
 from src.features.mode_switching import update_agent_mode
-from src.utils.helpers import UsageManager
+from src.utils.helpers import UsageManager, GameAnalyticsManager
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
@@ -208,6 +208,18 @@ async def entrypoint(ctx: JobContext):
     usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
     usage_manager.setup_metrics_collection(session)
     logger.info("Usage tracking initialized - subscribed to metrics_collected event")
+
+    # ============================================================================
+    # GAME ANALYTICS: Track game attempts locally, send on session close
+    # ============================================================================
+    game_analytics_manager = GameAnalyticsManager(
+        mac_address=device_mac,
+        session_id=room_name,
+        mode_type='word_ladder',
+        agent_id=agent_id
+    )
+    set_game_analytics_manager(game_analytics_manager)
+    logger.info("Game analytics tracking initialized")
 
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
     logger.info("State management registered")
@@ -387,17 +399,31 @@ async def entrypoint(ctx: JobContext):
 
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
+    cleanup_task = None
 
     # Initialize chat history service
     chat_history_service = None
     if agent_id and device_mac:
         chat_history_service = init_chat_history_service(device_mac, room_name, agent_id)
+    else:
+        logger.warning(f"❌ Chat history service skipped: agent_id={agent_id}, device_mac={device_mac}")
 
     async def cleanup_room_and_session():
-        nonlocal cleanup_completed
+        nonlocal cleanup_completed, cleanup_task
+        current_t = asyncio.current_task()
+        if cleanup_task is not None and cleanup_task != current_t:
+            try:
+                await asyncio.shield(cleanup_task)
+            except Exception:
+                pass
+            return
+
         if cleanup_completed:
             return
+
         cleanup_completed = True
+        cleanup_task = current_t
+
         try:
             logger.info("Initiating cleanup")
             cancel_idle_timer()  # Stop any pending idle reminders
@@ -405,15 +431,39 @@ async def entrypoint(ctx: JobContext):
             # Log usage summary FIRST (before chat history which takes longer)
             try:
                 if usage_manager:
-                    await asyncio.shield(usage_manager.log_session_summary())
+                    await asyncio.wait_for(
+                        asyncio.shield(usage_manager.log_session_summary()),
+                        timeout=5.0
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("Usage logging timed out after 5s")
             except asyncio.CancelledError:
                 logger.warning("Usage logging was cancelled but should complete")
             except Exception as e:
                 logger.warning(f"Failed to log usage summary: {e}")
 
+            # Send game analytics (batch send all attempts)
+            try:
+                if game_analytics_manager:
+                    await asyncio.wait_for(
+                        asyncio.shield(game_analytics_manager.send_analytics('completed')),
+                        timeout=10.0
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("Game analytics timed out after 10s")
+            except asyncio.CancelledError:
+                logger.warning("Game analytics was cancelled but should complete")
+            except Exception as e:
+                logger.warning(f"Failed to send game analytics: {e}")
+
             # Extract and send chat history (takes 2-3 seconds due to Mem0)
             try:
-                await asyncio.shield(extract_and_send_chat_history(session, chat_history_service, device_mac))
+                await asyncio.wait_for(
+                    asyncio.shield(extract_and_send_chat_history(session, chat_history_service, device_mac)),
+                    timeout=20.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Chat history extraction timed out after 20s")
             except asyncio.CancelledError:
                 logger.warning("Cleanup was cancelled but chat history send should complete")
             if session and hasattr(session, 'aclose'):

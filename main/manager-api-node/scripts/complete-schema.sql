@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS analytics_game_sessions (
     ended_at TIMESTAMP WITH TIME ZONE,
     duration_seconds INTEGER,
     interaction_count INTEGER DEFAULT 0,
+    completion_status VARCHAR(50) DEFAULT 'completed',
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
@@ -74,18 +75,23 @@ CREATE TABLE IF NOT EXISTS analytics_game_attempts (
     session_id VARCHAR(100) NOT NULL,
     mac_address VARCHAR(50) NOT NULL,
     game_type VARCHAR(50) NOT NULL,
-    question TEXT,
-    user_answer TEXT,
-    correct_answer TEXT,
+    question_text TEXT,
+    question_type VARCHAR(100),
+    difficulty_level VARCHAR(20),
+    correct_answer VARCHAR(500),
+    user_answer VARCHAR(500),
     is_correct BOOLEAN,
-    attempt_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    attempt_number SMALLINT DEFAULT 1,
     response_time_ms INTEGER,
+    answered_at TIMESTAMP WITH TIME ZONE,
     metadata JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_analytics_attempts_session ON analytics_game_attempts(session_id);
 CREATE INDEX IF NOT EXISTS idx_analytics_attempts_mac ON analytics_game_attempts(mac_address);
+CREATE INDEX IF NOT EXISTS idx_analytics_attempts_game ON analytics_game_attempts(game_type);
+CREATE INDEX IF NOT EXISTS idx_analytics_attempts_correct ON analytics_game_attempts(is_correct);
 
 -- Media Playback
 CREATE TABLE IF NOT EXISTS analytics_media_playback (
@@ -445,14 +451,14 @@ INSERT INTO sys_params (id, param_code, param_value, value_type, param_type, rem
 (701, 'server.enable_mobile_register', 'false', 'boolean', 1, 'Enable mobile registration'),
 (702, 'server.beian_icp_num', '', 'string', 1, 'ICP registration number'),
 (703, 'server.beian_ga_num', '', 'string', 1, 'GA registration number')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (param_code) DO NOTHING;
 
 -- =====================================================
 -- SEED DATA - Admin User (sys_user)
 -- =====================================================
 INSERT INTO sys_user (id, username, password, nickname, gender, status, role) VALUES
 (2009521127141888000, 'admin', '$2a$10$UaqDQlwQWgEz9pi76AHc/.8FZkVyQkIyHooQClEGplGjOAagtRPi', 'Administrator', 0, 1, 'admin')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (username) DO NOTHING;
 
 -- =====================================================
 -- SAMPLE DATA (Optional - safe to skip if data exists)
@@ -510,6 +516,35 @@ ON CONFLICT (id) DO UPDATE SET
   is_visible = EXCLUDED.is_visible,
   sort = EXCLUDED.sort,
   updated_at = NOW();
+
+-- =====================================================
+-- MIGRATION: Add missing columns to existing tables
+-- =====================================================
+ALTER TABLE analytics_game_sessions
+ADD COLUMN IF NOT EXISTS completion_status VARCHAR(50) DEFAULT 'completed';
+
+ALTER TABLE analytics_game_attempts
+ADD COLUMN IF NOT EXISTS answered_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE analytics_game_attempts
+ADD COLUMN IF NOT EXISTS attempt_number INTEGER DEFAULT 1;
+
+ALTER TABLE analytics_game_attempts
+ADD COLUMN IF NOT EXISTS question_type VARCHAR(50);
+
+ALTER TABLE analytics_game_attempts
+ADD COLUMN IF NOT EXISTS difficulty_level VARCHAR(20);
+
+-- Rename 'question' to 'question_text' if it exists (for backwards compatibility)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'analytics_game_attempts' AND column_name = 'question') THEN
+        ALTER TABLE analytics_game_attempts RENAME COLUMN question TO question_text;
+    END IF;
+END $$;
+
+ALTER TABLE analytics_game_attempts
+ADD COLUMN IF NOT EXISTS question_text TEXT;
 
 -- =====================================================
 -- DONE!

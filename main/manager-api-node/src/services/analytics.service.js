@@ -214,16 +214,8 @@ const logGameAttempt = async ({
     throw new Error('Failed to log game attempt');
   }
 
-  // Increment session interaction count
-  if (sessionId) {
-    await supabaseAdmin
-      .from('analytics_game_sessions')
-      .update({
-        interaction_count: supabaseAdmin.raw('interaction_count + 1'),
-        updated_at: now
-      })
-      .eq('session_id', sessionId);
-  }
+  // Note: interaction_count is set when ending the session via endSession()
+  // No need to increment here since we track attempt count separately
 
   return attempt;
 };
@@ -1736,6 +1728,451 @@ const getMonthActiveDevices = async () => {
   return Object.values(deviceMap);
 };
 
+// =============================================
+// Dashboard Aggregate Analytics (All Devices)
+// =============================================
+
+/**
+ * Get dashboard summary stats (aggregate across all devices)
+ * @param {Object} options - { startDate, endDate }
+ * @returns {Promise<Object>} Summary stats
+ */
+const getDashboardSummary = async ({ startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Build date filters
+  let sessionQuery = supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('id, duration_seconds, mac_address', { count: 'exact' });
+
+  let attemptQuery = supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('id, is_correct', { count: 'exact' });
+
+  if (startDate) {
+    sessionQuery = sessionQuery.gte('started_at', startDate);
+    attemptQuery = attemptQuery.gte('created_at', startDate);
+  }
+  if (endDate) {
+    sessionQuery = sessionQuery.lte('started_at', endDate);
+    attemptQuery = attemptQuery.lte('created_at', endDate);
+  }
+
+  // Execute queries in parallel
+  const [sessionsResult, attemptsResult, correctAttemptsResult] = await Promise.all([
+    sessionQuery,
+    attemptQuery,
+    (startDate || endDate)
+      ? supabaseAdmin
+          .from('analytics_game_attempts')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_correct', true)
+          .gte('created_at', startDate || '1970-01-01')
+          .lte('created_at', endDate || '2099-12-31')
+      : supabaseAdmin
+          .from('analytics_game_attempts')
+          .select('id', { count: 'exact', head: true })
+          .eq('is_correct', true)
+  ]);
+
+  const sessions = sessionsResult.data || [];
+  const totalSessions = sessionsResult.count || 0;
+  const totalAttempts = attemptsResult.count || 0;
+  const correctAttempts = correctAttemptsResult.count || 0;
+
+  // Calculate total time
+  const totalTimeSeconds = sessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
+
+  // Calculate unique devices
+  const uniqueDevices = new Set(sessions.map(s => s.mac_address)).size;
+
+  // Calculate accuracy
+  const avgAccuracy = totalAttempts > 0
+    ? Math.round((correctAttempts / totalAttempts) * 100)
+    : 0;
+
+  return {
+    total_sessions: totalSessions,
+    total_time_seconds: totalTimeSeconds,
+    avg_accuracy: avgAccuracy,
+    active_device_count: uniqueDevices,
+    total_attempts: totalAttempts,
+    correct_attempts: correctAttempts
+  };
+};
+
+/**
+ * Get sessions per day for trend chart (all devices)
+ * @param {Object} options - { startDate, endDate }
+ * @returns {Promise<Array>} Daily session counts
+ */
+const getSessionsPerDay = async ({ startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Default to last 30 days if no date range
+  if (!startDate) {
+    const defaultStart = new Date();
+    defaultStart.setDate(defaultStart.getDate() - 30);
+    startDate = defaultStart.toISOString().split('T')[0];
+  }
+  if (!endDate) {
+    endDate = new Date().toISOString().split('T')[0];
+  }
+
+  let query = supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('started_at, duration_seconds, mode_type, mac_address')
+    .gte('started_at', startDate)
+    .lte('started_at', endDate + 'T23:59:59.999Z')
+    .order('started_at', { ascending: true });
+
+  const { data: sessions, error } = await query;
+
+  if (error) {
+    logger.error('Failed to get sessions per day:', error);
+    throw new Error('Failed to get sessions per day');
+  }
+
+  // Group by date
+  const dailyData = {};
+  (sessions || []).forEach(session => {
+    const date = session.started_at.split('T')[0];
+    if (!dailyData[date]) {
+      dailyData[date] = {
+        date,
+        session_count: 0,
+        total_duration_seconds: 0,
+        unique_devices: new Set(),
+        by_mode: {}
+      };
+    }
+    dailyData[date].session_count++;
+    dailyData[date].total_duration_seconds += session.duration_seconds || 0;
+    dailyData[date].unique_devices.add(session.mac_address);
+
+    const mode = session.mode_type || 'Unknown';
+    if (!dailyData[date].by_mode[mode]) {
+      dailyData[date].by_mode[mode] = 0;
+    }
+    dailyData[date].by_mode[mode]++;
+  });
+
+  // Convert Sets to counts and return array
+  return Object.values(dailyData).map(day => ({
+    date: day.date,
+    session_count: day.session_count,
+    total_duration_seconds: day.total_duration_seconds,
+    unique_devices: day.unique_devices.size,
+    by_mode: day.by_mode
+  }));
+};
+
+/**
+ * Get game accuracy by type (aggregate across all devices)
+ * @param {Object} options - { startDate, endDate }
+ * @returns {Promise<Object>} Accuracy per game type
+ */
+const getGameAccuracyByType = async ({ startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('game_type, is_correct, response_time_ms');
+
+  if (startDate) {
+    query = query.gte('created_at', startDate);
+  }
+  if (endDate) {
+    query = query.lte('created_at', endDate + 'T23:59:59.999Z');
+  }
+
+  const { data: attempts, error } = await query;
+
+  if (error) {
+    logger.error('Failed to get game accuracy by type:', error);
+    throw new Error('Failed to get game accuracy by type');
+  }
+
+  // Group by game type
+  const gameStats = {};
+  (attempts || []).forEach(attempt => {
+    const gameType = attempt.game_type || 'unknown';
+    if (!gameStats[gameType]) {
+      gameStats[gameType] = {
+        game_type: gameType,
+        total_attempts: 0,
+        correct_attempts: 0,
+        response_times: []
+      };
+    }
+    gameStats[gameType].total_attempts++;
+    if (attempt.is_correct) gameStats[gameType].correct_attempts++;
+    if (attempt.response_time_ms) {
+      gameStats[gameType].response_times.push(attempt.response_time_ms);
+    }
+  });
+
+  // Calculate accuracy and avg response time
+  const result = {};
+  Object.keys(gameStats).forEach(gameType => {
+    const stats = gameStats[gameType];
+    result[gameType] = {
+      game_type: gameType,
+      total_attempts: stats.total_attempts,
+      correct_attempts: stats.correct_attempts,
+      accuracy: stats.total_attempts > 0
+        ? Math.round((stats.correct_attempts / stats.total_attempts) * 100)
+        : 0,
+      avg_response_time_ms: stats.response_times.length > 0
+        ? Math.round(stats.response_times.reduce((a, b) => a + b, 0) / stats.response_times.length)
+        : null
+    };
+  });
+
+  return result;
+};
+
+/**
+ * Get difficulty distribution (aggregate across all devices)
+ * @param {Object} options - { startDate, endDate }
+ * @returns {Promise<Object>} Counts per difficulty level
+ */
+const getDifficultyDistribution = async ({ startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Default empty distribution
+  const distribution = {
+    easy: { count: 0, correct: 0, accuracy: 0 },
+    medium: { count: 0, correct: 0, accuracy: 0 },
+    hard: { count: 0, correct: 0, accuracy: 0 },
+    unknown: { count: 0, correct: 0, accuracy: 0 }
+  };
+
+  try {
+    // Try to query with difficulty_level column
+    let query = supabaseAdmin
+      .from('analytics_game_attempts')
+      .select('difficulty_level, is_correct');
+
+    if (startDate) {
+      query = query.gte('created_at', startDate);
+    }
+    if (endDate) {
+      query = query.lte('created_at', endDate + 'T23:59:59.999Z');
+    }
+
+    const { data: attempts, error } = await query;
+
+    if (error) {
+      // If column doesn't exist, return empty distribution
+      if (error.message && error.message.includes('does not exist')) {
+        logger.warn('difficulty_level column not found, returning empty distribution');
+        return distribution;
+      }
+      logger.error('Failed to get difficulty distribution:', error);
+      throw new Error('Failed to get difficulty distribution');
+    }
+
+    // Group by difficulty level
+    (attempts || []).forEach(attempt => {
+      const level = (attempt.difficulty_level || 'unknown').toLowerCase();
+      const key = distribution[level] ? level : 'unknown';
+      distribution[key].count++;
+      if (attempt.is_correct) distribution[key].correct++;
+    });
+
+    // Calculate accuracy for each level
+    Object.keys(distribution).forEach(level => {
+      const d = distribution[level];
+      d.accuracy = d.count > 0 ? Math.round((d.correct / d.count) * 100) : 0;
+    });
+
+    return distribution;
+  } catch (err) {
+    // Return empty distribution on any error
+    logger.error('Error in getDifficultyDistribution:', err);
+    return distribution;
+  }
+};
+
+/**
+ * Get response time (TTFT) trend per day
+ * @param {Object} options - { startDate, endDate }
+ * @returns {Promise<Array>} Daily average response time
+ */
+const getTtftTrend = async ({ startDate, endDate } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Default to last 30 days if no date range
+  if (!startDate) {
+    const defaultStart = new Date();
+    defaultStart.setDate(defaultStart.getDate() - 30);
+    startDate = defaultStart.toISOString().split('T')[0];
+  }
+  if (!endDate) {
+    endDate = new Date().toISOString().split('T')[0];
+  }
+
+  let query = supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('created_at, response_time_ms')
+    .not('response_time_ms', 'is', null)
+    .gte('created_at', startDate)
+    .lte('created_at', endDate + 'T23:59:59.999Z')
+    .order('created_at', { ascending: true });
+
+  const { data: attempts, error } = await query;
+
+  if (error) {
+    logger.error('Failed to get TTFT trend:', error);
+    throw new Error('Failed to get TTFT trend');
+  }
+
+  // Group by date
+  const dailyData = {};
+  (attempts || []).forEach(attempt => {
+    const date = attempt.created_at.split('T')[0];
+    if (!dailyData[date]) {
+      dailyData[date] = {
+        date,
+        response_times: []
+      };
+    }
+    dailyData[date].response_times.push(attempt.response_time_ms);
+  });
+
+  // Calculate average for each day
+  return Object.values(dailyData).map(day => ({
+    date: day.date,
+    avg_response_time_ms: day.response_times.length > 0
+      ? Math.round(day.response_times.reduce((a, b) => a + b, 0) / day.response_times.length)
+      : 0,
+    total_attempts: day.response_times.length
+  }));
+};
+
+/**
+ * Get top active devices by session count
+ * @param {Object} options - { startDate, endDate, limit }
+ * @returns {Promise<Array>} Top devices with stats
+ */
+const getTopActiveDevices = async ({ startDate, endDate, limit = 10 } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get sessions with date filter
+  let sessionQuery = supabaseAdmin
+    .from('analytics_game_sessions')
+    .select('mac_address, duration_seconds, mode_type');
+
+  if (startDate) {
+    sessionQuery = sessionQuery.gte('started_at', startDate);
+  }
+  if (endDate) {
+    sessionQuery = sessionQuery.lte('started_at', endDate + 'T23:59:59.999Z');
+  }
+
+  const { data: sessions, error: sessionError } = await sessionQuery;
+
+  if (sessionError) {
+    logger.error('Failed to get sessions for top devices:', sessionError);
+    throw new Error('Failed to get top active devices');
+  }
+
+  // Get attempts with date filter for accuracy
+  let attemptQuery = supabaseAdmin
+    .from('analytics_game_attempts')
+    .select('mac_address, is_correct');
+
+  if (startDate) {
+    attemptQuery = attemptQuery.gte('created_at', startDate);
+  }
+  if (endDate) {
+    attemptQuery = attemptQuery.lte('created_at', endDate + 'T23:59:59.999Z');
+  }
+
+  const { data: attempts, error: attemptError } = await attemptQuery;
+
+  if (attemptError) {
+    logger.error('Failed to get attempts for top devices:', attemptError);
+  }
+
+  // Aggregate by device
+  const deviceStats = {};
+  (sessions || []).forEach(session => {
+    const mac = session.mac_address;
+    if (!deviceStats[mac]) {
+      deviceStats[mac] = {
+        mac_address: mac,
+        session_count: 0,
+        total_duration_seconds: 0,
+        modes: new Set(),
+        total_attempts: 0,
+        correct_attempts: 0
+      };
+    }
+    deviceStats[mac].session_count++;
+    deviceStats[mac].total_duration_seconds += session.duration_seconds || 0;
+    if (session.mode_type) deviceStats[mac].modes.add(session.mode_type);
+  });
+
+  // Add attempt stats
+  (attempts || []).forEach(attempt => {
+    const mac = attempt.mac_address;
+    if (deviceStats[mac]) {
+      deviceStats[mac].total_attempts++;
+      if (attempt.is_correct) deviceStats[mac].correct_attempts++;
+    }
+  });
+
+  // Get device info (alias, owner)
+  const macs = Object.keys(deviceStats);
+  let deviceInfoMap = {};
+  if (macs.length > 0) {
+    const { data: devices } = await supabaseAdmin
+      .from('ai_device')
+      .select('mac_address, alias, user_id')
+      .in('mac_address', macs);
+
+    const userIds = [...new Set((devices || []).map(d => d.user_id).filter(Boolean))];
+    let userMap = {};
+    if (userIds.length > 0) {
+      const { data: users } = await supabaseAdmin
+        .from('sys_user')
+        .select('id, username')
+        .in('id', userIds);
+      (users || []).forEach(u => {
+        userMap[u.id] = u.username;
+      });
+    }
+
+    (devices || []).forEach(d => {
+      deviceInfoMap[d.mac_address] = {
+        alias: d.alias,
+        owner_name: userMap[d.user_id] || null
+      };
+    });
+  }
+
+  // Build result array
+  const result = Object.values(deviceStats).map(stats => ({
+    mac_address: stats.mac_address,
+    alias: deviceInfoMap[stats.mac_address]?.alias || null,
+    owner_name: deviceInfoMap[stats.mac_address]?.owner_name || null,
+    session_count: stats.session_count,
+    total_duration_seconds: stats.total_duration_seconds,
+    modes: Array.from(stats.modes),
+    total_attempts: stats.total_attempts,
+    accuracy: stats.total_attempts > 0
+      ? Math.round((stats.correct_attempts / stats.total_attempts) * 100)
+      : 0
+  }));
+
+  // Sort by session count and limit
+  return result
+    .sort((a, b) => b.session_count - a.session_count)
+    .slice(0, limit);
+};
+
 module.exports = {
   // Sessions
   startSession,
@@ -1775,5 +2212,12 @@ module.exports = {
   getTodayDeviceCount,
   getMonthDeviceCount,
   getTodayActiveDevices,
-  getMonthActiveDevices
+  getMonthActiveDevices,
+  // Dashboard aggregate analytics
+  getDashboardSummary,
+  getSessionsPerDay,
+  getGameAccuracyByType,
+  getDifficultyDistribution,
+  getTtftTrend,
+  getTopActiveDevices
 };

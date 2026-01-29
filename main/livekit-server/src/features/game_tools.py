@@ -14,6 +14,14 @@ logger = logging.getLogger("game_tools")
 _math_game_state = None
 _riddle_game_state = None
 _word_ladder_state = None
+_game_analytics_manager = None
+
+
+def set_game_analytics_manager(manager):
+    """Set the game analytics manager reference for recording attempts"""
+    global _game_analytics_manager
+    _game_analytics_manager = manager
+    logger.info("📊 Game analytics manager connected to tools")
 
 
 def set_math_game_state(state):
@@ -45,15 +53,15 @@ def set_word_ladder_state(state):
 async def check_math_answer(context: RunContext, user_answer: str, expected_answer: str) -> str:
     """
     Validate user's math answer against the expected answer.
-    
+
     Args:
         user_answer: The child's spoken answer (e.g., "eight", "8")
         expected_answer: The correct answer you invented (e.g., "8", "4")
-        
+
     Returns:
         JSON string with result: correct, retry, move_next, streak, game_complete, message
     """
-    global _math_game_state
+    global _math_game_state, _game_analytics_manager
     import json
 
     start_time = time.perf_counter()
@@ -93,7 +101,7 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
             if is_correct:
                 _math_game_state.streak += 1
                 _math_game_state.current_attempts = 0
-                
+
                 game_complete = _math_game_state.streak >= 5
                 result = {
                     'correct': True,
@@ -104,6 +112,16 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                     'message': f"Correct! Streak: {_math_game_state.streak}"
                 }
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                # Record attempt to analytics manager
+                if _game_analytics_manager:
+                    _game_analytics_manager.record_attempt(
+                        game_type='math_tutor',
+                        is_correct=True,
+                        attempt_number=1,
+                        response_time_ms=int(elapsed_ms)
+                    )
+
                 logger.info(f"🧮 [MATH-TOOL] RESULT: correct=True, streak={_math_game_state.streak}, game_complete={game_complete}")
                 logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
                 logger.info(f"{'=' * 60}")
@@ -122,6 +140,17 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                         'game_complete': False,
                         'message': f"Try again! Attempts left: {_math_game_state.max_attempts - _math_game_state.current_attempts}"
                     }
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                    # Record attempt to analytics manager
+                    if _game_analytics_manager:
+                        _game_analytics_manager.record_attempt(
+                            game_type='math_tutor',
+                            is_correct=False,
+                            attempt_number=_math_game_state.current_attempts,
+                            response_time_ms=int(elapsed_ms)
+                        )
+
                     logger.info(f"🧮 [MATH-TOOL] RESULT: correct=False, retry=True, streak=0")
                     logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
                     logger.info(f"{'=' * 60}")
@@ -137,6 +166,17 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
                         'correct_answer': str(parsed_expected),
                         'message': f"The answer was {parsed_expected}. Let's try a new one!"
                     }
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                    # Record attempt to analytics manager (final attempt before moving on)
+                    if _game_analytics_manager:
+                        _game_analytics_manager.record_attempt(
+                            game_type='math_tutor',
+                            is_correct=False,
+                            attempt_number=_math_game_state.max_attempts,
+                            response_time_ms=int(elapsed_ms)
+                        )
+
                     logger.info(f"🧮 [MATH-TOOL] RESULT: correct=False, move_next=True, streak=0")
                     logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
                     logger.info(f"{'=' * 60}")
@@ -186,7 +226,7 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
     Returns:
         JSON string with result: correct, retry, move_next, streak, game_complete, message
     """
-    global _riddle_game_state
+    global _riddle_game_state, _game_analytics_manager
     import json
 
     start_time = time.perf_counter()
@@ -234,7 +274,7 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
             if is_correct:
                 _riddle_game_state.streak += 1
                 _riddle_game_state.current_attempts = 0
-                
+
                 result = {
                     'correct': True,
                     'retry': False,
@@ -244,6 +284,16 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                     'message': f"Correct! It's a {expected_answer}!"
                 }
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                # Record attempt to analytics manager
+                if _game_analytics_manager:
+                    _game_analytics_manager.record_attempt(
+                        game_type='riddle_solver',
+                        is_correct=True,
+                        attempt_number=1,
+                        response_time_ms=int(elapsed_ms)
+                    )
+
                 logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (correct)")
                 return json.dumps(result)
             else:
@@ -260,6 +310,16 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                         'message': "Think harder! Try again!"
                     }
                     elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                    # Record attempt to analytics manager
+                    if _game_analytics_manager:
+                        _game_analytics_manager.record_attempt(
+                            game_type='riddle_solver',
+                            is_correct=False,
+                            attempt_number=_riddle_game_state.current_attempts,
+                            response_time_ms=int(elapsed_ms)
+                        )
+
                     logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (retry)")
                     return json.dumps(result)
                 else:
@@ -274,6 +334,16 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
                         'message': f"It was a {expected_answer}! Let's try another!"
                     }
                     elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+                    # Record attempt to analytics manager
+                    if _game_analytics_manager:
+                        _game_analytics_manager.record_attempt(
+                            game_type='riddle_solver',
+                            is_correct=False,
+                            attempt_number=_riddle_game_state.max_attempts,
+                            response_time_ms=int(elapsed_ms)
+                        )
+
                     logger.info(f"⏱️ check_riddle_answer completed in {elapsed_ms:.2f}ms (move_next)")
                     return json.dumps(result)
         else:
@@ -319,7 +389,7 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
     Returns:
         JSON string with result: success, next_letter, expected_letter, game_status, words_used, message
     """
-    global _word_ladder_state
+    global _word_ladder_state, _game_analytics_manager
     import json
 
     start_time = time.perf_counter()
@@ -362,7 +432,17 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
         if not is_valid:
             # Increment failure
             max_reached = _word_ladder_state.increment_failure()
-            
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+            # Record invalid attempt
+            if _game_analytics_manager:
+                _game_analytics_manager.record_attempt(
+                    game_type='word_ladder',
+                    is_correct=False,
+                    attempt_number=1,
+                    response_time_ms=int(elapsed_ms)
+                )
+
             if max_reached:
                 # Restart game with new words
                 from src.games.word_ladder_game import pick_valid_word_pair
@@ -379,7 +459,6 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                     'words_used': 1,
                     'message': f'Let\'s restart! New game: {new_start} → {new_target}'
                 }
-                elapsed_ms = (time.perf_counter() - start_time) * 1000
                 logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (restart)")
                 return json.dumps(result)
             else:
@@ -391,13 +470,22 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                     'words_used': len(_word_ladder_state.word_history),
                     'message': error_msg
                 }
-                elapsed_ms = (time.perf_counter() - start_time) * 1000
                 logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (invalid)")
                 return json.dumps(result)
         
         # Valid move - add to chain
         _word_ladder_state.add_valid_move(user_word)
-        
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Record valid attempt
+        if _game_analytics_manager:
+            _game_analytics_manager.record_attempt(
+                game_type='word_ladder',
+                is_correct=True,
+                attempt_number=1,
+                response_time_ms=int(elapsed_ms)
+            )
+
         # Check victory (10 words in chain)
         if len(_word_ladder_state.word_history) >= 10:
             result = {
@@ -408,7 +496,6 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
                 'words_used': len(_word_ladder_state.word_history),
                 'message': 'Victory! You built the rope!'
             }
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
             logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (victory)")
             return json.dumps(result)
 
@@ -420,7 +507,6 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
             'words_used': len(_word_ladder_state.word_history),
             'message': f'Great! Next letter: {_word_ladder_state.get_next_letter()}'
         }
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
         logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (valid)")
         return json.dumps(result)
 

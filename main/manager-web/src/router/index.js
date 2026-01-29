@@ -187,6 +187,17 @@ const routes = [
       title: 'Email Report Settings'
     }
   },
+  {
+    path: '/game-analytics',
+    name: 'GameAnalytics',
+    component: function () {
+      return import('../views/GameAnalytics.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Game Analytics'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -208,7 +219,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
 
 // Route guard
 router.beforeEach((to, from, next) => {

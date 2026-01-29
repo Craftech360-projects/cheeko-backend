@@ -222,7 +222,7 @@ class UsageManager:
                 "totalResponseDurationSeconds": round(self.total_response_duration, 3)
             }
 
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(url, json=payload)
 
                 if response.status_code == 200:
@@ -264,3 +264,244 @@ class UsageManager:
     async def log_usage(self):
         """Log usage summary (legacy method)"""
         return await self.log_session_summary()
+
+
+class GameAnalyticsManager:
+    """
+    Utility class for managing game analytics metrics locally and sending on session close.
+    Similar pattern to UsageManager - stores metrics locally, sends batch on cleanup.
+    """
+
+    # Mode type normalization map
+    MODE_TYPE_MAP = {
+        'cheeko': 'conversation',
+        'math tutor': 'math_tutor',
+        'riddle solver': 'riddle_solver',
+        'word ladder': 'word_ladder',
+        'music': 'music',
+        'story': 'story',
+        'conversation': 'conversation',
+        'math_tutor': 'math_tutor',
+        'riddle_solver': 'riddle_solver',
+        'word_ladder': 'word_ladder'
+    }
+
+    def __init__(self, mac_address: str, session_id: str, mode_type: str, agent_id: str = None):
+        """
+        Initialize game analytics manager.
+
+        Args:
+            mac_address: Device MAC address
+            session_id: Session identifier (room name)
+            mode_type: Game mode (math_tutor, riddle_solver, word_ladder, etc.)
+            agent_id: Agent identifier (optional)
+        """
+        self.mac_address = mac_address
+        self.session_id = session_id
+        self.agent_id = agent_id
+        self.mode_type = self._normalize_mode_type(mode_type)
+
+        # Session tracking
+        self.session_start_time = time.time()
+        self.interaction_count = 0
+
+        # Game attempts storage (batch send on close)
+        self.attempts = []
+
+        # Streak tracking
+        self.current_streak = 0
+        self.longest_streak = 0
+        self.streak_count = 0
+
+        logger.info(f"🎮 [GAME-ANALYTICS] Initialized - MAC: {mac_address}, Mode: {self.mode_type}, Session: {session_id}")
+
+    def _normalize_mode_type(self, mode_name: str) -> str:
+        """Normalize mode type to consistent snake_case format"""
+        if not mode_name:
+            return 'conversation'
+        mode_lower = mode_name.lower()
+        if mode_lower in self.MODE_TYPE_MAP:
+            return self.MODE_TYPE_MAP[mode_lower]
+        return mode_lower.replace(' ', '_')
+
+    def record_attempt(
+        self,
+        game_type: str,
+        is_correct: bool,
+        attempt_number: int = 1,
+        response_time_ms: int = None,
+        question_type: str = None,
+        difficulty_level: str = None
+    ):
+        """
+        Record a game attempt locally (will be sent on session close).
+
+        Args:
+            game_type: Game type (math_tutor, riddle_solver, word_ladder)
+            is_correct: Whether answer was correct
+            attempt_number: Attempt number (1 or 2)
+            response_time_ms: Response time in milliseconds
+            question_type: Question type (addition, subtraction, etc.)
+            difficulty_level: Difficulty level (easy, medium, hard)
+        """
+        attempt = {
+            'game_type': game_type,
+            'is_correct': is_correct,
+            'attempt_number': attempt_number,
+            'response_time_ms': response_time_ms,
+            'question_type': question_type,
+            'difficulty_level': difficulty_level,
+            'answered_at': time.time()
+        }
+        self.attempts.append(attempt)
+        self.interaction_count += 1
+
+        # Update streak tracking
+        if is_correct:
+            self.current_streak += 1
+            if self.current_streak > self.longest_streak:
+                self.longest_streak = self.current_streak
+        else:
+            if self.current_streak > 0:
+                self.streak_count += 1
+            self.current_streak = 0
+
+        logger.info(f"🎮 [GAME-ANALYTICS] Attempt recorded - Game: {game_type}, Correct: {is_correct}, Streak: {self.current_streak}")
+
+    def get_stats(self):
+        """Get current session statistics"""
+        total_attempts = len(self.attempts)
+        correct_attempts = sum(1 for a in self.attempts if a['is_correct'])
+        accuracy = (correct_attempts / total_attempts * 100) if total_attempts > 0 else 0
+
+        return {
+            'total_attempts': total_attempts,
+            'correct_attempts': correct_attempts,
+            'accuracy': round(accuracy, 1),
+            'current_streak': self.current_streak,
+            'longest_streak': self.longest_streak,
+            'streak_count': self.streak_count
+        }
+
+    async def send_analytics(self, completion_status: str = 'completed'):
+        """
+        Send all accumulated analytics to Manager API on session close.
+
+        Args:
+            completion_status: Session completion status (completed, interrupted, switched, victory, failure)
+        """
+        logger.info(f"🎮 [GAME-ANALYTICS] send_analytics() called with status={completion_status}, attempts={len(self.attempts)}")
+        try:
+            session_duration = int(time.time() - self.session_start_time)
+            stats = self.get_stats()
+
+            logger.info("=" * 60)
+            logger.info("🎮 [GAME-ANALYTICS] Session Summary")
+            logger.info("=" * 60)
+            logger.info(f"🎮 [GAME-ANALYTICS] Session ID: {self.session_id}")
+            logger.info(f"🎮 [GAME-ANALYTICS] MAC Address: {self.mac_address}")
+            logger.info(f"🎮 [GAME-ANALYTICS] Mode: {self.mode_type}")
+            logger.info(f"🎮 [GAME-ANALYTICS] Duration: {session_duration}s")
+            logger.info(f"🎮 [GAME-ANALYTICS] Total Attempts: {stats['total_attempts']}")
+            logger.info(f"🎮 [GAME-ANALYTICS] Correct: {stats['correct_attempts']}")
+            logger.info(f"🎮 [GAME-ANALYTICS] Accuracy: {stats['accuracy']}%")
+            logger.info(f"🎮 [GAME-ANALYTICS] Longest Streak: {stats['longest_streak']}")
+            logger.info(f"🎮 [GAME-ANALYTICS] Status: {completion_status}")
+            logger.info("=" * 60)
+
+            # Only send if we have attempts
+            if len(self.attempts) == 0:
+                logger.info("🎮 [GAME-ANALYTICS] No attempts to send, skipping API call")
+                return
+
+            # Send session and attempts in one batch request
+            await self._send_batch_to_api(session_duration, completion_status)
+
+        except Exception as e:
+            logger.error(f"🎮 [GAME-ANALYTICS] Failed to send analytics: {e}")
+
+    async def _send_batch_to_api(self, session_duration: int, completion_status: str):
+        """Send batch analytics data to Manager API"""
+        try:
+            # Get service secret from environment
+            service_secret = os.environ.get("MANAGER_API_SECRET", "")
+
+            headers = {
+                "X-Service-Key": service_secret,
+                "Content-Type": "application/json"
+            }
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # 1. Start session (API expects 'mac' not 'macAddress')
+                # API generates its own sessionId, we'll use that for attempts
+                session_payload = {
+                    "mac": self.mac_address,
+                    "agentId": self.agent_id,
+                    "modeType": self.mode_type,
+                    "metadata": None
+                }
+
+                session_url = f"{MANAGER_API_URL}/analytics/session/start"
+                response = await client.post(session_url, json=session_payload, headers=headers)
+
+                # Get the API-generated sessionId from response
+                api_session_id = self.session_id  # fallback to our session_id
+                if response.status_code == 200:
+                    try:
+                        resp_data = response.json()
+                        if resp_data.get('data') and resp_data['data'].get('session_id'):
+                            api_session_id = resp_data['data']['session_id']
+                            logger.info(f"🎮 [GAME-ANALYTICS] Session started with ID: {api_session_id}")
+                    except Exception as e:
+                        logger.warning(f"🎮 [GAME-ANALYTICS] Could not parse session response: {e}")
+                else:
+                    resp_text = response.text
+                    logger.warning(f"🎮 [GAME-ANALYTICS] Failed to start session: {response.status_code} - {resp_text}")
+
+                # 2. Send all attempts using the API-generated sessionId
+                attempt_url = f"{MANAGER_API_URL}/analytics/game-attempt"
+                success_count = 0
+                for attempt in self.attempts:
+                    attempt_payload = {
+                        "sessionId": api_session_id,
+                        "mac": self.mac_address,
+                        "gameType": attempt['game_type'],
+                        "isCorrect": attempt['is_correct'],
+                        "attemptNumber": attempt['attempt_number'],
+                        "responseTimeMs": attempt['response_time_ms'],
+                        "questionType": attempt['question_type'],
+                        "difficultyLevel": attempt['difficulty_level'],
+                        "answeredAt": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(attempt['answered_at'])),
+                        # Privacy: don't send question/answer text
+                        "questionText": None,
+                        "correctAnswer": None,
+                        "userAnswer": None,
+                        "metadata": None
+                    }
+                    logger.info(f"🎮 [GAME-ANALYTICS] Sending attempt payload: {attempt_payload}")
+
+                    resp = await client.post(attempt_url, json=attempt_payload, headers=headers)
+                    if resp.status_code == 200:
+                        success_count += 1
+                    else:
+                        logger.warning(f"🎮 [GAME-ANALYTICS] Failed to send attempt: {resp.status_code}")
+
+                # 3. End session (use API-generated sessionId, send as JSON body not query params)
+                end_url = f"{MANAGER_API_URL}/analytics/session/end"
+                end_payload = {
+                    "sessionId": api_session_id,
+                    "completionStatus": completion_status,
+                    "interactionCount": len(self.attempts)
+                }
+                response = await client.post(end_url, json=end_payload, headers=headers)
+
+                if response.status_code == 200:
+                    logger.info(f"🎮 [GAME-ANALYTICS] Successfully sent {success_count}/{len(self.attempts)} attempts to API")
+                else:
+                    resp_text = response.text
+                    logger.warning(f"🎮 [GAME-ANALYTICS] Failed to end session: {response.status_code} - {resp_text}")
+
+        except Exception as e:
+            import traceback
+            logger.error(f"🎮 [GAME-ANALYTICS] Error sending batch to API: {e}")
+            logger.error(f"🎮 [GAME-ANALYTICS] Traceback: {traceback.format_exc()}")

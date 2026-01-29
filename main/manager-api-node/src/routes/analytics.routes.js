@@ -2107,4 +2107,349 @@ router.get('/month/active-devices', requireAuth, asyncHandler(async (req, res) =
   return success(res, devices);
 }));
 
+// =============================================
+// Dashboard Aggregate Analytics
+// =============================================
+
+/**
+ * @swagger
+ * /analytics/dashboard/summary:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get dashboard summary stats
+ *     description: Returns aggregate stats across all devices (sessions, time, accuracy, device count)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: Dashboard summary
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     total_sessions:
+ *                       type: integer
+ *                     total_time_seconds:
+ *                       type: integer
+ *                     avg_accuracy:
+ *                       type: number
+ *                     active_device_count:
+ *                       type: integer
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/dashboard/summary', requireAuth, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const summary = await analyticsService.getDashboardSummary({ startDate, endDate });
+  return success(res, summary);
+}));
+
+/**
+ * @swagger
+ * /analytics/dashboard/sessions-per-day:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get sessions per day
+ *     description: Returns daily session counts for trend chart
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: Daily session data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                       session_count:
+ *                         type: integer
+ *                       total_duration_seconds:
+ *                         type: integer
+ *                       unique_devices:
+ *                         type: integer
+ *                       by_mode:
+ *                         type: object
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/dashboard/sessions-per-day', requireAuth, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const data = await analyticsService.getSessionsPerDay({ startDate, endDate });
+  return success(res, data);
+}));
+
+/**
+ * @swagger
+ * /analytics/dashboard/game-accuracy:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get game accuracy by type
+ *     description: Returns accuracy stats per game type (math_tutor, riddle_solver, word_ladder)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: Game accuracy by type
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   additionalProperties:
+ *                     type: object
+ *                     properties:
+ *                       game_type:
+ *                         type: string
+ *                       total_attempts:
+ *                         type: integer
+ *                       correct_attempts:
+ *                         type: integer
+ *                       accuracy:
+ *                         type: number
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/dashboard/game-accuracy', requireAuth, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const data = await analyticsService.getGameAccuracyByType({ startDate, endDate });
+  return success(res, data);
+}));
+
+/**
+ * @swagger
+ * /analytics/dashboard/difficulty-distribution:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get difficulty distribution
+ *     description: Returns attempt counts by difficulty level (easy, medium, hard)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: Difficulty distribution
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     easy:
+ *                       type: object
+ *                       properties:
+ *                         count:
+ *                           type: integer
+ *                         correct:
+ *                           type: integer
+ *                         accuracy:
+ *                           type: number
+ *                     medium:
+ *                       type: object
+ *                     hard:
+ *                       type: object
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/dashboard/difficulty-distribution', requireAuth, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const data = await analyticsService.getDifficultyDistribution({ startDate, endDate });
+  return success(res, data);
+}));
+
+/**
+ * @swagger
+ * /analytics/dashboard/ttft-trend:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get response time trend
+ *     description: Returns average response time (TTFT) per day
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date (YYYY-MM-DD)
+ *     responses:
+ *       200:
+ *         description: TTFT trend data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       date:
+ *                         type: string
+ *                       avg_response_time_ms:
+ *                         type: integer
+ *                       total_attempts:
+ *                         type: integer
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/dashboard/ttft-trend', requireAuth, asyncHandler(async (req, res) => {
+  const { startDate, endDate } = req.query;
+  const data = await analyticsService.getTtftTrend({ startDate, endDate });
+  return success(res, data);
+}));
+
+/**
+ * @swagger
+ * /analytics/dashboard/top-devices:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Get top active devices
+ *     description: Returns top devices ranked by session count with stats
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date (YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date (YYYY-MM-DD)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *         description: Number of devices to return
+ *     responses:
+ *       200:
+ *         description: Top active devices
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 code:
+ *                   type: integer
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       mac_address:
+ *                         type: string
+ *                       alias:
+ *                         type: string
+ *                       owner_name:
+ *                         type: string
+ *                       session_count:
+ *                         type: integer
+ *                       total_duration_seconds:
+ *                         type: integer
+ *                       modes:
+ *                         type: array
+ *                       accuracy:
+ *                         type: number
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/dashboard/top-devices', requireAuth, asyncHandler(async (req, res) => {
+  const { startDate, endDate, limit = 10 } = req.query;
+  const data = await analyticsService.getTopActiveDevices({
+    startDate,
+    endDate,
+    limit: parseInt(limit)
+  });
+  return success(res, data);
+}));
+
 module.exports = router;

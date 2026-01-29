@@ -423,24 +423,43 @@ async def entrypoint(ctx: JobContext):
     # Room lifecycle management
     participant_count = len(ctx.room.remote_participants)
     cleanup_completed = False
+    cleanup_task = None
 
     # Initialize chat history service (sends on room close)
     chat_history_service = None
     if agent_id and device_mac:
         chat_history_service = init_chat_history_service(device_mac, room_name, agent_id)
+    else:
+        logger.warning(f"❌ Chat history service skipped: agent_id={agent_id}, device_mac={device_mac}")
 
     async def cleanup_room_and_session():
-        nonlocal cleanup_completed
+        nonlocal cleanup_completed, cleanup_task
+        current_t = asyncio.current_task()
+        if cleanup_task is not None and cleanup_task != current_t:
+            try:
+                await asyncio.shield(cleanup_task)
+            except Exception:
+                pass
+            return
+
         if cleanup_completed:
             return
+
         cleanup_completed = True
+        cleanup_task = current_t
+
         try:
             logger.info("Initiating cleanup")
 
             # Log usage summary before closing session (sends to Manager API)
             try:
                 if usage_manager:
-                    await asyncio.shield(usage_manager.log_session_summary())
+                    await asyncio.wait_for(
+                        asyncio.shield(usage_manager.log_session_summary()),
+                        timeout=5.0
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("Usage logging timed out after 5s")
             except asyncio.CancelledError:
                 logger.warning("Usage logging was cancelled but should complete")
             except Exception as e:
@@ -449,9 +468,14 @@ async def entrypoint(ctx: JobContext):
             # Extract and send chat history before closing session (also sends to Mem0)
             # Use asyncio.shield to protect from cancellation during job shutdown
             try:
-                await asyncio.shield(
-                    extract_and_send_chat_history(session, chat_history_service, device_mac)
+                await asyncio.wait_for(
+                    asyncio.shield(
+                        extract_and_send_chat_history(session, chat_history_service, device_mac)
+                    ),
+                    timeout=20.0
                 )
+            except asyncio.TimeoutError:
+                logger.warning("Chat history extraction timed out after 20s")
             except asyncio.CancelledError:
                 logger.warning("Cleanup was cancelled but chat history send should complete")
 

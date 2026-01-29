@@ -276,12 +276,16 @@ model analytics_game_attempts {
   session_id       String    @db.VarChar(100)
   mac_address      String    @db.VarChar(50)
   game_type        String    @db.VarChar(50)
-  question         String?
+  question_text    String?
+  question_type    String?   @db.VarChar(50)
+  difficulty_level String?   @db.VarChar(20)
   user_answer      String?
   correct_answer   String?
   is_correct       Boolean?
+  attempt_number   Int?      @default(1)
   attempt_time     DateTime? @default(now()) @db.Timestamptz(6)
   response_time_ms Int?
+  answered_at      DateTime? @db.Timestamptz(6)
   metadata         Json?     @default("{}")
   created_at       DateTime? @default(now()) @db.Timestamptz(6)
 
@@ -299,6 +303,7 @@ model analytics_game_sessions {
   ended_at          DateTime? @db.Timestamptz(6)
   duration_seconds  Int?
   interaction_count Int?      @default(0)
+  completion_status String?   @default("completed") @db.VarChar(50)
   metadata          Json?     @default("{}")
   created_at        DateTime? @default(now()) @db.Timestamptz(6)
   updated_at        DateTime? @default(now()) @db.Timestamptz(6)

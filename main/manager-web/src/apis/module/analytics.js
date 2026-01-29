@@ -97,5 +97,149 @@ export default {
                     });
                 }
             }).send();
+    },
+
+    // =============================================
+    // Game Analytics Dashboard APIs
+    // =============================================
+
+    // Get dashboard summary (aggregate stats across all devices)
+    getDashboardSummary(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/dashboard/summary`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getDashboardSummary(params, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get sessions per day for trend chart
+    getSessionsPerDay(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/dashboard/sessions-per-day`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getSessionsPerDay(params, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get game accuracy by type
+    getGameAccuracy(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/dashboard/game-accuracy`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getGameAccuracy(params, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get difficulty distribution
+    getDifficultyDistribution(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/dashboard/difficulty-distribution`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getDifficultyDistribution(params, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get TTFT/response time trend
+    getTtftTrend(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/dashboard/ttft-trend`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getTtftTrend(params, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get top active devices
+    getTopDevices(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/dashboard/top-devices`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getTopDevices(params, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get recent sessions (paginated)
+    getRecentSessions(params, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/sessions`)
+            .method('GET')
+            .data(params)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getRecentSessions(params, callback, errorCallback);
+                    });
+                }
+            }).send();
     }
 }
