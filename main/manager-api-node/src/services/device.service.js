@@ -1463,7 +1463,8 @@ const getDailyUsageSummary = async ({ startDate, endDate } = {}) => {
         deviceSet: new Set(),
         session_count: 0,
         message_count: 0,
-        session_duration_seconds: 0
+        session_duration_seconds: 0,
+        weightedTtftSum: 0
       };
     }
     byDate[date].input_tokens += record.input_tokens || 0;
@@ -1477,15 +1478,29 @@ const getDailyUsageSummary = async ({ startDate, endDate } = {}) => {
     byDate[date].session_count += record.session_count || 0;
     byDate[date].message_count += record.message_count || 0;
     byDate[date].session_duration_seconds += record.session_duration_seconds || 0;
+    // Track weighted TTFT sum for average calculation
+    byDate[date].weightedTtftSum += (record.avg_ttft_seconds || 0) * (record.message_count || 0);
   }
 
-  // Convert device sets to counts, add cost_inr, and sort by date descending
+  // Convert device sets to counts, add calculated fields, and sort by date descending
   const dailyData = Object.values(byDate)
     .map(day => {
-      const { deviceSet, ...rest } = day;
+      const { deviceSet, weightedTtftSum, ...rest } = day;
+      const deviceCount = deviceSet.size;
+      const avgDuration = day.session_count > 0
+        ? day.session_duration_seconds / day.session_count
+        : 0;
+      const avgTtft = day.message_count > 0
+        ? weightedTtftSum / day.message_count
+        : 0;
       return {
         ...rest,
-        device_count: deviceSet.size,
+        device_count: deviceCount,
+        // Frontend-expected aliases
+        unique_devices: deviceCount,
+        total_sessions: day.session_count,
+        avg_duration_seconds: avgDuration,
+        avg_ttft_seconds: avgTtft,
         cost_inr: calculateCostInINR(
           day.input_text_tokens,
           day.input_audio_tokens,
@@ -1520,6 +1535,7 @@ const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
     endDate = new Date().toISOString().split('T')[0];
   }
 
+  // Fetch token usage records
   const { data: records, error } = await supabaseAdmin
     .from('device_token_usage')
     .select('*')
@@ -1531,27 +1547,106 @@ const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
     throw new Error('Failed to fetch per-device usage');
   }
 
-  // Transform records to snake_case format with cost_inr
-  const usage = (records || []).map(record => ({
-    mac_address: record.mac_address,
-    usage_date: record.usage_date,
-    input_tokens: record.input_tokens || 0,
-    output_tokens: record.output_tokens || 0,
-    total_tokens: record.total_tokens || 0,
-    input_text_tokens: record.input_text_tokens || 0,
-    input_audio_tokens: record.input_audio_tokens || 0,
-    output_text_tokens: record.output_text_tokens || 0,
-    output_audio_tokens: record.output_audio_tokens || 0,
-    session_count: record.session_count || 0,
-    message_count: record.message_count || 0,
-    session_duration_seconds: record.session_duration_seconds || 0,
-    cost_inr: calculateCostInINR(
-      record.input_text_tokens || 0,
-      record.input_audio_tokens || 0,
-      record.output_text_tokens || 0,
-      record.output_audio_tokens || 0
-    )
-  }));
+  // Get unique MAC addresses from records
+  const macAddresses = [...new Set((records || []).map(r => r.mac_address))];
+
+  // Fetch device info with kid and parent profiles
+  let deviceMap = {};
+  if (macAddresses.length > 0) {
+    const { data: devices } = await supabaseAdmin
+      .from('ai_device')
+      .select('mac_address, alias, kid_id, user_id')
+      .in('mac_address', macAddresses);
+
+    // Get kid IDs and user IDs that exist
+    const kidIds = (devices || []).filter(d => d.kid_id).map(d => d.kid_id);
+    const userIds = (devices || []).filter(d => d.user_id).map(d => d.user_id);
+
+    // Fetch kid profiles if any
+    let kidMap = {};
+    if (kidIds.length > 0) {
+      const { data: kids } = await supabaseAdmin
+        .from('kid_profile')
+        .select('id, name, nickname')
+        .in('id', kidIds);
+
+      for (const kid of kids || []) {
+        kidMap[kid.id] = kid.nickname || kid.name;
+      }
+    }
+
+    // Fetch parent profiles if any
+    let parentMap = {};
+    if (userIds.length > 0) {
+      // First try parent_profile table
+      const { data: parents } = await supabaseAdmin
+        .from('parent_profile')
+        .select('user_id, display_name')
+        .in('user_id', userIds);
+
+      for (const parent of parents || []) {
+        if (parent.display_name) {
+          parentMap[parent.user_id] = parent.display_name;
+        }
+      }
+
+      // Fallback to sys_user nickname for users without parent_profile
+      const usersWithoutProfile = userIds.filter(id => !parentMap[id]);
+      if (usersWithoutProfile.length > 0) {
+        const { data: users } = await supabaseAdmin
+          .from('sys_user')
+          .select('id, nickname, username')
+          .in('id', usersWithoutProfile);
+
+        for (const user of users || []) {
+          if (!parentMap[user.id]) {
+            parentMap[user.id] = user.nickname || user.username;
+          }
+        }
+      }
+    }
+
+    // Build device map with separate kid_name and owner_name (parent)
+    for (const device of devices || []) {
+      const kidName = device.kid_id && kidMap[device.kid_id] ? kidMap[device.kid_id] : null;
+      const parentName = device.user_id && parentMap[device.user_id] ? parentMap[device.user_id] : null;
+
+      deviceMap[device.mac_address] = {
+        kid_name: kidName,
+        owner_name: parentName || device.alias || null
+      };
+    }
+  }
+
+  // Transform records to snake_case format with cost_inr, kid_name, and owner_name
+  const usage = (records || []).map(record => {
+    const deviceInfo = deviceMap[record.mac_address] || {};
+    return {
+      mac_address: record.mac_address,
+      usage_date: record.usage_date,
+      input_tokens: record.input_tokens || 0,
+      output_tokens: record.output_tokens || 0,
+      total_tokens: record.total_tokens || 0,
+      input_text_tokens: record.input_text_tokens || 0,
+      input_audio_tokens: record.input_audio_tokens || 0,
+      output_text_tokens: record.output_text_tokens || 0,
+      output_audio_tokens: record.output_audio_tokens || 0,
+      session_count: record.session_count || 0,
+      message_count: record.message_count || 0,
+      session_duration_seconds: record.session_duration_seconds || 0,
+      // Frontend-expected aliases
+      total_duration_seconds: record.session_duration_seconds || 0,
+      avg_ttft_seconds: record.avg_ttft_seconds || 0,
+      kid_name: deviceInfo.kid_name || null,
+      owner_name: deviceInfo.owner_name || null,
+      cost_inr: calculateCostInINR(
+        record.input_text_tokens || 0,
+        record.input_audio_tokens || 0,
+        record.output_text_tokens || 0,
+        record.output_audio_tokens || 0
+      )
+    };
+  });
 
   // Sort by date descending
   usage.sort((a, b) => b.usage_date.localeCompare(a.usage_date));

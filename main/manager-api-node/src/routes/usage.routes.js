@@ -329,10 +329,15 @@ router.get('/analytics/totals',
         output_text_tokens: totals.outputTextTokens || 0,
         output_audio_tokens: totals.outputAudioTokens || 0,
         session_duration_seconds: totals.sessionDurationSeconds || 0,
+        avg_ttft_seconds: totals.avgTtftSeconds || 0,
         message_count: totals.messageCount || 0,
         session_count: totals.sessionCount || 0,
         device_count: totals.deviceCount || 0,
         day_count: totals.dayCount || 0,
+        // Frontend-expected aliases
+        unique_devices: totals.deviceCount || 0,
+        total_sessions: totals.sessionCount || 0,
+        total_messages: totals.messageCount || 0,
         // Calculate cost in INR for Gemini 2.5 Flash Native Audio (USD rates × ₹91.99)
         // USD: Text In=$0.50, Audio In=$3.00, Text Out=$2.00, Audio Out=$12.00
         cost_inr: Math.round((

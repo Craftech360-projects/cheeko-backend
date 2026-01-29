@@ -331,9 +331,14 @@
           stripe
           style="width: 100%"
         >
-          <el-table-column prop="owner_name" label="Owner" min-width="140">
+          <el-table-column prop="owner_name" label="Parent" min-width="120">
             <template slot-scope="scope">
-              <span class="owner-name">{{ scope.row.owner_name || 'Unknown' }}</span>
+              <span class="owner-name">{{ scope.row.owner_name || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="kid_name" label="Kid" min-width="100">
+            <template slot-scope="scope">
+              <span class="kid-name">{{ scope.row.kid_name || '-' }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="mac_address" label="Device MAC" min-width="150">
@@ -803,6 +808,11 @@ export default {
 .owner-name {
   font-weight: 500;
   color: #3d4566;
+}
+
+.kid-name {
+  font-weight: 500;
+  color: #409eff;
 }
 
 .mac-address {
