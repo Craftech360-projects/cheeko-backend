@@ -45,6 +45,7 @@ from src.shared.entrypoint_utils import (
 )
 from src.features.game_tools import check_math_answer, set_math_game_state
 from src.features.mode_switching import update_agent_mode
+from src.utils.helpers import UsageManager
 
 AGENT_NAME = "math-tutor-agent"
 CHARACTER_NAME = "Math Tutor"
@@ -205,6 +206,13 @@ async def entrypoint(ctx: JobContext):
 
     session = AgentSession(llm=realtime_model, tools=GAME_TOOLS)
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game tools")
+
+    # ============================================================================
+    # USAGE TRACKING: Capture prompt_tokens, completion_tokens, TTFT per response
+    # ============================================================================
+    usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
+    usage_manager.setup_metrics_collection(session)
+    logger.info("Usage tracking initialized - subscribed to metrics_collected event")
 
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
     logger.info("State management registered")
@@ -388,7 +396,17 @@ async def entrypoint(ctx: JobContext):
         try:
             logger.info("Initiating cleanup")
             cancel_idle_timer()  # Stop any pending idle reminders
-            # Use asyncio.shield to protect from cancellation during job shutdown
+
+            # Log usage summary FIRST (before chat history which takes longer)
+            try:
+                if usage_manager:
+                    await asyncio.shield(usage_manager.log_session_summary())
+            except asyncio.CancelledError:
+                logger.warning("Usage logging was cancelled but should complete")
+            except Exception as e:
+                logger.warning(f"Failed to log usage summary: {e}")
+
+            # Extract and send chat history (takes 2-3 seconds due to Mem0)
             try:
                 await asyncio.shield(extract_and_send_chat_history(session, chat_history_service, device_mac))
             except asyncio.CancelledError:
