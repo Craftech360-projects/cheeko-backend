@@ -36,4 +36,10 @@ public class RfidContentLookupDTO implements Serializable {
 
     @Schema(description = "Language code")
     private String language;
+
+    @Schema(description = "Cached audio URL for this sequence (null if not yet cached)")
+    private String cachedAudioUrl;
+
+    @Schema(description = "Whether cached audio is available")
+    private Boolean cached;
 }

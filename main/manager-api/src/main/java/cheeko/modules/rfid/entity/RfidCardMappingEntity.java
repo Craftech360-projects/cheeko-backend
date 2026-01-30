@@ -45,11 +45,8 @@ public class RfidCardMappingEntity extends BaseEntity {
     @Schema(description = "FK to rfid_pack table")
     private Long packId;
 
-    @Schema(description = "FK to rfid_content_pack table for RAG system")
+    @Schema(description = "FK to rfid_content_pack table - unified for all content types (habits, rhymes, etc.)")
     private Long contentPackId;
-
-    @Schema(description = "FK to habit table for basic habits")
-    private Long habitId;
 
     @Schema(description = "Internal notes or description")
     private String notes;

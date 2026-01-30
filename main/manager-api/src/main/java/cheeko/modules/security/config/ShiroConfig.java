@@ -114,7 +114,10 @@ public class ShiroConfig {
         filterMap.put("/content/items/**", "anon");
         filterMap.put("/device/**/playlist/**", "anon"); // Allow anonymous access to playlist APIs
         filterMap.put("/admin/rfid/card/lookup/**", "anon"); // Allow ESP32 device access to RFID question lookup
-        filterMap.put("/admin/rfid/card/habit/download/**", "anon"); // Allow ESP32 device access to habit download manifest
+        filterMap.put("/admin/rfid/card/content/download/**", "anon"); // Allow ESP32 device access to unified content download
+        filterMap.put("/admin/rfid/card/habit/download/**", "anon"); // Allow ESP32 device access to habit download manifest (legacy)
+        filterMap.put("/admin/rfid/card/rhyme/download/**", "anon"); // Allow ESP32 device access to rhyme download (legacy)
+        filterMap.put("/admin/rfid/card/content-pack/**", "anon"); // Allow LiveKit agent to update cached audio URLs
         filterMap.put("/admin/rfid/series/lookup/**", "anon"); // Allow ESP32 device access to RFID series lookup
         filterMap.put("/admin/rfid/pack/active", "anon"); // Allow public access to active packs
         filterMap.put("/admin/rfid/pack/age/**", "anon"); // Allow public access to age-based packs

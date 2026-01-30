@@ -115,3 +115,30 @@ databaseChangeLog:
             encoding: utf8
             path: classpath:db/changelog/V1_9_0__basic_habits_tables.sql
 
+  - changeSet:
+      id: V1_11_0_rhyme_audio_cache
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_11_0__rhyme_audio_cache.sql
+
+  - changeSet:
+      id: V1_12_0_rhyme_item_table
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_12_0__rhyme_item_table.sql
+
+  - changeSet:
+      id: V1_13_0_unified_content_tables
+      author: cheeko
+      validCheckSum: ANY
+      changes:
+        - sqlFile:
+            encoding: utf8
+            path: classpath:db/changelog/V1_13_0__unified_content_tables.sql
+

@@ -14,39 +14,45 @@ import lombok.EqualsAndHashCode;
 import cheeko.common.entity.BaseEntity;
 
 /**
- * Habit Pack Entity
- * Organizes habits into content packs
+ * Unified Content Item Entity
+ * Represents a single item (rhyme, habit step, etc.) within a content pack
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
-@TableName("habit_pack")
-@Schema(description = "Habit Pack Entity")
-public class HabitPackEntity extends BaseEntity {
+@TableName("content_item")
+@Schema(description = "Unified Content Item Entity")
+public class ContentItemEntity extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     @Schema(description = "Primary key")
     private Long id;
 
-    @Schema(description = "Unique pack identifier (e.g., HABITS_EN_01)")
-    private String packCode;
+    @Schema(description = "FK to rfid_content_pack table")
+    private Long contentPackId;
 
-    @Schema(description = "Display name")
-    private String name;
+    @Schema(description = "Item number (1-based)")
+    private Integer itemNumber;
 
-    @Schema(description = "Pack description")
+    @Schema(description = "Item title")
+    private String title;
+
+    @Schema(description = "Description or instruction text")
     private String description;
 
-    @Schema(description = "Total number of habits in pack")
-    private Integer totalHabits;
+    @Schema(description = "Audio file URL")
+    private String audioUrl;
 
-    @Schema(description = "Language code (e.g., en, hi)")
-    private String language;
+    @Schema(description = "Audio file size in bytes")
+    private Long audioSizeBytes;
 
-    @Schema(description = "Content version")
-    private String version;
+    @Schema(description = "Audio duration in milliseconds")
+    private Integer audioDurationMs;
 
-    @Schema(description = "Content hash for cache validation")
-    private String contentHash;
+    @Schema(description = "JSON array of images [{url, sizeBytes, sequence}] - for habits")
+    private String imagesJson;
+
+    @Schema(description = "Lyrics/content text - for rhymes")
+    private String lyricsText;
 
     @Schema(description = "Active status: 0=Disabled, 1=Enabled")
     private Boolean active;

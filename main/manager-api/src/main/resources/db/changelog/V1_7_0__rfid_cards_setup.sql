@@ -2,11 +2,11 @@
 -- Adds support for 5 RFID cards with rhymes, phonics, math, colors, and animals content
 
 -- Step 1: Create new Colors pack
-INSERT INTO rfid_pack (pack_code, name, description, age_min, age_max, active, creator, create_date)
+INSERT IGNORE INTO rfid_pack (pack_code, name, description, age_min, age_max, active, creator, create_date)
 VALUES ('BLINKIT_COLORS_PACK_1', 'Colors Learning Pack 1', 'Color identification and recognition activities.', 3, 6, 1, 1, NOW());
 
 -- Step 2: Insert Math questions (10 questions)
-INSERT INTO rfid_question (code, title, prompt_text, language, category, difficulty, active, creator, create_date)
+INSERT IGNORE INTO rfid_question (code, title, prompt_text, language, category, difficulty, active, creator, create_date)
 VALUES
   ('MATH_ADD_1_1', 'Addition: 1 + 1', 'What is 1 plus 1? Think carefully and tell me the answer!', 'en', 'math', 1, 1, 1, NOW()),
   ('MATH_ADD_2_2', 'Addition: 2 + 2', 'Let''s add 2 plus 2. What do you get?', 'en', 'math', 1, 1, 1, NOW()),
@@ -20,7 +20,7 @@ VALUES
   ('MATH_ADD_8_2', 'Addition: 8 + 2', 'What is 8 plus 2? This is the last one!', 'en', 'math', 1, 1, 1, NOW());
 
 -- Step 3: Insert Colors questions (10 questions)
-INSERT INTO rfid_question (code, title, prompt_text, language, category, difficulty, active, creator, create_date)
+INSERT IGNORE INTO rfid_question (code, title, prompt_text, language, category, difficulty, active, creator, create_date)
 VALUES
   ('COLOR_RED', 'Identify Red', 'Can you find something red around you? Tell me what you see!', 'en', 'colors', 1, 1, 1, NOW()),
   ('COLOR_BLUE', 'Identify Blue', 'Look for something blue. What blue things can you see?', 'en', 'colors', 1, 1, 1, NOW()),
@@ -34,7 +34,7 @@ VALUES
   ('COLOR_WHITE', 'Identify White', 'Look for something white near you. Can you tell me what it is?', 'en', 'colors', 1, 1, 1, NOW());
 
 -- Step 4: Insert Animals questions (10 questions)
-INSERT INTO rfid_question (code, title, prompt_text, language, category, difficulty, active, creator, create_date)
+INSERT IGNORE INTO rfid_question (code, title, prompt_text, language, category, difficulty, active, creator, create_date)
 VALUES
   ('ANIMAL_DOG', 'About Dogs', 'Tell me what you know about dogs. What sound does a dog make?', 'en', 'animals', 1, 1, 1, NOW()),
   ('ANIMAL_CAT', 'About Cats', 'What do you know about cats? How does a cat say hello?', 'en', 'animals', 1, 1, 1, NOW()),
@@ -52,7 +52,7 @@ VALUES
 -- Assuming current max ID is 4, new questions will be IDs 5-34
 
 -- C56C06AD → Rhymes (uses existing RHYMES_EN_01 content pack)
-INSERT INTO rfid_card_mapping (rfid_uid, question_id, question_ids, pack_code, pack_id, content_pack_id, active, creator, create_date)
+INSERT IGNORE INTO rfid_card_mapping (rfid_uid, question_id, question_ids, pack_code, pack_id, content_pack_id, active, creator, create_date)
 SELECT 'C56C06AD', NULL, NULL, 'RHYMES_EN_01', NULL, id, 1, 1, NOW()
 FROM rfid_content_pack WHERE pack_code = 'RHYMES_EN_01';
 
@@ -69,7 +69,7 @@ WHERE rfid_uid = '3D456D7E';
 
 -- 13347AC9 → Math (10 questions)
 -- Get the pack_id for BLINKIT_MATH_PACK_1
-INSERT INTO rfid_card_mapping (rfid_uid, question_id, question_ids, pack_code, pack_id, active, creator, create_date)
+INSERT IGNORE INTO rfid_card_mapping (rfid_uid, question_id, question_ids, pack_code, pack_id, active, creator, create_date)
 SELECT 
     '13347AC9',
     (SELECT MIN(id) FROM rfid_question WHERE code = 'MATH_ADD_1_1'),
@@ -92,7 +92,7 @@ SELECT
     NOW();
 
 -- F67F44F4 → Colors (10 questions)
-INSERT INTO rfid_card_mapping (rfid_uid, question_id, question_ids, pack_code, pack_id, active, creator, create_date)
+INSERT IGNORE INTO rfid_card_mapping (rfid_uid, question_id, question_ids, pack_code, pack_id, active, creator, create_date)
 SELECT 
     'F67F44F4',
     (SELECT MIN(id) FROM rfid_question WHERE code = 'COLOR_RED'),

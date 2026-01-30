@@ -36,6 +36,7 @@ from pydub import AudioSegment
 from src.config.config_loader import ConfigLoader
 from src.services.elevenlabs_tts_service import get_elevenlabs_service
 from src.services.animal_audio_service import AnimalAudioService
+from src.services.rhyme_cache_service import get_rhyme_cache_service
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
@@ -710,7 +711,12 @@ async def entrypoint(ctx: JobContext):
                         
                         elif content_type == 'read_only' and content_text:
                             # RAG mode: Use ElevenLabs TTS for high-quality rhyme playback
-                            logger.info(f"📖 [RFID-RAG] Generating ElevenLabs audio for: {title}")
+                            pack_code = message.get('pack_code', '')
+                            generate_and_cache = message.get('generate_and_cache', False)
+                            notify_firmware = message.get('notify_firmware', False)
+                            client_id = message.get('client_id', '')
+
+                            logger.info(f"[RFID-RAG] Generating ElevenLabs audio for: {title}, pack={pack_code}, seq={sequence}, cache={generate_and_cache}")
 
                             try:
                                 # Get ElevenLabs service and generate audio
@@ -718,21 +724,50 @@ async def entrypoint(ctx: JobContext):
                                 audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
 
                                 if audio_data and not error:
-                                    logger.info(f"🎵 [RFID-RAG] ElevenLabs audio generated: {len(audio_data)} bytes")
+                                    logger.info(f"[RFID-RAG] ElevenLabs audio generated: {len(audio_data)} bytes")
+
+                                    # Cache to S3 if requested (async, don't block playback)
+                                    if generate_and_cache and pack_code and sequence:
+                                        async def cache_and_notify():
+                                            try:
+                                                rhyme_cache = get_rhyme_cache_service()
+                                                url = await rhyme_cache.cache_rhyme_audio(audio_data, pack_code, sequence)
+                                                if url:
+                                                    logger.info(f"[RHYME-CACHE] Cached: {url}")
+
+                                                    # Notify firmware that URL is ready via data channel
+                                                    if notify_firmware and client_id:
+                                                        notification = {
+                                                            "type": "rhyme_cached",
+                                                            "pack_code": pack_code,
+                                                            "sequence": sequence,
+                                                            "audio_url": url,
+                                                            "title": title,
+                                                            "client_id": client_id
+                                                        }
+                                                        await ctx.room.local_participant.publish_data(
+                                                            json.dumps(notification).encode('utf-8'),
+                                                            reliable=True
+                                                        )
+                                                        logger.info(f"[RHYME-CACHE] Notified firmware: {url}")
+                                            except Exception as cache_err:
+                                                logger.error(f"[RHYME-CACHE] Error: {cache_err}")
+
+                                        asyncio.create_task(cache_and_notify())
 
                                     # Play audio using session.say with pre-synthesized frames
                                     await emit_agent_state("speaking")
                                     await play_elevenlabs_audio(session, audio_data, title)
                                     await emit_agent_state("listening")
-                                    logger.info(f"✅ [RFID-RAG] Finished playing rhyme: {title}")
+                                    logger.info(f"[RFID-RAG] Finished playing rhyme: {title}")
                                 else:
                                     # Fallback to Gemini if ElevenLabs fails
-                                    logger.warning(f"⚠️ [RFID-RAG] ElevenLabs failed: {error}, falling back to Gemini")
+                                    logger.warning(f"[RFID-RAG] ElevenLabs failed: {error}, falling back to Gemini")
                                     read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
                                     await session.generate_reply(instructions=read_instruction)
 
                             except Exception as tts_error:
-                                logger.error(f"❌ [RFID-RAG] ElevenLabs error: {tts_error}, falling back to Gemini")
+                                logger.error(f"[RFID-RAG] ElevenLabs error: {tts_error}, falling back to Gemini")
                                 read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
                                 await session.generate_reply(instructions=read_instruction)
                         else:
