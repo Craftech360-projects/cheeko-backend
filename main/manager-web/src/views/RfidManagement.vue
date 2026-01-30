@@ -3,7 +3,7 @@
         <HeaderBar />
 
         <div class="operation-bar">
-            <h2 class="page-title">RFID Management</h2>
+            <h2 class="page-title">RFID Card Management</h2>
             <div class="right-operations">
                 <el-input placeholder="Search..." v-model="searchKeyword" class="search-input"
                     @keyup.enter.native="handleSearch" clearable />
@@ -11,34 +11,87 @@
             </div>
         </div>
 
+        <!-- Stats Overview Bar -->
+        <div class="stats-bar" v-loading="statsLoading" element-loading-background="transparent">
+            <div class="stat-item" @click="switchTab('questions')">
+                <div class="stat-icon prompts"><i class="el-icon-chat-line-round"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalPrompts }}</div>
+                    <div class="stat-label">AI Prompts</div>
+                </div>
+            </div>
+            <div class="stat-item" @click="switchTab('contentPacks')">
+                <div class="stat-icon content"><i class="el-icon-notebook-2"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalContentPacks }}</div>
+                    <div class="stat-label">Story &amp; Rhyme Packs</div>
+                </div>
+            </div>
+            <div class="stat-item" @click="switchTab('packs')">
+                <div class="stat-icon skus"><i class="el-icon-goods"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalProductSkus }}</div>
+                    <div class="stat-label">Product SKUs</div>
+                </div>
+            </div>
+            <div class="stat-item" @click="switchTab('cards')">
+                <div class="stat-icon cards"><i class="el-icon-postcard"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalCards }}</div>
+                    <div class="stat-label">Card Mappings</div>
+                </div>
+            </div>
+            <div class="stat-item" @click="switchTab('series')">
+                <div class="stat-icon series"><i class="el-icon-s-operation"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalSeries }}</div>
+                    <div class="stat-label">Bulk Ranges</div>
+                </div>
+            </div>
+        </div>
+
         <div class="main-wrapper">
             <!-- Tab Navigation -->
             <div class="tab-navigation">
                 <div class="tab-btn" :class="{ active: activeTab === 'questions' }" @click="switchTab('questions')">
-                    Questions
-                </div>
-                <div class="tab-btn" :class="{ active: activeTab === 'packs' }" @click="switchTab('packs')">
-                    Packs
-                </div>
-                <div class="tab-btn" :class="{ active: activeTab === 'cards' }" @click="switchTab('cards')">
-                    Cards
+                    <i class="el-icon-chat-line-round"></i> AI Prompts
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'contentPacks' }" @click="switchTab('contentPacks')">
-                    Content Packs
+                    <i class="el-icon-notebook-2"></i> Story &amp; Rhyme Packs
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'packs' }" @click="switchTab('packs')">
+                    <i class="el-icon-goods"></i> Product SKUs
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'cards' }" @click="switchTab('cards')">
+                    <i class="el-icon-postcard"></i> Card Mappings
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
-                    Series
+                    <i class="el-icon-s-operation"></i> Bulk Ranges
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'console' }" @click="switchTab('console')">
-                    <i class="el-icon-search"></i> Console
+                    <i class="el-icon-search"></i> Lookup &amp; Test
                 </div>
             </div>
 
             <div class="content-panel">
                 <div class="content-area">
                     <el-card class="rfid-card" shadow="never">
-                        <!-- Questions Tab -->
+                        <!-- AI Prompts Tab -->
                         <template v-if="activeTab === 'questions'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-chat-line-round"></i> AI Prompts
+                                        <el-tag size="mini" type="info" class="section-count">{{ questionsTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Prompt templates sent to the AI when a card is tapped. The AI generates a unique response each time.
+                                        <el-tooltip content="Each prompt has a code (e.g., ANIMALS_10), a title, and the prompt text that gets sent to the AI model. Cards reference prompts by ID." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
                             <el-table ref="questionsTable" :data="questionsList" class="transparent-table" v-loading="questionsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
@@ -90,8 +143,22 @@
                             </div>
                         </template>
 
-                        <!-- Packs Tab -->
+                        <!-- Product SKUs Tab -->
                         <template v-if="activeTab === 'packs'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-goods"></i> Product SKUs
+                                        <el-tag size="mini" type="info" class="section-count">{{ packsTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Physical card pack products for retail grouping (e.g., "Blinkit Animals Pack").
+                                        <el-tooltip content="Each product SKU groups RFID cards into a retail pack with a code, name, and target age range." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
                             <el-table ref="packsTable" :data="packsList" class="transparent-table" v-loading="packsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
@@ -145,41 +212,77 @@
                             </div>
                         </template>
 
-                        <!-- Cards Tab -->
+                        <!-- Card Mappings Tab -->
                         <template v-if="activeTab === 'cards'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-postcard"></i> Card Mappings
+                                        <el-tag size="mini" type="info" class="section-count">{{ cardsTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Links a physical RFID card (by UID) to AI Prompts or Story &amp; Rhyme Packs.
+                                        <el-tooltip content="Each card mapping ties one RFID UID to content. A card can reference AI Prompts (for dynamic AI responses) or a Story & Rhyme Pack (for pre-authored TTS content)." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
                             <el-table ref="cardsTable" :data="cardsList" class="transparent-table" v-loading="cardsLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
                                 :header-cell-class-name="headerCellClassName">
-                                <el-table-column label="Select" align="center" width="80">
+                                <el-table-column label="Select" align="center" width="60">
                                     <template slot-scope="scope">
                                         <el-checkbox v-model="scope.row.selected"></el-checkbox>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="RFID UID" prop="rfidUid" align="center" width="150"></el-table-column>
-                                <el-table-column label="Questions" align="center" show-overflow-tooltip>
+                                <el-table-column label="RFID UID" align="center" width="150">
                                     <template slot-scope="scope">
-                                        {{ getQuestionsLabel(scope.row.questionIds || (scope.row.questionId ? [scope.row.questionId] : [])) }}
+                                        <span class="uid-mono">{{ scope.row.rfidUid }}</span>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Pack" align="center" width="150">
+                                <el-table-column label="Content Type" align="center" width="130">
                                     <template slot-scope="scope">
-                                        {{ getPackLabel(scope.row.packId) }}
+                                        <el-tag v-if="scope.row.contentPackId" type="warning" size="small" class="content-badge">
+                                            <i class="el-icon-notebook-2"></i> Story/Rhyme
+                                        </el-tag>
+                                        <el-tag v-else-if="(scope.row.questionIds && scope.row.questionIds.length) || scope.row.questionId" size="small" class="content-badge">
+                                            <i class="el-icon-chat-line-round"></i> AI Prompt
+                                        </el-tag>
+                                        <el-tag v-else type="info" size="small" class="content-badge">
+                                            Unmapped
+                                        </el-tag>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Content Pack" align="center" width="180" show-overflow-tooltip>
+                                <el-table-column label="AI Prompts" align="center" show-overflow-tooltip>
                                     <template slot-scope="scope">
-                                        {{ getContentPackLabel(scope.row.contentPackId) }}
+                                        <el-tooltip v-if="(scope.row.questionIds && scope.row.questionIds.length) || scope.row.questionId" :content="getQuestionsLabel(scope.row.questionIds || (scope.row.questionId ? [scope.row.questionId] : []))" placement="top">
+                                            <el-tag size="small" type="info">{{ (scope.row.questionIds || (scope.row.questionId ? [scope.row.questionId] : [])).length }} prompt(s)</el-tag>
+                                        </el-tooltip>
+                                        <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Active" align="center" width="80">
+                                <el-table-column label="Story/Rhyme Pack" align="center" width="160" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.contentPackId" type="warning" size="small">{{ getContentPackLabel(scope.row.contentPackId) }}</el-tag>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Product SKU" align="center" width="140">
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.packId" type="success" size="small">{{ getPackLabel(scope.row.packId) }}</el-tag>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Active" align="center" width="70">
                                     <template slot-scope="scope">
                                         <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
                                             {{ scope.row.active ? 'Yes' : 'No' }}
                                         </el-tag>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Actions" align="center" width="140">
+                                <el-table-column label="Actions" align="center" width="120">
                                     <template slot-scope="scope">
                                         <el-button size="mini" type="text" @click="editCard(scope.row)">Edit</el-button>
                                         <el-button size="mini" type="text" @click="deleteCard(scope.row)">Delete</el-button>
@@ -209,23 +312,38 @@
                             </div>
                         </template>
 
-                        <!-- Content Packs Tab -->
+                        <!-- Story & Rhyme Packs Tab -->
                         <template v-if="activeTab === 'contentPacks'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-notebook-2"></i> Story &amp; Rhyme Packs
+                                        <el-tag size="mini" type="info" class="section-count">{{ contentPacksTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Pre-authored content (rhymes, habits, stories) read directly by TTS. Each pack has numbered items.
+                                        <el-tooltip content="Content packs hold markdown text split by numbered items (## 1. Title). When a card is tapped, the device requests a specific item number (sequence). 'AI Generated' packs use AI; 'TTS Read-Aloud' packs are read as-is." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
                             <el-table ref="contentPacksTable" :data="contentPacksList" class="transparent-table" v-loading="contentPacksLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
                                 :header-cell-class-name="headerCellClassName">
-                                <el-table-column label="Select" align="center" width="80">
+                                <el-table-column label="Select" align="center" width="60">
                                     <template slot-scope="scope">
                                         <el-checkbox v-model="scope.row.selected"></el-checkbox>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="Pack Code" prop="packCode" align="center" width="200"></el-table-column>
                                 <el-table-column label="Name" prop="name" align="center" show-overflow-tooltip></el-table-column>
-                                <el-table-column label="Type" prop="contentType" align="center" width="100">
+                                <el-table-column label="Delivery" align="center" width="150">
                                     <template slot-scope="scope">
                                         <el-tag :type="scope.row.contentType === 'prompt' ? '' : 'warning'" size="small">
-                                            {{ scope.row.contentType === 'prompt' ? 'Prompt' : 'Read Only' }}
+                                            <i :class="scope.row.contentType === 'prompt' ? 'el-icon-chat-line-round' : 'el-icon-reading'"></i>
+                                            {{ scope.row.contentType === 'prompt' ? 'AI Generated' : 'TTS Read-Aloud' }}
                                         </el-tag>
                                     </template>
                                 </el-table-column>
@@ -238,7 +356,7 @@
                                         </el-tag>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Actions" align="center" width="140">
+                                <el-table-column label="Actions" align="center" width="120">
                                     <template slot-scope="scope">
                                         <el-button size="mini" type="text" @click="editContentPack(scope.row)">Edit</el-button>
                                         <el-button size="mini" type="text" @click="deleteContentPack(scope.row)">Delete</el-button>
@@ -268,8 +386,22 @@
                             </div>
                         </template>
 
-                        <!-- Series Tab -->
+                        <!-- Bulk Ranges Tab -->
                         <template v-if="activeTab === 'series'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-s-operation"></i> Bulk Ranges
+                                        <el-tag size="mini" type="info" class="section-count">{{ seriesTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Maps an entire range of RFID UIDs to the same prompt. Used for manufacturing batches.
+                                        <el-tooltip content="Bulk ranges let you assign one AI prompt to all cards with UIDs between a start and end value. Useful when manufacturing many cards with the same content. Priority determines which range wins if UIDs overlap." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
                             <el-table ref="seriesTable" :data="seriesList" class="transparent-table" v-loading="seriesLoading"
                                 element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
@@ -329,12 +461,21 @@
                             </div>
                         </template>
 
-                        <!-- Console Tab -->
+                        <!-- Lookup & Test Tab -->
                         <template v-if="activeTab === 'console'">
                             <div class="console-container">
-                                <div class="console-header">
-                                    <h3>RFID Lookup Console</h3>
-                                    <p class="console-description">Test RFID card lookups to verify card-to-content mappings</p>
+                                <div class="section-header">
+                                    <div class="section-info">
+                                        <h3 class="section-title">
+                                            <i class="el-icon-search"></i> Lookup &amp; Test
+                                        </h3>
+                                        <p class="section-description">
+                                            Test RFID card lookups to verify card-to-content mappings before deploying to devices.
+                                            <el-tooltip content="Use this console to test what happens when a physical RFID card is tapped on a device. Enter a UID and use the buttons to simulate different lookup flows." placement="top">
+                                                <i class="el-icon-question section-help"></i>
+                                            </el-tooltip>
+                                        </p>
+                                    </div>
                                 </div>
 
                                 <div class="console-input-section">
@@ -347,26 +488,44 @@
                                     >
                                         <template slot="prepend">RFID UID</template>
                                     </el-input>
-                                    <el-input-number v-model="consoleSequence" :min="1" :max="99" class="console-sequence" controls-position="right"></el-input-number>
-                                    <el-button type="primary" :loading="consoleLookupLoading" @click="handleConsoleLookup">
-                                        <i class="el-icon-search"></i> Card
-                                    </el-button>
-                                    <el-button type="info" :loading="consoleSeriesLoading" @click="handleSeriesLookup">
-                                        <i class="el-icon-files"></i> Series
-                                    </el-button>
-                                    <el-button type="success" :loading="consoleContentLoading" @click="handleContentLookup">
-                                        <i class="el-icon-document"></i> Content
-                                    </el-button>
-                                    <el-button type="warning" :loading="consoleDownloadLoading" @click="handleDownloadLookup">
-                                        <i class="el-icon-download"></i> Download
-                                    </el-button>
+                                    <div class="sequence-group">
+                                        <label class="sequence-label">Item #
+                                            <el-tooltip content="Which numbered item in a Story/Rhyme pack to retrieve (e.g., item 3 of a rhymes pack)" placement="top">
+                                                <i class="el-icon-question"></i>
+                                            </el-tooltip>
+                                        </label>
+                                        <el-input-number v-model="consoleSequence" :min="1" :max="99" class="console-sequence" controls-position="right"></el-input-number>
+                                    </div>
+                                </div>
+
+                                <div class="console-actions">
+                                    <el-tooltip content="Find the exact card mapping for this UID" placement="top">
+                                        <el-button type="primary" :loading="consoleLookupLoading" @click="handleConsoleLookup">
+                                            <i class="el-icon-search"></i> Find Card Mapping
+                                        </el-button>
+                                    </el-tooltip>
+                                    <el-tooltip content="Check if this UID falls within any bulk range" placement="top">
+                                        <el-button type="info" :loading="consoleSeriesLoading" @click="handleSeriesLookup">
+                                            <i class="el-icon-s-operation"></i> Find Bulk Range
+                                        </el-button>
+                                    </el-tooltip>
+                                    <el-tooltip content="Get the final content (AI prompt text or story item) for this UID + sequence" placement="top">
+                                        <el-button type="success" :loading="consoleContentLoading" @click="handleContentLookup">
+                                            <i class="el-icon-document"></i> Resolve Content
+                                        </el-button>
+                                    </el-tooltip>
+                                    <el-tooltip content="Get audio download URLs for device offline playback" placement="top">
+                                        <el-button type="warning" :loading="consoleDownloadLoading" @click="handleDownloadLookup">
+                                            <i class="el-icon-download"></i> Download Manifest
+                                        </el-button>
+                                    </el-tooltip>
                                 </div>
 
                                 <div class="console-result" v-if="consoleLookupResult">
                                     <div class="result-header">
                                         <span class="result-label">
                                             <i :class="consoleLookupResult.success ? 'el-icon-success' : 'el-icon-error'"></i>
-                                            {{ consoleLookupResult.success ? 'Card Found' : 'Card Not Found' }}
+                                            {{ getResultTitle(consoleLookupResult) }}
                                         </span>
                                         <el-tag :type="consoleLookupResult.success ? 'success' : 'danger'" size="small">
                                             {{ consoleLookupResult.type || 'card' }}
@@ -376,8 +535,26 @@
                                 </div>
 
                                 <div class="console-empty" v-else>
-                                    <i class="el-icon-postcard"></i>
-                                    <p>Enter an RFID UID and click Lookup to test card mappings</p>
+                                    <i class="el-icon-search" style="font-size: 48px; margin-bottom: 16px; color: #c0c4cc;"></i>
+                                    <p style="font-size: 15px; margin-bottom: 20px;">Enter an RFID UID above and use the buttons to test different lookups</p>
+                                    <div class="lookup-guide">
+                                        <div class="guide-item">
+                                            <el-tag size="small">Find Card Mapping</el-tag>
+                                            <span>Exact UID match in Card Mappings</span>
+                                        </div>
+                                        <div class="guide-item">
+                                            <el-tag size="small" type="info">Find Bulk Range</el-tag>
+                                            <span>Check if UID falls in any start-end range</span>
+                                        </div>
+                                        <div class="guide-item">
+                                            <el-tag size="small" type="success">Resolve Content</el-tag>
+                                            <span>Get final content (prompt text or story item)</span>
+                                        </div>
+                                        <div class="guide-item">
+                                            <el-tag size="small" type="warning">Download Manifest</el-tag>
+                                            <span>Get audio URLs for device offline playback</span>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </template>
@@ -464,7 +641,7 @@ export default {
             questionsTotal: 0,
             isAllQuestionsSelected: false,
             questionDialogVisible: false,
-            questionDialogTitle: 'Add Question',
+            questionDialogTitle: 'Add AI Prompt',
             questionForm: { id: null, code: '', title: '', promptText: '', language: 'en', category: '', difficulty: 3, active: true },
 
             // Packs
@@ -475,7 +652,7 @@ export default {
             packsTotal: 0,
             isAllPacksSelected: false,
             packDialogVisible: false,
-            packDialogTitle: 'Add Pack',
+            packDialogTitle: 'Add Product SKU',
             packForm: { id: null, packCode: '', name: '', description: '', ageMin: 3, ageMax: 16, active: true },
 
             // Cards
@@ -486,7 +663,7 @@ export default {
             cardsTotal: 0,
             isAllCardsSelected: false,
             cardDialogVisible: false,
-            cardDialogTitle: 'Add Card',
+            cardDialogTitle: 'Add Card Mapping',
             cardForm: { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, contentPackId: null, notes: '', active: true },
 
             // Series
@@ -497,7 +674,7 @@ export default {
             seriesTotal: 0,
             isAllSeriesSelected: false,
             seriesDialogVisible: false,
-            seriesDialogTitle: 'Add Series',
+            seriesDialogTitle: 'Add Bulk Range',
             seriesForm: { id: null, startUid: '', endUid: '', questionId: null, packId: null, priority: 0, notes: '', active: true },
 
             // Content Packs
@@ -508,7 +685,7 @@ export default {
             contentPacksTotal: 0,
             isAllContentPacksSelected: false,
             contentPackDialogVisible: false,
-            contentPackDialogTitle: 'Add Content Pack',
+            contentPackDialogTitle: 'Add Story & Rhyme Pack',
             contentPackForm: { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, active: true },
 
             // Dropdown data
@@ -523,12 +700,23 @@ export default {
             consoleContentLoading: false,
             consoleDownloadLoading: false,
             consoleSequence: 1,
-            consoleLookupResult: null
+            consoleLookupResult: null,
+
+            // Stats
+            stats: {
+                totalPrompts: 0,
+                totalContentPacks: 0,
+                totalProductSkus: 0,
+                totalCards: 0,
+                totalSeries: 0
+            },
+            statsLoading: false
         };
     },
     created() {
         this.fetchQuestions();
         this.loadDropdownData();
+        this.loadStats();
     },
     computed: {
         // Questions pagination
@@ -633,6 +821,48 @@ export default {
             });
         },
 
+        loadStats() {
+            this.statsLoading = true;
+            let completed = 0;
+            const checkDone = () => {
+                completed++;
+                if (completed >= 5) this.statsLoading = false;
+            };
+            Api.rfid.getQuestionPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalPrompts = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getContentPackPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalContentPacks = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getPackPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalProductSkus = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getCardPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalCards = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getSeriesPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalSeries = data.data.total || 0;
+                checkDone();
+            });
+        },
+
+        getResultTitle(result) {
+            if (!result) return '';
+            const typeMap = {
+                'card': result.success ? 'Card Mapping Found' : 'Card Mapping Not Found',
+                'series': result.success ? 'Bulk Range Found' : 'No Bulk Range for this UID',
+                'download manifest': result.success ? 'Download Manifest Ready' : 'Download Manifest Not Found'
+            };
+            if (result.type && result.type.startsWith('content')) {
+                return result.success ? 'Content Resolved' : 'Content Not Found';
+            }
+            return typeMap[result.type] || (result.success ? 'Found' : 'Not Found');
+        },
+
         getQuestionLabel(id) {
             const q = this.questionsDropdown.find(q => q.id === id);
             return q ? `${q.code} - ${q.title}` : '-';
@@ -691,13 +921,13 @@ export default {
         },
 
         showAddQuestionDialog() {
-            this.questionDialogTitle = 'Add Question';
+            this.questionDialogTitle = 'Add AI Prompt';
             this.questionForm = { id: null, code: '', title: '', promptText: '', language: 'en', category: '', difficulty: 3, active: true };
             this.questionDialogVisible = true;
         },
 
         editQuestion(row) {
-            this.questionDialogTitle = 'Edit Question';
+            this.questionDialogTitle = 'Edit AI Prompt';
             this.questionForm = { ...row };
             this.questionDialogVisible = true;
         },
@@ -711,6 +941,7 @@ export default {
                     this.questionDialogVisible = false;
                     this.fetchQuestions();
                     this.loadDropdownData();
+                    this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -730,6 +961,7 @@ export default {
                         this.$message.success('Deleted successfully');
                         this.fetchQuestions();
                         this.loadDropdownData();
+                        this.loadStats();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -780,13 +1012,13 @@ export default {
         },
 
         showAddPackDialog() {
-            this.packDialogTitle = 'Add Pack';
+            this.packDialogTitle = 'Add Product SKU';
             this.packForm = { id: null, packCode: '', name: '', description: '', ageMin: 3, ageMax: 16, active: true };
             this.packDialogVisible = true;
         },
 
         editPack(row) {
-            this.packDialogTitle = 'Edit Pack';
+            this.packDialogTitle = 'Edit Product SKU';
             this.packForm = { ...row };
             this.packDialogVisible = true;
         },
@@ -800,6 +1032,7 @@ export default {
                     this.packDialogVisible = false;
                     this.fetchPacks();
                     this.loadDropdownData();
+                    this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -819,6 +1052,7 @@ export default {
                         this.$message.success('Deleted successfully');
                         this.fetchPacks();
                         this.loadDropdownData();
+                        this.loadStats();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -869,13 +1103,13 @@ export default {
         },
 
         showAddCardDialog() {
-            this.cardDialogTitle = 'Add Card';
+            this.cardDialogTitle = 'Add Card Mapping';
             this.cardForm = { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, contentPackId: null, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
         editCard(row) {
-            this.cardDialogTitle = 'Edit Card';
+            this.cardDialogTitle = 'Edit Card Mapping';
             const form = { ...row };
             // Backward compatibility: convert legacy questionId to questionIds array
             if (!form.questionIds && form.questionId) {
@@ -896,6 +1130,7 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.cardDialogVisible = false;
                     this.fetchCards();
+                    this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -914,6 +1149,7 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchCards();
+                        this.loadStats();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -964,13 +1200,13 @@ export default {
         },
 
         showAddContentPackDialog() {
-            this.contentPackDialogTitle = 'Add Content Pack';
+            this.contentPackDialogTitle = 'Add Story & Rhyme Pack';
             this.contentPackForm = { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, active: true };
             this.contentPackDialogVisible = true;
         },
 
         editContentPack(row) {
-            this.contentPackDialogTitle = 'Edit Content Pack';
+            this.contentPackDialogTitle = 'Edit Story & Rhyme Pack';
             this.contentPackForm = { ...row };
             this.contentPackDialogVisible = true;
         },
@@ -984,6 +1220,7 @@ export default {
                     this.contentPackDialogVisible = false;
                     this.fetchContentPacks();
                     this.loadDropdownData();
+                    this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -1003,6 +1240,7 @@ export default {
                         this.$message.success('Deleted successfully');
                         this.fetchContentPacks();
                         this.loadDropdownData();
+                        this.loadStats();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -1052,13 +1290,13 @@ export default {
         },
 
         showAddSeriesDialog() {
-            this.seriesDialogTitle = 'Add Series';
+            this.seriesDialogTitle = 'Add Bulk Range';
             this.seriesForm = { id: null, startUid: '', endUid: '', questionId: null, packId: null, priority: 0, notes: '', active: true };
             this.seriesDialogVisible = true;
         },
 
         editSeries(row) {
-            this.seriesDialogTitle = 'Edit Series';
+            this.seriesDialogTitle = 'Edit Bulk Range';
             this.seriesForm = { ...row };
             this.seriesDialogVisible = true;
         },
@@ -1071,6 +1309,7 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.seriesDialogVisible = false;
                     this.fetchSeries();
+                    this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
                 }
@@ -1089,6 +1328,7 @@ export default {
                     if (data.code === 0) {
                         this.$message.success('Deleted successfully');
                         this.fetchSeries();
+                        this.loadStats();
                     } else {
                         this.$message.error(data.msg || 'Delete failed');
                     }
@@ -1496,6 +1736,129 @@ export default {
 }
 
 /* Console Tab Styles */
+/* Stats Bar */
+.stats-bar {
+    display: flex;
+    gap: 16px;
+    padding: 0 24px 8px;
+    min-height: 64px;
+}
+
+.stat-item {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    cursor: pointer;
+    transition: all 0.2s ease;
+
+    &:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+}
+
+.stat-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+
+    &.prompts { background: #eff6ff; color: #3b82f6; }
+    &.content { background: #fff7ed; color: #f97316; }
+    &.skus { background: #f0fdf4; color: #22c55e; }
+    &.cards { background: #faf5ff; color: #a855f7; }
+    &.series { background: #fef2f2; color: #ef4444; }
+}
+
+.stat-content {
+    .stat-value {
+        font-size: 20px;
+        font-weight: 700;
+        color: #1e293b;
+        line-height: 1.2;
+    }
+
+    .stat-label {
+        font-size: 11px;
+        color: #94a3b8;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+}
+
+/* Section Headers */
+.section-header {
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid #f1f5f9;
+    margin-bottom: 4px;
+}
+
+.section-info {
+    .section-title {
+        margin: 0 0 4px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #1e293b;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        i {
+            color: #5f70f3;
+        }
+    }
+
+    .section-count {
+        font-weight: 500;
+        font-size: 11px;
+    }
+
+    .section-description {
+        margin: 0;
+        font-size: 13px;
+        color: #64748b;
+        line-height: 1.5;
+    }
+
+    .section-help {
+        color: #94a3b8;
+        cursor: help;
+        margin-left: 4px;
+
+        &:hover {
+            color: #5f70f3;
+        }
+    }
+}
+
+/* Card table helpers */
+.uid-mono {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    color: #334155;
+    letter-spacing: 0.5px;
+}
+
+.text-muted {
+    color: #cbd5e1;
+}
+
+.content-badge {
+    i {
+        margin-right: 3px;
+    }
+}
+
+/* Console Tab Styles */
 .console-container {
     padding: 20px;
     height: 100%;
@@ -1503,27 +1866,11 @@ export default {
     flex-direction: column;
 }
 
-.console-header {
-    margin-bottom: 20px;
-
-    h3 {
-        margin: 0 0 8px 0;
-        color: #3d4566;
-        font-size: 18px;
-    }
-
-    .console-description {
-        margin: 0;
-        color: #909399;
-        font-size: 13px;
-    }
-}
-
 .console-input-section {
     display: flex;
     gap: 12px;
-    margin-bottom: 20px;
-    align-items: center;
+    margin-bottom: 16px;
+    align-items: flex-end;
     flex-wrap: wrap;
 
     .console-input {
@@ -1533,7 +1880,53 @@ export default {
     }
 
     .console-sequence {
-        width: 100px;
+        width: 90px;
+    }
+}
+
+.sequence-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    .sequence-label {
+        font-size: 12px;
+        color: #64748b;
+        font-weight: 500;
+
+        i {
+            font-size: 12px;
+            color: #94a3b8;
+            cursor: help;
+        }
+    }
+}
+
+.console-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.lookup-guide {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    text-align: left;
+    max-width: 400px;
+
+    .guide-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 13px;
+        color: #64748b;
+
+        .el-tag {
+            min-width: 130px;
+            text-align: center;
+        }
     }
 }
 

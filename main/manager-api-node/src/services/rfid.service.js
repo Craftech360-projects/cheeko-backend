@@ -144,7 +144,7 @@ const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, que
     dataQuery = dataQuery.eq('question_id', questionId);
   }
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     countQuery = countQuery.eq('active', active);
     dataQuery = dataQuery.eq('active', active);
   }
@@ -187,7 +187,7 @@ const getCardMappingList = async ({ packCode, questionId, active } = {}) => {
     query = query.eq('question_id', questionId);
   }
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     query = query.eq('active', active);
   }
 
@@ -871,7 +871,7 @@ const getPackPage = async ({ page = 1, limit = 10, packCode, name, active } = {}
     dataQuery = dataQuery.ilike('pack_name', `%${name}%`);
   }
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     // Convert boolean to status (1=active, 0=inactive)
     const statusValue = active ? 1 : 0;
     countQuery = countQuery.eq('status', statusValue);
@@ -917,7 +917,7 @@ const getPackList = async ({ packCode, name, active } = {}) => {
     query = query.ilike('pack_name', `%${name}%`);
   }
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     const statusValue = active ? 1 : 0;
     query = query.eq('status', statusValue);
   }
@@ -1182,7 +1182,7 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
 
   // questionId filter not applicable - rfid_series doesn't have question_id column
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     const statusValue = active === true || active === 'true' ? 1 : 0;
     countQuery = countQuery.eq('status', statusValue);
     dataQuery = dataQuery.eq('status', statusValue);
@@ -1226,7 +1226,7 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
 
   // questionId filter not applicable - rfid_series doesn't have question_id column
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     const statusValue = active === true || active === 'true' ? 1 : 0;
     query = query.eq('status', statusValue);
   }
@@ -1519,7 +1519,7 @@ const getQuestionPage = async ({ page = 1, limit = 10, category, language, activ
     dataQuery = dataQuery.eq('language', language);
   }
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     countQuery = countQuery.eq('active', active);
     dataQuery = dataQuery.eq('active', active);
   }
@@ -1562,7 +1562,7 @@ const getQuestionList = async ({ category, language, active } = {}) => {
     query = query.eq('language', language);
   }
 
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     query = query.eq('active', active);
   }
 
@@ -2692,7 +2692,7 @@ const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, conten
     countQuery = countQuery.eq('language', language);
     dataQuery = dataQuery.eq('language', language);
   }
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     const activeVal = active === true || active === 'true' || active === '1';
     countQuery = countQuery.eq('active', activeVal);
     dataQuery = dataQuery.eq('active', activeVal);
@@ -2730,7 +2730,7 @@ const getContentPackList = async ({ packCode, name, contentType, language, activ
   if (name) query = query.ilike('name', `%${name}%`);
   if (contentType) query = query.eq('content_type', contentType);
   if (language) query = query.eq('language', language);
-  if (active !== undefined) {
+  if (active !== undefined && active !== null && active !== '') {
     const activeVal = active === true || active === 'true' || active === '1';
     query = query.eq('active', activeVal);
   }
