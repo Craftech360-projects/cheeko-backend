@@ -506,42 +506,6 @@ router.post('/rag/search',
 
 /**
  * @swagger
- * /admin/rfid/content-pack/{id}:
- *   get:
- *     tags: [RFID]
- *     summary: Get content pack by ID
- *     description: Retrieve content pack details for RAG content management
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: integer
- *         description: Content pack ID
- *     responses:
- *       200:
- *         description: Content pack details
- *       404:
- *         description: Content pack not found
- */
-router.get('/content-pack/:id',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { id } = req.params;
-
-    const pack = await rfidService.getContentPack(parseInt(id));
-    if (!pack) {
-      return notFound(res, 'Content pack not found');
-    }
-
-    success(res, pack);
-  })
-);
-
-/**
- * @swagger
  * /admin/rfid/card:
  *   post:
  *     tags: [RFID]
@@ -3604,6 +3568,42 @@ router.post('/content-pack/delete',
 
     await rfidService.deleteContentPacks(ids);
     success(res, null, 'Content packs deleted successfully');
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/{id}:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get content pack by ID
+ *     description: Retrieve content pack details for RAG content management
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Content pack ID
+ *     responses:
+ *       200:
+ *         description: Content pack details
+ *       404:
+ *         description: Content pack not found
+ */
+router.get('/content-pack/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+
+    const pack = await rfidService.getContentPack(parseInt(id));
+    if (!pack) {
+      return notFound(res, 'Content pack not found');
+    }
+
+    success(res, pack);
   })
 );
 

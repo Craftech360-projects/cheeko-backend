@@ -481,6 +481,139 @@ export default {
             }).send()
     },
 
+    // ==================== CONTENT PACKS ====================
+
+    // Get content pack page list
+    getContentPackPage(params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page || 1,
+            limit: params.limit || 10,
+            packCode: params.packCode || '',
+            contentType: params.contentType || '',
+            language: params.language || '',
+            active: params.active !== undefined ? params.active : ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack/page?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get content pack list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getContentPackPage(params, callback)
+                })
+            }).send()
+    },
+
+    // Get all content packs list
+    getContentPackList(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack/list`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get content pack list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getContentPackList(callback)
+                })
+            }).send()
+    },
+
+    // Get active content packs
+    getContentPackActive(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack/active`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get active content packs:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getContentPackActive(callback)
+                })
+            }).send()
+    },
+
+    // Get content pack by code
+    getContentPackByCode(packCode, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get content pack:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getContentPackByCode(packCode, callback)
+                })
+            }).send()
+    },
+
+    // Add content pack
+    addContentPack(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack`)
+            .method('POST')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to add content pack:', err)
+                RequestService.reAjaxFun(() => {
+                    this.addContentPack(data, callback)
+                })
+            }).send()
+    },
+
+    // Update content pack
+    updateContentPack(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack`)
+            .method('PUT')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to update content pack:', err)
+                RequestService.reAjaxFun(() => {
+                    this.updateContentPack(data, callback)
+                })
+            }).send()
+    },
+
+    // Delete content packs
+    deleteContentPack(ids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/content-pack/delete`)
+            .method('POST')
+            .data(ids)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete content pack:', err)
+                RequestService.reAjaxFun(() => {
+                    this.deleteContentPack(ids, callback)
+                })
+            }).send()
+    },
+
     // ==================== LOOKUP (Console) ====================
 
     // Lookup card by RFID UID
@@ -509,6 +642,37 @@ export default {
             })
             .networkFail((err) => {
                 console.error('Failed to lookup series:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+
+    // Lookup content by RFID UID with sequence
+    lookupContent(rfidUid, sequence, callback) {
+        const seqParam = sequence ? `?sequence=${sequence}` : '';
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}${seqParam}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to lookup content:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+
+    // Get content download manifest
+    getContentDownload(rfidUid, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/card/content/download/${encodeURIComponent(rfidUid)}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get content download:', err)
                 callback({ data: { code: -1, msg: 'Network error', data: null } })
             }).send()
     }

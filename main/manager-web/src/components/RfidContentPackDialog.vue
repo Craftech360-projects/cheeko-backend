@@ -1,7 +1,7 @@
 <template>
   <el-dialog :title="title"
     :visible.sync="visible"
-    width="520px"
+    width="600px"
     class="rfid-dialog-wrapper"
     :append-to-body="true"
     :close-on-click-modal="false"
@@ -19,47 +19,39 @@
         </button>
       </div>
 
-      <el-form :model="form" :rules="rules" ref="form" label-width="110px" label-position="left" class="rfid-form">
-        <el-form-item label="RFID UID" prop="rfidUid" class="form-item">
-          <el-input v-model="form.rfidUid" placeholder="Physical card UID (hex)" class="custom-input"></el-input>
-        </el-form-item>
-
-        <el-form-item label="Questions" prop="questionIds" class="form-item">
-          <el-select v-model="form.questionIds" placeholder="Select questions" class="custom-select" filterable clearable multiple collapse-tags>
-            <el-option
-              v-for="q in questions"
-              :key="q.id"
-              :label="`${q.code} - ${q.title}`"
-              :value="q.id"/>
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="Pack" prop="packId" class="form-item">
-          <el-select v-model="form.packId" placeholder="Select pack" class="custom-select" filterable clearable>
-            <el-option
-              v-for="p in packs"
-              :key="p.id"
-              :label="`${p.packCode} - ${p.name}`"
-              :value="p.id"/>
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="Content Pack" prop="contentPackId" class="form-item">
-          <el-select v-model="form.contentPackId" placeholder="Select content pack" class="custom-select" filterable clearable>
-            <el-option
-              v-for="cp in contentPacks"
-              :key="cp.id"
-              :label="`${cp.packCode} - ${cp.name}`"
-              :value="cp.id"/>
-          </el-select>
-        </el-form-item>
-
+      <el-form :model="form" :rules="rules" ref="form" label-width="130px" label-position="left" class="rfid-form">
         <el-form-item label="Pack Code" prop="packCode" class="form-item">
-          <el-input v-model="form.packCode" placeholder="Legacy pack code (optional)" class="custom-input"></el-input>
+          <el-input v-model="form.packCode" placeholder="e.g., BASIC_RHYMES_EN" class="custom-input"></el-input>
         </el-form-item>
 
-        <el-form-item label="Notes" prop="notes" class="form-item">
-          <el-input type="textarea" v-model="form.notes" placeholder="Internal notes" :rows="2" class="custom-textarea"></el-input>
+        <el-form-item label="Name" prop="name" class="form-item">
+          <el-input v-model="form.name" placeholder="Display name" class="custom-input"></el-input>
+        </el-form-item>
+
+        <el-form-item label="Description" prop="description" class="form-item">
+          <el-input type="textarea" v-model="form.description" placeholder="Content pack description" :rows="2" class="custom-textarea"></el-input>
+        </el-form-item>
+
+        <el-form-item label="Content Type" prop="contentType" class="form-item">
+          <el-select v-model="form.contentType" placeholder="Select type" class="custom-select">
+            <el-option label="Prompt (AI-generated)" value="prompt"/>
+            <el-option label="Read Only (TTS)" value="read_only"/>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="Language" prop="language" class="form-item">
+          <el-select v-model="form.language" placeholder="Select language" class="custom-select">
+            <el-option label="English" value="en"/>
+            <el-option label="Hindi" value="hi"/>
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="Total Items" prop="totalItems" class="form-item">
+          <el-input-number v-model="form.totalItems" :min="0" :max="999" class="total-items-input"></el-input-number>
+        </el-form-item>
+
+        <el-form-item label="Content (MD)" prop="contentMd" class="form-item">
+          <el-input type="textarea" v-model="form.contentMd" placeholder="Markdown content (## 1. Title\ncontent\n---)" :rows="8" class="custom-textarea"></el-input>
         </el-form-item>
 
         <el-form-item label="Active" prop="active" class="form-item">
@@ -89,7 +81,7 @@ export default {
   props: {
     title: {
       type: String,
-      default: 'Add Card'
+      default: 'Add Content Pack'
     },
     visible: {
       type: Boolean,
@@ -99,25 +91,15 @@ export default {
       type: Object,
       default: () => ({
         id: null,
-        rfidUid: '',
-        questionIds: [],
         packCode: '',
-        packId: null,
-        notes: '',
+        name: '',
+        description: '',
+        contentType: 'prompt',
+        language: 'en',
+        contentMd: '',
+        totalItems: 0,
         active: true
       })
-    },
-    questions: {
-      type: Array,
-      default: () => []
-    },
-    packs: {
-      type: Array,
-      default: () => []
-    },
-    contentPacks: {
-      type: Array,
-      default: () => []
     }
   },
   data() {
@@ -125,8 +107,11 @@ export default {
       dialogKey: Date.now(),
       saving: false,
       rules: {
-        rfidUid: [
-          { required: true, message: "Please enter RFID UID", trigger: "blur" }
+        packCode: [
+          { required: true, message: "Please enter pack code", trigger: "blur" }
+        ],
+        name: [
+          { required: true, message: "Please enter name", trigger: "blur" }
         ]
       }
     };
@@ -278,12 +263,17 @@ export default {
         padding: 12px 14px;
         font-size: 14px;
         color: #334155;
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
 
         &:focus {
           border-color: #3b82f6;
           box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
         }
       }
+    }
+
+    .total-items-input {
+      width: 160px;
     }
   }
 

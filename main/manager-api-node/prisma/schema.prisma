@@ -518,55 +518,121 @@ model parent_profile {
 }
 
 model rfid_card_mapping {
-  id              BigInt   @id @default(autoincrement())
-  rfid_uid        String   @db.VarChar(50)
-  content_pack_id BigInt?
-  question_ids    Json     @default("[]")
-  active          Boolean  @default(true)
-  create_date     DateTime @default(now()) @db.Timestamptz(6)
-  creator         BigInt?
-  notes           String?  @db.VarChar(500)
-  pack_code       String?  @db.VarChar(100)
-  pack_id         BigInt?
-  question_id     BigInt?
-  update_date     DateTime @default(now()) @db.Timestamptz(6)
-  updater         BigInt?
+  id                BigInt              @id @default(autoincrement())
+  rfid_uid          String              @unique @db.VarChar(50)
+  content_pack_id   BigInt?
+  pack_id           BigInt?
+  question_id       BigInt?
+  question_ids      Json                @default("[]")
+  pack_code         String?             @db.VarChar(100)
+  notes             String?             @db.VarChar(500)
+  active            Boolean             @default(true)
+  creator           BigInt?
+  create_date       DateTime            @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  update_date       DateTime            @default(now()) @db.Timestamptz(6)
+  rfid_content_pack rfid_content_pack?  @relation(fields: [content_pack_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rfid_pack         rfid_pack?          @relation(fields: [pack_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rfid_question     rfid_question?      @relation(fields: [question_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@index([content_pack_id], map: "idx_rfid_card_mapping_pack")
   @@index([rfid_uid], map: "idx_rfid_card_mapping_uid")
+  @@index([question_id], map: "idx_rfid_card_mapping_question")
+  @@index([pack_id], map: "idx_rfid_card_mapping_pack_id")
+  @@index([content_pack_id], map: "idx_rfid_card_mapping_pack")
+  @@index([active], map: "idx_rfid_card_mapping_active")
 }
 
 model rfid_pack {
-  id          BigInt        @id @default(autoincrement())
-  pack_name   String        @db.VarChar(255)
-  pack_code   String?       @db.VarChar(100)
-  description String?
-  age_min     Int?
-  age_max     Int?
-  language    String?       @default("en") @db.VarChar(50)
-  status      Int?          @default(1)
-  created_at  DateTime?     @default(now()) @db.Timestamptz(6)
-  updated_at  DateTime?     @default(now()) @db.Timestamptz(6)
-  rfid_series rfid_series[]
+  id                BigInt              @id @default(autoincrement())
+  pack_name         String              @db.VarChar(255)
+  pack_code         String?             @db.VarChar(100)
+  description       String?
+  age_min           Int?
+  age_max           Int?
+  language          String?             @default("en") @db.VarChar(50)
+  active            Boolean?            @default(true)
+  status            Int?                @default(1)
+  creator           BigInt?
+  create_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  update_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  created_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  rfid_series       rfid_series[]
+  rfid_card_mapping rfid_card_mapping[]
+
+  @@index([pack_code], map: "idx_rfid_pack_code")
+  @@index([active], map: "idx_rfid_pack_active")
 }
 
 model rfid_question {
-  id          BigInt    @id @default(autoincrement())
-  code        String    @unique @db.VarChar(100)
-  title       String    @db.VarChar(255)
-  prompt_text String?
-  language    String?   @default("en") @db.VarChar(10)
-  category    String?   @db.VarChar(100)
-  difficulty  Int?      @default(1)
-  active      Boolean?  @default(true)
-  creator     BigInt?
-  create_date DateTime? @default(now()) @db.Timestamptz(6)
-  updater     BigInt?
-  update_date DateTime? @default(now()) @db.Timestamptz(6)
+  id                BigInt              @id @default(autoincrement())
+  code              String              @unique @db.VarChar(100)
+  title             String              @db.VarChar(255)
+  prompt_text       String?
+  language          String?             @default("en") @db.VarChar(10)
+  category          String?             @db.VarChar(100)
+  difficulty        Int?                @default(1)
+  active            Boolean?            @default(true)
+  creator           BigInt?
+  create_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  update_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  rfid_card_mapping rfid_card_mapping[]
+  rfid_series       rfid_series[]
 
   @@index([category], map: "idx_rfid_question_category")
   @@index([code], map: "idx_rfid_question_code")
   @@index([language], map: "idx_rfid_question_language")
+  @@index([active], map: "idx_rfid_question_active")
+}
+
+model rfid_content_pack {
+  id                BigInt              @id @default(autoincrement())
+  pack_code         String              @unique @db.VarChar(100)
+  name              String              @db.VarChar(255)
+  description       String?
+  content_type      String?             @default("prompt") @db.VarChar(50)
+  content_md        String?
+  total_items       Int?                @default(0)
+  language          String?             @default("en") @db.VarChar(10)
+  cached_audio_urls String?
+  version           String?             @db.VarChar(50)
+  content_hash      String?             @db.VarChar(255)
+  active            Boolean?            @default(true)
+  creator           BigInt?
+  create_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  update_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  content_item      content_item[]
+  rfid_card_mapping rfid_card_mapping[]
+
+  @@index([pack_code], map: "idx_rfid_content_pack_code")
+  @@index([content_type], map: "idx_rfid_content_pack_type")
+  @@index([active], map: "idx_rfid_content_pack_active")
+}
+
+model content_item {
+  id                BigInt              @id @default(autoincrement())
+  content_pack_id   BigInt?
+  item_number       Int
+  title             String?             @db.VarChar(255)
+  description       String?
+  audio_url         String?             @db.VarChar(500)
+  audio_size_bytes  BigInt?
+  audio_duration_ms BigInt?
+  images_json       Json?
+  lyrics_text       String?
+  active            Boolean?            @default(true)
+  creator           BigInt?
+  create_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  updater           BigInt?
+  update_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  rfid_content_pack rfid_content_pack?  @relation(fields: [content_pack_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([content_pack_id], map: "idx_content_item_pack")
+  @@index([content_pack_id, item_number], map: "idx_content_item_number")
+  @@index([active], map: "idx_content_item_active")
 }
 
 model rfid_scan_log {
@@ -578,16 +644,23 @@ model rfid_scan_log {
 }
 
 model rfid_series {
-  id              BigInt     @id @default(autoincrement())
-  series_name     String     @db.VarChar(255)
-  start_uid       String     @db.VarChar(100)
-  end_uid         String     @db.VarChar(100)
+  id              BigInt          @id @default(autoincrement())
+  series_name     String          @db.VarChar(255)
+  start_uid       String          @db.VarChar(100)
+  end_uid         String          @db.VarChar(100)
   content_pack_id BigInt?
-  priority        Int?       @default(0)
-  status          Int?       @default(1)
-  created_at      DateTime?  @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime?  @default(now()) @db.Timestamptz(6)
-  rfid_pack       rfid_pack? @relation(fields: [content_pack_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  question_id     BigInt?
+  priority        Int?            @default(0)
+  notes           String?         @db.VarChar(500)
+  status          Int?            @default(1)
+  created_at      DateTime?       @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime?       @default(now()) @db.Timestamptz(6)
+  rfid_pack       rfid_pack?      @relation(fields: [content_pack_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rfid_question   rfid_question?  @relation(fields: [question_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([start_uid, end_uid], map: "idx_rfid_series_uid_range")
+  @@index([question_id], map: "idx_rfid_series_question")
+  @@index([content_pack_id], map: "idx_rfid_series_pack")
 }
 
 model rfid_tags {

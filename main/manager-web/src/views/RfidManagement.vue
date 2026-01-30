@@ -23,6 +23,9 @@
                 <div class="tab-btn" :class="{ active: activeTab === 'cards' }" @click="switchTab('cards')">
                     Cards
                 </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'contentPacks' }" @click="switchTab('contentPacks')">
+                    Content Packs
+                </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     Series
                 </div>
@@ -159,9 +162,14 @@
                                         {{ getQuestionsLabel(scope.row.questionIds || (scope.row.questionId ? [scope.row.questionId] : [])) }}
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Pack" align="center" width="180">
+                                <el-table-column label="Pack" align="center" width="150">
                                     <template slot-scope="scope">
                                         {{ getPackLabel(scope.row.packId) }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Content Pack" align="center" width="180" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        {{ getContentPackLabel(scope.row.contentPackId) }}
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="Active" align="center" width="80">
@@ -197,6 +205,65 @@
                                         :class="{ active: page === cardsCurrentPage }" @click="goToCardsPage(page)">{{ page }}</button>
                                     <button class="pagination-btn" :disabled="cardsCurrentPage === cardsPageCount" @click="goNextCards">Next</button>
                                     <span class="total-text">Total {{ cardsTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Content Packs Tab -->
+                        <template v-if="activeTab === 'contentPacks'">
+                            <el-table ref="contentPacksTable" :data="contentPacksList" class="transparent-table" v-loading="contentPacksLoading"
+                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)"
+                                :header-cell-class-name="headerCellClassName">
+                                <el-table-column label="Select" align="center" width="80">
+                                    <template slot-scope="scope">
+                                        <el-checkbox v-model="scope.row.selected"></el-checkbox>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Pack Code" prop="packCode" align="center" width="200"></el-table-column>
+                                <el-table-column label="Name" prop="name" align="center" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Type" prop="contentType" align="center" width="100">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.contentType === 'prompt' ? '' : 'warning'" size="small">
+                                            {{ scope.row.contentType === 'prompt' ? 'Prompt' : 'Read Only' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Language" prop="language" align="center" width="90"></el-table-column>
+                                <el-table-column label="Items" prop="totalItems" align="center" width="70"></el-table-column>
+                                <el-table-column label="Active" align="center" width="80">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
+                                            {{ scope.row.active ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" align="center" width="140">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" type="text" @click="editContentPack(scope.row)">Edit</el-button>
+                                        <el-button size="mini" type="text" @click="deleteContentPack(scope.row)">Delete</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn">
+                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllContentPacks">
+                                        {{ isAllContentPacksSelected ? 'Deselect All' : 'Select All' }}
+                                    </el-button>
+                                    <el-button size="mini" type="success" @click="showAddContentPackDialog">Add</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedContentPacks">Delete</el-button>
+                                </div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="contentPacksPageSize" @change="handleContentPacksPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="contentPacksCurrentPage === 1" @click="goFirstContentPacks">First</button>
+                                    <button class="pagination-btn" :disabled="contentPacksCurrentPage === 1" @click="goPrevContentPacks">Previous</button>
+                                    <button v-for="page in contentPacksVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === contentPacksCurrentPage }" @click="goToContentPacksPage(page)">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="contentPacksCurrentPage === contentPacksPageCount" @click="goNextContentPacks">Next</button>
+                                    <span class="total-text">Total {{ contentPacksTotal }} records</span>
                                 </div>
                             </div>
                         </template>
@@ -280,11 +347,18 @@
                                     >
                                         <template slot="prepend">RFID UID</template>
                                     </el-input>
+                                    <el-input-number v-model="consoleSequence" :min="1" :max="99" class="console-sequence" controls-position="right"></el-input-number>
                                     <el-button type="primary" :loading="consoleLookupLoading" @click="handleConsoleLookup">
-                                        <i class="el-icon-search"></i> Lookup Card
+                                        <i class="el-icon-search"></i> Card
                                     </el-button>
                                     <el-button type="info" :loading="consoleSeriesLoading" @click="handleSeriesLookup">
-                                        <i class="el-icon-files"></i> Lookup Series
+                                        <i class="el-icon-files"></i> Series
+                                    </el-button>
+                                    <el-button type="success" :loading="consoleContentLoading" @click="handleContentLookup">
+                                        <i class="el-icon-document"></i> Content
+                                    </el-button>
+                                    <el-button type="warning" :loading="consoleDownloadLoading" @click="handleDownloadLookup">
+                                        <i class="el-icon-download"></i> Download
                                     </el-button>
                                 </div>
 
@@ -335,8 +409,17 @@
             :form="cardForm"
             :questions="questionsDropdown"
             :packs="packsDropdown"
+            :content-packs="contentPacksDropdown"
             @submit="handleCardSubmit"
             @cancel="cardDialogVisible = false"
+        />
+
+        <RfidContentPackDialog
+            :title="contentPackDialogTitle"
+            :visible.sync="contentPackDialogVisible"
+            :form="contentPackForm"
+            @submit="handleContentPackSubmit"
+            @cancel="contentPackDialogVisible = false"
         />
 
         <RfidSeriesDialog
@@ -362,10 +445,11 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import RfidQuestionDialog from "@/components/RfidQuestionDialog.vue";
 import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
+import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
 
 export default {
-    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidSeriesDialog },
+    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog },
     data() {
         return {
             activeTab: 'questions',
@@ -403,7 +487,7 @@ export default {
             isAllCardsSelected: false,
             cardDialogVisible: false,
             cardDialogTitle: 'Add Card',
-            cardForm: { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, notes: '', active: true },
+            cardForm: { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, contentPackId: null, notes: '', active: true },
 
             // Series
             seriesList: [],
@@ -416,14 +500,29 @@ export default {
             seriesDialogTitle: 'Add Series',
             seriesForm: { id: null, startUid: '', endUid: '', questionId: null, packId: null, priority: 0, notes: '', active: true },
 
+            // Content Packs
+            contentPacksList: [],
+            contentPacksLoading: false,
+            contentPacksCurrentPage: 1,
+            contentPacksPageSize: 10,
+            contentPacksTotal: 0,
+            isAllContentPacksSelected: false,
+            contentPackDialogVisible: false,
+            contentPackDialogTitle: 'Add Content Pack',
+            contentPackForm: { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, active: true },
+
             // Dropdown data
             questionsDropdown: [],
             packsDropdown: [],
+            contentPacksDropdown: [],
 
             // Console
             consoleLookupUid: '',
             consoleLookupLoading: false,
             consoleSeriesLoading: false,
+            consoleContentLoading: false,
+            consoleDownloadLoading: false,
+            consoleSequence: 1,
             consoleLookupResult: null
         };
     },
@@ -445,6 +544,13 @@ export default {
         },
         packsVisiblePages() {
             return this.getVisiblePages(this.packsCurrentPage, this.packsPageCount);
+        },
+        // Content Packs pagination
+        contentPacksPageCount() {
+            return Math.ceil(this.contentPacksTotal / this.contentPacksPageSize);
+        },
+        contentPacksVisiblePages() {
+            return this.getVisiblePages(this.contentPacksCurrentPage, this.contentPacksPageCount);
         },
         // Cards pagination
         cardsPageCount() {
@@ -486,6 +592,7 @@ export default {
             if (tab === 'questions') this.fetchQuestions();
             else if (tab === 'packs') this.fetchPacks();
             else if (tab === 'cards') this.fetchCards();
+            else if (tab === 'contentPacks') this.fetchContentPacks();
             else if (tab === 'series') this.fetchSeries();
         },
 
@@ -499,6 +606,9 @@ export default {
             } else if (this.activeTab === 'cards') {
                 this.cardsCurrentPage = 1;
                 this.fetchCards();
+            } else if (this.activeTab === 'contentPacks') {
+                this.contentPacksCurrentPage = 1;
+                this.fetchContentPacks();
             } else if (this.activeTab === 'series') {
                 this.seriesCurrentPage = 1;
                 this.fetchSeries();
@@ -514,6 +624,11 @@ export default {
             Api.rfid.getPackList(({ data }) => {
                 if (data.code === 0) {
                     this.packsDropdown = data.data || [];
+                }
+            });
+            Api.rfid.getContentPackList(({ data }) => {
+                if (data.code === 0) {
+                    this.contentPacksDropdown = data.data || [];
                 }
             });
         },
@@ -534,6 +649,12 @@ export default {
         getPackLabel(id) {
             const p = this.packsDropdown.find(p => p.id === id);
             return p ? p.name : '-';
+        },
+
+        getContentPackLabel(id) {
+            if (!id) return '-';
+            const cp = this.contentPacksDropdown.find(cp => cp.id === id);
+            return cp ? cp.name : `#${id}`;
         },
 
         // ==================== QUESTIONS ====================
@@ -749,7 +870,7 @@ export default {
 
         showAddCardDialog() {
             this.cardDialogTitle = 'Add Card';
-            this.cardForm = { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, contentPackId: null, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -807,6 +928,95 @@ export default {
                 return;
             }
             this.deleteCard(selected);
+        },
+
+        // ==================== CONTENT PACKS ====================
+        fetchContentPacks() {
+            this.contentPacksLoading = true;
+            Api.rfid.getContentPackPage({
+                page: this.contentPacksCurrentPage,
+                limit: this.contentPacksPageSize,
+                packCode: this.searchKeyword
+            }, ({ data }) => {
+                this.contentPacksLoading = false;
+                if (data.code === 0) {
+                    this.contentPacksList = (data.data.list || []).map(item => ({ ...item, selected: false }));
+                    this.contentPacksTotal = data.data.total || 0;
+                } else {
+                    this.$message.error(data.msg || 'Failed to load content packs');
+                }
+            });
+        },
+
+        handleContentPacksPageSizeChange(val) {
+            this.contentPacksPageSize = val;
+            this.contentPacksCurrentPage = 1;
+            this.fetchContentPacks();
+        },
+        goFirstContentPacks() { this.contentPacksCurrentPage = 1; this.fetchContentPacks(); },
+        goPrevContentPacks() { if (this.contentPacksCurrentPage > 1) { this.contentPacksCurrentPage--; this.fetchContentPacks(); } },
+        goNextContentPacks() { if (this.contentPacksCurrentPage < this.contentPacksPageCount) { this.contentPacksCurrentPage++; this.fetchContentPacks(); } },
+        goToContentPacksPage(page) { this.contentPacksCurrentPage = page; this.fetchContentPacks(); },
+
+        handleSelectAllContentPacks() {
+            this.isAllContentPacksSelected = !this.isAllContentPacksSelected;
+            this.contentPacksList.forEach(row => { row.selected = this.isAllContentPacksSelected; });
+        },
+
+        showAddContentPackDialog() {
+            this.contentPackDialogTitle = 'Add Content Pack';
+            this.contentPackForm = { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, active: true };
+            this.contentPackDialogVisible = true;
+        },
+
+        editContentPack(row) {
+            this.contentPackDialogTitle = 'Edit Content Pack';
+            this.contentPackForm = { ...row };
+            this.contentPackDialogVisible = true;
+        },
+
+        handleContentPackSubmit({ form, done }) {
+            const api = form.id ? Api.rfid.updateContentPack : Api.rfid.addContentPack;
+            api(form, ({ data }) => {
+                done && done();
+                if (data.code === 0) {
+                    this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
+                    this.contentPackDialogVisible = false;
+                    this.fetchContentPacks();
+                    this.loadDropdownData();
+                } else {
+                    this.$message.error(data.msg || 'Operation failed');
+                }
+            });
+        },
+
+        deleteContentPack(row) {
+            const items = Array.isArray(row) ? row : [row];
+            if (items.length === 0) return;
+            this.$confirm(`Delete ${items.length} content pack(s)?`, 'Warning', {
+                confirmButtonText: 'Confirm',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                Api.rfid.deleteContentPack(items.map(i => i.id), ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchContentPacks();
+                        this.loadDropdownData();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        deleteSelectedContentPacks() {
+            const selected = this.contentPacksList.filter(r => r.selected);
+            if (selected.length === 0) {
+                this.$message.warning('Please select items to delete');
+                return;
+            }
+            this.deleteContentPack(selected);
         },
 
         // ==================== SERIES ====================
@@ -943,6 +1153,58 @@ export default {
                         success: false,
                         type: 'series',
                         data: { error: data.msg || 'Series not found for this UID', uid: this.consoleLookupUid }
+                    };
+                }
+            });
+        },
+
+        handleContentLookup() {
+            if (!this.consoleLookupUid.trim()) {
+                this.$message.warning('Please enter an RFID UID');
+                return;
+            }
+            this.consoleContentLoading = true;
+            this.consoleLookupResult = null;
+
+            Api.rfid.lookupContent(this.consoleLookupUid.trim(), this.consoleSequence, ({ data }) => {
+                this.consoleContentLoading = false;
+                if (data.code === 0 && data.data) {
+                    this.consoleLookupResult = {
+                        success: true,
+                        type: `content (seq ${this.consoleSequence})`,
+                        data: data.data
+                    };
+                } else {
+                    this.consoleLookupResult = {
+                        success: false,
+                        type: 'content',
+                        data: { error: data.msg || 'Content not found', uid: this.consoleLookupUid, sequence: this.consoleSequence }
+                    };
+                }
+            });
+        },
+
+        handleDownloadLookup() {
+            if (!this.consoleLookupUid.trim()) {
+                this.$message.warning('Please enter an RFID UID');
+                return;
+            }
+            this.consoleDownloadLoading = true;
+            this.consoleLookupResult = null;
+
+            Api.rfid.getContentDownload(this.consoleLookupUid.trim(), ({ data }) => {
+                this.consoleDownloadLoading = false;
+                if (data.code === 0 && data.data) {
+                    this.consoleLookupResult = {
+                        success: true,
+                        type: 'download manifest',
+                        data: data.data
+                    };
+                } else {
+                    this.consoleLookupResult = {
+                        success: false,
+                        type: 'download',
+                        data: { error: data.msg || 'Download manifest not found', uid: this.consoleLookupUid }
                     };
                 }
             });
@@ -1262,10 +1524,16 @@ export default {
     gap: 12px;
     margin-bottom: 20px;
     align-items: center;
+    flex-wrap: wrap;
 
     .console-input {
         flex: 1;
-        max-width: 500px;
+        max-width: 400px;
+        min-width: 200px;
+    }
+
+    .console-sequence {
+        width: 100px;
     }
 }
 

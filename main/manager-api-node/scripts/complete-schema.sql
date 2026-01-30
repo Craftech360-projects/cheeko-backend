@@ -165,26 +165,88 @@ CREATE TABLE IF NOT EXISTS story_playlist (
 -- RFID TABLES (if not exist)
 -- =====================================================
 
+-- rfid_pack - RFID product packs/SKUs
 CREATE TABLE IF NOT EXISTS rfid_pack (
     id BIGSERIAL PRIMARY KEY,
     pack_name VARCHAR(255) NOT NULL,
-    pack_code VARCHAR(100),
+    pack_code VARCHAR(100) UNIQUE,
     description TEXT,
     age_min INTEGER,
     age_max INTEGER,
     language VARCHAR(50) DEFAULT 'en',
+    active BOOLEAN DEFAULT TRUE,
     status INTEGER DEFAULT 1,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    creator BIGINT,
+    create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updater BIGINT,
+    update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add columns that may be missing from older rfid_pack schema
+ALTER TABLE rfid_pack ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT TRUE;
+ALTER TABLE rfid_pack ADD COLUMN IF NOT EXISTS creator BIGINT;
+ALTER TABLE rfid_pack ADD COLUMN IF NOT EXISTS create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE rfid_pack ADD COLUMN IF NOT EXISTS updater BIGINT;
+ALTER TABLE rfid_pack ADD COLUMN IF NOT EXISTS update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+CREATE INDEX IF NOT EXISTS idx_rfid_pack_code ON rfid_pack(pack_code);
+CREATE INDEX IF NOT EXISTS idx_rfid_pack_active ON rfid_pack(active);
+
+-- rfid_question - Question templates
+CREATE TABLE IF NOT EXISTS rfid_question (
+    id BIGSERIAL PRIMARY KEY,
+    code VARCHAR(100) UNIQUE NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    prompt_text TEXT NOT NULL,
+    language VARCHAR(10) DEFAULT 'en',
+    category VARCHAR(100),
+    difficulty INTEGER DEFAULT 1,
+    active BOOLEAN DEFAULT TRUE,
+    creator BIGINT,
+    create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updater BIGINT,
+    update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rfid_question_code ON rfid_question(code);
+CREATE INDEX IF NOT EXISTS idx_rfid_question_category ON rfid_question(category);
+CREATE INDEX IF NOT EXISTS idx_rfid_question_language ON rfid_question(language);
+CREATE INDEX IF NOT EXISTS idx_rfid_question_active ON rfid_question(active);
+
+-- rfid_content_pack - RAG-ready content packs (habits, rhymes, stories)
+CREATE TABLE IF NOT EXISTS rfid_content_pack (
+    id BIGSERIAL PRIMARY KEY,
+    pack_code VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    content_type VARCHAR(50) DEFAULT 'prompt',
+    content_md TEXT,
+    total_items INTEGER DEFAULT 0,
+    language VARCHAR(10) DEFAULT 'en',
+    cached_audio_urls TEXT,
+    version VARCHAR(50),
+    content_hash VARCHAR(255),
+    active BOOLEAN DEFAULT TRUE,
+    creator BIGINT,
+    create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updater BIGINT,
+    update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_rfid_content_pack_code ON rfid_content_pack(pack_code);
+CREATE INDEX IF NOT EXISTS idx_rfid_content_pack_type ON rfid_content_pack(content_type);
+CREATE INDEX IF NOT EXISTS idx_rfid_content_pack_active ON rfid_content_pack(active);
+
+-- rfid_card_mapping - Individual card to content mappings
 CREATE TABLE IF NOT EXISTS rfid_card_mapping (
     id BIGSERIAL PRIMARY KEY,
     rfid_uid VARCHAR(100) NOT NULL UNIQUE,
-    content_pack_id BIGINT REFERENCES rfid_pack(id),
-    pack_id BIGINT,
-    question_id BIGINT,
+    content_pack_id BIGINT REFERENCES rfid_content_pack(id) ON DELETE SET NULL,
+    pack_id BIGINT REFERENCES rfid_pack(id) ON DELETE SET NULL,
+    question_id BIGINT REFERENCES rfid_question(id) ON DELETE SET NULL,
     question_ids JSONB DEFAULT '[]',
+    pack_code VARCHAR(100),
+    notes VARCHAR(500),
     action_type VARCHAR(50) DEFAULT 'content',
     action_data JSONB DEFAULT '{}',
     emotions JSONB DEFAULT '[]',
@@ -192,22 +254,50 @@ CREATE TABLE IF NOT EXISTS rfid_card_mapping (
     active BOOLEAN DEFAULT true,
     status INTEGER DEFAULT 1,
     creator BIGINT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updater BIGINT,
+    update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add columns that may be missing from older rfid_card_mapping schema
+ALTER TABLE rfid_card_mapping ADD COLUMN IF NOT EXISTS pack_code VARCHAR(100);
+ALTER TABLE rfid_card_mapping ADD COLUMN IF NOT EXISTS notes VARCHAR(500);
+ALTER TABLE rfid_card_mapping ADD COLUMN IF NOT EXISTS question_id BIGINT;
+ALTER TABLE rfid_card_mapping ADD COLUMN IF NOT EXISTS create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE rfid_card_mapping ADD COLUMN IF NOT EXISTS updater BIGINT;
+ALTER TABLE rfid_card_mapping ADD COLUMN IF NOT EXISTS update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+CREATE INDEX IF NOT EXISTS idx_rfid_card_mapping_uid ON rfid_card_mapping(rfid_uid);
+CREATE INDEX IF NOT EXISTS idx_rfid_card_mapping_question ON rfid_card_mapping(question_id);
+CREATE INDEX IF NOT EXISTS idx_rfid_card_mapping_pack ON rfid_card_mapping(pack_id);
+CREATE INDEX IF NOT EXISTS idx_rfid_card_mapping_content ON rfid_card_mapping(content_pack_id);
+CREATE INDEX IF NOT EXISTS idx_rfid_card_mapping_active ON rfid_card_mapping(active);
+
+-- rfid_series - RFID UID range mappings
 CREATE TABLE IF NOT EXISTS rfid_series (
     id BIGSERIAL PRIMARY KEY,
-    series_name VARCHAR(255) NOT NULL,
+    series_name VARCHAR(255),
     start_uid VARCHAR(100) NOT NULL,
     end_uid VARCHAR(100) NOT NULL,
-    content_pack_id BIGINT REFERENCES rfid_pack(id),
+    content_pack_id BIGINT REFERENCES rfid_pack(id) ON DELETE SET NULL,
+    question_id BIGINT REFERENCES rfid_question(id) ON DELETE SET NULL,
     priority INTEGER DEFAULT 0,
-    status INTEGER DEFAULT 1,  -- 1=active, 0=inactive (no 'active' Boolean column)
+    notes VARCHAR(500),
+    status INTEGER DEFAULT 1,  -- 1=active, 0=inactive
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Add columns that may be missing from older rfid_series schema
+ALTER TABLE rfid_series ADD COLUMN IF NOT EXISTS question_id BIGINT;
+ALTER TABLE rfid_series ADD COLUMN IF NOT EXISTS notes VARCHAR(500);
+ALTER TABLE rfid_series ADD COLUMN IF NOT EXISTS content_pack_id BIGINT;
+
+CREATE INDEX IF NOT EXISTS idx_rfid_series_uid_range ON rfid_series(start_uid, end_uid);
+CREATE INDEX IF NOT EXISTS idx_rfid_series_question ON rfid_series(question_id);
+CREATE INDEX IF NOT EXISTS idx_rfid_series_pack ON rfid_series(content_pack_id);
+
+-- rfid_scan_log - RFID scan audit trail
 CREATE TABLE IF NOT EXISTS rfid_scan_log (
     id BIGSERIAL PRIMARY KEY,
     mac_address VARCHAR(50) NOT NULL,
@@ -229,6 +319,29 @@ CREATE TABLE IF NOT EXISTS rfid_tags (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- content_item - Unified content items for content packs (rhymes, habit steps, stories)
+CREATE TABLE IF NOT EXISTS content_item (
+    id BIGSERIAL PRIMARY KEY,
+    content_pack_id BIGINT REFERENCES rfid_content_pack(id) ON DELETE CASCADE,
+    item_number INTEGER NOT NULL,
+    title VARCHAR(255),
+    description TEXT,
+    audio_url VARCHAR(500),
+    audio_size_bytes BIGINT,
+    audio_duration_ms BIGINT,
+    images_json JSONB,
+    lyrics_text TEXT,
+    active BOOLEAN DEFAULT TRUE,
+    creator BIGINT,
+    create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updater BIGINT,
+    update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_item_pack ON content_item(content_pack_id);
+CREATE INDEX IF NOT EXISTS idx_content_item_number ON content_item(content_pack_id, item_number);
+CREATE INDEX IF NOT EXISTS idx_content_item_active ON content_item(active);
 
 -- =====================================================
 -- PARENT PROFILE TABLE
@@ -545,6 +658,54 @@ END $$;
 
 ALTER TABLE analytics_game_attempts
 ADD COLUMN IF NOT EXISTS question_text TEXT;
+
+-- =====================================================
+-- MIGRATION: Fix FK and add missing RFID columns
+-- (safe to run on fresh or existing databases)
+-- =====================================================
+
+-- rfid_card_mapping: fix content_pack_id FK to point to rfid_content_pack (not rfid_pack)
+DO $$
+BEGIN
+    -- Drop old FK if it references rfid_pack instead of rfid_content_pack
+    IF EXISTS (
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+        WHERE tc.table_name = 'rfid_card_mapping'
+          AND tc.constraint_type = 'FOREIGN KEY'
+          AND ccu.table_name = 'rfid_pack'
+          AND ccu.column_name = 'id'
+          AND tc.constraint_name LIKE '%content_pack_id%'
+    ) THEN
+        EXECUTE (
+            SELECT 'ALTER TABLE rfid_card_mapping DROP CONSTRAINT ' || tc.constraint_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+            WHERE tc.table_name = 'rfid_card_mapping'
+              AND tc.constraint_type = 'FOREIGN KEY'
+              AND kcu.column_name = 'content_pack_id'
+            LIMIT 1
+        );
+    END IF;
+
+    -- Add correct FK if not already present
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints tc
+        JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name = ccu.constraint_name
+        WHERE tc.table_name = 'rfid_card_mapping'
+          AND tc.constraint_type = 'FOREIGN KEY'
+          AND ccu.table_name = 'rfid_content_pack'
+    ) THEN
+        ALTER TABLE rfid_card_mapping
+            ADD CONSTRAINT fk_card_mapping_content_pack
+            FOREIGN KEY (content_pack_id) REFERENCES rfid_content_pack(id) ON DELETE SET NULL;
+    END IF;
+END $$;
+
+-- rfid_content_pack: ensure migration 0008 columns exist
+ALTER TABLE rfid_content_pack ADD COLUMN IF NOT EXISTS cached_audio_urls TEXT;
+ALTER TABLE rfid_content_pack ADD COLUMN IF NOT EXISTS version VARCHAR(50);
+ALTER TABLE rfid_content_pack ADD COLUMN IF NOT EXISTS content_hash VARCHAR(255);
 
 -- =====================================================
 -- DONE!
