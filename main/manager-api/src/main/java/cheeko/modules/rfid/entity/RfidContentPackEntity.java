@@ -51,6 +51,15 @@ public class RfidContentPackEntity extends BaseEntity {
     @Schema(description = "Active status: 0=Disabled, 1=Enabled")
     private Boolean active;
 
+    @Schema(description = "Cached audio URLs JSON mapping sequence to CDN URLs")
+    private String cachedAudioUrls;
+
+    @Schema(description = "Content version for cache validation")
+    private String version;
+
+    @Schema(description = "Content hash for cache validation")
+    private String contentHash;
+
     @Schema(description = "Creator user ID")
     @TableField(fill = FieldFill.INSERT)
     private Long creator;

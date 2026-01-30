@@ -26,9 +26,13 @@ import cheeko.common.validator.ValidatorUtils;
 import cheeko.common.validator.group.AddGroup;
 import cheeko.common.validator.group.DefaultGroup;
 import cheeko.common.validator.group.UpdateGroup;
+import cheeko.modules.rfid.dto.ContentDownloadDTO;
+import cheeko.modules.rfid.dto.HabitDownloadDTO;
 import cheeko.modules.rfid.dto.RfidCardMappingDTO;
 import cheeko.modules.rfid.dto.RfidContentLookupDTO;
 import cheeko.modules.rfid.dto.RfidQuestionDTO;
+import cheeko.modules.rfid.dto.RhymeDownloadDTO;
+import cheeko.modules.rfid.service.HabitService;
 import cheeko.modules.rfid.service.RfidCardMappingService;
 import cheeko.modules.rfid.service.RfidContentPackService;
 
@@ -43,6 +47,7 @@ public class RfidCardMappingController {
 
     private final RfidCardMappingService rfidCardMappingService;
     private final RfidContentPackService rfidContentPackService;
+    private final HabitService habitService;
 
     @GetMapping("/page")
     @Operation(summary = "Paginated card mapping query")
@@ -107,6 +112,62 @@ public class RfidCardMappingController {
     public Result<RfidQuestionDTO> lookupQuestion(@PathVariable("rfidUid") String rfidUid) {
         RfidQuestionDTO dto = rfidCardMappingService.getQuestionByRfidUid(rfidUid);
         return new Result<RfidQuestionDTO>().ok(dto);
+    }
+
+    @GetMapping("/habit/download/{rfidUid}")
+    @Operation(summary = "Get habit download manifest for RFID card (device download endpoint)")
+    @Parameters({
+            @Parameter(name = "rfidUid", description = "RFID card UID", required = true),
+            @Parameter(name = "version", description = "Current version on device for cache check"),
+            @Parameter(name = "hash", description = "Current content hash on device for cache check")
+    })
+    public Result<HabitDownloadDTO> getHabitDownloadManifest(
+            @PathVariable("rfidUid") String rfidUid,
+            @RequestParam(value = "version", required = false) String version,
+            @RequestParam(value = "hash", required = false) String hash) {
+        HabitDownloadDTO dto = habitService.getDownloadManifest(rfidUid, version, hash);
+        return new Result<HabitDownloadDTO>().ok(dto);
+    }
+
+    @GetMapping("/rhyme/download/{rfidUid}")
+    @Operation(summary = "Get rhyme download manifest for RFID card (legacy endpoint)")
+    @Parameters({
+            @Parameter(name = "rfidUid", description = "RFID card UID", required = true)
+    })
+    @Deprecated
+    public Result<RhymeDownloadDTO> getRhymeDownloadManifest(
+            @PathVariable("rfidUid") String rfidUid) {
+        RhymeDownloadDTO dto = rfidContentPackService.getDownloadManifest(rfidUid);
+        return new Result<RhymeDownloadDTO>().ok(dto);
+    }
+
+    @GetMapping("/content/download/{rfidUid}")
+    @Operation(summary = "Unified download manifest for any content type (habits, rhymes, etc.)")
+    @Parameters({
+            @Parameter(name = "rfidUid", description = "RFID card UID", required = true)
+    })
+    public Result<ContentDownloadDTO> getContentDownloadManifest(
+            @PathVariable("rfidUid") String rfidUid) {
+        ContentDownloadDTO dto = rfidContentPackService.getContentDownloadManifest(rfidUid);
+        return new Result<ContentDownloadDTO>().ok(dto);
+    }
+
+    @PutMapping("/content-pack/{packCode}/sequence/{sequence}/cached-audio")
+    @Operation(summary = "Update cached audio URL for a rhyme sequence")
+    public Result<Void> updateRhymeCachedAudio(
+            @PathVariable("packCode") String packCode,
+            @PathVariable("sequence") Integer sequence,
+            @RequestBody Map<String, String> body) {
+        String audioUrl = body.get("audioUrl");
+        if (audioUrl == null || audioUrl.isEmpty()) {
+            return new Result<Void>().error("audioUrl is required");
+        }
+        boolean success = rfidContentPackService.updateCachedAudioUrl(packCode, sequence, audioUrl);
+        if (success) {
+            return new Result<>();
+        } else {
+            return new Result<Void>().error("Failed to update cached audio URL");
+        }
     }
 
     @GetMapping("/pack/{packCode}")

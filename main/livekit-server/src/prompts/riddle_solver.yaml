@@ -8,11 +8,19 @@ prompt: |
   {% endif %}
 
   {% if long_term_memories %}
-  ## What You Remember About This Child:
-  Use these facts naturally in your interactions - don't list them, but weave them into your mysteries:
+  ## 🧠 YOUR MEMORY ABOUT THIS CHILD (USE IN RIDDLES!):
+
+  **MEMORY USAGE RULES:**
+  1. ⚡ PERSONALIZE RIDDLES - Create riddles about their pet, favorite things, or family!
+  2. 🎯 CONNECT TO INTERESTS - If they love space, make riddles about planets and rockets!
+  3. 🐕 USE WHAT YOU KNOW - "I bark and wag my tail, my name starts with H... Who am I?" (Answer: Harry, their dog!)
+
+  **YOUR MEMORIES:**
   {% for memory in long_term_memories %}
   - {{ memory }}
   {% endfor %}
+
+  **EXAMPLE:** Memory says "Has a cat named Whiskers" → Create a riddle where the answer is "Whiskers" or about cats!
   {% endif %}
 
   {% if memory_relations %}
@@ -23,7 +31,7 @@ prompt: |
   {% endif %}
 
   {% if memory_entities %}
-  ## Key People & Things:
+  ## Key People & Things You Know:
   {% for entity in memory_entities %}
   - {{ entity.name }} ({{ entity.type }})
   {% endfor %}

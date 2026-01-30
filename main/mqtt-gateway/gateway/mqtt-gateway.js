@@ -50,6 +50,19 @@ function setConfigManager(cm) {
 }
 
 /**
+ * Encode spaces in URL path while preserving the URL structure.
+ * Handles URLs with spaces in filenames for proper HTTP requests.
+ * @param {string} url - The URL to encode
+ * @returns {string} URL with path segments properly encoded
+ */
+function encodeUrlPath(url) {
+  if (!url) return url;
+  // Simply encode spaces in the URL path
+  // Don't use URL object assignment as it double-encodes
+  return url.replace(/ /g, '%20');
+}
+
+/**
  * Lookup RFID content from Manager API by RFID UID and sequence.
  * Uses the RAG-enabled endpoint in RfidCardMappingController:
  *   GET /toy/admin/rfid/card/lookup/{rfidUid}?sequence={sequence}
@@ -152,6 +165,69 @@ async function fetchRfidPromptTextFromManagerApi(rfidUid) {
   const result = await fetchRfidContentFromManagerApi(rfidUid, null);
   if (!result) return null;
   return result.promptText || result.contentText || null;
+}
+
+/**
+ * Fetch unified content download manifest from Manager API.
+ * This is the new unified endpoint that works for all content types (habits, rhymes, etc.)
+ * Uses the content download endpoint:
+ *   GET /toy/admin/rfid/card/content/download/{rfidUid}
+ *
+ * @param {string} rfidUid - RFID card UID
+ * @returns {Object|null} Content download manifest or null if not found
+ */
+async function fetchContentDownloadManifest(rfidUid) {
+  try {
+    const trimmedUid = (rfidUid || "").trim();
+    if (!trimmedUid) {
+      logger.warn(`⚠️ [CONTENT-DOWNLOAD] Empty rfidUid provided`);
+      return null;
+    }
+
+    const baseUrl = process.env.MANAGER_API_URL || "";
+    if (!baseUrl) {
+      logger.warn(
+        `⚠️ [CONTENT-DOWNLOAD] MANAGER_API_URL not set, cannot fetch content manifest for UID ${trimmedUid}`
+      );
+      return null;
+    }
+
+    const apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/content/download/${encodeURIComponent(
+      trimmedUid
+    )}`;
+
+    logger.info(
+      `🔍 [CONTENT-DOWNLOAD] Fetching content manifest for RFID UID ${trimmedUid} via ${apiUrl}`
+    );
+
+    const response = await axios.get(apiUrl, { timeout: 10000 });
+    const body = response.data;
+
+    if (!body || body.code !== 0) {
+      logger.warn(
+        `⚠️ [CONTENT-DOWNLOAD] Fetch failed for UID ${trimmedUid}: code=${body && body.code}, msg=${body && body.msg}`
+      );
+      return null;
+    }
+
+    // data can be null if no content pack is linked to this card
+    if (!body.data) {
+      logger.info(`📦 [CONTENT-DOWNLOAD] No content linked to RFID UID ${trimmedUid}`);
+      return null;
+    }
+
+    const manifest = body.data;
+    logger.info(
+      `✅ [CONTENT-DOWNLOAD] Got manifest for UID ${trimmedUid} -> type=${manifest.contentType}, pack=${manifest.packCode}, version=${manifest.version}, items=${manifest.totalItems}`
+    );
+
+    return manifest;
+  } catch (error) {
+    logger.error(
+      `❌ [CONTENT-DOWNLOAD] Error fetching content manifest for RFID UID ${rfidUid}: ${error.message}`
+    );
+    return null;
+  }
 }
 
 class MQTTGateway {
@@ -604,6 +680,16 @@ class MQTTGateway {
           logger.warn(`⚠️ [MODE-CHANGE] No mode specified in payload`);
           return;
         }
+      }
+
+      // Handle content download requests from device (for SD card content)
+      // Unified handler for all content types (habits, rhymes, etc.)
+      // Supports: download_request (new), habit_download_request (legacy), rhyme_download_request (legacy)
+      if (originalPayload.type === "download_request" ||
+          originalPayload.type === "habit_download_request" ||
+          originalPayload.type === "rhyme_download_request") {
+        await this.handleContentDownloadRequest(deviceId, originalPayload, clientId);
+        return;
       }
 
       // Handle specific content playback requests (play_music / play_story)
@@ -1199,6 +1285,92 @@ class MQTTGateway {
         };
         this.mqttPublish(errorTopic, errorMsg);
       }
+    }
+  }
+
+  /**
+   * Handle content download request from device (unified handler).
+   * Uses the unified content download endpoint that works for all content types.
+   * Responds with content_type so device knows what it's downloading (habit, rhyme, story, etc.)
+   * @param {string} deviceId - Device MAC address
+   * @param {Object} payload - Request payload with rfid_uid
+   * @param {string} clientId - MQTT client ID for response
+   */
+  async handleContentDownloadRequest(deviceId, payload, clientId) {
+    const rfidUid = payload.rfid_uid;
+    const currentVersion = payload.current_version || payload.version;
+
+    logger.info(`📥 [CONTENT-DOWNLOAD] Device ${deviceId} requesting content for RFID: ${rfidUid}`);
+
+    try {
+      // Fetch unified content manifest (works for habits, rhymes, stories, etc.)
+      const manifest = await fetchContentDownloadManifest(rfidUid);
+
+      if (!manifest) {
+        // No content linked to this card
+        logger.info(`📦 [CONTENT-DOWNLOAD] No content linked to RFID UID ${rfidUid}`);
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: "download_response",
+          status: "not_found",
+          rfid_uid: rfidUid,
+          message: "No downloadable content linked to this RFID card"
+        });
+        return;
+      }
+
+      const contentType = manifest.contentType || "unknown";
+      logger.info(`📦 [CONTENT-DOWNLOAD] RFID ${rfidUid} is a ${contentType.toUpperCase()} card`);
+
+      // Check if device already has this version
+      if (currentVersion && manifest.version && currentVersion === manifest.version) {
+        logger.info(`✅ [CONTENT-DOWNLOAD] Device already has version ${currentVersion}`);
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: "download_response",
+          status: "up_to_date",
+          rfid_uid: rfidUid,
+          pack_code: manifest.packCode,
+          version: manifest.version
+        });
+        return;
+      }
+
+      // Build files object (unified format for all content types)
+      const files = {};
+      for (const item of manifest.items || []) {
+        const itemNum = item.itemNumber;
+
+        // Add audio URL (URL-encoded for proper HTTP requests)
+        if (item.audio && item.audio.url) {
+          files[`audio_${itemNum}`] = encodeUrlPath(item.audio.url);
+        }
+
+        // Add image URL if present (for habits)
+        if (item.images && item.images.length > 0 && item.images[0].url) {
+          files[`image_${itemNum}`] = item.images[0].url;
+        }
+      }
+
+      // Send unified download response with content_type
+      logger.info(`📦 [CONTENT-DOWNLOAD] Sending ${contentType} download links for ${manifest.packCode} v${manifest.version} (${Object.keys(files).length} files)`);
+      this.mqttPublish(`devices/p2p/${clientId}`, {
+        type: "download_response",
+        status: "download_required",
+        rfid_uid: rfidUid,
+        pack_code: manifest.packCode,
+        pack_name: manifest.packName,
+        version: manifest.version,
+        total_items: manifest.totalItems,
+        files: files
+      });
+
+    } catch (error) {
+      logger.error(`❌ [CONTENT-DOWNLOAD] Error handling request: ${error.message}`);
+      this.mqttPublish(`devices/p2p/${clientId}`, {
+        type: "download_response",
+        status: "error",
+        rfid_uid: rfidUid,
+        message: "Server error processing request"
+      });
     }
   }
 

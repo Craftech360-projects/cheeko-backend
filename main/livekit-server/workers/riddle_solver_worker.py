@@ -3,7 +3,7 @@ Riddle Solver Agent Worker
 Game agent for riddles with answer validation
 
 agent_name: riddle-solver-agent
-Port: 8083
+Port: 8085
 """
 
 import os
@@ -49,7 +49,7 @@ from src.utils.helpers import UsageManager, GameAnalyticsManager
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
-DEFAULT_PORT = 8083
+DEFAULT_PORT = 8085
 GAME_TOOLS = [check_riddle_answer, update_agent_mode]
 
 

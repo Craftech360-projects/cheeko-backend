@@ -3,7 +3,7 @@ Word Ladder Agent Worker
 Game agent for word ladder with move validation
 
 agent_name: word-ladder-agent
-Port: 8084
+Port: 8086
 """
 
 import os
@@ -49,7 +49,7 @@ from src.utils.helpers import UsageManager, GameAnalyticsManager
 
 AGENT_NAME = "word-ladder-agent"
 CHARACTER_NAME = "Word Ladder"
-DEFAULT_PORT = 8084
+DEFAULT_PORT = 8086
 GAME_TOOLS = [validate_word_ladder_move, update_agent_mode]
 
 

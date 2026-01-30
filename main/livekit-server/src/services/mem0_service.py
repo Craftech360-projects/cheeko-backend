@@ -195,6 +195,93 @@ class Mem0Service:
             [{"chatType": 1, "content": fact}]
         )
 
+    async def search_relevant_memories(
+        self,
+        user_id: str,
+        query: str,
+        limit: int = 5
+    ) -> List[str]:
+        """
+        Search memories relevant to the current conversation context.
+        Called in real-time before each LLM response to find contextually relevant memories.
+
+        Args:
+            user_id: Device MAC address
+            query: The current user message/query (e.g., "tell me a dog story")
+            limit: Maximum number of relevant memories to retrieve
+
+        Returns:
+            List of memory strings relevant to the query
+        """
+        if not self.client or not query:
+            return []
+
+        try:
+            clean_user_id = self._normalize_user_id(user_id)
+
+            logger.info(f"[MEM0] Searching relevant memories for query: '{query[:50]}...'")
+
+            # Use the user's actual query for semantic search
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                lambda: self.client.search(
+                    query,  # Use actual user message for semantic relevance
+                    user_id=clean_user_id,
+                    limit=limit,
+                    enable_graph=True
+                )
+            )
+
+            if results:
+                memories = []
+                for r in results.get("results", []):
+                    if r.get("memory"):
+                        memories.append(r["memory"])
+
+                if memories:
+                    logger.info(f"[MEM0] Found {len(memories)} relevant memories for query")
+                return memories
+
+            return []
+
+        except Exception as e:
+            logger.error(f"[MEM0] Failed to search relevant memories: {e}")
+            return []
+
+    def format_relevant_memories_for_injection(
+        self,
+        query: str,
+        memories: List[str]
+    ) -> str:
+        """
+        Format relevant memories as a context injection for the LLM.
+
+        Args:
+            query: The user's current query
+            memories: List of relevant memory strings
+
+        Returns:
+            Formatted string to inject into the conversation context
+        """
+        if not memories:
+            return ""
+
+        formatted = f"""
+🧠 RELEVANT MEMORIES FOR THIS REQUEST:
+The child just said: "{query}"
+
+YOU MUST USE these memories in your response:
+"""
+        for memory in memories:
+            formatted += f"- {memory}\n"
+
+        formatted += """
+⚠️ CRITICAL: If any memory above is relevant to what the child asked, you MUST incorporate it!
+Example: If they asked about a dog and you know their dog's name → USE that name!
+"""
+        return formatted
+
     def is_ready(self) -> bool:
         """Check if the Mem0 client is initialized and ready"""
         return self.client is not None

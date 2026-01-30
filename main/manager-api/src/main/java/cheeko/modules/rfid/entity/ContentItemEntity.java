@@ -1,14 +1,12 @@
 package cheeko.modules.rfid.entity;
 
 import java.util.Date;
-import java.util.List;
 
 import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
@@ -16,40 +14,45 @@ import lombok.EqualsAndHashCode;
 import cheeko.common.entity.BaseEntity;
 
 /**
- * RFID Card Mapping Entity
- * Links physical RFID UIDs to question templates
+ * Unified Content Item Entity
+ * Represents a single item (rhyme, habit step, etc.) within a content pack
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
-@TableName(value = "rfid_card_mapping", autoResultMap = true)
-@Schema(description = "RFID Card to Question Mapping Entity")
-public class RfidCardMappingEntity extends BaseEntity {
+@TableName("content_item")
+@Schema(description = "Unified Content Item Entity")
+public class ContentItemEntity extends BaseEntity {
 
     @TableId(type = IdType.AUTO)
     @Schema(description = "Primary key")
     private Long id;
 
-    @Schema(description = "RFID card UID (hex string format)")
-    private String rfidUid;
-
-    @Schema(description = "FK to rfid_question table (legacy single question)")
-    private Long questionId;
-
-    @Schema(description = "JSON array of question IDs for multi-question support")
-    @TableField(typeHandler = JacksonTypeHandler.class)
-    private List<Long> questionIds;
-
-    @Schema(description = "Product/pack/SKU identifier (e.g., BLINKIT_ANIMALS_PACK_1)")
-    private String packCode;
-
-    @Schema(description = "FK to rfid_pack table")
-    private Long packId;
-
-    @Schema(description = "FK to rfid_content_pack table - unified for all content types (habits, rhymes, etc.)")
+    @Schema(description = "FK to rfid_content_pack table")
     private Long contentPackId;
 
-    @Schema(description = "Internal notes or description")
-    private String notes;
+    @Schema(description = "Item number (1-based)")
+    private Integer itemNumber;
+
+    @Schema(description = "Item title")
+    private String title;
+
+    @Schema(description = "Description or instruction text")
+    private String description;
+
+    @Schema(description = "Audio file URL")
+    private String audioUrl;
+
+    @Schema(description = "Audio file size in bytes")
+    private Long audioSizeBytes;
+
+    @Schema(description = "Audio duration in milliseconds")
+    private Integer audioDurationMs;
+
+    @Schema(description = "JSON array of images [{url, sizeBytes, sequence}] - for habits")
+    private String imagesJson;
+
+    @Schema(description = "Lyrics/content text - for rhymes")
+    private String lyricsText;
 
     @Schema(description = "Active status: 0=Disabled, 1=Enabled")
     private Boolean active;
