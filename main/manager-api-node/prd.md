@@ -1,26 +1,191 @@
-# Manager API Node.js - API Compatibility Testing PRD
+# RFID Content Pack Port (Java → Node.js) - Product Requirements Document
 
 ## Overview
-Systematic testing and fixing of the Node.js manager-api-node to ensure full compatibility with the Vue.js manager-web frontend. Compare API responses with the Spring Boot manager-api (reference) and fix any differences.
+
+Port the missing RFID Content Pack features from the Java `manager-api` to the Node.js `manager-api-node`. The Java API has evolved to include a full RAG-based content delivery system (content packs, content items, download manifests, markdown parsing, cached audio) that ESP32 devices depend on. The Node.js API currently lacks these features, preventing it from being a drop-in replacement.
 
 ## Target Audience
-- The manager-web Vue.js frontend application
-- Developers maintaining the Cheeko backend
-- ESP32 devices connecting via OTA endpoints
 
-## Reference Setup
-- **Node.js API**: http://localhost:8002/toy (being tested/fixed)
-- **Spring Boot API**: http://localhost:8003/toy (reference for expected behavior)
-- **Frontend**: main/manager-web Vue.js application
+- **ESP32 Devices**: Call content download and lookup endpoints to fetch habits, rhymes, and stories
+- **LiveKit Agent (Python)**: Calls cached audio URL update endpoint after TTS generation
+- **Admin Dashboard (Vue.js)**: Needs full CRUD for content packs and content items
+
+## Core Features (Priority Order)
+
+### P0 — Device-Facing (Blocks ESP32 Functionality)
+1. **Content lookup with sequence support** — `GET /card/lookup/:rfidUid?sequence=N`
+2. **Unified content download manifest** — `GET /card/content/download/:rfidUid`
+3. **Habit download manifest** — `GET /card/habit/download/:rfidUid`
+4. **Rhyme download manifest** — `GET /card/rhyme/download/:rfidUid` (deprecated but still used)
+5. **Cached audio URL update** — `PUT /card/content-pack/:packCode/sequence/:sequence/cached-audio`
+
+### P1 — Content Infrastructure
+6. **Markdown parser utility** — `MdParserUtil` equivalent for extracting content by sequence
+7. **`content_item` table queries** — Service methods to query individual items by pack
+
+### P2 — Admin CRUD
+8. **Full `rfid_content_pack` CRUD** — Page, list, get-by-code, create, update, delete
+9. **Legacy lookup endpoint** — `GET /card/lookup-legacy/:rfidUid`
 
 ## Tech Stack
-- **Backend**: Node.js/Express.js
-- **Database**: Supabase (PostgreSQL) with Prisma ORM
-- **Authentication**: JWT tokens via custom auth middleware
-- **API Documentation**: Swagger/OpenAPI at /toy/doc.html
+
+- **Runtime**: Node.js 20+ (existing)
+- **Framework**: Express.js (existing)
+- **Database**: Supabase / PostgreSQL (existing)
+- **ORM**: Supabase JS Client (existing)
+- **Auth**: Supabase Auth + service key middleware (existing)
+
+No new dependencies required. All work is within the existing `manager-api-node` codebase.
+
+## Architecture
+
+Follows the existing Node.js project patterns:
+- Routes in `src/routes/rfid.routes.js` (add new endpoints to existing file)
+- Service methods in `src/services/rfid.service.js` (add new methods to existing file)
+- Utility in `src/utils/mdParser.js` (new file)
+- Database migration in `supabase/migrations/` (if `content_item` table or new columns don't exist)
+
+## Data Model
+
+### Existing Tables (already in Supabase schema)
+- `rfid_content_pack` — content packs with markdown, version, hash, cachedAudioUrls
+- `rfid_card_mapping` — links RFID UIDs to content packs via `content_pack_id`
+
+### Table to Verify/Add: `content_item`
+```
+content_item:
+  id              BIGSERIAL PRIMARY KEY
+  content_pack_id BIGINT FK → rfid_content_pack(id)
+  item_number     INTEGER (1-based sequence)
+  title           VARCHAR(255)
+  description     TEXT
+  audio_url       VARCHAR(500)
+  audio_size_bytes BIGINT
+  audio_duration_ms BIGINT
+  images_json     JSONB (array of {url, sizeBytes, sequence})
+  lyrics_text     TEXT
+  active          BOOLEAN DEFAULT true
+  creator         BIGINT
+  create_date     TIMESTAMP
+  updater         BIGINT
+  update_date     TIMESTAMP
+```
+
+### Response Shapes (Match Java DTOs exactly)
+
+**RfidContentLookupDTO** (returned by `/card/lookup/:rfidUid?sequence=N`):
+```json
+{
+  "rfidUid": "04A3B2C1D00000",
+  "contentType": "read_only",
+  "title": "Twinkle Twinkle",
+  "contentText": "Twinkle twinkle little star...",
+  "promptText": null,
+  "sequence": 1,
+  "packCode": "RHYMES_EN_01",
+  "language": "en",
+  "cachedAudioUrl": "https://cdn.../twinkle.mp3",
+  "cached": true
+}
+```
+
+**ContentDownloadDTO** (returned by `/card/content/download/:rfidUid`):
+```json
+{
+  "rfidUid": "04A3B2C1D00000",
+  "contentType": "read_only",
+  "packCode": "RHYMES_EN_01",
+  "packName": "English Nursery Rhymes",
+  "description": "10 classic rhymes",
+  "version": "1.0",
+  "contentHash": "abc123",
+  "totalItems": 10,
+  "language": "en",
+  "thumbnailUrl": null,
+  "items": [
+    {
+      "itemNumber": 1,
+      "title": "Twinkle Twinkle",
+      "description": "A classic lullaby",
+      "lyricsText": "Twinkle twinkle...",
+      "audio": { "url": "https://...", "sizeBytes": 245000, "durationMs": 30000 },
+      "images": []
+    }
+  ]
+}
+```
+
+**HabitDownloadDTO** (returned by `/card/habit/download/:rfidUid`):
+```json
+{
+  "rfidUid": "04A3B2C1D00000",
+  "contentType": "habit",
+  "habitCode": "BRUSH_TEETH_01",
+  "habitName": "Brush Your Teeth",
+  "version": "1.0",
+  "contentHash": "def456",
+  "totalSteps": 5,
+  "thumbnailUrl": "https://cdn.../thumb.jpg",
+  "steps": [
+    {
+      "stepNumber": 1,
+      "title": "Wet your toothbrush",
+      "instructionText": "Turn on the tap...",
+      "audio": { "url": "https://...", "sizeBytes": 120000, "durationMs": 15000 },
+      "images": [{ "url": "https://...", "sizeBytes": 50000, "sequence": 1 }]
+    }
+  ]
+}
+```
+
+**RhymeDownloadDTO** (returned by `/card/rhyme/download/:rfidUid`):
+```json
+{
+  "rfidUid": "04A3B2C1D00000",
+  "contentType": "rhyme",
+  "packCode": "RHYMES_EN_01",
+  "packName": "English Nursery Rhymes",
+  "version": "1.0",
+  "contentHash": "abc123",
+  "totalItems": 10,
+  "language": "en",
+  "items": [
+    {
+      "itemNumber": 1,
+      "title": "Twinkle Twinkle",
+      "lyricsText": "Twinkle twinkle...",
+      "audio": { "url": "https://...", "sizeBytes": 245000, "durationMs": 30000 }
+    }
+  ]
+}
+```
+
+## Security Considerations
+
+- **Public endpoints** (no auth): `/card/lookup/:rfidUid`, `/card/content/download/:rfidUid`, `/card/habit/download/:rfidUid`, `/card/rhyme/download/:rfidUid`, cached audio update (service-to-service key)
+- **Admin endpoints** (require admin auth): All content pack CRUD, content item queries
+- UID normalization must sanitize input (strip non-hex characters, uppercase)
+
+## Third-Party Integrations
+
+None new. Uses existing Supabase client.
+
+## Constraints & Assumptions
+
+- Response shapes must exactly match Java API DTOs for backward compatibility with ESP32 firmware and LiveKit agent
+- The `content_item` table may already exist in Supabase from a previous migration — verify before creating
+- The `rfid_content_pack` table fields (`version`, `content_hash`, `cached_audio_urls`) may need to be added if not present
+- All new code goes into existing files (`rfid.routes.js`, `rfid.service.js`) plus one new utility file (`mdParser.js`)
+- Follow existing code patterns (asyncHandler, success/badRequest/notFound helpers, Swagger JSDoc)
 
 ## Success Criteria
-All manager-web frontend features work correctly with the Node.js API, matching Spring Boot behavior exactly.
+
+- All 5 P0 endpoints return responses matching the Java API DTOs exactly
+- ESP32 devices can call `/card/lookup/:rfidUid?sequence=1` and receive correct content
+- ESP32 devices can call `/card/content/download/:rfidUid` and receive full manifest
+- LiveKit agent can call `PUT /card/content-pack/:packCode/sequence/:sequence/cached-audio` successfully
+- Admin dashboard can list, create, edit, and delete content packs
+- All existing RFID endpoints continue to work (no regressions)
 
 ---
 
@@ -29,599 +194,143 @@ All manager-web frontend features work correctly with the Node.js API, matching 
 ```json
 [
   {
-    "id": 1,
     "category": "setup",
-    "description": "Start manager-web frontend and verify connection to Node.js API",
+    "description": "Verify content_item and rfid_content_pack table schema in Supabase",
     "steps": [
-      "Navigate to main/manager-web directory",
-      "Run npm install if needed",
-      "Check .env.development or vue.config.js for API URL configuration",
-      "Update to point to http://localhost:8002/toy if needed",
-      "Run npm run serve to start the frontend",
-      "Verify frontend loads at http://localhost:8080 without errors"
+      "Check if content_item table exists in Supabase migrations",
+      "Check if rfid_content_pack has version, content_hash, cached_audio_urls columns",
+      "Create migration to add any missing tables/columns",
+      "Test migration applies cleanly"
     ],
     "passes": true
   },
   {
-    "id": 2,
-    "category": "auth",
-    "description": "Test and fix POST /user/login endpoint",
-    "endpoints": ["POST /user/login"],
+    "category": "feature",
+    "description": "Create MdParserUtil (src/utils/mdParser.js)",
     "steps": [
-      "Test login on Spring Boot: curl -X POST http://localhost:8003/toy/user/login -d '{...}'",
-      "Test login on Node.js: curl -X POST http://localhost:8002/toy/user/login -d '{...}'",
-      "Compare response structures (fields, format, status codes)",
-      "Fix any differences in auth.service.js or auth.routes.js",
-      "Verify login works in frontend"
+      "Create src/utils/mdParser.js with extractBySequence(mdContent, sequence) method",
+      "Implement countItems(mdContent) method",
+      "Implement hasSequence(mdContent, sequence) method",
+      "Regex pattern: ## {N}. Title followed by content until next --- or ## or EOF",
+      "Export all three methods"
     ],
     "passes": true
   },
   {
-    "id": 3,
-    "category": "auth",
-    "description": "Test and fix GET /user/info endpoint",
-    "endpoints": ["GET /user/info"],
+    "category": "feature",
+    "description": "Add content_item query methods to rfid.service.js",
     "steps": [
-      "Test on both APIs with auth token",
-      "Compare response fields and format",
-      "Fix any differences",
-      "Verify user info displays correctly in frontend header"
+      "Add getContentItemsByPackId(contentPackId) — select from content_item ordered by item_number",
+      "Add getContentItem(contentPackId, itemNumber) — single item lookup",
+      "Add getTotalAudioSize(contentPackId) — SUM(audio_size_bytes)",
+      "Add countItemsWithImages(contentPackId) — COUNT where images_json is not empty",
+      "Add transformContentItemToDTO(item) helper matching ContentItemDTO shape"
     ],
     "passes": true
   },
   {
-    "id": 4,
-    "category": "auth",
-    "description": "Test and fix GET /user/pub-config endpoint",
-    "endpoints": ["GET /user/pub-config"],
+    "category": "feature",
+    "description": "Add content pack lookup with sequence support to rfid.service.js",
     "steps": [
-      "Test on both APIs",
-      "Compare response structure",
-      "This endpoint provides public system configuration",
-      "Fix any differences"
+      "Add lookupContentByRfidUid(rfidUid, sequence) method",
+      "Lookup card mapping by rfidUid, get content_pack_id",
+      "If content pack found: parse markdown with MdParserUtil.extractBySequence()",
+      "Check cached_audio_urls JSON for pre-rendered audio URL",
+      "Fallback chain: content pack → question_ids[sequence] → single question → series range",
+      "Return RfidContentLookupDTO shape"
     ],
     "passes": true
   },
   {
-    "id": 5,
-    "category": "admin",
-    "description": "Test and fix GET /admin/users pagination endpoint",
-    "endpoints": ["GET /admin/users?page=1&limit=10"],
+    "category": "feature",
+    "description": "Add content download manifest methods to rfid.service.js",
     "steps": [
-      "Test user listing on both APIs",
-      "Compare pagination format (page, limit, total, list)",
-      "Compare user object fields",
-      "Fix any differences",
-      "Verify user management page works in frontend"
+      "Add getContentDownloadManifest(rfidUid) — returns ContentDownloadDTO",
+      "Lookup card mapping → content_pack_id → content_item rows",
+      "Transform items to ContentItemDTO array with audio/images nested objects",
+      "Add getHabitDownloadManifest(rfidUid, version, hash) — returns HabitDownloadDTO",
+      "Convert content items to HabitStepDTO array with stepNumber, instructionText, audio, images",
+      "Support version/hash cache check (return 304-equivalent if unchanged)",
+      "Add getRhymeDownloadManifest(rfidUid) — returns RhymeDownloadDTO",
+      "Convert content items to RhymeItemDTO array with itemNumber, title, lyricsText, audio"
     ],
     "passes": true
   },
   {
-    "id": 6,
-    "category": "admin",
-    "description": "Test and fix admin user CRUD operations",
-    "endpoints": [
-      "DELETE /admin/users/{id}",
-      "PUT /admin/users/{id}",
-      "PUT /admin/users/changeStatus/{status}"
-    ],
+    "category": "feature",
+    "description": "Add cached audio URL update method to rfid.service.js",
     "steps": [
-      "Test delete user on both APIs",
-      "Test reset password on both APIs",
-      "Test change status on both APIs",
-      "Fix any response format differences"
+      "Add updateCachedAudioUrl(packCode, sequence, audioUrl) method",
+      "Fetch content pack by packCode",
+      "Parse existing cached_audio_urls JSON (or create empty {})",
+      "Add/update entry for the sequence key",
+      "Save updated JSON back to rfid_content_pack row"
     ],
     "passes": true
   },
   {
-    "id": 7,
-    "category": "admin",
-    "description": "Test and fix GET /admin/params/page endpoint",
-    "endpoints": ["GET /admin/params/page?page=1&limit=10"],
+    "category": "feature",
+    "description": "Add full rfid_content_pack CRUD methods to rfid.service.js",
     "steps": [
-      "Test params listing on both APIs",
-      "Compare pagination and field formats",
-      "Fix any differences",
-      "Verify system parameters page works"
+      "Add getContentPackPage(params) — paginated listing with filters (packCode, name, contentType, language, active)",
+      "Add getContentPackList(params) — unpaginated listing with same filters",
+      "Add getContentPackByCode(packCode) — lookup by unique code",
+      "Add getAllActiveContentPacks() — active packs only",
+      "Add getContentPacksByType(contentType) — filter by read_only/prompt",
+      "Add getContentPacksByLanguage(language) — filter by language",
+      "Add createContentPack(data) — create with packCode uniqueness check",
+      "Add updateContentPack(data) — update by id",
+      "Add deleteContentPacks(ids) — batch delete",
+      "Add transformContentPackToCamelCase(pack) helper"
     ],
     "passes": true
   },
   {
-    "id": 8,
-    "category": "admin",
-    "description": "Test and fix params CRUD operations",
-    "endpoints": [
-      "POST /admin/params",
-      "PUT /admin/params",
-      "POST /admin/params/delete"
-    ],
+    "category": "feature",
+    "description": "Add device-facing routes to rfid.routes.js (P0 endpoints)",
     "steps": [
-      "Test create param on both APIs",
-      "Test update param on both APIs",
-      "Test delete param on both APIs",
-      "Fix any differences"
+      "Modify GET /card/lookup/:rfidUid to accept ?sequence query param and call lookupContentByRfidUid when sequence is provided",
+      "Add GET /card/content/download/:rfidUid route (public, no auth) calling getContentDownloadManifest()",
+      "Add GET /card/habit/download/:rfidUid route (public, no auth) with ?version and ?hash query params calling getHabitDownloadManifest()",
+      "Add GET /card/rhyme/download/:rfidUid route (public, no auth) calling getRhymeDownloadManifest()",
+      "Add PUT /card/content-pack/:packCode/sequence/:sequence/cached-audio route calling updateCachedAudioUrl()",
+      "Add GET /card/lookup-legacy/:rfidUid route calling existing question lookup",
+      "Add Swagger JSDoc annotations for all new endpoints"
     ],
     "passes": true
   },
   {
-    "id": 9,
-    "category": "admin",
-    "description": "Test and fix dictionary type endpoints",
-    "endpoints": [
-      "GET /admin/dict/type/page",
-      "GET /admin/dict/type/{id}",
-      "POST /admin/dict/type/save",
-      "PUT /admin/dict/type/update",
-      "POST /admin/dict/type/delete"
-    ],
+    "category": "feature",
+    "description": "Add content pack CRUD routes to rfid.routes.js (P2 endpoints)",
     "steps": [
-      "Test dict type listing and CRUD on both APIs",
-      "Compare response formats",
-      "Fix any differences",
-      "Verify dictionary management page works"
+      "Add GET /content-pack/page route (admin auth) calling getContentPackPage()",
+      "Add GET /content-pack/list route (admin auth) calling getContentPackList()",
+      "Add GET /content-pack/code/:packCode route (admin auth) calling getContentPackByCode()",
+      "Add GET /content-pack/active route (public) calling getAllActiveContentPacks()",
+      "Add GET /content-pack/type/:contentType route (admin auth) calling getContentPacksByType()",
+      "Add GET /content-pack/language/:language route (admin auth) calling getContentPacksByLanguage()",
+      "Add POST /content-pack route (admin auth) calling createContentPack()",
+      "Add PUT /content-pack route (admin auth) calling updateContentPack()",
+      "Add DELETE /content-pack route (admin auth) calling deleteContentPacks()",
+      "Add POST /content-pack/delete route (admin auth) calling deleteContentPacks()",
+      "Add Swagger JSDoc annotations for all new endpoints"
     ],
     "passes": true
   },
   {
-    "id": 10,
-    "category": "admin",
-    "description": "Test and fix dictionary data endpoints",
-    "endpoints": [
-      "GET /admin/dict/data/page",
-      "GET /admin/dict/data/{id}",
-      "GET /admin/dict/data/type/{dictType}",
-      "POST /admin/dict/data/save",
-      "PUT /admin/dict/data/update",
-      "POST /admin/dict/data/delete"
-    ],
+    "category": "testing",
+    "description": "Add integration tests for new RFID content endpoints",
     "steps": [
-      "Test dict data listing and CRUD on both APIs",
-      "Test getting data by dict type",
-      "Fix any differences"
+      "Add tests for GET /card/lookup/:rfidUid?sequence=1 with content pack",
+      "Add tests for GET /card/content/download/:rfidUid",
+      "Add tests for GET /card/habit/download/:rfidUid",
+      "Add tests for GET /card/rhyme/download/:rfidUid",
+      "Add tests for PUT /card/content-pack/:packCode/sequence/1/cached-audio",
+      "Add tests for content pack CRUD (page, list, create, update, delete)",
+      "Add tests for MdParserUtil methods",
+      "Verify response shapes match Java DTOs exactly"
     ],
     "passes": true
-  },
-  {
-    "id": 11,
-    "category": "device",
-    "description": "Test and fix GET /device/bind/{agentId} endpoint",
-    "endpoints": ["GET /device/bind/{agentId}"],
-    "steps": [
-      "Test getting devices bound to agent on both APIs",
-      "Compare response format (list of devices)",
-      "Fix any differences",
-      "Verify device list displays correctly in frontend"
-    ],
-    "passes": true
-  },
-  {
-    "id": 12,
-    "category": "device",
-    "description": "Test and fix device bind/unbind operations",
-    "endpoints": [
-      "POST /device/bind/{agentId}/{deviceCode}",
-      "POST /device/unbind"
-    ],
-    "steps": [
-      "Test binding device with activation code on both APIs",
-      "Test unbinding device on both APIs",
-      "Compare response formats",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 13,
-    "category": "device",
-    "description": "Test and fix device update and manual add",
-    "endpoints": [
-      "PUT /device/update/{id}",
-      "POST /device/manual-add"
-    ],
-    "steps": [
-      "Test device update on both APIs",
-      "Test manual device addition on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 14,
-    "category": "device",
-    "description": "Test and fix GET /admin/device/all endpoint",
-    "endpoints": ["GET /admin/device/all?page=1&limit=10"],
-    "steps": [
-      "Test admin device listing on both APIs",
-      "Compare pagination and device object format",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 15,
-    "category": "agent",
-    "description": "Test and fix agent listing endpoints",
-    "endpoints": [
-      "GET /agent/all",
-      "GET /agent/list"
-    ],
-    "steps": [
-      "Test /agent/all (admin view) on both APIs",
-      "Test /agent/list (user's agents) on both APIs",
-      "Compare response formats",
-      "Fix any differences",
-      "Verify agent list displays correctly in frontend"
-    ],
-    "passes": true
-  },
-  {
-    "id": 16,
-    "category": "agent",
-    "description": "Test and fix agent CRUD operations",
-    "endpoints": [
-      "GET /agent/{agentId}",
-      "POST /agent",
-      "PUT /agent/{agentId}",
-      "DELETE /agent/{agentId}"
-    ],
-    "steps": [
-      "Test getting single agent on both APIs",
-      "Test create, update, delete on both APIs",
-      "Compare response formats for each",
-      "Fix any differences",
-      "Verify agent config page works in frontend"
-    ],
-    "passes": true
-  },
-  {
-    "id": 17,
-    "category": "agent",
-    "description": "Test and fix agent template endpoints",
-    "endpoints": [
-      "GET /agent/template",
-      "POST /agent/template",
-      "PUT /agent/template/{templateId}"
-    ],
-    "steps": [
-      "Test template listing on both APIs",
-      "Test template CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 18,
-    "category": "agent",
-    "description": "Test and fix agent chat history endpoints",
-    "endpoints": [
-      "GET /agent/{agentId}/sessions",
-      "GET /agent/{agentId}/chat-history/{sessionId}",
-      "GET /agent/{agentId}/chat-history/user"
-    ],
-    "steps": [
-      "Test session listing on both APIs",
-      "Test chat history retrieval on both APIs",
-      "Test recent user messages on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 19,
-    "category": "agent",
-    "description": "Test and fix agent MCP endpoints",
-    "endpoints": [
-      "GET /agent/mcp/address/{agentId}",
-      "GET /agent/mcp/tools/{agentId}"
-    ],
-    "steps": [
-      "Test MCP address endpoint on both APIs",
-      "Test MCP tools endpoint on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 20,
-    "category": "analytics",
-    "description": "Test and fix device analytics endpoints",
-    "endpoints": [
-      "GET /analytics/today/device-count",
-      "GET /analytics/month/device-count",
-      "GET /analytics/today/active-devices",
-      "GET /analytics/month/active-devices"
-    ],
-    "steps": [
-      "Test all analytics endpoints on both APIs",
-      "Compare response formats",
-      "Fix any differences",
-      "Verify dashboard analytics display correctly"
-    ],
-    "passes": true
-  },
-  {
-    "id": 21,
-    "category": "analytics",
-    "description": "Test and fix usage/token analytics endpoints",
-    "endpoints": [
-      "GET /usage/analytics/daily-summary",
-      "GET /usage/analytics/per-device",
-      "GET /usage/analytics/totals"
-    ],
-    "steps": [
-      "Test all usage analytics endpoints on both APIs",
-      "Compare response formats",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 22,
-    "category": "model",
-    "description": "Test and fix model listing endpoints",
-    "endpoints": [
-      "GET /models/list?page=1&limit=10",
-      "GET /models/{id}",
-      "GET /models/names",
-      "GET /models/llm/names"
-    ],
-    "steps": [
-      "Test model listing on both APIs",
-      "Test getting single model on both APIs",
-      "Test model names endpoints on both APIs",
-      "Fix any differences",
-      "Verify model config page works"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Changed table from ai_model to ai_model_config, 2) Added camelCase transformation for response fields, 3) Fixed requireAdmin middleware to check user.super_admin, 4) Fixed route ordering for /enable and /default endpoints"
-  },
-  {
-    "id": 23,
-    "category": "model",
-    "description": "Test and fix model CRUD operations",
-    "endpoints": [
-      "POST /models/{modelType}/{provideCode}",
-      "PUT /models/{modelType}/{provideCode}/{id}",
-      "DELETE /models/{id}",
-      "PUT /models/enable/{id}/{status}",
-      "PUT /models/default/{id}"
-    ],
-    "steps": [
-      "Test model create, update, delete on both APIs",
-      "Test enable/disable on both APIs",
-      "Test set default on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Added referential integrity checks to DELETE (default model check, agent references, intent config references), 2) Added intent LLM validation to UPDATE (validates LLM exists and is openai/ollama type)"
-  },
-  {
-    "id": 24,
-    "category": "model",
-    "description": "Test and fix model provider endpoints",
-    "endpoints": [
-      "GET /models/provider",
-      "POST /models/provider",
-      "PUT /models/provider",
-      "POST /models/provider/delete"
-    ],
-    "steps": [
-      "Test provider listing on both APIs",
-      "Test provider CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Changed auth from requireAuth to requireAdmin, 2) Added camelCase transformation for responses, 3) Added name filter support (LIKE on name OR provider_code), 4) Added batch delete support (accepts ids array)"
-  },
-  {
-    "id": 25,
-    "category": "ota",
-    "description": "Test and fix OTA management endpoints",
-    "endpoints": [
-      "GET /otaMag",
-      "GET /otaMag/{id}",
-      "POST /otaMag",
-      "PUT /otaMag/{id}",
-      "DELETE /otaMag/{id}",
-      "PUT /otaMag/forceUpdate/{id}"
-    ],
-    "steps": [
-      "Test firmware listing on both APIs",
-      "Test firmware CRUD on both APIs",
-      "Test force update flag on both APIs",
-      "Fix any differences",
-      "Verify OTA management page works"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Route ordering - specific routes before /:id, 2) Response camelCase transformation, 3) POST/PUT/DELETE return null data (Result<Void>), 4) forceUpdate endpoint expects both forceUpdate and type, 5) getDownloadUrl returns just UUID, 6) download endpoint uses cache with 3x limit, 7) upload uses MD5 filename"
-  },
-  {
-    "id": 26,
-    "category": "rfid",
-    "description": "Test and fix RFID question endpoints",
-    "endpoints": [
-      "GET /admin/rfid/question/page",
-      "GET /admin/rfid/question/list",
-      "GET /admin/rfid/question/{id}",
-      "POST /admin/rfid/question",
-      "PUT /admin/rfid/question",
-      "POST /admin/rfid/question/delete"
-    ],
-    "steps": [
-      "Test question listing on both APIs",
-      "Test question CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true
-  },
-  {
-    "id": 27,
-    "category": "rfid",
-    "description": "Test and fix RFID pack endpoints",
-    "endpoints": [
-      "GET /admin/rfid/pack/page",
-      "GET /admin/rfid/pack/list",
-      "POST /admin/rfid/pack",
-      "PUT /admin/rfid/pack",
-      "POST /admin/rfid/pack/delete"
-    ],
-    "steps": [
-      "Test pack listing on both APIs",
-      "Test pack CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Schema mapping from Supabase (pack_name, status) to Spring Boot (name, active), 2) Added transformPackToCamelCase helper, 3) Added missing endpoints (/page, /active, /code/:packCode, /age/:age), 4) CUD operations return null (Result<Void>), 5) Changed auth to requireAdmin, 6) Added batch delete support"
-  },
-  {
-    "id": 28,
-    "category": "rfid",
-    "description": "Test and fix RFID card endpoints",
-    "endpoints": [
-      "GET /admin/rfid/card/page",
-      "GET /admin/rfid/card/{id}",
-      "GET /admin/rfid/card/uid/{rfidUid}",
-      "GET /admin/rfid/card/pack/{packCode}",
-      "GET /admin/rfid/card/question/{questionId}",
-      "POST /admin/rfid/card",
-      "PUT /admin/rfid/card",
-      "DELETE /admin/rfid/card",
-      "POST /admin/rfid/card/delete"
-    ],
-    "steps": [
-      "Test card listing on both APIs",
-      "Test get card by UID on both APIs",
-      "Test card CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Added transformCardMappingToCamelCase helper, 2) Added missing endpoints (/{id}, /uid/{rfidUid}, /pack/{packCode}, /question/{questionId}), 3) Fixed broken DELETE /card route (undefined variables), 4) Added POST /card/delete endpoint, 5) Changed auth to requireAdmin, 6) CUD operations return null (Result<Void>)"
-  },
-  {
-    "id": 29,
-    "category": "rfid",
-    "description": "Test and fix RFID series endpoints",
-    "endpoints": [
-      "GET /admin/rfid/series/page",
-      "GET /admin/rfid/series/list",
-      "GET /admin/rfid/series/active",
-      "GET /admin/rfid/series/{id}",
-      "GET /admin/rfid/series/lookup/{uid}",
-      "GET /admin/rfid/series/find/{uid}",
-      "GET /admin/rfid/series/pack/{packId}",
-      "GET /admin/rfid/series/question/{questionId}",
-      "POST /admin/rfid/series",
-      "PUT /admin/rfid/series",
-      "DELETE /admin/rfid/series",
-      "POST /admin/rfid/series/delete"
-    ],
-    "steps": [
-      "Test series listing on both APIs",
-      "Test series CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Added transformSeriesToCamelCase helper, 2) Changed auth to requireAdmin, 3) Added questionId filter support, 4) Replaced DELETE /{id} with DELETE body array, 5) Added POST /series/delete, 6) Fixed column names (pack_id not content_pack_id), 7) CUD operations return null (Result<Void>)"
-  },
-  {
-    "id": 30,
-    "category": "voice",
-    "description": "Test and fix TTS voice endpoints",
-    "endpoints": [
-      "GET /ttsVoice",
-      "POST /ttsVoice",
-      "PUT /ttsVoice/{id}",
-      "POST /ttsVoice/delete"
-    ],
-    "steps": [
-      "Test voice listing on both APIs",
-      "Test voice CRUD on both APIs",
-      "Fix any differences"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Created new /ttsVoice route matching Spring Boot TimbreController, 2) Added pagination with fuzzy name filter, 3) Response camelCase transformation (referenceAudio, ttsModelId, voiceDemo), 4) CUD operations return null (Result<Void>), 5) Batch delete with String[] body"
-  },
-  {
-    "id": 31,
-    "category": "integration",
-    "description": "Full frontend test - Login and Dashboard",
-    "steps": [
-      "Open manager-web in browser",
-      "Login with test credentials",
-      "Verify dashboard loads with analytics data",
-      "Check browser console for any API errors"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Installed missing express-async-handler package, 2) Verified all login endpoints (login, pub-config, user/info), 3) Verified all dashboard endpoints (agent/list, analytics/today/device-count, analytics/month/device-count, analytics/today/active-devices, analytics/month/active-devices)"
-  },
-  {
-    "id": 32,
-    "category": "integration",
-    "description": "Full frontend test - Device Management",
-    "steps": [
-      "Navigate to device management page",
-      "Verify device list loads",
-      "Test device binding with activation code",
-      "Test device unbinding",
-      "Test device update"
-    ],
-    "passes": true,
-    "notes": "All device management endpoints working: device/bind/{agentId}, admin/device/all, device/manual-add, device/update/{id}, device/unbind"
-  },
-  {
-    "id": 33,
-    "category": "integration",
-    "description": "Full frontend test - Agent Configuration",
-    "steps": [
-      "Navigate to agent/role config page",
-      "Verify agent list loads",
-      "Test creating new agent",
-      "Test editing agent configuration",
-      "Test viewing chat history"
-    ],
-    "passes": true,
-    "notes": "All agent endpoints working: agent/list, agent/all, agent/{id} (GET/PUT/DELETE), agent/sessions, agent/chat-history/user, agent/template"
-  },
-  {
-    "id": 34,
-    "category": "integration",
-    "description": "Full frontend test - Model Configuration",
-    "steps": [
-      "Navigate to model config page",
-      "Verify model list loads",
-      "Test model CRUD operations",
-      "Test enabling/disabling models",
-      "Test setting default model"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Added missing ai_model_provider model to Prisma schema, 2) Verified all model endpoints (list, names, CRUD, enable, default), 3) Verified provider endpoints"
-  },
-  {
-    "id": 35,
-    "category": "integration",
-    "description": "Full frontend test - RFID Management",
-    "steps": [
-      "Navigate to RFID management page",
-      "Test questions tab - list and CRUD",
-      "Test packs tab - list and CRUD",
-      "Test cards tab - list and CRUD",
-      "Test series tab - list and CRUD"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Synced Prisma schema with database via db pull, 2) Verified all RFID endpoints (question/page, pack/page, card/page, series/page), 3) Verified pack CRUD operation"
-  },
-  {
-    "id": 36,
-    "category": "integration",
-    "description": "Full frontend test - Admin Settings",
-    "steps": [
-      "Navigate to user management",
-      "Navigate to system parameters",
-      "Navigate to dictionary management",
-      "Verify all admin pages work correctly"
-    ],
-    "passes": true,
-    "notes": "Fixed: 1) Removed creator column from dict type/data insert (column doesn't exist in schema), 2) Verified user management endpoints, 3) Verified system params endpoints, 4) Verified dictionary management endpoints"
   }
 ]
 ```
@@ -632,29 +341,15 @@ All manager-web frontend features work correctly with the Node.js API, matching 
 
 1. Read `activity.md` first to understand current state
 2. Find next task with `"passes": false`
-3. For each task:
-   - Test endpoints against Spring Boot API (port 8003) to get expected behavior
-   - Test same endpoints against Node.js API (port 8002)
-   - Compare responses using curl
-   - Fix any differences in Node.js API code
-   - Verify fix works
-4. Update task to `"passes": true`
-5. Log completion in `activity.md`
-6. Repeat until all tasks pass
-
-**Testing Pattern:**
-```bash
-# Get auth token first
-TOKEN=$(curl -s -X POST http://localhost:8003/toy/user/login -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123"}' | jq -r '.data.token')
-
-# Compare responses
-echo "=== Spring Boot ===" && curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8003/toy/endpoint | jq
-echo "=== Node.js ===" && curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8002/toy/endpoint | jq
-```
+3. Complete all steps for that task
+4. Verify in browser using agent-browser
+5. Update task to `"passes": true`
+6. Log completion in `activity.md`
+7. Repeat until all tasks pass
 
 **Important:** Only modify the `passes` field. Do not remove or rewrite tasks.
 
 ---
 
 ## Completion Criteria
-All 36 tasks marked with `"passes": true`
+All tasks marked with `"passes": true`

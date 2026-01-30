@@ -8,6 +8,7 @@
 const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
+const { extractBySequence, countItems } = require('../utils/mdParser');
 const qdrantService = require('./integrations/qdrant.service');
 
 // =============================================
@@ -2080,6 +2081,860 @@ const registerDeviceTags = async (mac, tags) => {
   return results;
 };
 
+// =============================================
+// Content Item Query Methods (Task 3)
+// =============================================
+
+/**
+ * Get all content items for a content pack, ordered by item_number
+ * @param {number} contentPackId - Content pack ID
+ * @returns {Promise<Array>} Content items
+ */
+const getContentItemsByPackId = async (contentPackId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: items, error } = await supabaseAdmin
+    .from('content_item')
+    .select('*')
+    .eq('content_pack_id', contentPackId)
+    .eq('active', true)
+    .order('item_number', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch content items:', { error, contentPackId });
+    throw new Error('Failed to fetch content items');
+  }
+
+  return items || [];
+};
+
+/**
+ * Get a single content item by pack ID and item number
+ * @param {number} contentPackId - Content pack ID
+ * @param {number} itemNumber - Item sequence number (1-based)
+ * @returns {Promise<Object|null>} Content item or null
+ */
+const getContentItem = async (contentPackId, itemNumber) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: item, error } = await supabaseAdmin
+    .from('content_item')
+    .select('*')
+    .eq('content_pack_id', contentPackId)
+    .eq('item_number', itemNumber)
+    .eq('active', true)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch content item:', { error, contentPackId, itemNumber });
+    throw new Error('Failed to fetch content item');
+  }
+
+  return item || null;
+};
+
+/**
+ * Get total audio size for all items in a content pack
+ * @param {number} contentPackId - Content pack ID
+ * @returns {Promise<number>} Total audio size in bytes
+ */
+const getTotalAudioSize = async (contentPackId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: items, error } = await supabaseAdmin
+    .from('content_item')
+    .select('audio_size_bytes')
+    .eq('content_pack_id', contentPackId)
+    .eq('active', true);
+
+  if (error) {
+    logger.error('Failed to get total audio size:', { error, contentPackId });
+    throw new Error('Failed to get total audio size');
+  }
+
+  return (items || []).reduce((sum, item) => sum + (item.audio_size_bytes || 0), 0);
+};
+
+/**
+ * Count items that have images in a content pack
+ * @param {number} contentPackId - Content pack ID
+ * @returns {Promise<number>} Count of items with images
+ */
+const countItemsWithImages = async (contentPackId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: items, error } = await supabaseAdmin
+    .from('content_item')
+    .select('id, images_json')
+    .eq('content_pack_id', contentPackId)
+    .eq('active', true)
+    .not('images_json', 'is', null);
+
+  if (error) {
+    logger.error('Failed to count items with images:', { error, contentPackId });
+    throw new Error('Failed to count items with images');
+  }
+
+  // Filter for non-empty arrays
+  return (items || []).filter(item => {
+    if (!item.images_json) return false;
+    const images = typeof item.images_json === 'string' ? JSON.parse(item.images_json) : item.images_json;
+    return Array.isArray(images) && images.length > 0;
+  }).length;
+};
+
+/**
+ * Transform a content_item row to ContentItemDTO shape
+ * @param {Object} item - Raw DB row
+ * @returns {Object} ContentItemDTO
+ */
+const transformContentItemToDTO = (item) => {
+  if (!item) return null;
+
+  const dto = {
+    itemNumber: item.item_number,
+    title: item.title,
+    description: item.description,
+    lyricsText: item.lyrics_text,
+  };
+
+  // Audio info (nested object)
+  if (item.audio_url) {
+    dto.audio = {
+      url: item.audio_url,
+      sizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null,
+      durationMs: item.audio_duration_ms ? Number(item.audio_duration_ms) : null,
+    };
+  } else {
+    dto.audio = null;
+  }
+
+  // Images info (parse JSONB)
+  if (item.images_json) {
+    try {
+      const images = typeof item.images_json === 'string'
+        ? JSON.parse(item.images_json)
+        : item.images_json;
+      dto.images = Array.isArray(images) ? images : [];
+    } catch (e) {
+      logger.error('Failed to parse images_json for item:', { itemId: item.id, error: e.message });
+      dto.images = [];
+    }
+  } else {
+    dto.images = [];
+  }
+
+  return dto;
+};
+
+// =============================================
+// Content Pack Lookup with Sequence Support (Task 4)
+// =============================================
+
+/**
+ * Lookup content by RFID UID with sequence support (matches Java lookupContentByRfidUid)
+ * @param {string} rfidUid - RFID UID
+ * @param {number|null} sequence - Sequence number (1-based)
+ * @returns {Promise<Object>} RfidContentLookupDTO
+ */
+const lookupContentByRfidUid = async (rfidUid, sequence) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = rfidUid.toUpperCase().replace(/[^0-9A-F]/g, '');
+  logger.info('Looking up content for RFID UID:', { rfidUid: normalizedUid, sequence });
+
+  const result = {
+    rfidUid: normalizedUid,
+    sequence: sequence || null,
+    contentType: null,
+    title: null,
+    contentText: null,
+    promptText: null,
+    packCode: null,
+    language: null,
+    cachedAudioUrl: null,
+    cached: false,
+  };
+
+  // Step 1: Try to find content pack via card mapping
+  const { data: mapping } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .select('*, rfid_content_pack:content_pack_id(*)')
+    .eq('rfid_uid', normalizedUid)
+    .eq('active', true)
+    .single();
+
+  const contentPack = mapping?.rfid_content_pack;
+
+  if (contentPack && contentPack.content_md) {
+    logger.info('Found content pack for RFID UID:', { packCode: contentPack.pack_code, rfidUid: normalizedUid });
+
+    result.contentType = contentPack.content_type;
+    result.packCode = contentPack.pack_code;
+    result.language = contentPack.language;
+
+    // Parse markdown to extract content by sequence
+    if (sequence && sequence > 0) {
+      const item = extractBySequence(contentPack.content_md, sequence);
+
+      if (item) {
+        result.title = item.title;
+        result.contentText = item.content;
+        logger.info('Extracted content for sequence:', { sequence, title: item.title });
+      } else {
+        logger.warn('Sequence not found in content pack:', { sequence, packCode: contentPack.pack_code });
+      }
+
+      // Check for cached audio URL
+      const cachedAudioUrl = getCachedAudioUrl(contentPack.cached_audio_urls, sequence);
+      if (cachedAudioUrl) {
+        result.cachedAudioUrl = cachedAudioUrl;
+        result.cached = true;
+        logger.info('Found cached audio:', { sequence, url: cachedAudioUrl });
+      }
+    }
+
+    return result;
+  }
+
+  // Step 2: Fallback to legacy rfid_question lookup
+  logger.info('No content pack found, falling back to legacy question lookup:', { rfidUid: normalizedUid });
+
+  let questionEntity = null;
+
+  // Try to get question by sequence if provided and question_ids exists
+  if (sequence && sequence > 0 && mapping?.question_ids && Array.isArray(mapping.question_ids) && mapping.question_ids.length > 0) {
+    const questionIdForSequence = mapping.question_ids[sequence - 1]; // 0-indexed array
+    if (questionIdForSequence) {
+      const { data: qData } = await supabaseAdmin
+        .from('rfid_question')
+        .select('*')
+        .eq('id', questionIdForSequence)
+        .eq('active', true)
+        .single();
+      if (qData) {
+        questionEntity = qData;
+        logger.info('Found question by sequence:', { sequence, title: qData.title });
+      }
+    }
+  }
+
+  // Fallback to single question
+  if (!questionEntity && mapping?.question_id) {
+    const { data: qData } = await supabaseAdmin
+      .from('rfid_question')
+      .select('*')
+      .eq('id', mapping.question_id)
+      .eq('active', true)
+      .single();
+    if (qData) {
+      questionEntity = qData;
+    }
+  }
+
+  // Try series range match if no exact match
+  if (!questionEntity) {
+    const { data: series } = await supabaseAdmin
+      .from('rfid_series')
+      .select('*, rfid_content_pack:content_pack_id(*)')
+      .lte('start_uid', normalizedUid)
+      .gte('end_uid', normalizedUid)
+      .eq('status', 1)
+      .order('priority', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (series?.rfid_content_pack?.content_md && sequence && sequence > 0) {
+      const pack = series.rfid_content_pack;
+      result.contentType = pack.content_type;
+      result.packCode = pack.pack_code;
+      result.language = pack.language;
+
+      const item = extractBySequence(pack.content_md, sequence);
+      if (item) {
+        result.title = item.title;
+        result.contentText = item.content;
+      }
+
+      const cachedAudioUrl = getCachedAudioUrl(pack.cached_audio_urls, sequence);
+      if (cachedAudioUrl) {
+        result.cachedAudioUrl = cachedAudioUrl;
+        result.cached = true;
+      }
+
+      return result;
+    }
+  }
+
+  if (questionEntity) {
+    result.contentType = 'prompt';
+    result.title = questionEntity.title;
+    result.promptText = questionEntity.prompt_text;
+    result.language = questionEntity.language;
+    logger.info('Found legacy question:', { rfidUid: normalizedUid, title: questionEntity.title });
+  } else {
+    logger.warn('No content or question found for RFID UID:', { rfidUid: normalizedUid });
+  }
+
+  return result;
+};
+
+/**
+ * Extract cached audio URL for a specific sequence from JSON string
+ * @param {string} cachedAudioUrlsJson - JSON string mapping sequence to URL
+ * @param {number} sequence - Sequence number
+ * @returns {string|null} Audio URL or null
+ */
+const getCachedAudioUrl = (cachedAudioUrlsJson, sequence) => {
+  if (!cachedAudioUrlsJson || sequence == null) return null;
+
+  try {
+    const cachedUrls = typeof cachedAudioUrlsJson === 'string'
+      ? JSON.parse(cachedAudioUrlsJson)
+      : cachedAudioUrlsJson;
+    return cachedUrls[String(sequence)] || null;
+  } catch (e) {
+    logger.warn('Failed to parse cached audio URLs:', { error: e.message });
+    return null;
+  }
+};
+
+// =============================================
+// Content Download Manifest Methods (Task 5)
+// =============================================
+
+/**
+ * Get unified content download manifest (matches Java getContentDownloadManifest)
+ * @param {string} rfidUid - RFID UID
+ * @returns {Promise<Object|null>} ContentDownloadDTO or null
+ */
+const getContentDownloadManifest = async (rfidUid) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!rfidUid || !rfidUid.trim()) {
+    logger.warn('getContentDownloadManifest called with empty rfidUid');
+    return null;
+  }
+
+  const normalizedUid = rfidUid.toUpperCase().replace(/[^0-9A-F]/g, '');
+
+  // Lookup card mapping
+  const { data: mapping } = await supabaseAdmin
+    .from('rfid_card_mapping')
+    .select('*')
+    .eq('rfid_uid', normalizedUid)
+    .eq('active', true)
+    .single();
+
+  if (!mapping) {
+    logger.info('No RFID mapping found for UID:', { rfidUid: normalizedUid });
+    return null;
+  }
+
+  if (!mapping.content_pack_id) {
+    logger.info('RFID card is not linked to a content pack:', { rfidUid: normalizedUid });
+    return null;
+  }
+
+  return getContentDownloadManifestByPackId(mapping.content_pack_id, normalizedUid);
+};
+
+/**
+ * Get content download manifest by pack ID (matches Java getContentDownloadManifestByPackId)
+ * @param {number} contentPackId - Content pack ID
+ * @param {string} rfidUid - RFID UID for response
+ * @returns {Promise<Object|null>} ContentDownloadDTO or null
+ */
+const getContentDownloadManifestByPackId = async (contentPackId, rfidUid) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Get content pack
+  const { data: contentPack } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .eq('id', contentPackId)
+    .eq('active', true)
+    .single();
+
+  if (!contentPack) {
+    logger.info('Content pack not found or inactive:', { contentPackId });
+    return null;
+  }
+
+  // Get all content items
+  const items = await getContentItemsByPackId(contentPackId);
+
+  // Convert items to DTOs
+  const itemDtos = items.map(transformContentItemToDTO);
+
+  // Build response (ContentDownloadDTO)
+  const dto = {
+    rfidUid: rfidUid,
+    contentType: contentPack.content_type,
+    packCode: contentPack.pack_code,
+    packName: contentPack.name,
+    description: contentPack.description,
+    version: contentPack.version || '1.0.0',
+    contentHash: contentPack.content_hash,
+    totalItems: contentPack.total_items || items.length,
+    language: contentPack.language,
+    thumbnailUrl: null,
+    items: itemDtos,
+  };
+
+  logger.info('Returning download manifest:', {
+    contentType: contentPack.content_type,
+    rfidUid,
+    itemCount: itemDtos.length,
+  });
+
+  return dto;
+};
+
+/**
+ * Get habit download manifest (matches Java HabitDownloadDTO)
+ * @param {string} rfidUid - RFID UID
+ * @param {string} [clientVersion] - Client's cached version for 304 check
+ * @param {string} [clientHash] - Client's cached hash for 304 check
+ * @returns {Promise<Object|null>} HabitDownloadDTO or null
+ */
+const getHabitDownloadManifest = async (rfidUid, clientVersion, clientHash) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = rfidUid.toUpperCase().replace(/[^0-9A-F]/g, '');
+
+  // Get unified manifest first
+  const manifest = await getContentDownloadManifest(normalizedUid);
+  if (!manifest) return null;
+
+  // Check if client already has the latest version
+  if (clientVersion && clientHash && manifest.version === clientVersion && manifest.contentHash === clientHash) {
+    return { notModified: true };
+  }
+
+  // Convert to HabitDownloadDTO
+  return {
+    rfidUid: normalizedUid,
+    contentType: 'habit',
+    habitCode: manifest.packCode,
+    habitName: manifest.packName,
+    version: manifest.version,
+    contentHash: manifest.contentHash,
+    totalSteps: manifest.totalItems,
+    thumbnailUrl: manifest.thumbnailUrl,
+    steps: (manifest.items || []).map(item => ({
+      stepNumber: item.itemNumber,
+      title: item.title,
+      instructionText: item.description,
+      audio: item.audio,
+      images: item.images || [],
+    })),
+  };
+};
+
+/**
+ * Get rhyme download manifest (deprecated - matches Java RhymeDownloadDTO)
+ * @param {string} rfidUid - RFID UID
+ * @returns {Promise<Object|null>} RhymeDownloadDTO or null
+ */
+const getRhymeDownloadManifest = async (rfidUid) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = rfidUid.toUpperCase().replace(/[^0-9A-F]/g, '');
+
+  // Get unified manifest first
+  const manifest = await getContentDownloadManifest(normalizedUid);
+  if (!manifest) return null;
+
+  // Convert to RhymeDownloadDTO
+  return {
+    rfidUid: normalizedUid,
+    contentType: manifest.contentType || 'rhyme',
+    packCode: manifest.packCode,
+    packName: manifest.packName,
+    version: manifest.version,
+    contentHash: manifest.contentHash,
+    totalItems: manifest.totalItems,
+    language: manifest.language,
+    items: (manifest.items || []).map(item => ({
+      itemNumber: item.itemNumber,
+      title: item.title,
+      lyricsText: item.lyricsText,
+      audio: item.audio,
+    })),
+  };
+};
+
+// =============================================
+// Cached Audio URL Update (Task 6)
+// =============================================
+
+/**
+ * Update cached audio URL for a content pack sequence (matches Java updateCachedAudioUrl)
+ * @param {string} packCode - Content pack code
+ * @param {number} sequence - Sequence number
+ * @param {string} audioUrl - New audio URL
+ * @returns {Promise<boolean>} true if successful
+ */
+const updateCachedAudioUrl = async (packCode, sequence, audioUrl) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  logger.info('Updating cached audio URL:', { packCode, sequence, audioUrl });
+
+  try {
+    // Get pack by packCode
+    const { data: contentPack, error: fetchError } = await supabaseAdmin
+      .from('rfid_content_pack')
+      .select('id, cached_audio_urls')
+      .eq('pack_code', packCode)
+      .single();
+
+    if (fetchError || !contentPack) {
+      logger.error('Content pack not found:', { packCode });
+      return false;
+    }
+
+    // Parse existing cachedAudioUrls JSON (or create empty)
+    let cachedUrls = {};
+    if (contentPack.cached_audio_urls) {
+      try {
+        cachedUrls = typeof contentPack.cached_audio_urls === 'string'
+          ? JSON.parse(contentPack.cached_audio_urls)
+          : contentPack.cached_audio_urls;
+      } catch (e) {
+        logger.warn('Failed to parse existing cached URLs, starting fresh:', { error: e.message });
+      }
+    }
+
+    // Add/update entry for sequence
+    cachedUrls[String(sequence)] = audioUrl;
+
+    // Save back to DB
+    const updatedJson = JSON.stringify(cachedUrls);
+    const { error: updateError } = await supabaseAdmin
+      .from('rfid_content_pack')
+      .update({ cached_audio_urls: updatedJson, update_date: new Date().toISOString() })
+      .eq('id', contentPack.id);
+
+    if (updateError) {
+      logger.error('Failed to update cached audio URL:', { error: updateError });
+      return false;
+    }
+
+    logger.info('Successfully updated cached audio URL:', { packCode, sequence });
+    return true;
+  } catch (e) {
+    logger.error('Failed to update cached audio URL:', { error: e.message, packCode, sequence });
+    return false;
+  }
+};
+
+// =============================================
+// Content Pack CRUD Methods (Task 7)
+// =============================================
+
+/**
+ * Transform rfid_content_pack row to camelCase DTO
+ */
+const transformContentPackToCamelCase = (pack) => {
+  if (!pack) return null;
+  return {
+    id: pack.id ? Number(pack.id) : null,
+    packCode: pack.pack_code,
+    name: pack.name,
+    description: pack.description,
+    contentType: pack.content_type,
+    contentMd: pack.content_md,
+    totalItems: pack.total_items,
+    language: pack.language,
+    active: pack.active,
+    cachedAudioUrls: pack.cached_audio_urls,
+    version: pack.version,
+    contentHash: pack.content_hash,
+    createDate: formatDate(pack.create_date),
+    updateDate: formatDate(pack.update_date),
+  };
+};
+
+/**
+ * Get content packs with pagination (matches Java page endpoint)
+ * @param {Object} params - Pagination and filter options
+ * @returns {Promise<Object>} Paginated content pack list
+ */
+const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, contentType, language, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('rfid_content_pack')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .order('name', { ascending: true });
+
+  // Apply filters (LIKE search matching Java)
+  if (packCode) {
+    countQuery = countQuery.ilike('pack_code', `%${packCode}%`);
+    dataQuery = dataQuery.ilike('pack_code', `%${packCode}%`);
+  }
+  if (name) {
+    countQuery = countQuery.ilike('name', `%${name}%`);
+    dataQuery = dataQuery.ilike('name', `%${name}%`);
+  }
+  if (contentType) {
+    countQuery = countQuery.eq('content_type', contentType);
+    dataQuery = dataQuery.eq('content_type', contentType);
+  }
+  if (language) {
+    countQuery = countQuery.eq('language', language);
+    dataQuery = dataQuery.eq('language', language);
+  }
+  if (active !== undefined) {
+    const activeVal = active === true || active === 'true' || active === '1';
+    countQuery = countQuery.eq('active', activeVal);
+    dataQuery = dataQuery.eq('active', activeVal);
+  }
+
+  const { count } = await countQuery;
+  const { data: packs, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch content packs:', error);
+    throw new Error('Failed to fetch content packs');
+  }
+
+  return {
+    list: (packs || []).map(transformContentPackToCamelCase),
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit),
+  };
+};
+
+/**
+ * Get all content packs (no pagination)
+ */
+const getContentPackList = async ({ packCode, name, contentType, language, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (packCode) query = query.ilike('pack_code', `%${packCode}%`);
+  if (name) query = query.ilike('name', `%${name}%`);
+  if (contentType) query = query.eq('content_type', contentType);
+  if (language) query = query.eq('language', language);
+  if (active !== undefined) {
+    const activeVal = active === true || active === 'true' || active === '1';
+    query = query.eq('active', activeVal);
+  }
+
+  const { data: packs, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch content packs:', error);
+    throw new Error('Failed to fetch content packs');
+  }
+
+  return (packs || []).map(transformContentPackToCamelCase);
+};
+
+/**
+ * Get content pack by pack code
+ */
+const getContentPackByCode = async (packCode) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: pack, error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .eq('pack_code', packCode)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch content pack by code:', error);
+    throw new Error('Failed to fetch content pack');
+  }
+
+  return transformContentPackToCamelCase(pack);
+};
+
+/**
+ * Get all active content packs
+ */
+const getAllActiveContentPacks = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: packs, error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .eq('active', true)
+    .order('name', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch active content packs:', error);
+    throw new Error('Failed to fetch active content packs');
+  }
+
+  return (packs || []).map(transformContentPackToCamelCase);
+};
+
+/**
+ * Get content packs by content type
+ */
+const getContentPacksByType = async (contentType) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: packs, error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .eq('content_type', contentType)
+    .eq('active', true)
+    .order('name', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch content packs by type:', error);
+    throw new Error('Failed to fetch content packs');
+  }
+
+  return (packs || []).map(transformContentPackToCamelCase);
+};
+
+/**
+ * Get content packs by language
+ */
+const getContentPacksByLanguage = async (language) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: packs, error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .select('*')
+    .eq('language', language)
+    .eq('active', true)
+    .order('name', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch content packs by language:', error);
+    throw new Error('Failed to fetch content packs');
+  }
+
+  return (packs || []).map(transformContentPackToCamelCase);
+};
+
+/**
+ * Create content pack with packCode uniqueness check
+ */
+const createContentPack = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Check for duplicate packCode
+  const existing = await getContentPackByCode(data.packCode);
+  if (existing) {
+    throw new Error('Content pack with this code already exists');
+  }
+
+  const insertData = {
+    pack_code: data.packCode,
+    name: data.name,
+    description: data.description || null,
+    content_type: data.contentType || 'prompt',
+    content_md: data.contentMd || null,
+    total_items: data.totalItems || 0,
+    language: data.language || 'en',
+    active: data.active !== false,
+    cached_audio_urls: data.cachedAudioUrls || null,
+    version: data.version || null,
+    content_hash: data.contentHash || null,
+    creator: userId,
+  };
+
+  const { error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .insert(insertData);
+
+  if (error) {
+    logger.error('Failed to create content pack:', error);
+    if (error.code === '23505') {
+      throw new Error('Content pack with this code already exists');
+    }
+    throw new Error('Failed to create content pack');
+  }
+
+  return null;
+};
+
+/**
+ * Update content pack by id
+ */
+const updateContentPack = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!data.id) {
+    throw new Error('Content pack ID is required');
+  }
+
+  const updateData = {
+    updater: userId,
+    update_date: new Date().toISOString(),
+  };
+
+  if (data.packCode !== undefined) updateData.pack_code = data.packCode;
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.contentType !== undefined) updateData.content_type = data.contentType;
+  if (data.contentMd !== undefined) updateData.content_md = data.contentMd;
+  if (data.totalItems !== undefined) updateData.total_items = data.totalItems;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.active !== undefined) updateData.active = data.active;
+  if (data.cachedAudioUrls !== undefined) updateData.cached_audio_urls = data.cachedAudioUrls;
+  if (data.version !== undefined) updateData.version = data.version;
+  if (data.contentHash !== undefined) updateData.content_hash = data.contentHash;
+
+  const { error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .update(updateData)
+    .eq('id', data.id);
+
+  if (error) {
+    logger.error('Failed to update content pack:', error);
+    if (error.code === '23505') {
+      throw new Error('Content pack with this code already exists');
+    }
+    throw new Error('Failed to update content pack');
+  }
+
+  return null;
+};
+
+/**
+ * Delete content packs by IDs
+ */
+const deleteContentPacks = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Content pack IDs are required');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('rfid_content_pack')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to delete content packs:', error);
+    throw new Error('Failed to delete content packs');
+  }
+
+  return null;
+};
+
 module.exports = {
   // PRD-specified card mapping methods
   getCardMappingPage,
@@ -2148,5 +3003,36 @@ module.exports = {
   deleteRfid,
   processScan,
   getScanLogs,
-  registerDeviceTags
+  registerDeviceTags,
+
+  // Content Item methods (Task 3)
+  getContentItemsByPackId,
+  getContentItem,
+  getTotalAudioSize,
+  countItemsWithImages,
+  transformContentItemToDTO,
+
+  // Content Pack Lookup with sequence (Task 4)
+  lookupContentByRfidUid,
+
+  // Content Download Manifest methods (Task 5)
+  getContentDownloadManifest,
+  getContentDownloadManifestByPackId,
+  getHabitDownloadManifest,
+  getRhymeDownloadManifest,
+
+  // Cached Audio URL update (Task 6)
+  updateCachedAudioUrl,
+
+  // Content Pack CRUD (Task 7)
+  getContentPackPage,
+  getContentPackList,
+  getContentPackByCode,
+  getAllActiveContentPacks,
+  getContentPacksByType,
+  getContentPacksByLanguage,
+  createContentPack,
+  updateContentPack,
+  deleteContentPacks,
+  transformContentPackToCamelCase,
 };

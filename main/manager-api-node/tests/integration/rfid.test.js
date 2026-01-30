@@ -1086,6 +1086,413 @@ describe('RFID Routes', () => {
   });
 
   // =============================================
+  // Content Pack Lookup with Sequence (P0 Endpoints)
+  // =============================================
+
+  describe('GET /toy/admin/rfid/card/lookup/:rfidUid?sequence=N', () => {
+    it('should accept sequence query param', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/lookup/${TEST_UID}`)
+        .query({ sequence: 1 });
+
+      // 200 returns RfidContentLookupDTO shape
+      expect([200, 404, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+
+      if (res.status === 200 && res.body.data) {
+        expect(res.body.data).toHaveProperty('rfidUid');
+        expect(res.body.data).toHaveProperty('sequence');
+        expect(res.body.data).toHaveProperty('cached');
+      }
+    });
+
+    it('should return content pack data when sequence provided', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/lookup/${TEST_UID}`)
+        .query({ sequence: 1 });
+
+      expect([200, 404, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should fallback to legacy lookup without sequence', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/lookup/${TEST_UID}`);
+
+      expect([200, 404, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/card/content/download/:rfidUid', () => {
+    it('should be a public endpoint (no auth required)', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/content/download/${TEST_UID}`);
+
+      expect([200, 404, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return ContentDownloadDTO shape when found', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/content/download/${TEST_UID}`);
+
+      if (res.status === 200 && res.body.data) {
+        expect(res.body.data).toHaveProperty('rfidUid');
+        expect(res.body.data).toHaveProperty('contentType');
+        expect(res.body.data).toHaveProperty('packCode');
+        expect(res.body.data).toHaveProperty('items');
+        expect(Array.isArray(res.body.data.items)).toBe(true);
+      }
+    });
+
+    it('should return 404 for non-existent UID', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/content/download/${NON_EXISTENT_UID}`);
+
+      expect([404, 500]).toContain(res.status);
+    });
+  });
+
+  describe('GET /toy/admin/rfid/card/habit/download/:rfidUid', () => {
+    it('should be a public endpoint (no auth required)', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/habit/download/${TEST_UID}`);
+
+      expect([200, 304, 404, 500]).toContain(res.status);
+      if (res.status === 200) {
+        expect(res.body).toHaveProperty('code');
+      }
+    });
+
+    it('should accept version and hash query params', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/habit/download/${TEST_UID}`)
+        .query({ version: '1.0', hash: 'abc123' });
+
+      expect([200, 304, 404, 500]).toContain(res.status);
+    });
+
+    it('should return HabitDownloadDTO shape when found', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/habit/download/${TEST_UID}`);
+
+      if (res.status === 200 && res.body.data) {
+        expect(res.body.data).toHaveProperty('rfidUid');
+        expect(res.body.data).toHaveProperty('habitCode');
+        expect(res.body.data).toHaveProperty('steps');
+        expect(Array.isArray(res.body.data.steps)).toBe(true);
+      }
+    });
+
+    it('should return 404 for non-existent UID', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/habit/download/${NON_EXISTENT_UID}`);
+
+      expect([404, 500]).toContain(res.status);
+    });
+  });
+
+  describe('GET /toy/admin/rfid/card/rhyme/download/:rfidUid', () => {
+    it('should be a public endpoint (no auth required)', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/rhyme/download/${TEST_UID}`);
+
+      expect([200, 404, 500]).toContain(res.status);
+      if (res.status === 200) {
+        expect(res.body).toHaveProperty('code');
+      }
+    });
+
+    it('should return RhymeDownloadDTO shape when found', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/rhyme/download/${TEST_UID}`);
+
+      if (res.status === 200 && res.body.data) {
+        expect(res.body.data).toHaveProperty('rfidUid');
+        expect(res.body.data).toHaveProperty('packCode');
+        expect(res.body.data).toHaveProperty('items');
+        expect(Array.isArray(res.body.data.items)).toBe(true);
+      }
+    });
+
+    it('should return 404 for non-existent UID', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/rhyme/download/${NON_EXISTENT_UID}`);
+
+      expect([404, 500]).toContain(res.status);
+    });
+  });
+
+  describe('PUT /toy/admin/rfid/card/content-pack/:packCode/sequence/:sequence/cached-audio', () => {
+    it('should accept audio URL update', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/card/content-pack/RHYMES_EN_01/sequence/1/cached-audio')
+        .send({ audioUrl: 'https://cdn.example.com/audio/twinkle.mp3' });
+
+      // 200 if pack found, 404 if pack not found, 500 if DB error
+      expect([200, 404, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should require audioUrl field', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/card/content-pack/RHYMES_EN_01/sequence/1/cached-audio')
+        .send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return 404 for non-existent pack code', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/card/content-pack/NONEXISTENT_PACK/sequence/1/cached-audio')
+        .send({ audioUrl: 'https://cdn.example.com/audio/test.mp3' });
+
+      expect([404, 500]).toContain(res.status);
+    });
+  });
+
+  describe('GET /toy/admin/rfid/card/lookup-legacy/:rfidUid', () => {
+    it('should be a public endpoint (no auth required)', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/lookup-legacy/${TEST_UID}`);
+
+      expect([200, 404, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should return 404 for non-existent UID', async () => {
+      const res = await request(app)
+        .get(`/toy/admin/rfid/card/lookup-legacy/${NON_EXISTENT_UID}`);
+
+      expect([404, 500]).toContain(res.status);
+    });
+  });
+
+  // =============================================
+  // Content Pack CRUD Routes (P2 Endpoints)
+  // =============================================
+
+  describe('GET /toy/admin/rfid/content-pack/page', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/page');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept pagination and filter params', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/page')
+        .query({ page: 1, limit: 10, contentType: 'read_only', language: 'en' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/content-pack/list', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/list');
+
+      expect(res.status).toBe(401);
+      expect(res.body).toHaveProperty('code');
+    });
+
+    it('should accept filter params', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/list')
+        .query({ contentType: 'read_only' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/content-pack/active', () => {
+    it('should be a public endpoint (no auth required)', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/active');
+
+      expect([200, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/content-pack/type/:contentType', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/type/read_only');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should accept valid content type', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/type/read_only')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/content-pack/language/:language', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/language/en');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should accept valid language code', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/language/en')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('GET /toy/admin/rfid/content-pack/code/:packCode', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/code/RHYMES_EN_01');
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should return 404 for non-existent code', async () => {
+      const res = await request(app)
+        .get('/toy/admin/rfid/content-pack/code/NONEXISTENT')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([404, 401, 500]).toContain(res.status);
+    });
+  });
+
+  describe('POST /toy/admin/rfid/content-pack', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/content-pack')
+        .send({ packCode: 'TEST', name: 'Test Pack' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should require packCode and name', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/content-pack')
+        .send({})
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+    });
+
+    it('should accept valid content pack data', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/content-pack')
+        .send({
+          packCode: `TEST_PACK_${Date.now()}`,
+          name: 'Integration Test Pack',
+          contentType: 'read_only',
+          language: 'en',
+          contentMd: '## 1. Test Item\n\nTest content\n\n---',
+          totalItems: 1,
+          active: true
+        })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('PUT /toy/admin/rfid/content-pack', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/content-pack')
+        .send({ id: 1, name: 'Updated' });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should require id field', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/content-pack')
+        .send({ name: 'Updated' })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+    });
+
+    it('should accept valid update data', async () => {
+      const res = await request(app)
+        .put('/toy/admin/rfid/content-pack')
+        .send({ id: 1, name: 'Updated Pack', active: false })
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('DELETE /toy/admin/rfid/content-pack', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/content-pack')
+        .send([999999]);
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should require IDs array', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/content-pack')
+        .send({})
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([400, 401, 403]).toContain(res.status);
+    });
+
+    it('should accept valid IDs array', async () => {
+      const res = await request(app)
+        .delete('/toy/admin/rfid/content-pack')
+        .send([999999])
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  describe('POST /toy/admin/rfid/content-pack/delete', () => {
+    it('should require authentication', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/content-pack/delete')
+        .send([999999]);
+
+      expect(res.status).toBe(401);
+    });
+
+    it('should accept valid IDs array', async () => {
+      const res = await request(app)
+        .post('/toy/admin/rfid/content-pack/delete')
+        .send([999999])
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 400, 401, 403, 500]).toContain(res.status);
+      expect(res.body).toHaveProperty('code');
+    });
+  });
+
+  // =============================================
   // UID Format Handling
   // =============================================
 

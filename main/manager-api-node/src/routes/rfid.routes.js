@@ -200,11 +200,19 @@ router.get('/card/uid/:rfidUid',
 router.get('/card/lookup/:rfidUid',
   asyncHandler(async (req, res) => {
     const { rfidUid } = req.params;
+    const { sequence } = req.query;
 
     if (!rfidUid) {
       return badRequest(res, 'RFID UID is required');
     }
 
+    // If sequence is provided, use content pack lookup (RAG system)
+    if (sequence) {
+      const result = await rfidService.lookupContentByRfidUid(rfidUid, parseInt(sequence));
+      return success(res, result);
+    }
+
+    // Otherwise, use legacy card lookup
     const card = await rfidService.lookupCardByUid(rfidUid);
     if (!card) {
       return notFound(res, 'Card mapping not found');
@@ -2976,5 +2984,627 @@ router.post('/register-batch',
  *           type: string
  *           format: date-time
  */
+
+// =============================================
+// Device-Facing Content Routes (P0 endpoints - Task 8)
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/card/content/download/{rfidUid}:
+ *   get:
+ *     tags: [RFID Content]
+ *     summary: Get unified content download manifest
+ *     description: |
+ *       Returns complete content download manifest for a content pack linked to this RFID UID.
+ *       Includes all content items with audio and image metadata.
+ *       Public endpoint — no auth required (called by ESP32 devices).
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string)
+ *     responses:
+ *       200:
+ *         description: Content download manifest
+ *       404:
+ *         description: No content pack found for this UID
+ */
+router.get('/card/content/download/:rfidUid',
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    const manifest = await rfidService.getContentDownloadManifest(rfidUid);
+    if (!manifest) {
+      return notFound(res, 'No content pack found for this RFID UID');
+    }
+    success(res, manifest);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/habit/download/{rfidUid}:
+ *   get:
+ *     tags: [RFID Content]
+ *     summary: Get habit download manifest
+ *     description: |
+ *       Returns habit-specific download manifest for a content pack linked to this RFID UID.
+ *       Includes steps with instruction text, audio, and images.
+ *       Public endpoint — no auth required (called by ESP32 devices).
+ *       Supports version/hash cache validation via query params.
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string)
+ *       - in: query
+ *         name: version
+ *         schema:
+ *           type: string
+ *         description: Client's cached version for 304 check
+ *       - in: query
+ *         name: hash
+ *         schema:
+ *           type: string
+ *         description: Client's cached hash for 304 check
+ *     responses:
+ *       200:
+ *         description: Habit download manifest
+ *       304:
+ *         description: Content not modified (client has latest version)
+ *       404:
+ *         description: No content pack found for this UID
+ */
+router.get('/card/habit/download/:rfidUid',
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+    const { version, hash } = req.query;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    const manifest = await rfidService.getHabitDownloadManifest(rfidUid, version, hash);
+    if (!manifest) {
+      return notFound(res, 'No content pack found for this RFID UID');
+    }
+
+    // If client already has the latest version
+    if (manifest.notModified) {
+      return res.status(304).end();
+    }
+
+    success(res, manifest);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/rhyme/download/{rfidUid}:
+ *   get:
+ *     tags: [RFID Content]
+ *     summary: Get rhyme download manifest (deprecated)
+ *     description: |
+ *       Returns rhyme-specific download manifest. Deprecated — use /content/download instead.
+ *       Kept for backward compatibility with existing ESP32 firmware.
+ *       Public endpoint — no auth required.
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string)
+ *     responses:
+ *       200:
+ *         description: Rhyme download manifest
+ *       404:
+ *         description: No content pack found for this UID
+ *     deprecated: true
+ */
+router.get('/card/rhyme/download/:rfidUid',
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    const manifest = await rfidService.getRhymeDownloadManifest(rfidUid);
+    if (!manifest) {
+      return notFound(res, 'No content pack found for this RFID UID');
+    }
+    success(res, manifest);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/content-pack/{packCode}/sequence/{sequence}/cached-audio:
+ *   put:
+ *     tags: [RFID Content]
+ *     summary: Update cached audio URL for a content pack sequence
+ *     description: |
+ *       Called by LiveKit agent after TTS generation to store the CDN audio URL.
+ *       Service-to-service endpoint.
+ *     parameters:
+ *       - in: path
+ *         name: packCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content pack code
+ *       - in: path
+ *         name: sequence
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Sequence number (1-based)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - audioUrl
+ *             properties:
+ *               audioUrl:
+ *                 type: string
+ *                 description: CDN URL of the cached audio file
+ *     responses:
+ *       200:
+ *         description: Cached audio URL updated
+ *       400:
+ *         description: Missing required fields
+ *       404:
+ *         description: Content pack not found
+ */
+router.put('/card/content-pack/:packCode/sequence/:sequence/cached-audio',
+  asyncHandler(async (req, res) => {
+    const { packCode, sequence } = req.params;
+    const { audioUrl } = req.body;
+
+    if (!packCode || !sequence) {
+      return badRequest(res, 'Pack code and sequence are required');
+    }
+
+    if (!audioUrl) {
+      return badRequest(res, 'Audio URL is required');
+    }
+
+    const result = await rfidService.updateCachedAudioUrl(packCode, parseInt(sequence), audioUrl);
+    if (!result) {
+      return notFound(res, 'Content pack not found');
+    }
+    success(res, null, 'Cached audio URL updated successfully');
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/card/lookup-legacy/{rfidUid}:
+ *   get:
+ *     tags: [RFID Content]
+ *     summary: Legacy card lookup (question-based)
+ *     description: |
+ *       Legacy lookup that returns question data only (no content pack / markdown).
+ *       For backward compatibility with older firmware.
+ *     parameters:
+ *       - in: path
+ *         name: rfidUid
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: RFID UID (hex string)
+ *     responses:
+ *       200:
+ *         description: Card mapping with question data
+ *       404:
+ *         description: Card mapping not found
+ */
+router.get('/card/lookup-legacy/:rfidUid',
+  asyncHandler(async (req, res) => {
+    const { rfidUid } = req.params;
+
+    if (!rfidUid) {
+      return badRequest(res, 'RFID UID is required');
+    }
+
+    const card = await rfidService.lookupCardByUid(rfidUid);
+    if (!card) {
+      return notFound(res, 'Card mapping not found');
+    }
+    success(res, card);
+  })
+);
+
+// =============================================
+// Content Pack CRUD Routes (P2 endpoints - Task 9)
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/page:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Get content packs (paginated)
+ *     description: Returns paginated list of content packs with filters
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *       - in: query
+ *         name: packCode
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: contentType
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: language
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: active
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       200:
+ *         description: Paginated content pack list
+ */
+router.get('/content-pack/page',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, packCode, name, contentType, language, active } = req.query;
+    const result = await rfidService.getContentPackPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      packCode,
+      name,
+      contentType,
+      language,
+      active,
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/list:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Get all content packs
+ *     description: Returns all content packs without pagination
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Content pack list
+ */
+router.get('/content-pack/list',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { packCode, name, contentType, language, active } = req.query;
+    const result = await rfidService.getContentPackList({
+      packCode,
+      name,
+      contentType,
+      language,
+      active,
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/active:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Get all active content packs
+ *     description: Public endpoint returning all active content packs
+ *     responses:
+ *       200:
+ *         description: Active content pack list
+ */
+router.get('/content-pack/active',
+  asyncHandler(async (req, res) => {
+    const result = await rfidService.getAllActiveContentPacks();
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/type/{contentType}:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Get content packs by content type
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: contentType
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Content type (read_only or prompt)
+ *     responses:
+ *       200:
+ *         description: Content pack list
+ */
+router.get('/content-pack/type/:contentType',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { contentType } = req.params;
+    const result = await rfidService.getContentPacksByType(contentType);
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/language/{language}:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Get content packs by language
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: language
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Language code (en, hi, etc.)
+ *     responses:
+ *       200:
+ *         description: Content pack list
+ */
+router.get('/content-pack/language/:language',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { language } = req.params;
+    const result = await rfidService.getContentPacksByLanguage(language);
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/code/{packCode}:
+ *   get:
+ *     tags: [RFID Content Pack]
+ *     summary: Get content pack by pack code
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: packCode
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Unique pack code
+ *     responses:
+ *       200:
+ *         description: Content pack details
+ *       404:
+ *         description: Content pack not found
+ */
+router.get('/content-pack/code/:packCode',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { packCode } = req.params;
+    const result = await rfidService.getContentPackByCode(packCode);
+    if (!result) {
+      return notFound(res, 'Content pack not found');
+    }
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack:
+ *   post:
+ *     tags: [RFID Content Pack]
+ *     summary: Create content pack
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - packCode
+ *               - name
+ *             properties:
+ *               packCode:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               contentType:
+ *                 type: string
+ *                 enum: [read_only, prompt]
+ *               contentMd:
+ *                 type: string
+ *               totalItems:
+ *                 type: integer
+ *               language:
+ *                 type: string
+ *               active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Content pack created
+ *       400:
+ *         description: Validation error
+ */
+router.post('/content-pack',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = req.body;
+
+    if (!data.packCode || !data.name) {
+      return badRequest(res, 'Pack code and name are required');
+    }
+
+    const userId = req.user?.id;
+    await rfidService.createContentPack(data, userId);
+    success(res, null, 'Content pack created successfully');
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack:
+ *   put:
+ *     tags: [RFID Content Pack]
+ *     summary: Update content pack
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *               packCode:
+ *                 type: string
+ *               name:
+ *                 type: string
+ *               description:
+ *                 type: string
+ *               contentType:
+ *                 type: string
+ *               contentMd:
+ *                 type: string
+ *               totalItems:
+ *                 type: integer
+ *               language:
+ *                 type: string
+ *               active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Content pack updated
+ */
+router.put('/content-pack',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const data = req.body;
+
+    if (!data.id) {
+      return badRequest(res, 'Content pack ID is required');
+    }
+
+    const userId = req.user?.id;
+    await rfidService.updateContentPack(data, userId);
+    success(res, null, 'Content pack updated successfully');
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack:
+ *   delete:
+ *     tags: [RFID Content Pack]
+ *     summary: Delete content packs
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *     responses:
+ *       200:
+ *         description: Content packs deleted
+ */
+router.delete('/content-pack',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ids = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Content pack IDs are required');
+    }
+
+    await rfidService.deleteContentPacks(ids);
+    success(res, null, 'Content packs deleted successfully');
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/delete:
+ *   post:
+ *     tags: [RFID Content Pack]
+ *     summary: Delete content packs (POST alternative)
+ *     description: Alternative delete endpoint using POST (for frontends that don't support DELETE body)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: array
+ *             items:
+ *               type: integer
+ *     responses:
+ *       200:
+ *         description: Content packs deleted
+ */
+router.post('/content-pack/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const ids = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Content pack IDs are required');
+    }
+
+    await rfidService.deleteContentPacks(ids);
+    success(res, null, 'Content packs deleted successfully');
+  })
+);
 
 module.exports = router;
