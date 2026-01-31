@@ -61,97 +61,432 @@ RFID_WEB_UI_PORT = 8088
 _web_ui_client = None
 _last_rfid_response = None
 _last_rfid_response_time = 0
+_rfid_response_history = []  # capped at 20 entries
 
 RFID_HTML_PAGE = """<!DOCTYPE html>
-<html><head>
-<title>Cheeko RFID Test Panel</title>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cheeko Device Simulator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;justify-content:center;padding:40px 20px}
-.container{width:440px}
-.card{background:#1e293b;border-radius:12px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.3);margin-bottom:16px}
-h1{font-size:20px;margin-bottom:20px;color:#f1f5f9}
-h2{font-size:15px;color:#94a3b8;margin-bottom:12px}
-label{display:block;font-size:13px;color:#94a3b8;margin-bottom:6px;font-weight:500}
-input{width:100%;padding:10px 14px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:14px;outline:none;margin-bottom:16px}
-input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.2)}
-input::placeholder{color:#475569}
-.btn{width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}
-.btn:hover{background:#2563eb}
-.btn:active{transform:scale(0.98)}
-.btn:disabled{background:#334155;cursor:not-allowed}
-.status{display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:13px}
-.dot{width:8px;height:8px;border-radius:50%;background:#22c55e}
-.response-empty{color:#475569;font-size:13px;text-align:center;padding:20px}
-.manifest-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #334155;font-size:13px}
-.manifest-label{color:#94a3b8}
-.manifest-value{color:#e2e8f0;font-weight:500}
-.badge{display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;margin-bottom:10px}
-.badge-green{background:#22c55e20;color:#22c55e}
-.badge-blue{background:#3b82f620;color:#3b82f6}
-.file-list{margin-top:12px;max-height:300px;overflow-y:auto}
-.file-item{font-size:12px;padding:4px 0;color:#94a3b8;word-break:break-all}
-.file-item .seq{color:#3b82f6;font-weight:600;margin-right:6px}
-.log-area{background:#0f172a;border-radius:8px;padding:12px;max-height:180px;overflow-y:auto;font-family:'Cascadia Code',monospace;font-size:11px;color:#64748b}
-.log-entry{padding:2px 0}
-.log-entry.ok{color:#22c55e}
-.log-entry.info{color:#3b82f6}
-.log-entry.err{color:#ef4444}
+:root{--bg:#060918;--surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.07);--border:rgba(255,255,255,0.08);--border-focus:rgba(59,130,246,0.5);--text:#e2e8f0;--text-muted:#64748b;--text-dim:#475569;--blue:#3b82f6;--green:#22c55e;--amber:#f59e0b;--red:#ef4444;--purple:#8b5cf6;--inset:#030712;--radius:12px;--radius-sm:8px;--font-ui:'Inter',system-ui,sans-serif;--font-mono:'JetBrains Mono','Fira Code',monospace}
+body{font-family:var(--font-ui);background:var(--bg);color:var(--text);min-height:100vh;padding:0}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 50% -10%,rgba(59,130,246,0.08),transparent 70%);pointer-events:none;z-index:0}
+
+/* Header */
+.header{position:sticky;top:0;z-index:50;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;background:rgba(6,9,24,0.85);backdrop-filter:blur(16px);border-bottom:1px solid var(--border)}
+.header-left{display:flex;align-items:center;gap:12px}
+.logo{width:28px;height:28px;background:linear-gradient(135deg,var(--blue),var(--purple));border-radius:8px;display:flex;align-items:center;justify-content:center}
+.logo svg{width:16px;height:16px;fill:white}
+.header-title{font-size:16px;font-weight:700;letter-spacing:-0.02em}
+.header-right{display:flex;align-items:center;gap:16px;font-size:12px}
+.status-pill{display:flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;background:var(--surface);border:1px solid var(--border)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0}
+.status-dot.off{background:var(--red)}
+.mac-display{font-family:var(--font-mono);color:var(--text-muted);font-size:11px}
+
+/* Layout */
+.main{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:20px 24px;display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
+@media(max-width:800px){.main{grid-template-columns:1fr;max-width:500px}}
+
+/* Cards */
+.card{background:var(--surface);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:var(--radius);padding:20px;transition:border-color 0.2s}
+.card:hover{border-color:rgba(255,255,255,0.12)}
+.card+.card{margin-top:16px}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted)}
+.card-icon{width:18px;height:18px;color:var(--text-dim)}
+
+/* Inputs */
+label{display:block;font-size:12px;color:var(--text-muted);margin-bottom:6px;font-weight:500}
+input[type="text"],select{width:100%;padding:10px 12px;background:var(--inset);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:13px;font-family:var(--font-mono);outline:none;transition:border-color 0.2s,box-shadow 0.2s}
+input[type="text"]:focus,select:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(59,130,246,0.15)}
+input::placeholder{color:var(--text-dim)}
+.input-row{display:grid;grid-template-columns:1fr 90px;gap:8px;margin-bottom:12px}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 16px;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:600;font-family:var(--font-ui);cursor:pointer;transition:all 0.15s;outline:none}
+.btn:active{transform:scale(0.97)}
+.btn:disabled{opacity:0.4;cursor:not-allowed;transform:none}
+.btn-primary{background:var(--blue);color:white;width:100%}
+.btn-primary:hover:not(:disabled){background:#2563eb;box-shadow:0 0 20px rgba(59,130,246,0.25)}
+.btn-sm{padding:7px 10px;font-size:12px;font-weight:500}
+.btn-ghost{background:var(--surface);color:var(--text-muted);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--surface-hover);color:var(--text);border-color:rgba(255,255,255,0.15)}
+.btn-danger{background:rgba(239,68,68,0.12);color:var(--red);border:1px solid rgba(239,68,68,0.2)}
+.btn-danger:hover{background:rgba(239,68,68,0.2)}
+
+/* Control Grid */
+.ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.ctrl-btn{padding:10px 8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:12px;font-weight:500;font-family:var(--font-ui);cursor:pointer;transition:all 0.15s;text-align:center;display:flex;flex-direction:column;align-items:center;gap:4px}
+.ctrl-btn:hover{background:var(--surface-hover);border-color:rgba(255,255,255,0.15)}
+.ctrl-btn:active{transform:scale(0.96)}
+.ctrl-btn svg{width:16px;height:16px;opacity:0.7}
+.ctrl-btn.listen{border-color:rgba(34,197,94,0.3)}
+.ctrl-btn.listen:hover{background:rgba(34,197,94,0.08);border-color:rgba(34,197,94,0.5)}
+.ctrl-btn.abort{border-color:rgba(239,68,68,0.3)}
+.ctrl-btn.abort:hover{background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.5)}
+.ctrl-btn.goodbye{border-color:rgba(249,115,22,0.3)}
+.ctrl-btn.goodbye:hover{background:rgba(249,115,22,0.08);border-color:rgba(249,115,22,0.5)}
+
+/* Advanced section */
+details{margin-top:12px}
+summary{font-size:11px;color:var(--text-dim);cursor:pointer;user-select:none;padding:4px 0;letter-spacing:0.04em;text-transform:uppercase;font-weight:600}
+summary:hover{color:var(--text-muted)}
+details[open] summary{margin-bottom:12px}
+.adv-row{display:flex;gap:8px;margin-bottom:8px;align-items:end}
+.adv-row label{margin-bottom:0}
+.adv-row .adv-input{flex:1}
+.adv-row .adv-input label{margin-bottom:4px}
+.adv-row select,.adv-row input{margin-bottom:0}
+
+/* Quick UIDs */
+.quick-uids{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;min-height:26px}
+.uid-chip{padding:3px 10px;background:var(--surface);border:1px solid var(--border);border-radius:20px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);cursor:pointer;transition:all 0.15s}
+.uid-chip:hover{background:var(--surface-hover);color:var(--text);border-color:rgba(255,255,255,0.15)}
+
+/* Response Panel */
+.resp-empty{color:var(--text-dim);font-size:13px;text-align:center;padding:40px 20px}
+.resp-empty svg{width:32px;height:32px;margin-bottom:12px;opacity:0.3}
+.badge{display:inline-block;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:600;margin-bottom:12px;letter-spacing:0.03em}
+.badge-green{background:rgba(34,197,94,0.12);color:var(--green)}
+.badge-blue{background:rgba(59,130,246,0.12);color:var(--blue)}
+.badge-purple{background:rgba(139,92,246,0.12);color:var(--purple)}
+.meta-table{width:100%;margin-bottom:12px}
+.meta-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
+.meta-label{color:var(--text-muted)}
+.meta-value{color:var(--text);font-weight:500;font-family:var(--font-mono);font-size:11px}
+.file-list{margin-top:8px;max-height:300px;overflow-y:auto}
+.file-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);transition:background 0.15s}
+.file-row:nth-child(odd){background:rgba(255,255,255,0.02)}
+.file-row:hover{background:rgba(255,255,255,0.05)}
+.file-row svg{width:14px;height:14px;flex-shrink:0;opacity:0.5}
+.file-seq{color:var(--blue);font-weight:600;min-width:24px}
+.file-url{word-break:break-all;flex:1}
+.json-pre{background:var(--inset);border-radius:var(--radius-sm);padding:14px;font-family:var(--font-mono);font-size:12px;line-height:1.6;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+.json-key{color:#94a3b8}
+.json-str{color:#4ade80}
+.json-num{color:#fbbf24}
+.json-bool{color:#c084fc}
+.json-null{color:#64748b}
+
+/* Log */
+.log-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.log-area{background:var(--inset);border-radius:var(--radius-sm);padding:10px 12px;max-height:200px;overflow-y:auto;font-family:var(--font-mono);font-size:11px;line-height:1.7;color:var(--text-dim)}
+.log-entry{display:flex;gap:8px}
+.log-ts{color:var(--text-dim);opacity:0.5;flex-shrink:0}
+.log-msg{}
+.log-entry.ok .log-msg{color:var(--green)}
+.log-entry.info .log-msg{color:var(--blue)}
+.log-entry.err .log-msg{color:var(--red)}
+.log-entry.warn .log-msg{color:var(--amber)}
+
+/* History */
+.hist-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;transition:background 0.15s;font-size:12px}
+.hist-item:hover{background:var(--surface-hover)}
+.hist-ts{color:var(--text-dim);font-size:10px;font-family:var(--font-mono);flex-shrink:0}
+.hist-uid{font-family:var(--font-mono);font-weight:500;flex:1}
+.hist-badge{font-size:10px;padding:1px 6px;border-radius:3px;font-weight:600}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}
+
+/* Spinner */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.6s linear infinite;display:none}
+.btn.loading .spinner{display:block}
+.btn.loading .btn-text{display:none}
 </style>
 </head><body>
-<div class="container">
-  <div class="card">
-    <h1>RFID Test Panel</h1>
-    <div class="status"><div class="dot" id="dot"></div><span id="statusTxt">Connected</span></div>
-    <label>RFID UID</label>
-    <input type="text" id="uid" placeholder="e.g. 12345678 or E96C8A81" value="12345678">
-    <label>Sequence <span style="color:#475569">(optional)</span></label>
-    <input type="text" id="seq" placeholder="e.g. 1, 2, 3...">
-    <button class="btn" id="sendBtn" onclick="send()">Send RFID Scan</button>
+
+<!-- Header -->
+<header class="header">
+  <div class="header-left">
+    <div class="logo"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.94-.49-7-3.85-7-7.93s3.05-7.44 7-7.93v15.86zm2-15.86c1.03.13 2 .45 2.87.93H13v-.93zM13 7h5.24c.25.31.48.65.68 1H13V7zm0 3h6.74c.08.33.15.66.19 1H13v-1zm0 9.93V14h2.87c-.87.48-1.84.8-2.87.93zM18.24 13H13v-1h6.93c-.04.34-.11.67-.19 1zM13 17v-1h5.92c-.2.35-.43.69-.68 1H13z"/></svg></div>
+    <span class="header-title">Cheeko Device Simulator</span>
   </div>
-  <div class="card">
-    <h2>Response</h2>
-    <div id="resp"><div class="response-empty">No response yet. Send an RFID scan above.</div></div>
+  <div class="header-right">
+    <span class="mac-display" id="macDisplay">--:--:--:--:--:--</span>
+    <div class="status-pill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusTxt">Connecting</span>
+    </div>
   </div>
-  <div class="card">
-    <h2>Log</h2>
-    <div class="log-area" id="log"></div>
+</header>
+
+<!-- Main Grid -->
+<div class="main">
+  <!-- LEFT COLUMN -->
+  <div class="left-col">
+
+    <!-- RFID Scanner -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">RFID Scanner</span>
+        <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 12h.01"/><path d="M17 12h.01"/><path d="M7 12h.01"/></svg>
+      </div>
+      <div class="quick-uids" id="quickUids"></div>
+      <div class="input-row">
+        <div><label>RFID UID</label><input type="text" id="uid" placeholder="e.g. 12345678"></div>
+        <div><label>Sequence</label><input type="text" id="seq" placeholder="1"></div>
+      </div>
+      <button class="btn btn-primary" id="sendBtn" onclick="sendRfid()">
+        <span class="btn-text">Scan Card</span>
+        <div class="spinner"></div>
+      </button>
+    </div>
+
+    <!-- Device Controls -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Device Controls</span>
+        <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg>
+      </div>
+      <div class="ctrl-grid">
+        <button class="ctrl-btn listen" onclick="sendAction('listen')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+          Listen
+        </button>
+        <button class="ctrl-btn abort" onclick="sendAction('abort')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+          Abort
+        </button>
+        <button class="ctrl-btn" onclick="sendAction('previous')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19,20 9,12 19,4"/><line x1="5" y1="19" x2="5" y2="5"/></svg>
+          Prev Track
+        </button>
+        <button class="ctrl-btn" onclick="sendAction('next')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,4 15,12 5,20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+          Next Track
+        </button>
+        <button class="ctrl-btn" onclick="sendAction('start_agent')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          Start Agent
+        </button>
+        <button class="ctrl-btn goodbye" onclick="sendAction('goodbye')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+          Goodbye
+        </button>
+      </div>
+
+      <details>
+        <summary>Advanced Controls</summary>
+        <div class="adv-row">
+          <div class="adv-input"><label>Mode</label><select id="modeSelect">
+            <option value="conversation">Conversation</option>
+            <option value="music">Music</option>
+            <option value="story">Story</option>
+            <option value="game">Game</option>
+          </select></div>
+          <button class="btn btn-sm btn-ghost" onclick="sendAction('mode-change',{mode:document.getElementById('modeSelect').value})">Apply</button>
+        </div>
+        <div class="adv-row">
+          <div class="adv-input"><label>Character</label><input type="text" id="charInput" placeholder="Character name"></div>
+          <button class="btn btn-sm btn-ghost" onclick="sendAction('character-change',{character:document.getElementById('charInput').value})">Apply</button>
+        </div>
+        <div class="adv-row">
+          <div class="adv-input"><label>Download</label><select id="dlSelect">
+            <option value="story">Story</option>
+            <option value="rhyme">Rhyme</option>
+            <option value="habit">Habit</option>
+          </select></div>
+          <button class="btn btn-sm btn-ghost" onclick="sendAction('download_request',{content_type:document.getElementById('dlSelect').value})">Request</button>
+        </div>
+      </details>
+    </div>
+
+    <!-- Scan History -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Scan History</span>
+      </div>
+      <div id="history"><div class="resp-empty" style="padding:12px;font-size:12px">No scans yet</div></div>
+    </div>
+  </div>
+
+  <!-- RIGHT COLUMN -->
+  <div class="right-col">
+
+    <!-- Response -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Response</span>
+      </div>
+      <div id="resp">
+        <div class="resp-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 12h.01"/></svg>
+          <div>No response yet. Scan a card or send a command.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="card">
+      <div class="log-header">
+        <span class="card-title">Activity Log</span>
+        <button class="btn btn-sm btn-ghost" onclick="clearLog()" style="padding:4px 10px;font-size:11px">Clear</button>
+      </div>
+      <div class="log-area" id="log"></div>
+    </div>
   </div>
 </div>
+
 <script>
 let lastT=0;
-function log(m,t=''){const a=document.getElementById('log'),d=document.createElement('div');d.className='log-entry '+t;d.textContent=new Date().toLocaleTimeString()+' '+m;a.appendChild(d);a.scrollTop=a.scrollHeight}
-function row(l,v){return '<div class="manifest-row"><span class="manifest-label">'+l+'</span><span class="manifest-value">'+(v||'N/A')+'</span></div>'}
-async function send(){
+const scanHistory=[];
+
+/* --- Logging --- */
+function addLog(m,t=''){
+  const a=document.getElementById('log'),d=document.createElement('div');
+  d.className='log-entry '+t;
+  const ts=document.createElement('span');ts.className='log-ts';ts.textContent=new Date().toLocaleTimeString();
+  const msg=document.createElement('span');msg.className='log-msg';msg.textContent=m;
+  d.appendChild(ts);d.appendChild(msg);a.appendChild(d);a.scrollTop=a.scrollHeight;
+}
+function clearLog(){document.getElementById('log').innerHTML='';addLog('Log cleared','info')}
+
+/* --- Quick UIDs (localStorage) --- */
+function getRecentUids(){try{return JSON.parse(localStorage.getItem('cheeko_uids')||'[]')}catch(e){return[]}}
+function saveRecentUid(uid){
+  let list=getRecentUids().filter(u=>u!==uid);
+  list.unshift(uid);list=list.slice(0,5);
+  localStorage.setItem('cheeko_uids',JSON.stringify(list));
+  renderQuickUids();
+}
+function renderQuickUids(){
+  const c=document.getElementById('quickUids'),list=getRecentUids();
+  c.innerHTML='';
+  list.forEach(uid=>{
+    const ch=document.createElement('span');ch.className='uid-chip';ch.textContent=uid;
+    ch.onclick=()=>{document.getElementById('uid').value=uid};
+    c.appendChild(ch);
+  });
+}
+
+/* --- RFID Scan --- */
+async function sendRfid(){
   const uid=document.getElementById('uid').value.trim(),seq=document.getElementById('seq').value.trim();
-  if(!uid){alert('Enter RFID UID');return}
-  const btn=document.getElementById('sendBtn');btn.disabled=true;btn.textContent='Sending...';
+  if(!uid){addLog('RFID UID is required','err');return}
+  const btn=document.getElementById('sendBtn');btn.classList.add('loading');btn.disabled=true;
   try{
     const r=await fetch('/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rfid_uid:uid,sequence:seq})});
     const d=await r.json();
-    if(d.status==='sent')log('Sent: uid='+uid+', seq='+(seq||'none'),'ok');
-    else log('Error: '+d.error,'err');
-  }catch(e){log('Failed: '+e.message,'err')}
-  btn.disabled=false;btn.textContent='Send RFID Scan';
+    if(d.status==='sent'){addLog('RFID scan sent: '+uid+(seq?' seq='+seq:''),'ok');saveRecentUid(uid);addHistory(uid,seq)}
+    else addLog('Error: '+d.error,'err');
+  }catch(e){addLog('Send failed: '+e.message,'err')}
+  btn.classList.remove('loading');btn.disabled=false;
 }
+
+/* --- Device Actions --- */
+async function sendAction(action,extra){
+  addLog('Sending: '+action,'info');
+  try{
+    const body={action};if(extra)Object.assign(body,extra);
+    const r=await fetch('/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(d.status==='sent')addLog('Action sent: '+action,'ok');
+    else addLog('Error: '+(d.error||'unknown'),'err');
+  }catch(e){addLog('Action failed: '+e.message,'err')}
+}
+
+/* --- Scan History --- */
+function addHistory(uid,seq){
+  scanHistory.unshift({uid,seq,time:new Date(),type:null});
+  if(scanHistory.length>10)scanHistory.pop();
+  renderHistory();
+}
+function renderHistory(){
+  const c=document.getElementById('history');
+  if(!scanHistory.length){c.innerHTML='<div class="resp-empty" style="padding:12px;font-size:12px">No scans yet</div>';return}
+  c.innerHTML='';
+  scanHistory.forEach((h,i)=>{
+    const d=document.createElement('div');d.className='hist-item';
+    d.innerHTML='<span class="hist-ts">'+h.time.toLocaleTimeString()+'</span>'
+      +'<span class="hist-uid">'+h.uid+(h.seq?' #'+h.seq:'')+'</span>'
+      +(h.type?'<span class="hist-badge" style="background:rgba(34,197,94,0.12);color:var(--green)">'+h.type+'</span>':'');
+    d.onclick=()=>{document.getElementById('uid').value=h.uid;if(h.seq)document.getElementById('seq').value=h.seq;sendRfid()};
+    c.appendChild(d);
+  });
+}
+
+/* --- JSON syntax highlight --- */
+function highlightJson(obj){
+  const s=JSON.stringify(obj,null,2);
+  return s.replace(/("(\\\\u[a-zA-Z0-9]{4}|\\\\[^u]|[^\\\\"])*")(\\s*:)?/g,function(m){
+    let cls='json-str';
+    if(/:$/.test(m)){cls='json-key';m=m.slice(0,-1)+':'}
+    else if(/^"/.test(m))cls='json-str';
+    return '<span class="'+cls+'">'+m+'</span>';
+  }).replace(/\\b(true|false)\\b/g,'<span class="json-bool">$1</span>')
+    .replace(/\\bnull\\b/g,'<span class="json-null">null</span>')
+    .replace(/\\b(-?\\d+\\.?\\d*)\\b/g,'<span class="json-num">$1</span>');
+}
+
+/* --- Render response --- */
+function metaRow(l,v){return '<div class="meta-row"><span class="meta-label">'+l+'</span><span class="meta-value">'+(v!=null?v:'N/A')+'</span></div>'}
+
 function render(d){
-  if(!d||!d.type)return;const a=document.getElementById('resp');
+  if(!d||!d.type)return;
+  const a=document.getElementById('resp');
+
   if(d.type==='download_response'){
-    const f=d.files||{},au=Object.keys(f).filter(k=>k.startsWith('audio_')).sort(),im=Object.keys(f).filter(k=>k.startsWith('image_')).sort();
-    let h='<div class="badge badge-green">Content Pack</div>';
-    h+=row('RFID UID',d.rfid_uid)+row('Pack Code',d.pack_code)+row('Pack Name',d.pack_name);
-    h+=row('Version',d.version)+row('Total Items',d.total_items)+row('Audio Files',au.length)+row('Image Files',im.length);
-    if(au.length){h+='<div class="file-list">';for(const k of au){const s=k.replace('audio_','');h+='<div class="file-item"><span class="seq">#'+s+'</span>'+f[k]+'</div>';const ik='image_'+s;if(f[ik])h+='<div class="file-item" style="padding-left:20px;color:#64748b">img: '+f[ik]+'</div>'}h+='</div>'}
-    a.innerHTML=h;log('Content Pack: '+d.pack_name+' ('+d.total_items+' items)','info');
+    const f=d.files||{};
+    const audioKeys=Object.keys(f).filter(k=>k.startsWith('audio_')).sort();
+    const imageKeys=Object.keys(f).filter(k=>k.startsWith('image_')).sort();
+    let h='<div class="badge badge-green">Content Pack</div><div class="meta-table">';
+    h+=metaRow('RFID UID',d.rfid_uid)+metaRow('Pack Code',d.pack_code)+metaRow('Pack Name',d.pack_name);
+    h+=metaRow('Version',d.version)+metaRow('Total Items',d.total_items);
+    h+=metaRow('Audio',audioKeys.length)+metaRow('Images',imageKeys.length)+'</div>';
+    if(audioKeys.length){
+      h+='<div class="file-list">';
+      audioKeys.forEach(k=>{
+        const seq=k.replace('audio_','');
+        h+='<div class="file-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+        h+='<span class="file-seq">#'+seq+'</span><span class="file-url">'+f[k]+'</span></div>';
+        const ik='image_'+seq;
+        if(f[ik]){
+          h+='<div class="file-row" style="padding-left:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+          h+='<span class="file-url" style="opacity:0.6">'+f[ik]+'</span></div>';
+        }
+      });
+      h+='</div>';
+    }
+    a.innerHTML=h;
+    addLog('Content Pack: '+d.pack_name+' ('+d.total_items+' items)','info');
+    if(scanHistory.length)scanHistory[0].type='content';
+    renderHistory();
   }else{
-    a.innerHTML='<div class="badge badge-blue">'+d.type+'</div><pre style="font-size:12px;color:#94a3b8;white-space:pre-wrap;margin-top:8px">'+JSON.stringify(d,null,2)+'</pre>';
-    log('Response: type='+d.type,'info');
+    a.innerHTML='<div class="badge badge-blue">'+d.type+'</div><pre class="json-pre">'+highlightJson(d)+'</pre>';
+    addLog('Response: type='+d.type,'info');
+    if(scanHistory.length)scanHistory[0].type=d.type;
+    renderHistory();
   }
 }
-async function poll(){try{const r=await fetch('/status'),d=await r.json();document.getElementById('dot').style.background=d.connected?'#22c55e':'#ef4444';document.getElementById('statusTxt').textContent=d.connected?'Connected':'Disconnected';if(d.last_response&&d.last_response_time>lastT){lastT=d.last_response_time;render(d.last_response)}}catch(e){}}
-document.getElementById('uid').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
-document.getElementById('seq').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
-setInterval(poll,1000);log('UI ready. Enter RFID UID and click Send.','info');
+
+/* --- Poll server status --- */
+async function poll(){
+  try{
+    const r=await fetch('/status'),d=await r.json();
+    const dot=document.getElementById('statusDot'),txt=document.getElementById('statusTxt');
+    if(d.connected){dot.classList.remove('off');txt.textContent='Connected'}
+    else{dot.classList.add('off');txt.textContent='Disconnected'}
+    if(d.device_mac)document.getElementById('macDisplay').textContent=d.device_mac;
+    if(d.last_response&&d.last_response_time>lastT){lastT=d.last_response_time;render(d.last_response)}
+  }catch(e){}
+}
+
+/* --- Init --- */
+document.getElementById('uid').addEventListener('keydown',e=>{if(e.key==='Enter')sendRfid()});
+document.getElementById('seq').addEventListener('keydown',e=>{if(e.key==='Enter')sendRfid()});
+renderQuickUids();
+setInterval(poll,1000);
+addLog('Device simulator UI ready','info');
 </script>
 </body></html>"""
 
@@ -175,8 +510,16 @@ class RfidWebHandler(BaseHTTPRequestHandler):
                 "connected": connected,
                 "last_response": _last_rfid_response,
                 "last_response_time": _last_rfid_response_time,
+                "device_mac": _web_ui_client.device_mac_formatted if _web_ui_client else None,
+                "session_id": udp_session_details.get("session_id") if udp_session_details else None,
             }
             self.wfile.write(json.dumps(resp).encode())
+        elif self.path == '/history':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            self.wfile.write(json.dumps(_rfid_response_history).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -204,6 +547,44 @@ class RfidWebHandler(BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "Missing RFID UID or client not connected"}).encode())
+        elif self.path == '/action':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode()
+            data = json.loads(body)
+
+            action = data.get('action', '').strip()
+            if not action or not _web_ui_client:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Missing action or client not connected"}).encode())
+                return
+
+            # Map UI actions to MQTT message types and extra fields
+            action_map = {
+                "listen": ("listen", {"state": "detect", "text": "hello baby"}),
+                "abort": ("abort", None),
+                "next": ("playback_control", {"action": "next"}),
+                "previous": ("playback_control", {"action": "previous"}),
+                "start_agent": ("playback_control", {"action": "start_agent"}),
+                "goodbye": ("goodbye", None),
+                "mode-change": ("mode-change", {"mode": data.get("mode", "conversation")}),
+                "character-change": ("character-change", {"character": data.get("character", "")}),
+                "download_request": ("download_request", {"content_type": data.get("content_type", "story")}),
+            }
+
+            if action in action_map:
+                msg_type, extra = action_map[action]
+                _web_ui_client.send_mqtt_action(msg_type, extra)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "sent", "action": action}).encode())
+            else:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": f"Unknown action: {action}"}).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -357,9 +738,17 @@ class TestClient:
 
             # Handle Content Pack download_response (manifest with audio URLs + thumbnails)
             elif payload.get("type") == "download_response":
-                global _last_rfid_response, _last_rfid_response_time
+                global _last_rfid_response, _last_rfid_response_time, _rfid_response_history
                 _last_rfid_response = payload
                 _last_rfid_response_time = time.time()
+                _rfid_response_history.append({
+                    "timestamp": _last_rfid_response_time,
+                    "rfid_uid": payload.get("rfid_uid"),
+                    "type": "download_response",
+                    "response": payload,
+                })
+                if len(_rfid_response_history) > 20:
+                    _rfid_response_history.pop(0)
 
                 status = payload.get("status", "unknown")
                 rfid_uid = payload.get("rfid_uid", "N/A")
@@ -989,6 +1378,14 @@ class TestClient:
         # Publish to device-server topic (gateway will process this)
         self.mqtt_client.publish("device-server", json.dumps(rfid_payload))
         logger.info(f"[RFID] Sent RFID greeting: {json.dumps(rfid_payload, indent=2)}")
+
+    def send_mqtt_action(self, action_type, extra_fields=None):
+        """Generic MQTT action sender for UI control buttons."""
+        payload = {"type": action_type, "session_id": udp_session_details.get("session_id")}
+        if extra_fields:
+            payload.update(extra_fields)
+        self.mqtt_client.publish("device-server", json.dumps(payload))
+        logger.info(f"[ACTION] Sent '{action_type}': {json.dumps(payload, indent=2)}")
 
     def trigger_conversation(self, rfid_uid=None, rfid_sequence=None):
         """Starts the audio streaming threads and sends initial listen message or RFID greeting.
