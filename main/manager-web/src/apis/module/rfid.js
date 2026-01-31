@@ -614,6 +614,123 @@ export default {
             }).send()
     },
 
+    // ==================== QUESTION PACKS (NEW) ====================
+
+    // Get question pack page list
+    getQuestionPackPage(params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page || 1,
+            limit: params.limit || 10,
+            packCode: params.packCode || '',
+            name: params.name || '',
+            category: params.category || '',
+            language: params.language || '',
+            active: params.active !== undefined ? params.active : ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/question-pack/page?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get question pack list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getQuestionPackPage(params, callback)
+                })
+            }).send()
+    },
+
+    // Get all question packs list
+    getQuestionPackList(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/question-pack/list`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get question pack list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getQuestionPackList(callback)
+                })
+            }).send()
+    },
+
+    // Get active question packs
+    getQuestionPackActive(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/question-pack/active`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get active question packs:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getQuestionPackActive(callback)
+                })
+            }).send()
+    },
+
+    // Add question pack
+    addQuestionPack(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/question-pack`)
+            .method('POST')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to add question pack:', err)
+                RequestService.reAjaxFun(() => {
+                    this.addQuestionPack(data, callback)
+                })
+            }).send()
+    },
+
+    // Update question pack
+    updateQuestionPack(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/question-pack`)
+            .method('PUT')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to update question pack:', err)
+                RequestService.reAjaxFun(() => {
+                    this.updateQuestionPack(data, callback)
+                })
+            }).send()
+    },
+
+    // Delete question packs
+    deleteQuestionPack(ids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/question-pack/delete`)
+            .method('POST')
+            .data(ids)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete question packs:', err)
+                RequestService.reAjaxFun(() => {
+                    this.deleteQuestionPack(ids, callback)
+                })
+            }).send()
+    },
+
     // ==================== LOOKUP (Console) ====================
 
     // Lookup card by RFID UID

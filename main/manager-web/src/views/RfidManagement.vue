@@ -13,18 +13,19 @@
 
         <!-- Stats Overview Bar -->
         <div class="stats-bar" v-loading="statsLoading" element-loading-background="transparent">
-            <div class="stat-item" @click="switchTab('questions')">
-                <div class="stat-icon prompts"><i class="el-icon-chat-line-round"></i></div>
+
+            <div class="stat-item" @click="switchTab('questionPacks')">
+                <div class="stat-icon qa-packs" style="background: rgba(155, 89, 182, 0.1); color: #9b59b6;"><i class="el-icon-chat-square"></i></div>
                 <div class="stat-content">
-                    <div class="stat-value">{{ stats.totalPrompts }}</div>
-                    <div class="stat-label">AI Prompts</div>
+                    <div class="stat-value">{{ stats.totalQuestionPacks }}</div>
+                    <div class="stat-label">Q&A Packs</div>
                 </div>
             </div>
             <div class="stat-item" @click="switchTab('contentPacks')">
                 <div class="stat-icon content"><i class="el-icon-notebook-2"></i></div>
                 <div class="stat-content">
                     <div class="stat-value">{{ stats.totalContentPacks }}</div>
-                    <div class="stat-label">Story &amp; Rhyme Packs</div>
+                    <div class="stat-label">Content Packs</div>
                 </div>
             </div>
             <div class="stat-item" @click="switchTab('packs')">
@@ -53,11 +54,12 @@
         <div class="main-wrapper">
             <!-- Tab Navigation -->
             <div class="tab-navigation">
-                <div class="tab-btn" :class="{ active: activeTab === 'questions' }" @click="switchTab('questions')">
-                    <i class="el-icon-chat-line-round"></i> AI Prompts
+
+                <div class="tab-btn" :class="{ active: activeTab === 'questionPacks' }" @click="switchTab('questionPacks')">
+                    <i class="el-icon-chat-square"></i> Q&A Packs
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'contentPacks' }" @click="switchTab('contentPacks')">
-                    <i class="el-icon-notebook-2"></i> Story &amp; Rhyme Packs
+                    <i class="el-icon-notebook-2"></i> Content Packs
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'packs' }" @click="switchTab('packs')">
                     <i class="el-icon-goods"></i> Product SKUs
@@ -77,71 +79,7 @@
                 <div class="content-area">
                     <el-card class="rfid-card" shadow="never">
                         <!-- AI Prompts Tab -->
-                        <template v-if="activeTab === 'questions'">
-                            <div class="section-header">
-                                <div class="section-info">
-                                    <h3 class="section-title">
-                                        <i class="el-icon-chat-line-round"></i> AI Prompts
-                                        <el-tag size="mini" type="info" class="section-count">{{ questionsTotal }} total</el-tag>
-                                    </h3>
-                                    <p class="section-description">
-                                        Prompt templates sent to the AI when a card is tapped. The AI generates a unique response each time.
-                                        <el-tooltip content="Each prompt has a code (e.g., ANIMALS_10), a title, and the prompt text that gets sent to the AI model. Cards reference prompts by ID." placement="top">
-                                            <i class="el-icon-question section-help"></i>
-                                        </el-tooltip>
-                                    </p>
-                                </div>
-                            </div>
-                            <el-table ref="questionsTable" :data="questionsList" class="transparent-table" v-loading="questionsLoading"
-                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
-                                element-loading-background="rgba(255, 255, 255, 0.7)"
-                                :header-cell-class-name="headerCellClassName">
-                                <el-table-column label="Select" align="center" width="80">
-                                    <template slot-scope="scope">
-                                        <el-checkbox v-model="scope.row.selected"></el-checkbox>
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Code" prop="code" align="center" width="150"></el-table-column>
-                                <el-table-column label="Title" prop="title" align="center" show-overflow-tooltip></el-table-column>
-                                <el-table-column label="Category" prop="category" align="center" width="100"></el-table-column>
-                                <el-table-column label="Language" prop="language" align="center" width="90"></el-table-column>
-                                <el-table-column label="Difficulty" prop="difficulty" align="center" width="90"></el-table-column>
-                                <el-table-column label="Active" align="center" width="80">
-                                    <template slot-scope="scope">
-                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
-                                            {{ scope.row.active ? 'Yes' : 'No' }}
-                                        </el-tag>
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Actions" align="center" width="140">
-                                    <template slot-scope="scope">
-                                        <el-button size="mini" type="text" @click="editQuestion(scope.row)">Edit</el-button>
-                                        <el-button size="mini" type="text" @click="deleteQuestion(scope.row)">Delete</el-button>
-                                    </template>
-                                </el-table-column>
-                            </el-table>
 
-                            <div class="table_bottom">
-                                <div class="ctrl_btn">
-                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllQuestions">
-                                        {{ isAllQuestionsSelected ? 'Deselect All' : 'Select All' }}
-                                    </el-button>
-                                    <el-button size="mini" type="success" @click="showAddQuestionDialog">Add</el-button>
-                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedQuestions">Delete</el-button>
-                                </div>
-                                <div class="custom-pagination">
-                                    <el-select v-model="questionsPageSize" @change="handleQuestionsPageSizeChange" class="page-size-select">
-                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
-                                    </el-select>
-                                    <button class="pagination-btn" :disabled="questionsCurrentPage === 1" @click="goFirstQuestions">First</button>
-                                    <button class="pagination-btn" :disabled="questionsCurrentPage === 1" @click="goPrevQuestions">Previous</button>
-                                    <button v-for="page in questionsVisiblePages" :key="page" class="pagination-btn"
-                                        :class="{ active: page === questionsCurrentPage }" @click="goToQuestionsPage(page)">{{ page }}</button>
-                                    <button class="pagination-btn" :disabled="questionsCurrentPage === questionsPageCount" @click="goNextQuestions">Next</button>
-                                    <span class="total-text">Total {{ questionsTotal }} records</span>
-                                </div>
-                            </div>
-                        </template>
 
                         <!-- Product SKUs Tab -->
                         <template v-if="activeTab === 'packs'">
@@ -263,7 +201,7 @@
                                         <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Story/Rhyme Pack" align="center" width="160" show-overflow-tooltip>
+                                <el-table-column label="Content Pack" align="center" width="160" show-overflow-tooltip>
                                     <template slot-scope="scope">
                                         <el-tag v-if="scope.row.contentPackId" type="warning" size="small">{{ getContentPackLabel(scope.row.contentPackId) }}</el-tag>
                                         <span v-else class="text-muted">-</span>
@@ -312,12 +250,94 @@
                             </div>
                         </template>
 
-                        <!-- Story & Rhyme Packs Tab -->
+
+                        <!-- Q&A Packs Tab (Grid View) -->
+                        <template v-if="activeTab === 'questionPacks'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-chat-square"></i> Q&A Packs
+                                        <el-tag size="mini" type="info" class="section-count">{{ questionPacksTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Collections of AI prompts that form a structured conversation or game.
+                                        <el-tooltip content="Q&A Packs allow you to group multiple questions together. When a card is tapped, the system intelligently sequences through these questions." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
+                                <div>
+                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllQuestionPacks(true)">
+                                        Select All
+                                    </el-button>
+                                    <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddQuestionPackDialog">Create Pack</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedQuestionPacks">Delete Selected</el-button>
+                                </div>
+                            </div>
+
+                            <div v-loading="questionPacksLoading" class="pack-grid-container" element-loading-background="rgba(255, 255, 255, 0.5)">
+                                <div v-if="questionPacksList.length === 0 && !questionPacksLoading" class="empty-state">
+                                    <i class="el-icon-chat-square empty-icon" style="font-size: 48px; color: #ddd; margin-bottom: 10px;"></i>
+                                    <p style="color: #909399;">No Q&A Packs found</p>
+                                    <el-button type="text" @click="showAddQuestionPackDialog">Create your first pack</el-button>
+                                </div>
+
+                                <div v-else class="pack-grid">
+                                    <div v-for="pack in questionPacksList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editQuestionPack(pack)">
+                                        <div class="pack-card-selection" @click.stop="">
+                                            <el-checkbox v-model="pack.selected"></el-checkbox>
+                                        </div>
+                                        <div class="pack-card-header">
+                                            <div class="pack-title-row">
+                                                <span class="pack-title" :title="pack.name">{{ pack.name }}</span>
+                                                <el-tag size="mini" :type="pack.active ? 'success' : 'info'" effect="dark">{{ pack.active ? 'Active' : 'Draft' }}</el-tag>
+                                            </div>
+                                            <div class="pack-code">{{ pack.packCode }}</div>
+                                        </div>
+                                        <div class="pack-card-body">
+                                            <div class="pack-desc">{{ pack.description || 'No description provided.' }}</div>
+                                            <div class="pack-metrics">
+                                                <el-tag size="mini" type="warning" effect="plain"><i class="el-icon-chat-dot-square"></i> {{ (pack.questionIds || []).length }} Qs</el-tag>
+                                                <el-tag size="mini" type="primary" effect="plain"><i class="el-icon-flag"></i> {{ pack.language }}</el-tag>
+                                                <el-tag size="mini" type="info" effect="plain" v-if="pack.category">{{ pack.category }}</el-tag>
+                                            </div>
+                                        </div>
+                                        <div class="pack-card-footer">
+                                            <div class="pack-version">v{{ pack.version }}</div>
+                                            <div class="pack-actions">
+                                                <el-button size="mini" icon="el-icon-edit" circle type="primary" plain @click.stop="editQuestionPack(pack)"></el-button>
+                                                <el-button size="mini" icon="el-icon-delete" circle type="danger" plain @click.stop="deleteQuestionPack(pack)"></el-button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn"></div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="questionPacksPageSize" @change="handleQuestionPacksPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="questionPacksCurrentPage === 1" @click="goFirstQuestionPacks">First</button>
+                                    <button class="pagination-btn" :disabled="questionPacksCurrentPage === 1" @click="goPrevQuestionPacks">Previous</button>
+                                    <button v-for="page in questionPacksVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === questionPacksCurrentPage }" @click="goToQuestionPacksPage(page)">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="questionPacksCurrentPage === questionPacksPageCount" @click="goNextQuestionPacks">Next</button>
+                                    <span class="total-text">Total {{ questionPacksTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Content Packs Tab (Grid View) -->
                         <template v-if="activeTab === 'contentPacks'">
                             <div class="section-header">
                                 <div class="section-info">
                                     <h3 class="section-title">
-                                        <i class="el-icon-notebook-2"></i> Story &amp; Rhyme Packs
+                                        <i class="el-icon-notebook-2"></i> Content Packs
                                         <el-tag size="mini" type="info" class="section-count">{{ contentPacksTotal }} total</el-tag>
                                     </h3>
                                     <p class="section-description">
@@ -328,50 +348,60 @@
                                     </p>
                                 </div>
                             </div>
-                            <el-table ref="contentPacksTable" :data="contentPacksList" class="transparent-table" v-loading="contentPacksLoading"
-                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
-                                element-loading-background="rgba(255, 255, 255, 0.7)"
-                                :header-cell-class-name="headerCellClassName">
-                                <el-table-column label="Select" align="center" width="60">
-                                    <template slot-scope="scope">
-                                        <el-checkbox v-model="scope.row.selected"></el-checkbox>
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Pack Code" prop="packCode" align="center" width="200"></el-table-column>
-                                <el-table-column label="Name" prop="name" align="center" show-overflow-tooltip></el-table-column>
-                                <el-table-column label="Delivery" align="center" width="150">
-                                    <template slot-scope="scope">
-                                        <el-tag :type="scope.row.contentType === 'prompt' ? '' : 'warning'" size="small">
-                                            <i :class="scope.row.contentType === 'prompt' ? 'el-icon-chat-line-round' : 'el-icon-reading'"></i>
-                                            {{ scope.row.contentType === 'prompt' ? 'AI Generated' : 'TTS Read-Aloud' }}
-                                        </el-tag>
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Language" prop="language" align="center" width="90"></el-table-column>
-                                <el-table-column label="Items" prop="totalItems" align="center" width="70"></el-table-column>
-                                <el-table-column label="Active" align="center" width="80">
-                                    <template slot-scope="scope">
-                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
-                                            {{ scope.row.active ? 'Yes' : 'No' }}
-                                        </el-tag>
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Actions" align="center" width="120">
-                                    <template slot-scope="scope">
-                                        <el-button size="mini" type="text" @click="editContentPack(scope.row)">Edit</el-button>
-                                        <el-button size="mini" type="text" @click="deleteContentPack(scope.row)">Delete</el-button>
-                                    </template>
-                                </el-table-column>
-                            </el-table>
+
+                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
+                                <div>
+                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllContentPacks(true)">
+                                        Select All
+                                    </el-button>
+                                    <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddContentPackDialog">Create Pack</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedContentPacks">Delete Selected</el-button>
+                                </div>
+                            </div>
+
+                            <div v-loading="contentPacksLoading" class="pack-grid-container" element-loading-background="rgba(255, 255, 255, 0.5)">
+                                <div v-if="contentPacksList.length === 0 && !contentPacksLoading" class="empty-state">
+                                    <i class="el-icon-notebook-2 empty-icon" style="font-size: 48px; color: #ddd; margin-bottom: 10px;"></i>
+                                    <p style="color: #909399;">No Content Packs found</p>
+                                    <el-button type="text" @click="showAddContentPackDialog">Create your first pack</el-button>
+                                </div>
+
+                                <div v-else class="pack-grid">
+                                    <div v-for="pack in contentPacksList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editContentPack(pack)">
+                                        <div class="pack-card-selection" @click.stop="">
+                                            <el-checkbox v-model="pack.selected"></el-checkbox>
+                                        </div>
+                                        <div class="pack-card-header">
+                                            <div class="pack-title-row">
+                                                <span class="pack-title" :title="pack.name">{{ pack.name }}</span>
+                                                <el-tag size="mini" :type="pack.active ? 'success' : 'info'" effect="dark">{{ pack.active ? 'Active' : 'Draft' }}</el-tag>
+                                            </div>
+                                            <div class="pack-code">{{ pack.packCode }}</div>
+                                        </div>
+                                        <div class="pack-card-body">
+                                            <div class="pack-desc">{{ pack.description || 'No description provided.' }}</div>
+                                            <div class="pack-metrics">
+                                                <el-tag size="mini" :type="pack.contentType === 'prompt' ? 'primary' : 'warning'" effect="plain">
+                                                    <i :class="pack.contentType === 'prompt' ? 'el-icon-chat-line-round' : 'el-icon-reading'"></i>
+                                                    {{ pack.contentType === 'prompt' ? 'AI' : 'TTS' }}
+                                                </el-tag>
+                                                <el-tag size="mini" type="info" effect="plain"><i class="el-icon-document"></i> {{ pack.totalItems || 0 }} Items</el-tag>
+                                                <el-tag size="mini" type="success" effect="plain"><i class="el-icon-flag"></i> {{ pack.language }}</el-tag>
+                                            </div>
+                                        </div>
+                                        <div class="pack-card-footer">
+                                            <div class="pack-version">{{ pack.contentType === 'prompt' ? 'AI Generated' : 'Read-Aloud' }}</div>
+                                            <div class="pack-actions">
+                                                <el-button size="mini" icon="el-icon-edit" circle type="primary" plain @click.stop="editContentPack(pack)"></el-button>
+                                                <el-button size="mini" icon="el-icon-delete" circle type="danger" plain @click.stop="deleteContentPack(pack)"></el-button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
 
                             <div class="table_bottom">
-                                <div class="ctrl_btn">
-                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllContentPacks">
-                                        {{ isAllContentPacksSelected ? 'Deselect All' : 'Select All' }}
-                                    </el-button>
-                                    <el-button size="mini" type="success" @click="showAddContentPackDialog">Add</el-button>
-                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedContentPacks">Delete</el-button>
-                                </div>
+                                <div class="ctrl_btn"></div>
                                 <div class="custom-pagination">
                                     <el-select v-model="contentPacksPageSize" @change="handleContentPacksPageSizeChange" class="page-size-select">
                                         <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
@@ -490,7 +520,7 @@
                                     </el-input>
                                     <div class="sequence-group">
                                         <label class="sequence-label">Item #
-                                            <el-tooltip content="Which numbered item in a Story/Rhyme pack to retrieve (e.g., item 3 of a rhymes pack)" placement="top">
+                                            <el-tooltip content="Which numbered item in a Content Pack to retrieve (e.g., item 3 of a rhymes pack)" placement="top">
                                                 <i class="el-icon-question"></i>
                                             </el-tooltip>
                                         </label>
@@ -564,13 +594,7 @@
         </div>
 
         <!-- Dialogs -->
-        <RfidQuestionDialog
-            :title="questionDialogTitle"
-            :visible.sync="questionDialogVisible"
-            :form="questionForm"
-            @submit="handleQuestionSubmit"
-            @cancel="questionDialogVisible = false"
-        />
+
 
         <RfidPackDialog
             :title="packDialogTitle"
@@ -609,6 +633,15 @@
             @cancel="seriesDialogVisible = false"
         />
 
+        <RfidQuestionPackDialog
+            :title="questionPackDialogTitle"
+            :visible.sync="questionPackDialogVisible"
+            :form="questionPackForm"
+            :questions="questionsDropdown"
+            @submit="handleQuestionPackSubmit"
+            @cancel="questionPackDialogVisible = false"
+        />
+
         <el-footer>
             <version-footer />
         </el-footer>
@@ -624,12 +657,13 @@ import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
+import RfidQuestionPackDialog from "@/components/RfidQuestionPackDialog.vue";
 
 export default {
-    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog },
+    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog },
     data() {
         return {
-            activeTab: 'questions',
+            activeTab: 'questionPacks',
             searchKeyword: '',
             pageSizeOptions: [10, 20, 50, 100],
 
@@ -642,7 +676,7 @@ export default {
             isAllQuestionsSelected: false,
             questionDialogVisible: false,
             questionDialogTitle: 'Add AI Prompt',
-            questionForm: { id: null, code: '', title: '', promptText: '', language: 'en', category: '', difficulty: 3, active: true },
+            questionForm: { id: null, code: '', title: '', promptText: '', language: 'en', category: '', difficulty: 3, allowCaching: true, cachedAudioUrl: '', systemPromptOverride: '', active: true },
 
             // Packs
             packsList: [],
@@ -664,7 +698,7 @@ export default {
             isAllCardsSelected: false,
             cardDialogVisible: false,
             cardDialogTitle: 'Add Card Mapping',
-            cardForm: { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, contentPackId: null, notes: '', active: true },
+            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', notes: '', active: true },
 
             // Series
             seriesList: [],
@@ -685,13 +719,25 @@ export default {
             contentPacksTotal: 0,
             isAllContentPacksSelected: false,
             contentPackDialogVisible: false,
-            contentPackDialogTitle: 'Add Story & Rhyme Pack',
-            contentPackForm: { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, active: true },
+            contentPackDialogTitle: 'Add Content Pack',
+            contentPackForm: { id: null, packCode: '', name: '', description: '', contentType: 'story_pack', language: 'en', status: 'draft', version: 1, items: [], active: true },
+
+            // Question Packs (NEW)
+            questionPacksList: [],
+            questionPacksLoading: false,
+            questionPacksCurrentPage: 1,
+            questionPacksPageSize: 10,
+            questionPacksTotal: 0,
+            isAllQuestionPacksSelected: false,
+            questionPackDialogVisible: false,
+            questionPackDialogTitle: 'Add Q&A Pack',
+            questionPackForm: { id: null, packCode: '', name: '', description: '', questionIds: [], language: 'en', category: '', status: 'draft', version: 1, active: true },
 
             // Dropdown data
             questionsDropdown: [],
             packsDropdown: [],
             contentPacksDropdown: [],
+            questionPacksDropdown: [],
 
             // Console
             consoleLookupUid: '',
@@ -708,13 +754,15 @@ export default {
                 totalContentPacks: 0,
                 totalProductSkus: 0,
                 totalCards: 0,
-                totalSeries: 0
+                totalSeries: 0,
+                totalQuestionPacks: 0
             },
             statsLoading: false
         };
     },
     created() {
-        this.fetchQuestions();
+
+        this.fetchQuestionPacks();
         this.loadDropdownData();
         this.loadStats();
     },
@@ -753,6 +801,13 @@ export default {
         },
         seriesVisiblePages() {
             return this.getVisiblePages(this.seriesCurrentPage, this.seriesPageCount);
+        },
+        // Question Packs pagination (NEW)
+        questionPacksPageCount() {
+            return Math.ceil(this.questionPacksTotal / this.questionPacksPageSize);
+        },
+        questionPacksVisiblePages() {
+            return this.getVisiblePages(this.questionPacksCurrentPage, this.questionPacksPageCount);
         }
     },
     methods: {
@@ -782,6 +837,7 @@ export default {
             else if (tab === 'cards') this.fetchCards();
             else if (tab === 'contentPacks') this.fetchContentPacks();
             else if (tab === 'series') this.fetchSeries();
+            else if (tab === 'questionPacks') this.fetchQuestionPacks();
         },
 
         handleSearch() {
@@ -800,6 +856,9 @@ export default {
             } else if (this.activeTab === 'series') {
                 this.seriesCurrentPage = 1;
                 this.fetchSeries();
+            } else if (this.activeTab === 'questionPacks') {
+                this.questionPacksCurrentPage = 1;
+                this.fetchQuestionPacks();
             }
         },
 
@@ -828,8 +887,8 @@ export default {
                 completed++;
                 if (completed >= 5) this.statsLoading = false;
             };
-            Api.rfid.getQuestionPage({ page: 1, limit: 1 }, ({ data }) => {
-                if (data.code === 0) this.stats.totalPrompts = data.data.total || 0;
+            Api.rfid.getQuestionPackPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalQuestionPacks = data.data.total || 0;
                 checkDone();
             });
             Api.rfid.getContentPackPage({ page: 1, limit: 1 }, ({ data }) => {
@@ -1104,7 +1163,7 @@ export default {
 
         showAddCardDialog() {
             this.cardDialogTitle = 'Add Card Mapping';
-            this.cardForm = { id: null, rfidUid: '', questionIds: [], packCode: '', packId: null, contentPackId: null, notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1200,15 +1259,33 @@ export default {
         },
 
         showAddContentPackDialog() {
-            this.contentPackDialogTitle = 'Add Story & Rhyme Pack';
-            this.contentPackForm = { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, active: true };
+            this.contentPackDialogTitle = 'Add Content Pack';
+            this.contentPackForm = { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, items: [], active: true };
             this.contentPackDialogVisible = true;
         },
 
         editContentPack(row) {
-            this.contentPackDialogTitle = 'Edit Story & Rhyme Pack';
-            this.contentPackForm = { ...row };
-            this.contentPackDialogVisible = true;
+            this.contentPackDialogTitle = 'Edit Content Pack';
+            // Fetch full pack details to ensure items array is loaded
+            Api.rfid.getContentPackByCode(row.packCode, ({ data }) => {
+                if (data.code === 0 && data.data) {
+                    const fullPack = data.data;
+                    // Ensure items array exists
+                    if (!fullPack.items) {
+                        fullPack.items = [];
+                    }
+                    this.contentPackForm = { ...fullPack };
+                    this.contentPackDialogVisible = true;
+                } else {
+                    // Fallback to row data if fetch fails
+                    const form = { ...row };
+                    if (!form.items) {
+                        form.items = [];
+                    }
+                    this.contentPackForm = form;
+                    this.contentPackDialogVisible = true;
+                }
+            });
         },
 
         handleContentPackSubmit({ form, done }) {
@@ -1343,6 +1420,117 @@ export default {
                 return;
             }
             this.deleteSeries(selected);
+        },
+
+        // ==================== QUESTION PACKS (NEW) ====================
+        fetchQuestionPacks() {
+            this.questionPacksLoading = true;
+            Api.rfid.getQuestionPackPage({
+                page: this.questionPacksCurrentPage,
+                limit: this.questionPacksPageSize,
+                name: this.searchKeyword
+            }, ({ data }) => {
+                this.questionPacksLoading = false;
+                if (data.code === 0) {
+                    this.questionPacksList = data.data.list.map(p => ({ ...p, selected: false }));
+                    this.questionPacksTotal = data.data.total;
+                }
+            });
+        },
+
+        handleQuestionPacksPageSizeChange(val) {
+            this.questionPacksPageSize = val;
+            this.fetchQuestionPacks();
+        },
+
+        goFirstQuestionPacks() {
+            this.questionPacksCurrentPage = 1;
+            this.fetchQuestionPacks();
+        },
+
+        goPrevQuestionPacks() {
+            if (this.questionPacksCurrentPage > 1) {
+                this.questionPacksCurrentPage--;
+                this.fetchQuestionPacks();
+            }
+        },
+
+        goToQuestionPacksPage(page) {
+            this.questionPacksCurrentPage = page;
+            this.fetchQuestionPacks();
+        },
+
+        goNextQuestionPacks() {
+            if (this.questionPacksCurrentPage < Math.ceil(this.questionPacksTotal / this.questionPacksPageSize)) {
+                this.questionPacksCurrentPage++;
+                this.fetchQuestionPacks();
+            }
+        },
+
+        handleSelectAllQuestionPacks(val) {
+            this.isAllQuestionPacksSelected = val;
+            this.questionPacksList.forEach(item => item.selected = val);
+        },
+
+        showAddQuestionPackDialog() {
+            this.questionPackDialogTitle = 'Add Q&A Pack';
+            this.questionPackForm = { id: null, packCode: '', name: '', description: '', questionIds: [], questions: [], language: 'en', category: '', status: 'draft', version: 1, active: true };
+            this.questionPackDialogVisible = true;
+        },
+
+        editQuestionPack(row) {
+            this.questionPackDialogTitle = 'Edit Q&A Pack';
+            // Ensure questionIds is array
+            const form = { ...row };
+            if (!form.questionIds) form.questionIds = [];
+            this.questionPackForm = form;
+            this.questionPackDialogVisible = true;
+        },
+
+        handleQuestionPackSubmit({ form, done }) {
+            const api = form.id ? Api.rfid.updateQuestionPack : Api.rfid.addQuestionPack;
+            api(form, ({ data }) => {
+                done && done();
+                if (data.code === 0) {
+                    this.$message.success(form.id ? 'Updated successfully' : 'Created successfully');
+                    this.questionPackDialogVisible = false;
+                    this.fetchQuestionPacks();
+                    this.loadStats();
+                    this.loadDropdownData();
+                } else {
+                    this.$message.error(data.msg || 'Operation failed');
+                }
+            });
+        },
+
+        deleteQuestionPack(row) {
+            const items = Array.isArray(row) ? row : [row];
+            if (items.length === 0) return;
+            this.$confirm(`Delete ${items.length} question packs?`, 'Warning', {
+                confirmButtonText: 'Confirm',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                Api.rfid.deleteQuestionPack(items.map(i => i.id), ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchQuestionPacks();
+                        this.loadStats();
+                        this.loadDropdownData();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        deleteSelectedQuestionPacks() {
+            const selected = this.questionPacksList.filter(r => r.selected);
+            if (selected.length === 0) {
+                this.$message.warning('Please select items to delete');
+                return;
+            }
+            this.deleteQuestionPack(selected);
         },
 
         // ==================== CONSOLE ====================
@@ -1997,5 +2185,125 @@ export default {
         margin: 0;
         font-size: 14px;
     }
+}
+
+/* Q&A Packs Grid */
+.pack-grid-container {
+    padding: 10px 0;
+    min-height: 200px;
+}
+.pack-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 24px;
+    padding-bottom: 20px;
+}
+.pack-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    border: 1px solid #f0f0f0;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    cursor: pointer;
+    height: 100%;
+}
+.pack-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.06);
+    border-color: #d9ecff;
+}
+.pack-card.selected {
+    border-color: #409eff;
+    box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+.pack-card-selection {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 10;
+}
+.pack-card-header {
+    background: linear-gradient(135deg, #ffffff 0%, #fcfcfc 100%);
+    padding: 16px;
+    border-bottom: 1px solid #f5f7fa;
+}
+.pack-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    gap: 10px;
+}
+.pack-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: #1a1a1a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pack-code {
+    font-size: 11px;
+    color: #909399;
+    font-family: 'Roboto Mono', monospace;
+    background: #f4f4f5;
+    padding: 2px 6px;
+    border-radius: 4px;
+    display: inline-block;
+}
+.pack-card-body {
+    padding: 16px;
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+}
+.pack-desc {
+    font-size: 13px;
+    color: #606266;
+    margin-bottom: 16px;
+    line-height: 1.5;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    flex-grow: 1;
+}
+.pack-metrics {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.pack-card-footer {
+    padding: 12px 16px;
+    border-top: 1px solid #f5f7fa;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #fafafa;
+}
+.pack-version {
+    font-size: 11px;
+    color: #909399;
+    font-weight: 500;
+}
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 80px 0;
+    background: #fdfdfd;
+    border-radius: 12px;
+    border: 2px dashed #e4e7ed;
+    text-align: center;
+}
+/* Stat Icons */
+.stat-icon.qa-packs {
+    color: #9b59b6;
+    background: rgba(155, 89, 182, 0.1);
 }
 </style>

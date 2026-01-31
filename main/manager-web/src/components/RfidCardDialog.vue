@@ -24,27 +24,33 @@
           <el-input v-model="form.rfidUid" placeholder="Physical card UID (hex)" class="custom-input"></el-input>
         </el-form-item>
 
-        <el-form-item label="Questions" prop="questionIds" class="form-item">
-          <el-select v-model="form.questionIds" placeholder="Select questions" class="custom-select" filterable clearable multiple collapse-tags>
-            <el-option
-              v-for="q in questions"
-              :key="q.id"
-              :label="`${q.code} - ${q.title}`"
-              :value="q.id"/>
-          </el-select>
+        <el-form-item label="Content Type" class="form-item">
+            <div class="type-selector">
+                <div class="type-option" :class="{ active: form.actionType === 'qna' }" @click="form.actionType = 'qna'">
+                    <i class="el-icon-chat-square"></i>
+                    <span>Q&A Pack</span>
+                </div>
+                <div class="type-option" :class="{ active: form.actionType === 'content' }" @click="form.actionType = 'content'">
+                    <i class="el-icon-notebook-2"></i>
+                    <span>Content Pack</span>
+                </div>
+            </div>
         </el-form-item>
 
-        <el-form-item label="Pack" prop="packId" class="form-item">
-          <el-select v-model="form.packId" placeholder="Select pack" class="custom-select" filterable clearable>
+        <!-- Q&A Pack Selector -->
+        <el-form-item v-if="form.actionType === 'qna'" label="Q&A Pack" prop="questionPackId" class="form-item">
+          <el-select v-model="form.questionPackId" placeholder="Select Q&A pack" class="custom-select" filterable clearable>
             <el-option
-              v-for="p in packs"
-              :key="p.id"
-              :label="`${p.packCode} - ${p.name}`"
-              :value="p.id"/>
+              v-for="qp in questionPacks"
+              :key="qp.id"
+              :label="`${qp.packCode} - ${qp.name}`"
+              :value="qp.id"/>
           </el-select>
+          <div class="field-hint">Select a pre-defined Q&A pack (managed in Q&A Packs tab).</div>
         </el-form-item>
 
-        <el-form-item label="Content Pack" prop="contentPackId" class="form-item">
+        <!-- Content Pack Selector -->
+        <el-form-item v-if="form.actionType === 'content'" label="Content Pack" prop="contentPackId" class="form-item">
           <el-select v-model="form.contentPackId" placeholder="Select content pack" class="custom-select" filterable clearable>
             <el-option
               v-for="cp in contentPacks"
@@ -54,8 +60,14 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="Pack Code" prop="packCode" class="form-item">
-          <el-input v-model="form.packCode" placeholder="Legacy pack code (optional)" class="custom-input"></el-input>
+        <el-form-item label="Product SKU" prop="packId" class="form-item">
+           <el-select v-model="form.packId" placeholder="Physical Product (Optional)" class="custom-select" filterable clearable>
+            <el-option
+              v-for="p in packs"
+              :key="p.id"
+              :label="`${p.packCode} - ${p.name}`"
+              :value="p.id"/>
+          </el-select>
         </el-form-item>
 
         <el-form-item label="Notes" prop="notes" class="form-item">
@@ -100,14 +112,15 @@ export default {
       default: () => ({
         id: null,
         rfidUid: '',
-        questionIds: [],
-        packCode: '',
-        packId: null,
+        questionPackId: null,
+        contentPackId: null,
+        packId: null, // Product SKU
+        actionType: 'content', // 'content' or 'qna'
         notes: '',
         active: true
       })
     },
-    questions: {
+    questionPacks: {
       type: Array,
       default: () => []
     },
@@ -234,6 +247,11 @@ export default {
         font-weight: 500;
         font-size: 14px;
       }
+    .field-hint {
+        font-size: 12px;
+        color: #94a3b8;
+        margin-top: 4px;
+    }
     }
 
     .custom-input {
@@ -324,5 +342,38 @@ export default {
       }
     }
   }
+}
+
+.type-selector {
+  display: flex;
+  gap: 12px;
+  margin-top: 5px;
+}
+.type-option {
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 10px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+  color: #606266;
+  background: #fff;
+  flex: 1;
+  justify-content: center;
+}
+.type-option:hover {
+  color: #409eff;
+  border-color: #c6e2ff;
+}
+.type-option.active {
+  color: #409eff;
+  border-color: #409eff;
+  background: #ecf5ff;
+  font-weight: 500;
+}
+.type-option i {
+  font-size: 16px;
 }
 </style>

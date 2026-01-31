@@ -46,17 +46,47 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="Total Items" prop="totalItems" class="form-item">
-          <el-input-number v-model="form.totalItems" :min="0" :max="999" class="total-items-input"></el-input-number>
+        <el-form-item label="Status" prop="status" class="form-item">
+          <el-radio-group v-model="form.status" size="small">
+            <el-radio-button label="draft">Draft</el-radio-button>
+            <el-radio-button label="published">Published</el-radio-button>
+          </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="Content (MD)" prop="contentMd" class="form-item">
-          <el-input type="textarea" v-model="form.contentMd" placeholder="Markdown content (## 1. Title\ncontent\n---)" :rows="8" class="custom-textarea"></el-input>
+        <el-form-item label="Version" prop="version" class="form-item">
+           <el-input-number v-model="form.version" :min="1" size="small"></el-input-number>
         </el-form-item>
 
-        <el-form-item label="Active" prop="active" class="form-item">
-          <el-switch v-model="form.active"></el-switch>
-        </el-form-item>
+        <!-- Dynamic Items Table -->
+        <div class="items-section">
+           <div class="items-header">
+              <span class="items-title">Pack Items (Max 10)</span>
+              <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
+           </div>
+           
+           <div class="items-list">
+              <div v-for="(item, index) in form.items" :key="index" class="item-row">
+                  <div class="item-col seq-col">
+                     <span class="seq-badge">{{ index + 1 }}</span>
+                  </div>
+                  <div class="item-col main-col">
+                      <el-input v-model="item.title" placeholder="Title" size="small" class="mb-1"></el-input>
+                      <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
+                          <template slot="prepend"><i class="el-icon-headset"></i></template>
+                      </el-input>
+                      <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small">
+                           <template slot="prepend"><i class="el-icon-picture"></i></template>
+                      </el-input>
+                  </div>
+                  <div class="item-col action-col">
+                      <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeItem(index)"></el-button>
+                  </div>
+              </div>
+              <div v-if="form.items.length === 0" class="empty-items">
+                  No items added. Click "Add Item" to start.
+              </div>
+           </div>
+        </div>
       </el-form>
 
       <div class="dialog-footer">
@@ -90,15 +120,15 @@ export default {
     form: {
       type: Object,
       default: () => ({
-        id: null,
         packCode: '',
         name: '',
         description: '',
-        contentType: 'prompt',
+        contentType: 'story_pack', // Default to story pack
         language: 'en',
-        contentMd: '',
-        totalItems: 0,
-        active: true
+        status: 'draft',
+        version: 1,
+        active: true,
+        items: [] // Structured Items
       })
     }
   },
@@ -117,9 +147,32 @@ export default {
     };
   },
   methods: {
+    addItem() {
+        if (this.form.items.length < 10) {
+            this.form.items.push({
+                sequence: this.form.items.length + 1,
+                title: '',
+                audioUrl: '',
+                imageUrl: ''
+            });
+        }
+    },
+    removeItem(index) {
+        this.form.items.splice(index, 1);
+        // Re-sequence
+        this.form.items.forEach((item, idx) => {
+            item.sequence = idx + 1;
+        });
+    },
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {
+          // Validate Items
+          if (this.form.items.length === 0) {
+              this.$message.warning("Please add at least one item to the pack.");
+              return;
+          }
+
           this.saving = true;
           this.$emit('submit', {
             form: this.form,
@@ -128,8 +181,8 @@ export default {
             }
           });
           setTimeout(() => {
-            this.saving = false;
-          }, 3000);
+             if (this.saving) this.saving = false;
+          }, 5000);
         }
       });
     },
@@ -274,6 +327,81 @@ export default {
 
     .total-items-input {
       width: 160px;
+    }
+
+    .items-section {
+        margin-top: 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 16px;
+        background: #fff;
+    }
+
+    .items-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+    }
+    
+    .items-title {
+        font-weight: 600;
+        color: #475569;
+        font-size: 14px;
+    }
+
+    .item-row {
+        display: flex;
+        gap: 12px;
+        padding: 12px;
+        border-bottom: 1px solid #f1f5f9;
+        align-items: flex-start;
+        
+        &:last-child {
+            border-bottom: none;
+        }
+    }
+
+    .seq-col {
+        width: 30px;
+        padding-top: 8px;
+    }
+    
+    .seq-badge {
+        background: #e2e8f0;
+        color: #64748b;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    .main-col {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .action-col {
+        width: 30px;
+        padding-top: 8px;
+    }
+
+    .mb-1 {
+        margin-bottom: 4px;
+    }
+
+    .empty-items {
+        text-align: center;
+        padding: 20px;
+        color: #94a3b8;
+        font-size: 13px;
+        font-style: italic;
     }
   }
 

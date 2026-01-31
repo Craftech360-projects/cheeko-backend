@@ -34,6 +34,9 @@ const transformQuestionToCamelCase = (question) => {
     language: question.language,
     category: question.category,
     difficulty: question.difficulty,
+    allowCaching: question.allow_caching !== false,
+    cachedAudioUrl: question.cached_audio_url,
+    systemPromptOverride: question.system_prompt_override,
     active: question.active,
     createDate: formatDate(question.create_date),
     updateDate: formatDate(question.update_date)
@@ -70,7 +73,7 @@ const transformCardMappingToCamelCase = (card) => {
     id: card.id ? Number(card.id) : null,
     rfidUid: card.rfid_uid,
     questionId: card.question_id ? Number(card.question_id) : null,
-    questionIds: card.question_ids || [],
+    questionPackId: card.question_pack_id ? Number(card.question_pack_id) : null,
     packCode: card.pack_code,
     packId: card.pack_id ? Number(card.pack_id) : null,
     contentPackId: card.content_pack_id ? Number(card.content_pack_id) : null,
@@ -301,127 +304,111 @@ const getCardsByQuestionId = async (questionId) => {
 const lookupCardByUid = async (rfidUid) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Normalize UID (uppercase, no separators)
   const normalizedUid = rfidUid.toUpperCase().replace(/[:-]/g, '');
 
-  // First try exact match - query without relationship joins
-  const { data: card, error } = await supabaseAdmin
+  // 1. Find the Mapping
+  const { data: mapping, error } = await supabaseAdmin
     .from('rfid_card_mapping')
     .select('*')
     .eq('rfid_uid', normalizedUid)
     .eq('active', true)
     .single();
 
-  if (error && error.code !== 'PGRST116') {
-    logger.error('Card lookup error:', error);
+  if (error && error.code !== 'PGRST116') logger.error('Card lookup error:', error);
+  if (!mapping) return null;
+
+  // Track 1: Content Pack (Story/Rhyme)
+  if (mapping.content_pack_id) {
+    const { data: pack } = await supabaseAdmin
+      .from('rfid_content_pack')
+      .select('*')
+      .eq('id', mapping.content_pack_id)
+      .single();
+
+    if (pack) {
+      // Fetch the 10 items
+      const { data: items } = await supabaseAdmin
+        .from('content_item')
+        .select('*')
+        .eq('content_pack_id', pack.id)
+        .order('item_number', { ascending: true });
+
+      return {
+        rfid_uid: normalizedUid,
+        contentType: pack.content_type || 'story_pack', // 'story_pack', 'rhyme'
+        title: pack.name,
+        packCode: pack.pack_code,
+        version: pack.version,
+        items: (items || []).map(item => ({
+          sequence: item.item_number,
+          title: item.title,
+          audioUrl: item.audio_url,
+          imageUrl: item.image_url,
+          promptText: item.content_text // Optional read-along
+        }))
+      };
+    }
   }
 
-  if (card) {
-    // Fetch related data separately
-    const questions = [];
-    let question = null;
-    let pack = null;
-    let contentPack = null;
+  // Track 2: Q&A / Prompt
+  if (mapping.question_id) {
+    const { data: question } = await supabaseAdmin
+      .from('rfid_question')
+      .select('*')
+      .eq('id', mapping.question_id)
+      .single();
 
-    // Fetch question if question_id exists
-    if (card.question_id) {
-      const { data: questionData } = await supabaseAdmin
-        .from('rfid_question')
-        .select('id, code, title, prompt_text, language, category, difficulty')
-        .eq('id', card.question_id)
-        .single();
-      if (questionData) {
-        question = questionData;
-        questions.push(questionData);
-      }
+    if (question) {
+      return {
+        rfid_uid: normalizedUid,
+        contentType: 'prompt', // Forces Agent processing logic
+        title: question.title,
+        promptText: question.prompt_text,
+        audioUrl: question.allow_caching ? question.cached_audio_url : null, // Send cache if allowed
+        allowCaching: question.allow_caching
+      };
     }
+  }
 
-    // Fetch pack if pack_id exists
-    if (card.pack_id) {
-      const { data: packData } = await supabaseAdmin
-        .from('rfid_pack')
-        .select('id, pack_code, name, description')
-        .eq('id', card.pack_id)
-        .single();
-      if (packData) {
-        pack = packData;
-      }
-    }
+  // Track 3: Q&A Pack (Reference to question_pack)
+  if (mapping.question_pack_id) {
+    const { data: questionPack } = await supabaseAdmin
+      .from('rfid_question_pack')
+      .select('*')
+      .eq('id', mapping.question_pack_id)
+      .single();
 
-    // Fetch content_pack if content_pack_id exists
-    if (card.content_pack_id) {
-      const { data: contentPackData } = await supabaseAdmin
-        .from('rfid_content_pack')
-        .select('id, pack_code, name, content_type, content_md')
-        .eq('id', card.content_pack_id)
-        .single();
-      if (contentPackData) {
-        contentPack = contentPackData;
-      }
-    }
-
-    // Get additional questions if question_ids is populated
-    if (card.question_ids && Array.isArray(card.question_ids) && card.question_ids.length > 0) {
-      const { data: additionalQuestions } = await supabaseAdmin
+    if (questionPack && questionPack.question_ids && questionPack.question_ids.length > 0) {
+      // Fetch all questions in the pack
+      const { data: questions } = await supabaseAdmin
         .from('rfid_question')
         .select('*')
-        .in('id', card.question_ids)
-        .eq('active', true);
+        .in('id', questionPack.question_ids);
 
-      if (additionalQuestions) {
-        // Merge, avoiding duplicates
-        const existingIds = questions.map(q => q.id);
-        additionalQuestions.forEach(q => {
-          if (!existingIds.includes(q.id)) {
-            questions.push(q);
-          }
-        });
+      if (questions) {
+        // Map to 'items' structure so Gateway can pick by sequence
+        const sortedItems = questionPack.question_ids.map((qId, index) => {
+          const q = questions.find(x => x.id === qId);
+          if (!q) return null;
+          return {
+            sequence: index + 1, // 1-based index
+            title: q.title,
+            promptText: q.prompt_text,
+            audioUrl: q.allow_caching ? q.cached_audio_url : null,
+            allowCaching: q.allow_caching,
+            systemPromptOverride: q.system_prompt_override
+          };
+        }).filter(Boolean);
+
+        return {
+          rfid_uid: normalizedUid,
+          contentType: 'prompt_pack',
+          packCode: questionPack.pack_code,
+          packName: questionPack.name,
+          items: sortedItems
+        };
       }
     }
-
-    return {
-      ...card,
-      question,
-      pack,
-      content_pack: contentPack,
-      questions: questions.length > 0 ? questions : undefined
-    };
-  }
-
-  // If no exact match, try series lookup (UID range)
-  // Note: Actual DB uses 'status' (Int, 1=active) instead of 'active' (Boolean)
-  const { data: series } = await supabaseAdmin
-    .from('rfid_series')
-    .select('*')
-    .lte('start_uid', normalizedUid)
-    .gte('end_uid', normalizedUid)
-    .eq('status', 1)
-    .order('priority', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (series) {
-    // Fetch related content pack for series
-    let seriesContentPack = null;
-
-    if (series.content_pack_id) {
-      const { data: packData } = await supabaseAdmin
-        .from('rfid_pack')
-        .select('id, pack_code, name, description')
-        .eq('id', series.content_pack_id)
-        .single();
-      if (packData) {
-        seriesContentPack = packData;
-      }
-    }
-
-    return {
-      rfid_uid: normalizedUid,
-      source: 'series',
-      series_id: series.id,
-      series_name: series.series_name,
-      content_pack: seriesContentPack
-    };
   }
 
   return null;
@@ -448,7 +435,7 @@ const createCardMapping = async (data, _userId) => {
   const insertData = {
     rfid_uid: normalizedUid,
     question_id: data.questionId || null,
-    question_ids: data.questionIds || [],
+    question_pack_id: data.questionPackId || null,
     pack_code: data.packCode || null,
     pack_id: data.packId || null,
     content_pack_id: data.contentPackId || null,
@@ -465,7 +452,7 @@ const createCardMapping = async (data, _userId) => {
     if (error.code === '23505') {
       throw new Error('Card mapping already exists for this UID');
     }
-    throw new Error('Failed to create card mapping');
+    throw new Error('Failed to create card mapping: ' + error.message);
   }
 
   return null;  // Spring Boot returns Result<Void>
@@ -493,7 +480,7 @@ const updateCardMapping = async (data, _userId) => {
     updateData.rfid_uid = data.rfidUid.toUpperCase().replace(/[:-]/g, '');
   }
   if (data.questionId !== undefined) updateData.question_id = data.questionId;
-  if (data.questionIds !== undefined) updateData.question_ids = data.questionIds;
+  if (data.questionPackId !== undefined) updateData.question_pack_id = data.questionPackId;
   if (data.packCode !== undefined) updateData.pack_code = data.packCode;
   if (data.packId !== undefined) updateData.pack_id = data.packId;
   if (data.contentPackId !== undefined) updateData.content_pack_id = data.contentPackId;
@@ -1298,7 +1285,7 @@ const createSeries = async (data, _userId) => {
 
   if (error) {
     logger.error('Failed to create series:', error);
-    throw new Error('Failed to create series');
+    throw new Error('Failed to create series: ' + error.message);
   }
 
   return null;  // Spring Boot returns Result<Void>
@@ -1688,6 +1675,9 @@ const createQuestion = async (data, userId) => {
     language: data.language || 'en',
     category: data.category || null,
     difficulty: data.difficulty || 1,
+    allow_caching: data.allowCaching !== false,
+    cached_audio_url: data.cachedAudioUrl || null,
+    system_prompt_override: data.systemPromptOverride || null,
     active: data.active !== false,
     creator: userId
   };
@@ -1735,6 +1725,9 @@ const updateQuestion = async (data, userId) => {
   if (data.language !== undefined) updateData.language = data.language;
   if (data.category !== undefined) updateData.category = data.category;
   if (data.difficulty !== undefined) updateData.difficulty = data.difficulty;
+  if (data.allowCaching !== undefined) updateData.allow_caching = data.allowCaching;
+  if (data.cachedAudioUrl !== undefined) updateData.cached_audio_url = data.cachedAudioUrl;
+  if (data.systemPromptOverride !== undefined) updateData.system_prompt_override = data.systemPromptOverride;
   if (data.active !== undefined) updateData.active = data.active;
 
   const { data: question, error } = await supabaseAdmin
@@ -2762,7 +2755,41 @@ const getContentPackByCode = async (packCode) => {
     throw new Error('Failed to fetch content pack');
   }
 
-  return transformContentPackToCamelCase(pack);
+  if (!pack) {
+    return null;
+  }
+
+  // Fetch associated items
+  const { data: items, error: itemsError } = await supabaseAdmin
+    .from('content_item')
+    .select('*')
+    .eq('content_pack_id', pack.id)
+    .order('item_number', { ascending: true });
+
+  if (itemsError) {
+    logger.error('Failed to fetch content items:', itemsError);
+    // Non-fatal, continue without items
+  }
+
+  // Transform pack to camelCase
+  const transformedPack = transformContentPackToCamelCase(pack);
+
+  // Add items array (transformed to camelCase)
+  if (items && items.length > 0) {
+    transformedPack.items = items.map(item => ({
+      id: item.id,
+      sequence: item.item_number,
+      title: item.title,
+      text: item.description || '',
+      audioUrl: item.audio_url,
+      imageUrl: item.image_url,
+      active: item.active
+    }));
+  } else {
+    transformedPack.items = [];
+  }
+
+  return transformedPack;
 };
 
 /**
@@ -2854,9 +2881,14 @@ const createContentPack = async (data, userId) => {
     creator: userId,
   };
 
-  const { error } = await supabaseAdmin
+  /*
+   * 1. Insert Pack
+   */
+  const { data: newPack, error } = await supabaseAdmin
     .from('rfid_content_pack')
-    .insert(insertData);
+    .insert(insertData)
+    .select()
+    .single();
 
   if (error) {
     logger.error('Failed to create content pack:', error);
@@ -2864,6 +2896,50 @@ const createContentPack = async (data, userId) => {
       throw new Error('Content pack with this code already exists');
     }
     throw new Error('Failed to create content pack');
+  }
+
+  /*
+   * 2. Insert Items (if any)
+   */
+  if (data.items && Array.isArray(data.items) && data.items.length > 0) {
+    logger.info(`[createContentPack] Inserting ${data.items.length} items for pack ID ${newPack.id}`);
+
+    const itemsData = data.items.map((item, index) => ({
+      content_pack_id: newPack.id,
+      item_number: index + 1, // Ensure sequence is correct
+      title: item.title,
+      audio_url: item.audioUrl,
+      image_url: item.imageUrl,
+      creator: userId,
+      active: true
+    }));
+
+    logger.info('[createContentPack] Items data to insert:', JSON.stringify(itemsData, null, 2));
+
+    const { error: itemsError } = await supabaseAdmin
+      .from('content_item')
+      .insert(itemsData);
+
+    if (itemsError) {
+      logger.error('[createContentPack] Failed to create content items:', itemsError);
+      // Non-fatal, but good to know
+    } else {
+      logger.info(`[createContentPack] Successfully inserted ${itemsData.length} items`);
+
+      // Update total_items count in the pack
+      const { error: updateError } = await supabaseAdmin
+        .from('rfid_content_pack')
+        .update({ total_items: itemsData.length })
+        .eq('id', newPack.id);
+
+      if (updateError) {
+        logger.error('[createContentPack] Failed to update total_items count:', updateError);
+      } else {
+        logger.info(`[createContentPack] Updated total_items to ${itemsData.length}`);
+      }
+    }
+  } else {
+    logger.info('[createContentPack] No items to insert');
   }
 
   return null;
@@ -2909,6 +2985,39 @@ const updateContentPack = async (data, userId) => {
     throw new Error('Failed to update content pack');
   }
 
+  /*
+   * 2. Update Items (Delete All + Re-insert)
+   * Only if items array is provided in update data
+   */
+  if (data.items && Array.isArray(data.items)) {
+    // Delete existing
+    await supabaseAdmin
+      .from('content_item')
+      .delete()
+      .eq('content_pack_id', data.id);
+
+    // Insert new
+    if (data.items.length > 0) {
+      const itemsData = data.items.map((item, index) => ({
+        content_pack_id: data.id,
+        item_number: index + 1,
+        title: item.title,
+        audio_url: item.audioUrl,
+        image_url: item.imageUrl,
+        updater: userId,
+        active: true
+      }));
+
+      const { error: itemsError } = await supabaseAdmin
+        .from('content_item')
+        .insert(itemsData);
+
+      if (itemsError) {
+        logger.error('Failed to update content items:', itemsError);
+      }
+    }
+  }
+
   return null;
 };
 
@@ -2930,6 +3039,318 @@ const deleteContentPacks = async (ids) => {
   if (error) {
     logger.error('Failed to delete content packs:', error);
     throw new Error('Failed to delete content packs');
+  }
+
+  return null;
+};
+
+// =============================================
+// Question Pack CRUD Methods (NEW)
+// =============================================
+
+/**
+ * Transform rfid_question_pack row to camelCase DTO
+ */
+const transformQuestionPackToCamelCase = (pack) => {
+  if (!pack) return null;
+  return {
+    id: pack.id ? Number(pack.id) : null,
+    packCode: pack.pack_code,
+    name: pack.name,
+    description: pack.description,
+    questionIds: pack.question_ids || [],
+    language: pack.language,
+    category: pack.category,
+    version: pack.version,
+    status: pack.status,
+    active: pack.active,
+    createDate: formatDate(pack.create_date),
+    updateDate: formatDate(pack.update_date),
+  };
+};
+
+/**
+ * Get question packs with pagination
+ */
+const getQuestionPackPage = async ({ page = 1, limit = 10, packCode, name, category, language, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const offset = (page - 1) * limit;
+
+  let countQuery = supabaseAdmin
+    .from('rfid_question_pack')
+    .select('id', { count: 'exact', head: true });
+
+  let dataQuery = supabaseAdmin
+    .from('rfid_question_pack')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (packCode) {
+    countQuery = countQuery.ilike('pack_code', `%${packCode}%`);
+    dataQuery = dataQuery.ilike('pack_code', `%${packCode}%`);
+  }
+  if (name) {
+    countQuery = countQuery.ilike('name', `%${name}%`);
+    dataQuery = dataQuery.ilike('name', `%${name}%`);
+  }
+  if (category) {
+    countQuery = countQuery.eq('category', category);
+    dataQuery = dataQuery.eq('category', category);
+  }
+  if (language) {
+    countQuery = countQuery.eq('language', language);
+    dataQuery = dataQuery.eq('language', language);
+  }
+  if (active !== undefined && active !== null && active !== '') {
+    const activeVal = active === true || active === 'true' || active === '1';
+    countQuery = countQuery.eq('active', activeVal);
+    dataQuery = dataQuery.eq('active', activeVal);
+  }
+
+  const { count } = await countQuery;
+  const { data: packs, error } = await dataQuery.range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch question packs:', error);
+    throw new Error('Failed to fetch question packs');
+  }
+
+  return {
+    list: (packs || []).map(transformQuestionPackToCamelCase),
+    total: count || 0,
+    page,
+    limit,
+    pages: Math.ceil((count || 0) / limit),
+  };
+};
+
+/**
+ * Get all question packs (no pagination)
+ */
+const getQuestionPackList = async ({ packCode, name, category, language, active } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('rfid_question_pack')
+    .select('*')
+    .order('name', { ascending: true });
+
+  if (packCode) query = query.ilike('pack_code', `%${packCode}%`);
+  if (name) query = query.ilike('name', `%${name}%`);
+  if (category) query = query.eq('category', category);
+  if (language) query = query.eq('language', language);
+  if (active !== undefined && active !== null && active !== '') {
+    const activeVal = active === true || active === 'true' || active === '1';
+    query = query.eq('active', activeVal);
+  }
+
+  const { data: packs, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch question packs:', error);
+    throw new Error('Failed to fetch question packs');
+  }
+
+  return (packs || []).map(transformQuestionPackToCamelCase);
+};
+
+/**
+ * Get question pack by pack code
+ */
+const getQuestionPackByCode = async (packCode) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: pack, error } = await supabaseAdmin
+    .from('rfid_question_pack')
+    .select('*')
+    .eq('pack_code', packCode)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch question pack by code:', error);
+    throw new Error('Failed to fetch question pack');
+  }
+
+  return transformQuestionPackToCamelCase(pack);
+};
+
+/**
+ * Get all active question packs
+ */
+const getAllActiveQuestionPacks = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: packs, error } = await supabaseAdmin
+    .from('rfid_question_pack')
+    .select('*')
+    .eq('active', true)
+    .order('name', { ascending: true });
+
+  if (error) {
+    logger.error('Failed to fetch active question packs:', error);
+    throw new Error('Failed to fetch active question packs');
+  }
+
+  return (packs || []).map(transformQuestionPackToCamelCase);
+};
+
+/**
+ * Create question pack with packCode uniqueness check
+ */
+const createQuestionPack = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Check for duplicate packCode
+  const existing = await getQuestionPackByCode(data.packCode);
+  if (existing) {
+    throw new Error('Question pack with this code already exists');
+  }
+
+  let finalQuestionIds = data.questionIds || [];
+  logger.info('[createQuestionPack] Step A: Initial questionIds:', finalQuestionIds);
+
+  // Handle inline questions provided during creation
+  if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
+    logger.info(`[createQuestionPack] Step B: Processing ${data.questions.length} inline questions for pack ${data.packCode}`);
+
+    const newQuestions = data.questions.map((q, index) => {
+      // Generate unique code: PACKCODE_Q{Index}_{RandomSuffix}
+      const suffix = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+      // Use a sanitized sequence for code
+      const qCode = `${data.packCode}_Q${index + 1}_${suffix}`;
+
+      const questionData = {
+        code: qCode,
+        title: q.text ? (q.text.length > 50 ? q.text.substring(0, 47) + '...' : q.text) : `Question ${index + 1}`,
+        prompt_text: q.text,
+        cached_audio_url: q.audio || null,
+        language: data.language || 'en',
+        category: data.category || 'general',
+        difficulty: 1,
+        active: true,
+        creator: userId
+      };
+
+      logger.info(`[createQuestionPack] Step B.${index + 1}: Prepared question:`, questionData);
+      return questionData;
+    });
+
+    logger.info(`[createQuestionPack] Step C: Inserting ${newQuestions.length} questions into database`);
+
+    const { data: createdQs, error: qError } = await supabaseAdmin
+      .from('rfid_question')
+      .insert(newQuestions)
+      .select('id');
+
+    if (qError) {
+      logger.error('[createQuestionPack] Step C: ERROR - Failed to create inline questions:', qError);
+      throw new Error('Failed to create inline questions: ' + qError.message);
+    }
+
+    logger.info(`[createQuestionPack] Step D: Database insert result:`, createdQs);
+
+    if (createdQs && createdQs.length > 0) {
+      const newIds = createdQs.map(q => q.id);
+      logger.info(`[createQuestionPack] Step E: Successfully created ${newIds.length} questions with IDs:`, newIds);
+      finalQuestionIds = [...finalQuestionIds, ...newIds];
+      logger.info(`[createQuestionPack] Step F: Final questionIds array:`, finalQuestionIds);
+    } else {
+      logger.warn('[createQuestionPack] Step E: WARNING - No questions were created despite no error');
+    }
+  } else {
+    logger.info('[createQuestionPack] Step B: No inline questions provided, using existing questionIds:', data.questionIds);
+  }
+
+  logger.info('[createQuestionPack] Step G: Creating question pack with questionIds:', finalQuestionIds);
+
+  const insertData = {
+    pack_code: data.packCode,
+    name: data.name,
+    description: data.description || null,
+    question_ids: finalQuestionIds,
+    language: data.language || 'en',
+    category: data.category || null,
+    version: data.version || 1,
+    status: data.status || 'draft',
+    active: data.active !== false,
+    creator: userId,
+  };
+
+  const { error } = await supabaseAdmin
+    .from('rfid_question_pack')
+    .insert(insertData);
+
+  if (error) {
+    logger.error('Failed to create question pack:', error);
+    if (error.code === '23505') {
+      throw new Error('Question pack with this code already exists');
+    }
+    throw new Error('Failed to create question pack');
+  }
+
+  return null;
+};
+
+/**
+ * Update question pack by id
+ */
+const updateQuestionPack = async (data, userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!data.id) {
+    throw new Error('Question pack ID is required');
+  }
+
+  const updateData = {
+    updater: userId,
+    update_date: new Date().toISOString(),
+  };
+
+  if (data.packCode !== undefined) updateData.pack_code = data.packCode;
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.questionIds !== undefined) updateData.question_ids = data.questionIds;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.category !== undefined) updateData.category = data.category;
+  if (data.version !== undefined) updateData.version = data.version;
+  if (data.status !== undefined) updateData.status = data.status;
+  if (data.active !== undefined) updateData.active = data.active;
+
+  const { error } = await supabaseAdmin
+    .from('rfid_question_pack')
+    .update(updateData)
+    .eq('id', data.id);
+
+  if (error) {
+    logger.error('Failed to update question pack:', error);
+    if (error.code === '23505') {
+      throw new Error('Question pack with this code already exists');
+    }
+    throw new Error('Failed to update question pack');
+  }
+
+  return null;
+};
+
+/**
+ * Delete question packs by IDs
+ */
+const deleteQuestionPacks = async (ids) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Question pack IDs are required');
+  }
+
+  const { error } = await supabaseAdmin
+    .from('rfid_question_pack')
+    .delete()
+    .in('id', ids);
+
+  if (error) {
+    logger.error('Failed to delete question packs:', error);
+    throw new Error('Failed to delete question packs');
   }
 
   return null;
@@ -3035,4 +3456,14 @@ module.exports = {
   updateContentPack,
   deleteContentPacks,
   transformContentPackToCamelCase,
+
+  // Question Pack CRUD (NEW)
+  getQuestionPackPage,
+  getQuestionPackList,
+  getQuestionPackByCode,
+  getAllActiveQuestionPacks,
+  createQuestionPack,
+  updateQuestionPack,
+  deleteQuestionPacks,
+  transformQuestionPackToCamelCase,
 };

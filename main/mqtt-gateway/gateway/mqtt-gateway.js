@@ -686,8 +686,8 @@ class MQTTGateway {
       // Unified handler for all content types (habits, rhymes, etc.)
       // Supports: download_request (new), habit_download_request (legacy), rhyme_download_request (legacy)
       if (originalPayload.type === "download_request" ||
-          originalPayload.type === "habit_download_request" ||
-          originalPayload.type === "rhyme_download_request") {
+        originalPayload.type === "habit_download_request" ||
+        originalPayload.type === "rhyme_download_request") {
         await this.handleContentDownloadRequest(deviceId, originalPayload, clientId);
         return;
       }
@@ -957,14 +957,48 @@ class MQTTGateway {
             userTextMsg.sequence = sequence;
           }
 
-          // Add RAG content fields if available
-          if (rfidContent) {
-            userTextMsg.content_type = rfidContent.contentType; // "read_only", "animal", or "prompt"
-            userTextMsg.title = rfidContent.title;
-            userTextMsg.content_text = rfidContent.contentText; // For read_only/animal mode
-            userTextMsg.prompt_text = rfidContent.promptText; // For prompt mode
-            userTextMsg.pack_code = rfidContent.packCode;
-            userTextMsg.language = rfidContent.language;
+          // Special Handling: If it is a Content Pack (Story/Rhyme), DO NOT send to Agent.
+          // Instead, send Maniifest/Download Response directly to device.
+          const isContentPack = rfidContent && (
+            rfidContent.contentType.endsWith("_pack") ||
+            rfidContent.contentType === "story" ||
+            rfidContent.contentType === "rhyme"
+          );
+
+          if (isContentPack) {
+            logger.info(`📦 [RFID-ROUTING] Detected Content Pack (${rfidContent.contentType}). Routing to Device manifest flow, NOT Agent.`);
+
+            // Reuse the download logic to send the manifest
+            // We construct a payload that matches what handleContentDownloadRequest expects
+            const downloadPayload = {
+              rfid_uid: rfidUid,
+              current_version: 0 // Force manifest send
+            };
+            await this.handleContentDownloadRequest(deviceId, downloadPayload, clientId);
+            return;
+          }
+
+          // If Q&A / Prompt Pack:
+          // 1. Find the specific Question based on 'sequence'
+          let selectedItem = null;
+          if (rfidContent && rfidContent.items && Array.isArray(rfidContent.items)) {
+            // Try to find item matching sequence (1-based index)
+            // If sequence is 1, we want items[0]
+            const targetSeq = sequence || 1;
+            selectedItem = rfidContent.items.find(item => item.sequence === targetSeq || item.itemNumber === targetSeq);
+          }
+
+          // 2. Extract Data
+          // Use item-specific prompt if available, fallback to main card prompt
+          const promptText = selectedItem ? (selectedItem.promptText || selectedItem.title) : (rfidContent?.promptText || textToSend);
+          const cachedAudio = selectedItem ? selectedItem.audioUrl : rfidContent?.audioUrl;
+
+          // 3. Update Message
+          userTextMsg.text = promptText;
+          userTextMsg.content_type = "prompt"; // Force type to prompt
+          if (cachedAudio) {
+            userTextMsg.audio_url = cachedAudio; // Agent can chose to play this immediately
+            logger.info(`Found cached audio for Q&A (Sequence ${sequence || 1}): ${cachedAudio.substring(0, 30)}...`);
           }
 
           const payloadStr = JSON.stringify(userTextMsg);
@@ -972,7 +1006,7 @@ class MQTTGateway {
 
           await room.localParticipant.publishData(data, { reliable: true });
           logger.info(
-            `✅ [TEXT-GREETING] Forwarded RFID content to LiveKit agent for device ${deviceId} (content_type=${rfidContent?.contentType || "prompt"})`
+            `✅ [TEXT-GREETING] Forwarded Q&A (Seq: ${sequence || 1}) to Agent (Prompt: "${promptText.substring(0, 20)}...")`
           );
         } catch (err) {
           logger.error(

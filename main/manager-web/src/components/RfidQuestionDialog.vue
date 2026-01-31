@@ -61,6 +61,23 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="Smart Caching" prop="allowCaching" class="form-item">
+           <div class="flex-row">
+              <el-switch v-model="form.allowCaching"></el-switch>
+              <span class="ml-2 text-sm text-gray">Allow saving AI responses for instant playback later</span>
+           </div>
+        </el-form-item>
+
+        <el-form-item v-if="form.allowCaching" label="Cached Audio" prop="cachedAudioUrl" class="form-item">
+           <el-input v-model="form.cachedAudioUrl" placeholder="Optional: Pre-generated audio URL" class="custom-input">
+              <template slot="prepend"><i class="el-icon-headset"></i></template>
+           </el-input>
+        </el-form-item>
+
+        <el-form-item label="System Override" prop="systemPromptOverride" class="form-item">
+           <el-input v-model="form.systemPromptOverride" placeholder="Optional: Override system persona" class="custom-input" size="small"></el-input>
+        </el-form-item>
+
         <el-form-item label="Active" prop="active" class="form-item">
           <el-switch v-model="form.active"></el-switch>
         </el-form-item>
@@ -104,6 +121,9 @@ export default {
         language: 'en',
         category: '',
         difficulty: 3,
+        allowCaching: true,
+        cachedAudioUrl: '',
+        systemPromptOverride: '',
         active: true
       })
     }
@@ -324,5 +344,13 @@ export default {
       }
     }
   }
+
+  .flex-row {
+      display: flex;
+      align-items: center;
+  }
+  .ml-2 { margin-left: 8px; }
+  .text-sm { font-size: 12px; }
+  .text-gray { color: #94a3b8; }
 }
 </style>
