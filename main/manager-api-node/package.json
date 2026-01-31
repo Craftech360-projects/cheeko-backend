@@ -40,9 +40,11 @@
   "license": "MIT",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.975.0",
+    "@playwright/mcp": "^0.0.62",
     "@prisma/client": "^7.3.0",
     "@qdrant/js-client-rest": "^1.9.0",
     "@supabase/supabase-js": "^2.39.0",
+    "axios": "^1.13.4",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

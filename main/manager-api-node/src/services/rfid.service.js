@@ -115,7 +115,7 @@ const transformSeriesToCamelCase = (series) => {
  * @param {Object} options - Pagination and filter options
  * @returns {Promise<Object>} Paginated card mapping list with camelCase fields
  */
-const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, questionId, active } = {}) => {
+const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, questionId, questionPackId, contentPackId, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const offset = (page - 1) * limit;
@@ -147,6 +147,16 @@ const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, que
     dataQuery = dataQuery.eq('question_id', questionId);
   }
 
+  if (questionPackId) {
+    countQuery = countQuery.eq('question_pack_id', questionPackId);
+    dataQuery = dataQuery.eq('question_pack_id', questionPackId);
+  }
+
+  if (contentPackId) {
+    countQuery = countQuery.eq('content_pack_id', contentPackId);
+    dataQuery = dataQuery.eq('content_pack_id', contentPackId);
+  }
+
   if (active !== undefined && active !== null && active !== '') {
     countQuery = countQuery.eq('active', active);
     dataQuery = dataQuery.eq('active', active);
@@ -174,7 +184,7 @@ const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, que
  * @param {Object} options - Filter options
  * @returns {Promise<Array>} All card mappings with camelCase fields
  */
-const getCardMappingList = async ({ packCode, questionId, active } = {}) => {
+const getCardMappingList = async ({ packCode, questionId, questionPackId, contentPackId, active } = {}) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   let query = supabaseAdmin
@@ -188,6 +198,14 @@ const getCardMappingList = async ({ packCode, questionId, active } = {}) => {
 
   if (questionId) {
     query = query.eq('question_id', questionId);
+  }
+
+  if (questionPackId) {
+    query = query.eq('question_pack_id', questionPackId);
+  }
+
+  if (contentPackId) {
+    query = query.eq('content_pack_id', contentPackId);
   }
 
   if (active !== undefined && active !== null && active !== '') {
@@ -305,6 +323,7 @@ const lookupCardByUid = async (rfidUid) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const normalizedUid = rfidUid.toUpperCase().replace(/[:-]/g, '');
+  logger.info(`[RFID-LOOKUP] lookupCardByUid: uid=${normalizedUid}`);
 
   // 1. Find the Mapping
   const { data: mapping, error } = await supabaseAdmin
@@ -314,76 +333,103 @@ const lookupCardByUid = async (rfidUid) => {
     .eq('active', true)
     .single();
 
-  if (error && error.code !== 'PGRST116') logger.error('Card lookup error:', error);
-  if (!mapping) return null;
+  if (error && error.code !== 'PGRST116') logger.error('[RFID-LOOKUP] Card lookup DB error:', error);
+  if (!mapping) {
+    logger.warn(`[RFID-LOOKUP] No active card mapping for uid=${normalizedUid}`);
+    return null;
+  }
+
+  logger.info(`[RFID-LOOKUP] Found mapping: id=${mapping.id}, content_pack_id=${mapping.content_pack_id || 'null'}, question_id=${mapping.question_id || 'null'}, question_pack_id=${mapping.question_pack_id || 'null'}`);
 
   // Track 1: Content Pack (Story/Rhyme)
   if (mapping.content_pack_id) {
-    const { data: pack } = await supabaseAdmin
+    logger.info(`[RFID-LOOKUP] Track 1: Content Pack lookup, pack_id=${mapping.content_pack_id}`);
+    const { data: pack, error: packError } = await supabaseAdmin
       .from('rfid_content_pack')
       .select('*')
       .eq('id', mapping.content_pack_id)
       .single();
 
+    if (packError) logger.error(`[RFID-LOOKUP] Content pack query error:`, packError);
+
     if (pack) {
       // Fetch the 10 items
-      const { data: items } = await supabaseAdmin
+      const { data: items, error: itemsError } = await supabaseAdmin
         .from('content_item')
         .select('*')
         .eq('content_pack_id', pack.id)
         .order('item_number', { ascending: true });
 
+      if (itemsError) logger.error(`[RFID-LOOKUP] Content items query error:`, itemsError);
+
+      const mappedItems = (items || []).map(item => ({
+        sequence: item.item_number,
+        title: item.title,
+        audioUrl: item.audio_url,
+        imageUrl: item.image_url,
+        promptText: item.content_text // Optional read-along
+      }));
+
+      logger.info(`[RFID-LOOKUP] Content Pack resolved: name="${pack.name}", type=${pack.content_type}, items=${mappedItems.length}, audioUrls=${mappedItems.filter(i => i.audioUrl).length}`);
+
       return {
         rfid_uid: normalizedUid,
-        contentType: pack.content_type || 'story_pack', // 'story_pack', 'rhyme'
+        contentType: pack.content_type || 'story_pack',
         title: pack.name,
         packCode: pack.pack_code,
         version: pack.version,
-        items: (items || []).map(item => ({
-          sequence: item.item_number,
-          title: item.title,
-          audioUrl: item.audio_url,
-          imageUrl: item.image_url,
-          promptText: item.content_text // Optional read-along
-        }))
+        items: mappedItems
       };
+    } else {
+      logger.warn(`[RFID-LOOKUP] Content pack id=${mapping.content_pack_id} not found in rfid_content_pack table`);
     }
   }
 
   // Track 2: Q&A / Prompt
   if (mapping.question_id) {
-    const { data: question } = await supabaseAdmin
+    logger.info(`[RFID-LOOKUP] Track 2: Single Q&A lookup, question_id=${mapping.question_id}`);
+    const { data: question, error: qError } = await supabaseAdmin
       .from('rfid_question')
       .select('*')
       .eq('id', mapping.question_id)
       .single();
 
+    if (qError) logger.error(`[RFID-LOOKUP] Question query error:`, qError);
+
     if (question) {
+      logger.info(`[RFID-LOOKUP] Q&A resolved: title="${question.title}", hasCache=${!!question.cached_audio_url}`);
       return {
         rfid_uid: normalizedUid,
-        contentType: 'prompt', // Forces Agent processing logic
+        contentType: 'prompt',
         title: question.title,
         promptText: question.prompt_text,
-        audioUrl: question.allow_caching ? question.cached_audio_url : null, // Send cache if allowed
+        audioUrl: question.allow_caching ? question.cached_audio_url : null,
         allowCaching: question.allow_caching
       };
+    } else {
+      logger.warn(`[RFID-LOOKUP] Question id=${mapping.question_id} not found in rfid_question table`);
     }
   }
 
   // Track 3: Q&A Pack (Reference to question_pack)
   if (mapping.question_pack_id) {
-    const { data: questionPack } = await supabaseAdmin
+    logger.info(`[RFID-LOOKUP] Track 3: Q&A Pack lookup, pack_id=${mapping.question_pack_id}`);
+    const { data: questionPack, error: qpError } = await supabaseAdmin
       .from('rfid_question_pack')
       .select('*')
       .eq('id', mapping.question_pack_id)
       .single();
 
+    if (qpError) logger.error(`[RFID-LOOKUP] Question pack query error:`, qpError);
+
     if (questionPack && questionPack.question_ids && questionPack.question_ids.length > 0) {
       // Fetch all questions in the pack
-      const { data: questions } = await supabaseAdmin
+      const { data: questions, error: qsError } = await supabaseAdmin
         .from('rfid_question')
         .select('*')
         .in('id', questionPack.question_ids);
+
+      if (qsError) logger.error(`[RFID-LOOKUP] Questions batch query error:`, qsError);
 
       if (questions) {
         // Map to 'items' structure so Gateway can pick by sequence
@@ -391,7 +437,7 @@ const lookupCardByUid = async (rfidUid) => {
           const q = questions.find(x => x.id === qId);
           if (!q) return null;
           return {
-            sequence: index + 1, // 1-based index
+            sequence: index + 1,
             title: q.title,
             promptText: q.prompt_text,
             audioUrl: q.allow_caching ? q.cached_audio_url : null,
@@ -399,6 +445,8 @@ const lookupCardByUid = async (rfidUid) => {
             systemPromptOverride: q.system_prompt_override
           };
         }).filter(Boolean);
+
+        logger.info(`[RFID-LOOKUP] Q&A Pack resolved: name="${questionPack.name}", code=${questionPack.pack_code}, questions=${sortedItems.length}`);
 
         return {
           rfid_uid: normalizedUid,
@@ -408,9 +456,12 @@ const lookupCardByUid = async (rfidUid) => {
           items: sortedItems
         };
       }
+    } else {
+      logger.warn(`[RFID-LOOKUP] Question pack id=${mapping.question_pack_id} not found or has no questions`);
     }
   }
 
+  logger.warn(`[RFID-LOOKUP] Card mapping exists (id=${mapping.id}) but no content resolved for uid=${normalizedUid}`);
   return null;
 };
 
@@ -3356,6 +3407,33 @@ const deleteQuestionPacks = async (ids) => {
   return null;
 };
 
+/**
+ * Get RFID mapping options for dropdowns
+ * Returns combined list of questions, packs, content packs, and question packs
+ */
+const getRfidMappingOptions = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const [
+    { data: questions },
+    { data: packs },
+    { data: contentPacks },
+    { data: questionPacks }
+  ] = await Promise.all([
+    supabaseAdmin.from('rfid_question').select('id, code, title').eq('active', true).order('title'),
+    supabaseAdmin.from('rfid_pack').select('id, pack_code, pack_name').eq('status', 1).order('pack_name'),
+    supabaseAdmin.from('rfid_content_pack').select('id, pack_code, name').eq('active', true).order('name'),
+    supabaseAdmin.from('rfid_question_pack').select('id, pack_code, name').eq('active', true).order('name')
+  ]);
+
+  return {
+    questions: (questions || []).map(q => ({ id: q.id, name: q.title, code: q.code })),
+    packs: (packs || []).map(p => ({ id: p.id, name: p.pack_name, code: p.pack_code })),
+    contentPacks: (contentPacks || []).map(cp => ({ id: cp.id, name: cp.name, code: cp.pack_code })),
+    questionPacks: (questionPacks || []).map(qp => ({ id: qp.id, name: qp.name, code: qp.pack_code }))
+  };
+};
+
 module.exports = {
   // PRD-specified card mapping methods
   getCardMappingPage,
@@ -3466,4 +3544,5 @@ module.exports = {
   updateQuestionPack,
   deleteQuestionPacks,
   transformQuestionPackToCamelCase,
+  getRfidMappingOptions,
 };

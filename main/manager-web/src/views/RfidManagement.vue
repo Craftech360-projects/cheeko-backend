@@ -608,7 +608,7 @@
             :title="cardDialogTitle"
             :visible.sync="cardDialogVisible"
             :form="cardForm"
-            :questions="questionsDropdown"
+            :question-packs="questionPacksDropdown"
             :packs="packsDropdown"
             :content-packs="contentPacksDropdown"
             @submit="handleCardSubmit"
@@ -876,6 +876,11 @@ export default {
             Api.rfid.getContentPackList(({ data }) => {
                 if (data.code === 0) {
                     this.contentPacksDropdown = data.data || [];
+                }
+            });
+            Api.rfid.getQuestionPackList(({ data }) => {
+                if (data.code === 0) {
+                    this.questionPacksDropdown = data.data || [];
                 }
             });
         },
@@ -1163,7 +1168,7 @@ export default {
 
         showAddCardDialog() {
             this.cardDialogTitle = 'Add Card Mapping';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'content', notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1176,6 +1181,9 @@ export default {
             }
             if (!form.questionIds) {
                 form.questionIds = [];
+            }
+            if (!form.actionType) {
+                form.actionType = form.questionPackId ? 'qna' : 'content';
             }
             this.cardForm = form;
             this.cardDialogVisible = true;

@@ -93,13 +93,15 @@ const logger = require('../utils/logger');
 router.get('/card/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, rfidUid, packCode, questionId, active } = req.query;
+    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, active } = req.query;
     const result = await rfidService.getCardMappingPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
       rfidUid,
       packCode,
       questionId: questionId ? parseInt(questionId) : undefined,
+      questionPackId: questionPackId ? parseInt(questionPackId) : undefined,
+      contentPackId: contentPackId ? parseInt(contentPackId) : undefined,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
@@ -138,13 +140,36 @@ router.get('/card/page',
 router.get('/card/list',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { packCode, questionId, active } = req.query;
+    const { packCode, questionId, questionPackId, contentPackId, active } = req.query;
     const result = await rfidService.getCardMappingList({
       packCode,
       questionId: questionId ? parseInt(questionId) : undefined,
+      questionPackId: questionPackId ? parseInt(questionPackId) : undefined,
+      contentPackId: contentPackId ? parseInt(contentPackId) : undefined,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/mapping/options:
+ *   get:
+ *     tags: [RFID]
+ *     summary: Get card mapping options
+ *     description: Returns all questions, packs, content packs and question packs for mapping selection
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Consolidated mapping options
+ */
+router.get('/mapping/options',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const options = await rfidService.getRfidMappingOptions();
+    success(res, options);
   })
 );
 
@@ -207,17 +232,22 @@ router.get('/card/lookup/:rfidUid',
       return badRequest(res, 'RFID UID is required');
     }
 
+    logger.info(`[RFID-LOOKUP] Incoming lookup: uid=${rfidUid}, sequence=${sequence || 'none'}`);
+
     // If sequence is provided, use content pack lookup (RAG system)
     if (sequence) {
       const result = await rfidService.lookupContentByRfidUid(rfidUid, parseInt(sequence));
+      logger.info(`[RFID-LOOKUP] RAG result for uid=${rfidUid}, seq=${sequence}: ${result ? `contentType=${result.contentType}, title="${result.title}"` : 'null'}`);
       return success(res, result);
     }
 
-    // Otherwise, use legacy card lookup
+    // Otherwise, use card lookup
     const card = await rfidService.lookupCardByUid(rfidUid);
     if (!card) {
+      logger.warn(`[RFID-LOOKUP] No card mapping found for uid=${rfidUid}`);
       return notFound(res, 'Card mapping not found');
     }
+    logger.info(`[RFID-LOOKUP] Card found for uid=${rfidUid}: contentType=${card.contentType}, items=${card.items ? card.items.length : 0}, title="${card.title || card.packName || ''}"`);
     success(res, card);
   })
 );
@@ -2708,19 +2738,17 @@ router.post('/register-batch',
  *       properties:
  *         id:
  *           type: integer
- *         rfid_uid:
+ *         rfidUid:
  *           type: string
- *         question_id:
+ *         questionId:
  *           type: integer
- *         question_ids:
- *           type: array
- *           items:
- *             type: integer
- *         pack_code:
+ *         questionPackId:
+ *           type: integer
+ *         packCode:
  *           type: string
- *         pack_id:
+ *         packId:
  *           type: integer
- *         content_pack_id:
+ *         contentPackId:
  *           type: integer
  *         notes:
  *           type: string

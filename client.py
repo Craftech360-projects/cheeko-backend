@@ -19,9 +19,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.1.99"
+SERVER_IP = "192.168.1.98"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "192.168.1.99"
+MQTT_BROKER_HOST = "192.168.1.98"
 
 
 MQTT_BROKER_PORT = 1883
@@ -198,6 +198,45 @@ class TestClient:
                 logger.info(
                     "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
                 stop_recording_event.set()  # This will cause the recording thread loop to exit
+
+            # Handle Content Pack download_response (manifest with audio URLs + thumbnails)
+            elif payload.get("type") == "download_response":
+                status = payload.get("status", "unknown")
+                rfid_uid = payload.get("rfid_uid", "N/A")
+                pack_code = payload.get("pack_code", "N/A")
+                pack_name = payload.get("pack_name", "N/A")
+                version = payload.get("version", "N/A")
+                total_items = payload.get("total_items", 0)
+                files = payload.get("files", {})
+
+                logger.info("=" * 60)
+                logger.info("[CONTENT-PACK] Download Response Received!")
+                logger.info("=" * 60)
+                logger.info(f"  RFID UID   : {rfid_uid}")
+                logger.info(f"  Pack Code  : {pack_code}")
+                logger.info(f"  Pack Name  : {pack_name}")
+                logger.info(f"  Version    : {version}")
+                logger.info(f"  Status     : {status}")
+                logger.info(f"  Total Items: {total_items}")
+                logger.info("-" * 60)
+
+                # Parse and display audio/image files
+                audio_count = 0
+                image_count = 0
+                for key in sorted(files.keys()):
+                    url = files[key]
+                    if key.startswith("audio_"):
+                        audio_count += 1
+                        seq = key.replace("audio_", "")
+                        logger.info(f"  Audio #{seq}: {url}")
+                    elif key.startswith("image_"):
+                        image_count += 1
+                        seq = key.replace("image_", "")
+                        logger.info(f"  Image #{seq}: {url}")
+
+                logger.info("-" * 60)
+                logger.info(f"  Summary: {audio_count} audio files, {image_count} image files")
+                logger.info("=" * 60)
 
             else:
                 mqtt_message_queue.put(payload)
@@ -527,29 +566,36 @@ class TestClient:
         }
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
-            response = mqtt_message_queue.get(timeout=30)
-            if response.get("type") == "hello" and "udp" in response:
-                global udp_session_details
-                udp_session_details = response
-                self.udp_socket = socket.socket(
-                    socket.AF_INET, socket.SOCK_DGRAM)
-                # Increase UDP receive buffer to handle burst traffic
-                self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
-                self.udp_socket.settimeout(1.0)
-                ping_payload = f"ping:{udp_session_details['session_id']}".encode(
-                )
-                encrypted_ping = self.encrypt_packet(ping_payload)
-                server_udp_addr = (
-                    udp_session_details['udp']['server'], udp_session_details['udp']['port'])
-                logger.info(f"[RETRY] Sending UDP Ping to {server_udp_addr} with session ID {udp_session_details['session_id']}"
-                            f" and key {udp_session_details['udp']['key']}"
-                            f" (local sequence: {self.udp_local_sequence})"
-                            )
-                if encrypted_ping:
-                    self.udp_socket.sendto(encrypted_ping, server_udp_addr)
-                    logger.info(f"[OK] UDP Ping sent. Session configured.")
-                    return True
-            logger.error(f"[ERROR] Received unexpected message: {response}")
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                response = mqtt_message_queue.get(timeout=remaining)
+                if response.get("type") == "hello" and "udp" in response:
+                    global udp_session_details
+                    udp_session_details = response
+                    self.udp_socket = socket.socket(
+                        socket.AF_INET, socket.SOCK_DGRAM)
+                    # Increase UDP receive buffer to handle burst traffic
+                    self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)  # 1MB buffer
+                    self.udp_socket.settimeout(1.0)
+                    ping_payload = f"ping:{udp_session_details['session_id']}".encode(
+                    )
+                    encrypted_ping = self.encrypt_packet(ping_payload)
+                    server_udp_addr = (
+                        udp_session_details['udp']['server'], udp_session_details['udp']['port'])
+                    logger.info(f"[RETRY] Sending UDP Ping to {server_udp_addr} with session ID {udp_session_details['session_id']}"
+                                f" and key {udp_session_details['udp']['key']}"
+                                f" (local sequence: {self.udp_local_sequence})"
+                                )
+                    if encrypted_ping:
+                        self.udp_socket.sendto(encrypted_ping, server_udp_addr)
+                        logger.info(f"[OK] UDP Ping sent. Session configured.")
+                        return True
+                else:
+                    logger.info(f"[SKIP] Ignoring non-hello message: {response.get('type')}")
+            logger.error("[ERROR] Timed out waiting for 'hello' response.")
             return False
         except Empty:
             logger.error("[ERROR] Timed out waiting for 'hello' response.")
@@ -576,15 +622,15 @@ class TestClient:
                     if self.audio_playback_queue.qsize() < PLAYBACK_BUFFER_START_FRAMES:
                         # Check for timeout
                         if time.time() - buffer_timeout_start > BUFFER_TIMEOUT_SECONDS:
-                            logger.warning(
-                                f"[TIME] Buffer timeout after {BUFFER_TIMEOUT_SECONDS}s. Queue size: {self.audio_playback_queue.qsize()}")
+                            # logger.warning(
+                            #     f"[TIME] Buffer timeout after {BUFFER_TIMEOUT_SECONDS}s. Queue size: {self.audio_playback_queue.qsize()}")
                             if self.tts_active:
                                 logger.warning(
                                     "[PLAY] TTS is active but no audio received. Possible server issue.")
                             buffer_timeout_start = time.time()  # Reset timeout
 
-                        logger.info(
-                            f"[AUDIO] Buffering audio... {self.audio_playback_queue.qsize()}/{PLAYBACK_BUFFER_START_FRAMES}")
+                        # logger.info(
+                        #     f"[AUDIO] Buffering audio... {self.audio_playback_queue.qsize()}/{PLAYBACK_BUFFER_START_FRAMES}")
                         time.sleep(0.05)
                         continue
                     else:
@@ -746,8 +792,36 @@ class TestClient:
 
         logger.info("[REC] Recording thread finished completely.")
 
-    def trigger_conversation(self):
-        """Starts the audio streaming threads and sends initial listen message."""
+    def send_rfid_greeting(self, rfid_uid, sequence=None):
+        """Sends an RFID card scan message to the gateway.
+        
+        Args:
+            rfid_uid: The RFID card UID (e.g., 'E96C8A82')
+            sequence: Optional sequence number for content packs (e.g., 1 for first item)
+        """
+        logger.info(f"[RFID] Simulating RFID card scan: UID={rfid_uid}, sequence={sequence}")
+        
+        rfid_payload = {
+            "type": "text_greeting",
+            "rfid_uid": rfid_uid,
+            "text": f"RFID card scanned: {rfid_uid}",
+            "session_id": udp_session_details.get("session_id")
+        }
+        
+        if sequence is not None:
+            rfid_payload["sequence"] = sequence
+        
+        # Publish to device-server topic (gateway will process this)
+        self.mqtt_client.publish("device-server", json.dumps(rfid_payload))
+        logger.info(f"[RFID] Sent RFID greeting: {json.dumps(rfid_payload, indent=2)}")
+
+    def trigger_conversation(self, rfid_uid=None, rfid_sequence=None):
+        """Starts the audio streaming threads and sends initial listen message or RFID greeting.
+        
+        Args:
+            rfid_uid: Optional RFID card UID to simulate card scan
+            rfid_sequence: Optional sequence number for RFID content packs
+        """
         if not self.udp_socket:
             return False
         logger.info("[STEP] STEP 4: Starting all streaming audio threads...")
@@ -766,12 +840,21 @@ class TestClient:
         self.playback_thread.start(), self.udp_listener_thread.start(
         ), self.audio_recording_thread.start()
 
-        logger.info(
-            "[STEP] STEP 5: Sending 'listen' message to trigger initial TTS from server...")
-        # The server's initial TTS will then trigger the client's recording.
-        listen_payload = {
-            "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
-        self.mqtt_client.publish("device-server", json.dumps(listen_payload))
+        if rfid_uid:
+            # RFID mode: Send RFID greeting instead of listen message
+            logger.info(
+                f"[STEP] STEP 5: Sending RFID greeting for card {rfid_uid}...")
+            time.sleep(0.5)  # Give threads a moment to start
+            self.send_rfid_greeting(rfid_uid, rfid_sequence)
+        else:
+            # Normal mode: Send listen message
+            logger.info(
+                "[STEP] STEP 5: Sending 'listen' message to trigger initial TTS from server...")
+            # The server's initial TTS will then trigger the client's recording.
+            listen_payload = {
+                "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
+            self.mqtt_client.publish("device-server", json.dumps(listen_payload))
+        
         logger.info(
             "[WAIT] Test running. Press Spacebar to abort TTS or Ctrl+C to stop.")
 
@@ -864,14 +947,24 @@ class TestClient:
             logger.info("[DISC] MQTT Disconnected.")
         logger.info("[OK] Test finished.")
 
-    def run_test(self):
-        """Runs the full test sequence."""
+    def run_test(self, rfid_uid=None, rfid_sequence=None):
+        """Runs the full test sequence.
+        
+        Args:
+            rfid_uid: Optional RFID card UID to test RFID functionality
+            rfid_sequence: Optional sequence number for RFID content packs
+        """
         if ENABLE_SEQUENCE_LOGGING:
             logger.info("[SEQ] Sequence tracking is ENABLED")
             logger.info(
                 f"[STATS] Will log sequence info every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
         else:
             logger.info("[SEQ] Sequence tracking is DISABLED")
+
+        if rfid_uid:
+            logger.info(f"[RFID] RFID TEST MODE: Will scan card {rfid_uid}")
+            if rfid_sequence:
+                logger.info(f"[RFID] Sequence: {rfid_sequence}")
 
         if not self.get_ota_config():
             return
@@ -881,19 +974,44 @@ class TestClient:
         if not self.send_hello_and_get_session():
             self.cleanup()
             return
-        self.trigger_conversation()
+        self.trigger_conversation(rfid_uid, rfid_sequence)
         self.cleanup()
 
 
 if __name__ == "__main__":
+    import sys
+    
     # You can control sequence logging from here
     print(
         f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
     print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
 
+    # Check for RFID test mode from command line
+    rfid_uid = None
+    rfid_sequence = None
+    
+    if len(sys.argv) > 1:
+        if sys.argv[1] == '--rfid':
+            if len(sys.argv) > 2:
+                rfid_uid = sys.argv[2]
+                print(f"[RFID] RFID TEST MODE: Card UID = {rfid_uid}")
+                
+                if len(sys.argv) > 3:
+                    try:
+                        rfid_sequence = int(sys.argv[3])
+                        print(f"[RFID] Sequence = {rfid_sequence}")
+                    except ValueError:
+                        print("[WARN] Invalid sequence number, ignoring")
+            else:
+                print("[ERROR] --rfid requires a card UID")
+                print("Usage: python client.py --rfid <RFID_UID> [sequence]")
+                print("Example: python client.py --rfid E96C8A82")
+                print("Example: python client.py --rfid BEDTIME001 1")
+                sys.exit(1)
+
     client = TestClient()
     try:
-        client.run_test()
+        client.run_test(rfid_uid, rfid_sequence)
     except KeyboardInterrupt:
         logger.info("Manual interruption detected. Cleaning up...")
         client.cleanup()

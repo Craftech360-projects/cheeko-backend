@@ -49,7 +49,7 @@ graph TD
     A[Device Scans RFID] -->|MQTT: rfid_uid| B(MQTT Gateway)
     B -->|API Lookup| C{Content Type?}
     
-    C -->|Story/Rhyme| D[Extract Audio URL]
+    C -->|CONTENT PACKS| D[Extract Audio URL]
     C -->|Q&A| E{Audio Cached?}
     
     D -->|MQTT: play_url| A

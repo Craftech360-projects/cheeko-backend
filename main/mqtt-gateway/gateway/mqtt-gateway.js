@@ -63,12 +63,11 @@ function encodeUrlPath(url) {
 }
 
 /**
- * Lookup RFID content from Manager API by RFID UID and sequence.
- * Uses the RAG-enabled endpoint in RfidCardMappingController:
- *   GET /toy/admin/rfid/card/lookup/{rfidUid}?sequence={sequence}
+ * Lookup RFID card mapping from Manager API.
+ *   GET /toy/admin/rfid/card/lookup/{rfidUid}
  *
  * Returns object with:
- *   - contentType: "read_only" (TTS only) or "prompt" (send to LLM)
+ *   - contentType: card type (story_pack, rhyme_pack, habit_pack, prompt, prompt_pack)
  *   - title: Content title
  *   - contentText: Text to speak directly (for read_only mode)
  *   - promptText: Text to send to LLM (for prompt mode, backward compatible)
@@ -89,13 +88,11 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       return null;
     }
 
-    // Build URL with optional sequence parameter
+    // Always fetch full card data (no sequence param).
+    // The gateway handles sequence selection locally from the items array.
     let apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/lookup/${encodeURIComponent(
       trimmedUid
     )}`;
-    if (sequence !== null && sequence !== undefined) {
-      apiUrl += `?sequence=${encodeURIComponent(sequence)}`;
-    }
 
     logger.info(
       `🔍 [RFID-LOOKUP] Looking up content for RFID UID ${trimmedUid}, sequence=${sequence} via ${apiUrl}`
@@ -114,28 +111,30 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
 
     const data = body.data;
     const contentType = data.contentType || "prompt";
-    const title = (data.title || "").trim();
+    const title = (data.title || data.packName || "").trim();
     const contentText = (data.contentText || "").trim();
     const promptText = (data.promptText || "").trim();
+    const hasPack = Array.isArray(data.items) && data.items.length > 0;
 
-    // For read_only mode, we need contentText; for prompt mode, we need promptText
-    if (contentType === "read_only" && !contentText) {
-      logger.warn(
-        `⚠️ [RFID-LOOKUP] read_only mode but no contentText for UID ${trimmedUid}, sequence=${sequence}`
-      );
-      return null;
+    // Validation: only enforce text requirements for non-pack types
+    if (!hasPack) {
+      if (contentType === "read_only" && !contentText) {
+        logger.warn(
+          `⚠️ [RFID-LOOKUP] read_only mode but no contentText for UID ${trimmedUid}, sequence=${sequence}`
+        );
+        return null;
+      }
+      if (contentType === "prompt" && !promptText) {
+        logger.warn(
+          `⚠️ [RFID-LOOKUP] prompt mode but no promptText for UID ${trimmedUid}`
+        );
+        return null;
+      }
     }
 
-    if (contentType === "prompt" && !promptText) {
-      logger.warn(
-        `⚠️ [RFID-LOOKUP] prompt mode but no promptText for UID ${trimmedUid}`
-      );
-      return null;
-    }
-
-    const displayText = contentType === "read_only" ? contentText : promptText;
+    const displayText = contentType === "read_only" ? contentText : (promptText || title);
     logger.info(
-      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", text="${displayText.slice(
+      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", items=${hasPack ? data.items.length : 0}, text="${displayText.slice(
         0,
         80
       )}${displayText.length > 80 ? "..." : ""}"`
@@ -147,7 +146,12 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       contentText,
       promptText,
       packCode: data.packCode,
+      packName: data.packName,
       language: data.language,
+      version: data.version,
+      items: data.items || null,
+      audioUrl: data.audioUrl || null,
+      allowCaching: data.allowCaching,
     };
   } catch (error) {
     logger.error(
@@ -157,15 +161,6 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
   }
 }
 
-/**
- * Legacy function for backward compatibility
- * @deprecated Use fetchRfidContentFromManagerApi instead
- */
-async function fetchRfidPromptTextFromManagerApi(rfidUid) {
-  const result = await fetchRfidContentFromManagerApi(rfidUid, null);
-  if (!result) return null;
-  return result.promptText || result.contentText || null;
-}
 
 /**
  * Fetch unified content download manifest from Manager API.
@@ -572,13 +567,13 @@ class MQTTGateway {
       logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
       // Subscribe to the internal topic where EMQX republishes with client info
       // All device messages (hello, data, etc.) come through this single topic via EMQX republish rule
-      this.mqttClient.subscribe("internal/server-ingest", (err) => {
+      this.mqttClient.subscribe(["internal/server-ingest"], (err) => {
         if (err)
           logger.error(
-            "Failed to subscribe to internal/server-ingest topic:",
+            "Failed to subscribe to MQTT topics:",
             err
           );
-        else logger.info("📡 Subscribed to internal/server-ingest (all device messages)");
+        else logger.info("📡 Subscribed to internal/server-ingest");
       });
     });
 
@@ -831,9 +826,8 @@ class MQTTGateway {
         if (!greetingSent) {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
         }
-      } else if (originalPayload.type === "start_greeting_text") {
-        // Handle RFID-based greeting: resolve content via Manager API then forward to LiveKit agent
-        // Supports RAG system with read_only content and legacy prompt mode
+      } else if (originalPayload.type === "start_greeting_text" || originalPayload.type === "text_greeting") {
+        // RFID Card Scan: look up card mapping and route to Content Pack (device) or Q&A (agent)
         const rfidUid =
           originalPayload.rfid_uid ||
           originalPayload.rfidUid ||
@@ -843,102 +837,120 @@ class MQTTGateway {
           originalPayload.seq ||
           originalPayload.sl_no ||
           null;
-        const legacyText = (originalPayload.text || "").trim();
 
-        let rfidContent = null;
-        let textToSend = null;
-
-        if (rfidUid) {
-          logger.info(
-            `✉️ [TEXT-GREETING] Received RFID UID from device ${deviceId}: "${rfidUid}", sequence=${sequence}`
-          );
-          // Use the new RAG-enabled content lookup
-          rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
-
-          if (rfidContent) {
-            // For read_only/animal mode, use contentText; for prompt mode, use promptText
-            textToSend =
-              rfidContent.contentType === "read_only" || rfidContent.contentType === "animal"
-                ? rfidContent.contentText
-                : rfidContent.promptText;
-          }
-
-          if (!textToSend && legacyText) {
-            logger.warn(
-              `⚠️ [TEXT-GREETING] No content found for UID ${rfidUid}, falling back to legacy text from device ${deviceId}`
-            );
-            textToSend = legacyText;
-            rfidContent = null; // Clear so we don't send read_only fields
-          }
-        } else if (legacyText) {
-          // Backward compatibility: old firmware sending text directly
-          logger.info(
-            `✉️ [TEXT-GREETING] No RFID UID, using legacy text from device ${deviceId}`
-          );
-          textToSend = legacyText;
-        }
-
-        if (!textToSend) {
-          logger.warn(
-            `⚠️ [TEXT-GREETING] No RFID UID or usable text payload from device ${deviceId}, ignoring`
-          );
+        if (!rfidUid) {
+          logger.warn(`[RFID-SCAN] No RFID UID in payload from device ${deviceId}, ignoring`);
           return;
         }
 
+        logger.info(`[RFID-SCAN] Card scanned on device ${deviceId}: uid=${rfidUid}, sequence=${sequence}`);
+
+        const rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
+        if (!rfidContent) {
+          logger.warn(`[RFID-SCAN] No content found for uid=${rfidUid} on device ${deviceId}`);
+          return;
+        }
+
+        // Determine text for agent path (content packs use title as placeholder)
+        let textToSend;
+        if (rfidContent.items && rfidContent.items.length > 0) {
+          textToSend = rfidContent.title || "pack content";
+        } else {
+          textToSend = rfidContent.promptText || rfidContent.contentText;
+        }
+
+        if (!textToSend) {
+          logger.warn(`[RFID-SCAN] Card found but no usable content for uid=${rfidUid}`);
+          return;
+        }
+
+        // ====== RFID SMART ROUTING ======
+        // Classify card type by DATA SHAPE, not contentType string.
+        // This handles any content_type value (tts, story_pack, rhyme, habit, etc.)
+        const hasItems = rfidContent && Array.isArray(rfidContent.items) && rfidContent.items.length > 0;
+
+        // Branch A: Content Pack — items with audioUrl => send manifest to device
+        const isContentPack = hasItems && rfidContent.items.some(item => item.audioUrl);
+        // Branch B: Q&A Pack — items with promptText => send prompt to agent
+        const isQaPack = hasItems && !isContentPack && rfidContent.items.some(item => item.promptText);
+
+        // ====== BRANCH A: CONTENT PACK — send manifest directly via MQTT (no LiveKit needed) ======
+        if (isContentPack) {
+          logger.info(
+            `📦 [RFID-ROUTING] Content Pack detected (${rfidContent.contentType}, ${rfidContent.items.length} items). ` +
+            `Sending manifest directly to device, bypassing Agent.`
+          );
+
+          // Build device manifest directly from lookup data (no second API call)
+          const files = {};
+          for (const item of rfidContent.items) {
+            const seq = item.sequence;
+            if (item.audioUrl) {
+              files[`audio_${seq}`] = encodeUrlPath(item.audioUrl);
+            }
+            if (item.imageUrl) {
+              files[`image_${seq}`] = item.imageUrl;
+            }
+          }
+
+          const manifest = {
+            type: "download_response",
+            status: "download_required",
+            rfid_uid: rfidUid,
+            pack_code: rfidContent.packCode,
+            pack_name: rfidContent.title || rfidContent.packName,
+            version: rfidContent.version || "1.0.0",
+            total_items: rfidContent.items.length,
+            files: files,
+          };
+
+          logger.info(
+            `📦 [RFID-ROUTING] Sending manifest: pack=${manifest.pack_code}, v=${manifest.version}, ` +
+            `files=${Object.keys(files).length} to device ${deviceId}`
+          );
+
+          this.mqttPublish(`devices/p2p/${clientId}`, manifest);
+          return;
+        }
+
+        // ====== BRANCH B: Q&A — requires LiveKit connection ======
         const deviceInfo = this.deviceConnections.get(deviceId);
         if (!deviceInfo || !deviceInfo.connection || !deviceInfo.connection.bridge) {
-          logger.warn(
-            `⚠️ [TEXT-GREETING] No active connection/bridge for device ${deviceId}, cannot forward text`
-          );
+          logger.warn(`[RFID-SCAN] No active connection for device ${deviceId}`);
           return;
         }
 
         const connection = deviceInfo.connection;
         const bridge = connection.bridge;
 
-        // Only support conversation rooms for now
         if (connection.roomType !== "conversation") {
-          logger.info(
-            `ℹ️ [TEXT-GREETING] Ignoring text greeting in non-conversation mode for device ${deviceId} (roomType=${connection.roomType})`
-          );
+          logger.info(`[RFID-SCAN] Ignoring scan in non-conversation mode for device ${deviceId}`);
           return;
         }
 
         const room = bridge.room;
         if (!room || !room.localParticipant) {
-          logger.warn(
-            `⚠️ [TEXT-GREETING] No LiveKit room/localParticipant for device ${deviceId}`
-          );
+          logger.warn(`[RFID-SCAN] No LiveKit room for device ${deviceId}`);
           return;
         }
 
         try {
-          logger.info(
-            `✉️ [TEXT-GREETING] Prepared content for device ${deviceId}: type=${rfidContent?.contentType || "prompt"}, title="${rfidContent?.title || ""}", text="${textToSend.slice(0, 80)}..."`
-          );
-
-          // Guard: if audio is currently playing, abort existing playback before new text
+          // Abort existing playback if needed
           if (bridge.isAudioPlaying) {
-            logger.info(
-              `🛑 [TEXT-GREETING] Audio currently playing for device ${deviceId}, sending abort before new text`
-            );
+            logger.info(`[RFID-SCAN] Aborting current playback on device ${deviceId}`);
             try {
               const currentSessionId = connection.udp?.session_id || null;
               if (currentSessionId) {
                 await bridge.sendAbortSignal(currentSessionId);
               }
-              // Notify device to return to listening state
               bridge.sendTtsStopMessage();
-              // Small delay to let abort/stop propagate
               await new Promise((resolve) => setTimeout(resolve, 100));
             } catch (abortErr) {
-              logger.error(
-                `❌ [TEXT-GREETING] Failed to send abort before new text for device ${deviceId}: ${abortErr.message}`
-              );
+              logger.error(`[RFID-SCAN] Abort failed for device ${deviceId}: ${abortErr.message}`);
             }
           }
 
-          // Build message with RAG content fields
+          // Build message for LiveKit Agent
           const userTextMsg = {
             type: "user_text",
             text: textToSend,
@@ -957,48 +969,45 @@ class MQTTGateway {
             userTextMsg.sequence = sequence;
           }
 
-          // Special Handling: If it is a Content Pack (Story/Rhyme), DO NOT send to Agent.
-          // Instead, send Maniifest/Download Response directly to device.
-          const isContentPack = rfidContent && (
-            rfidContent.contentType.endsWith("_pack") ||
-            rfidContent.contentType === "story" ||
-            rfidContent.contentType === "rhyme"
+          // ====== Q&A PACK or SINGLE PROMPT — route to LiveKit Agent ======
+          let selectedItem = null;
+          if (isQaPack) {
+            // Q&A Pack: find the specific question by sequence
+            const targetSeq = sequence || 1;
+            selectedItem = rfidContent.items.find(
+              item => item.sequence === targetSeq || item.itemNumber === targetSeq
+            );
+            if (!selectedItem) {
+              logger.warn(
+                `⚠️ [RFID-ROUTING] Q&A Pack sequence ${targetSeq} not found in ${rfidContent.items.length} items. Falling back to first.`
+              );
+              selectedItem = rfidContent.items[0];
+            }
+          }
+
+          // Extract prompt and optional cached audio
+          const promptText = selectedItem
+            ? (selectedItem.promptText || selectedItem.title)
+            : (rfidContent?.promptText || textToSend);
+          const cachedAudio = selectedItem
+            ? selectedItem.audioUrl
+            : (rfidContent?.audioUrl || null);
+
+          logger.info(
+            `[RFID-ROUTING] Q&A selected -> seq=${sequence || 1}, ` +
+            `question="${selectedItem?.title || 'N/A'}", ` +
+            `prompt="${promptText.substring(0, 80)}", ` +
+            `audioUrl=${cachedAudio || 'none'}`
           );
 
-          if (isContentPack) {
-            logger.info(`📦 [RFID-ROUTING] Detected Content Pack (${rfidContent.contentType}). Routing to Device manifest flow, NOT Agent.`);
-
-            // Reuse the download logic to send the manifest
-            // We construct a payload that matches what handleContentDownloadRequest expects
-            const downloadPayload = {
-              rfid_uid: rfidUid,
-              current_version: 0 // Force manifest send
-            };
-            await this.handleContentDownloadRequest(deviceId, downloadPayload, clientId);
-            return;
-          }
-
-          // If Q&A / Prompt Pack:
-          // 1. Find the specific Question based on 'sequence'
-          let selectedItem = null;
-          if (rfidContent && rfidContent.items && Array.isArray(rfidContent.items)) {
-            // Try to find item matching sequence (1-based index)
-            // If sequence is 1, we want items[0]
-            const targetSeq = sequence || 1;
-            selectedItem = rfidContent.items.find(item => item.sequence === targetSeq || item.itemNumber === targetSeq);
-          }
-
-          // 2. Extract Data
-          // Use item-specific prompt if available, fallback to main card prompt
-          const promptText = selectedItem ? (selectedItem.promptText || selectedItem.title) : (rfidContent?.promptText || textToSend);
-          const cachedAudio = selectedItem ? selectedItem.audioUrl : rfidContent?.audioUrl;
-
-          // 3. Update Message
+          // Update message for Agent
           userTextMsg.text = promptText;
-          userTextMsg.content_type = "prompt"; // Force type to prompt
+          userTextMsg.content_type = "prompt";
           if (cachedAudio) {
-            userTextMsg.audio_url = cachedAudio; // Agent can chose to play this immediately
-            logger.info(`Found cached audio for Q&A (Sequence ${sequence || 1}): ${cachedAudio.substring(0, 30)}...`);
+            userTextMsg.audio_url = cachedAudio;
+          }
+          if (selectedItem?.systemPromptOverride) {
+            userTextMsg.system_prompt_override = selectedItem.systemPromptOverride;
           }
 
           const payloadStr = JSON.stringify(userTextMsg);
@@ -1006,11 +1015,11 @@ class MQTTGateway {
 
           await room.localParticipant.publishData(data, { reliable: true });
           logger.info(
-            `✅ [TEXT-GREETING] Forwarded Q&A (Seq: ${sequence || 1}) to Agent (Prompt: "${promptText.substring(0, 20)}...")`
+            `[RFID-ROUTING] Sent to LiveKit Agent -> device=${deviceId}, seq=${sequence || 1}, hasAudio=${!!cachedAudio}`
           );
         } catch (err) {
           logger.error(
-            `❌ [TEXT-GREETING] Error while preparing/sending user_text for device ${deviceId}: ${err.message}`
+            `[RFID-SCAN] Error processing card for device ${deviceId}: ${err.message}`
           );
         }
       } else {

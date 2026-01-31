@@ -34,8 +34,9 @@
 
         <el-form-item label="Content Type" prop="contentType" class="form-item">
           <el-select v-model="form.contentType" placeholder="Select type" class="custom-select">
-            <el-option label="Prompt (AI-generated)" value="prompt"/>
-            <el-option label="Read Only (TTS)" value="read_only"/>
+            <el-option label="Story Pack" value="story_pack"/>
+            <el-option label="Rhyme Pack" value="rhyme_pack"/>
+            <el-option label="Habit Pack" value="habit_pack"/>
           </el-select>
         </el-form-item>
 
