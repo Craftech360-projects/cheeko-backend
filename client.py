@@ -7,7 +7,8 @@ import struct
 import logging
 import pyaudio
 import keyboard
-# hjvk
+import webbrowser
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Optional, Tuple
 import requests
 import paho.mqtt.client as mqtt_client
@@ -54,6 +55,161 @@ stop_threads = threading.Event()
 start_recording_event = threading.Event()
 # Event to signal recording thread to stop
 stop_recording_event = threading.Event()
+
+# --- Web UI state ---
+RFID_WEB_UI_PORT = 8088
+_web_ui_client = None
+_last_rfid_response = None
+_last_rfid_response_time = 0
+
+RFID_HTML_PAGE = """<!DOCTYPE html>
+<html><head>
+<title>Cheeko RFID Test Panel</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;justify-content:center;padding:40px 20px}
+.container{width:440px}
+.card{background:#1e293b;border-radius:12px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,0.3);margin-bottom:16px}
+h1{font-size:20px;margin-bottom:20px;color:#f1f5f9}
+h2{font-size:15px;color:#94a3b8;margin-bottom:12px}
+label{display:block;font-size:13px;color:#94a3b8;margin-bottom:6px;font-weight:500}
+input{width:100%;padding:10px 14px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:14px;outline:none;margin-bottom:16px}
+input:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.2)}
+input::placeholder{color:#475569}
+.btn{width:100%;padding:12px;background:#3b82f6;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.15s}
+.btn:hover{background:#2563eb}
+.btn:active{transform:scale(0.98)}
+.btn:disabled{background:#334155;cursor:not-allowed}
+.status{display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:#22c55e}
+.response-empty{color:#475569;font-size:13px;text-align:center;padding:20px}
+.manifest-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #334155;font-size:13px}
+.manifest-label{color:#94a3b8}
+.manifest-value{color:#e2e8f0;font-weight:500}
+.badge{display:inline-block;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:600;margin-bottom:10px}
+.badge-green{background:#22c55e20;color:#22c55e}
+.badge-blue{background:#3b82f620;color:#3b82f6}
+.file-list{margin-top:12px;max-height:300px;overflow-y:auto}
+.file-item{font-size:12px;padding:4px 0;color:#94a3b8;word-break:break-all}
+.file-item .seq{color:#3b82f6;font-weight:600;margin-right:6px}
+.log-area{background:#0f172a;border-radius:8px;padding:12px;max-height:180px;overflow-y:auto;font-family:'Cascadia Code',monospace;font-size:11px;color:#64748b}
+.log-entry{padding:2px 0}
+.log-entry.ok{color:#22c55e}
+.log-entry.info{color:#3b82f6}
+.log-entry.err{color:#ef4444}
+</style>
+</head><body>
+<div class="container">
+  <div class="card">
+    <h1>RFID Test Panel</h1>
+    <div class="status"><div class="dot" id="dot"></div><span id="statusTxt">Connected</span></div>
+    <label>RFID UID</label>
+    <input type="text" id="uid" placeholder="e.g. 12345678 or E96C8A81" value="12345678">
+    <label>Sequence <span style="color:#475569">(optional)</span></label>
+    <input type="text" id="seq" placeholder="e.g. 1, 2, 3...">
+    <button class="btn" id="sendBtn" onclick="send()">Send RFID Scan</button>
+  </div>
+  <div class="card">
+    <h2>Response</h2>
+    <div id="resp"><div class="response-empty">No response yet. Send an RFID scan above.</div></div>
+  </div>
+  <div class="card">
+    <h2>Log</h2>
+    <div class="log-area" id="log"></div>
+  </div>
+</div>
+<script>
+let lastT=0;
+function log(m,t=''){const a=document.getElementById('log'),d=document.createElement('div');d.className='log-entry '+t;d.textContent=new Date().toLocaleTimeString()+' '+m;a.appendChild(d);a.scrollTop=a.scrollHeight}
+function row(l,v){return '<div class="manifest-row"><span class="manifest-label">'+l+'</span><span class="manifest-value">'+(v||'N/A')+'</span></div>'}
+async function send(){
+  const uid=document.getElementById('uid').value.trim(),seq=document.getElementById('seq').value.trim();
+  if(!uid){alert('Enter RFID UID');return}
+  const btn=document.getElementById('sendBtn');btn.disabled=true;btn.textContent='Sending...';
+  try{
+    const r=await fetch('/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({rfid_uid:uid,sequence:seq})});
+    const d=await r.json();
+    if(d.status==='sent')log('Sent: uid='+uid+', seq='+(seq||'none'),'ok');
+    else log('Error: '+d.error,'err');
+  }catch(e){log('Failed: '+e.message,'err')}
+  btn.disabled=false;btn.textContent='Send RFID Scan';
+}
+function render(d){
+  if(!d||!d.type)return;const a=document.getElementById('resp');
+  if(d.type==='download_response'){
+    const f=d.files||{},au=Object.keys(f).filter(k=>k.startsWith('audio_')).sort(),im=Object.keys(f).filter(k=>k.startsWith('image_')).sort();
+    let h='<div class="badge badge-green">Content Pack</div>';
+    h+=row('RFID UID',d.rfid_uid)+row('Pack Code',d.pack_code)+row('Pack Name',d.pack_name);
+    h+=row('Version',d.version)+row('Total Items',d.total_items)+row('Audio Files',au.length)+row('Image Files',im.length);
+    if(au.length){h+='<div class="file-list">';for(const k of au){const s=k.replace('audio_','');h+='<div class="file-item"><span class="seq">#'+s+'</span>'+f[k]+'</div>';const ik='image_'+s;if(f[ik])h+='<div class="file-item" style="padding-left:20px;color:#64748b">img: '+f[ik]+'</div>'}h+='</div>'}
+    a.innerHTML=h;log('Content Pack: '+d.pack_name+' ('+d.total_items+' items)','info');
+  }else{
+    a.innerHTML='<div class="badge badge-blue">'+d.type+'</div><pre style="font-size:12px;color:#94a3b8;white-space:pre-wrap;margin-top:8px">'+JSON.stringify(d,null,2)+'</pre>';
+    log('Response: type='+d.type,'info');
+  }
+}
+async function poll(){try{const r=await fetch('/status'),d=await r.json();document.getElementById('dot').style.background=d.connected?'#22c55e':'#ef4444';document.getElementById('statusTxt').textContent=d.connected?'Connected':'Disconnected';if(d.last_response&&d.last_response_time>lastT){lastT=d.last_response_time;render(d.last_response)}}catch(e){}}
+document.getElementById('uid').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
+document.getElementById('seq').addEventListener('keydown',e=>{if(e.key==='Enter')send()});
+setInterval(poll,1000);log('UI ready. Enter RFID UID and click Send.','info');
+</script>
+</body></html>"""
+
+
+class RfidWebHandler(BaseHTTPRequestHandler):
+    """HTTP handler for the RFID test web UI."""
+
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            self.wfile.write(RFID_HTML_PAGE.encode())
+        elif self.path == '/status':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache')
+            self.end_headers()
+            connected = _web_ui_client is not None and _web_ui_client.session_active
+            resp = {
+                "connected": connected,
+                "last_response": _last_rfid_response,
+                "last_response_time": _last_rfid_response_time,
+            }
+            self.wfile.write(json.dumps(resp).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path == '/send':
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode()
+            data = json.loads(body)
+
+            rfid_uid = data.get('rfid_uid', '').strip()
+            seq_str = data.get('sequence', '').strip()
+            seq_num = int(seq_str) if seq_str else None
+
+            if rfid_uid and _web_ui_client:
+                _web_ui_client.send_rfid_greeting(rfid_uid, seq_num)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "sent", "rfid_uid": rfid_uid, "sequence": seq_num
+                }).encode())
+            else:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Missing RFID UID or client not connected"}).encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        pass  # Suppress default HTTP request logs
 
 
 def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
@@ -201,6 +357,10 @@ class TestClient:
 
             # Handle Content Pack download_response (manifest with audio URLs + thumbnails)
             elif payload.get("type") == "download_response":
+                global _last_rfid_response, _last_rfid_response_time
+                _last_rfid_response = payload
+                _last_rfid_response_time = time.time()
+
                 status = payload.get("status", "unknown")
                 rfid_uid = payload.get("rfid_uid", "N/A")
                 pack_code = payload.get("pack_code", "N/A")
@@ -792,6 +952,21 @@ class TestClient:
 
         logger.info("[REC] Recording thread finished completely.")
 
+    def _start_rfid_web_ui(self):
+        """Start the RFID web UI HTTP server and open browser."""
+        global _web_ui_client
+        _web_ui_client = self
+
+        server = HTTPServer(('localhost', RFID_WEB_UI_PORT), RfidWebHandler)
+        self._web_server = server
+
+        server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        server_thread.start()
+
+        url = f"http://localhost:{RFID_WEB_UI_PORT}"
+        logger.info(f"[UI] RFID Web UI started at {url}")
+        webbrowser.open(url)
+
     def send_rfid_greeting(self, rfid_uid, sequence=None):
         """Sends an RFID card scan message to the gateway.
         
@@ -839,6 +1014,9 @@ class TestClient:
             target=self._record_and_send_audio_thread, daemon=True)
         self.playback_thread.start(), self.udp_listener_thread.start(
         ), self.audio_recording_thread.start()
+
+        # Start the RFID web UI (browser-based)
+        self._start_rfid_web_ui()
 
         if rfid_uid:
             # RFID mode: Send RFID greeting instead of listen message
@@ -914,6 +1092,11 @@ class TestClient:
         self.session_active = False
         start_recording_event.set()  # Unblock if waiting
         stop_recording_event.set()  # Unblock if running
+
+        # Shutdown web UI server
+        if hasattr(self, '_web_server') and self._web_server:
+            self._web_server.shutdown()
+            logger.info("[UI] Web UI server stopped.")
 
         # Print final sequence summary
         if ENABLE_SEQUENCE_LOGGING and self.total_packets_received > 0:

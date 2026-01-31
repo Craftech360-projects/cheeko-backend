@@ -28,7 +28,7 @@ const CHARACTER_AGENT_MAP = {
 };
 
 // MAC address regex
-const MacAddressRegex = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/;
+const MacAddressRegex = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i;
 
 // Global config manager and debug reference (injected by gateway)
 let configManager = null;
@@ -1586,14 +1586,25 @@ class VirtualMQTTConnection {
       `🗑️ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`
     );
 
-    // CRITICAL FIX: Keep connection in deviceConnections map longer during cleanup
-    // This prevents "No connection found" errors when messages arrive during cleanup
+    // CRITICAL FIX: Only remove from deviceConnections if this entry still belongs
+    // to THIS connection. When a device reconnects, handleDeviceHello closes the old
+    // connection and creates a new one. Without this guard, the old connection's
+    // delayed delete would remove the NEW connection's entry (race condition).
+    const myConnectionId = this.connectionId;
+    const myDeviceId = this.deviceId;
     setTimeout(() => {
-      this.gateway.deviceConnections.delete(this.deviceId);
-      console.log(
-        `🗑️ [CLEANUP] Removed ${this.deviceId} from deviceConnections map`
-      );
-    }, 2000); // Increased from 1s to 2s to handle slower cleanup scenarios
+      const current = this.gateway.deviceConnections.get(myDeviceId);
+      if (current && current.connectionId === myConnectionId) {
+        this.gateway.deviceConnections.delete(myDeviceId);
+        console.log(
+          `🗑️ [CLEANUP] Removed ${myDeviceId} from deviceConnections map (conn: ${myConnectionId})`
+        );
+      } else {
+        console.log(
+          `🔒 [CLEANUP] Skipped removing ${myDeviceId} from deviceConnections — entry belongs to a newer connection`
+        );
+      }
+    }, 2000);
   }
 
   isAlive() {

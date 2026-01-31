@@ -443,9 +443,16 @@ class MQTTGateway {
     const staleDevices = [];
     const now = Date.now();
     const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+    const MIN_AGE_FOR_CLEANUP = 60 * 1000; // 60 seconds grace period for new connections
 
     for (const [deviceId, deviceInfo] of this.deviceConnections.entries()) {
       const connection = deviceInfo?.connection;
+
+      // Never clean up connections that were created recently (bridge may still be initializing)
+      const connectionAge = now - (connection?.lastActivityTime || now);
+      if (connectionAge < MIN_AGE_FOR_CLEANUP) {
+        continue;
+      }
 
       // Check if connection is dead or closing (fixed: proper isAlive check)
       const isDead = !connection || connection.closing ||
@@ -486,6 +493,12 @@ class MQTTGateway {
     // 3. Clean up stale connections map entries
     const staleConnectionIds = [];
     for (const [connectionId, connection] of this.connections.entries()) {
+      // Never clean up connections younger than 60 seconds
+      const connAge = now - (connection?.lastActivityTime || now);
+      if (connAge < MIN_AGE_FOR_CLEANUP) {
+        continue;
+      }
+
       const isStaleConn = !connection || connection.closing ||
         (typeof connection.isAlive === 'function' && !connection.isAlive());
       if (isStaleConn) {
