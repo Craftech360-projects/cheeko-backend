@@ -30,9 +30,9 @@ except ImportError:
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.1.99"
+SERVER_IP = "192.168.1.168"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "192.168.1.99"
+MQTT_BROKER_HOST = "192.168.1.168"
 
 
 MQTT_BROKER_PORT = 1883

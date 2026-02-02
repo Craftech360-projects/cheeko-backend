@@ -2,41 +2,32 @@
  * MQTT Gateway
  *
  * Main orchestrator class that manages all device connections.
- * Handles EMQX broker, UDP server, LiveKit rooms, and agent dispatch.
+ * Handles EMQX broker, UDP server, and Pipecat session management.
  */
 
 const dgram = require("dgram");
 const mqtt = require("mqtt");
 const axios = require("axios");
 const {
-  RoomServiceClient,
-  AgentDispatchClient,
-} = require("livekit-server-sdk");
-const {
   VirtualMQTTConnection,
   setConfigManager: setVirtualConnectionConfigManager,
 } = require("../mqtt/virtual-connection");
 const { ConfigManager } = require("../utils/config-manager");
 const {
-  LiveKitBridge,
-  setConfigManager: setLivekitConfigManager,
-} = require("../livekit/livekit-bridge");
+  PipecatBridge,
+  setConfigManager: setPipecatConfigManager,
+} = require("../pipecat/pipecat-bridge");
 const {
-  generateLiveKitCredentials,
-} = require("../livekit/token-generator");
+  sendOffer,
+  terminateSession,
+  setConfigManager: setSignalingConfigManager,
+} = require("../pipecat/pipecat-signaling");
+const { buildGreetingMetadata } = require("../pipecat/message-adapter");
 const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
-
-// Character to Agent name mapping for multi-agent dispatch
-const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent",
-  "Math Tutor": "math-tutor-agent",
-  "Riddle Solver": "riddle-solver-agent",
-  "Word Ladder": "word-ladder-agent",
-};
 
 // Global config manager and debug reference (injected by app.js)
 let configManager = null;
@@ -48,7 +39,8 @@ function setConfigManager(cm) {
   const debugModule = require("debug");
   debug = debugModule("mqtt-server");
   // Cascade to all dependent modules
-  setLivekitConfigManager(cm);
+  setPipecatConfigManager(cm);
+  setSignalingConfigManager(cm);
   setVirtualConnectionConfigManager(cm);
 }
 
@@ -118,63 +110,45 @@ async function fetchRfidPromptTextFromManagerApi(rfidUid) {
 
 class MQTTGateway {
   constructor(workerPool) {
-    // Shared worker pool for all LiveKit bridges / audio processing
+    // Shared worker pool for audio processing
     this.workerPool = workerPool;
     this.udpPort = parseInt(process.env.UDP_PORT) || 1883;
     this.publicIp = process.env.PUBLIC_IP || "127.0.0.1";
     this.connections = new Map(); // clientId -> VirtualMQTTConnection
     this.keepAliveTimer = null;
     this.keepAliveCheckInterval = 15000; // Check every 15 seconds
-    this.ghostCleanupTimer = null;
-    this.ghostCleanupInterval = 5 * 60 * 1000; // Clean up ghost rooms every 5 minutes
+    this.sessionCleanupTimer = null;
+    this.sessionCleanupInterval = 5 * 60 * 1000; // Clean up stale sessions every 5 minutes
     this.headerBuffer = Buffer.alloc(16);
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
     this.clientConnections = new Map(); // clientId -> device info (for tracking EMQX clients)
 
-    // Initialize LiveKit RoomServiceClient for room management
+    // Pipecat session tracking
+    this.pipecatSessions = new Map(); // deviceId -> { pc_id, sessionId, createdAt }
+
+    // Initialize Pipecat configuration
     try {
-      let livekitConfig = configManager.get("livekit") || {};
+      let pipecatConfig = configManager.get("pipecat") || {};
 
       // Override with environment variables if present
-      if (process.env.LIVEKIT_URL) livekitConfig.url = process.env.LIVEKIT_URL;
-      if (process.env.LIVEKIT_API_KEY)
-        livekitConfig.api_key = process.env.LIVEKIT_API_KEY;
-      if (process.env.LIVEKIT_API_SECRET)
-        livekitConfig.api_secret = process.env.LIVEKIT_API_SECRET;
+      if (process.env.PIPECAT_URL) pipecatConfig.url = process.env.PIPECAT_URL;
 
-      if (
-        !livekitConfig.url ||
-        !livekitConfig.api_key ||
-        !livekitConfig.api_secret
-      ) {
-        this.agentDispatchClient = null;
-        this.roomService = null;
-        logger.warn(
-          "⚠️ [INIT] LiveKit credentials incomplete, clients not initialized"
-        );
-      } else {
-        // Initialize LiveKit clients with valid credentials
-        this.roomService = new RoomServiceClient(
-          livekitConfig.url,
-          livekitConfig.api_key,
-          livekitConfig.api_secret
-        );
-        this.agentDispatchClient = new AgentDispatchClient(
-          livekitConfig.url,
-          livekitConfig.api_key,
-          livekitConfig.api_secret
-        );
-        logger.info("✅ [INIT] LiveKit clients initialized successfully");
+      if (!pipecatConfig.url) {
+        logger.warn("⚠️ [INIT] Pipecat URL not configured, using default");
+        pipecatConfig.url = "http://192.168.1.168:7860";
       }
+
+      this.pipecatConfig = pipecatConfig;
+      logger.info(`✅ [INIT] Pipecat configured: ${pipecatConfig.url}`);
     } catch (error) {
-      logger.error(
-        "❌ [INIT] Failed to initialize LiveKit clients:",
-        error.message
-      );
-      this.roomService = null;
-      this.agentDispatchClient = null;
+      logger.error("❌ [INIT] Failed to initialize Pipecat config:", error.message);
+      this.pipecatConfig = { url: "http://192.168.1.168:7860" };
     }
+
+    // Legacy LiveKit references (set to null for backward compatibility)
+    this.roomService = null;
+    this.agentDispatchClient = null;
   }
 
   generateNewConnectionId() {
@@ -206,139 +180,100 @@ class MQTTGateway {
     // Start global heartbeat check timer
     this.setupKeepAliveTimer();
 
-    // Start ghost room/session cleanup timer (every 5 minutes)
-    this.setupGhostCleanupTimer();
+    // Start session cleanup timer (every 5 minutes)
+    this.setupSessionCleanupTimer();
   }
 
   /**
-   * Set up ghost room/session cleanup timer (every 5 minutes)
+   * Set up session cleanup timer (every 5 minutes)
    * Cleans up:
-   * - LiveKit rooms with no participants or only stale agents
+   * - Stale Pipecat sessions
    * - Stale entries in deviceConnections and connections maps
    */
-  setupGhostCleanupTimer() {
+  setupSessionCleanupTimer() {
     // Clear existing timer
-    this.clearGhostCleanupTimer();
+    this.clearSessionCleanupTimer();
 
-    logger.info(`🧹 [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
+    logger.info(`🧹 [SESSION-CLEANUP] Starting cleanup timer (interval: ${this.sessionCleanupInterval / 1000}s)`);
 
     // Run cleanup immediately on startup (after 30 seconds to let things stabilize)
     setTimeout(() => {
-      this.cleanupGhostRoomsAndSessions().catch(err => {
-        logger.error(`❌ [GHOST-CLEANUP] Initial cleanup failed:`, err.message);
+      this.cleanupStaleSessions().catch(err => {
+        logger.error(`❌ [SESSION-CLEANUP] Initial cleanup failed:`, err.message);
       });
     }, 30000);
 
     // Set recurring timer
-    this.ghostCleanupTimer = setInterval(async () => {
+    this.sessionCleanupTimer = setInterval(async () => {
       try {
-        await this.cleanupGhostRoomsAndSessions();
+        await this.cleanupStaleSessions();
       } catch (error) {
-        logger.error(`❌ [GHOST-CLEANUP] Cleanup cycle failed:`, error.message);
+        logger.error(`❌ [SESSION-CLEANUP] Cleanup cycle failed:`, error.message);
       }
-    }, this.ghostCleanupInterval);
+    }, this.sessionCleanupInterval);
   }
 
   /**
-   * Clear ghost cleanup timer
+   * Clear session cleanup timer
    */
-  clearGhostCleanupTimer() {
-    if (this.ghostCleanupTimer) {
-      clearInterval(this.ghostCleanupTimer);
-      this.ghostCleanupTimer = null;
+  clearSessionCleanupTimer() {
+    if (this.sessionCleanupTimer) {
+      clearInterval(this.sessionCleanupTimer);
+      this.sessionCleanupTimer = null;
     }
   }
 
   /**
-   * Clean up ghost rooms and stale sessions
-   * - Lists all LiveKit rooms and removes empty/stale ones
+   * Clean up stale sessions and connections
+   * - Cleans up stale Pipecat sessions
    * - Cleans up deviceConnections entries without active connections
    * - Cleans up connections map entries that are dead
    */
-  async cleanupGhostRoomsAndSessions() {
+  async cleanupStaleSessions() {
     const startTime = Date.now();
     const memBefore = process.memoryUsage();
 
-    let roomsCleaned = 0;
+    let pipecatSessionsCleaned = 0;
     let sessionsCleaned = 0;
     let connectionsCleaned = 0;
 
-    logger.info(`🧹 [GHOST-CLEANUP] Starting cleanup cycle...`);
+    logger.info(`🧹 [SESSION-CLEANUP] Starting cleanup cycle...`);
 
-    // 1. Clean up ghost LiveKit rooms
-    if (this.roomService) {
-      try {
-        const rooms = await this.roomService.listRooms();
-        logger.info(`🧹 [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
+    // 1. Clean up stale Pipecat sessions
+    const now = Date.now();
+    const PIPECAT_SESSION_TIMEOUT = 60 * 60 * 1000; // 1 hour max session
 
-        for (const room of rooms) {
-          try {
-            const roomName = room.name;
-            const numParticipants = room.numParticipants || 0;
-            const creationTime = room.creationTime ? Number(room.creationTime) * 1000 : Date.now();
-            const roomAge = Date.now() - creationTime;
-            const roomAgeMinutes = Math.round(roomAge / 60000);
+    for (const [deviceId, sessionInfo] of this.pipecatSessions.entries()) {
+      const sessionAge = now - (sessionInfo.createdAt || 0);
 
-            // Get detailed participant info
-            let participants = [];
-            try {
-              participants = await this.roomService.listParticipants(roomName);
-            } catch (err) {
-              // Room might have been deleted already
-              logger.warn(`⚠️ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
-            }
+      // Check if session is stale (older than 1 hour or device disconnected)
+      const deviceInfo = this.deviceConnections.get(deviceId);
+      const isDeviceDisconnected = !deviceInfo || !deviceInfo.connection || deviceInfo.connection.closing;
 
-            // Check if room should be cleaned up
-            const hasRealDevice = participants.some(p =>
-              p.identity && !p.identity.toLowerCase().includes('agent') && !p.identity.toLowerCase().includes('gateway')
-            );
-            const hasOnlyAgents = participants.length > 0 && !hasRealDevice;
-            const isEmpty = participants.length === 0;
+      if (sessionAge > PIPECAT_SESSION_TIMEOUT || isDeviceDisconnected) {
+        logger.info(`🗑️ [SESSION-CLEANUP] Terminating stale Pipecat session: ${deviceId} (age: ${Math.round(sessionAge / 60000)}min)`);
 
-            // Clean up if:
-            // - Room is empty and older than 2 minutes (empty timeout)
-            // - Room only has agents (no device) and older than 5 minutes
-            // - Room is older than 60 minutes (absolute max)
-            const shouldCleanup =
-              (isEmpty && roomAge > 2 * 60 * 1000) ||
-              (hasOnlyAgents && roomAge > 5 * 60 * 1000) ||
-              (roomAge > 60 * 60 * 1000);
-
-            if (shouldCleanup) {
-              const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
-              logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
-
-              // Stop any media bots first
-              if (roomName.includes('_music') || roomName.includes('_story')) {
-                try {
-                  await axios.post(`${MEDIA_API_BASE}/stop-bot`, { room_name: roomName }, mediaAxiosConfig({ timeout: 3000 }));
-                } catch (botErr) {
-                  // Ignore bot stop errors
-                }
-              }
-
-              await this.roomService.deleteRoom(roomName);
-              roomsCleaned++;
-              logger.info(`✅ [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
-            }
-          } catch (roomError) {
-            logger.warn(`⚠️ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
+        try {
+          if (sessionInfo.pc_id) {
+            await terminateSession(sessionInfo.pc_id);
           }
+        } catch (err) {
+          // Ignore termination errors
         }
-      } catch (error) {
-        logger.error(`❌ [GHOST-CLEANUP] Failed to list/cleanup LiveKit rooms:`, error.message);
+
+        this.pipecatSessions.delete(deviceId);
+        pipecatSessionsCleaned++;
       }
     }
 
     // 2. Clean up stale deviceConnections entries
     const staleDevices = [];
-    const now = Date.now();
     const STALE_THRESHOLD = 5 * 60 * 1000; // 5 minutes
 
     for (const [deviceId, deviceInfo] of this.deviceConnections.entries()) {
       const connection = deviceInfo?.connection;
 
-      // Check if connection is dead or closing (fixed: proper isAlive check)
+      // Check if connection is dead or closing
       const isDead = !connection || connection.closing ||
         (typeof connection.isAlive === 'function' && !connection.isAlive());
 
@@ -353,7 +288,7 @@ class MQTTGateway {
     }
 
     for (const deviceId of staleDevices) {
-      logger.info(`🗑️ [GHOST-CLEANUP] Removing stale deviceConnection: ${deviceId}`);
+      logger.info(`🗑️ [SESSION-CLEANUP] Removing stale deviceConnection: ${deviceId}`);
       const deviceInfo = this.deviceConnections.get(deviceId);
 
       // Try to close the connection properly first
@@ -366,11 +301,12 @@ class MQTTGateway {
         }
       }
 
-      // Remove from map
+      // Remove from maps
       if (deviceInfo?.connectionId) {
         this.connections.delete(deviceInfo.connectionId);
       }
       this.deviceConnections.delete(deviceId);
+      this.pipecatSessions.delete(deviceId);
       sessionsCleaned++;
     }
 
@@ -387,7 +323,7 @@ class MQTTGateway {
     for (const connectionId of staleConnectionIds) {
       // Don't double-count if already cleaned via deviceConnections
       if (!staleDevices.some(d => this.deviceConnections.get(d)?.connectionId === connectionId)) {
-        logger.info(`🗑️ [GHOST-CLEANUP] Removing stale connection: ${connectionId}`);
+        logger.info(`🗑️ [SESSION-CLEANUP] Removing stale connection: ${connectionId}`);
         const connection = this.connections.get(connectionId);
         if (connection && !connection.closing) {
           try {
@@ -402,26 +338,25 @@ class MQTTGateway {
       }
     }
 
-    // 4. Clean up stale clientConnections entries (these are never cleaned otherwise)
+    // 4. Clean up stale clientConnections entries
     let clientConnectionsCleaned = 0;
     for (const [clientId, info] of this.clientConnections.entries()) {
       const deviceId = info?.deviceId;
-      // Remove if no deviceId or device no longer exists in deviceConnections
       if (!deviceId || !this.deviceConnections.has(deviceId)) {
         this.clientConnections.delete(clientId);
         clientConnectionsCleaned++;
       }
     }
     if (clientConnectionsCleaned > 0) {
-      logger.info(`🗑️ [GHOST-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
+      logger.info(`🗑️ [SESSION-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
     }
 
     const duration = Date.now() - startTime;
     const memAfter = process.memoryUsage();
     const heapDiff = (memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024;
 
-    logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}, ClientConns: ${clientConnectionsCleaned}`);
-    logger.info(`📊 [GHOST-CLEANUP] Memory: Heap ${(memAfter.heapUsed / 1024 / 1024).toFixed(1)}MB, Released: ${heapDiff.toFixed(1)}MB | Active: ${this.connections.size}, Devices: ${this.deviceConnections.size}`);
+    logger.info(`✅ [SESSION-CLEANUP] Complete in ${duration}ms - Pipecat: ${pipecatSessionsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}`);
+    logger.info(`📊 [SESSION-CLEANUP] Memory: Heap ${(memAfter.heapUsed / 1024 / 1024).toFixed(1)}MB | Active: ${this.connections.size}, Devices: ${this.deviceConnections.size}, Pipecat: ${this.pipecatSessions.size}`);
   }
 
   connectToEmqxBroker() {
@@ -577,7 +512,7 @@ class MQTTGateway {
         }
       }
 
-      // Handle MCP responses - check for pending promises first, then forward to LiveKit agent
+      // Handle MCP responses - check for pending promises first, then forward to Pipecat agent
       if (
         originalPayload.type === "mcp" &&
         originalPayload.payload &&
@@ -624,7 +559,7 @@ class MQTTGateway {
             }
           }
 
-          // If no pending promise, forward to LiveKit agent (normal flow)
+          // If no pending promise, forward to Pipecat agent (normal flow)
           const requestId = `req_${mcpRequestId}`;
           await deviceInfo.connection.forwardMcpResponse(
             originalPayload.payload,
@@ -661,11 +596,11 @@ class MQTTGateway {
           // Room should already exist from parseHelloMessage
           if (connection.bridge) {
             const bridge = connection.bridge;
-            const roomName = bridge.room ? bridge.room.name : null;
+            const sessionId = bridge.sessionId || connection.sessionId;
 
-            if (!roomName) {
+            if (!sessionId) {
               logger.error(
-                `❌ [START-GREETING] Cannot dispatch agent - room name not available`
+                `❌ [START-GREETING] Cannot dispatch agent - session ID not available`
               );
               return;
             }
@@ -696,7 +631,7 @@ class MQTTGateway {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
         }
       } else if (originalPayload.type === "start_greeting_text") {
-        // Handle RFID-based greeting: resolve question via Manager API then forward to LiveKit agent
+        // Handle RFID-based greeting: resolve question via Manager API then forward to Pipecat agent
         const rfidUid =
           originalPayload.rfid_uid ||
           originalPayload.rfidUid ||
@@ -751,10 +686,10 @@ class MQTTGateway {
           return;
         }
 
-        const room = bridge.room;
-        if (!room || !room.localParticipant) {
+        // Check if bridge is connected to Pipecat
+        if (!bridge.isConnected || !bridge.pcId) {
           logger.warn(
-            `⚠️ [TEXT-GREETING] No LiveKit room/localParticipant for device ${deviceId}`
+            `⚠️ [TEXT-GREETING] No Pipecat connection for device ${deviceId}`
           );
           return;
         }
@@ -770,7 +705,7 @@ class MQTTGateway {
               `🛑 [TEXT-GREETING] Audio currently playing for device ${deviceId}, sending abort before new text`
             );
             try {
-              const currentSessionId = connection.udp?.session_id || null;
+              const currentSessionId = connection.udp?.session_id || connection.sessionId || null;
               if (currentSessionId) {
                 await bridge.sendAbortSignal(currentSessionId);
               }
@@ -790,7 +725,7 @@ class MQTTGateway {
             text: textToSend,
             device_id: deviceId,
             // Prefer gateway-known session; ignore any session_id sent by device
-            session_id: connection.udp?.session_id || null,
+            session_id: connection.udp?.session_id || connection.sessionId || null,
             source: "rfid",
             timestamp: Date.now(),
           };
@@ -799,12 +734,10 @@ class MQTTGateway {
             userTextMsg.rfid_uid = rfidUid;
           }
 
-          const payloadStr = JSON.stringify(userTextMsg);
-          const data = new Uint8Array(Buffer.from(payloadStr, "utf8"));
-
-          await room.localParticipant.publishData(data, { reliable: true });
+          // Forward to Pipecat via bridge
+          await bridge.forwardMessage(userTextMsg);
           logger.info(
-            `✅ [TEXT-GREETING] Forwarded RFID question to LiveKit agent for device ${deviceId}`
+            `✅ [TEXT-GREETING] Forwarded RFID question to Pipecat for device ${deviceId}`
           );
         } catch (err) {
           logger.error(
@@ -856,43 +789,19 @@ class MQTTGateway {
   }
 
   /**
-   * Check if an agent is already present in a LiveKit room
-   * Uses LiveKit Server API to get actual participants (more reliable than local flags)
-   * @param {string} roomName - The LiveKit room name to check
-   * @returns {Promise<{exists: boolean, identity: string|null}>} - Whether agent exists and its identity
+   * Check if agent is active for a device
+   * With Pipecat, agent is always running - check session state instead
+   * @param {string} deviceId - The device ID to check
+   * @returns {Promise<{exists: boolean, identity: string|null}>}
    */
-  async checkAgentInRoom(roomName) {
-    try {
-      if (!this.roomService) {
-        // logger.warn(`⚠️ [AGENT-CHECK] RoomService not available, cannot check participants`);
-        return { exists: false, identity: null };
-      }
-
-      const participants = await this.roomService.listParticipants(roomName);
-
-      for (const participant of participants) {
-        // logger.info(`   - Participant: ${participant.identity} (state: ${participant.state})`);
-
-        // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-agent')
-        if (
-          participant.identity &&
-          (participant.identity.toLowerCase().includes("agent") ||
-            participant.identity === "cheeko-agent")
-        ) {
-          // logger.info(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
-          return { exists: true, identity: participant.identity };
-        }
-      }
-
-      return { exists: false, identity: null };
-    } catch (error) {
-      logger.error(
-        `❌ [AGENT-CHECK] Error checking room participants:`,
-        error.message
-      );
-      // On error, return false to allow dispatch attempt (fail-safe)
-      return { exists: false, identity: null };
+  async checkAgentInRoom(deviceId) {
+    // With Pipecat, agent is always running on the server
+    // Check if we have an active session for this device
+    const sessionInfo = this.pipecatSessions.get(deviceId);
+    if (sessionInfo && sessionInfo.pc_id) {
+      return { exists: true, identity: "pipecat-agent" };
     }
+    return { exists: false, identity: null };
   }
 
   setupControlTopics(macAddress) {
@@ -953,14 +862,7 @@ class MQTTGateway {
     }
 
     try {
-      if (mode === "music") {
-        // Send data channel message to LiveKit agent
-        const room = deviceInfo.connection?.bridge?.room;
-        if (!room) {
-          logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
-          return;
-        }
-
+      if (mode === "music" || mode === "story") {
         // Send TTS stop message first
         if (clientId) {
           const controlTopic = `devices/p2p/${clientId}`;
@@ -972,18 +874,20 @@ class MQTTGateway {
           this.mqttPublish(controlTopic, ttsStopMsg);
         }
 
-        // Send playback control via LiveKit data channel
-        const playbackMessage = JSON.stringify({
-          type: "playback_control",
-          action: "next",
-        });
-        await room.localParticipant.publishData(
-          new TextEncoder().encode(playbackMessage),
-          { reliable: true }
-        );
-        logger.info(
-          `✅ [CONTROL] Sent 'next' command via data channel to ${roomName}`
-        );
+        // Send playback control via Media Bot API
+        try {
+          await axios.post(
+            `${MEDIA_API_BASE}/playback-control`,
+            {
+              room_name: roomName,
+              action: "next",
+            },
+            mediaAxiosConfig({ timeout: 3000 })
+          );
+          logger.info(`✅ [CONTROL] Sent 'next' command to media bot for ${roomName}`);
+        } catch (apiError) {
+          logger.error(`❌ [CONTROL] Media API error: ${apiError.message}`);
+        }
 
         // Send TTS start message
         if (clientId) {
@@ -992,28 +896,34 @@ class MQTTGateway {
             type: "tts",
             state: "start",
             text: "Skipping to next song",
-            session_id: deviceInfo.connection?.udp?.session_id || null,
+            session_id: deviceInfo.connection?.sessionInfo?.sessionId || null,
           };
           this.mqttPublish(controlTopic, ttsStartMsg);
         }
+      } else if (mode === "conversation") {
+        // For conversation mode, forward to Pipecat via bridge
+        const bridge = deviceInfo.connection?.bridge;
+        if (bridge && bridge.isConnected) {
+          await bridge.forwardMessage({
+            type: "playback_control",
+            action: "next",
+          });
+          logger.info(`✅ [CONTROL] Sent 'next' command to Pipecat`);
+        }
       } else {
-        // Other modes not supported
-        logger.warn(
-          `⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}`
-        );
+        logger.warn(`⚠️ [CONTROL] Next not supported for mode: ${mode}`);
         return;
       }
     } catch (error) {
       logger.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
 
-      // Send error notification to device if possible
       if (clientId) {
         const errorTopic = `devices/p2p/${clientId}`;
         const errorMsg = {
           type: "tts",
           state: "start",
           text: "Skip failed, please try again",
-          session_id: deviceInfo.connection?.udp?.session_id || null,
+          session_id: deviceInfo.connection?.sessionInfo?.sessionId || null,
         };
         this.mqttPublish(errorTopic, errorMsg);
       }
@@ -1024,20 +934,17 @@ class MQTTGateway {
     let macAddress;
 
     if (clientId) {
-      // Extract MAC from clientId format: GID_test@@@68_25_dd_bb_f3_a0@@@uuid
       const clientParts = clientId.split("@@@");
       if (clientParts.length >= 2) {
         macAddress = clientParts[1].replace(/_/g, ":");
       }
     } else {
-      // Fallback: Extract MAC address from topic: cheeko/{macAddress}/control/previous
       const topicParts = topic.split("/");
       macAddress = topicParts[1];
     }
 
     logger.info(`⏮️ [CONTROL] Previous requested for device: ${macAddress}`);
 
-    // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
     if (!deviceInfo) {
       logger.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
@@ -1048,21 +955,12 @@ class MQTTGateway {
     const mode = deviceInfo.currentMode;
 
     if (!roomName || !mode) {
-      logger.warn(
-        `⚠️ [CONTROL] No active room or mode for device: ${macAddress}`
-      );
+      logger.warn(`⚠️ [CONTROL] No active room or mode for device: ${macAddress}`);
       return;
     }
 
     try {
-      if (mode === "music") {
-        // Send data channel message to LiveKit agent
-        const room = deviceInfo.connection?.bridge?.room;
-        if (!room) {
-          logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
-          return;
-        }
-
+      if (mode === "music" || mode === "story") {
         // Send TTS stop message first
         if (clientId) {
           const controlTopic = `devices/p2p/${clientId}`;
@@ -1074,18 +972,20 @@ class MQTTGateway {
           this.mqttPublish(controlTopic, ttsStopMsg);
         }
 
-        // Send playback control via LiveKit data channel
-        const playbackMessage = JSON.stringify({
-          type: "playback_control",
-          action: "previous",
-        });
-        await room.localParticipant.publishData(
-          new TextEncoder().encode(playbackMessage),
-          { reliable: true }
-        );
-        logger.info(
-          `✅ [CONTROL] Sent 'previous' command via data channel to ${roomName}`
-        );
+        // Send playback control via Media Bot API
+        try {
+          await axios.post(
+            `${MEDIA_API_BASE}/playback-control`,
+            {
+              room_name: roomName,
+              action: "previous",
+            },
+            mediaAxiosConfig({ timeout: 3000 })
+          );
+          logger.info(`✅ [CONTROL] Sent 'previous' command to media bot for ${roomName}`);
+        } catch (apiError) {
+          logger.error(`❌ [CONTROL] Media API error: ${apiError.message}`);
+        }
 
         // Send TTS start message
         if (clientId) {
@@ -1094,26 +994,34 @@ class MQTTGateway {
             type: "tts",
             state: "start",
             text: "Going to previous song",
-            session_id: deviceInfo.connection?.udp?.session_id || null,
+            session_id: deviceInfo.connection?.sessionInfo?.sessionId || null,
           };
           this.mqttPublish(controlTopic, ttsStartMsg);
         }
+      } else if (mode === "conversation") {
+        // For conversation mode, forward to Pipecat via bridge
+        const bridge = deviceInfo.connection?.bridge;
+        if (bridge && bridge.isConnected) {
+          await bridge.forwardMessage({
+            type: "playback_control",
+            action: "previous",
+          });
+          logger.info(`✅ [CONTROL] Sent 'previous' command to Pipecat`);
+        }
       } else {
-        // Other modes not supported
         logger.warn(`⚠️ [CONTROL] Previous not supported for mode: ${mode}`);
         return;
       }
     } catch (error) {
       logger.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);
 
-      // Send error notification to device if possible
       if (clientId) {
         const errorTopic = `devices/p2p/${clientId}`;
         const errorMsg = {
           type: "tts",
           state: "start",
           text: "Previous skip failed, please try again",
-          session_id: deviceInfo.connection?.udp?.session_id || null,
+          session_id: deviceInfo.connection?.sessionInfo?.sessionId || null,
         };
         this.mqttPublish(errorTopic, errorMsg);
       }
@@ -1211,109 +1119,31 @@ class MQTTGateway {
         }
       } else if (roomType === "conversation") {
         const connection = deviceInfo.connection;
-        if (
-          connection &&
-          connection.bridge &&
-          connection.bridge.room &&
-          connection.bridge.room.localParticipant
-        ) {
+        // With Pipecat, check if bridge is connected (agent is always running on Pipecat server)
+        if (connection && connection.bridge && connection.bridge.isConnected) {
           // Guard: Skip if agent already deployed (prevent duplicate dispatches)
           if (connection.bridge?.agentDeployed) {
-            logger.info(`[START-AGENT] Agent already deployed, skipping duplicate dispatch`);
+            logger.info(`[START-AGENT] Pipecat agent already connected, skipping`);
             return;
           }
 
           const agentCheck = await this.checkAgentInRoom(roomName);
 
-          if (!agentCheck.exists) {
-            if (!isModeSwitch) {
-              // Fresh boot: dispatch agent now
-              if (this.agentDispatchClient) {
-                try {
-                  // Fetch current character and child profile from database
-                  const macAddress = deviceId.replace(/:/g, "").toLowerCase();
-                  let characterName = "Cheeko";
-                  let childProfile = null;
-
-                  // Fetch character and child profile in parallel
-                  logger.info(`[START-AGENT] Fetching character and child profile for device: ${deviceId}`);
-                  try {
-                    const [charResponse, profileResponse] = await Promise.all([
-                      axios.get(`${process.env.MANAGER_API_URL}/agent/device/${macAddress}/current-character`, { timeout: 5000 }),
-                      axios.post(
-                        `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
-                        { macAddress },
-                        { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
-                      )
-                    ]);
-
-                    if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
-                      characterName = charResponse.data.data.characterName;
-                      logger.info(`[START-AGENT] ✅ Character from DB: "${characterName}"`);
-                    }
-
-                    if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
-                      childProfile = profileResponse.data.data;
-                      logger.info(`[START-AGENT] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
-                    }
-                  } catch (fetchError) {
-                    logger.warn(`[START-AGENT] ⚠️ Fetch error: ${fetchError.message}`);
-                  }
-
-                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
-                  logger.info(`[START-AGENT] 🚀 Dispatching: Character "${characterName}" → Agent "${agentName}"`);
-
-                  // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
-                  connection.bridge.agentDeployed = true;
-
-                  const dispatch =
-                    await this.agentDispatchClient.createDispatch(
-                      roomName,
-                      agentName,
-                      {
-                        metadata: JSON.stringify({
-                          device_mac: connection.macAddress,
-                          device_uuid: deviceId,
-                          character: characterName,
-                          child_profile: childProfile,
-                          timestamp: Date.now(),
-                        }),
-                      }
-                    );
-                  connection.currentCharacter = characterName;
-                  // Agent will greet via on_enter lifecycle hook
-                } catch (dispatchError) {
-                  // Reset flag on failure so retry can work
-                  connection.bridge.agentDeployed = false;
-                  logger.error(
-                    `❌ [START-AGENT] Failed to dispatch agent:`,
-                    dispatchError.message
-                  );
-                  connection.sendMqttMessage(
-                    JSON.stringify({
-                      type: "error",
-                      code: "AGENT_DISPATCH_FAILED",
-                      message: "Failed to start conversation agent",
-                      timestamp: Date.now(),
-                    })
-                  );
-                  return;
-                }
-              } else {
-                logger.error(
-                  `❌ [START-AGENT] AgentDispatchClient not initialized`
-                );
-                return;
-              }
-            }
+          if (!agentCheck.exists && !isModeSwitch) {
+            // With Pipecat, the agent is always running - we just need to verify connection
+            logger.info(`[START-AGENT] Pipecat connection verified, agent is ready`);
+            connection.bridge.agentJoined = true;
+            connection.bridge.agentDeployed = true;
+            connection.currentCharacter = connection.bridge.currentCharacter || "Cheeko";
+            // Pipecat agent will auto-greet based on metadata sent during SDP exchange
           } else {
             connection.bridge.agentJoined = true;
             connection.bridge.agentDeployed = true;
           }
-          // Agent will greet user via on_enter lifecycle hook
+          // Agent will greet user via Pipecat's on_enter lifecycle
         } else {
           logger.error(
-            `❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`
+            `❌ [START-AGENT] No active Pipecat connection for device: ${deviceId}`
           );
         }
       } else {
@@ -1353,11 +1183,8 @@ class MQTTGateway {
       }
 
       const connection = deviceInfo.connection;
-      if (
-        connection.bridge &&
-        connection.bridge.room &&
-        connection.bridge.room.localParticipant
-      ) {
+      // Use Pipecat bridge to forward the function call
+      if (connection.bridge && connection.bridge.isConnected) {
         const functionCallMessage = {
           type: "function_call",
           function_call: payload.function_call,
@@ -1365,12 +1192,7 @@ class MQTTGateway {
           session_id: macAddress,
           timestamp: Date.now(),
         };
-        const messageData = new TextEncoder().encode(
-          JSON.stringify(functionCallMessage)
-        );
-        await connection.bridge.room.localParticipant.publishData(messageData, {
-          reliable: true,
-        });
+        await connection.bridge.forwardMessage(functionCallMessage);
         await this.sendSuccessResponse(
           clientId,
           `Playing "${songName}"`,
@@ -1378,7 +1200,7 @@ class MQTTGateway {
         );
       } else {
         logger.error(
-          `❌ [SPECIFIC-MUSIC] No active LiveKit room for device: ${macAddress}`
+          `❌ [SPECIFIC-MUSIC] No active Pipecat connection for device: ${macAddress}`
         );
         await this.sendErrorResponse(
           clientId,
@@ -1427,11 +1249,8 @@ class MQTTGateway {
       }
 
       const connection = deviceInfo.connection;
-      if (
-        connection.bridge &&
-        connection.bridge.room &&
-        connection.bridge.room.localParticipant
-      ) {
+      // Use Pipecat bridge to forward the function call
+      if (connection.bridge && connection.bridge.isConnected) {
         const functionCallMessage = {
           type: "function_call",
           function_call: payload.function_call,
@@ -1439,12 +1258,7 @@ class MQTTGateway {
           session_id: macAddress,
           timestamp: Date.now(),
         };
-        const messageData = new TextEncoder().encode(
-          JSON.stringify(functionCallMessage)
-        );
-        await connection.bridge.room.localParticipant.publishData(messageData, {
-          reliable: true,
-        });
+        await connection.bridge.forwardMessage(functionCallMessage);
         await this.sendSuccessResponse(
           clientId,
           `Playing "${storyName}"`,
@@ -1452,7 +1266,7 @@ class MQTTGateway {
         );
       } else {
         logger.error(
-          `❌ [SPECIFIC-STORY] No active LiveKit room for device: ${macAddress}`
+          `❌ [SPECIFIC-STORY] No active Pipecat connection for device: ${macAddress}`
         );
         await this.sendErrorResponse(
           clientId,
@@ -1472,13 +1286,17 @@ class MQTTGateway {
     }
   }
 
-  async forwardSpecificContentRequest(room, requestData) {
+  /**
+   * Forward specific content request via Pipecat bridge
+   * @deprecated Use bridge.forwardMessage() directly
+   */
+  async forwardSpecificContentRequest(bridge, requestData) {
     try {
-      const messageData = new TextEncoder().encode(JSON.stringify(requestData));
-      await room.localParticipant.publishData(messageData, {
-        reliable: true,
-        topic: "specific_content",
-      });
+      if (bridge && bridge.isConnected) {
+        await bridge.forwardMessage(requestData);
+      } else {
+        throw new Error("Bridge not connected");
+      }
     } catch (error) {
       logger.error(
         `❌ [DATA-CHANNEL] Failed to forward request: ${error.message}`
@@ -1569,132 +1387,62 @@ class MQTTGateway {
   }
 
   /**
-   * Send shutdown signal to agent and wait for acknowledgment
-   * @param {Room} room - LiveKit room instance
+   * Send shutdown signal to Pipecat agent via bridge
+   * @param {PipecatBridge} bridge - Pipecat bridge instance
    * @param {string} sessionId - Session ID
    * @param {number} timeoutMs - Timeout in milliseconds (default: 3000)
-   * @returns {Promise<boolean>} - True if acknowledged, false if timeout
+   * @returns {Promise<boolean>} - True if sent successfully
    */
-  async sendAgentShutdownWithAck(room, sessionId, timeoutMs = 3000) {
-    return new Promise(async (resolve) => {
-      let ackReceived = false;
-      let timeoutId = null;
-      let ackHandler = null;
+  async sendAgentShutdownWithAck(bridge, sessionId, timeoutMs = 3000) {
+    // With Pipecat, we send a shutdown message via the bridge
+    // No ack mechanism currently - just send the message
+    if (!bridge || !bridge.isConnected) {
+      logger.warn(`[CLEANUP] Bridge not connected, cannot send shutdown`);
+      return false;
+    }
 
-      // Setup listener for acknowledgment
-      ackHandler = (data_packet) => {
-        try {
-          const message = JSON.parse(Buffer.from(data_packet.data).toString('utf-8'));
-          if (message.type === 'shutdown_ack' && message.session_id === sessionId) {
-            ackReceived = true;
-            if (timeoutId) clearTimeout(timeoutId);
-            room.off('data_received', ackHandler);
-            logger.info(`[CLEANUP] Received shutdown_ack from agent`);
-            resolve(true);
-          }
-        } catch (e) {
-          // Ignore parse errors
-        }
+    try {
+      const shutdownMessage = {
+        type: 'shutdown_request',
+        session_id: sessionId,
+        timestamp: Date.now(),
+        source: 'mqtt_gateway',
       };
 
-      room.on('data_received', ackHandler);
-
-      // Send shutdown signal
-      try {
-        const shutdownMessage = {
-          type: 'shutdown_request',
-          session_id: sessionId,
-          timestamp: Date.now(),
-          source: 'mqtt_gateway',
-          require_ack: true
-        };
-
-        const messageData = new Uint8Array(Buffer.from(JSON.stringify(shutdownMessage), 'utf8'));
-        await room.localParticipant.publishData(messageData, { reliable: true });
-        logger.info(`[CLEANUP] Sent shutdown_request, waiting for ack...`);
-      } catch (e) {
-        logger.warn(`[CLEANUP] Failed to send shutdown_request: ${e.message}`);
-        room.off('data_received', ackHandler);
-        resolve(false);
-        return;
-      }
-
-      // Set timeout
-      timeoutId = setTimeout(() => {
-        if (!ackReceived) {
-          logger.warn(`[CLEANUP] Shutdown ack timeout after ${timeoutMs}ms`);
-          room.off('data_received', ackHandler);
-          resolve(false);
-        }
-      }, timeoutMs);
-    });
-  }
-
-  /**
-   * Remove agent participant explicitly using LiveKit API
-   * @param {string} roomName - Room name
-   * @returns {Promise<boolean>} - True if removed, false otherwise
-   */
-  async removeAgentParticipant(roomName) {
-    try {
-      if (!this.roomService) {
-        logger.warn(`[CLEANUP] RoomService not available`);
-        return false;
-      }
-
-      const participants = await this.roomService.listParticipants(roomName);
-
-      for (const participant of participants) {
-        // Identify agent participants (identity contains 'agent')
-        const identity = participant.identity || '';
-        if (identity.toLowerCase().includes('agent') ||
-          identity.startsWith('agent-')) {
-          logger.info(`[CLEANUP] Removing agent participant: ${identity}`);
-          try {
-            await this.roomService.removeParticipant(roomName, identity);
-            logger.info(`[CLEANUP] Successfully removed: ${identity}`);
-          } catch (removeErr) {
-            logger.warn(`[CLEANUP] Failed to remove ${identity}: ${removeErr.message}`);
-          }
-        }
-      }
-
+      await bridge.forwardMessage(shutdownMessage);
+      logger.info(`[CLEANUP] Sent shutdown_request to Pipecat`);
       return true;
-    } catch (error) {
-      logger.warn(`[CLEANUP] Error listing/removing agents: ${error.message}`);
+    } catch (e) {
+      logger.warn(`[CLEANUP] Failed to send shutdown_request: ${e.message}`);
       return false;
     }
   }
 
   /**
-   * Verify room has no agents remaining
-   * @param {string} roomName - Room name
+   * Remove agent from Pipecat session (no-op for Pipecat)
+   * With Pipecat, the agent is terminated when the session ends
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<boolean>} - Always returns true
+   */
+  async removeAgentParticipant(sessionId) {
+    // With Pipecat, agents are terminated when the session/pc_id is disconnected
+    // This is a no-op - cleanup is handled by terminateSession()
+    logger.info(`[CLEANUP] Agent cleanup for Pipecat session ${sessionId} - handled by session termination`);
+    return true;
+  }
+
+  /**
+   * Verify Pipecat session is cleaned up
+   * @param {string} sessionId - Session ID
    * @param {number} maxWaitMs - Max wait time (default: 2000)
    * @param {number} pollIntervalMs - Poll interval (default: 200)
-   * @returns {Promise<boolean>} - True if room is agent-free
+   * @returns {Promise<boolean>} - True if session is cleaned up
    */
-  async verifyRoomAgentFree(roomName, maxWaitMs = 2000, pollIntervalMs = 200) {
-    const startTime = Date.now();
-
-    while (Date.now() - startTime < maxWaitMs) {
-      try {
-        const agentCheck = await this.checkAgentInRoom(roomName);
-        if (!agentCheck.exists) {
-          logger.info(`[CLEANUP] Room ${roomName} is agent-free`);
-          return true;
-        }
-        logger.info(`[CLEANUP] Agent still in room, waiting...`);
-      } catch (error) {
-        // Room might be deleted already, that's okay
-        logger.info(`[CLEANUP] Room check error (may be deleted): ${error.message}`);
-        return true;
-      }
-
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-    }
-
-    logger.warn(`[CLEANUP] Room ${roomName} still has agent after ${maxWaitMs}ms`);
-    return false;
+  async verifyRoomAgentFree(sessionId, maxWaitMs = 2000, pollIntervalMs = 200) {
+    // With Pipecat, once we call terminateSession, the session is immediately cleaned up
+    // No need to poll - just return true
+    logger.info(`[CLEANUP] Pipecat session ${sessionId} terminated`);
+    return true;
   }
 
   /**
@@ -1710,64 +1458,50 @@ class MQTTGateway {
       return;
     }
 
-    const roomName = bridge.room?.name || bridge.roomName;
-    const sessionId = connection.udp?.session_id;
+    const sessionId = connection.sessionInfo?.sessionId || bridge.sessionId;
+    const pcId = bridge.pcId;
 
-    logger.info(`[CLEANUP] Starting robust cleanup for ${roomName} (reason: ${reason})`);
+    logger.info(`[CLEANUP] Starting cleanup for session ${sessionId} (reason: ${reason})`);
 
-    // Step 1: Stop audio forwarding immediately
-    bridge.stopAudioForwarding = true;
-    if (typeof bridge.clearAudioBuffers === 'function') {
-      bridge.clearAudioBuffers();
-    }
+    // Step 1: Clear audio playing state
+    bridge.isAudioPlaying = false;
+    bridge.audioPlayingStartTime = null;
 
-    // Step 2: Send shutdown signal with acknowledgment (wait up to 3s)
-    let shutdownAcked = false;
-    if (bridge.room?.localParticipant && bridge.room.state === 'connected') {
-      shutdownAcked = await this.sendAgentShutdownWithAck(bridge.room, sessionId, 3000);
-      logger.info(`[CLEANUP] Shutdown ack result: ${shutdownAcked}`);
-    }
-
-    // Step 3: If no ack, forcefully remove agent via API
-    if (!shutdownAcked && roomName) {
-      logger.info(`[CLEANUP] No ack received, removing agent via API`);
-      await this.removeAgentParticipant(roomName);
-    }
-
-    // Step 4: Verify room is agent-free (poll for up to 2s)
-    if (roomName) {
-      await this.verifyRoomAgentFree(roomName, 2000, 200);
-    }
-
-    // Step 5: Disconnect gateway from room
-    if (bridge.room) {
+    // Step 2: Terminate Pipecat session
+    if (pcId) {
       try {
-        await bridge.room.disconnect();
-        logger.info(`[CLEANUP] Disconnected from room: ${roomName}`);
+        await terminateSession(pcId);
+        logger.info(`[CLEANUP] Terminated Pipecat session: ${pcId}`);
       } catch (error) {
-        logger.warn(`[CLEANUP] Disconnect error: ${error.message}`);
+        logger.warn(`[CLEANUP] Pipecat terminate error: ${error.message}`);
       }
     }
 
-    // Step 6: Delete room from LiveKit server
-    if (roomName && this.roomService) {
+    // Step 3: Close bridge
+    if (bridge.close) {
       try {
-        await this.roomService.deleteRoom(roomName);
-        logger.info(`[CLEANUP] Deleted room: ${roomName}`);
+        await bridge.close();
+        logger.info(`[CLEANUP] Bridge closed`);
       } catch (error) {
-        logger.warn(`[CLEANUP] Delete room error: ${error.message}`);
+        logger.warn(`[CLEANUP] Bridge close error: ${error.message}`);
       }
     }
 
-    // Step 7: Clear bridge reference
+    // Step 4: Clear bridge reference
     connection.bridge = null;
 
-    // Step 8: Cleanup worker-pool session codecs (if any) for this connection
+    // Step 5: Remove from Pipecat sessions tracking
+    const deviceId = connection.deviceId || connection.macAddress;
+    if (deviceId) {
+      this.pipecatSessions.delete(deviceId);
+    }
+
+    // Step 6: Cleanup worker-pool session codecs (if any)
     if (this.workerPool && sessionId && this.workerPool.cleanupSession) {
       this.workerPool.cleanupSession(sessionId);
     }
 
-    logger.info(`[CLEANUP] Robust cleanup complete for ${roomName}`);
+    logger.info(`[CLEANUP] Cleanup complete for session ${sessionId}`);
   }
 
   async handleDeviceCharacterChange(deviceId, payload) {
@@ -1778,7 +1512,7 @@ class MQTTGateway {
       const crypto = require("crypto");
       const axios = require("axios");
 
-      // Get clientId from payload (for direct LiveKit connections)
+      // Get clientId from payload (for Pipecat connections)
       const clientId = payload.clientId;
       if (!clientId) {
         logger.error(`[CHARACTER-CHANGE] No clientId in payload for device: ${deviceId}`);
@@ -1803,42 +1537,41 @@ class MQTTGateway {
         const { newModeName } = response.data.data;
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
-        // Step 2: Get agent name for the new character
-        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-agent";
-        logger.info(`[CHARACTER-CHANGE] Agent: ${agentName}`);
-
-        // Step 3: Get device connection (optional - may not exist for direct LiveKit)
+        // Step 2: Get device connection
         const deviceInfo = this.deviceConnections.get(deviceId);
         const connection = deviceInfo?.connection;
 
-        // Step 4: Generate new room name
+        // Step 3: Generate new session ID
         const newSessionUuid = crypto.randomUUID();
         const macForRoom = deviceId.replace(/:/g, "");
-        const newRoomName = `${newSessionUuid}_${macForRoom}_conversation`;
+        const newSessionId = `${newSessionUuid}_${macForRoom}_conversation`;
 
-        // Step 5: Clean up old sessions for this device (if roomService available)
-        if (this.roomService) {
+        // Step 4: Terminate existing Pipecat session
+        const existingSession = this.pipecatSessions.get(deviceId);
+        if (existingSession && existingSession.pc_id) {
           try {
-            await LiveKitBridge.cleanupOldSessionsForDevice(
-              deviceId,
-              this.roomService,
-              newRoomName
-            );
-            logger.info(`[CHARACTER-CHANGE] Cleaned up old sessions for device`);
+            await terminateSession(existingSession.pc_id);
+            logger.info(`[CHARACTER-CHANGE] Terminated old Pipecat session: ${existingSession.pc_id}`);
           } catch (err) {
             logger.warn(`[CHARACTER-CHANGE] Cleanup error (non-fatal): ${err.message}`);
           }
         }
 
-        // Step 6: If connection exists in map, do cleanup and update state
-        if (connection) {
-          await this.performRobustAgentCleanup(connection, 'character_change');
-
-          // Update connection state
-          if (connection.udp) {
-            connection.udp.session_id = newRoomName;
+        // Step 5: Close existing bridge if present
+        if (connection && connection.bridge) {
+          try {
+            await connection.bridge.close();
+            connection.bridge = null;
+          } catch (err) {
+            logger.warn(`[CHARACTER-CHANGE] Bridge close error: ${err.message}`);
           }
-          connection.sessionId = newRoomName;
+        }
+
+        // Step 6: If connection exists, update state
+        if (connection) {
+          if (connection.sessionInfo) {
+            connection.sessionInfo.sessionId = newSessionId;
+          }
           connection.currentCharacter = newModeName;
           connection.isEnding = false;
           connection.endPromptSentTime = null;
@@ -1846,22 +1579,7 @@ class MQTTGateway {
           connection.lastActivityTime = Date.now();
         }
 
-        // Step 7: Create new room
-        if (this.roomService) {
-          try {
-            await this.roomService.createRoom({
-              name: newRoomName,
-              emptyTimeout: 60,
-              maxParticipants: 3,
-            });
-            logger.info(`[CHARACTER-CHANGE] Created new room: ${newRoomName}`);
-          } catch (error) {
-            logger.error(`[CHARACTER-CHANGE] Failed to create room: ${error.message}`);
-            return;
-          }
-        }
-
-        // Step 8: Fetch child profile for agent metadata
+        // Step 7: Fetch child profile for agent metadata
         let childProfile = null;
         try {
           const profileResponse = await axios.post(
@@ -1877,61 +1595,44 @@ class MQTTGateway {
           logger.warn(`[CHARACTER-CHANGE] ⚠️ Failed to fetch child profile: ${error.message}`);
         }
 
-        // Step 9: Dispatch agent to new room
-        if (this.agentDispatchClient) {
-          try {
-            await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
-              metadata: JSON.stringify({
-                device_mac: deviceId,
-                character: newModeName,
-                child_profile: childProfile,
-                timestamp: Date.now(),
-              }),
-            });
-            logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
-          } catch (error) {
-            logger.error(`[CHARACTER-CHANGE] Failed to dispatch agent: ${error.message}`);
-          }
-        }
-
-        // Step 10: ALWAYS send hello response with LiveKit credentials via MQTT
-        // This works for both direct LiveKit connections and UDP bridge mode
-        try {
-          const livekitCredentials = await generateLiveKitCredentials(
-            newRoomName,
-            deviceId.replace(/:/g, "_"), // Participant identity
-            {
-              macAddress: deviceId,
-              uuid: connection?.uuid || "",
-              roomType: "conversation",
-            }
-          );
-
-          const helloResponse = {
-            type: "hello",
-            version: connection?.protocolVersion || 4,
-            mode: "conversation",
+        // Step 8: Send character-change-ready message to device
+        // Device will need to send new SDP offer to establish new Pipecat session
+        const characterChangeMsg = {
+          type: "character_change_ready",
+          version: connection?.protocolVersion || 4,
+          mode: "conversation",
+          character: newModeName,
+          session_id: newSessionId,
+          timestamp: Date.now(),
+          transport: "pipecat",
+          // Device needs to reconnect with new SDP offer
+          requires_reconnect: true,
+          metadata: {
             character: newModeName,
-            session_id: newRoomName,
-            timestamp: Date.now(),
-            transport: "livekit",
-            livekit: livekitCredentials,
-            audio_params: {
-              sample_rate: 24000,
-              channels: 1,
-              frame_duration: 60,
-              format: "opus",
-            },
-          };
+            child_profile: childProfile,
+          },
+          audio_params: {
+            sample_rate: 24000,
+            channels: 1,
+            frame_duration: 60,
+            format: "opus",
+          },
+        };
 
-          const controlTopic = `devices/p2p/${clientId}`;
-          this.mqttPublish(controlTopic, helloResponse);
-          logger.info(`[CHARACTER-CHANGE] Sent hello response with LiveKit credentials for room: ${newRoomName}`);
-        } catch (credError) {
-          logger.error(`[CHARACTER-CHANGE] Failed to generate LiveKit credentials: ${credError.message}`);
-        }
+        const controlTopic = `devices/p2p/${clientId}`;
+        this.mqttPublish(controlTopic, characterChangeMsg);
+        logger.info(`[CHARACTER-CHANGE] Sent character_change_ready, device should reconnect with new SDP`);
 
-        logger.info(`[CHARACTER-CHANGE] Successfully switched to ${newModeName} (${agentName})`);
+        // Update Pipecat session tracking (will be fully populated when device reconnects)
+        this.pipecatSessions.set(deviceId, {
+          pc_id: null, // Will be set when device reconnects
+          sessionId: newSessionId,
+          character: newModeName,
+          childProfile: childProfile,
+          createdAt: Date.now(),
+        });
+
+        logger.info(`[CHARACTER-CHANGE] Successfully switched to ${newModeName}`);
       } else {
         logger.error(`[CHARACTER-CHANGE] API error:`, response.data);
       }
@@ -2066,17 +1767,17 @@ class MQTTGateway {
       // Stop old media bot (if music/story mode) before cleanup
       if (existingConnection?.roomType && existingConnection?.bridge) {
         const oldMode = existingConnection.roomType;
-        const oldRoomName = existingConnection.bridge.room?.name;
+        const oldSessionId = existingConnection.bridge.sessionId || existingConnection.sessionId;
 
-        logger.info(`[MODE-CHANGE] Step 2: Old mode: ${oldMode}, Old room: ${oldRoomName}`);
+        logger.info(`[MODE-CHANGE] Step 2: Old mode: ${oldMode}, Old session: ${oldSessionId}`);
 
-        if ((oldMode === "music" || oldMode === "story") && oldRoomName) {
+        if ((oldMode === "music" || oldMode === "story") && oldSessionId) {
           try {
-            logger.info(`[MODE-CHANGE] Stopping ${oldMode} bot for room: ${oldRoomName}`);
+            logger.info(`[MODE-CHANGE] Stopping ${oldMode} bot for session: ${oldSessionId}`);
             const axios = require("axios");
             await axios.post(
               `${MEDIA_API_BASE}/stop-bot`,
-              { room_name: oldRoomName },
+              { room_name: oldSessionId },
               mediaAxiosConfig()
             );
             await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2143,21 +1844,19 @@ class MQTTGateway {
 
         logger.info(`[MODE-CHANGE] Step 6: New room name: ${newRoomName}`);
 
-        // Clean up ALL old sessions for this device (prevents ghost rooms)
-        if (this.roomService) {
+        // Clean up stale Pipecat sessions for this device
+        const existingSession = this.pipecatSessions.get(deviceId);
+        if (existingSession) {
           try {
-            await LiveKitBridge.cleanupOldSessionsForDevice(
-              deviceId,
-              this.roomService,
-              newRoomName
-            );
-            logger.info(`[MODE-CHANGE] Cleaned up old sessions for device`);
+            await terminateSession(existingSession.pc_id);
+            this.pipecatSessions.delete(deviceId);
+            logger.info(`[MODE-CHANGE] Cleaned up old Pipecat session for device`);
           } catch (err) {
-            logger.warn(`[MODE-CHANGE] Cleanup error (non-fatal): ${err.message}`);
+            logger.warn(`[MODE-CHANGE] Session cleanup error (non-fatal): ${err.message}`);
           }
         }
 
-        // Handle both UDP bridge and direct LiveKit connection modes
+        // Handle both UDP bridge and direct Pipecat connection modes
         if (connection.udp) {
           connection.udp.session_id = newRoomName;
         }
@@ -2167,15 +1866,15 @@ class MQTTGateway {
         connection.goodbyeSent = false;
         connection.lastActivityTime = Date.now();
 
-        logger.info(`[MODE-CHANGE] Step 7: Creating new LiveKitBridge`);
-        // Create new LiveKitBridge with workerPool
-        const newBridge = new LiveKitBridge(
+        logger.info(`[MODE-CHANGE] Step 7: Creating new PipecatBridge`);
+        // Create new PipecatBridge with workerPool
+        const newBridge = new PipecatBridge(
           connection,
           connection.protocolVersion || 1,
           deviceId,
           newSessionUuid,
           connection.userData || {},
-          this.workerPool  // CRITICAL: Pass workerPool to prevent "Cannot read properties of undefined (reading 'initializeWorker')" error
+          this.workerPool
         );
         connection.bridge = newBridge;
 
@@ -2183,13 +1882,10 @@ class MQTTGateway {
           connection.bridge = null;
         });
 
-        logger.info(`[MODE-CHANGE] Step 8: Connecting to LiveKit room`);
-        await newBridge.connect(
-          connection.audio_params || { sample_rate: 24000, channels: 1 },
-          connection.features || {},
-          this.roomService
-        );
-        logger.info(`[MODE-CHANGE] ✅ Connected to LiveKit`);
+        // Note: For mode change, we may not have an SDP offer from the device yet
+        // The device will need to send a new hello with SDP offer after mode change
+        // For now, just prepare the bridge - actual connection happens when device sends SDP
+        logger.info(`[MODE-CHANGE] Step 8: PipecatBridge prepared (connection pending SDP from device)`);
 
         // Fetch character and child profile for conversation mode
         let currentCharacter = null;
@@ -2210,9 +1906,11 @@ class MQTTGateway {
           logger.info(`[MODE-CHANGE] ✅ Character: ${currentCharacter || 'null'}`);
         }
 
-        logger.info(`[MODE-CHANGE] Step 10: Sending mode_update/hello to device`);
+        logger.info(`[MODE-CHANGE] Step 10: Sending mode_update to device`);
 
-        // Check if using direct LiveKit connection (no UDP) or UDP bridge
+        // For Pipecat, device needs to reconnect with new SDP exchange
+        // Send mode_update to notify device of the mode change
+        // Device will respond with new hello containing SDP offer
         if (connection.udp) {
           // UDP bridge mode - send mode_update with UDP credentials
           const modeUpdateMsg = {
@@ -2242,41 +1940,28 @@ class MQTTGateway {
           connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
           logger.info(`[MODE-CHANGE] Sent mode_update (UDP mode, listening_mode: ${connection.deviceMode || "manual"})`);
         } else {
-          // Direct LiveKit mode - send hello response with LiveKit credentials
-          try {
-            const livekitCredentials = await generateLiveKitCredentials(
-              newRoomName,
-              deviceId.replace(/:/g, "_"),
-              {
-                macAddress: deviceId,
-                uuid: connection.uuid || "",
-                roomType: newMode,
-              }
-            );
-
-            const helloResponse = {
-              type: "hello",
-              version: connection.protocolVersion || 4,
-              mode: newMode,
-              ...(newMode === "conversation" && currentCharacter
-                ? { character: currentCharacter }
-                : {}),
-              session_id: newRoomName,
-              timestamp: Date.now(),
-              transport: "livekit",
-              livekit: livekitCredentials,
-              audio_params: {
-                sample_rate: 24000,
-                channels: 1,
-                frame_duration: 60,
-                format: "opus",
-              },
-            };
-            connection.sendMqttMessage(JSON.stringify(helloResponse));
-            logger.info(`[MODE-CHANGE] Sent hello response (direct LiveKit mode) for room: ${newRoomName}`);
-          } catch (credError) {
-            logger.error(`[MODE-CHANGE] Failed to generate LiveKit credentials: ${credError.message}`);
-          }
+          // Direct Pipecat mode - send mode_update, device will reconnect with SDP
+          const modeUpdateMsg = {
+            type: "mode_update",
+            mode: newMode,
+            listening_mode: connection.deviceMode || "manual",
+            ...(newMode === "conversation" && currentCharacter
+              ? { character: currentCharacter }
+              : {}),
+            session_id: newRoomName,
+            timestamp: Date.now(),
+            transport: "pipecat",
+            // Device should send new hello with SDP offer to establish Pipecat connection
+            reconnect_required: true,
+            audio_params: {
+              sample_rate: 24000,
+              channels: 1,
+              frame_duration: 60,
+              format: "opus",
+            },
+          };
+          connection.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+          logger.info(`[MODE-CHANGE] Sent mode_update (Pipecat mode) - device should reconnect with SDP`);
         }
 
         // Handle mode-specific startup
@@ -2286,45 +1971,13 @@ class MQTTGateway {
         } else if (newMode === "story") {
           await connection.spawnStoryBot(newRoomName);
         } else if (newMode === "conversation") {
-          if (this.agentDispatchClient) {
-            try {
-              // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
-              logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
-              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-agent";
-              logger.info(`[MODE-CHANGE] 🚀 Dispatching: Character "${currentCharacter || 'Cheeko'}" → Agent "${agentName}"`)
-
-              // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
-              newBridge.agentDeployed = true;
-
-              await this.agentDispatchClient.createDispatch(
-                newRoomName,
-                agentName,
-                {
-                  metadata: JSON.stringify({
-                    device_mac: connection.macAddress,
-                    device_uuid: deviceId,
-                    character: currentCharacter || "Cheeko",
-                    child_profile: childProfile,
-                    timestamp: Date.now(),
-                  }),
-                }
-              );
-              logger.info(`[MODE-CHANGE] ✅ Agent dispatched successfully`);
-              // Agent will greet via on_enter lifecycle hook
-            } catch (error) {
-              // Reset flag on failure so retry can work
-              newBridge.agentDeployed = false;
-              logger.error(
-                `❌ [MODE-CHANGE] Failed to dispatch agent:`,
-                error.message
-              );
-              logger.error(`[MODE-CHANGE] Agent dispatch error stack:`, error.stack);
-            }
-          } else {
-            logger.error(
-              `❌ [MODE-CHANGE] AgentDispatchClient not initialized`
-            );
-          }
+          // With Pipecat, the agent is always running on the Pipecat server
+          // Character/profile metadata will be sent during SDP exchange when device reconnects
+          newBridge.currentCharacter = currentCharacter || "Cheeko";
+          newBridge.childProfile = childProfile;
+          newBridge.agentDeployed = false; // Will be true after SDP exchange
+          logger.info(`[MODE-CHANGE] Pipecat conversation mode - character: ${currentCharacter || 'Cheeko'}`);
+          logger.info(`[MODE-CHANGE] Waiting for device to reconnect with SDP offer...`);
         }
 
         logger.info(`✅ [MODE-CHANGE] Complete: ${oldMode} → ${newMode}`);

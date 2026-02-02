@@ -9,12 +9,16 @@
     "reconnectPeriod": 1000,
     "connectTimeout": 30000
   },
-    "livekit": {
+  "pipecat": {
+    "url": "http://192.168.1.168:7860",
+    "offer_endpoint": "/api/offer",
+    "message_endpoint": "/api/message",
+    "disconnect_endpoint": "/api/disconnect",
+    "timeout_ms": 10000
+  },
+  "livekit": {
     "url": "wss://cheekotest-cw0h23qc.livekit.cloud",
     "api_key": "APIH7cPNdCWbjXf",
     "api_secret": "RyfUil3IY1k1eKtOOnbSi0n06p4cTkayOeUVOJVewhXD"
   }
 }
-
-
-
