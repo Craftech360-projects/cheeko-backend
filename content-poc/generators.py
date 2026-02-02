@@ -113,6 +113,13 @@ def generate_audio(text, step_number, output_dir, model_id="eleven_turbo_v2_5", 
                     mixed.export(filepath, format="mp3")
                     print(f"Mixed voice + sound effect for step {step_number}")
                     
+                    # Cleanup intermediate files
+                    try:
+                        os.remove(voice_only_path)
+                        os.remove(sfx_path)
+                    except OSError as e:
+                        print(f"Error removing temp files: {e}")
+                    
                 except ImportError:
                     print("pydub not installed. Saving voice-only. Install with: pip install pydub")
                     # Just use voice-only
@@ -165,11 +172,16 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
             if esp32_mode:
                 # Resize to 150x150
                 img = img.resize((150, 150), Image.Resampling.NEAREST)
-                # Overwrite filename to be .jpg for better size control if needed, or keep png
-                # Let's save as optimized JPEG for strict size control
-                path = path.replace(".png", ".jpg")
-                img = img.convert("RGB")
-                img.save(path, "JPEG", quality=85, optimize=True)
+                
+                # Ensure path ends in .png
+                if path.endswith(".jpg") or path.endswith(".jpeg"):
+                    path = path.rsplit('.', 1)[0] + ".png"
+                
+                # Save as optimized PNG (P mode for small size if possible, or usually just RGB/RGBA)
+                # For pixel art, keeping it as PNG is strictly better for quality.
+                # We can try to optimize it by converting to P (palette types) if we wanted strictly <20KB,
+                # but standard PNG at 150x150 is usually small enough.
+                img.save(path, "PNG", optimize=True)
             else:
                 if is_bytes:
                     with open(path, "wb") as f:
