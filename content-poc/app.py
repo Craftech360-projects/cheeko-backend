@@ -176,9 +176,13 @@ def main():
 
         if content_data:
             # Setup Output Directory
-            # Use the currently entered topic for the directory name
-            dir_name = topic.replace(" ", "_").strip()
-            if not dir_name: dir_name = "Untitled_Project"
+            # If we're viewing a history item, use that exact folder name
+            # Otherwise, use the topic from the text input
+            if selected_history != "(New Generation)":
+                dir_name = selected_history  # Use exact history folder name
+            else:
+                dir_name = topic.replace(" ", "_").strip()
+                if not dir_name: dir_name = "Untitled_Project"
                 
             output_dir = os.path.join("output", dir_name)
             os.makedirs(output_dir, exist_ok=True)
