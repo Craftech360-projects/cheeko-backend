@@ -16,7 +16,7 @@ load_dotenv()
 st.set_page_config(page_title="Cheeko Content Factory", layout="wide")
 
 def main():
-    st.title("🧸 Cheeko Content Factory POC")
+    st.title("🧸 Cheeko Content Factory")
     st.markdown("Generate 10-step audio guides with Multi-Agent AI.")
 
     # ---------------- Sidebar Config ----------------
@@ -31,7 +31,7 @@ def main():
         # Content Type Selector
         content_type = st.selectbox(
             "Content Type", 
-            ["Story", "Routine", "Learning", "Song/Rhyme", "Meditation"]
+            [ "Routine", "Learning","Story",  "Meditation","Song/Rhyme"]
         )
         
         eleven_model = st.selectbox(
@@ -41,9 +41,9 @@ def main():
         
         # Voice Map
         voices = {
+            "Mimi (Child - Australian)": "zrHiDhphv9ZnVXBqCLjz",
             "Cheeko (Default - Kid Friendly)": "mHX7OoPk2G45VMAuinIt",
             "Gigi (Child - American)": "jBpfuIE2acCO8z3wKNLl",
-            "Mimi (Child - Australian)": "zrHiDhphv9ZnVXBqCLjz", 
             "Rachel": "21m00Tcm4TlvDq8ikWAM",
             "Nicole (Soft & Calm)": "piTKgcLEGmPE4e6mEKli",
             "Bella (Soft)": "EXAVITQu4vr4xnSDxMaL"
