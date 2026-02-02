@@ -1,0 +1,6 @@
+crewai
+google-genai
+elevenlabs
+streamlit
+python-dotenv
+
