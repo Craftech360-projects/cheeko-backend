@@ -13,10 +13,43 @@ def init_clients():
     # New SDK handles auth via env var GOOGLE_API_KEY usually, or we pass it
     pass
 
-def generate_audio(text, step_number, output_dir, model_id="eleven_turbo_v2_5", voice_id="21m00Tcm4TlvDq8ikWAM", settings=None):
+def generate_sound_effect(description, step_number, output_dir):
+    """
+    Generate a sound effect using ElevenLabs Sound Effects API.
+    Returns the filepath of the generated sound effect, or None if failed.
+    """
+    try:
+        client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+        
+        print(f"Generating sound effect for step {step_number}: {description}")
+        
+        # ElevenLabs Sound Effects API
+        # Note: This uses the sound-generation endpoint
+        result = client.text_to_sound_effects.convert(
+            text=description,
+            duration_seconds=3.0,  # Short ambient sound
+            prompt_influence=0.5   # How closely to follow the prompt
+        )
+        
+        # Save the sound effect
+        audio_bytes = b"".join(result)
+        filename = f"step_{step_number}_sfx.mp3"
+        filepath = os.path.join(output_dir, filename)
+        
+        with open(filepath, "wb") as f:
+            f.write(audio_bytes)
+        
+        return filepath
+    except Exception as e:
+        print(f"Error generating sound effect for step {step_number}: {e}")
+        print("Continuing without sound effect...")
+        return None
+
+def generate_audio(text, step_number, output_dir, model_id="eleven_turbo_v2_5", voice_id="mHX7OoPk2G45VMAuinIt", settings=None, sound_effect_description=None):
     """
     Generate audio using ElevenLabs.
     settings: dict with 'stability', 'similarity_boost', 'style', 'use_speaker_boost'
+    sound_effect_description: Optional description for background sound effect
     """
     try:
         client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
@@ -44,8 +77,59 @@ def generate_audio(text, step_number, output_dir, model_id="eleven_turbo_v2_5", 
         filename = f"step_{step_number}_audio.mp3"
         filepath = os.path.join(output_dir, filename)
         
-        with open(filepath, "wb") as f:
+        # Save voice-only version first
+        voice_only_path = os.path.join(output_dir, f"step_{step_number}_voice_only.mp3")
+        with open(voice_only_path, "wb") as f:
             f.write(audio_bytes)
+        
+        # If sound effect is requested, generate and mix
+        if sound_effect_description:
+            sfx_path = generate_sound_effect(sound_effect_description, step_number, output_dir)
+            
+            if sfx_path:
+                try:
+                    from pydub import AudioSegment
+                    
+                    # Load both audio files
+                    voice = AudioSegment.from_mp3(voice_only_path)
+                    sfx = AudioSegment.from_mp3(sfx_path)
+                    
+                    # Make sound effect quieter (background)
+                    sfx = sfx - 15  # Reduce volume by 15dB
+                    
+                    # Loop or trim sfx to match voice duration
+                    if len(sfx) < len(voice):
+                        # Loop the sound effect
+                        loops_needed = (len(voice) // len(sfx)) + 1
+                        sfx = sfx * loops_needed
+                    
+                    # Trim to voice length
+                    sfx = sfx[:len(voice)]
+                    
+                    # Mix: overlay sound effect under voice
+                    mixed = voice.overlay(sfx)
+                    
+                    # Export mixed audio
+                    mixed.export(filepath, format="mp3")
+                    print(f"Mixed voice + sound effect for step {step_number}")
+                    
+                except ImportError:
+                    print("pydub not installed. Saving voice-only. Install with: pip install pydub")
+                    # Just use voice-only
+                    with open(filepath, "wb") as f:
+                        f.write(audio_bytes)
+                except Exception as mix_error:
+                    print(f"Error mixing audio: {mix_error}. Using voice-only.")
+                    with open(filepath, "wb") as f:
+                        f.write(audio_bytes)
+            else:
+                # No sfx generated, use voice only
+                with open(filepath, "wb") as f:
+                    f.write(audio_bytes)
+        else:
+            # No sound effect requested
+            with open(filepath, "wb") as f:
+                f.write(audio_bytes)
             
         return filepath
     except Exception as e:

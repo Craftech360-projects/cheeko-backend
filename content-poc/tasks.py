@@ -32,15 +32,15 @@ class ContentTasks:
     def write_task(self, agent, context_task, content_type="Story"):
         # Distinct writing style based on type
         if content_type == "Routine":
-            tone = "Encouraging, clear, and direct. Use phrases like 'Let's try...' or 'Now we...'. slightly rhythmic but NOT rhyming poems. Conversational."
+            tone = "Encouraging, clear, and direct. Use phrases like 'Let's try...' or 'Now we...'. Slightly rhythmic but NOT rhyming poems. Conversational. Add gentle pauses with commas."
         elif content_type == "Song/Rhyme":
-            tone = "Lyrical, rhyming (AABB or ABCB), and very rhythmic. It should be sung or chanted."
+            tone = "Lyrical, rhyming (AABB or ABCB), and very rhythmic. It should be sung or chanted. Kid-friendly and playful."
         elif content_type == "Learning":
-            tone = "Curious, excited, and educational. Ask questions and give answers."
+            tone = "Curious, excited, and educational. Ask questions and give answers. Speak slowly for kids to follow."
         elif content_type == "Meditation":
-            tone = "Very slow, sensory, varying breath focus. Whisper-soft."
+            tone = "Very slow, sensory, varying breath focus. Whisper-soft. Long pauses between phrases."
         else:
-            tone = "Narrative, descriptive, and dreamy. Typical storybook language."
+            tone = "Narrative, descriptive, and dreamy. Typical storybook language. Gentle pacing for children."
 
         return Task(
             description=dedent(f"""
@@ -51,8 +51,17 @@ class ContentTasks:
                 - Total steps: 10.
                 - Keep each step short (1-2 sentences).
                 - Ensure the language fits the Target Tone perfectly.
+                - Make it KID-FRIENDLY: simple words, gentle pacing, add commas for natural pauses.
+                - For EACH step, also suggest a SHORT sound effect description (e.g., "gentle bell chime", "soft rain", "playful giggle", "calm ocean waves").
+                
+                IMPORTANT: Output valid JSON format ONLY.
+                Structure:
+                [
+                    {{ "step": 1, "text": "...", "sound_effect": "gentle bell chime" }},
+                    ...
+                ]
             """),
-            expected_output="A step-by-step script (Step 1 to Step 10) with the exact text to be spoken.",
+            expected_output="A valid JSON array containing 10 objects, each with 'step', 'text' (the spoken script), and 'sound_effect' (brief description).",
             context=[context_task],
             agent=agent
         )
@@ -68,15 +77,16 @@ class ContentTasks:
                 Based on the script, create an Image Generation Prompt for EACH of the 10 steps.
                 - Style Constraint: "{style_desc}".
                 - The prompt should describe the visual scene matching the step.
+                - PRESERVE the 'text' and 'sound_effect' fields from the input.
                 
                 IMPORTANT: Output valid JSON format ONLY.
                 Structure:
                 [
-                    {{ "step": 1, "text": "...", "image_prompt": "..." }},
+                    {{ "step": 1, "text": "...", "sound_effect": "...", "image_prompt": "..." }},
                     ...
                 ]
             """),
-            expected_output="A valid JSON array containing 10 objects, each with 'step', 'text' (from the script), and 'image_prompt'.",
+            expected_output="A valid JSON array containing 10 objects, each with 'step', 'text', 'sound_effect', and 'image_prompt'.",
             context=[context_task],
             agent=agent
         )

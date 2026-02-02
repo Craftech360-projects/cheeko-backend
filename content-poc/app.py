@@ -41,9 +41,10 @@ def main():
         
         # Voice Map
         voices = {
+            "Cheeko (Default - Kid Friendly)": "mHX7OoPk2G45VMAuinIt",
             "Gigi (Child - American)": "jBpfuIE2acCO8z3wKNLl",
             "Mimi (Child - Australian)": "zrHiDhphv9ZnVXBqCLjz", 
-            "Rachel (Default)": "21m00Tcm4TlvDq8ikWAM",
+            "Rachel": "21m00Tcm4TlvDq8ikWAM",
             "Nicole (Soft & Calm)": "piTKgcLEGmPE4e6mEKli",
             "Bella (Soft)": "EXAVITQu4vr4xnSDxMaL"
         }
@@ -65,7 +66,7 @@ def main():
 
         # Display Mode Config
         st.markdown("### 🖥️ Display Settings")
-        esp32_mode = st.checkbox("Optimize for ESP32 Display (150x150 px, Pixel Art)", value=False)
+        esp32_mode = st.checkbox("Optimize for ESP32 Display (150x150 px, Pixel Art)", value=True)
 
         # History / Load Previous
         st.markdown("---")
@@ -176,13 +177,9 @@ def main():
 
         if content_data:
             # Setup Output Directory
-            # If we're viewing a history item, use that exact folder name
-            # Otherwise, use the topic from the text input
-            if selected_history != "(New Generation)":
-                dir_name = selected_history  # Use exact history folder name
-            else:
-                dir_name = topic.replace(" ", "_").strip()
-                if not dir_name: dir_name = "Untitled_Project"
+            # Use the currently entered topic for the directory name
+            dir_name = topic.replace(" ", "_").strip()
+            if not dir_name: dir_name = "Untitled_Project"
                 
             output_dir = os.path.join("output", dir_name)
             os.makedirs(output_dir, exist_ok=True)
@@ -202,11 +199,12 @@ def main():
                     step = item.get('step')
                     text = item.get('text')
                     prompt = item.get('image_prompt')
+                    sound_effect = item.get('sound_effect')  # Get sound effect description
                     
                     status_text.text(f"Processing Step {step}/{len(content_data)}...")
                     
-                    # Generate Both
-                    generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings)
+                    # Generate Both (with sound effects)
+                    generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
                     generate_image(prompt, step, output_dir, esp32_mode)
                     
                     progress_bar.progress((i + 1) / len(content_data))
@@ -223,6 +221,7 @@ def main():
                 step = item.get('step')
                 text = item.get('text')
                 prompt = item.get('image_prompt')
+                sound_effect = item.get('sound_effect', '')  # Get sound effect, default to empty
                 
                 # Check for existing generated files
                 audio_file = os.path.join(output_dir, f"step_{step}_audio.mp3")
@@ -259,11 +258,11 @@ def main():
                             if os.path.exists(audio_file):
                                 st.audio(audio_file)
                                 if st.button("🔄 Regen Audio", key=f"aud_{step}"):
-                                    path = generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings)
+                                    path = generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
                                     st.rerun()
                             else:
                                 if st.button(f"🔊 Audio", key=f"aud_{step}"):
-                                    path = generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings)
+                                    path = generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
                                     if path: st.rerun()
                         with c2:
                             if found_image:

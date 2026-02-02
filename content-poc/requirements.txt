@@ -3,4 +3,6 @@ google-genai
 elevenlabs
 streamlit
 python-dotenv
-
+pydub
+Pillow
+requests
