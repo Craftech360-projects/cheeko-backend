@@ -75,25 +75,31 @@ def main():
         os.makedirs(output_root, exist_ok=True)
         previous_projects = [d for d in os.listdir(output_root) if os.path.isdir(os.path.join(output_root, d))]
         
-        selected_history = st.selectbox("Load Previous Project", ["(New Generation)"] + previous_projects)
-    
-    # ---------------- Load History Logic ----------------
-    # We update the 'topic' variable based on history selection, or keep it manageable
-    # We must ensure 'topic' is available for the rest of the script.
-    
-    # ---------------- Load History Logic ----------------
-    if selected_history != "(New Generation)":
-        history_dir = os.path.join(output_root, selected_history)
-        plan_path = os.path.join(history_dir, "plan.json")
-        
-        # Load the plan into session state if it exists
-        if os.path.exists(plan_path):
-             with open(plan_path, "r") as f:
-                st.session_state['raw_result'] = f.read()
-             # Update session state topic to match history
-             st.session_state['topic'] = selected_history.replace("_", " ")
-        else:
-            st.sidebar.error("No plan.json found in this folder.")
+        # Use a callback to handle history loading explicitly
+        def on_history_change():
+            current_selection = st.session_state.history_selector
+            if current_selection != "(New Generation)":
+                history_dir = os.path.join("output", current_selection)
+                plan_path = os.path.join(history_dir, "plan.json")
+                if os.path.exists(plan_path):
+                    with open(plan_path, "r") as f:
+                        st.session_state['raw_result'] = f.read()
+                    # Update active topic
+                    st.session_state['topic'] = current_selection.replace("_", " ")
+                else:
+                    st.toast("No plan.json found in this folder.", icon="⚠️")
+            else:
+                # Optional: Reset only if you want "New" to be blank? 
+                # Or keep the last topic. Let's keep it safe and not auto-clear 
+                # unless we want a fresh start.
+                pass
+
+        selected_history = st.selectbox(
+            "Load Previous Project", 
+            ["(New Generation)"] + previous_projects,
+            key="history_selector",
+            on_change=on_history_change
+        )
     
     # Ensure topic is initialized
     if 'topic' not in st.session_state:
@@ -103,9 +109,7 @@ def main():
     st.markdown("---")
     
     # Topic Input (bound to session state)
-    topic = st.text_input("Topic", value=st.session_state['topic'], key="topic_input")
-    # Sync back to persistence (optional, but good for flows)
-    st.session_state['topic'] = topic
+    topic = st.text_input("Topic", key="topic") # Direct binding to session_state['topic']
     
     col_gen, col_redo = st.columns(2)
     with col_gen:
@@ -117,7 +121,57 @@ def main():
             redo_btn = False
 
     # ---------------- Handle Plan Generation ----------------
-    if generate_btn or redo_btn:
+    # ---------------- Handle Plan Generation ----------------
+    # Initialize confirmation state
+    if 'confirm_gen' not in st.session_state:
+        st.session_state.confirm_gen = False
+    
+    # Trigger confirmation on button click
+    if generate_btn:
+        st.session_state.confirm_gen = True
+        
+    start_generation = False
+    
+    # Show Confirmation Dialog
+    if st.session_state.confirm_gen:
+        st.markdown("---")
+        # Calc target dir
+        target_dir_name = topic.replace(" ", "_").strip()
+        if not target_dir_name: target_dir_name = "Untitled_Project"
+        target_path = os.path.join("output", target_dir_name)
+        
+        st.write(f"**Target Folder:** `{target_path}`")
+        
+        if os.path.exists(target_path):
+            # Check if it has content
+            files = os.listdir(target_path)
+            num_files = len(files)
+            
+            if num_files > 0:
+                st.warning(f"⚠️ Folder **`{target_dir_name}`** already exists and contains `{num_files}` files!")
+                st.write("Generating a new plan will replace the contents of this folder.")
+                confirm_label = "✅ Yes, Overwrite & Generate"
+            else:
+                st.info(f"ℹ️ Folder **`{target_dir_name}`** exists but is empty.")
+                confirm_label = "✅ Use Empty Folder & Generate"
+        else:
+            st.success(f"✨ Ready to create new project: **`{target_dir_name}`**")
+            confirm_label = "✅ Create & Generate"
+            
+        c1, c2 = st.columns([1,2])
+        if c1.button(confirm_label, key="confirm_btn"):
+            st.session_state.confirm_gen = False
+            start_generation = True
+        if c2.button("❌ Cancel", key="cancel_btn"):
+            st.session_state.confirm_gen = False
+            st.rerun()
+
+    # Redo skips confirmation (user already viewing it) or we can enable it. 
+    # Let's say Redo is "Try again on same topic", so just run it.
+    if redo_btn:
+        start_generation = True
+
+    if start_generation:
         if not os.getenv("GEMINI_API_KEY"):
             st.error("Please set GEMINI_API_KEY in .env")
             return
@@ -154,7 +208,9 @@ def main():
 
     # ---------------- Display Results & Asset Gen ----------------
     if 'raw_result' in st.session_state:
-        st.subheader(f"📝 Plan Output: {topic}")
+        # Use session state topic as source of truth for display
+        display_topic = st.session_state.get('topic', 'Unknown Topic')
+        st.subheader(f"📝 Plan Output: {display_topic}")
         
         content_data = None
         raw_text = st.session_state['raw_result']
@@ -177,8 +233,12 @@ def main():
 
         if content_data:
             # Setup Output Directory
-            # Use the currently entered topic for the directory name
-            dir_name = topic.replace(" ", "_").strip()
+            # CRITICAL FIX: ALWAYS derive directory from current TOPIC. 
+            # If we loaded history, 'topic' was updated to history name.
+            # If user typed new topic, 'topic' is the new topic.
+            # We NEVER rely on the dropdown value directly here, only the active topic variable.
+            
+            dir_name = display_topic.replace(" ", "_").strip()
             if not dir_name: dir_name = "Untitled_Project"
                 
             output_dir = os.path.join("output", dir_name)
