@@ -1495,19 +1495,69 @@ export default {
             this.questionPackDialogVisible = true;
         },
 
-        handleQuestionPackSubmit({ form, done }) {
-            const api = form.id ? Api.rfid.updateQuestionPack : Api.rfid.addQuestionPack;
-            api(form, ({ data }) => {
-                done && done();
-                if (data.code === 0) {
-                    this.$message.success(form.id ? 'Updated successfully' : 'Created successfully');
-                    this.questionPackDialogVisible = false;
-                    this.fetchQuestionPacks();
-                    this.loadStats();
-                    this.loadDropdownData();
-                } else {
-                    this.$message.error(data.msg || 'Operation failed');
+        handleQuestionPackSubmit({ form, questionsToProcess, done }) {
+            const processQuestions = () => {
+                if (!questionsToProcess || questionsToProcess.length === 0) {
+                    return Promise.resolve();
                 }
+                const promises = questionsToProcess.map((q, index) => {
+                    return new Promise((resolve) => {
+                        if (q.id) {
+                            // Update existing
+                            Api.rfid.updateQuestion(q, ({ data }) => {
+                               if(data.code !== 0) {
+                                   console.error(`Failed to update question ${q.id}: ${data.msg}`);
+                               }
+                               resolve(q.id);
+                            });
+                        } else {
+                            // Create new
+                            const newQ = {
+                                ...q,
+                                title: q.promptText ? q.promptText.substring(0, 50) : 'New Question',
+                                code: `Q_${Date.now()}_${index}`, // Generate temp code
+                                active: true,
+                                language: form.language,
+                                difficulty: 3,
+                                allowCaching: true
+                            };
+                            Api.rfid.addQuestion(newQ, ({ data }) => {
+                                if (data.code === 0 && data.data) {
+                                    resolve(data.data.id || data.data); // Assuming data returns ID or object
+                                } else {
+                                    console.error(`Failed to create question: ${data.msg}`);
+                                    resolve(null);
+                                }
+                            });
+                        }
+                    });
+                });
+                return Promise.all(promises);
+            };
+
+            processQuestions().then((ids) => {
+                // ids contains updated IDs and new IDs. Filter nulls.
+                // We need to preserve the order if possible, or just gather all valid IDs.
+                // form.questionIds currently has existing IDs, but we want the list in questionsToProcess order.
+                
+                const validIds = ids.filter(id => !!id);
+                if (validIds.length > 0) {
+                    form.questionIds = validIds;
+                }
+
+                const api = form.id ? Api.rfid.updateQuestionPack : Api.rfid.addQuestionPack;
+                api(form, ({ data }) => {
+                    done && done();
+                    if (data.code === 0) {
+                        this.$message.success(form.id ? 'Updated successfully' : 'Created successfully');
+                        this.questionPackDialogVisible = false;
+                        this.fetchQuestionPacks();
+                        this.loadStats();
+                        this.loadDropdownData();
+                    } else {
+                        this.$message.error(data.msg || 'Operation failed');
+                    }
+                });
             });
         },
 
@@ -2236,7 +2286,7 @@ export default {
 }
 .pack-card-header {
     background: linear-gradient(135deg, #ffffff 0%, #fcfcfc 100%);
-    padding: 16px;
+    padding: 16px 16px 16px 40px;
     border-bottom: 1px solid #f5f7fa;
 }
 .pack-title-row {

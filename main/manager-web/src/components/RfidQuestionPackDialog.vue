@@ -82,6 +82,7 @@
                       <el-input v-model="q.text" placeholder="Question Text (Required)" size="small" class="mb-2"></el-input>
                       <el-input v-model="q.audio" placeholder="Audio URL (Optional)" size="small">
                          <template slot="prepend"><i class="el-icon-mic"></i></template>
+                         <el-button slot="append" :icon="playingUrl === q.audio ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(q.audio)" v-if="q.audio"></el-button>
                       </el-input>
                   </div>
                   <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeQuestion(idx)"></el-button>
@@ -92,30 +93,58 @@
             </div>
           </template>
 
-          <!-- EDIT MODE: Select Existing -->
+          <!-- EDIT MODE: Linked Questions with Inline Edit -->
           <template v-else>
             <div class="section-header">
               <span class="section-title">📝 Linked Questions (Max 10)</span>
-              <span class="question-count">{{ form.questionIds.length }}/10</span>
+              <div>
+                <span class="question-count" style="margin-right: 8px">{{ localQuestions.length }}/10</span>
+                <el-button size="mini" type="success" icon="el-icon-plus" @click="addNewLinkedQuestion" :disabled="localQuestions.length >= 10">Create New</el-button>
+              </div>
             </div>
 
-            <el-form-item prop="questionIds" class="form-item">
-              <el-select 
-                v-model="form.questionIds" 
-                placeholder="Select questions for this pack" 
-                class="custom-select" 
-                filterable 
-                multiple
-                :multiple-limit="10"
-                collapse-tags>
-                <el-option
-                  v-for="q in questions"
-                  :key="q.id"
-                  :label="`${q.code} - ${q.title}`"
-                  :value="q.id"/>
-              </el-select>
-              <div class="field-hint">Select up to 10 questions. They will play in the order selected.</div>
-            </el-form-item>
+            <!-- Add Existing Question -->
+             <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+                <el-select 
+                  v-model="selectedQuestionToAdd" 
+                  placeholder="Link existing question..." 
+                  class="custom-select" 
+                  filterable 
+                  style="flex: 1"
+                  :disabled="localQuestions.length >= 10"
+                  @change="addLinkedQuestion"
+                  value-key="id">
+                  <el-option
+                    v-for="q in availableQuestions"
+                    :key="q.id"
+                    :label="`${q.code} - ${q.title}`"
+                    :value="q.id"/>
+                </el-select>
+             </div>
+
+            <div class="inline-questions-list">
+               <div v-for="(q, idx) in localQuestions" :key="idx" class="question-row">
+                  <div class="q-seq">{{ idx + 1 }}</div>
+                  <div class="q-inputs">
+                      <!-- Editable Prompt Text -->
+                      <el-input v-model="q.promptText" placeholder="Question Text" size="small" class="mb-2">
+                         <template slot="prepend">Prompt</template>
+                      </el-input>
+                      <!-- Editable Audio URL -->
+                      <el-input v-model="q.cachedAudioUrl" placeholder="Audio URL" size="small">
+                         <template slot="prepend"><i class="el-icon-mic"></i> URL</template>
+                         <el-button slot="append" :icon="playingUrl === q.cachedAudioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(q.cachedAudioUrl)" v-if="q.cachedAudioUrl"></el-button>
+                      </el-input>
+                      <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                          Code: {{ q.code || 'PENDING' }} <span v-if="q.id">(ID: {{ q.id }})</span>
+                      </div>
+                  </div>
+                  <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeLinkedQuestion(idx)"></el-button>
+               </div>
+               <div v-if="localQuestions.length === 0" class="empty-state-text">
+                  No questions linked. Create new or select existing above.
+               </div>
+            </div>
           </template>
         </div>
 
@@ -177,20 +206,29 @@ export default {
     return {
       dialogKey: Date.now(),
       saving: false,
+      localQuestions: [], // For Edit Mode: Stores full question objects
+      selectedQuestionToAdd: null,
+      currentAudio: null,
+      playingUrl: null,
       rules: {
         packCode: [
           { required: true, message: "Please enter pack code", trigger: "blur" }
         ],
         name: [
           { required: true, message: "Please enter pack name", trigger: "blur" }
-        ],
-        questionIds: [
-          { type: 'array', required: false, message: "Please select questions", trigger: "change" }
         ]
       }
     };
   },
+  computed: {
+    availableQuestions() {
+        // Filter out already selected questions
+        const selectedIds = this.localQuestions.map(q => q.id).filter(id => id !== null);
+        return this.questions.filter(q => !selectedIds.includes(q.id));
+    }
+  },
   methods: {
+    // Create Mode Methods
     addQuestion() {
         if (!this.form.questions) this.$set(this.form, 'questions', []);
         if (this.form.questions.length < 10) {
@@ -200,6 +238,81 @@ export default {
     removeQuestion(index) {
         this.form.questions.splice(index, 1);
     },
+
+    // Edit Mode Methods
+    initLocalQuestions() {
+        if (this.form.id && this.form.questionIds) {
+            this.localQuestions = this.form.questionIds.map(id => {
+                const q = this.questions.find(item => item.id === id);
+                if (q) {
+                    // Deep clone to avoid mutating prop directly and to allow diffing later if needed
+                    return JSON.parse(JSON.stringify(q));
+                }
+                // Fallback for ID not found in dropdown
+                return { id, promptText: 'Unknown Question', cachedAudioUrl: '', code: '?' };
+            }).filter(q => !!q);
+        } else {
+            this.localQuestions = [];
+        }
+    },
+    addLinkedQuestion(id) {
+        if(!id) return;
+        const q = this.questions.find(item => item.id === id);
+        if (q) {
+            this.localQuestions.push(JSON.parse(JSON.stringify(q)));
+        }
+        this.selectedQuestionToAdd = null;
+    },
+    addNewLinkedQuestion() {
+        if (this.localQuestions.length < 10) {
+            // Add a new pending question
+            this.localQuestions.push({ 
+                id: null, 
+                promptText: '', 
+                cachedAudioUrl: '', 
+                code: '', // Will be generated or labeled PENDING
+                language: this.form.language 
+            });
+        }
+    },
+    toggleAudio(url) {
+      if (!url) return;
+      
+      if (this.playingUrl === url) {
+        // Pause current
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+        }
+        this.playingUrl = null;
+      } else {
+        // Stop previous
+        this.stopAudio();
+        
+        // Play new
+        this.currentAudio = new Audio(url);
+        this.currentAudio.onended = () => {
+          this.playingUrl = null;
+        };
+        this.currentAudio.play().catch(err => {
+          console.error('Audio playback failed', err);
+          this.$message.error('Could not play audio');
+          this.playingUrl = null;
+        });
+        this.playingUrl = url;
+      }
+    },
+    stopAudio() {
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio = null;
+        }
+        this.playingUrl = null;
+    },
+    removeLinkedQuestion(index) {
+        this.localQuestions.splice(index, 1);
+    },
+
+
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {
@@ -215,20 +328,26 @@ export default {
                  return;
              }
           } else {
-             // Edit Mode: Check IDs
-             if (this.form.questionIds.length === 0) {
-                this.$message.warning("Please select at least one question for the pack.");
-                return;
+             // Edit Mode: Check localQuestions
+             if (this.localQuestions.length === 0) {
+                 this.$message.warning("Please link or create at least one question.");
+                 return;
              }
-             if (this.form.questionIds.length > 10) {
-                this.$message.warning("Maximum 10 questions allowed per pack.");
-                return;
+             if (this.localQuestions.some(q => !q.promptText || !q.promptText.trim())) {
+                 this.$message.warning("All questions must have prompt text.");
+                 return;
              }
+             
+             // Sync only EXISTING IDs to form for now. New ones (id=null) will be handled by parent.
+             this.form.questionIds = this.localQuestions
+                 .filter(q => q.id !== null)
+                 .map(q => q.id);
           }
 
           this.saving = true;
           this.$emit('submit', {
             form: this.form,
+            questionsToProcess: this.form.id ? this.localQuestions : [], // Dictionary of questions including new ones
             done: () => {
               this.saving = false;
             }
@@ -240,6 +359,7 @@ export default {
       });
     },
     cancel() {
+      this.stopAudio();
       this.saving = false;
       this.$emit('cancel');
     }
@@ -248,6 +368,9 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+        this.initLocalQuestions();
+      } else {
+        this.stopAudio();
       }
     }
   }

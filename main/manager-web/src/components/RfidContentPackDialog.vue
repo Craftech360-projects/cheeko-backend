@@ -71,13 +71,19 @@
                      <span class="seq-badge">{{ index + 1 }}</span>
                   </div>
                   <div class="item-col main-col">
-                      <el-input v-model="item.title" placeholder="Title" size="small" class="mb-1"></el-input>
-                      <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
-                          <template slot="prepend"><i class="el-icon-headset"></i></template>
-                      </el-input>
-                      <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small">
-                           <template slot="prepend"><i class="el-icon-picture"></i></template>
-                      </el-input>
+                      <div class="inputs-wrapper" style="flex: 1; min-width: 0;">
+                          <el-input v-model="item.title" placeholder="Title" size="small" class="mb-1"></el-input>
+                          <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
+                              <template slot="prepend"><i class="el-icon-headset"></i></template>
+                              <el-button slot="append" :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(item.audioUrl)" v-if="item.audioUrl"></el-button>
+                          </el-input>
+                          <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small">
+                               <template slot="prepend"><i class="el-icon-picture"></i></template>
+                          </el-input>
+                      </div>
+                      <div v-if="item.imageUrl" class="img-preview-box">
+                           <img :src="item.imageUrl" alt="Preview"/>
+                      </div>
                   </div>
                   <div class="item-col action-col">
                       <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeItem(index)"></el-button>
@@ -137,6 +143,8 @@ export default {
     return {
       dialogKey: Date.now(),
       saving: false,
+      currentAudio: null,
+      playingUrl: null,
       rules: {
         packCode: [
           { required: true, message: "Please enter pack code", trigger: "blur" }
@@ -165,6 +173,39 @@ export default {
             item.sequence = idx + 1;
         });
     },
+    toggleAudio(url) {
+      if (!url) return;
+      
+      if (this.playingUrl === url) {
+        // Pause current
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+        }
+        this.playingUrl = null;
+      } else {
+        // Stop previous
+        this.stopAudio();
+        
+        // Play new
+        this.currentAudio = new Audio(url);
+        this.currentAudio.onended = () => {
+          this.playingUrl = null;
+        };
+        this.currentAudio.play().catch(err => {
+          console.error('Audio playback failed', err);
+          this.$message.error('Could not play audio');
+          this.playingUrl = null;
+        });
+        this.playingUrl = url;
+      }
+    },
+    stopAudio() {
+        if (this.currentAudio) {
+            this.currentAudio.pause();
+            this.currentAudio = null;
+        }
+        this.playingUrl = null;
+    },
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {
@@ -188,6 +229,7 @@ export default {
       });
     },
     cancel() {
+      this.stopAudio();
       this.saving = false;
       this.$emit('cancel');
     }
@@ -196,6 +238,8 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+      } else {
+        this.stopAudio();
       }
     }
   }
@@ -384,8 +428,27 @@ export default {
     .main-col {
         flex: 1;
         display: flex;
-        flex-direction: column;
-        gap: 8px;
+        flex-direction: row; /* Changed from column to row for side-by-side */
+        gap: 12px;
+    }
+
+    .img-preview-box {
+        width: 100px;
+        height: 100px;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+        flex-shrink: 0;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: cover;
+        }
     }
 
     .action-col {
