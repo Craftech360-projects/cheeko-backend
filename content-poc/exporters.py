@@ -11,7 +11,7 @@ class ManagerAPIClient:
         }
         print(f"🔌 Initialized API Client: {self.api_url}")
 
-    def upload_file(self, file_path, content_type='story'):
+    def upload_file(self, file_path, content_type='story', category=None):
         """Uploads a file (audio or image) to the Manager API"""
         if not os.path.exists(file_path):
             print(f"❌ File not found: {file_path}")
@@ -32,10 +32,14 @@ class ManagerAPIClient:
             with open(file_path, 'rb') as f:
                 files = {'file': (os.path.basename(file_path), f, mime_type)}
                 data = {'contentType': content_type}
-                if not is_image:
+                
+                # Use provided category (e.g., pack_code) or default
+                if category:
+                    data['category'] = category
+                elif not is_image:
                     data['category'] = 'Generated'
                 
-                print(f"☁️ Uploading {os.path.basename(file_path)}...")
+                print(f"☁️ Uploading {os.path.basename(file_path)} to {data.get('category')}...")
                 response = requests.post(url, headers=self.headers, files=files, data=data)
                 
                 if response.status_code == 200:
@@ -81,6 +85,14 @@ class ManagerAPIClient:
         final_name = pack_name if pack_name else topic
         print(f"\n🚀 Starting Export for: {final_name}")
         
+        # --- Generate Pack Code Early (for unique folder) ---
+        import random
+        # Clean topic: remove spaces, special chars, keep short
+        clean_topic = "".join(c for c in topic if c.isalnum())[:10].upper()
+        if not clean_topic: clean_topic = "PACK"
+        pack_code = f"GEN_{clean_topic}_{random.randint(1000, 9999)}"
+        # ----------------------------------------------------
+        
         # 1. Scan directory for assets
         steps = []
         files = os.listdir(project_dir)
@@ -117,10 +129,12 @@ class ManagerAPIClient:
                 continue
             
             print(f"--- Processing Step {step_num} ---")
-            audio_url = self.upload_file(assets['audio'], content_type)
+            # PASS pack_code AS CATEGORY to force subfolder isolation
+            audio_url = self.upload_file(assets['audio'], content_type, category=pack_code)
+            
             image_url = None
             if 'image' in assets:
-                image_url = self.upload_file(assets['image'], content_type)
+                image_url = self.upload_file(assets['image'], content_type, category=pack_code)
             
             if audio_url:
                 pack_items.append({
@@ -134,10 +148,6 @@ class ManagerAPIClient:
             return False
 
         # 3. Create Pack
-        # Generate a unique Pack Code
-        import random
-        clean_topic = topic.replace(" ", "").upper()[:10]
-        pack_code = f"GEN_{clean_topic}_{random.randint(1000, 9999)}"
         
         payload = {
             "packCode": pack_code,
