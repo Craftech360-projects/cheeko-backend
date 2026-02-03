@@ -251,11 +251,37 @@ def main():
             # Global Actions
             st.info(f"✅ Previewing {len(content_data)} steps. Output Folder: `{output_dir}`")
             
+            # --- EDITABLE PLAN SECTION ---
+            st.subheader("✏️ Edit Plan Before Generation")
+            st.caption("You can edit the Text, Image Prompts, and Sound Effects below. Changes are auto-saved to plan.json.")
+            
+            # Use data_editor to allow editing
+            edited_data = st.data_editor(
+                content_data,
+                column_config={
+                    "step": st.column_config.NumberColumn("Step", width="small", disabled=True),
+                    "text": st.column_config.TextColumn("Voice Script", width="large"),
+                    "image_prompt": st.column_config.TextColumn("Image Prompt", width="large"),
+                    "sound_effect": st.column_config.TextColumn("SFX Instructions", width="small"),
+                },
+                use_container_width=True, 
+                num_rows="dynamic",
+                key="plan_editor"
+            )
+            
+            # Update content_data reference to the edited version
+            content_data = edited_data
+            
+            # Auto-Save Plan (Overwriting the previous save with edited version)
+            with open(os.path.join(output_dir, "plan.json"), "w") as f:
+                json.dump(content_data, f, indent=2)
+
             if st.button("✨ Generate ALL Assets (Audio + Images)"):
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
                 for i, item in enumerate(content_data):
+                    # Progress bar logic existing...
                     step = item.get('step')
                     text = item.get('text')
                     prompt = item.get('image_prompt')

@@ -111,6 +111,42 @@ Access the UI at `http://localhost:8501`.
 
 ---
 
+## 🏁 Deployment (Hosting)
+
+You can host this application permanently using **PM2** (Process Manager 2), which ensures it stays running and auto-restarts if it crashes.
+
+### Method 1: Direct PM2 Command
+Run this from the `content-poc` folder:
+
+```bash
+# Windows (assuming venv is active)
+pm2 start "python -m streamlit run app.py" --name cheeko-content
+
+# Linux / Mac
+pm2 start "streamlit run app.py" --name cheeko-content
+```
+
+### Method 2: ecosystem.config.js (Recommended)
+Create an `ecosystem.config.js` file for easier management:
+
+```javascript
+module.exports = {
+  apps: [{
+    name: "cheeko-content",
+    script: "python",
+    args: "-m streamlit run app.py",
+    cwd: "./",
+    interpreter: "none", // uses system/venv python
+    env: {
+      NODE_ENV: "production",
+    }
+  }]
+}
+```
+Then run: `pm2 start ecosystem.config.js`
+
+---
+
 ## 🛠️ Developer Notes
 
 ### Adding New Content Types
