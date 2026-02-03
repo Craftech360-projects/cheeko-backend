@@ -90,37 +90,8 @@ if (process.env.LOKI_HOST) {
     console.log('⚠️ [LOKI] No LOKI_HOST found, skipping Loki transport');
 }
 
-// Override console methods to send to Loki as well (if enabled)
-if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
-    console.log = (...args) => {
-        originalConsole.log(...args); // Still show in terminal
-        // Use setTimeout to ensure logger is ready
-        setTimeout(() => {
-            if (logger && logger.info) {
-                logger.info(args.join(' ')); // Also send to Loki
-            }
-        }, 0);
-    };
-
-    console.warn = (...args) => {
-        originalConsole.warn(...args);
-        setTimeout(() => {
-            if (logger && logger.warn) {
-                logger.warn(args.join(' '));
-            }
-        }, 0);
-    };
-
-    console.error = (...args) => {
-        originalConsole.error(...args);
-        setTimeout(() => {
-            if (logger && logger.error) {
-                logger.error(args.join(' '));
-            }
-        }, 0);
-    };
-
-    originalConsole.log('🔧 [LOKI] Console override enabled - console.log will also go to Loki');
-}
+// NOTE: Console override is now handled by console-override.js
+// Do NOT override console methods here as it causes duplicate logs
+// The console-override.js file handles forwarding console output to the logger
 
 module.exports = logger;

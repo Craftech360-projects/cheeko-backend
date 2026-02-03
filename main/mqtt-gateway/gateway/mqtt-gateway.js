@@ -601,7 +601,9 @@ class MQTTGateway {
           await this.handleModeChange(deviceId, mode, clientId);
           return;
         } else {
-          logger.warn(`⚠️ [MODE-CHANGE] No mode specified in payload`);
+          // No mode specified - cycle to next mode
+          logger.info(`🔄 [MODE-CHANGE] No mode specified, cycling to next mode`);
+          await this.handleDeviceModeChange(deviceId, originalPayload);
           return;
         }
       }

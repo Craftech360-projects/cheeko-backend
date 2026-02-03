@@ -727,6 +727,10 @@ class LiveKitBridge extends EventEmitter {
             if (!this.primaryAgentIdentity) {
               this.primaryAgentIdentity = participant.identity;
               console.log(`🎯 [PRIMARY-AGENT] Set primary agent on join: ${participant.identity}`);
+            } else if (this.primaryAgentIdentity === participant.identity) {
+              // Same agent event fired twice - skip duplicate processing
+              console.log(`⏭️ [PRIMARY-AGENT] Skipping duplicate event for same agent: ${participant.identity}`);
+              return;
             }
 
             // Set agent joined flag and resolve promise
@@ -741,22 +745,8 @@ class LiveKitBridge extends EventEmitter {
               this.agentJoinTimeout = null;
             }
 
-            // Send ready_for_greeting to agent via data channel to trigger greeting
-            console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
-            try {
-              const greetingTrigger = JSON.stringify({
-                type: "ready_for_greeting",
-                session_id: this.connection?.udp?.session_id || "unknown",
-                timestamp: Date.now(),
-              });
-              await this.room.localParticipant.publishData(
-                Buffer.from(greetingTrigger),
-                { reliable: true }
-              );
-              console.log(`✅ [GREETING] ready_for_greeting sent to agent`);
-            } catch (greetErr) {
-              console.error(`❌ [GREETING] Failed to send ready_for_greeting: ${greetErr.message}`);
-            }
+            // Don't send ready_for_greeting here - wait for device to send it via MQTT when ready
+            console.log(`⏳ [GREETING] Agent joined, waiting for device to send ready_for_greeting via MQTT`);
           }
         });
 

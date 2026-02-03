@@ -48,13 +48,6 @@ public interface AiAgentChatHistoryDao extends BaseMapper<AgentChatHistoryEntity
     List<Map<String, Object>> getMonthActiveDevices();
 
     /**
-     * ByAgentIDDeleteAudio
-     *
-     * @param agentId AgentID
-     */
-    void deleteAudioByAgentId(String agentId);
-
-    /**
      * ByAgentIDDeleteChatHistoryRecord
      *
      * @param agentId AgentID

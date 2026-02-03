@@ -132,16 +132,14 @@ public class AgentChatHistoryServiceImpl extends ServiceImpl<AiAgentChatHistoryD
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteByAgentId(String agentId, Boolean deleteAudio, Boolean deleteText) {
-        if (deleteAudio) {
-            baseMapper.deleteAudioByAgentId(agentId);
-        }
+        // If deleting audio references (audio_id column), clear them first
         if (deleteAudio && !deleteText) {
             baseMapper.deleteAudioIdByAgentId(agentId);
         }
+        // If deleting text, delete the entire history rows (audio_id gets deleted with them)
         if (deleteText) {
             baseMapper.deleteHistoryByAgentId(agentId);
         }
-
     }
 
     @Override

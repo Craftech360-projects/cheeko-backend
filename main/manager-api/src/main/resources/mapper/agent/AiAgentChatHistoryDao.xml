@@ -8,29 +8,21 @@
     <result column="mac_address" jdbcType="VARCHAR" property="macAddress" />
     <result column="agent_id" jdbcType="VARCHAR" property="agentId" />
     <result column="session_id" jdbcType="VARCHAR" property="sessionId" />
-    <result column="sort" jdbcType="BIGINT" property="sort" />
     <result column="chat_type" jdbcType="TINYINT" property="chatType" />
     <result column="content" jdbcType="VARCHAR" property="content" />
-    <result column="audio" jdbcType="LONGVARCHAR" property="audio" />
-    <result column="audio_url" jdbcType="VARCHAR" property="audioUrl" />
+    <result column="audio_id" jdbcType="VARCHAR" property="audioId" />
     <result column="created_at" jdbcType="TIMESTAMP" property="createdAt" />
     <result column="updated_at" jdbcType="TIMESTAMP" property="updatedAt" />
   </resultMap>
   <sql id="Base_Column_List">
     <!--@mbg.generated-->
-    id, mac_address, agent_id, session_id, sort, chat_type, content, audio, audio_url, 
+    id, mac_address, agent_id, session_id, chat_type, content, audio_id,
     created_at, updated_at
   </sql>
 
-  <delete id="deleteAudioByAgentId">
-    DELETE FROM ai_agent_chat_audio 
-    WHERE id IN (
-      SELECT audio_id 
-      FROM ai_agent_chat_history 
-      WHERE agent_id = #{agentId}
-    )
-  </delete>
-  
+  <!-- Audio deletion methods removed - ai_agent_chat_audio table does not exist -->
+  <!-- audio_id is stored directly in ai_agent_chat_history as a reference string -->
+
   <update id="deleteAudioIdByAgentId">
     UPDATE ai_agent_chat_history
     SET audio_id = NULL
