@@ -199,6 +199,14 @@ const optionalAuth = async (req, res, next) => {
  * Combines authentication and admin check
  */
 const requireAdmin = async (req, res, next) => {
+  // Check for Service Key first (God Mode for internal tools)
+  const serviceKey = extractServiceKey(req);
+  if (serviceKey && SERVICE_SECRET_KEY && serviceKey === SERVICE_SECRET_KEY) {
+    req.isServiceAuth = true;
+    req.user = { id: 0, role: 'admin', super_admin: 1, email: 'service@internal' };
+    return next();
+  }
+
   // First verify authentication
   const token = extractBearerToken(req);
 
@@ -216,12 +224,12 @@ const requireAdmin = async (req, res, next) => {
 
   // Check admin flag in user object (from custom token) or metadata (from Supabase Auth)
   const isAdmin = user.super_admin === 1 ||
-                  user.role === 'admin' ||
-                  user.user_metadata?.admin === true ||
-                  user.user_metadata?.super_admin === true ||
-                  user.app_metadata?.admin === true ||
-                  user.app_metadata?.super_admin === true ||
-                  (user.app_metadata?.roles || []).includes('admin');
+    user.role === 'admin' ||
+    user.user_metadata?.admin === true ||
+    user.user_metadata?.super_admin === true ||
+    user.app_metadata?.admin === true ||
+    user.app_metadata?.super_admin === true ||
+    (user.app_metadata?.roles || []).includes('admin');
 
   if (!isAdmin) {
     return forbidden(res, 'Admin access required');
@@ -242,9 +250,9 @@ const requireSuperAdmin = async (req, res, next) => {
   // Check super_admin flag in database (1 = super admin)
   // Also check metadata for backward compatibility
   const isSuperAdmin = req.user.super_admin === 1 ||
-                       req.user.user_metadata?.super_admin === true ||
-                       req.user.app_metadata?.super_admin === true ||
-                       req.user.role === 'admin'; // Fallback: treat 'admin' role as super admin
+    req.user.user_metadata?.super_admin === true ||
+    req.user.app_metadata?.super_admin === true ||
+    req.user.role === 'admin'; // Fallback: treat 'admin' role as super admin
 
   if (!isSuperAdmin) {
     return forbidden(res, 'Super admin access required');

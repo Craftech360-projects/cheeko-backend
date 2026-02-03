@@ -40,7 +40,9 @@ const s3Client = new S3Client({
 const uploadContentFile = async (fileBuffer, filename, contentType, category, mimeType) => {
   try {
     // Determine S3 folder based on content type
-    const folder = contentType === 'music' ? 'music' : 'stories';
+    let folder = 'stories';
+    if (contentType === 'music') folder = 'music';
+    if (contentType === 'rfidcontent') folder = 'rfidcontent';
     const categoryFolder = category || 'English';
 
     // Clean filename (remove special chars but keep extension)

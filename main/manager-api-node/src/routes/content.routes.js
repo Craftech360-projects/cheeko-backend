@@ -514,8 +514,8 @@ router.post('/library/upload',
 
     const { contentType, category } = req.body;
 
-    if (!contentType || !['music', 'story'].includes(contentType)) {
-      return badRequest(res, 'Content type must be music or story');
+    if (!contentType || !['music', 'story', 'rfidcontent'].includes(contentType)) {
+      return badRequest(res, 'Content type must be music, story or rfidcontent');
     }
 
     try {

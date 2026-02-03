@@ -340,6 +340,53 @@ def main():
                                         else:
                                             st.error("Failed")
 
+    # ---------------- Export to Cloud ----------------
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("☁️ Cloud Upload")
+    
+    # Check for secrets
+    api_secret = os.getenv("MANAGER_API_SECRET", "da11d988-f105-4e71-b095-da62ada82189")
+    api_url = os.getenv("MANAGER_API_URL", "http://localhost:8002/toy") # Use actual backend port/context
+
+    # Determine default pack name from topic
+    display_topic = st.session_state.get('topic', 'Unknown Topic')
+    pack_name_input = st.sidebar.text_input("Content Pack Name", value=display_topic)
+
+    if st.sidebar.button("📤 Upload to Cheeko Cloud"):
+        # Determine output dir again
+        dir_name = display_topic.replace(" ", "_").strip()
+        if not dir_name: dir_name = "Untitled_Project"
+        export_dir = os.path.join("output", dir_name)
+        
+        if not os.path.exists(export_dir):
+            st.sidebar.error("Project folder not found!")
+        else:
+            with st.sidebar.status("Uploading content...", expanded=True) as status:
+                st.write("🔌 Connecting to Manager API...")
+                from exporters import ManagerAPIClient
+                client = ManagerAPIClient(api_url, api_secret)
+                
+                # Map generic types to API types
+                api_content_type = 'rfidcontent' # Default to new bucket
+                
+                if content_type in ["Song/Rhyme"]:
+                    api_content_type = 'music'
+                elif content_type in ["Story"]:
+                    api_content_type = 'story'
+                
+                # Routine, Learning, Meditation -> 'rfidcontent'
+                
+                st.write(f"📂 Processing: {display_topic} (Type: {api_content_type})")
+                pack_code = client.export_project(export_dir, display_topic, api_content_type, pack_name=pack_name_input)
+                
+                if pack_code:
+                    status.update(label="✅ Upload Complete!", state="complete", expanded=True)
+                    st.sidebar.success(f"Pack Created: **{pack_code}**")
+                    st.sidebar.info("You can now assign this card in the Admin Panel.")
+                else:
+                    status.update(label="❌ Upload Failed", state="error")
+                    st.sidebar.error("Check console logs for details.")
+
 if __name__ == "__main__":
     init_clients()
     main()
