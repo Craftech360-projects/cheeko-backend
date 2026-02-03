@@ -100,6 +100,23 @@ def main():
             key="history_selector",
             on_change=on_history_change
         )
+        
+        # Add Delete Button for selected history
+        if selected_history != "(New Generation)":
+            if st.button(f"🗑️ Delete '{selected_history}'", type="primary"):
+                import shutil
+                del_path = os.path.join("output", selected_history)
+                try:
+                    shutil.rmtree(del_path)
+                    st.toast(f"Deleted {selected_history}", icon="✅")
+                    # Clear session state related to this content to avoid errors
+                    if 'raw_result' in st.session_state: del st.session_state['raw_result']
+                    
+                    # Do not modify history_selector manually; rerun will reset it as the option disappears
+                    time.sleep(0.5)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error deleting: {e}")
     
     # Ensure topic is initialized
     if 'topic' not in st.session_state:
