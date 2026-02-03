@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a bridge service for IoT device communication that implements conversion from MQTT and UDP protocols to WebSocket. The service allows devices to transmit control messages through MQTT protocol while efficiently transmitting audio data through UDP protocol, bridging this data to WebSocket services.
+This is a bridge service for IoT device communication that implements conversion from MQTT and UDP protocols to WebSocket. The service allows devices to transmit control messages through MQTT protocol while efficiently transmitting audio data through UDP protocol, bridging this data to WebSocket services 
 
 ## Features
 
