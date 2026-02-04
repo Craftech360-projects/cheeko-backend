@@ -938,16 +938,29 @@ async def entrypoint(ctx: JobContext):
                 asyncio.create_task(cleanup_room_and_session())
                 return
 
-            # Handle text input forwarded from MQTT gateway (RFID text)
+            # Handle text input forwarded from MQTT gateway (RFID text or reminders)
             # Supports RAG system with read_only content and legacy prompt mode
             if msg_type == 'user_text':
+                # Check if this is a reminder notification (not a request to set one)
+                source = message.get('source', '')
+                text = (message.get('text') or '').strip()
+                
+                if source == 'reminder' and text.startswith('Reminder:'):
+                    # This is a reminder notification - announce it directly
+                    reminder_text = text.replace('Reminder:', '').strip()
+                    logger.info(f"🔔 [REMINDER] Announcing reminder: {reminder_text}")
+                    
+                    # Generate a natural reminder announcement
+                    reminder_prompt = f"Announce this reminder to the user in a friendly, natural way: '{reminder_text}'. Keep it brief and cheerful!"
+                    asyncio.create_task(session.generate_reply(instructions=reminder_prompt))
+                    return
+                
                 # Extract RAG content fields first (needed for validation)
                 content_type = message.get('content_type', 'prompt')  # "animal", "read_only", or "prompt"
                 title = message.get('title', '')
                 content_text = message.get('content_text', '')
                 sequence = message.get('sequence')
                 rfid_uid = message.get('rfid_uid', '')
-                text = (message.get('text') or '').strip()
 
                 # For animal/read_only, content is in content_text; for prompt, it's in text
                 has_content = bool(content_text) if content_type in ('animal', 'read_only') else bool(text)
