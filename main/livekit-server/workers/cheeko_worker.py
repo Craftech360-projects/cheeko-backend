@@ -53,6 +53,7 @@ from src.shared.entrypoint_utils import (
 )
 # from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
 from src.features.mode_switching import update_agent_mode
+from src.features.openclaw_tools import OPENCLAW_TOOLS
 from src.services.mem0_service import mem0_service
 
 # Agent configuration
@@ -82,6 +83,8 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
+# Combine mode switching and OpenClaw tools
+ALL_AGENT_TOOLS = MODE_SWITCH_TOOLS + OPENCLAW_TOOLS
 
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
@@ -366,10 +369,10 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching tools and TTS for session.say()
+    # Create AgentSession with mode switching tools, OpenClaw tools, and TTS for session.say()
     # Note: Google Search is passed to RealtimeModel as a provider tool, not here
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=MODE_SWITCH_TOOLS)
-    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + ElevenLabs TTS")
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=ALL_AGENT_TOOLS)
+    logger.info(f"AgentSession created with {len(ALL_AGENT_TOOLS)} tools (mode switching + OpenClaw) + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
@@ -731,6 +734,10 @@ async def entrypoint(ctx: JobContext):
     # Create assistant instance
     assistant = CheekoAssistant(instructions=agent_prompt)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
+    
+    # Set device MAC for OpenClaw tools
+    from src.features.openclaw_tools import set_device_mac
+    set_device_mac(device_mac)
     logger.info(f"{CHARACTER_NAME} Assistant initialized")
 
     # COMMENTED OUT - Music service disabled
@@ -1070,7 +1077,7 @@ async def entrypoint(ctx: JobContext):
                         else:
                             # Prompt mode: Send to Gemini for generation (current behavior)
                             logger.info(f"🤖 [RFID-PROMPT] Sending to Gemini: {text[:100]}...")
-                            await session.generate_reply(instructions=text)
+                            await session.generate_reply(user_input=text)
                     except Exception as e:
                         logger.error(f"❌ Error handling user_text: {e}")
 

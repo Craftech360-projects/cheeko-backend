@@ -792,6 +792,56 @@ class MQTTGateway {
             payload: JSON.stringify(originalPayload),
           });
         }
+      } else if (originalPayload.type === "reminder") {
+        // Handle reminder from OpenClaw service - forward to LiveKit agent
+        logger.info(`🔔 [REMINDER] Received reminder for ${deviceId}: ${originalPayload.text}`);
+
+        const deviceInfo = this.deviceConnections.get(deviceId);
+        if (deviceInfo && deviceInfo.connection) {
+          const connection = deviceInfo.connection;
+
+          // Check if device is in conversation mode with an agent
+          if (connection.roomType !== "conversation" || !connection.bridge) {
+            logger.warn(`⚠️ [REMINDER] Device ${deviceId} not in conversation mode, cannot deliver reminder`);
+            return;
+          }
+
+          const bridge = connection.bridge;
+          const room = bridge.room;
+
+          if (!room || !room.localParticipant) {
+            logger.warn(`⚠️ [REMINDER] No LiveKit room for device ${deviceId}`);
+            return;
+          }
+
+          // Build user_text message for LiveKit Agent (same format as RFID scan)
+          const userTextMsg = {
+            type: "user_text",
+            text: `Reminder: ${originalPayload.text}`,
+            device_id: deviceId,
+            session_id: connection.udp?.session_id || null,
+            source: "reminder",
+            timestamp: Date.now(),
+          };
+
+          logger.info(`📨 [REMINDER] Forwarding to LiveKit agent: "${userTextMsg.text}"`);
+
+          // Send to LiveKit agent via data channel
+          try {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(JSON.stringify(userTextMsg));
+
+            await room.localParticipant.publishData(
+              data,
+              { reliable: true }
+            );
+            logger.info(`✅ [REMINDER] Sent to LiveKit agent for device ${deviceId}`);
+          } catch (err) {
+            logger.error(`❌ [REMINDER] Failed to send to agent: ${err.message}`);
+          }
+        } else {
+          logger.warn(`⚠️ [REMINDER] Device ${deviceId} not connected, reminder not delivered`);
+        }
       } else if (originalPayload.type === "start_greeting") {
         // Special handling for start_greeting - legacy path (no-op in new flow)
 
@@ -1022,6 +1072,7 @@ class MQTTGateway {
           // Update message for Agent
           userTextMsg.text = promptText;
           userTextMsg.content_type = "prompt";
+          userTextMsg.title = selectedItem?.title || rfidContent?.title || '';
           if (cachedAudio) {
             userTextMsg.audio_url = cachedAudio;
           }
