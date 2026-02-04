@@ -11,7 +11,6 @@ import sys
 import json
 import asyncio
 import time
-from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -27,14 +26,11 @@ from livekit.agents import (
     cli,
     AutoSubscribe,
     RoomInputOptions,
-    RunContext,
-    function_tool,
     # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
 from livekit import rtc, api
 from livekit.plugins import google, elevenlabs
 import io
-import pytz
 from pydub import AudioSegment
 
 from src.config.config_loader import ConfigLoader
@@ -57,6 +53,7 @@ from src.shared.entrypoint_utils import (
 )
 # from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
 from src.features.mode_switching import update_agent_mode
+from src.features.openclaw_tools import OPENCLAW_TOOLS
 from src.services.mem0_service import mem0_service
 
 # Agent configuration
@@ -86,237 +83,8 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
-
-TIMEZONE_ALIASES = {
-    "asia/kolkata": ("Asia/Kolkata", "India Standard Time (IST)"),
-    "india": ("Asia/Kolkata", "India Standard Time (IST)"),
-    "indian time": ("Asia/Kolkata", "India Standard Time (IST)"),
-    "indian standard time": ("Asia/Kolkata", "India Standard Time (IST)"),
-    "ist": ("Asia/Kolkata", "India Standard Time (IST)"),
-    "utc": ("UTC", "UTC"),
-    "gmt": ("Etc/GMT", "GMT"),
-}
-
-DEFAULT_TIMEZONE_ID = "Asia/Kolkata"
-DEFAULT_TIMEZONE_LABEL = "India Standard Time (IST)"
-
-
-def build_session_prompt_vars(dispatch_metadata: dict) -> dict:
-    """Extract session-level prompt variables from dispatch metadata."""
-    return {
-        'session_language_code': dispatch_metadata.get('session_language_code', '') or '',
-        'session_language_name': dispatch_metadata.get('session_language_name', '') or '',
-    }
-
-
-def build_language_lock(language_name: str) -> str:
-    """Append a strict session language directive."""
-    if not language_name:
-        return ""
-
-    return f"""
-
-<session_language_override>
-This session language is fixed by the RFID AI card.
-- You must speak only in {language_name}.
-- Do not answer in any other language.
-- Use natural, child-friendly {language_name}.
-- Use native script by default unless the child explicitly asks for transliteration.
-</session_language_override>
-"""
-
-
-def build_time_tool_guard() -> str:
-    """Append a strict rule to use the local time tool for time/date questions."""
-    return """
-
-<time_tool_rule>
-- For any question about the current time, date, day, or timezone, call the `get_time_date` tool first.
-- Do not guess the time/date from memory.
-- Do not rely on Google Search for basic current time/date questions when `get_time_date` can answer them.
-- Default timezone is India Standard Time (Asia/Kolkata) unless the user explicitly asks for another timezone.
-</time_tool_rule>
-"""
-
-
-def build_search_availability_guard() -> str:
-    """Append a rule that disables any claim of live web search for this session."""
-    return """
-
-<search_availability_rule>
-- In this session, no live web search tool is available.
-- Do not say you searched the internet, browsed the web, or verified something online unless a real search tool is present.
-- For current time/date questions, use the `get_time_date` tool.
-</search_availability_rule>
-"""
-
-
-def build_identity_guard() -> str:
-    """Append a strict identity directive so provider names are not mistaken for the creator."""
-    return """
-
-<identity_guard>
-You are Cheeko, the AI companion for the Cheeko product.
-- If asked who created, built, or made you, say: "I was created by ALTIO AI PRIVATE LIMITED for Cheeko."
-- Do not say Google, Gemini, LiveKit, Cerebrium, ElevenLabs, AWS, OpenAI, or any model/provider created you.
-- If asked what technology powers you, say you may use third-party AI services, but they are tools and not your creator.
-</identity_guard>
-"""
-
-
-def resolve_timezone(timezone_name: str) -> tuple[str, str]:
-    """Resolve a user-facing timezone name to a pytz timezone and display label."""
-    normalized = (timezone_name or DEFAULT_TIMEZONE_ID).strip()
-    if not normalized:
-        normalized = DEFAULT_TIMEZONE_ID
-
-    alias = TIMEZONE_ALIASES.get(normalized.lower())
-    if alias:
-        return alias
-
-    try:
-        timezone = pytz.timezone(normalized)
-        return timezone.zone, timezone.zone
-    except Exception:
-        logger.warning(f"⏰ [TIME-TOOL] Unknown timezone '{timezone_name}', defaulting to IST")
-        return DEFAULT_TIMEZONE_ID, DEFAULT_TIMEZONE_LABEL
-
-
-def get_latest_user_text(context: RunContext) -> str:
-    """Return the latest user text from session history, if available."""
-    try:
-        messages = context.session.history.messages()
-        for message in reversed(messages):
-            if message.role == "user" and message.text_content:
-                return message.text_content
-    except Exception as e:
-        logger.debug(f"⏰ [TIME-TOOL] Could not inspect chat history: {e}")
-
-    return ""
-
-
-def should_force_default_timezone(user_text: str, requested_timezone_id: str) -> bool:
-    """Use IST for generic time questions unless the user explicitly asked for another timezone."""
-    if requested_timezone_id == DEFAULT_TIMEZONE_ID:
-        return False
-
-    normalized_text = (user_text or "").lower()
-    if not normalized_text:
-        return True
-
-    explicit_non_default_markers = [
-        " utc",
-        "gmt",
-        "greenwich",
-        "universal time",
-        "zulu time",
-        "pst",
-        "pdt",
-        "est",
-        "edt",
-        "cst",
-        "cdt",
-        "mst",
-        "mdt",
-        "london",
-        "new york",
-        "tokyo",
-        "dubai",
-        "singapore",
-        "paris",
-        "in utc",
-        "in gmt",
-    ]
-    explicit_default_markers = [
-        " india",
-        " indian",
-        " ist",
-        "kolkata",
-        "asia/kolkata",
-    ]
-
-    if any(marker in normalized_text for marker in explicit_non_default_markers):
-        return False
-
-    if any(marker in normalized_text for marker in explicit_default_markers):
-        return requested_timezone_id != DEFAULT_TIMEZONE_ID
-
-    return " in " not in normalized_text
-
-
-@function_tool
-async def get_time_date(
-    context: RunContext,
-    query_type: str = "time",
-    timezone_name: str = DEFAULT_TIMEZONE_ID,
-) -> str:
-    """
-    Get the current time and/or date using the server clock in a requested timezone.
-
-    Use this tool for questions like:
-    - "What time is it?"
-    - "What's today's date?"
-    - "Tell me the date and time in India"
-    - "What time is it in UTC?"
-
-    Args:
-        query_type: One of "time", "date", "both", or "calendar"
-        timezone_name: Timezone name like "Asia/Kolkata", "IST", "India", or "UTC"
-    """
-    try:
-        tz_id, display_name = resolve_timezone(timezone_name)
-        latest_user_text = get_latest_user_text(context)
-        if should_force_default_timezone(latest_user_text, tz_id):
-            logger.info(
-                f"⏰ [TIME-TOOL] Overriding requested timezone '{tz_id}' to default IST for generic query: '{latest_user_text}'"
-            )
-            tz_id, display_name = DEFAULT_TIMEZONE_ID, DEFAULT_TIMEZONE_LABEL
-        now = datetime.now(pytz.timezone(tz_id))
-        query_type = (query_type or "time").strip().lower()
-
-        logger.info(
-            f"⏰ [TIME-TOOL] get_time_date called with query_type='{query_type}', timezone='{tz_id}'"
-        )
-
-        if query_type == "date":
-            return f"Today's date in {display_name} is {now.strftime('%A, %B %d, %Y')}."
-
-        if query_type == "both":
-            return (
-                f"In {display_name}, today is {now.strftime('%A, %B %d, %Y')} "
-                f"and the current time is {now.strftime('%I:%M %p')}."
-            )
-
-        if query_type == "calendar":
-            vikram_year = now.year + 57
-            hindu_months = [
-                "Paush", "Magh", "Falgun", "Chaitra", "Vaishakh", "Jyeshtha",
-                "Ashadh", "Shravan", "Bhadrapada", "Ashwin", "Kartik", "Margashirsha",
-            ]
-            hindu_month = hindu_months[now.month - 1]
-            return (
-                f"In {display_name}, today is {now.strftime('%A, %B %d, %Y')} "
-                f"and the current time is {now.strftime('%I:%M %p')}. "
-                f"In the Hindu calendar, this is {hindu_month} in Vikram Samvat year {vikram_year}."
-            )
-
-        return f"The current time in {display_name} is {now.strftime('%I:%M %p')}."
-
-    except Exception as e:
-        logger.error(f"⏰ [TIME-TOOL] Error getting time/date: {e}")
-        return "Sorry, I couldn't get the current time right now."
-
-
-class NonResumableGeminiRealtimeModel(google.realtime.RealtimeModel):
-    """Disable Gemini session resumption to avoid stale-handle reconnect failures."""
-
-    def _build_connect_config(self):
-        # Force every reconnect to start as a fresh Gemini Live session.
-        self._session_resumption_handle = None
-        conf = super()._build_connect_config()
-        conf.session_resumption = None
-        return conf
-
+# Combine mode switching and OpenClaw tools
+ALL_AGENT_TOOLS = MODE_SWITCH_TOOLS + OPENCLAW_TOOLS
 
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
@@ -473,8 +241,6 @@ async def entrypoint(ctx: JobContext):
     dispatch_memories = []
     dispatch_relations = []
     dispatch_entities = []
-    dispatch_metadata = {}
-    session_prompt_vars = {}
     try:
         if hasattr(ctx, 'job') and ctx.job and ctx.job.metadata:
             dispatch_metadata = json.loads(ctx.job.metadata)
@@ -482,7 +248,6 @@ async def entrypoint(ctx: JobContext):
             dispatch_memories = dispatch_metadata.get('long_term_memories', [])
             dispatch_relations = dispatch_metadata.get('memory_relations', [])
             dispatch_entities = dispatch_metadata.get('memory_entities', [])
-            session_prompt_vars = build_session_prompt_vars(dispatch_metadata)
             if dispatch_child_profile:
                 logger.info(f"👶 Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
             if dispatch_memories:
@@ -558,21 +323,10 @@ async def entrypoint(ctx: JobContext):
     has_child_name = 'child_name' in agent_prompt
     logger.info(f"Template analysis - Has Jinja: {has_placeholder}, Has child_name: {has_child_name}")
     
-    agent_prompt = render_prompt_with_profile(
-        agent_prompt,
-        child_profile,
-        dispatch_memories,
-        dispatch_relations,
-        dispatch_entities,
-        extra_vars=session_prompt_vars,
-    )
-
-    if session_prompt_vars.get('session_language_name'):
-        agent_prompt += build_language_lock(session_prompt_vars['session_language_name'])
-
-    agent_prompt += build_time_tool_guard()
-    agent_prompt += build_search_availability_guard()
-    agent_prompt += build_identity_guard()
+    if child_profile:
+        agent_prompt = render_prompt_with_profile(
+            agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
+        )
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
@@ -596,15 +350,18 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model
-    realtime_model = NonResumableGeminiRealtimeModel(
+    # Create Gemini Realtime model with Google Search enabled
+    # GoogleSearch is a provider tool that must be passed to RealtimeModel, not AgentSession
+    google_search_tool = google.tools.GoogleSearch()
+    realtime_model = google.realtime.RealtimeModel(
         model=gemini_model,
         voice=gemini_voice,
         instructions=agent_prompt,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
+        _gemini_tools=[google_search_tool],
     )
-    logger.info("Gemini Realtime model created with session resumption disabled")
+    logger.info("Gemini Realtime model created with Google Search enabled")
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
@@ -612,12 +369,10 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching, deterministic time/date, and TTS for session.say()
-    session_tools = [*MODE_SWITCH_TOOLS, get_time_date]
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=session_tools)
-    logger.info(
-        f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + 1 time/date tool + ElevenLabs TTS"
-    )
+    # Create AgentSession with mode switching tools, OpenClaw tools, and TTS for session.say()
+    # Note: Google Search is passed to RealtimeModel as a provider tool, not here
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=ALL_AGENT_TOOLS)
+    logger.info(f"AgentSession created with {len(ALL_AGENT_TOOLS)} tools (mode switching + OpenClaw) + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
@@ -979,6 +734,10 @@ async def entrypoint(ctx: JobContext):
     # Create assistant instance
     assistant = CheekoAssistant(instructions=agent_prompt)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
+    
+    # Set device MAC for OpenClaw tools
+    from src.features.openclaw_tools import set_device_mac
+    set_device_mac(device_mac)
     logger.info(f"{CHARACTER_NAME} Assistant initialized")
 
     # COMMENTED OUT - Music service disabled
@@ -1318,7 +1077,7 @@ async def entrypoint(ctx: JobContext):
                         else:
                             # Prompt mode: Send to Gemini for generation (current behavior)
                             logger.info(f"🤖 [RFID-PROMPT] Sending to Gemini: {text[:100]}...")
-                            await session.generate_reply(instructions=text)
+                            await session.generate_reply(user_input=text)
                     except Exception as e:
                         logger.error(f"❌ Error handling user_text: {e}")
 
