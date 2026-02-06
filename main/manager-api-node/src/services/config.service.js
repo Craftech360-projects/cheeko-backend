@@ -410,6 +410,104 @@ const getWeather = async ({ latitude, longitude, city }) => {
   };
 };
 
+/**
+ * Create and assign a child profile to a device
+ * @param {string} macAddress - Device MAC address
+ * @param {Object} profileData - Child profile data
+ * @param {string} profileData.name - Child's name
+ * @param {string} [profileData.dateOfBirth] - Date of birth
+ * @param {string} [profileData.gender] - Gender
+ * @param {Array} [profileData.interests] - List of interests
+ * @param {string} [profileData.additionalNotes] - Additional notes
+ * @returns {Promise<Object>} Created profile and assignment result
+ */
+const createAndAssignChildProfile = async (macAddress, profileData) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedMac = normalizeMacAddress(macAddress);
+
+  // 1. Get device
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, agent_id, kid_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (deviceError || !device) {
+    throw new Error('Device not found');
+  }
+
+  // 2. Create kid profile
+  const { data: kid, error: kidError } = await supabaseAdmin
+    .from('kid_profile')
+    .insert({
+      name: profileData.name,
+      date_of_birth: profileData.dateOfBirth || null,
+      gender: profileData.gender || null,
+      interests: profileData.interests || [],
+      additional_notes: profileData.additionalNotes || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (kidError || !kid) {
+    logger.error('Error creating kid profile:', kidError);
+    throw new Error('Failed to create child profile');
+  }
+
+  // 3. Assign kid profile to device
+  const { error: updateError } = await supabaseAdmin
+    .from('ai_device')
+    .update({ kid_id: kid.id, updated_at: new Date().toISOString() })
+    .eq('id', device.id);
+
+  if (updateError) {
+    logger.error('Error assigning kid to device:', updateError);
+    throw new Error('Failed to assign child profile to device');
+  }
+
+  logger.info(`Created and assigned kid profile ${kid.id} to device ${normalizedMac}`);
+
+  return {
+    kidId: kid.id,
+    deviceId: device.id,
+    profile: {
+      id: kid.id,
+      name: kid.name,
+      dateOfBirth: kid.date_of_birth,
+      gender: kid.gender,
+      interests: kid.interests,
+      additionalNotes: kid.additional_notes
+    }
+  };
+};
+
+/**
+ * Get radio schedule
+ * Returns the active daily schedule for the radio agent
+ * @returns {Promise<Array>} List of schedule items
+ */
+const getRadioSchedule = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Query radio_schedule table
+  // Columns: id, start_time, program_name, playlist_id, is_active
+  const { data: schedule, error } = await supabaseAdmin
+    .from('radio_schedule')
+    .select('*')
+    .eq('is_active', true)
+    .order('start_time', { ascending: true });
+
+  if (error) {
+    logger.error(`Error fetching radio schedule: ${error.message}`);
+    throw new Error('Failed to fetch radio schedule');
+  }
+
+  return schedule || [];
+};
+
 module.exports = {
   getServerBaseConfig,
   getAgentModels,
@@ -418,5 +516,7 @@ module.exports = {
   getAgentTemplateIdByMac,
   getTemplateContent,
   getDeviceLocation,
-  getWeather
+  getWeather,
+  getRadioSchedule,
+  createAndAssignChildProfile
 };

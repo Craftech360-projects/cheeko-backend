@@ -516,4 +516,44 @@ router.post('/assign-child-profile',
   })
 );
 
+/**
+ * @swagger
+ * /config/radio-schedule:
+ *   get:
+ *     tags: [Config]
+ *     summary: Get radio schedule
+ *     description: Returns the daily schedule for the radio agent
+ *     responses:
+ *       200:
+ *         description: List of schedule items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                   start_time:
+ *                     type: string
+ *                     format: time
+ *                   program_name:
+ *                     type: string
+ *                   playlist_id:
+ *                     type: string
+ *                   is_active:
+ *                     type: boolean
+ */
+router.get('/radio-schedule',
+  asyncHandler(async (req, res) => {
+    try {
+      const schedule = await configService.getRadioSchedule();
+      success(res, schedule);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 module.exports = router;

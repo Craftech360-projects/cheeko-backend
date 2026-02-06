@@ -8,7 +8,6 @@ from datetime import datetime
 import io
 
 import aiohttp
-import aiohttp
 from livekit import rtc, api
 from pydub import AudioSegment
 
@@ -238,37 +237,73 @@ class RadioAgent:
                 await self.current_iterator.close()
             logger.info("📻 Radio Agent stopped")
 
+    def _get_current_program(self, schedule: list) -> dict:
+        """Find the program matching the current time"""
+        if not schedule:
+            return None
+
+        now = datetime.now()
+        current_time = now.strftime('%H:%M:%S')
+
+        for program in schedule:
+            start_time = program.get('start_time', '00:00:00')
+            end_time = program.get('end_time', '23:59:59')
+
+            # Handle time strings (could be "HH:MM:SS" or datetime objects)
+            if hasattr(start_time, 'strftime'):
+                start_time = start_time.strftime('%H:%M:%S')
+            if hasattr(end_time, 'strftime'):
+                end_time = end_time.strftime('%H:%M:%S')
+
+            # Check if current time falls within this program's slot
+            # Handle midnight crossover (e.g., 22:00:00 to 06:00:00)
+            if start_time <= end_time:
+                # Normal case: start < end (e.g., 08:00 to 16:00)
+                if start_time <= current_time <= end_time:
+                    return program
+            else:
+                # Midnight crossover case (e.g., 22:00 to 06:00)
+                if current_time >= start_time or current_time <= end_time:
+                    return program
+
+        # Fallback to first program if no match
+        logger.warning(f"⚠️ No program matches current time {current_time}, using first in schedule")
+        return schedule[0] if schedule else None
+
     async def _scheduler_loop(self):
         """Monitors schedule via API and manages playback"""
         logger.info("📅 Scheduler loop started")
-        
+
         while not self.should_stop:
             try:
                 # 1. Fetch Schedule
                 schedule = await self.db_helper.get_radio_schedule()
-                
-                # Determine current program based on time (Simplified for MVP)
-                target_program = schedule[0] if schedule else None
+
+                # 2. Determine current program based on time
+                target_program = self._get_current_program(schedule)
 
                 if not target_program:
-                    logger.warning("⚠️ No active program found in schedule. Playing filler.")
+                    logger.warning("⚠️ No active program found in schedule. Waiting...")
                     await asyncio.sleep(30)
                     continue
-                
-                # If program changed or we are not playing anything
-                if self.current_program != target_program or not self.current_iterator:
-                     logger.info(f"🔄 Program Update: {target_program.get('program_name')} (ID: {target_program.get('id')})")
-                     await self._play_program(target_program)
-                     self.current_program = target_program
-                
-                # If we are playing, check if iterator is done/closed
+
+                # 3. Check if program changed (by ID) or we need to start playing
+                current_id = self.current_program.get('id') if self.current_program else None
+                target_id = target_program.get('id')
+
+                if current_id != target_id or not self.current_iterator:
+                    logger.info(f"🔄 Program Update: {target_program.get('program_name')} (ID: {target_id})")
+                    await self._play_program(target_program)
+                    self.current_program = target_program
+
+                # 4. If current track finished, play next track in same program
                 if self.current_iterator and self.current_iterator.is_closed:
-                     logger.info("🎵 Current track finished, restarting/advancing program...")
-                     await self._play_program(target_program) 
-                     
+                    logger.info("🎵 Current track finished, playing next track...")
+                    await self._play_program(target_program)
+
             except Exception as e:
                 logger.error(f"❌ Scheduler error: {e}")
-                
+
             await asyncio.sleep(5)
 
     async def _play_program(self, program):
@@ -327,13 +362,14 @@ async def run_radio_agent():
     
     jwt_token = token.to_jwt()
 
-    # 2. Connect to Room
+    # 2. Connect to Room (SUBSCRIBE_NONE - broadcast only, don't subscribe to others)
     room = rtc.Room()
-    
+    room_options = rtc.RoomOptions(auto_subscribe=False)
+
     logger.info(f"🚀 Connecting to {LIVEKIT_URL} room: radio-live-1")
     try:
-        await room.connect(LIVEKIT_URL, jwt_token)
-        logger.info("✅ Connected to room")
+        await room.connect(LIVEKIT_URL, jwt_token, options=room_options)
+        logger.info("✅ Connected to room (auto_subscribe=False)")
     except Exception as e:
         logger.error(f"❌ Failed to connect: {e}")
         return
