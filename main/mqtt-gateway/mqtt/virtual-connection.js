@@ -1391,6 +1391,16 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // CRITICAL: Radio mode devices are passive listeners - no timeout cleanup
+    // The radio room persists and devices can listen indefinitely
+    if (this.roomType === 'radio') {
+      // Only log occasionally to avoid spam
+      if (Date.now() % 60000 < 1000) {
+        console.log(`📻 [RADIO-KEEPALIVE] Skipping timeout check for radio listener: ${this.deviceId}`);
+      }
+      return;
+    }
+
     const now = Date.now();
 
     // Check max session duration (60 minutes absolute limit)
