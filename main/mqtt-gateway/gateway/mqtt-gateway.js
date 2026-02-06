@@ -414,6 +414,12 @@ class MQTTGateway {
               (roomAge > 60 * 60 * 1000);
 
             if (shouldCleanup) {
+              // CRITICAL: Prevent deletion of shared radio rooms
+              if (roomName === 'radio-live-1' || roomName.startsWith('radio-') || roomName.includes('radio-live')) {
+                logger.info(`📻 [GHOST-CLEANUP] Skipping cleanup for shared radio room: ${roomName}`);
+                continue;
+              }
+
               const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
               logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
 
@@ -1438,7 +1444,7 @@ class MQTTGateway {
    * @param {string} clientId - MQTT client ID
    */
   async handleModeChange(deviceId, mode, clientId = null) {
-    const validModes = ["conversation", "music", "story"];
+    const validModes = ["conversation", "music", "story", "radio"];
 
     if (!validModes.includes(mode)) {
       logger.warn(`⚠️ [MODE-CHANGE] Invalid mode: ${mode}, valid modes: ${validModes.join(", ")}`);
@@ -1478,7 +1484,13 @@ class MQTTGateway {
       // Step 2: Generate new room name
       const newSessionUuid = require("crypto").randomUUID();
       const macForRoom = deviceId.replace(/:/g, "");
-      const newRoomName = `${newSessionUuid}_${macForRoom}_${mode}`;
+
+      let newRoomName;
+      if (mode === 'radio') {
+        newRoomName = 'radio-live-1'; // Fixed room for radio
+      } else {
+        newRoomName = `${newSessionUuid}_${macForRoom}_${mode}`;
+      }
       logger.info(`🏠 [MODE-CHANGE] New room: ${newRoomName}`);
 
       // Step 3: Update connection state
@@ -1601,7 +1613,11 @@ class MQTTGateway {
         } catch (error) {
           logger.error(`❌ [MODE-CHANGE] Failed to start story bot: ${error.message}`);
         }
+      } else if (mode === "radio") {
+        logger.info(`📻 [MODE-CHANGE] Radio mode - joining shared broadcast room, no agent dispatch needed`);
       }
+
+
 
       // Step 6: Send mode_update confirmation to device
       if (clientId) {
@@ -1621,7 +1637,7 @@ class MQTTGateway {
       logger.info(`✅ [MODE-CHANGE] Successfully switched device ${deviceId} to ${mode} mode`);
 
     } catch (error) {
-      logger.error(`❌ [MODE-CHANGE] Error: ${error.message}`, { stack: error.stack });
+      logger.error(`❌[MODE - CHANGE] Error: ${error.message} `, { stack: error.stack });
     }
   }
 
@@ -1629,24 +1645,24 @@ class MQTTGateway {
     try {
       const sessionId = payload.session_id;
       if (!sessionId) {
-        logger.warn(`⚠️ [START-AGENT] No session_id in payload`);
+        logger.warn(`⚠️[START - AGENT] No session_id in payload`);
         return;
       }
 
       const parts = sessionId.split("_");
       if (parts.length < 3) {
-        logger.warn(`⚠️ [START-AGENT] Invalid session_id format: ${sessionId}`);
+        logger.warn(`⚠️[START - AGENT] Invalid session_id format: ${sessionId} `);
         return;
       }
 
       const roomType = parts[parts.length - 1];
       const roomName = sessionId;
 
-      // logger.info(`▶️ [START-AGENT] Processing start_agent for mode: ${roomType}`);
+      // logger.info(`▶️[START - AGENT] Processing start_agent for mode: ${ roomType } `);
 
       const deviceInfo = this.deviceConnections.get(deviceId);
       if (!deviceInfo) {
-        logger.warn(`⚠️ [START-AGENT] Device not found: ${deviceId}`);
+        logger.warn(`⚠️[START - AGENT] Device not found: ${deviceId} `);
         return;
       }
 
@@ -1659,7 +1675,7 @@ class MQTTGateway {
       }
 
       if (roomType === "music") {
-        const apiUrl = `${MEDIA_API_BASE}/music-bot/${roomName}/start`;
+        const apiUrl = `${MEDIA_API_BASE} /music-bot/${roomName}/start`;
 
         try {
           const response = await axios.post(
@@ -2255,12 +2271,17 @@ class MQTTGateway {
     }
 
     // Step 6: Delete room from LiveKit server
+    // CRITICAL: Prevent deletion of shared radio rooms
     if (roomName && this.roomService) {
-      try {
-        await this.roomService.deleteRoom(roomName);
-        logger.info(`[CLEANUP] Deleted room: ${roomName}`);
-      } catch (error) {
-        logger.warn(`[CLEANUP] Delete room error: ${error.message}`);
+      if (roomName.startsWith('radio-') || roomName.includes('radio-live')) {
+        logger.info(`📻 [CLEANUP] Skipping room deletion for shared radio room: ${roomName}`);
+      } else {
+        try {
+          await this.roomService.deleteRoom(roomName);
+          logger.info(`[CLEANUP] Deleted room: ${roomName}`);
+        } catch (error) {
+          logger.warn(`[CLEANUP] Delete room error: ${error.message}`);
+        }
       }
     }
 

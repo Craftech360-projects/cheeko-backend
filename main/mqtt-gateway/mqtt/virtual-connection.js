@@ -369,10 +369,10 @@ class VirtualMQTTConnection {
     );
 
     // Validate room type
-    if (!["conversation", "music", "story"].includes(this.roomType)) {
+    if (!["conversation", "music", "story", "radio"].includes(this.roomType)) {
       console.error(
         `❌ [ROOM-TYPE] Invalid room_type from DB: ${this.roomType}, using 'conversation'`
-      );
+      ); // Fix: Added console.error call parenthesis
       this.roomType = "conversation";
     }
 
@@ -452,7 +452,16 @@ class VirtualMQTTConnection {
 
     // Generate session_id for room WITH ROOM TYPE
     const macForRoom = this.macAddress.replace(/:/g, "");
-    const futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
+    let futureSessionId;
+
+    if (this.roomType === 'radio') {
+      // Use fixed room name for radio mode so all devices join the same room
+      futureSessionId = 'radio-live-1';
+      console.log(`📻 [RADIO] Using shared radio room: ${futureSessionId}`);
+    } else {
+      futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
+    }
+
     this.udp.session_id = futureSessionId;
 
     console.log(`🏠 [ROOM-NAME] Room will be: ${futureSessionId}`);
@@ -469,12 +478,21 @@ class VirtualMQTTConnection {
         `🧹 [CLEANUP] Cleaning up old sessions for device: ${this.deviceId}`
       );
       try {
-        await LiveKitBridge.cleanupOldSessionsForDevice(
-          this.deviceId,
-          this.gateway.roomService,
-          newRoomName
-        );
-        console.log(`✅ [CLEANUP] Old sessions cleaned up`);
+        // For radio mode, we don't own the room, but we still want to ensure we don't have lingering sessions
+        // However, cleanupOldSessionsForDevice might try to look for rooms with this mac? 
+        // Actually, for radio mode, the room name is fixed 'radio-live-1', which is NOT unique to device.
+        // We should skip this cleanup if we are joining radio, OR ensure we don't delete radio room.
+
+        if (this.roomType !== 'radio') {
+          await LiveKitBridge.cleanupOldSessionsForDevice(
+            this.deviceId,
+            this.gateway.roomService,
+            newRoomName
+          );
+          console.log(`✅ [CLEANUP] Old sessions cleaned up`);
+        } else {
+          console.log(`📻 [CLEANUP] Skipping room cleanup for radio mode`);
+        }
       } catch (err) {
         console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err.message);
         // Continue anyway - don't block room creation
@@ -550,9 +568,13 @@ class VirtualMQTTConnection {
         await this.spawnStoryBot(futureSessionId);
       }
 
-      console.log(
-        `⏰ [HELLO] Room will auto-close if no participants join within 60 seconds (LiveKit emptyTimeout)`
-      );
+      if (this.roomType !== 'radio') {
+        console.log(
+          `⏰ [HELLO] Room will auto-close if no participants join within 60 seconds (LiveKit emptyTimeout)`
+        );
+      } else {
+        console.log(`📻 [HELLO] Radio mode - room persistence managed by radio-agent-main`);
+      }
 
       // Send hello response with UDP session details
       // this.sendMqttMessage(JSON.stringify({
@@ -633,6 +655,9 @@ class VirtualMQTTConnection {
           this.bridge.agentDeployed = false;
           logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
         }
+      } else if (this.roomType === "radio") {
+        console.log(`📻 [RADIO] Radio mode - joining shared broadcast room`);
+        // No agent dispatch or bot spawning needed - RadioAgent should be running in this room
       } else if (this.roomType !== "conversation") {
         // For music/story modes, no agent needed
         console.log(
@@ -734,7 +759,7 @@ class VirtualMQTTConnection {
       const apiUrl = `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`;
       const serverSecret = process.env.MANAGER_API_SECRET;
 
-      logger.info(`👶 [CHILD-PROFILE] Fetching profile for device: ${macAddress}, secret: ${serverSecret ? 'SET(' + serverSecret.substring(0,8) + '...)' : 'NOT SET'}`);
+      logger.info(`👶 [CHILD-PROFILE] Fetching profile for device: ${macAddress}, secret: ${serverSecret ? 'SET(' + serverSecret.substring(0, 8) + '...)' : 'NOT SET'}`);
 
       const response = await axios.post(
         apiUrl,

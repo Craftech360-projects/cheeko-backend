@@ -242,9 +242,17 @@ class LiveKitBridge extends EventEmitter {
     // console.log(`🔍 [DEBUG] LiveKitBridge.connect() called - UUID: ${this.uuid}, MAC: ${this.macAddress}`);
     // console.log(`⏱️ [TIMING-START] Connection initiated at ${connectStartTime}`);
     const { url, api_key, api_secret } = this.livekitConfig;
-    // Include MAC address AND room type in room name
-    const macForRoom = this.macAddress.replace(/:/g, ""); // Remove colons: 00:16:3e:ac:b5:38 → 00163eacb538
-    const roomName = `${this.uuid}_${macForRoom}_${this.roomType}`; // CHANGED: Include room type
+
+    // Determine room name
+    let roomName;
+    if (this.roomType === 'radio') {
+      roomName = 'radio-live-1'; // Fixed shared room for radio
+    } else {
+      // Include MAC address AND room type in room name
+      const macForRoom = this.macAddress.replace(/:/g, ""); // Remove colons
+      roomName = `${this.uuid}_${macForRoom}_${this.roomType}`;
+    }
+
     const participantName = this.macAddress;
 
     // Store roomService and roomName for cleanup on disconnect
@@ -255,15 +263,24 @@ class LiveKitBridge extends EventEmitter {
       `🏠 [LIVEKIT] Creating room: ${roomName} (type: ${this.roomType})`
     );
 
-    // Pre-create room with emptyTimeout setting
+    // Pre-create room with options based on type
     if (roomService) {
       try {
-        await roomService.createRoom({
+        const roomOptions = {
           name: roomName,
-          empty_timeout: 60, // Auto-close room if empty for 60 seconds (snake_case for LiveKit API)
-          max_participants: 2,
-        });
-        // console.log(`✅ [ROOM] Pre-created room with 60-second empty_timeout: ${roomName}`);
+          empty_timeout: 60, // Default: Auto-close room if empty for 60 seconds
+          max_participants: 2, // Default: 2 participants (user + agent)
+        };
+
+        // Custom options for radio mode
+        if (this.roomType === 'radio') {
+          roomOptions.empty_timeout = 0; // Never auto-close (handled by agent)
+          roomOptions.max_participants = 100; // Allow many listeners
+          // roomOptions.metadata = JSON.stringify({ type: 'radio' });
+        }
+
+        await roomService.createRoom(roomOptions);
+        // console.log(`✅ [ROOM] Pre-created room: ${roomName}`);
       } catch (error) {
         // Log the actual error for debugging
         console.error(`❌ [ROOM] Error pre-creating room: ${error.message}`);
@@ -327,8 +344,7 @@ class LiveKitBridge extends EventEmitter {
             data = JSON5.parse(str);
             // Simplified LiveKit message log
             console.log(
-              `📨 [LIVEKIT-IN] Type: ${data?.type} from ${
-                participant?.identity || "unknown"
+              `📨 [LIVEKIT-IN] Type: ${data?.type} from ${participant?.identity || "unknown"
               }`
             );
           } catch (err) {
@@ -512,6 +528,25 @@ class LiveKitBridge extends EventEmitter {
             // Check for both string "audio" and TrackKind.KIND_AUDIO constant
             if (track.kind === "audio" || track.kind === TrackKind.KIND_AUDIO) {
               // PRIMARY AGENT CHECK: Only accept audio from the primary agent
+              const isAgent = participant.identity.toLowerCase().includes("agent") ||
+                participant.identity.toLowerCase().includes("radio-host");
+
+              if (!isAgent) {
+                // In radio mode, it's normal to see other clients. Ignore their audio quietly.
+                if (this.roomType === 'radio') {
+                  // console.log(`🔇 [RADIO-PARTICIPANT] Ignoring audio from other listener: ${participant.identity}`);
+                } else {
+                  console.log(`🔇 [PARTICIPANT] Ignoring audio from non-agent: ${participant.identity}`);
+                }
+
+                try {
+                  publication.setSubscribed(false);
+                } catch (unsubErr) {
+                  // Ignore unsubscription errors
+                }
+                return;
+              }
+
               // If no primary agent set yet, this participant becomes the primary
               if (!this.primaryAgentIdentity) {
                 this.primaryAgentIdentity = participant.identity;
@@ -837,11 +872,10 @@ class LiveKitBridge extends EventEmitter {
         opusData.length <= 100
           ? "40ms"
           : opusData.length <= 150
-          ? "60ms"
-          : "unknown";
+            ? "60ms"
+            : "unknown";
       console.log(
-        `🎵 [FRAME-VERIFY] Incoming audio frame #${
-          this.frameCountLogged + 1
+        `🎵 [FRAME-VERIFY] Incoming audio frame #${this.frameCountLogged + 1
         }: ${opusData.length}B (likely ${frameDurationGuess})`
       );
       this.frameCountLogged++;
@@ -2170,8 +2204,7 @@ class LiveKitBridge extends EventEmitter {
           const roomCreationTime = Number(room.creationTime) * 1000; // Convert seconds to ms
           const roomAge = (now - roomCreationTime) / 1000; // Convert to seconds for display
           console.log(
-            `   - Deleting room: ${room.name} (${
-              room.numParticipants
+            `   - Deleting room: ${room.name} (${room.numParticipants
             } participants, age: ${roomAge.toFixed(0)}s)`
           );
           try {

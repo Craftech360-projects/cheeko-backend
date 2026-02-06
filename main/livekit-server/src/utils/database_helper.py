@@ -561,3 +561,56 @@ class DatabaseHelper:
 
         logger.error(f"Failed to get weather after {self.retry_attempts} attempts for location: {location}")
         return None
+
+    async def get_radio_schedule(self) -> list:
+        """
+        Get daily radio schedule from Manager API
+        
+        Returns:
+            list: List of schedule items (dicts) or empty list if failed/empty
+        """
+        url = f"{self.manager_api_url}/config/radio-schedule"
+        headers = {
+            "secret": self.secret,
+            "Content-Type": "application/json"
+        }
+        
+        for attempt in range(self.retry_attempts):
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            # Check for Result<List> format: {code: 0, data: [...]}
+                            if isinstance(data, dict) and data.get('code') == 0:
+                                schedule = data.get('data')
+                                logger.info(f"📻✅ Retrieved radio schedule: {len(schedule)} items")
+                                return schedule
+                            # Fallback: direct array
+                            elif isinstance(data, list):
+                                logger.info(f"📻✅ Retrieved radio schedule: {len(data)} items")
+                                return data
+                            else:
+                                logger.warning(f"📻⚠️ Unexpected API response for schedule: {data}")
+                                return []
+                        else:
+                            error_text = await response.text()
+                            logger.warning(f"API request failed: {response.status} - {error_text}")
+                            
+                            if 400 <= response.status < 500:
+                                return []
+                                
+            except asyncio.TimeoutError:
+                logger.warning(f"API request timeout (attempt {attempt + 1}/{self.retry_attempts})")
+            except aiohttp.ClientError as e:
+                logger.warning(f"API client error (attempt {attempt + 1}/{self.retry_attempts}): {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error getting schedule (attempt {attempt + 1}/{self.retry_attempts}): {e}")
+                
+            if attempt < self.retry_attempts - 1:
+                wait_time = 2 ** attempt
+                await asyncio.sleep(wait_time)
+                
+        logger.error(f"Failed to get radio schedule after {self.retry_attempts} attempts")
+        return []
