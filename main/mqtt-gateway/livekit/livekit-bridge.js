@@ -2111,17 +2111,25 @@ class LiveKitBridge extends EventEmitter {
       }
 
       // Step 3: Force delete the room from LiveKit server to remove all participants
+      // CRITICAL: Never delete shared radio rooms - they must persist for the radio agent
       if (this.roomService && this.roomName) {
-        try {
-          await this.roomService.deleteRoom(this.roomName);
+        const isRadioRoom = this.roomName.startsWith('radio-') || this.roomName.includes('radio-live');
+        if (isRadioRoom) {
           console.log(
-            `✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`
+            `📻 [CLEANUP] Skipping room deletion for shared radio room: ${this.roomName}`
           );
-        } catch (error) {
-          // Room might already be gone, that's okay
-          console.log(
-            `⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`
-          );
+        } else {
+          try {
+            await this.roomService.deleteRoom(this.roomName);
+            console.log(
+              `✅ [CLEANUP] Deleted room from LiveKit: ${this.roomName}`
+            );
+          } catch (error) {
+            // Room might already be gone, that's okay
+            console.log(
+              `⚠️ [CLEANUP] Could not delete room (may already be removed): ${error.message}`
+            );
+          }
         }
       } else {
         console.log(
