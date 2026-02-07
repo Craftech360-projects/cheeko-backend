@@ -486,19 +486,27 @@ const createAndAssignChildProfile = async (macAddress, profileData) => {
 
 /**
  * Get radio schedule
- * Returns the active daily schedule for the radio agent
+ * Returns the active schedule for the radio agent, optionally filtered by day of week.
+ * Items with day_of_week=NULL are "every day" entries and always included.
+ * @param {number|null} [dayOfWeek] - Day of week (0=Sunday..6=Saturday), null for all
  * @returns {Promise<Array>} List of schedule items
  */
-const getRadioSchedule = async () => {
+const getRadioSchedule = async (dayOfWeek = null) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Query radio_schedule table
-  // Columns: id, start_time, program_name, playlist_id, is_active
-  const { data: schedule, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('radio_schedule')
     .select('*')
-    .eq('is_active', true)
-    .order('start_time', { ascending: true });
+    .eq('is_active', true);
+
+  // Filter by day: include items for this specific day OR items with no day (every day)
+  if (dayOfWeek !== null && dayOfWeek !== undefined) {
+    query = query.or(`day_of_week.eq.${dayOfWeek},day_of_week.is.null`);
+  }
+
+  query = query.order('start_time', { ascending: true });
+
+  const { data: schedule, error } = await query;
 
   if (error) {
     logger.error(`Error fetching radio schedule: ${error.message}`);
@@ -506,6 +514,121 @@ const getRadioSchedule = async () => {
   }
 
   return schedule || [];
+};
+
+/**
+ * Get all radio schedule items (for admin dashboard)
+ * Returns all items regardless of active status, grouped by day
+ * @returns {Promise<Array>} List of all schedule items
+ */
+const getRadioScheduleAll = async () => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: schedule, error } = await supabaseAdmin
+    .from('radio_schedule')
+    .select('*')
+    .order('day_of_week', { ascending: true, nullsFirst: true })
+    .order('start_time', { ascending: true });
+
+  if (error) {
+    logger.error(`Error fetching full radio schedule: ${error.message}`);
+    throw new Error('Failed to fetch radio schedule');
+  }
+
+  return schedule || [];
+};
+
+/**
+ * Create a radio schedule item
+ * @param {Object} data - Schedule item data
+ * @param {string} data.program_name - Program name
+ * @param {string} data.start_time - Start time (HH:MM:SS)
+ * @param {string} data.end_time - End time (HH:MM:SS)
+ * @param {string} [data.playlist_id] - Playlist/language identifier
+ * @param {string} [data.stream_url] - Direct stream URL
+ * @param {number|null} [data.day_of_week] - Day of week (0-6) or null for every day
+ * @param {boolean} [data.is_active] - Whether active (default true)
+ * @returns {Promise<Object>} Created schedule item
+ */
+const createRadioScheduleItem = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: item, error } = await supabaseAdmin
+    .from('radio_schedule')
+    .insert({
+      program_name: data.program_name,
+      start_time: data.start_time,
+      end_time: data.end_time,
+      playlist_id: data.playlist_id || null,
+      stream_url: data.stream_url || null,
+      day_of_week: data.day_of_week !== undefined ? data.day_of_week : null,
+      is_active: data.is_active !== undefined ? data.is_active : true,
+      metadata: data.metadata || {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error(`Error creating radio schedule item: ${error.message}`);
+    throw new Error('Failed to create radio schedule item');
+  }
+
+  return item;
+};
+
+/**
+ * Update a radio schedule item
+ * @param {number} id - Schedule item ID
+ * @param {Object} data - Fields to update
+ * @returns {Promise<Object>} Updated schedule item
+ */
+const updateRadioScheduleItem = async (id, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const updateData = { updated_at: new Date().toISOString() };
+  if (data.program_name !== undefined) updateData.program_name = data.program_name;
+  if (data.start_time !== undefined) updateData.start_time = data.start_time;
+  if (data.end_time !== undefined) updateData.end_time = data.end_time;
+  if (data.playlist_id !== undefined) updateData.playlist_id = data.playlist_id;
+  if (data.stream_url !== undefined) updateData.stream_url = data.stream_url;
+  if (data.day_of_week !== undefined) updateData.day_of_week = data.day_of_week;
+  if (data.is_active !== undefined) updateData.is_active = data.is_active;
+  if (data.metadata !== undefined) updateData.metadata = data.metadata;
+
+  const { data: item, error } = await supabaseAdmin
+    .from('radio_schedule')
+    .update(updateData)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error(`Error updating radio schedule item ${id}: ${error.message}`);
+    throw new Error('Failed to update radio schedule item');
+  }
+
+  return item;
+};
+
+/**
+ * Delete a radio schedule item
+ * @param {number} id - Schedule item ID
+ * @returns {Promise<void>}
+ */
+const deleteRadioScheduleItem = async (id) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { error } = await supabaseAdmin
+    .from('radio_schedule')
+    .delete()
+    .eq('id', id);
+
+  if (error) {
+    logger.error(`Error deleting radio schedule item ${id}: ${error.message}`);
+    throw new Error('Failed to delete radio schedule item');
+  }
 };
 
 module.exports = {
@@ -518,5 +641,9 @@ module.exports = {
   getDeviceLocation,
   getWeather,
   getRadioSchedule,
+  getRadioScheduleAll,
+  createRadioScheduleItem,
+  updateRadioScheduleItem,
+  deleteRadioScheduleItem,
   createAndAssignChildProfile
 };

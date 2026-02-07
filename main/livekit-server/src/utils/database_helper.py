@@ -562,14 +562,19 @@ class DatabaseHelper:
         logger.error(f"Failed to get weather after {self.retry_attempts} attempts for location: {location}")
         return None
 
-    async def get_radio_schedule(self) -> list:
+    async def get_radio_schedule(self, day: int = None) -> list:
         """
-        Get daily radio schedule from Manager API
-        
+        Get radio schedule from Manager API, optionally filtered by day of week
+
+        Args:
+            day: Day of week (0=Sunday..6=Saturday), None for all active items
+
         Returns:
             list: List of schedule items (dicts) or empty list if failed/empty
         """
         url = f"{self.manager_api_url}/config/radio-schedule"
+        if day is not None:
+            url += f"?day={day}"
         headers = {
             "secret": self.secret,
             "Content-Type": "application/json"

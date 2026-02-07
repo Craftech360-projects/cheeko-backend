@@ -198,6 +198,17 @@ const routes = [
       title: 'Game Analytics'
     }
   },
+  {
+    path: '/radio-schedule',
+    name: 'RadioSchedule',
+    component: function () {
+      return import('../views/RadioSchedule.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Radio Schedule'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -219,7 +230,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics', 'RadioSchedule']
 
 // Route guard
 router.beforeEach((to, from, next) => {

@@ -9,8 +9,29 @@ const express = require('express');
 const router = express.Router();
 const configService = require('../services/config.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { success, badRequest, notFound } = require('../utils/response');
+const { success, badRequest, notFound, unauthorized } = require('../utils/response');
 const logger = require('../utils/logger');
+const { supabaseAdmin } = require('../config/database');
+
+/**
+ * Verify request has valid auth: service secret OR Bearer token
+ * Used for admin CRUD endpoints accessible from both backend services and admin dashboard
+ */
+const verifyServiceOrAuth = async (req) => {
+  // Check service secret first
+  const secret = req.headers['secret'];
+  if (secret && secret === process.env.SERVICE_SECRET_KEY) return true;
+
+  // Check Bearer token (admin dashboard)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ') && supabaseAdmin) {
+    const token = authHeader.substring(7);
+    const { data } = await supabaseAdmin.from('sys_user_token').select('id').eq('token', token).single();
+    if (data) return true;
+  }
+
+  return false;
+};
 
 /**
  * @swagger
@@ -522,34 +543,178 @@ router.post('/assign-child-profile',
  *   get:
  *     tags: [Config]
  *     summary: Get radio schedule
- *     description: Returns the daily schedule for the radio agent
+ *     description: Returns the active schedule for the radio agent, optionally filtered by day of week
+ *     parameters:
+ *       - in: query
+ *         name: day
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *           maximum: 6
+ *         description: Day of week (0=Sunday..6=Saturday). Omit for all days.
  *     responses:
  *       200:
- *         description: List of schedule items
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: integer
- *                   start_time:
- *                     type: string
- *                     format: time
- *                   program_name:
- *                     type: string
- *                   playlist_id:
- *                     type: string
- *                   is_active:
- *                     type: boolean
+ *         description: List of active schedule items
  */
 router.get('/radio-schedule',
   asyncHandler(async (req, res) => {
     try {
-      const schedule = await configService.getRadioSchedule();
+      const dayParam = req.query.day;
+      const dayOfWeek = dayParam !== undefined ? parseInt(dayParam, 10) : null;
+
+      if (dayOfWeek !== null && (isNaN(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6)) {
+        return badRequest(res, 'day must be between 0 (Sunday) and 6 (Saturday)');
+      }
+
+      const schedule = await configService.getRadioSchedule(dayOfWeek);
       success(res, schedule);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /config/radio-schedule/all:
+ *   get:
+ *     tags: [Config]
+ *     summary: Get full radio schedule for admin dashboard
+ *     description: Returns all schedule items (active and inactive) for management
+ *     responses:
+ *       200:
+ *         description: Full list of schedule items
+ */
+router.get('/radio-schedule/all',
+  asyncHandler(async (req, res) => {
+    try {
+      const schedule = await configService.getRadioScheduleAll();
+      success(res, schedule);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /config/radio-schedule:
+ *   post:
+ *     tags: [Config]
+ *     summary: Create radio schedule item
+ *     description: Creates a new schedule item (requires service secret)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - program_name
+ *               - start_time
+ *               - end_time
+ *             properties:
+ *               program_name:
+ *                 type: string
+ *               start_time:
+ *                 type: string
+ *                 format: time
+ *               end_time:
+ *                 type: string
+ *                 format: time
+ *               playlist_id:
+ *                 type: string
+ *               stream_url:
+ *                 type: string
+ *               day_of_week:
+ *                 type: integer
+ *                 minimum: 0
+ *                 maximum: 6
+ *                 nullable: true
+ *               is_active:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Created schedule item
+ */
+router.post('/radio-schedule',
+  asyncHandler(async (req, res) => {
+    if (!await verifyServiceOrAuth(req)) {
+      return unauthorized(res, 'Authentication required');
+    }
+
+    const { program_name, start_time, end_time } = req.body;
+    if (!program_name || !start_time || !end_time) {
+      return badRequest(res, 'program_name, start_time, and end_time are required');
+    }
+
+    try {
+      const item = await configService.createRadioScheduleItem(req.body);
+      success(res, item, 'Schedule item created');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /config/radio-schedule/{id}:
+ *   put:
+ *     tags: [Config]
+ *     summary: Update radio schedule item
+ *     description: Updates an existing schedule item (requires service secret)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Updated schedule item
+ */
+router.put('/radio-schedule/:id',
+  asyncHandler(async (req, res) => {
+    if (!await verifyServiceOrAuth(req)) {
+      return unauthorized(res, 'Authentication required');
+    }
+
+    try {
+      const item = await configService.updateRadioScheduleItem(req.params.id, req.body);
+      success(res, item, 'Schedule item updated');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /config/radio-schedule/{id}:
+ *   delete:
+ *     tags: [Config]
+ *     summary: Delete radio schedule item
+ *     description: Deletes a schedule item (requires service secret)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Item deleted
+ */
+router.delete('/radio-schedule/:id',
+  asyncHandler(async (req, res) => {
+    if (!await verifyServiceOrAuth(req)) {
+      return unauthorized(res, 'Authentication required');
+    }
+
+    try {
+      await configService.deleteRadioScheduleItem(req.params.id);
+      success(res, null, 'Schedule item deleted');
     } catch (error) {
       badRequest(res, error.message);
     }

@@ -237,6 +237,13 @@ class RadioAgent:
                 await self.current_iterator.close()
             logger.info("📻 Radio Agent stopped")
 
+    def _get_js_day_of_week(self) -> int:
+        """Get current day of week in JS convention (0=Sunday, 1=Monday, ... 6=Saturday)"""
+        # Python: weekday() returns 0=Monday..6=Sunday
+        # JS/DB convention: 0=Sunday, 1=Monday..6=Saturday
+        py_weekday = datetime.now().weekday()  # 0=Mon, 6=Sun
+        return (py_weekday + 1) % 7  # Convert: Mon=1, Tue=2, ..., Sun=0
+
     def _get_current_program(self, schedule: list) -> dict:
         """Find the program matching the current time"""
         if not schedule:
@@ -276,10 +283,22 @@ class RadioAgent:
 
         while not self.should_stop:
             try:
-                # 1. Fetch Schedule
-                schedule = await self.db_helper.get_radio_schedule()
+                now = datetime.now()
+                js_day = self._get_js_day_of_week()
+                day_names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
-                # 2. Determine current program based on time
+                # 1. Fetch Schedule (filtered by current day of week)
+                schedule = await self.db_helper.get_radio_schedule(day=js_day)
+
+                # 2. Polling log
+                current_id = self.current_program.get('id') if self.current_program else None
+                current_name = self.current_program.get('program_name') if self.current_program else 'None'
+                logger.info(
+                    f"📅 [POLL] time={now.strftime('%H:%M:%S')} day={day_names[js_day]}({js_day}) "
+                    f"items={len(schedule)} current_program='{current_name}' (ID:{current_id})"
+                )
+
+                # 3. Determine current program based on time
                 target_program = self._get_current_program(schedule)
 
                 if not target_program:
@@ -287,16 +306,18 @@ class RadioAgent:
                     await asyncio.sleep(30)
                     continue
 
-                # 3. Check if program changed (by ID) or we need to start playing
-                current_id = self.current_program.get('id') if self.current_program else None
+                # 4. Check if program changed (by ID) or we need to start playing
                 target_id = target_program.get('id')
 
                 if current_id != target_id or not self.current_iterator:
-                    logger.info(f"🔄 Program Update: {target_program.get('program_name')} (ID: {target_id})")
+                    logger.info(
+                        f"🔄 [POLL] Program change detected: '{current_name}' (ID:{current_id}) -> "
+                        f"'{target_program.get('program_name')}' (ID:{target_id})"
+                    )
                     await self._play_program(target_program)
                     self.current_program = target_program
 
-                # 4. If current track finished, play next track in same program
+                # 5. If current track finished, play next track in same program
                 if self.current_iterator and self.current_iterator.is_closed:
                     logger.info("🎵 Current track finished, playing next track...")
                     await self._play_program(target_program)
