@@ -548,11 +548,6 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"⚠️ Error handler not available: {e} - using default error handling")
 
     # ============================================================================
-    # MEM0 PROVIDER - REMOVED (unused in current implementation)
-    # ============================================================================
-    # Removed for faster startup - was initialized but never used
-
-    # ============================================================================
     # DEVICE CONTROL SERVICE (Lazy-loaded)
     # ============================================================================
 

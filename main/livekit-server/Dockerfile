@@ -49,7 +49,6 @@ RUN pip install --no-cache-dir \
     'edge-tts==7.0.2' \
     'gtts' \
     'pyttsx3' \
-    'mem0ai==1.0.0' \
     'jinja2' \
     'pytz' \
     'qdrant-client>=1.7.0' \

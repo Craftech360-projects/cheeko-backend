@@ -46,11 +46,12 @@ from src.shared.entrypoint_utils import (
 from src.features.game_tools import check_riddle_answer, set_riddle_game_state, set_game_analytics_manager
 from src.features.mode_switching import update_agent_mode
 from src.utils.helpers import UsageManager, GameAnalyticsManager
+from src.memory import MEMORY_TOOLS
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
 DEFAULT_PORT = 8085
-GAME_TOOLS = [check_riddle_answer, update_agent_mode]
+GAME_TOOLS = [check_riddle_answer, update_agent_mode] + MEMORY_TOOLS
 
 
 class RiddleSolverAssistant(BaseAssistant):
@@ -129,7 +130,7 @@ async def entrypoint(ctx: JobContext):
             if dispatch_child_profile:
                 logger.info(f"👶 Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
             if dispatch_memories:
-                logger.info(f"🧠 [MEM0] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
+                logger.info(f"🧠 [MEMORY] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
     except Exception as e:
         logger.debug(f"No dispatch metadata or error parsing: {e}")
 
@@ -195,8 +196,8 @@ async def entrypoint(ctx: JobContext):
         modalities=["AUDIO"],
     )
 
-    session = AgentSession(llm=realtime_model, tools=GAME_TOOLS)
-    logger.info(f"AgentSession created with {len(GAME_TOOLS)} game tools")
+    session = AgentSession(llm=realtime_model, tools=GAME_TOOLS, userdata={"device_mac": device_mac or ""})
+    logger.info(f"AgentSession created with {len(GAME_TOOLS)} game + memory tools")
 
     # ============================================================================
     # USAGE TRACKING: Capture prompt_tokens, completion_tokens, TTFT per response
@@ -540,7 +541,7 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.warning(f"Failed to send game analytics: {e}")
 
-            # Extract and send chat history (takes 2-3 seconds due to Mem0)
+            # Extract and send chat history
             try:
                 await asyncio.wait_for(
                     asyncio.shield(extract_and_send_chat_history(session, chat_history_service, device_mac)),

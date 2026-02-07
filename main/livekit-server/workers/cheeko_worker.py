@@ -54,7 +54,7 @@ from src.shared.entrypoint_utils import (
 # from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
 from src.features.mode_switching import update_agent_mode
 from src.features.openclaw_tools import OPENCLAW_TOOLS
-from src.services.mem0_service import mem0_service
+from src.memory import get_memory_service, MEMORY_TOOLS
 
 # Agent configuration
 AGENT_NAME = "cheeko-agent"
@@ -63,9 +63,9 @@ AGENT_NAME = "cheeko-agent"
 # These are patterns where memory injection provides significant value
 MEMORY_TRIGGER_PATTERNS = [
     ("story", ["story about", "tell me a story", "tell a story"]),  # Story requests
-    ("remember", ["do you remember", "remember my", "remember when"]),  # Memory queries
+    ("remember", ["do you remember", "remember my", "remember when", "about me", "tell me about me", "you know me", "know about me", "know my name"]),  # Memory queries
     ("family", ["about my", "my dog", "my cat", "my pet", "my brother", "my sister", "my mom", "my dad", "my family"]),  # Family/pet references
-    ("question", ["what's my", "who is my", "what is my"]),  # Direct memory questions
+    ("question", ["what's my", "who is my", "what is my", "what do you know"]),  # Direct memory questions
 ]
 
 def should_inject_memory(text: str) -> tuple[bool, str]:
@@ -83,8 +83,8 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
-# Combine mode switching and OpenClaw tools
-ALL_AGENT_TOOLS = MODE_SWITCH_TOOLS + OPENCLAW_TOOLS
+# Combine mode switching, OpenClaw tools, and memory tools
+ALL_AGENT_TOOLS = MODE_SWITCH_TOOLS + OPENCLAW_TOOLS + MEMORY_TOOLS
 
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
@@ -197,10 +197,16 @@ class CheekoAssistant(BaseAssistant):
 
 
 def prewarm(proc: JobProcess):
-    """Prewarm for Gemini Realtime - start model preloading here (not on import)"""
-    # COMMENTED OUT - Music service disabled (saves ~11s startup time)
-    # from src.utils import start_preloading
-    # start_preloading()  # Only runs in worker process, not watcher
+    """Prewarm for Gemini Realtime - preload embedding model so first session is fast"""
+    # Preload the sentence-transformers embedding model (~16s cold load)
+    # This runs BEFORE any session starts, so the first child doesn't wait
+    try:
+        from src.utils.model_cache import model_cache
+        model_cache.get_embedding_model("all-MiniLM-L6-v2")
+        logger.info("[PREWARM] Embedding model preloaded")
+    except Exception as e:
+        logger.warning(f"[PREWARM] Failed to preload embedding model: {e}")
+
     logger.info("[PREWARM] Ready for Gemini Realtime")
     proc.userdata["ready"] = True
 
@@ -251,9 +257,13 @@ async def entrypoint(ctx: JobContext):
             if dispatch_child_profile:
                 logger.info(f"👶 Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
             if dispatch_memories:
-                logger.info(f"🧠 [MEM0] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
+                logger.info(f"🧠 [MEMORY] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
     except Exception as e:
         logger.debug(f"No dispatch metadata or error parsing: {e}")
+
+    # Initialize self-hosted memory service
+    memory_config = ConfigLoader.get_memory_config()
+    memory_service = get_memory_service(memory_config)
 
     if device_mac:
         try:
@@ -317,12 +327,15 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"Error in API calls: {e}")
             agent_prompt = ConfigLoader.get_default_prompt()
 
+    # Memory initialization runs in background AFTER session starts (see below)
+    # This avoids blocking agent startup with the 90s embedding model load
+
     # Render prompt with child profile
     # Debug: Check if prompt template has child_name placeholder
     has_placeholder = '{{' in agent_prompt or '{%' in agent_prompt
     has_child_name = 'child_name' in agent_prompt
     logger.info(f"Template analysis - Has Jinja: {has_placeholder}, Has child_name: {has_child_name}")
-    
+
     if child_profile:
         agent_prompt = render_prompt_with_profile(
             agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
@@ -369,10 +382,16 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching tools, OpenClaw tools, and TTS for session.say()
+    # Create AgentSession with mode switching tools, OpenClaw tools, memory tools, and TTS for session.say()
     # Note: Google Search is passed to RealtimeModel as a provider tool, not here
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=ALL_AGENT_TOOLS)
-    logger.info(f"AgentSession created with {len(ALL_AGENT_TOOLS)} tools (mode switching + OpenClaw) + ElevenLabs TTS")
+    # userdata must be passed in constructor (v1.3+ raises ValueError if set after creation)
+    session = AgentSession(
+        llm=realtime_model,
+        tts=elevenlabs_tts,
+        tools=ALL_AGENT_TOOLS,
+        userdata={"device_mac": device_mac or ""},
+    )
+    logger.info(f"AgentSession created with {len(ALL_AGENT_TOOLS)} tools (mode switching + OpenClaw + memory) + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
@@ -413,14 +432,14 @@ async def entrypoint(ctx: JobContext):
         # Skip memory injection if one is already in progress or happened recently
         current_time = time.time()
         if memory_injection_in_progress or (current_time - last_memory_injection_time) < 5:
-            logger.debug(f"🧠 [MEM0] Skipping memory check - recent injection or in progress")
+            logger.debug(f"[MEMORY] Skipping memory check - recent injection or in progress")
             return
 
         # Check if this message should trigger memory injection
         inject, category = should_inject_memory(text)
 
-        if inject and device_mac and mem0_service.is_ready():
-            logger.info(f"🧠 [MEM0] Memory trigger detected: category='{category}'")
+        if inject and device_mac and memory_service.is_ready():
+            logger.info(f"[MEMORY] Memory trigger detected: category='{category}'")
             memory_injection_in_progress = True
             last_memory_injection_time = current_time
             # Search for relevant memories and inject context
@@ -432,44 +451,40 @@ async def entrypoint(ctx: JobContext):
 
         try:
             # Small delay to let any automatic response start
-            # This helps us decide whether to interrupt or not
             await asyncio.sleep(0.3)
 
             # Search for memories relevant to what the user just said
-            relevant_memories = await mem0_service.search_relevant_memories(
-                user_id=mac_address,
+            relevant_memories = await memory_service.search(
+                mac=mac_address,
                 query=user_query,
-                limit=3  # Keep it small for low latency
+                limit=3
             )
 
             if relevant_memories:
-                logger.info(f"🧠 [MEM0-INJECT] Found {len(relevant_memories)} relevant memories for '{category}': '{user_query[:30]}...'")
+                logger.info(f"[MEMORY-INJECT] Found {len(relevant_memories)} relevant memories for '{category}': '{user_query[:30]}...'")
 
                 # Format the memory context
-                memory_context = mem0_service.format_relevant_memories_for_injection(
+                memory_context = memory_service.format_memories_for_injection(
                     user_query, relevant_memories
                 )
 
                 # For high-value triggers like stories, inject with generate_reply
-                # This will guide the response to use the memories
                 if category in ["story", "remember", "question"]:
                     try:
-                        logger.info(f"🧠 [MEM0-INJECT] Injecting memory context for {category} request")
+                        logger.info(f"[MEMORY-INJECT] Injecting memory context for {category} request")
                         await session.generate_reply(
                             instructions=f"{memory_context}\n\nRespond to the child's request: '{user_query}'"
                         )
-                        logger.info(f"🧠 [MEM0-INJECT] Memory context injected successfully")
+                        logger.info(f"[MEMORY-INJECT] Memory context injected successfully")
                     except Exception as gen_err:
-                        # This is expected if the model is already responding
-                        logger.debug(f"🧠 [MEM0-INJECT] Could not inject (model may be responding): {gen_err}")
+                        logger.debug(f"[MEMORY-INJECT] Could not inject (model may be responding): {gen_err}")
                 else:
-                    # For other categories, just log - rely on prompt instructions
-                    logger.info(f"🧠 [MEM0-INJECT] Relevant memories available for '{category}' - relying on prompt")
+                    logger.info(f"[MEMORY-INJECT] Relevant memories available for '{category}' - relying on prompt")
             else:
-                logger.debug(f"🧠 [MEM0-INJECT] No relevant memories found for: '{user_query[:30]}...'")
+                logger.debug(f"[MEMORY-INJECT] No relevant memories found for: '{user_query[:30]}...'")
 
         except Exception as e:
-            logger.error(f"🧠 [MEM0-INJECT] Error searching memories: {e}")
+            logger.error(f"[MEMORY-INJECT] Error searching memories: {e}")
         finally:
             memory_injection_in_progress = False
 
@@ -803,7 +818,7 @@ async def entrypoint(ctx: JobContext):
             except Exception as e:
                 logger.warning(f"Failed to log usage summary: {e}")
 
-            # Extract and send chat history before closing session (also sends to Mem0)
+            # Extract and send chat history before closing session
             # Use asyncio.shield to protect from cancellation during job shutdown
             try:
                 await asyncio.wait_for(
@@ -1169,6 +1184,44 @@ async def entrypoint(ctx: JobContext):
     init_elapsed = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"Total initialization: {init_elapsed:.0f}ms")
     logger.info(f"{CHARACTER_NAME} agent is LIVE!")
+
+    # Initialize memory in background (embedding model load can take 90s on first run)
+    # This runs AFTER the session is live so the child can start talking immediately
+    # After init, loads memory context and updates the agent's instructions via update_agent()
+    async def _init_memory_background():
+        try:
+            if device_mac and memory_service.is_ready():
+                await memory_service.initialize(device_mac, child_profile)
+                logger.info(f"[MEMORY] Device initialized in background")
+
+                # Load memory context and inject into the live session
+                try:
+                    context = await memory_service.load_context(device_mac)
+                    memories = context.get("long_term_memories", [])
+                    today_log = context.get("today_context", "")
+
+                    memory_block = ""
+                    if memories:
+                        memory_block += "\n\n## What you know about this child (from past conversations):\n"
+                        for mem in memories:
+                            memory_block += f"- {mem}\n"
+
+                    if today_log:
+                        memory_block += f"\n## Today's conversation log:\n{today_log}\n"
+
+                    if memory_block:
+                        # Use the proper async API to update instructions on the live realtime session
+                        updated_instructions = (assistant.instructions or "") + memory_block
+                        await assistant.update_instructions(updated_instructions)
+                        logger.info(f"[MEMORY] Injected {len(memories)} memories + today's log into live agent instructions")
+                    else:
+                        logger.info(f"[MEMORY] No existing memories to inject for this device")
+                except Exception as ctx_e:
+                    logger.warning(f"[MEMORY] Failed to load/inject context: {ctx_e}")
+        except Exception as e:
+            logger.warning(f"[MEMORY] Background init failed: {e}")
+
+    asyncio.create_task(_init_memory_background())
 
     # COMMENTED OUT - Music service disabled
     # # Auto-start music if in Music Mode

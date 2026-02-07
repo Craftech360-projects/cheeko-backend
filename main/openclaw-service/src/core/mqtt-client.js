@@ -155,6 +155,38 @@ class MQTTClient {
     }
 
     /**
+     * Publish audio to device
+     * @param {string} deviceMac - Device MAC address
+     * @param {Buffer} audioBuffer - Audio data (MP3)
+     * @returns {Promise<boolean>}
+     */
+    async publishAudio(deviceMac, audioBuffer) {
+        if (!this.connected) {
+            logger.error('[MQTT] Cannot publish audio - not connected');
+            return false;
+        }
+
+        try {
+            const topic = `device/${deviceMac}/agent_audio`;
+
+            return new Promise((resolve, reject) => {
+                this.client.publish(topic, audioBuffer, { qos: 1 }, (err) => {
+                    if (err) {
+                        logger.error(`[MQTT] Failed to publish audio to ${deviceMac}:`, err);
+                        reject(err);
+                    } else {
+                        logger.info(`[MQTT] ✅ Audio published to ${deviceMac} (${audioBuffer.length} bytes)`);
+                        resolve(true);
+                    }
+                });
+            });
+        } catch (error) {
+            logger.error('[MQTT] Error publishing audio:', error);
+            return false;
+        }
+    }
+
+    /**
      * Shutdown MQTT client
      */
     shutdown() {
