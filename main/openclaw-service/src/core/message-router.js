@@ -138,6 +138,18 @@ class MessageRouter {
             }
         }
 
+        // Initialize OpenClaw Agent if enabled
+        const openclawConfig = require('../config/openclaw.config');
+        if (openclawConfig.features.openclawAgent) {
+            try {
+                const mqttClient = require('./mqtt-client');
+                const agentModule = require('../agent');
+                await agentModule.initializeAgent(mqttClient);
+            } catch (error) {
+                logger.error('[MESSAGE-ROUTER] OpenClaw Agent initialization failed:', error);
+            }
+        }
+
         // Future: Initialize Telegram, Slack, etc.
 
         logger.info('[MESSAGE-ROUTER] ✅ Integrations initialized');

@@ -34,6 +34,14 @@ module.exports = {
         apiSecret: process.env.LIVEKIT_API_SECRET,
     },
 
+    // AI Services (OpenClaw Agent)
+    ai: {
+        deepgramApiKey: process.env.DEEPGRAM_API_KEY,
+        groqApiKey: process.env.GROQ_API_KEY,
+        elevenlabsApiKey: process.env.ELEVENLABS_API_KEY,
+        elevenlabsVoiceId: process.env.ELEVENLABS_VOICE_ID || 'EXAVITQu4vr4xnSDxMaL',
+    },
+
     // Task scheduler
     scheduler: {
         enabled: process.env.SCHEDULER_ENABLED === 'true',
@@ -56,6 +64,7 @@ module.exports = {
 
     // Feature flags
     features: {
+        openclawAgent: process.env.ENABLE_OPENCLAW_AGENT === 'true',
         proactiveReminders: process.env.ENABLE_PROACTIVE_REMINDERS === 'true',
         parentNotifications: process.env.ENABLE_PARENT_NOTIFICATIONS === 'true',
         webAutomation: process.env.ENABLE_WEB_AUTOMATION === 'true',

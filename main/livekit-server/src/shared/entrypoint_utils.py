@@ -90,9 +90,9 @@ def load_game_prompt(
         agent_name: The game name ("Math Tutor", "Riddle Solver", "Word Ladder")
         child_profile: Optional child profile for personalization
         extra_vars: Optional extra template variables (e.g., start_word, target_word)
-        long_term_memories: List of memory strings from Mem0
-        memory_relations: List of graph relations from Mem0
-        memory_entities: List of graph entities from Mem0
+        long_term_memories: List of long-term memory strings
+        memory_relations: List of graph relations
+        memory_entities: List of graph entities
 
     Returns:
         str: Rendered prompt or None if file not found
@@ -160,7 +160,7 @@ def load_game_prompt(
             else:
                 logger.warning("No child profile available for prompt rendering")
 
-            # Add Mem0 memories and graph data
+            # Add memories and graph data
             template_vars.update({
                 'long_term_memories': long_term_memories or [],
                 'memory_relations': memory_relations or [],
@@ -194,9 +194,9 @@ def render_prompt_with_profile(
     Args:
         agent_prompt: Prompt template string
         child_profile: Child profile data
-        long_term_memories: List of memory strings from Mem0
-        memory_relations: List of graph relations from Mem0
-        memory_entities: List of graph entities from Mem0
+        long_term_memories: List of long-term memory strings
+        memory_relations: List of graph relations
+        memory_entities: List of graph entities
 
     Returns:
         str: Rendered prompt
@@ -237,9 +237,9 @@ def render_prompt_with_profile(
             'child_interests': interests,
             'primary_language': child_profile.get('primaryLanguage', 'English'),
             'additional_notes': child_profile.get('additionalNotes', ''),
-            'long_term_memories': long_term_memories or [],  # Mem0 memories
-            'memory_relations': memory_relations or [],  # Mem0 graph relations
-            'memory_entities': memory_entities or [],  # Mem0 graph entities
+            'long_term_memories': long_term_memories or [],
+            'memory_relations': memory_relations or [],
+            'memory_entities': memory_entities or [],
         }
 
         rendered = template.render(**template_vars)
@@ -471,12 +471,12 @@ def _is_gemini_thinking(text: str) -> bool:
 
 async def extract_and_send_chat_history(session, chat_history_service, device_mac: str = None):
     """
-    Extract chat history from session and send to API and Mem0
+    Extract chat history from session and send to API and memory service
 
     Args:
         session: AgentSession instance
         chat_history_service: ChatHistoryService instance
-        device_mac: Device MAC address for Mem0 (optional)
+        device_mac: Device MAC address for memory flush (optional)
 
     Returns:
         bool: True if successful, False otherwise
@@ -523,58 +523,70 @@ async def extract_and_send_chat_history(session, chat_history_service, device_ma
 
             logger.info(f"📝 Extracted {saved_count} messages from session.history (skipped {skipped_count} thinking)")
 
-        # Send to BOTH Manager API and Mem0 in parallel for speed
-        mem0_task = None
+        # Send to Manager API and flush to local memory service in parallel
+        memory_flush_task = None
         if device_mac and chat_history_service.conversation_history:
             try:
-                from src.services.mem0_service import mem0_service
-                if mem0_service.is_ready():
-                    # Copy the history to avoid race conditions
+                from src.memory import get_memory_service, create_extractor
+                memory_svc = get_memory_service()
+                if memory_svc.is_ready():
                     history_copy = list(chat_history_service.conversation_history)
-                    session_id = chat_history_service.session_id
-                    logger.info(f"🧠 [MEM0] Sending {len(history_copy)} messages to Mem0...")
-                    
-                    # Create Mem0 task (don't await yet)
-                    mem0_task = asyncio.create_task(
-                        mem0_service.add_conversation(
-                            user_id=device_mac,
-                            messages=history_copy,
-                            session_id=session_id
+                    logger.info(f"[MEMORY] Flushing {len(history_copy)} messages to local memory...")
+                    # Create LLM fact extraction callback (Groq)
+                    extractor = create_extractor()
+                    memory_flush_task = asyncio.create_task(
+                        memory_svc.flush_session(
+                            mac=device_mac,
+                            chat_history=history_copy,
+                            extract_with_llm=extractor,
                         )
                     )
                 else:
-                    logger.warning("🧠 [MEM0] Service not ready - check MEM0_API_KEY")
+                    logger.warning("[MEMORY] Service not ready, skipping flush")
             except Exception as e:
-                logger.warning(f"🧠 [MEM0] Failed to prepare task: {e}")
+                logger.warning(f"[MEMORY] Failed to prepare flush task: {e}")
         else:
             if not device_mac:
-                logger.debug("🧠 [MEM0] Skipping - no device_mac")
+                logger.debug("[MEMORY] Skipping flush - no device_mac")
             elif not chat_history_service.conversation_history:
-                logger.debug("🧠 [MEM0] Skipping - no conversation history")
+                logger.debug("[MEMORY] Skipping flush - no conversation history")
 
-        # Send to Manager API and Mem0 in parallel
+        # Send to Manager API and memory service in parallel
         tasks = [chat_history_service.cleanup()]
-        if mem0_task:
-            tasks.append(mem0_task)
-        
-        # Wait for both to complete (with timeout)
+        if memory_flush_task:
+            tasks.append(memory_flush_task)
+
+        # Step 1: Flush session data (API + memory indexing)
+        flush_succeeded = False
         try:
             results = await asyncio.wait_for(
                 asyncio.gather(*tasks, return_exceptions=True),
-                timeout=15.0  # 15 second total timeout
+                timeout=15.0
             )
-            
-            # Check Mem0 result if it ran
-            if mem0_task:
-                mem0_result = results[1] if len(results) > 1 else None
-                if isinstance(mem0_result, Exception):
-                    logger.warning(f"🧠 [MEM0] Failed: {mem0_result}")
-                elif mem0_result:
-                    logger.info(f"🧠 [MEM0] ✅ Successfully sent to Mem0")
+
+            if memory_flush_task:
+                memory_result = results[1] if len(results) > 1 else None
+                if isinstance(memory_result, Exception):
+                    logger.warning(f"[MEMORY] Flush failed: {memory_result}")
                 else:
-                    logger.warning(f"🧠 [MEM0] Send returned False")
+                    logger.info(f"[MEMORY] Session flushed successfully")
+                    flush_succeeded = True
         except asyncio.TimeoutError:
-            logger.warning("⏱️ Timeout waiting for Manager API and Mem0 sends")
+            logger.warning("Timeout waiting for Manager API and memory flush")
+
+        # Step 2: Run curation AFTER flush completes (separate timeout)
+        if flush_succeeded and device_mac:
+            try:
+                from src.memory import curate_device_memory
+                await asyncio.wait_for(
+                    curate_device_memory(device_mac),
+                    timeout=30.0
+                )
+                logger.info(f"[MEMORY] Curation completed for {device_mac}")
+            except asyncio.TimeoutError:
+                logger.warning(f"[MEMORY] Curation timed out for {device_mac}")
+            except Exception as cur_e:
+                logger.debug(f"[MEMORY] Curation skipped: {cur_e}")
 
         return True
     except Exception as e:
@@ -645,7 +657,7 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
                 if dispatch_child_profile:
                     logger.info(f"Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
                 if dispatch_memories:
-                    logger.info(f"🧠 [MEM0] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
+                    logger.info(f"🧠 [MEMORY] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
         except Exception as e:
             logger.debug(f"No dispatch metadata or error parsing: {e}")
 

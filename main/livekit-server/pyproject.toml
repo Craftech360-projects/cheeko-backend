@@ -22,7 +22,6 @@ dependencies = [
     "edge-tts",
     "gtts",
     "pyttsx3",
-    "mem0ai>=1.0.1",
     "jinja2",
     "pytz",
     "qdrant-client>=1.7.0",

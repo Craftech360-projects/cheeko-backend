@@ -107,12 +107,22 @@ async function startServer() {
 // Graceful shutdown
 process.on('SIGINT', async () => {
     logger.info('\\n🛑 Received SIGINT, shutting down gracefully...');
+
+    // Shutdown agent if running
+    const agentModule = require('../agent');
+    await agentModule.shutdownAgent();
+
     await messageRouter.shutdown();
     process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
     logger.info('\\n🛑 Received SIGTERM, shutting down gracefully...');
+
+    // Shutdown agent if running
+    const agentModule = require('../agent');
+    await agentModule.shutdownAgent();
+
     await messageRouter.shutdown();
     process.exit(0);
 });

@@ -88,10 +88,6 @@ FALLBACK_ENABLED = "true"
 FALLBACK_LLM_MODEL = "llama-3.1-8b-instant"
 TTS_FALLBACK_ENABLED = "true"
 
-# Mem0 Configuration
-MEM0_ENABLED = "false"
-MEM0_API_KEY = "m0-tNiOs5lPRZMUGeNglTt9np3GBHt7EOIBZr3FbUtC"
-
 # Agent Settings
 PREEMPTIVE_GENERATION = "false"
 NOISE_CANCELLATION = "false"

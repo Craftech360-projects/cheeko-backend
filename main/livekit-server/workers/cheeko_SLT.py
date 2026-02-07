@@ -122,7 +122,7 @@ async def entrypoint(ctx: JobContext):
             if dispatch_child_profile:
                 logger.info(f"👶 Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
             if dispatch_memories:
-                logger.info(f"🧠 [MEM0] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
+                logger.info(f"🧠 [MEMORY] Received {len(dispatch_memories)} memories, {len(dispatch_relations)} relations, {len(dispatch_entities)} entities")
     except Exception as e:
         logger.debug(f"No dispatch metadata or error parsing: {e}")
 
@@ -327,7 +327,7 @@ async def entrypoint(ctx: JobContext):
         try:
             logger.info("Initiating cleanup")
 
-            # Extract and send chat history before closing session (also sends to Mem0)
+            # Extract and send chat history before closing session
             # Use asyncio.shield to protect from cancellation during job shutdown
             try:
                 await asyncio.shield(

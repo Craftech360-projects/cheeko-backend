@@ -173,6 +173,12 @@ class ConfigLoader:
         return config.get('manager_api', {})
 
     @staticmethod
+    def get_memory_config():
+        """Get memory system configuration from config.yaml"""
+        config = ConfigLoader.load_yaml_config()
+        return config.get("memory", {})
+
+    @staticmethod
     def get_gemini_realtime_config():
         """Get Gemini Realtime configuration from config.yaml and environment variables"""
         # Load from config.yaml first
