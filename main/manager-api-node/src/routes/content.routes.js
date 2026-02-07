@@ -341,8 +341,8 @@ router.post('/library/batch',
       if (!items[i].title || !items[i].contentType) {
         return badRequest(res, `Item at index ${i} is missing required fields (title, contentType)`);
       }
-      if (!['music', 'story'].includes(items[i].contentType)) {
-        return badRequest(res, `Item at index ${i} has invalid contentType (must be music or story)`);
+      if (!['music', 'story', 'podcast'].includes(items[i].contentType)) {
+        return badRequest(res, `Item at index ${i} has invalid contentType (must be music, story or podcast)`);
       }
     }
 
@@ -514,8 +514,8 @@ router.post('/library/upload',
 
     const { contentType, category } = req.body;
 
-    if (!contentType || !['music', 'story', 'rfidcontent'].includes(contentType)) {
-      return badRequest(res, 'Content type must be music, story or rfidcontent');
+    if (!contentType || !['music', 'story', 'rfidcontent', 'podcast'].includes(contentType)) {
+      return badRequest(res, 'Content type must be music, story, rfidcontent or podcast');
     }
 
     try {
@@ -543,8 +543,8 @@ router.post('/library',
       return badRequest(res, 'Title is required');
     }
 
-    if (!contentType || !['music', 'story'].includes(contentType)) {
-      return badRequest(res, 'Content type must be music or story');
+    if (!contentType || !['music', 'story', 'podcast'].includes(contentType)) {
+      return badRequest(res, 'Content type must be music, story or podcast');
     }
 
     try {
@@ -625,8 +625,8 @@ router.put('/library/:id',
     }
 
     // Validate contentType if provided
-    if (req.body.contentType && !['music', 'story'].includes(req.body.contentType)) {
-      return badRequest(res, 'Content type must be music or story');
+    if (req.body.contentType && !['music', 'story', 'podcast'].includes(req.body.contentType)) {
+      return badRequest(res, 'Content type must be music, story or podcast');
     }
 
     try {

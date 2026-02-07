@@ -539,10 +539,12 @@ class VirtualMQTTConnection {
       );
 
       // Send mode_update to device firmware (includes listening_mode for PTT)
+      // ESP32 firmware doesn't recognize "radio" yet, send "conversation" instead
       console.log(`📤 [HELLO] Sending mode_update to device...`);
+      const deviceMode = this.roomType === "radio" ? "conversation" : this.roomType;
       const modeUpdateMsg = {
         type: "mode_update",
-        mode: this.roomType,
+        mode: deviceMode,
         listening_mode: this.deviceMode,
         ...(this.roomType === "conversation" && this.currentCharacter
           ? { character: this.currentCharacter }
@@ -586,7 +588,7 @@ class VirtualMQTTConnection {
       const helloResponseMsg = {
         type: "hello",
         version: json.version,
-        mode: this.roomType,
+        mode: this.roomType === "radio" ? "story" : this.roomType,
         ...(this.roomType === "conversation" && this.currentCharacter
           ? { character: this.currentCharacter }
           : {}),

@@ -1620,10 +1620,11 @@ class MQTTGateway {
 
 
       // Step 6: Send mode_update confirmation to device
+      // ESP32 firmware doesn't recognize "radio" yet, send "conversation" instead
       if (clientId) {
         const modeUpdateMsg = {
           type: "mode_update",
-          mode: mode,
+          mode: mode === "radio" ? "conversation" : mode,
           session_id: newRoomName,
           previous_mode: previousMode,
           timestamp: Date.now(),

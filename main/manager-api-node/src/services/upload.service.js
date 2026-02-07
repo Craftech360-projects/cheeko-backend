@@ -43,6 +43,7 @@ const uploadContentFile = async (fileBuffer, filename, contentType, category, mi
     let folder = 'stories';
     if (contentType === 'music') folder = 'music';
     if (contentType === 'rfidcontent') folder = 'rfidcontent';
+    if (contentType === 'podcast') folder = 'podcast';
     const categoryFolder = category || 'English';
 
     // Clean filename (remove special chars but keep extension)

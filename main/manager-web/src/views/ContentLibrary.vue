@@ -37,6 +37,10 @@
               <div class="stat-label">Stories</div>
             </div>
             <div class="stat-card">
+              <div class="stat-value">{{ stats.podcasts }}</div>
+              <div class="stat-label">Podcasts</div>
+            </div>
+            <div class="stat-card">
               <div class="stat-value">{{ stats.textbooks }}</div>
               <div class="stat-label">Textbooks</div>
             </div>
@@ -48,6 +52,7 @@
               <el-option label="All Types" value="" />
               <el-option label="Music" value="music" />
               <el-option label="Story" value="story" />
+              <el-option label="Podcast" value="podcast" />
               <el-option label="Textbook" value="textbook" />
             </el-select>
             <el-select v-model="filters.category" placeholder="Category" size="small" clearable @change="handleFilterChange">
@@ -184,6 +189,7 @@
           <el-select v-model="contentForm.content_type" placeholder="Select type" style="width: 100%">
             <el-option label="Music" value="music" />
             <el-option label="Story" value="story" />
+            <el-option label="Podcast" value="podcast" />
             <el-option label="Textbook" value="textbook" />
           </el-select>
         </el-form-item>
@@ -260,6 +266,7 @@ export default {
         total: 0,
         music: 0,
         stories: 0,
+        podcasts: 0,
         textbooks: 0
       },
       filters: {
@@ -359,6 +366,7 @@ export default {
             total: data.total || 0,
             music: data.byType?.music || 0,
             stories: data.byType?.story || 0,
+            podcasts: data.byType?.podcast || 0,
             textbooks: data.byType?.textbook || 0
           };
         }
@@ -388,6 +396,7 @@ export default {
       const colors = {
         music: "primary",
         story: "success",
+        podcast: "danger",
         textbook: "warning"
       };
       return colors[type] || "info";
