@@ -308,18 +308,18 @@ class RadioAgent:
 
                 # 4. Check if program changed (by ID) or we need to start playing
                 target_id = target_program.get('id')
+                program_changed = current_id != target_id
 
-                if current_id != target_id or not self.current_iterator:
+                if program_changed:
                     logger.info(
                         f"🔄 [POLL] Program change detected: '{current_name}' (ID:{current_id}) -> "
                         f"'{target_program.get('program_name')}' (ID:{target_id})"
                     )
-                    await self._play_program(target_program)
                     self.current_program = target_program
-
-                # 5. If current track finished, play next track in same program
-                if self.current_iterator and self.current_iterator.is_closed:
-                    logger.info("🎵 Current track finished, playing next track...")
+                    await self._play_program(target_program)
+                elif not self.current_iterator:
+                    # Track finished within same program, play next track
+                    logger.info("🎵 Track finished, playing next track in same program...")
                     await self._play_program(target_program)
 
             except Exception as e:
