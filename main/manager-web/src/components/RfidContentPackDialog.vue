@@ -21,7 +21,7 @@
 
       <el-form :model="form" :rules="rules" ref="form" label-width="130px" label-position="left" class="rfid-form">
         <el-form-item label="Pack Code" prop="packCode" class="form-item">
-          <el-input v-model="form.packCode" placeholder="e.g., BASIC_RHYMES_EN" class="custom-input"></el-input>
+          <el-input v-model="form.packCode" placeholder="e.g., AB123456" maxlength="8" show-word-limit class="custom-input"></el-input>
         </el-form-item>
 
         <el-form-item label="Name" prop="name" class="form-item">
@@ -168,7 +168,8 @@ export default {
       binCache: {},    // Cache decoded .bin previews
       rules: {
         packCode: [
-          { required: true, message: "Please enter pack code", trigger: "blur" }
+          { required: true, message: "Please enter pack code", trigger: "blur" },
+          { max: 8, message: "Pack code must be 8 characters or less", trigger: "blur" }
         ],
         name: [
           { required: true, message: "Please enter name", trigger: "blur" }

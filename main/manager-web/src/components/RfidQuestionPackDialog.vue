@@ -22,7 +22,7 @@
       <el-form :model="form" :rules="rules" ref="form" label-width="120px" label-position="left" class="rfid-form">
         <!-- Pack Metadata -->
         <el-form-item label="Pack Code" prop="packCode" class="form-item">
-          <el-input v-model="form.packCode" placeholder="e.g., QNA_ANIMALS_01" class="custom-input"></el-input>
+          <el-input v-model="form.packCode" placeholder="e.g., AN123456" maxlength="8" show-word-limit class="custom-input"></el-input>
         </el-form-item>
 
         <el-form-item label="Pack Name" prop="name" class="form-item">
@@ -212,7 +212,8 @@ export default {
       playingUrl: null,
       rules: {
         packCode: [
-          { required: true, message: "Please enter pack code", trigger: "blur" }
+          { required: true, message: "Please enter pack code", trigger: "blur" },
+          { max: 8, message: "Pack code must be 8 characters or less", trigger: "blur" }
         ],
         name: [
           { required: true, message: "Please enter pack name", trigger: "blur" }
