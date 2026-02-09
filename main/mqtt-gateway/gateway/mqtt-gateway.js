@@ -860,7 +860,13 @@ class MQTTGateway {
 
         const rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
         if (!rfidContent) {
-          logger.warn(`[RFID-SCAN] No content found for uid=${rfidUid} on device ${deviceId}`);
+          // Send card_unknown response to device (Phase 9 format)
+          const unknownResponse = {
+            type: "card_unknown",
+            rfid_uid: rfidUid
+          };
+          this.mqttPublish(`devices/p2p/${clientId}`, unknownResponse);
+          logger.warn(`[RFID-SCAN] Unknown card ${rfidUid}, sent card_unknown to device ${deviceId}`);
           return;
         }
 
@@ -887,39 +893,39 @@ class MQTTGateway {
         // Branch B: Q&A Pack — items with promptText => send prompt to agent
         const isQaPack = hasItems && !isContentPack && rfidContent.items.some(item => item.promptText);
 
-        // ====== BRANCH A: CONTENT PACK — send manifest directly via MQTT (no LiveKit needed) ======
+        // ====== BRANCH A: CONTENT PACK — send card_content directly via MQTT (no LiveKit needed) ======
         if (isContentPack) {
           logger.info(
             `📦 [RFID-ROUTING] Content Pack detected (${rfidContent.contentType}, ${rfidContent.items.length} items). ` +
-            `Sending manifest directly to device, bypassing Agent.`
+            `Sending card_content directly to device, bypassing Agent.`
           );
 
-          // Build device manifest directly from lookup data (no second API call)
-          const files = {};
+          // Build Phase 9 format arrays
+          const audio = [];
+          const images = [];
           for (const item of rfidContent.items) {
             const seq = item.sequence;
             if (item.audioUrl) {
-              files[`audio_${seq}`] = encodeUrlPath(item.audioUrl);
+              audio.push({ index: seq, url: encodeUrlPath(item.audioUrl) });
             }
             if (item.imageUrl) {
-              files[`image_${seq}`] = item.imageUrl;
+              images.push({ index: seq, url: item.imageUrl });
             }
           }
 
           const manifest = {
-            type: "download_response",
-            status: "download_required",
+            type: "card_content",
             rfid_uid: rfidUid,
-            pack_code: rfidContent.packCode,
-            pack_name: rfidContent.title || rfidContent.packName,
-            version: rfidContent.version || "1.0.0",
-            total_items: rfidContent.items.length,
-            files: files,
+            skill_id: rfidContent.packCode,
+            skill_name: rfidContent.title || rfidContent.packName,
+            version: parseInt(rfidContent.version) || 1,
+            audio: audio,
+            images: images,
           };
 
           logger.info(
-            `📦 [RFID-ROUTING] Sending manifest: pack=${manifest.pack_code}, v=${manifest.version}, ` +
-            `files=${Object.keys(files).length} to device ${deviceId}`
+            `📦 [RFID-ROUTING] Sending card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
+            `audio=${audio.length}, images=${images.length} to device ${deviceId}`
           );
 
           this.mqttPublish(`devices/p2p/${clientId}`, manifest);

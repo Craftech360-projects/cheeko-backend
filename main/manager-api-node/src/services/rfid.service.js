@@ -90,15 +90,13 @@ const transformCardMappingToCamelCase = (card) => {
 const transformSeriesToCamelCase = (series) => {
   if (!series) return null;
   // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
-  // and 'content_pack_id' instead of 'question_id'/'pack_id'
   const result = {
     id: series.id ? Number(series.id) : null,
     seriesName: series.series_name,
     startUid: series.start_uid,
     endUid: series.end_uid,
     contentPackId: series.content_pack_id ? Number(series.content_pack_id) : null,
-    // Keep packId for backward compatibility with frontend
-    packId: series.content_pack_id ? Number(series.content_pack_id) : null,
+    questionPackId: series.question_pack_id ? Number(series.question_pack_id) : null,
     priority: series.priority,
     active: series.status === 1,
     createDate: formatDate(series.created_at),
@@ -109,6 +107,12 @@ const transformSeriesToCamelCase = (series) => {
   if (series.rfid_content_pack) {
     result.contentPackName = series.rfid_content_pack.name;
     result.contentPackCode = series.rfid_content_pack.pack_code;
+  }
+
+  // Include question pack name if joined
+  if (series.rfid_question_pack) {
+    result.questionPackName = series.rfid_question_pack.name;
+    result.questionPackCode = series.rfid_question_pack.pack_code;
   }
 
   return result;
@@ -345,10 +349,10 @@ const lookupCardByUid = async (rfidUid) => {
   if (!mapping) {
     logger.info(`[RFID-LOOKUP] No individual card mapping for uid=${normalizedUid}, checking bulk-range/series...`);
 
-    // Fallback to series/bulk-range lookup
+    // Fallback to series/bulk-range lookup (supports both Content Packs and Q&A Packs)
     const { data: series, error: seriesError } = await supabaseAdmin
       .from('rfid_series')
-      .select('*, rfid_content_pack:content_pack_id(*)')
+      .select('*, rfid_content_pack:content_pack_id(*), rfid_question_pack:question_pack_id(*)')
       .lte('start_uid', normalizedUid)
       .gte('end_uid', normalizedUid)
       .eq('status', 1)
@@ -360,6 +364,7 @@ const lookupCardByUid = async (rfidUid) => {
       logger.error('[RFID-LOOKUP] Series lookup DB error:', seriesError);
     }
 
+    // Handle Content Pack from series
     if (series?.rfid_content_pack) {
       logger.info(`[RFID-LOOKUP] Found bulk-range match: series_id=${series.id}, content_pack_id=${series.content_pack_id}`);
 
@@ -394,6 +399,51 @@ const lookupCardByUid = async (rfidUid) => {
         version: pack.version,
         items: mappedItems
       };
+    }
+
+    // Handle Q&A Pack from series
+    if (series?.rfid_question_pack) {
+      logger.info(`[RFID-LOOKUP] Found bulk-range match: series_id=${series.id}, question_pack_id=${series.question_pack_id}`);
+
+      const questionPack = series.rfid_question_pack;
+
+      // Fetch all questions in the pack
+      if (questionPack.question_ids && questionPack.question_ids.length > 0) {
+        const { data: questions, error: qsError } = await supabaseAdmin
+          .from('rfid_question')
+          .select('*')
+          .in('id', questionPack.question_ids);
+
+        if (qsError) logger.error('[RFID-LOOKUP] Questions batch query error:', qsError);
+
+        if (questions) {
+          // Map to 'items' structure so Gateway can pick by sequence
+          const sortedItems = questionPack.question_ids.map((qId, index) => {
+            const q = questions.find(x => x.id === qId);
+            if (!q) return null;
+            return {
+              sequence: index + 1,
+              title: q.title,
+              promptText: q.prompt_text,
+              audioUrl: q.allow_caching ? q.cached_audio_url : null,
+              allowCaching: q.allow_caching,
+              systemPromptOverride: q.system_prompt_override
+            };
+          }).filter(Boolean);
+
+          logger.info(`[RFID-LOOKUP] Bulk-range Q&A Pack resolved: name="${questionPack.name}", code=${questionPack.pack_code}, questions=${sortedItems.length}`);
+
+          return {
+            rfid_uid: normalizedUid,
+            source: 'bulk_range',
+            series_id: series.id,
+            contentType: 'prompt_pack',
+            packCode: questionPack.pack_code,
+            packName: questionPack.name,
+            items: sortedItems
+          };
+        }
+      }
     }
 
     logger.warn(`[RFID-LOOKUP] No bulk-range match for uid=${normalizedUid}`);
@@ -1268,7 +1318,7 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
   // Build data query with content pack join
   let dataQuery = supabaseAdmin
     .from('rfid_series')
-    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code)')
+    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code), rfid_question_pack:question_pack_id(id, name, pack_code)')
     .order('priority', { ascending: false });
 
   // Apply filters
@@ -1314,7 +1364,7 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
 
   let query = supabaseAdmin
     .from('rfid_series')
-    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code)')
+    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code), rfid_question_pack:question_pack_id(id, name, pack_code)')
     .order('priority', { ascending: false });
 
   // Note: Actual DB uses 'content_pack_id' instead of 'pack_id'/'question_id'
@@ -1350,7 +1400,7 @@ const getSeriesById = async (seriesId) => {
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code)')
+    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code), rfid_question_pack:question_pack_id(id, name, pack_code)')
     .eq('id', seriesId)
     .single();
 
@@ -1381,12 +1431,12 @@ const createSeries = async (data, _userId) => {
   }
 
   // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
-  // and 'content_pack_id' instead of 'question_id'/'pack_id'
   const insertData = {
     series_name: data.seriesName || data.notes || `Series ${startUid}-${endUid}`,
     start_uid: startUid,
     end_uid: endUid,
-    content_pack_id: data.contentPackId || data.packId || null,
+    content_pack_id: data.contentPackId || null,
+    question_pack_id: data.questionPackId || null,
     priority: data.priority || 0,
     status: data.active !== false ? 1 : 0
   };
@@ -1422,7 +1472,6 @@ const updateSeries = async (data, _userId) => {
 
   // Only update provided fields
   // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
-  // and 'content_pack_id' instead of 'question_id'/'pack_id'
   if (data.startUid !== undefined) {
     updateData.start_uid = data.startUid.toUpperCase().replace(/[:-]/g, '');
   }
@@ -1431,7 +1480,7 @@ const updateSeries = async (data, _userId) => {
   }
   if (data.seriesName !== undefined) updateData.series_name = data.seriesName;
   if (data.contentPackId !== undefined) updateData.content_pack_id = data.contentPackId;
-  if (data.packId !== undefined) updateData.content_pack_id = data.packId;
+  if (data.questionPackId !== undefined) updateData.question_pack_id = data.questionPackId;
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.active !== undefined) updateData.status = data.active ? 1 : 0;
 

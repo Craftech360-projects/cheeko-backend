@@ -392,6 +392,7 @@ CREATE TABLE IF NOT EXISTS rfid_series (
     start_uid VARCHAR(100) NOT NULL,
     end_uid VARCHAR(100) NOT NULL,
     content_pack_id BIGINT REFERENCES rfid_content_pack (id) ON DELETE SET NULL,
+    question_pack_id BIGINT REFERENCES rfid_question_pack (id) ON DELETE SET NULL,
     priority INTEGER DEFAULT 0,
     status INTEGER DEFAULT 1,
     created_at TIMESTAMP
@@ -445,6 +446,10 @@ ADD COLUMN IF NOT EXISTS cached_audio_url VARCHAR(500);
 
 -- Update rfid_card_mapping
 ALTER TABLE rfid_card_mapping
+ADD COLUMN IF NOT EXISTS question_pack_id BIGINT REFERENCES rfid_question_pack (id) ON DELETE SET NULL;
+
+-- Update rfid_series (add question_pack_id for Q&A Pack support in bulk ranges)
+ALTER TABLE rfid_series
 ADD COLUMN IF NOT EXISTS question_pack_id BIGINT REFERENCES rfid_question_pack (id) ON DELETE SET NULL;
 
 -- =====================================================

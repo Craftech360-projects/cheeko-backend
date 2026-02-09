@@ -28,23 +28,30 @@
           <el-input v-model="form.endUid" placeholder="End of UID range (hex)" class="custom-input"></el-input>
         </el-form-item>
 
-        <el-form-item label="Question" prop="questionId" class="form-item">
-          <el-select v-model="form.questionId" placeholder="Select question" class="custom-select" filterable clearable>
+        <el-form-item label="Pack Type" class="form-item">
+          <el-radio-group v-model="packType" @change="handlePackTypeChange">
+            <el-radio label="qa">Q&A Pack</el-radio>
+            <el-radio label="content">Content Pack</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item v-if="packType === 'qa'" label="Q&A Pack" prop="questionPackId" class="form-item">
+          <el-select v-model="form.questionPackId" placeholder="Select Q&A Pack" class="custom-select" filterable clearable>
             <el-option
-              v-for="q in questions"
-              :key="q.id"
-              :label="`${q.code} - ${q.title}`"
-              :value="q.id"/>
+              v-for="qp in questionPacks"
+              :key="qp.id"
+              :label="`${qp.packCode} - ${qp.name}`"
+              :value="qp.id"/>
           </el-select>
         </el-form-item>
 
-        <el-form-item label="Pack" prop="packId" class="form-item">
-          <el-select v-model="form.packId" placeholder="Select pack" class="custom-select" filterable clearable>
+        <el-form-item v-if="packType === 'content'" label="Content Pack" prop="contentPackId" class="form-item">
+          <el-select v-model="form.contentPackId" placeholder="Select Content Pack (Story/Rhyme)" class="custom-select" filterable clearable>
             <el-option
-              v-for="p in packs"
-              :key="p.id"
-              :label="`${p.packCode} - ${p.name}`"
-              :value="p.id"/>
+              v-for="cp in contentPacks"
+              :key="cp.id"
+              :label="`${cp.packCode} - ${cp.name}`"
+              :value="cp.id"/>
           </el-select>
         </el-form-item>
 
@@ -95,18 +102,18 @@ export default {
         id: null,
         startUid: '',
         endUid: '',
-        questionId: null,
-        packId: null,
+        questionPackId: null,
+        contentPackId: null,
         priority: 0,
         notes: '',
         active: true
       })
     },
-    questions: {
+    questionPacks: {
       type: Array,
       default: () => []
     },
-    packs: {
+    contentPacks: {
       type: Array,
       default: () => []
     }
@@ -115,6 +122,7 @@ export default {
     return {
       dialogKey: Date.now(),
       saving: false,
+      packType: 'content',
       rules: {
         startUid: [
           { required: true, message: "Please enter start UID", trigger: "blur" }
@@ -126,6 +134,14 @@ export default {
     };
   },
   methods: {
+    handlePackTypeChange(type) {
+      // Clear the other pack selection when switching types
+      if (type === 'qa') {
+        this.form.contentPackId = null;
+      } else {
+        this.form.questionPackId = null;
+      }
+    },
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {
@@ -145,12 +161,21 @@ export default {
     cancel() {
       this.saving = false;
       this.$emit('cancel');
+    },
+    detectPackType() {
+      // Auto-detect pack type based on existing form data
+      if (this.form.questionPackId) {
+        this.packType = 'qa';
+      } else {
+        this.packType = 'content';
+      }
     }
   },
   watch: {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+        this.detectPackType();
       }
     }
   }

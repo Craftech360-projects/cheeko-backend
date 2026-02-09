@@ -159,13 +159,43 @@ details[open] summary{margin-bottom:12px}
 .meta-row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px}
 .meta-label{color:var(--text-muted)}
 .meta-value{color:var(--text);font-weight:500;font-family:var(--font-mono);font-size:11px}
-.file-list{margin-top:8px;max-height:300px;overflow-y:auto}
-.file-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);transition:background 0.15s}
+.file-list{margin-top:8px;max-height:400px;overflow-y:auto}
+.file-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);transition:background 0.15s}
 .file-row:nth-child(odd){background:rgba(255,255,255,0.02)}
 .file-row:hover{background:rgba(255,255,255,0.05)}
 .file-row svg{width:14px;height:14px;flex-shrink:0;opacity:0.5}
 .file-seq{color:var(--blue);font-weight:600;min-width:24px}
-.file-url{word-break:break-all;flex:1}
+.file-url{word-break:break-all;flex:1;font-size:10px;opacity:0.7}
+.file-actions{display:flex;gap:4px;flex-shrink:0}
+.play-btn,.view-btn{padding:4px 8px;border:none;border-radius:4px;font-size:10px;font-weight:600;cursor:pointer;transition:all 0.15s;display:flex;align-items:center;gap:4px}
+.play-btn{background:rgba(34,197,94,0.15);color:var(--green)}
+.play-btn:hover{background:rgba(34,197,94,0.25)}
+.play-btn.playing{background:rgba(239,68,68,0.15);color:var(--red)}
+.view-btn{background:rgba(139,92,246,0.15);color:var(--purple)}
+.view-btn:hover{background:rgba(139,92,246,0.25)}
+.play-btn svg,.view-btn svg{width:12px;height:12px}
+
+/* Audio Player */
+.audio-player{margin-top:12px;padding:12px;background:var(--inset);border-radius:var(--radius-sm);display:none}
+.audio-player.active{display:block}
+.audio-player-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.audio-player-title{font-size:12px;font-weight:600;color:var(--text)}
+.audio-player-close{background:none;border:none;color:var(--text-muted);cursor:pointer;padding:4px}
+.audio-player audio{width:100%}
+
+/* Image Modal */
+.img-modal{position:fixed;inset:0;background:rgba(0,0,0,0.9);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}
+.img-modal.active{display:flex}
+.img-modal-content{max-width:90%;max-height:90%;position:relative}
+.img-modal-content img{max-width:100%;max-height:80vh;border-radius:8px}
+.img-modal-close{position:absolute;top:-40px;right:0;background:none;border:none;color:white;font-size:24px;cursor:pointer}
+.img-modal-info{color:white;text-align:center;margin-top:12px;font-size:12px;font-family:var(--font-mono)}
+
+/* Play All Button */
+.play-all-btn{margin-top:12px;width:100%;padding:10px;background:linear-gradient(135deg,var(--green),#16a34a);color:white;border:none;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;transition:all 0.15s}
+.play-all-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(34,197,94,0.3)}
+.play-all-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+.play-all-btn svg{width:16px;height:16px}
 .json-pre{background:var(--inset);border-radius:var(--radius-sm);padding:14px;font-family:var(--font-mono);font-size:12px;line-height:1.6;overflow-x:auto;max-height:400px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
 .json-key{color:#94a3b8}
 .json-str{color:#4ade80}
@@ -337,9 +367,31 @@ details[open] summary{margin-bottom:12px}
   </div>
 </div>
 
+<!-- Audio Player (hidden by default) -->
+<div class="audio-player" id="audioPlayer">
+  <div class="audio-player-header">
+    <span class="audio-player-title" id="audioTitle">Now Playing</span>
+    <button class="audio-player-close" onclick="stopAudio()">&times;</button>
+  </div>
+  <audio id="audioElement" controls></audio>
+</div>
+
+<!-- Image Modal -->
+<div class="img-modal" id="imgModal" onclick="closeImageModal()">
+  <div class="img-modal-content" onclick="event.stopPropagation()">
+    <button class="img-modal-close" onclick="closeImageModal()">&times;</button>
+    <img id="modalImg" src="" alt="Preview">
+    <div class="img-modal-info" id="modalInfo"></div>
+  </div>
+</div>
+
 <script>
 let lastT=0;
 const scanHistory=[];
+let currentAudio=null;
+let currentPlaylist=[];
+let currentTrackIndex=0;
+let isPlayingAll=false;
 
 /* --- Logging --- */
 function addLog(m,t=''){
@@ -428,6 +480,90 @@ function highlightJson(obj){
     .replace(/\\b(-?\\d+\\.?\\d*)\\b/g,'<span class="json-num">$1</span>');
 }
 
+/* --- Audio Playback --- */
+function playAudio(url,title,idx){
+  const player=document.getElementById('audioPlayer');
+  const audio=document.getElementById('audioElement');
+  const titleEl=document.getElementById('audioTitle');
+
+  // Update all play buttons
+  document.querySelectorAll('.play-btn').forEach(btn=>btn.classList.remove('playing'));
+  const activeBtn=document.querySelector('.play-btn[data-idx="'+idx+'"]');
+  if(activeBtn)activeBtn.classList.add('playing');
+
+  titleEl.textContent='Playing: '+title;
+  audio.src=url;
+  audio.play();
+  player.classList.add('active');
+  currentAudio={url,title,idx};
+  addLog('Playing audio #'+idx+': '+title,'info');
+}
+
+function stopAudio(){
+  const player=document.getElementById('audioPlayer');
+  const audio=document.getElementById('audioElement');
+  audio.pause();
+  audio.src='';
+  player.classList.remove('active');
+  document.querySelectorAll('.play-btn').forEach(btn=>btn.classList.remove('playing'));
+  currentAudio=null;
+  isPlayingAll=false;
+  addLog('Audio stopped','info');
+}
+
+function playAll(audioList,skillName){
+  if(!audioList||!audioList.length)return;
+  currentPlaylist=audioList;
+  currentTrackIndex=0;
+  isPlayingAll=true;
+
+  const audio=document.getElementById('audioElement');
+  audio.onended=()=>{
+    if(isPlayingAll&&currentTrackIndex<currentPlaylist.length-1){
+      currentTrackIndex++;
+      const next=currentPlaylist[currentTrackIndex];
+      playAudio(next.url,skillName+' #'+next.index,next.index);
+    }else{
+      isPlayingAll=false;
+      document.querySelectorAll('.play-btn').forEach(btn=>btn.classList.remove('playing'));
+    }
+  };
+
+  const first=currentPlaylist[0];
+  playAudio(first.url,skillName+' #'+first.index,first.index);
+  addLog('Playing all '+audioList.length+' tracks','ok');
+}
+
+/* --- Image Viewing --- */
+function isBinFile(url){return url&&url.toLowerCase().endsWith('.bin')}
+
+function viewImage(url,title){
+  // .bin files are raw binary for ESP32 - can't preview, just download
+  if(isBinFile(url)){
+    addLog('Downloading binary file: '+title,'info');
+    const a=document.createElement('a');
+    a.href=url;a.download=url.split('/').pop();a.target='_blank';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    return;
+  }
+
+  const modal=document.getElementById('imgModal');
+  const img=document.getElementById('modalImg');
+  const info=document.getElementById('modalInfo');
+
+  img.src=url;
+  info.textContent=title;
+  modal.classList.add('active');
+  addLog('Viewing image: '+title,'info');
+}
+
+function closeImageModal(){
+  document.getElementById('imgModal').classList.remove('active');
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeImageModal()});
+
 /* --- Render response --- */
 function metaRow(l,v){return '<div class="meta-row"><span class="meta-label">'+l+'</span><span class="meta-value">'+(v!=null?v:'N/A')+'</span></div>'}
 
@@ -435,25 +571,99 @@ function render(d){
   if(!d||!d.type)return;
   const a=document.getElementById('resp');
 
-  if(d.type==='download_response'){
+  // Store for playback
+  window.lastContent=d;
+
+  // Phase 9 card_content format
+  if(d.type==='card_content'){
+    const audioList=d.audio||[];
+    const imagesList=d.images||[];
+    let h='<div class="badge badge-green">Card Content (Phase 9)</div><div class="meta-table">';
+    h+=metaRow('RFID UID',d.rfid_uid)+metaRow('Skill ID',d.skill_id)+metaRow('Skill Name',d.skill_name);
+    h+=metaRow('Version',d.version);
+    h+=metaRow('Audio Files',audioList.length)+metaRow('Image Files',imagesList.length)+'</div>';
+
+    if(audioList.length){
+      // Play All button
+      h+='<button class="play-all-btn" onclick="playAll(window.lastContent.audio,\\''+d.skill_name.replace(/'/g,"\\\\'")+'\\')"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Play All ('+audioList.length+' tracks)</button>';
+
+      h+='<div class="file-list">';
+      audioList.forEach(item=>{
+        const idx=item.index||'?';
+        const imgItem=imagesList.find(i=>i.index===idx);
+
+        h+='<div class="file-row">';
+        h+='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+        h+='<span class="file-seq">#'+idx+'</span>';
+        h+='<span class="file-url">'+item.url.split('/').pop()+'</span>';
+        h+='<div class="file-actions">';
+        h+='<button class="play-btn" data-idx="'+idx+'" onclick="playAudio(\\''+item.url+'\\',\\''+d.skill_name+' #'+idx+'\\','+idx+')"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>Play</button>';
+        if(imgItem){
+          const isBin=isBinFile(imgItem.url);
+          const btnLabel=isBin?'DL':'View';
+          const svgIcon=isBin?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+          h+='<button class="view-btn" onclick="viewImage(\\''+imgItem.url+'\\',\\'Image #'+idx+'\\')">'+svgIcon+btnLabel+'</button>';
+        }
+        h+='</div></div>';
+      });
+      h+='</div>';
+    }
+    a.innerHTML=h;
+    addLog('Card Content: '+d.skill_name+' ('+audioList.length+' audio, '+imagesList.length+' images)','ok');
+    if(scanHistory.length)scanHistory[0].type='content';
+    renderHistory();
+  }
+  // card_unknown - no mapping found
+  else if(d.type==='card_unknown'){
+    let h='<div class="badge" style="background:rgba(239,68,68,0.12);color:var(--red)">Unknown Card</div>';
+    h+='<div class="meta-table">'+metaRow('RFID UID',d.rfid_uid)+'</div>';
+    h+='<div style="padding:20px;text-align:center;color:var(--text-muted)">';
+    h+='<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom:12px;opacity:0.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+    h+='<div style="font-size:14px;margin-bottom:8px">No mapping found for this card</div>';
+    h+='<div style="font-size:12px">Add a card mapping or bulk range in the dashboard.</div>';
+    h+='</div>';
+    a.innerHTML=h;
+    addLog('Unknown card: '+d.rfid_uid,'warn');
+    if(scanHistory.length)scanHistory[0].type='unknown';
+    renderHistory();
+  }
+  // Legacy download_response format (backward compatibility)
+  else if(d.type==='download_response'){
     const f=d.files||{};
     const audioKeys=Object.keys(f).filter(k=>k.startsWith('audio_')).sort();
     const imageKeys=Object.keys(f).filter(k=>k.startsWith('image_')).sort();
-    let h='<div class="badge badge-green">Content Pack</div><div class="meta-table">';
+
+    // Convert legacy format to playlist array for playAll
+    window.legacyPlaylist=audioKeys.map(k=>({index:parseInt(k.replace('audio_','')),url:f[k]}));
+
+    let h='<div class="badge badge-green">Content Pack (Legacy)</div><div class="meta-table">';
     h+=metaRow('RFID UID',d.rfid_uid)+metaRow('Pack Code',d.pack_code)+metaRow('Pack Name',d.pack_name);
     h+=metaRow('Version',d.version)+metaRow('Total Items',d.total_items);
     h+=metaRow('Audio',audioKeys.length)+metaRow('Images',imageKeys.length)+'</div>';
+
     if(audioKeys.length){
+      // Play All button
+      h+='<button class="play-all-btn" onclick="playAll(window.legacyPlaylist,\\''+d.pack_name.replace(/'/g,"\\\\'")+'\\')"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg> Play All ('+audioKeys.length+' tracks)</button>';
+
       h+='<div class="file-list">';
       audioKeys.forEach(k=>{
         const seq=k.replace('audio_','');
-        h+='<div class="file-row"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
-        h+='<span class="file-seq">#'+seq+'</span><span class="file-url">'+f[k]+'</span></div>';
-        const ik='image_'+seq;
-        if(f[ik]){
-          h+='<div class="file-row" style="padding-left:30px"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
-          h+='<span class="file-url" style="opacity:0.6">'+f[ik]+'</span></div>';
+        const imgKey='image_'+seq;
+        const hasImg=f[imgKey];
+
+        h+='<div class="file-row">';
+        h+='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>';
+        h+='<span class="file-seq">#'+seq+'</span>';
+        h+='<span class="file-url">'+f[k].split('/').pop()+'</span>';
+        h+='<div class="file-actions">';
+        h+='<button class="play-btn" data-idx="'+seq+'" onclick="playAudio(\\''+f[k]+'\\',\\''+d.pack_name+' #'+seq+'\\','+seq+')"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>Play</button>';
+        if(hasImg){
+          const isBin=isBinFile(f[imgKey]);
+          const btnLabel=isBin?'DL':'View';
+          const svgIcon=isBin?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
+          h+='<button class="view-btn" onclick="viewImage(\\''+f[imgKey]+'\\',\\'Image #'+seq+'\\')">'+svgIcon+btnLabel+'</button>';
         }
+        h+='</div></div>';
       });
       h+='</div>';
     }
@@ -736,9 +946,78 @@ class TestClient:
                     "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
                 stop_recording_event.set()  # This will cause the recording thread loop to exit
 
-            # Handle Content Pack download_response (manifest with audio URLs + thumbnails)
-            elif payload.get("type") == "download_response":
+            # Handle Phase 9 card_content (new format with skill_id, audio[], images[])
+            elif payload.get("type") == "card_content":
                 global _last_rfid_response, _last_rfid_response_time, _rfid_response_history
+                _last_rfid_response = payload
+                _last_rfid_response_time = time.time()
+                _rfid_response_history.append({
+                    "timestamp": _last_rfid_response_time,
+                    "rfid_uid": payload.get("rfid_uid"),
+                    "type": "card_content",
+                    "response": payload,
+                })
+                if len(_rfid_response_history) > 20:
+                    _rfid_response_history.pop(0)
+
+                rfid_uid = payload.get("rfid_uid", "N/A")
+                skill_id = payload.get("skill_id", "N/A")
+                skill_name = payload.get("skill_name", "N/A")
+                version = payload.get("version", "N/A")
+                audio_list = payload.get("audio", [])
+                images_list = payload.get("images", [])
+
+                logger.info("=" * 60)
+                logger.info("[CARD-CONTENT] Phase 9 Content Response Received!")
+                logger.info("=" * 60)
+                logger.info(f"  RFID UID   : {rfid_uid}")
+                logger.info(f"  Skill ID   : {skill_id}")
+                logger.info(f"  Skill Name : {skill_name}")
+                logger.info(f"  Version    : {version}")
+                logger.info(f"  Audio Files: {len(audio_list)}")
+                logger.info(f"  Image Files: {len(images_list)}")
+                logger.info("-" * 60)
+
+                # Display audio files
+                for item in audio_list:
+                    idx = item.get("index", "?")
+                    url = item.get("url", "N/A")
+                    logger.info(f"  Audio #{idx}: {url}")
+
+                # Display image files
+                for item in images_list:
+                    idx = item.get("index", "?")
+                    url = item.get("url", "N/A")
+                    logger.info(f"  Image #{idx}: {url}")
+
+                logger.info("-" * 60)
+                logger.info(f"  Summary: {len(audio_list)} audio, {len(images_list)} images")
+                logger.info("=" * 60)
+
+            # Handle card_unknown (no mapping found for RFID)
+            elif payload.get("type") == "card_unknown":
+                _last_rfid_response = payload
+                _last_rfid_response_time = time.time()
+                _rfid_response_history.append({
+                    "timestamp": _last_rfid_response_time,
+                    "rfid_uid": payload.get("rfid_uid"),
+                    "type": "card_unknown",
+                    "response": payload,
+                })
+                if len(_rfid_response_history) > 20:
+                    _rfid_response_history.pop(0)
+
+                rfid_uid = payload.get("rfid_uid", "N/A")
+                logger.warning("=" * 60)
+                logger.warning("[CARD-UNKNOWN] No mapping found for RFID card!")
+                logger.warning("=" * 60)
+                logger.warning(f"  RFID UID: {rfid_uid}")
+                logger.warning("  This card is not mapped to any content or Q&A pack.")
+                logger.warning("  Add a mapping in the dashboard or create a bulk range.")
+                logger.warning("=" * 60)
+
+            # Handle legacy download_response format (backward compatibility)
+            elif payload.get("type") == "download_response":
                 _last_rfid_response = payload
                 _last_rfid_response_time = time.time()
                 _rfid_response_history.append({
@@ -759,7 +1038,7 @@ class TestClient:
                 files = payload.get("files", {})
 
                 logger.info("=" * 60)
-                logger.info("[CONTENT-PACK] Download Response Received!")
+                logger.info("[CONTENT-PACK] Legacy Download Response Received!")
                 logger.info("=" * 60)
                 logger.info(f"  RFID UID   : {rfid_uid}")
                 logger.info(f"  Pack Code  : {pack_code}")

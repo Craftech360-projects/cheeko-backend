@@ -453,6 +453,22 @@
                                         {{ getPackLabel(scope.row.packId) }}
                                     </template>
                                 </el-table-column>
+                                <el-table-column label="Content Pack" align="center" width="180">
+                                    <template slot-scope="scope">
+                                        <span v-if="scope.row.contentPackName" class="content-pack-badge">
+                                            {{ scope.row.contentPackName }}
+                                        </span>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Q&A Pack" align="center" width="180">
+                                    <template slot-scope="scope">
+                                        <span v-if="scope.row.questionPackName" class="qa-pack-badge">
+                                            {{ scope.row.questionPackName }}
+                                        </span>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
                                 <el-table-column label="Priority" prop="priority" align="center" width="80"></el-table-column>
                                 <el-table-column label="Active" align="center" width="80">
                                     <template slot-scope="scope">
@@ -627,8 +643,8 @@
             :title="seriesDialogTitle"
             :visible.sync="seriesDialogVisible"
             :form="seriesForm"
-            :questions="questionsDropdown"
-            :packs="packsDropdown"
+            :question-packs="questionPacksDropdown"
+            :content-packs="contentPacksDropdown"
             @submit="handleSeriesSubmit"
             @cancel="seriesDialogVisible = false"
         />
@@ -709,7 +725,7 @@ export default {
             isAllSeriesSelected: false,
             seriesDialogVisible: false,
             seriesDialogTitle: 'Add Bulk Range',
-            seriesForm: { id: null, startUid: '', endUid: '', questionId: null, packId: null, priority: 0, notes: '', active: true },
+            seriesForm: { id: null, startUid: '', endUid: '', questionPackId: null, contentPackId: null, priority: 0, notes: '', active: true },
 
             // Content Packs
             contentPacksList: [],
@@ -1376,7 +1392,7 @@ export default {
 
         showAddSeriesDialog() {
             this.seriesDialogTitle = 'Add Bulk Range';
-            this.seriesForm = { id: null, startUid: '', endUid: '', questionId: null, packId: null, priority: 0, notes: '', active: true };
+            this.seriesForm = { id: null, startUid: '', endUid: '', questionPackId: null, contentPackId: null, priority: 0, notes: '', active: true };
             this.seriesDialogVisible = true;
         },
 
@@ -2102,6 +2118,26 @@ export default {
     i {
         margin-right: 3px;
     }
+}
+
+.content-pack-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: white;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.qa-pack-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 4px;
+    background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+    color: white;
+    font-size: 12px;
+    font-weight: 500;
 }
 
 /* Console Tab Styles */
