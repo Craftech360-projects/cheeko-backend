@@ -249,8 +249,22 @@ export default {
       this.$set(this.binError, index, false);
 
       try {
-        // Fetch the .bin file
-        const response = await fetch(url);
+        // Fetch the .bin file via proxy to avoid CORS issues
+        const proxyUrl = `/toy/content/proxy?url=${encodeURIComponent(url)}`;
+
+        // Get auth token from localStorage
+        const storedToken = localStorage.getItem('token');
+        const headers = {};
+        if (storedToken) {
+          try {
+            const tokenData = JSON.parse(storedToken);
+            headers['Authorization'] = `Bearer ${tokenData.token}`;
+          } catch (e) {
+            console.warn('Could not parse auth token');
+          }
+        }
+
+        const response = await fetch(proxyUrl, { headers });
         if (!response.ok) throw new Error('Failed to fetch .bin file');
 
         const arrayBuffer = await response.arrayBuffer();

@@ -2576,6 +2576,84 @@ router.delete('/items/batch',
   })
 );
 
+// ==================== FILE PROXY ROUTE ====================
+
+/**
+ * @swagger
+ * /content/proxy:
+ *   get:
+ *     tags: [Content]
+ *     summary: Proxy file fetch (bypasses CORS)
+ *     description: Fetches a file from URL and returns it. Used for .bin file preview in dashboard.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: url
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: URL of the file to fetch
+ *     responses:
+ *       200:
+ *         description: File content
+ *       400:
+ *         description: URL parameter required
+ *       500:
+ *         description: Failed to fetch file
+ */
+router.get('/proxy',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { url } = req.query;
+
+    if (!url) {
+      return badRequest(res, 'URL parameter is required');
+    }
+
+    try {
+      // Validate URL is from allowed domains (S3/CDN)
+      const parsedUrl = new URL(url);
+      const allowedHosts = [
+        'amazonaws.com',
+        'cloudfront.net',
+        's3.amazonaws.com',
+        'cheeko.co',
+        'cheeko.com'
+      ];
+
+      const isAllowed = allowedHosts.some(host =>
+        parsedUrl.hostname.endsWith(host) || parsedUrl.hostname.includes(host)
+      );
+
+      if (!isAllowed) {
+        return badRequest(res, 'URL domain not allowed');
+      }
+
+      // Fetch the file
+      const fetch = (await import('node-fetch')).default;
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch: ${response.status}`);
+      }
+
+      // Get content type and set headers
+      const contentType = response.headers.get('content-type') || 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+
+      // Stream the response
+      const buffer = await response.buffer();
+      res.send(buffer);
+
+    } catch (error) {
+      console.error('Proxy fetch error:', error);
+      res.status(500).json({ code: 1, msg: `Failed to fetch file: ${error.message}` });
+    }
+  })
+);
+
 /**
  * @swagger
  * components:
