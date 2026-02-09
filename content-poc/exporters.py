@@ -11,8 +11,15 @@ class ManagerAPIClient:
         }
         print(f"🔌 Initialized API Client: {self.api_url}")
 
-    def upload_file(self, file_path, content_type='story', category=None):
-        """Uploads a file (audio or image) to the Manager API"""
+    def upload_file(self, file_path, content_type='story', category=None, custom_filename=None):
+        """Uploads a file (audio or image) to the Manager API
+
+        Args:
+            file_path: Path to the local file
+            content_type: Type of content (story, music, etc.)
+            category: Category/subfolder for S3 storage
+            custom_filename: Optional custom filename for S3 (e.g., '01.mp3')
+        """
         if not os.path.exists(file_path):
             print(f"❌ File not found: {file_path}")
             return None
@@ -21,25 +28,28 @@ class ManagerAPIClient:
         mime_type, _ = mimetypes.guess_type(file_path)
         if not mime_type:
             mime_type = 'application/octet-stream'
-            
+
         # Endpoint is /content/library/upload for both (verified in content.routes.js)
         endpoint = '/content/library/upload'
-        
+
         is_image = mime_type.startswith('image')
         url = f"{self.api_url}{endpoint}"
-        
+
+        # Use custom filename if provided, otherwise use original
+        upload_filename = custom_filename if custom_filename else os.path.basename(file_path)
+
         try:
             with open(file_path, 'rb') as f:
-                files = {'file': (os.path.basename(file_path), f, mime_type)}
+                files = {'file': (upload_filename, f, mime_type)}
                 data = {'contentType': content_type}
-                
+
                 # Use provided category (e.g., pack_code) or default
                 if category:
                     data['category'] = category
                 elif not is_image:
                     data['category'] = 'Generated'
-                
-                print(f"☁️ Uploading {os.path.basename(file_path)} to {data.get('category')}...")
+
+                print(f"☁️ Uploading {upload_filename} to {data.get('category')}...")
                 response = requests.post(url, headers=self.headers, files=files, data=data)
                 
                 if response.status_code == 200:
@@ -156,14 +166,22 @@ class ManagerAPIClient:
             if 'audio' not in assets:
                 print(f"⚠️ Skipping Step {step_num}: Missing audio.")
                 continue
-            
+
             print(f"--- Processing Step {step_num} ---")
+
+            # Generate simple filenames: 01.mp3, 01.bin, 02.mp3, 02.bin, etc.
+            step_prefix = f"{step_num:02d}"  # Zero-padded: 01, 02, 03...
+            audio_filename = f"{step_prefix}.mp3"
+
             # PASS pack_code AS CATEGORY to force subfolder isolation
-            audio_url = self.upload_file(assets['audio'], content_type, category=pack_code)
-            
+            audio_url = self.upload_file(assets['audio'], content_type, category=pack_code, custom_filename=audio_filename)
+
             image_url = None
             if 'image' in assets:
-                image_url = self.upload_file(assets['image'], content_type, category=pack_code)
+                # Determine extension from actual file
+                img_ext = os.path.splitext(assets['image'])[1].lower()  # .bin or .png
+                image_filename = f"{step_prefix}{img_ext}"
+                image_url = self.upload_file(assets['image'], content_type, category=pack_code, custom_filename=image_filename)
             
             if audio_url:
                 # Get text from plan.json if available
