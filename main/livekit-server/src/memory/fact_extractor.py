@@ -76,7 +76,7 @@ async def extract_facts_with_groq(conversation_text: str) -> List[str]:
         truncated = conversation_text[:4000]
 
         response = await client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="openai/gpt-oss-20b",
             messages=[
                 {"role": "user", "content": EXTRACTION_PROMPT.format(conversation=truncated)},
             ],

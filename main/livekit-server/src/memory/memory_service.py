@@ -63,6 +63,15 @@ class MemoryService:
                 logger.warning(f"[MEMORY] Qdrant backend unavailable ({e}), falling back to sqlite")
                 backend_type = "sqlite"
                 self.backend = SqliteBackend(base_path)
+        elif backend_type == "supabase":
+            try:
+                from .backends.supabase_backend import SupabaseBackend
+                supabase_config = config.get("supabase", {})
+                self.backend = SupabaseBackend(supabase_config)
+            except (ImportError, ValueError) as e:
+                logger.warning(f"[MEMORY] Supabase backend unavailable ({e}), falling back to sqlite")
+                backend_type = "sqlite"
+                self.backend = SqliteBackend(base_path)
         else:
             self.backend = SqliteBackend(base_path)
 

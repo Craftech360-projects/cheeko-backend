@@ -78,6 +78,11 @@ WEATHER_API = "12dd0eea5789636262549c9ec7f4f7d8"
 QDRANT_URL = "https://a2482b9f-2c29-476e-9ff0-741aaaaf632e.eu-west-1-0.aws.cloud.qdrant.io"
 QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIn0.zPBGAqVGy-edbbgfNOJsPWV496BsnQ4ELOFvsLNyjsk"
 
+# Supabase Configuration (for memory backend)
+SUPABASE_URL = "https://eypcciwkslkfwtjfzonl.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV5cGNjaXdrc2xrZnd0amZ6b25sIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MDM3MDM5NSwiZXhwIjoyMDg1OTQ2Mzk1fQ.4lY7P6U0_M2zAVtC_96Z_O6MISpzDh8gXoC14_lWfoA"
+MEMORY_BACKEND = "supabase"
+
 # Model Configuration
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 AUTO_PRELOAD_MODELS = "true"
