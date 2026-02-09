@@ -66,7 +66,7 @@ def main():
 
         # Display Mode Config
         st.markdown("### 🖥️ Display Settings")
-        esp32_mode = st.checkbox("Optimize for ESP32 Display (150x150 px, Pixel Art)", value=True)
+        esp32_mode = st.checkbox("Optimize for ESP32 Display (240x296 px, Pixel Art + .bin)", value=True)
 
         # History / Load Previous
         st.markdown("---")
@@ -332,14 +332,14 @@ def main():
                 # Check for pixel or normal image based on current mode preference, OR fallback to whatever exists
                 img_suffix = "_pixel" if esp32_mode else ""
                 
-                # Priority search list
+                # Priority search list (PNG for preview, .bin also generated for ESP32)
                 possible_images = [
+                    f"step_{step}_image{img_suffix}.png", # Exact match for current mode (png - for preview)
                     f"step_{step}_image{img_suffix}.jpg", # Exact match for current mode (jpg)
-                    f"step_{step}_image{img_suffix}.png", # Exact match for current mode (png)
-                    f"step_{step}_image_pixel.jpg",       # Pixel fallback
-                    f"step_{step}_image_pixel.png",
-                    f"step_{step}_image.jpg",             # Standard fallback
-                    f"step_{step}_image.png"
+                    f"step_{step}_image_pixel.png",       # Pixel fallback
+                    f"step_{step}_image_pixel.jpg",
+                    f"step_{step}_image.png",             # Standard fallback
+                    f"step_{step}_image.jpg"
                 ]
                 
                 found_image = None

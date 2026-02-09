@@ -92,7 +92,23 @@ class ManagerAPIClient:
         if not clean_topic: clean_topic = "PACK"
         pack_code = f"GEN_{clean_topic}_{random.randint(1000, 9999)}"
         # ----------------------------------------------------
-        
+
+        # Load plan.json to get text content for each step
+        plan_data = {}
+        plan_path = os.path.join(project_dir, "plan.json")
+        if os.path.exists(plan_path):
+            try:
+                with open(plan_path, 'r', encoding='utf-8') as f:
+                    plan_list = json.load(f)
+                    # Convert to dict keyed by step number
+                    for item in plan_list:
+                        step_num = item.get('step')
+                        if step_num:
+                            plan_data[step_num] = item
+                    print(f"📄 Loaded plan.json with {len(plan_data)} steps")
+            except Exception as e:
+                print(f"⚠️ Could not load plan.json: {e}")
+
         # 1. Scan directory for assets
         steps = []
         files = os.listdir(project_dir)
@@ -101,6 +117,7 @@ class ManagerAPIClient:
         # We need to group them.
         sys_files = {} # Key: step_num
         
+        # First pass: collect audio and .png files
         for f in files:
             if f.startswith('step_') and (f.endswith('.mp3') or f.endswith('.png')):
                 parts = f.split('_')
@@ -108,9 +125,21 @@ class ManagerAPIClient:
                     try:
                         step_num = int(parts[1])
                         if step_num not in sys_files: sys_files[step_num] = {}
-                        
+
                         if f.endswith('.mp3'): sys_files[step_num]['audio'] = os.path.join(project_dir, f)
                         if f.endswith('.png'): sys_files[step_num]['image'] = os.path.join(project_dir, f)
+                    except:
+                        pass
+
+        # Second pass: .bin files override .png (preferred for ESP32)
+        for f in files:
+            if f.startswith('step_') and f.endswith('.bin'):
+                parts = f.split('_')
+                if len(parts) >= 2:
+                    try:
+                        step_num = int(parts[1])
+                        if step_num not in sys_files: sys_files[step_num] = {}
+                        sys_files[step_num]['image'] = os.path.join(project_dir, f)
                     except:
                         pass
         
@@ -137,10 +166,16 @@ class ManagerAPIClient:
                 image_url = self.upload_file(assets['image'], content_type, category=pack_code)
             
             if audio_url:
+                # Get text from plan.json if available
+                step_info = plan_data.get(step_num, {})
+                step_text = step_info.get('text', '')
+                step_title = step_info.get('scene', f"Step {step_num}")  # Use scene as title if available
+
                 pack_items.append({
-                    "title": f"Step {step_num}",
+                    "title": step_title if step_title else f"Step {step_num}",
                     "audioUrl": audio_url,
-                    "imageUrl": image_url # API handles null
+                    "imageUrl": image_url,  # API handles null
+                    "text": step_text  # Voice script text
                 })
         
         if not pack_items:

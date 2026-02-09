@@ -77,12 +77,30 @@
                               <template slot="prepend"><i class="el-icon-headset"></i></template>
                               <el-button slot="append" :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(item.audioUrl)" v-if="item.audioUrl"></el-button>
                           </el-input>
-                          <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small">
+                          <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small" class="mb-1">
                                <template slot="prepend"><i class="el-icon-picture"></i></template>
+                          </el-input>
+                          <el-input type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input">
                           </el-input>
                       </div>
                       <div v-if="item.imageUrl" class="img-preview-box">
-                           <img :src="item.imageUrl" alt="Preview"/>
+                           <!-- Canvas for .bin files (LVGL RGB565 format) -->
+                           <canvas v-if="isBinFile(item.imageUrl)"
+                                   :ref="'canvas-' + index"
+                                   class="bin-preview-canvas"
+                                   @load="loadBinPreview(item.imageUrl, index)">
+                           </canvas>
+                           <!-- Regular image for png/jpg -->
+                           <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
+                           <!-- Loading indicator for .bin -->
+                           <div v-if="isBinFile(item.imageUrl) && binLoading[index]" class="bin-loading">
+                             <i class="el-icon-loading"></i>
+                           </div>
+                           <!-- Error state for .bin -->
+                           <div v-if="isBinFile(item.imageUrl) && binError[index]" class="bin-error">
+                             <i class="el-icon-picture-outline"></i>
+                             <span>.bin</span>
+                           </div>
                       </div>
                   </div>
                   <div class="item-col action-col">
@@ -145,6 +163,9 @@ export default {
       saving: false,
       currentAudio: null,
       playingUrl: null,
+      binLoading: {},  // Track loading state per item index
+      binError: {},    // Track error state per item index
+      binCache: {},    // Cache decoded .bin previews
       rules: {
         packCode: [
           { required: true, message: "Please enter pack code", trigger: "blur" }
@@ -162,7 +183,8 @@ export default {
                 sequence: this.form.items.length + 1,
                 title: '',
                 audioUrl: '',
-                imageUrl: ''
+                imageUrl: '',
+                text: ''  // Voice script / lyrics text
             });
         }
     },
@@ -206,6 +228,109 @@ export default {
         }
         this.playingUrl = null;
     },
+    // .bin file handling methods
+    isBinFile(url) {
+      return url && url.toLowerCase().endsWith('.bin');
+    },
+    handleImageError(event) {
+      // Hide broken image
+      event.target.style.display = 'none';
+    },
+    async loadBinPreview(url, index) {
+      if (!url || !this.isBinFile(url)) return;
+
+      // Check cache first
+      if (this.binCache[url]) {
+        this.renderCachedBin(url, index);
+        return;
+      }
+
+      this.$set(this.binLoading, index, true);
+      this.$set(this.binError, index, false);
+
+      try {
+        // Fetch the .bin file
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch .bin file');
+
+        const arrayBuffer = await response.arrayBuffer();
+        const dataView = new DataView(arrayBuffer);
+
+        // Parse LVGL v9 header (12 bytes)
+        const magic = dataView.getUint8(0);
+        const colorFormat = dataView.getUint8(1);
+        const width = dataView.getUint16(4, true);  // Little endian
+        const height = dataView.getUint16(6, true);
+        const stride = dataView.getUint16(8, true);
+
+        // Validate header
+        if (magic !== 0x19) {
+          console.warn('Invalid LVGL magic number:', magic);
+          throw new Error('Invalid LVGL format');
+        }
+
+        // Only support RGB565 (0x12) for now
+        if (colorFormat !== 0x12) {
+          console.warn('Unsupported color format:', colorFormat);
+          throw new Error('Unsupported color format');
+        }
+
+        // Create ImageData
+        const imageData = new ImageData(width, height);
+        const pixels = imageData.data;
+
+        // Skip 12-byte header, read pixel data
+        const pixelOffset = 12;
+
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const srcIdx = pixelOffset + (y * stride) + (x * 2);
+            const dstIdx = (y * width + x) * 4;
+
+            // Read RGB565 (little endian)
+            const rgb565 = dataView.getUint16(srcIdx, true);
+
+            // Convert RGB565 to RGBA8888
+            const r = ((rgb565 >> 11) & 0x1F) << 3;
+            const g = ((rgb565 >> 5) & 0x3F) << 2;
+            const b = (rgb565 & 0x1F) << 3;
+
+            pixels[dstIdx] = r | (r >> 5);     // R
+            pixels[dstIdx + 1] = g | (g >> 6); // G
+            pixels[dstIdx + 2] = b | (b >> 5); // B
+            pixels[dstIdx + 3] = 255;          // A
+          }
+        }
+
+        // Cache the decoded image data
+        this.binCache[url] = { imageData, width, height };
+
+        // Render to canvas
+        this.renderCachedBin(url, index);
+
+      } catch (error) {
+        console.error('Error loading .bin preview:', error);
+        this.$set(this.binError, index, true);
+      } finally {
+        this.$set(this.binLoading, index, false);
+      }
+    },
+    renderCachedBin(url, index) {
+      const cached = this.binCache[url];
+      if (!cached) return;
+
+      this.$nextTick(() => {
+        const canvasRef = this.$refs['canvas-' + index];
+        const canvas = Array.isArray(canvasRef) ? canvasRef[0] : canvasRef;
+
+        if (canvas) {
+          canvas.width = cached.width;
+          canvas.height = cached.height;
+          const ctx = canvas.getContext('2d');
+          ctx.putImageData(cached.imageData, 0, 0);
+        }
+      });
+    },
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {
@@ -238,9 +363,31 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+        // Load bin previews for existing items
+        this.$nextTick(() => {
+          this.form.items.forEach((item, index) => {
+            if (this.isBinFile(item.imageUrl)) {
+              this.loadBinPreview(item.imageUrl, index);
+            }
+          });
+        });
       } else {
         this.stopAudio();
+        // Clear bin states
+        this.binLoading = {};
+        this.binError = {};
       }
+    },
+    'form.items': {
+      handler(items) {
+        // Watch for imageUrl changes to load bin previews
+        items.forEach((item, index) => {
+          if (this.isBinFile(item.imageUrl) && !this.binLoading[index] && !this.binCache[item.imageUrl]) {
+            this.loadBinPreview(item.imageUrl, index);
+          }
+        });
+      },
+      deep: true
     }
   }
 };
@@ -443,11 +590,57 @@ export default {
         display: flex;
         align-items: center;
         justify-content: center;
+        position: relative;
 
         img {
             max-width: 100%;
             max-height: 100%;
             object-fit: cover;
+        }
+
+        .bin-preview-canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            image-rendering: pixelated; /* Keep pixel art crisp */
+        }
+
+        .bin-loading {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(248, 250, 252, 0.9);
+            color: #3b82f6;
+            font-size: 20px;
+        }
+
+        .bin-error {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #fef2f2;
+            color: #ef4444;
+
+            i {
+                font-size: 24px;
+                margin-bottom: 4px;
+            }
+
+            span {
+                font-size: 10px;
+                font-weight: 600;
+            }
         }
     }
 
@@ -458,6 +651,22 @@ export default {
 
     .mb-1 {
         margin-bottom: 4px;
+    }
+
+    .text-input {
+        :deep(.el-textarea__inner) {
+            background-color: #f8fafc;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            font-size: 12px;
+            color: #475569;
+            resize: none;
+
+            &:focus {
+                border-color: #3b82f6;
+                background-color: #ffffff;
+            }
+        }
     }
 
     .empty-items {

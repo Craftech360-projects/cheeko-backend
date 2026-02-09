@@ -7,6 +7,7 @@ from google.genai import types
 from datetime import datetime
 from PIL import Image
 import io
+from image_to_bin_converter import ImageToBinConverter, ColorFormat
 
 # Initialize clients
 def init_clients():
@@ -148,19 +149,20 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
     Generate image using Gemini (Nano Banana / Imagen 3) or Pollinations fallback.
     If esp32_mode is True:
     - Appends 'pixel art' to prompt
-    - Resizes to 150x150
-    - Ensures < 20KB size
+    - Resizes to 240x296 (ESP32 display resolution)
+    - Converts to LVGL .bin format (RGB565)
+    - Also keeps PNG for preview
     """
     try:
         # Use new Google GenAI SDK
         client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
+
         if esp32_mode:
             prompt = f"{prompt}, pixel art, 8-bit style, simple, high contrast, cartoon"
             filename_suffix = "_pixel"
         else:
             filename_suffix = ""
-        
+
         # Helper for saving
         def save_and_process_image(image_data, path, is_bytes=True):
             # Open image
@@ -168,27 +170,39 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
                 img = Image.open(io.BytesIO(image_data))
             else:
                 img = Image.open(image_data) # Path or other object
-            
+
             if esp32_mode:
-                # Resize to 150x150
-                img = img.resize((150, 150), Image.Resampling.NEAREST)
-                
-                # Ensure path ends in .png
+                # Resize to 240x296 (ESP32 display resolution)
+                img = img.resize((240, 296), Image.Resampling.NEAREST)
+
+                # Ensure path ends in .png for preview file
                 if path.endswith(".jpg") or path.endswith(".jpeg"):
                     path = path.rsplit('.', 1)[0] + ".png"
-                
-                # Save as optimized PNG (P mode for small size if possible, or usually just RGB/RGBA)
-                # For pixel art, keeping it as PNG is strictly better for quality.
-                # We can try to optimize it by converting to P (palette types) if we wanted strictly <20KB,
-                # but standard PNG at 150x150 is usually small enough.
+
+                # Save PNG for Streamlit preview
                 img.save(path, "PNG", optimize=True)
+
+                # Convert to .bin format for ESP32
+                bin_path = path.rsplit('.', 1)[0] + ".bin"
+                try:
+                    converter = ImageToBinConverter(
+                        color_format=ColorFormat.RGB565,
+                        dithering=True  # Enable dithering for smoother gradients
+                    )
+                    converter.load_image(path)
+                    converter.save_bin(bin_path)
+                    print(f"✅ Created .bin file: {bin_path}")
+                except Exception as bin_err:
+                    print(f"⚠️ Failed to create .bin: {bin_err}")
+
+                return path  # Return PNG path for preview
             else:
                 if is_bytes:
                     with open(path, "wb") as f:
                         f.write(image_data)
                 else:
                     img.save(path)
-            
+
             return path
 
         print(f"Generating image with Gemini 2.5... (ESP32 Mode: {esp32_mode})")

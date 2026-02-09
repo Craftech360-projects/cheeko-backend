@@ -91,7 +91,7 @@ const transformSeriesToCamelCase = (series) => {
   if (!series) return null;
   // Note: Actual DB uses 'status' (Int) instead of 'active' (Boolean)
   // and 'content_pack_id' instead of 'question_id'/'pack_id'
-  return {
+  const result = {
     id: series.id ? Number(series.id) : null,
     seriesName: series.series_name,
     startUid: series.start_uid,
@@ -104,6 +104,14 @@ const transformSeriesToCamelCase = (series) => {
     createDate: formatDate(series.created_at),
     updateDate: formatDate(series.updated_at)
   };
+
+  // Include content pack name if joined
+  if (series.rfid_content_pack) {
+    result.contentPackName = series.rfid_content_pack.name;
+    result.contentPackCode = series.rfid_content_pack.pack_code;
+  }
+
+  return result;
 };
 
 // =============================================
@@ -335,7 +343,60 @@ const lookupCardByUid = async (rfidUid) => {
 
   if (error && error.code !== 'PGRST116') logger.error('[RFID-LOOKUP] Card lookup DB error:', error);
   if (!mapping) {
-    logger.warn(`[RFID-LOOKUP] No active card mapping for uid=${normalizedUid}`);
+    logger.info(`[RFID-LOOKUP] No individual card mapping for uid=${normalizedUid}, checking bulk-range/series...`);
+
+    // Fallback to series/bulk-range lookup
+    const { data: series, error: seriesError } = await supabaseAdmin
+      .from('rfid_series')
+      .select('*, rfid_content_pack:content_pack_id(*)')
+      .lte('start_uid', normalizedUid)
+      .gte('end_uid', normalizedUid)
+      .eq('status', 1)
+      .order('priority', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (seriesError && seriesError.code !== 'PGRST116') {
+      logger.error('[RFID-LOOKUP] Series lookup DB error:', seriesError);
+    }
+
+    if (series?.rfid_content_pack) {
+      logger.info(`[RFID-LOOKUP] Found bulk-range match: series_id=${series.id}, content_pack_id=${series.content_pack_id}`);
+
+      // Fetch content items for the pack
+      const { data: items, error: itemsError } = await supabaseAdmin
+        .from('content_item')
+        .select('*')
+        .eq('content_pack_id', series.content_pack_id)
+        .eq('active', true)
+        .order('item_number', { ascending: true });
+
+      if (itemsError) logger.error('[RFID-LOOKUP] Content items query error:', itemsError);
+
+      const pack = series.rfid_content_pack;
+      const mappedItems = (items || []).map((item, idx) => ({
+        sequence: item.item_number || idx + 1,
+        title: item.title,
+        audioUrl: item.audio_url,
+        imageUrl: item.image_url,
+        promptText: item.content_text
+      }));
+
+      logger.info(`[RFID-LOOKUP] Bulk-range Content Pack resolved: name="${pack.name}", type=${pack.content_type}, items=${mappedItems.length}`);
+
+      return {
+        rfid_uid: normalizedUid,
+        source: 'bulk_range',
+        series_id: series.id,
+        contentType: pack.content_type || 'story_pack',
+        title: pack.name,
+        packCode: pack.pack_code,
+        version: pack.version,
+        items: mappedItems
+      };
+    }
+
+    logger.warn(`[RFID-LOOKUP] No bulk-range match for uid=${normalizedUid}`);
     return null;
   }
 
@@ -1204,10 +1265,10 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
     .from('rfid_series')
     .select('id', { count: 'exact', head: true });
 
-  // Build data query
+  // Build data query with content pack join
   let dataQuery = supabaseAdmin
     .from('rfid_series')
-    .select('*')
+    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code)')
     .order('priority', { ascending: false });
 
   // Apply filters
@@ -1253,7 +1314,7 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
 
   let query = supabaseAdmin
     .from('rfid_series')
-    .select('*')
+    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code)')
     .order('priority', { ascending: false });
 
   // Note: Actual DB uses 'content_pack_id' instead of 'pack_id'/'question_id'
@@ -1289,7 +1350,7 @@ const getSeriesById = async (seriesId) => {
 
   const { data: series, error } = await supabaseAdmin
     .from('rfid_series')
-    .select('*')
+    .select('*, rfid_content_pack:content_pack_id(id, name, pack_code)')
     .eq('id', seriesId)
     .single();
 
@@ -2831,7 +2892,7 @@ const getContentPackByCode = async (packCode) => {
       id: item.id,
       sequence: item.item_number,
       title: item.title,
-      text: item.description || '',
+      text: item.content_text || '',  // Voice script / lyrics text
       audioUrl: item.audio_url,
       imageUrl: item.image_url,
       active: item.active
@@ -2960,7 +3021,8 @@ const createContentPack = async (data, userId) => {
       item_number: index + 1, // Ensure sequence is correct
       title: item.title,
       audio_url: item.audioUrl,
-      image_url: item.imageUrl,
+      image_url: item.imageUrl || null,
+      content_text: item.text || item.lyricsText || null, // Voice script / lyrics text
       creator: userId,
       active: true
     }));
@@ -3054,7 +3116,8 @@ const updateContentPack = async (data, userId) => {
         item_number: index + 1,
         title: item.title,
         audio_url: item.audioUrl,
-        image_url: item.imageUrl,
+        image_url: item.imageUrl || null,
+        content_text: item.text || item.lyricsText || null, // Voice script / lyrics text
         updater: userId,
         active: true
       }));

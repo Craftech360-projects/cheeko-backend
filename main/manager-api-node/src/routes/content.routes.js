@@ -21,15 +21,18 @@ const upload = multer({
     fileSize: 50 * 1024 * 1024, // 50MB max file size
   },
   fileFilter: (req, file, cb) => {
-    // Allow audio and image files
+    // Allow audio, image, and binary files (.bin for LVGL ESP32 images)
     const allowedMimes = [
       'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a',
-      'image/jpeg', 'image/png', 'image/gif', 'image/webp'
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/octet-stream' // For .bin files (LVGL binary format)
     ];
-    if (allowedMimes.includes(file.mimetype)) {
+    // Also check file extension for .bin files (some systems may not set correct MIME)
+    const isBinFile = file.originalname && file.originalname.toLowerCase().endsWith('.bin');
+    if (allowedMimes.includes(file.mimetype) || isBinFile) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only audio and image files are allowed.'));
+      cb(new Error('Invalid file type. Only audio, image, and .bin files are allowed.'));
     }
   }
 });
