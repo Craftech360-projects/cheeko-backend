@@ -95,13 +95,14 @@ class ManagerAPIClient:
         final_name = pack_name if pack_name else topic
         print(f"\n🚀 Starting Export for: {final_name}")
         
-        # --- Generate Pack Code Early (for unique folder) ---
+        # --- Generate Pack Code (max 8 chars for ESP32 compatibility) ---
         import random
-        # Clean topic: remove spaces, special chars, keep short
-        clean_topic = "".join(c for c in topic if c.isalnum())[:10].upper()
-        if not clean_topic: clean_topic = "PACK"
-        pack_code = f"GEN_{clean_topic}_{random.randint(1000, 9999)}"
-        # ----------------------------------------------------
+        # Take first 2 letters from topic + 6 random digits = 8 chars max
+        clean_topic = "".join(c for c in topic if c.isalpha())[:2].upper()
+        if not clean_topic or len(clean_topic) < 2:
+            clean_topic = "PK"  # Default prefix
+        pack_code = f"{clean_topic}{random.randint(100000, 999999)}"  # e.g., "EL123456"
+        # -----------------------------------------------------------------
 
         # Load plan.json to get text content for each step
         plan_data = {}
