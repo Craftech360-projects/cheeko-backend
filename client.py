@@ -20,9 +20,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.1.98"
+SERVER_IP = "64.227.170.31"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "192.168.1.98"
+MQTT_BROKER_HOST = "64.227.170.31"
 
 
 MQTT_BROKER_PORT = 1883
@@ -1714,7 +1714,7 @@ class TestClient:
         logger.info(f"[RFID] Simulating RFID card scan: UID={rfid_uid}, sequence={sequence}")
         
         rfid_payload = {
-            "type": "text_greeting",
+            "type": "card_lookup",
             "rfid_uid": rfid_uid,
             "text": f"RFID card scanned: {rfid_uid}",
             "session_id": udp_session_details.get("session_id")

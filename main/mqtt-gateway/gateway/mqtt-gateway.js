@@ -839,7 +839,7 @@ class MQTTGateway {
         if (!greetingSent) {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
         }
-      } else if (originalPayload.type === "start_greeting_text" || originalPayload.type === "text_greeting") {
+      } else if (originalPayload.type === "start_greeting_text" || originalPayload.type === "card_lookup") {
         // RFID Card Scan: look up card mapping and route to Content Pack (device) or Q&A (agent)
         const rfidUid =
           originalPayload.rfid_uid ||
