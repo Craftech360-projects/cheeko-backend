@@ -537,20 +537,95 @@ function playAll(audioList,skillName){
 /* --- Image Viewing --- */
 function isBinFile(url){return url&&url.toLowerCase().endsWith('.bin')}
 
-function viewImage(url,title){
-  // .bin files are raw binary for ESP32 - can't preview, just download
-  if(isBinFile(url)){
-    addLog('Downloading binary file: '+title,'info');
-    const a=document.createElement('a');
-    a.href=url;a.download=url.split('/').pop();a.target='_blank';
-    document.body.appendChild(a);a.click();document.body.removeChild(a);
-    return;
+// Decode LVGL .bin file (RGB565 format) to canvas
+async function decodeLvglBin(url){
+  const resp=await fetch(url);
+  const buf=await resp.arrayBuffer();
+  const data=new DataView(buf);
+
+  // Parse 12-byte LVGL header (little-endian)
+  const magic=data.getUint8(0);      // 0x19 for LVGL v9
+  const cf=data.getUint8(1);          // Color format (0x12=RGB565)
+  const flags=data.getUint16(2,true);
+  const w=data.getUint16(4,true);
+  const h=data.getUint16(6,true);
+  const stride=data.getUint16(8,true);
+
+  console.log('LVGL Header:',{magic:magic.toString(16),cf:cf.toString(16),w,h,stride});
+
+  // Create canvas
+  const canvas=document.createElement('canvas');
+  canvas.width=w;canvas.height=h;
+  const ctx=canvas.getContext('2d');
+  const imgData=ctx.createImageData(w,h);
+
+  // Decode pixels starting after 12-byte header
+  let offset=12;
+  let pixIdx=0;
+
+  if(cf===0x12){  // RGB565
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const rgb565=data.getUint16(offset,true);
+        offset+=2;
+
+        // Extract RGB565 components and convert to RGB888
+        const r=((rgb565>>11)&0x1F)*255/31;
+        const g=((rgb565>>5)&0x3F)*255/63;
+        const b=(rgb565&0x1F)*255/31;
+
+        imgData.data[pixIdx++]=r;
+        imgData.data[pixIdx++]=g;
+        imgData.data[pixIdx++]=b;
+        imgData.data[pixIdx++]=255;
+      }
+    }
+  }else if(cf===0x0F){  // RGB888
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const b=data.getUint8(offset++);
+        const g=data.getUint8(offset++);
+        const r=data.getUint8(offset++);
+        imgData.data[pixIdx++]=r;
+        imgData.data[pixIdx++]=g;
+        imgData.data[pixIdx++]=b;
+        imgData.data[pixIdx++]=255;
+      }
+    }
+  }else{
+    throw new Error('Unsupported color format: 0x'+cf.toString(16));
   }
 
+  ctx.putImageData(imgData,0,0);
+  return {canvas,w,h,cf};
+}
+
+async function viewImage(url,title){
   const modal=document.getElementById('imgModal');
   const img=document.getElementById('modalImg');
   const info=document.getElementById('modalInfo');
 
+  // Handle LVGL .bin files
+  if(isBinFile(url)){
+    addLog('Decoding LVGL binary: '+title,'info');
+    try{
+      const {canvas,w,h,cf}=await decodeLvglBin(url);
+      img.src=canvas.toDataURL('image/png');
+      const fmt=cf===0x12?'RGB565':cf===0x0F?'RGB888':'0x'+cf.toString(16);
+      info.textContent=title+' ('+w+'x'+h+', '+fmt+')';
+      modal.classList.add('active');
+      addLog('Decoded '+w+'x'+h+' '+fmt+' image','ok');
+    }catch(e){
+      addLog('Failed to decode .bin: '+e.message,'err');
+      // Fallback to download
+      const a=document.createElement('a');
+      a.href=url;a.download=url.split('/').pop();a.target='_blank';
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+    }
+    return;
+  }
+
+  // Regular image files
   img.src=url;
   info.textContent=title;
   modal.classList.add('active');
@@ -599,10 +674,7 @@ function render(d){
         h+='<div class="file-actions">';
         h+='<button class="play-btn" data-idx="'+idx+'" onclick="playAudio(\\''+item.url+'\\',\\''+d.skill_name+' #'+idx+'\\','+idx+')"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>Play</button>';
         if(imgItem){
-          const isBin=isBinFile(imgItem.url);
-          const btnLabel=isBin?'DL':'View';
-          const svgIcon=isBin?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
-          h+='<button class="view-btn" onclick="viewImage(\\''+imgItem.url+'\\',\\'Image #'+idx+'\\')">'+svgIcon+btnLabel+'</button>';
+          h+='<button class="view-btn" onclick="viewImage(\\''+imgItem.url+'\\',\\'Image #'+idx+'\\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>View</button>';
         }
         h+='</div></div>';
       });
@@ -658,10 +730,7 @@ function render(d){
         h+='<div class="file-actions">';
         h+='<button class="play-btn" data-idx="'+seq+'" onclick="playAudio(\\''+f[k]+'\\',\\''+d.pack_name+' #'+seq+'\\','+seq+')"><svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>Play</button>';
         if(hasImg){
-          const isBin=isBinFile(f[imgKey]);
-          const btnLabel=isBin?'DL':'View';
-          const svgIcon=isBin?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>';
-          h+='<button class="view-btn" onclick="viewImage(\\''+f[imgKey]+'\\',\\'Image #'+seq+'\\')">'+svgIcon+btnLabel+'</button>';
+          h+='<button class="view-btn" onclick="viewImage(\\''+f[imgKey]+'\\',\\'Image #'+seq+'\\')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>View</button>';
         }
         h+='</div></div>';
       });
