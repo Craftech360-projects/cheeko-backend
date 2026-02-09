@@ -27,7 +27,10 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-from livekit.plugins import google
+try:
+    from livekit.plugins import aws  # noqa: F401 - must register on main thread
+except ImportError:
+    pass
 
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
@@ -78,12 +81,10 @@ RULES:
 
 
 def prewarm(proc: JobProcess):
-    """Prewarm for Gemini Realtime - cache configs and db_helper"""
+    """Prewarm - cache configs and db_helper"""
     # Cache config once at worker startup (avoids re-parsing YAML per job)
     yaml_config = ConfigLoader.load_yaml_config()
-    realtime_config = ConfigLoader.get_gemini_realtime_config()
     proc.userdata["yaml_config"] = yaml_config
-    proc.userdata["realtime_config"] = realtime_config
 
     # Cache DatabaseHelper instance (avoids creating new instance per job)
     manager_api_url = os.getenv("MANAGER_API_URL")
@@ -104,17 +105,16 @@ async def entrypoint(ctx: JobContext):
     if 'google' in api_keys and not os.getenv('GOOGLE_API_KEY'):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
 
+    # Load AWS credentials from config.yaml if not in env
+    if api_keys.get('aws_access_key_id') and not os.getenv('AWS_ACCESS_KEY_ID'):
+        os.environ['AWS_ACCESS_KEY_ID'] = api_keys['aws_access_key_id']
+    if api_keys.get('aws_secret_access_key') and not os.getenv('AWS_SECRET_ACCESS_KEY'):
+        os.environ['AWS_SECRET_ACCESS_KEY'] = api_keys['aws_secret_access_key']
+
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
 
     init_start_time = asyncio.get_event_loop().time()
-
-    # Use cached realtime config from prewarm
-    realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
-    gemini_voice = realtime_config.get('voice', 'Zephyr')
-    # Lower temperature for more consistent game behavior (was 0.8)
-    gemini_temperature = realtime_config.get('temperature', 0.6)
 
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)
@@ -197,13 +197,9 @@ async def entrypoint(ctx: JobContext):
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
-    realtime_model = google.realtime.RealtimeModel(
-        model=gemini_model,
-        voice=gemini_voice,
-        instructions=agent_prompt,
-        temperature=gemini_temperature,
-        modalities=["AUDIO"],
-    )
+    # Create Realtime model (Gemini or AWS Nova Sonic based on REALTIME_PROVIDER)
+    from src.utils.realtime_factory import create_realtime_model
+    realtime_model, audio_sample_rate = create_realtime_model(instructions=agent_prompt)
 
     session = AgentSession(llm=realtime_model, tools=GAME_TOOLS, userdata={"device_mac": device_mac or ""})
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game + memory tools")
@@ -716,12 +712,12 @@ async def entrypoint(ctx: JobContext):
     assistant.set_session_context(ctx)
     audio_player.set_session(session)
 
-    # Start session with 16kHz input audio to match MQTT gateway
+    # Start session with appropriate input audio sample rate
     await session.start(
         room=ctx.room,
         agent=assistant,
         room_input_options=RoomInputOptions(
-            audio_sample_rate=16000,
+            audio_sample_rate=audio_sample_rate,
             audio_num_channels=1
         )
     )
