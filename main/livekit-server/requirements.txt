@@ -41,3 +41,6 @@ ddtrace
 
 # Grafana Loki logging
 python-logging-loki>=0.3.1
+
+# Async HTTP client (for Supabase memory backend)
+httpx
