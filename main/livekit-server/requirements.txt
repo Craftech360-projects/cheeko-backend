@@ -4,6 +4,7 @@ livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
 livekit-plugins-google
+livekit-plugins-aws[realtime]
 google-genai
 python-dotenv
 pydub
@@ -44,3 +45,9 @@ python-logging-loki>=0.3.1
 
 # Async HTTP client (for Supabase memory backend)
 httpx
+
+# Custom pipeline (MQTT STT→LLM→TTS)
+aiomqtt>=2.0.0
+deepgram-sdk>=3.0.0
+elevenlabs>=1.0.0
+openai>=1.0.0

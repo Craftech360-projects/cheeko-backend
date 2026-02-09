@@ -655,6 +655,19 @@ class MQTTGateway {
         password: "extracted_from_emqx",
       };
 
+      // Handle pipeline_audio from custom_pipeline.py — stream TTS audio to device
+      if (originalPayload.type === "pipeline_audio") {
+        await this.handlePipelineAudio(deviceId, originalPayload, clientId);
+        return;
+      }
+
+      // Handle pipeline_request — either from device (trigger capture) or gateway-assembled (skip)
+      if (originalPayload.type === "pipeline_request") {
+        if (originalPayload._gateway_assembled) return; // skip our own assembled message
+        await this.handlePipelineRequest(deviceId, originalPayload, clientId);
+        return;
+      }
+
       if (
         originalPayload.type === "playback_control" &&
         originalPayload.action === "next"
@@ -1134,6 +1147,147 @@ class MQTTGateway {
         { stack: error.stack }
       );
     }
+  }
+
+  /**
+   * Handle pipeline_audio from custom_pipeline.py.
+   * Decodes base64 PCM audio, encodes frames to Opus via workerPool,
+   * and streams to the ESP32 device over UDP (same path as normal TTS).
+   */
+  async handlePipelineAudio(deviceId, payload, clientId) {
+    const requestId = payload.request_id || "unknown";
+    const text = payload.text || "";
+
+    const deviceInfo = this.deviceConnections.get(deviceId);
+    if (!deviceInfo || !deviceInfo.connection) {
+      logger.warn(
+        `⚠️ [PIPELINE-AUDIO] Device ${deviceId} not connected, dropping audio (req=${requestId})`
+      );
+      return;
+    }
+
+    const connection = deviceInfo.connection;
+    const sessionId = connection.udp?.session_id || `pipeline_${requestId}`;
+
+    logger.info(
+      `🔊 [PIPELINE-AUDIO] Streaming to ${deviceId}: "${text.substring(0, 60)}" (req=${requestId})`
+    );
+
+    // Send TTS start
+    connection.sendMqttMessage(
+      JSON.stringify({
+        type: "tts",
+        state: "start",
+        session_id: sessionId,
+      })
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Decode base64 PCM audio
+    const pcmData = Buffer.from(payload.audio, "base64");
+    const sampleRate = payload.sample_rate || 24000;
+
+    // 60ms frames at the given sample rate
+    const FRAME_SIZE_SAMPLES = Math.floor(sampleRate * 0.06); // 1440 at 24kHz
+    const FRAME_SIZE_BYTES = FRAME_SIZE_SAMPLES * 2; // 16-bit = 2 bytes per sample
+
+    let offset = 0;
+    let frameCount = 0;
+    const startTime = connection.udp?.startTime || Date.now();
+    let baseTimestamp = (Date.now() - startTime) & 0xffffffff;
+
+    while (offset < pcmData.length) {
+      const frameData = pcmData.slice(
+        offset,
+        Math.min(offset + FRAME_SIZE_BYTES, pcmData.length)
+      );
+
+      // Pad short final frame
+      let frameToSend = frameData;
+      if (frameData.length < FRAME_SIZE_BYTES) {
+        frameToSend = Buffer.alloc(FRAME_SIZE_BYTES);
+        frameData.copy(frameToSend);
+      }
+
+      const timestamp = (baseTimestamp + frameCount * 60) & 0xffffffff;
+
+      try {
+        const opusBuffer = await this.workerPool.encodeOpus(
+          sessionId,
+          frameToSend,
+          FRAME_SIZE_SAMPLES
+        );
+        connection.sendUdpMessage(opusBuffer, timestamp);
+      } catch (err) {
+        // Fallback: send raw PCM if Opus encoding fails
+        connection.sendUdpMessage(frameToSend, timestamp);
+      }
+
+      offset += FRAME_SIZE_BYTES;
+      frameCount++;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Send TTS stop
+    connection.sendMqttMessage(
+      JSON.stringify({
+        type: "tts",
+        state: "stop",
+        session_id: sessionId,
+      })
+    );
+
+    logger.info(
+      `✅ [PIPELINE-AUDIO] Done streaming ${frameCount} frames to ${deviceId} (req=${requestId})`
+    );
+  }
+
+  /**
+   * Handle pipeline_request from device.
+   * Triggers UDP audio capture on the connection — gateway buffers incoming
+   * Opus frames until silence, then publishes assembled request to
+   * internal/server-ingest for custom_pipeline.py.
+   */
+  async handlePipelineRequest(deviceId, payload, clientId) {
+    const context = payload.context || "";
+    const requestId = payload.request_id || `pr_${Date.now()}`;
+
+    const deviceInfo = this.deviceConnections.get(deviceId);
+    if (!deviceInfo || !deviceInfo.connection) {
+      logger.warn(
+        `⚠️ [PIPELINE-REQUEST] Device ${deviceId} not connected, ignoring (req=${requestId})`
+      );
+      return;
+    }
+
+    const connection = deviceInfo.connection;
+
+    // Guard: don't start a second capture if one is already in progress
+    if (connection.pipelineCapturing) {
+      logger.warn(
+        `⚠️ [PIPELINE-REQUEST] Capture already in progress for ${deviceId}, ignoring (req=${requestId})`
+      );
+      return;
+    }
+
+    logger.info(
+      `🎙️ [PIPELINE-REQUEST] Starting audio capture for ${deviceId} (req=${requestId}, context="${context.substring(0, 60)}")`
+    );
+
+    // Send ack to device so it knows to start speaking
+    connection.sendMqttMessage(
+      JSON.stringify({
+        type: "pipeline_request_ack",
+        request_id: requestId,
+        state: "listening",
+      })
+    );
+
+    // Start UDP audio capture
+    connection.startPipelineCapture(context, requestId);
   }
 
   /**

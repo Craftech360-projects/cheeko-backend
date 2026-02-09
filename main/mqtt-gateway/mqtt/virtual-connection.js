@@ -79,6 +79,16 @@ class VirtualMQTTConnection {
     this.targetToyMac = null; // MAC address of the toy to route audio to
     this.isMobileConnection = false; // Flag to identify mobile connections
 
+    // Pipeline audio capture state (UDP → assembled pipeline_request)
+    this.pipelineCapturing = false;
+    this.pipelineAudioBuffer = [];
+    this.pipelineContext = null;
+    this.pipelineRequestId = null;
+    this.pipelineSilenceTimer = null;
+    this.pipelineAbsoluteTimer = null;
+    this.pipelineSilenceTimeoutMs = 700;   // ms of no UDP frames = done recording
+    this.pipelineMaxCaptureMs = 10000;     // 10s absolute max capture
+
     // Parse device info from hello message
     if (helloPayload.clientId) {
       const parts = helloPayload.clientId.split("@@@");
@@ -304,6 +314,111 @@ class VirtualMQTTConnection {
     const message = Buffer.concat([header, encryptedPayload]);
     this.gateway.sendUdpMessage(message, this.udp.remoteAddress);
   }
+
+  // ─── Pipeline capture methods ───────────────────────────────────────
+
+  startPipelineCapture(context, requestId) {
+    this.pipelineCapturing = true;
+    this.pipelineContext = context;
+    this.pipelineRequestId = requestId;
+    this.pipelineAudioBuffer = [];
+    this.clearPipelineTimers();
+
+    console.log(
+      `🎙️ [PIPELINE-CAPTURE] Starting audio capture for ${this.deviceId} (req=${requestId})`
+    );
+
+    // Absolute timeout — safety valve to prevent infinite capture
+    this.pipelineAbsoluteTimer = setTimeout(() => {
+      if (this.pipelineCapturing) {
+        if (this.pipelineAudioBuffer.length > 0) {
+          console.log(
+            `⏰ [PIPELINE-CAPTURE] Absolute timeout (${this.pipelineMaxCaptureMs}ms) — finalizing with ${this.pipelineAudioBuffer.length} frames`
+          );
+          this.finalizePipelineCapture();
+        } else {
+          this.abortPipelineCapture("absolute timeout with no frames");
+        }
+      }
+    }, this.pipelineMaxCaptureMs);
+
+    // Initial wait timeout — if no UDP frames arrive within 3s, abort
+    this.pipelineSilenceTimer = setTimeout(() => {
+      if (this.pipelineCapturing && this.pipelineAudioBuffer.length === 0) {
+        this.abortPipelineCapture("no UDP frames received within 3s");
+      }
+    }, 3000);
+  }
+
+  finalizePipelineCapture() {
+    const frameCount = this.pipelineAudioBuffer.length;
+    const context = this.pipelineContext;
+    const requestId = this.pipelineRequestId;
+
+    // Concat all buffered Opus frames into a single blob
+    const assembledAudio = Buffer.concat(this.pipelineAudioBuffer);
+    const audioBase64 = assembledAudio.toString("base64");
+
+    // Reset state
+    this.clearPipelineTimers();
+    this.pipelineCapturing = false;
+    this.pipelineAudioBuffer = [];
+    this.pipelineContext = null;
+    this.pipelineRequestId = null;
+
+    console.log(
+      `✅ [PIPELINE-CAPTURE] Silence detected after ${frameCount} frames (${assembledAudio.length} bytes) — publishing assembled request`
+    );
+
+    // Publish to internal/server-ingest for custom_pipeline.py
+    const envelope = {
+      sender_client_id: this.fullClientId,
+      orginal_payload: {
+        type: "pipeline_request",
+        context: context,
+        audio: audioBase64,
+        audio_format: "opus",
+        sample_rate: 16000,
+        request_id: requestId,
+        _gateway_assembled: true,
+      },
+    };
+
+    this.gateway.mqttPublish(
+      "internal/server-ingest",
+      JSON.stringify(envelope)
+    );
+
+    console.log(
+      `📤 [PIPELINE-CAPTURE] Published assembled pipeline_request (${frameCount} frames, ${assembledAudio.length} bytes) for ${this.deviceId}`
+    );
+  }
+
+  abortPipelineCapture(reason) {
+    const frameCount = this.pipelineAudioBuffer.length;
+    this.clearPipelineTimers();
+    this.pipelineCapturing = false;
+    this.pipelineAudioBuffer = [];
+    this.pipelineContext = null;
+    this.pipelineRequestId = null;
+
+    console.warn(
+      `⚠️ [PIPELINE-CAPTURE] Aborted for ${this.deviceId}: ${reason} (had ${frameCount} frames)`
+    );
+  }
+
+  clearPipelineTimers() {
+    if (this.pipelineSilenceTimer) {
+      clearTimeout(this.pipelineSilenceTimer);
+      this.pipelineSilenceTimer = null;
+    }
+    if (this.pipelineAbsoluteTimer) {
+      clearTimeout(this.pipelineAbsoluteTimer);
+      this.pipelineAbsoluteTimer = null;
+    }
+  }
+
+  // ─── End pipeline capture methods ─────────────────────────────────
 
   generateUdpHeader(length, timestamp, sequence) {
     this.headerBuffer.writeUInt8(1, 0);
@@ -1324,18 +1439,15 @@ class VirtualMQTTConnection {
   onUdpMessage(rinfo, message, payloadLength, timestamp, sequence) {
     // UDP messages do not reset inactivity timer - only MQTT messages do
 
-    if (!this.bridge) {
-      return;
-    }
-
+    // Always track remote address (needed for pipeline response streaming)
     if (this.udp.remoteAddress !== rinfo) {
-      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
       this.udp.remoteAddress = rinfo;
     }
 
     if (sequence < this.udp.remoteSequence) {
       return;
     }
+    this.udp.remoteSequence = sequence;
 
     // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
     const header = message.slice(0, 16);
@@ -1355,8 +1467,28 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // Pipeline capture: buffer Opus frames instead of forwarding to LiveKit
+    if (this.pipelineCapturing) {
+      this.pipelineAudioBuffer.push(Buffer.from(payload));
+
+      // Reset silence timer on each frame
+      if (this.pipelineSilenceTimer) {
+        clearTimeout(this.pipelineSilenceTimer);
+      }
+      this.pipelineSilenceTimer = setTimeout(() => {
+        if (this.pipelineCapturing && this.pipelineAudioBuffer.length > 0) {
+          this.finalizePipelineCapture();
+        }
+      }, this.pipelineSilenceTimeoutMs);
+
+      return; // Don't forward to LiveKit bridge during capture
+    }
+
+    if (!this.bridge) {
+      return;
+    }
+
     this.bridge.sendAudio(payload, timestamp);
-    this.udp.remoteSequence = sequence;
   }
 
   async checkKeepAlive() {
@@ -1550,6 +1682,16 @@ class VirtualMQTTConnection {
     );
     console.log(`📍 [CLEANUP-TRACE] close() called from: ${callerLine}`);
     this.closing = true;
+
+    // Clean up pipeline capture if active
+    this.clearPipelineTimers();
+    if (this.pipelineCapturing) {
+      console.log(`🛑 [CLEANUP] Discarding in-progress pipeline capture (${this.pipelineAudioBuffer.length} frames)`);
+      this.pipelineCapturing = false;
+      this.pipelineAudioBuffer = [];
+      this.pipelineContext = null;
+      this.pipelineRequestId = null;
+    }
 
     // ADD: Stop media bot if music/story room
     if (

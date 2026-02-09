@@ -187,7 +187,7 @@ class ConfigLoader:
 
         # Environment variables can override yaml config
         return {
-            'provider': os.getenv('REALTIME_PROVIDER', 'gemini').lower(),  # gemini or openai
+            'provider': os.getenv('REALTIME_PROVIDER', gemini_config.get('provider', 'gemini')).lower(),  # gemini or aws
             'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')),
             'voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
             'temperature': float(os.getenv('GEMINI_REALTIME_TEMPERATURE', gemini_config.get('temperature', 0.6))),
@@ -203,4 +203,18 @@ class ConfigLoader:
             # OpenAI Realtime settings (if using OpenAI provider)
             'openai_model': os.getenv('OPENAI_REALTIME_MODEL', 'gpt-4o-realtime-preview'),
             'openai_voice': os.getenv('OPENAI_REALTIME_VOICE', 'alloy'),
+        }
+
+    @staticmethod
+    def get_aws_realtime_config():
+        """Get AWS Nova Sonic configuration from config.yaml and environment variables"""
+        yaml_config = ConfigLoader.load_yaml_config()
+        aws_config = yaml_config.get('aws_nova_sonic', {})
+
+        return {
+            'voice': os.getenv('AWS_NOVA_SONIC_VOICE', aws_config.get('voice', 'tiffany')),
+            'region': os.getenv('AWS_REGION', aws_config.get('region', 'us-east-1')),
+            'tool_choice': os.getenv('AWS_NOVA_SONIC_TOOL_CHOICE', aws_config.get('tool_choice', 'auto')),
+            'max_tokens': int(os.getenv('AWS_NOVA_SONIC_MAX_TOKENS', aws_config.get('max_tokens', 10000))),
+            'turn_detection': os.getenv('AWS_NOVA_SONIC_TURN_DETECTION', aws_config.get('turn_detection', 'LOW')),
         }

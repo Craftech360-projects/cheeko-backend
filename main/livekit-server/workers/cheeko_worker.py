@@ -29,7 +29,11 @@ from livekit.agents import (
     # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
 from livekit import rtc, api
-from livekit.plugins import google, elevenlabs
+from livekit.plugins import elevenlabs
+try:
+    from livekit.plugins import aws  # noqa: F401 - must register on main thread
+except ImportError:
+    pass
 import io
 from pydub import AudioSegment
 
@@ -197,7 +201,7 @@ class CheekoAssistant(BaseAssistant):
 
 
 def prewarm(proc: JobProcess):
-    """Prewarm for Gemini Realtime - preload embedding model so first session is fast"""
+    """Prewarm - preload embedding model so first session is fast"""
     # Preload the sentence-transformers embedding model (~16s cold load)
     # This runs BEFORE any session starts, so the first child doesn't wait
     try:
@@ -221,16 +225,16 @@ async def entrypoint(ctx: JobContext):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
         logger.info("Loaded GOOGLE_API_KEY from config.yaml")
 
+    # Load AWS credentials from config.yaml if not in env
+    if api_keys.get('aws_access_key_id') and not os.getenv('AWS_ACCESS_KEY_ID'):
+        os.environ['AWS_ACCESS_KEY_ID'] = api_keys['aws_access_key_id']
+    if api_keys.get('aws_secret_access_key') and not os.getenv('AWS_SECRET_ACCESS_KEY'):
+        os.environ['AWS_SECRET_ACCESS_KEY'] = api_keys['aws_secret_access_key']
+
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
 
     init_start_time = asyncio.get_event_loop().time()
-
-    # Load configuration
-    realtime_config = ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
-    gemini_voice = realtime_config.get('voice', 'Zephyr')
-    gemini_temperature = realtime_config.get('temperature', 0.8)
 
     # Parse room name
     room_name = ctx.room.name
@@ -363,18 +367,12 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model with Google Search enabled
-    # GoogleSearch is a provider tool that must be passed to RealtimeModel, not AgentSession
-    google_search_tool = google.tools.GoogleSearch()
-    realtime_model = google.realtime.RealtimeModel(
-        model=gemini_model,
-        voice=gemini_voice,
+    # Create Realtime model (Gemini or AWS Nova Sonic based on REALTIME_PROVIDER)
+    from src.utils.realtime_factory import create_realtime_model
+    realtime_model, audio_sample_rate = create_realtime_model(
         instructions=agent_prompt,
-        temperature=gemini_temperature,
-        modalities=["AUDIO"],
-        _gemini_tools=[google_search_tool],
+        enable_google_search=True,
     )
-    logger.info("Gemini Realtime model created with Google Search enabled")
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
@@ -1171,12 +1169,12 @@ async def entrypoint(ctx: JobContext):
     assistant.set_session_context(ctx)
     # audio_player.set_session(session)  # COMMENTED OUT - Music service disabled
 
-    # Start session with 16kHz input audio to match MQTT gateway
+    # Start session with appropriate input audio sample rate
     await session.start(
         room=ctx.room,
         agent=assistant,
         room_input_options=RoomInputOptions(
-            audio_sample_rate=16000,
+            audio_sample_rate=audio_sample_rate,
             audio_num_channels=1
         )
     )
