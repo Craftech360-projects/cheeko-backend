@@ -48,6 +48,34 @@ const getKidById = async (userId, kidId) => {
 };
 
 /**
+ * Calculate grade from birth date
+ * @param {string} birthDate - Birth date in YYYY-MM-DD format
+ * @returns {string} Grade/class level
+ */
+const calculateGrade = (birthDate) => {
+  if (!birthDate) return null;
+
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--;
+  }
+
+  // Calculate grade based on age (assuming school starts at age 5-6)
+  // Age 3-4: Preschool/Nursery
+  // Age 5: Kindergarten
+  // Age 6+: Grade = Age - 5
+  if (age < 3) return 'Toddler';
+  if (age < 5) return 'Preschool';
+  if (age === 5) return 'Kindergarten';
+  if (age >= 6 && age <= 18) return `Grade ${age - 5}`;
+  return 'Adult';
+};
+
+/**
  * Create kid profile
  * @param {number} userId - User ID
  * @param {Object} data - Profile data
@@ -56,20 +84,20 @@ const getKidById = async (userId, kidId) => {
 const createKid = async (userId, data) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
+  // Calculate grade from birth date if not provided
+  const grade = data.grade || calculateGrade(data.birthDate);
+
   const { data: profile, error } = await supabaseAdmin
     .from('kid_profile')
     .insert({
       user_id: userId,
       name: data.name,
-      nickname: data.nickname,
-      avatar_url: data.avatarUrl,
       birth_date: data.birthDate,
       gender: data.gender,
-      grade: data.grade,
-      school: data.school,
+      grade: grade,
       interests: data.interests,
       language: data.language || 'en',
-      timezone: data.timezone,
+      additional_notes: data.additionalNotes,
       preferences: data.preferences || {}
     })
     .select()
@@ -97,15 +125,16 @@ const updateKid = async (userId, kidId, data) => {
   const updateData = { updated_at: new Date().toISOString() };
 
   if (data.name !== undefined) updateData.name = data.name;
-  if (data.nickname !== undefined) updateData.nickname = data.nickname;
-  if (data.avatarUrl !== undefined) updateData.avatar_url = data.avatarUrl;
-  if (data.birthDate !== undefined) updateData.birth_date = data.birthDate;
+  if (data.birthDate !== undefined) {
+    updateData.birth_date = data.birthDate;
+    // Recalculate grade if birth date changes
+    updateData.grade = data.grade || calculateGrade(data.birthDate);
+  }
   if (data.gender !== undefined) updateData.gender = data.gender;
   if (data.grade !== undefined) updateData.grade = data.grade;
-  if (data.school !== undefined) updateData.school = data.school;
   if (data.interests !== undefined) updateData.interests = data.interests;
   if (data.language !== undefined) updateData.language = data.language;
-  if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.additionalNotes !== undefined) updateData.additional_notes = data.additionalNotes;
   if (data.preferences !== undefined) updateData.preferences = data.preferences;
 
   const { data: profile, error } = await supabaseAdmin
