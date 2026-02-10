@@ -312,9 +312,10 @@ async def check_riddle_answer(context: RunContext, user_answer: str, expected_an
 async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
     """
     Validate user's word in the Word Ladder game.
+    IMPORTANT: This game is played in English only. Always transcribe the child's spoken word into English letters (ASCII) before calling this tool. If the child speaks in another language, ask them to say an English word instead.
 
     Args:
-        user_word: The word spoken by the child
+        user_word: The English word spoken by the child (must be in English/ASCII letters only)
 
     Returns:
         JSON string with result: success, next_letter, expected_letter, game_status, words_used, message
@@ -342,6 +343,21 @@ async def validate_word_ladder_move(context: RunContext, user_word: str) -> str:
             return json.dumps(result)
 
         user_word = user_word.strip().lower()
+
+        # Reject non-English input (Gemini may transcribe in other scripts)
+        if not user_word.isascii():
+            logger.warning(f"⚠️ Non-English word detected: '{user_word}' - asking child to repeat in English")
+            result = {
+                'success': False,
+                'expected_letter': _word_ladder_state.get_next_letter(),
+                'next_letter': _word_ladder_state.get_next_letter(),
+                'game_status': 'playing',
+                'words_used': len(_word_ladder_state.word_history),
+                'message': f"I couldn't understand that word. Please say an English word that starts with the letter '{_word_ladder_state.get_next_letter().upper()}'."
+            }
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(f"⏱️ validate_word_ladder_move completed in {elapsed_ms:.2f}ms (non-english)")
+            return json.dumps(result)
 
         if len(user_word) < 2:
             result = {
