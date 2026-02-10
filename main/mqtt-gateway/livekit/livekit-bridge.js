@@ -99,6 +99,15 @@ class LiveKitBridge extends EventEmitter {
       AudioResamplerQuality.QUICK
     );
 
+    // Audio diagnostic stats (periodic logging instead of per-frame)
+    this.audioStats = {
+      framesCaptured: 0,
+      framesDropped: 0,
+      dropReasons: { noSource: 0, disconnected: 0, invalid: 0, error: 0 },
+      lastLogTime: Date.now(),
+      logIntervalMs: 30000, // Log every 30 seconds
+    };
+
     // Frame buffer for accumulating resampled audio into proper frame sizes
     this.frameBuffer = Buffer.alloc(0);
     this.targetFrameSize = 1440; // 1440 samples = 60ms at 24kHz (outgoing)
@@ -1008,10 +1017,24 @@ class LiveKitBridge extends EventEmitter {
     });
   }
 
+  _logAudioStatsIfNeeded() {
+    const now = Date.now();
+    if (now - this.audioStats.lastLogTime >= this.audioStats.logIntervalMs) {
+      const s = this.audioStats;
+      const dr = s.dropReasons;
+      console.log(
+        `[AUDIO-STATS] ${this.macAddress} | Captured: ${s.framesCaptured} | Dropped: ${s.framesDropped} (no-source: ${dr.noSource}, disconnected: ${dr.disconnected}, invalid: ${dr.invalid}, error: ${dr.error})`
+      );
+      this.audioStats.lastLogTime = now;
+    }
+  }
+
   async sendAudio(opusData, timestamp) {
     // Check if audioSource is available and room is connected
     if (!this.audioSource || !this.room || !this.room.isConnected) {
-      // console.warn(`⚠️ [AUDIO] Cannot send audio - audioSource or room not ready. Room connected: ${this.room?.isConnected}`);
+      this.audioStats.framesDropped++;
+      this.audioStats.dropReasons.disconnected++;
+      this._logAudioStatsIfNeeded();
       return;
     }
 
@@ -1105,35 +1128,40 @@ class LiveKitBridge extends EventEmitter {
     try {
       // Validate frame before capture
       if (!frame || !frame.data || frame.data.length === 0) {
-        // console.warn(`⚠️ [AUDIO] Invalid frame data, treating as keepalive/ping`);
+        this.audioStats.framesDropped++;
+        this.audioStats.dropReasons.invalid++;
         // Reset activity timer - treat invalid frames as keepalive signals
         if (this.connection && this.connection.updateActivityTime) {
           this.connection.updateActivityTime();
         }
+        this._logAudioStatsIfNeeded();
         return;
       }
 
       // Check if audioSource is still valid
       if (!this.audioSource) {
-        // console.warn(`⚠️ [AUDIO] AudioSource is null, cannot capture frame`);
+        this.audioStats.framesDropped++;
+        this.audioStats.dropReasons.noSource++;
+        this._logAudioStatsIfNeeded();
         return;
       }
 
       // Check if room is still connected before attempting to send audio
       if (!this.room || !this.room.isConnected) {
-        // console.warn(`⚠️ [AUDIO] Room disconnected or not available, skipping frame`);
+        this.audioStats.framesDropped++;
+        this.audioStats.dropReasons.disconnected++;
+        this._logAudioStatsIfNeeded();
         return;
       }
 
       // Attempt to capture the frame
       await this.audioSource.captureFrame(frame);
+      this.audioStats.framesCaptured++;
+      this._logAudioStatsIfNeeded();
     } catch (error) {
-      // console.error(`❌ [AUDIO] Failed to capture frame: ${error.message}`);
-      // If we get InvalidState error, it's likely the peer connection is disconnecting
-      // if (error.message.includes("InvalidState")) {
-      //   console.warn(`⚠️ [AUDIO] InvalidState error - peer connection may be disconnecting`);
-      //   console.warn(`💡 [HINT] This is normal during room disconnect, frames will be skipped`);
-      // }
+      this.audioStats.framesDropped++;
+      this.audioStats.dropReasons.error++;
+      this._logAudioStatsIfNeeded();
     }
   }
 
@@ -2259,6 +2287,13 @@ class LiveKitBridge extends EventEmitter {
   async close() {
     if (this.room) {
       console.log("[LiveKitBridge] Disconnecting from LiveKit room");
+
+      // Log final audio stats before closing
+      const s = this.audioStats;
+      const dr = s.dropReasons;
+      console.log(
+        `[AUDIO-STATS] FINAL ${this.macAddress} | Captured: ${s.framesCaptured} | Dropped: ${s.framesDropped} (no-source: ${dr.noSource}, disconnected: ${dr.disconnected}, invalid: ${dr.invalid}, error: ${dr.error})`
+      );
 
       // CRITICAL: Clear audio flag before disconnect to prevent stuck state
       this.isAudioPlaying = false;
