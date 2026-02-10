@@ -4,7 +4,7 @@
  * Handles kid profiles and preferences.
  */
 
-const { prisma } = require('../config/database');
+const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 
 /**
@@ -13,17 +13,17 @@ const logger = require('../utils/logger');
  * @returns {Promise<Array>} Kid profiles
  */
 const getKidProfiles = async (userId) => {
-  try {
-    const profiles = await prisma.kid_profile.findMany({
-      where: { user_id: BigInt(userId) },
-      orderBy: { created_at: 'asc' }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    return profiles;
-  } catch (err) {
-    logger.error('Failed to fetch kid profiles:', err);
-    throw new Error('Failed to fetch kid profiles');
-  }
+  const { data: profiles, error } = await supabaseAdmin
+    .from('kid_profile')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw new Error('Failed to fetch kid profiles');
+
+  return profiles || [];
 };
 
 /**
@@ -33,20 +33,46 @@ const getKidProfiles = async (userId) => {
  * @returns {Promise<Object>} Kid profile
  */
 const getKidById = async (userId, kidId) => {
-  try {
-    const profile = await prisma.kid_profile.findFirst({
-      where: {
-        id: BigInt(kidId),
-        user_id: BigInt(userId)
-      }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    if (!profile) return null;
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .select('*')
+    .eq('id', kidId)
+    .eq('user_id', userId)
+    .single();
 
-    return profile;
-  } catch (err) {
-    return null;
+  if (error || !profile) return null;
+
+  return profile;
+};
+
+/**
+ * Calculate grade from birth date
+ * @param {string} birthDate - Birth date in YYYY-MM-DD format
+ * @returns {string} Grade/class level
+ */
+const calculateGrade = (birthDate) => {
+  if (!birthDate) return null;
+
+  const today = new Date();
+  const birth = new Date(birthDate);
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age--;
   }
+
+  // Calculate grade based on age (assuming school starts at age 5-6)
+  // Age 3-4: Preschool/Nursery
+  // Age 5: Kindergarten
+  // Age 6+: Grade = Age - 5
+  if (age < 3) return 'Toddler';
+  if (age < 5) return 'Preschool';
+  if (age === 5) return 'Kindergarten';
+  if (age >= 6 && age <= 18) return `Grade ${age - 5}`;
+  return 'Adult';
 };
 
 /**
@@ -56,29 +82,30 @@ const getKidById = async (userId, kidId) => {
  * @returns {Promise<Object>} Created profile
  */
 const createKid = async (userId, data) => {
-  try {
-    const profile = await prisma.kid_profile.create({
-      data: {
-        user_id: BigInt(userId),
-        name: data.name,
-        nickname: data.nickname || null,
-        avatar_url: data.avatarUrl || null,
-        birth_date: data.birthDate ? new Date(data.birthDate) : null,
-        gender: data.gender || null,
-        grade: data.grade || null,
-        school: data.school || null,
-        interests: data.interests || [],
-        language: data.language || 'en',
-        timezone: data.timezone || null,
-        preferences: data.preferences || {}
-      }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    return profile;
-  } catch (err) {
-    logger.error('Failed to create kid profile:', err);
-    throw new Error('Failed to create kid profile');
-  }
+  // Calculate grade from birth date if not provided
+  const grade = data.grade || calculateGrade(data.birthDate);
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .insert({
+      user_id: userId,
+      name: data.name,
+      birth_date: data.birthDate,
+      gender: data.gender,
+      grade: grade,
+      interests: data.interests,
+      language: data.language || 'en',
+      additional_notes: data.additionalNotes,
+      preferences: data.preferences || {}
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to create kid profile');
+
+  return profile;
 };
 
 /**
@@ -89,35 +116,37 @@ const createKid = async (userId, data) => {
  * @returns {Promise<Object>} Updated profile
  */
 const updateKid = async (userId, kidId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify ownership
   const existing = await getKidById(userId, kidId);
   if (!existing) throw new Error('Kid profile not found');
 
-  const updateData = { updated_at: new Date() };
+  const updateData = { updated_at: new Date().toISOString() };
 
   if (data.name !== undefined) updateData.name = data.name;
-  if (data.nickname !== undefined) updateData.nickname = data.nickname;
-  if (data.avatarUrl !== undefined) updateData.avatar_url = data.avatarUrl;
-  if (data.birthDate !== undefined) updateData.birth_date = data.birthDate ? new Date(data.birthDate) : null;
+  if (data.birthDate !== undefined) {
+    updateData.birth_date = data.birthDate;
+    // Recalculate grade if birth date changes
+    updateData.grade = data.grade || calculateGrade(data.birthDate);
+  }
   if (data.gender !== undefined) updateData.gender = data.gender;
   if (data.grade !== undefined) updateData.grade = data.grade;
-  if (data.school !== undefined) updateData.school = data.school;
   if (data.interests !== undefined) updateData.interests = data.interests;
   if (data.language !== undefined) updateData.language = data.language;
-  if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.additionalNotes !== undefined) updateData.additional_notes = data.additionalNotes;
   if (data.preferences !== undefined) updateData.preferences = data.preferences;
 
-  try {
-    const profile = await prisma.kid_profile.update({
-      where: { id: BigInt(kidId) },
-      data: updateData
-    });
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .update(updateData)
+    .eq('id', kidId)
+    .select()
+    .single();
 
-    return profile;
-  } catch (err) {
-    logger.error('Failed to update kid profile:', err);
-    throw new Error('Failed to update kid profile');
-  }
+  if (error) throw new Error('Failed to update kid profile');
+
+  return profile;
 };
 
 /**
@@ -126,18 +155,18 @@ const updateKid = async (userId, kidId, data) => {
  * @param {number} kidId - Kid ID
  */
 const deleteKid = async (userId, kidId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify ownership
   const existing = await getKidById(userId, kidId);
   if (!existing) throw new Error('Kid profile not found');
 
-  try {
-    await prisma.kid_profile.delete({
-      where: { id: BigInt(kidId) }
-    });
-  } catch (err) {
-    logger.error('Failed to delete kid profile:', err);
-    throw new Error('Failed to delete kid profile');
-  }
+  const { error } = await supabaseAdmin
+    .from('kid_profile')
+    .delete()
+    .eq('id', kidId);
+
+  if (error) throw new Error('Failed to delete kid profile');
 };
 
 /**
@@ -147,21 +176,21 @@ const deleteKid = async (userId, kidId) => {
  * @returns {Promise<Object>} Learning progress
  */
 const getProgress = async (userId, kidId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify ownership
   const existing = await getKidById(userId, kidId);
   if (!existing) throw new Error('Kid profile not found');
 
-  try {
-    const progress = await prisma.kid_learning_progress.findMany({
-      where: { kid_id: BigInt(kidId) },
-      orderBy: { updated_at: 'desc' }
-    });
+  const { data: progress, error } = await supabaseAdmin
+    .from('kid_learning_progress')
+    .select('*')
+    .eq('kid_id', kidId)
+    .order('updated_at', { ascending: false });
 
-    return progress;
-  } catch (err) {
-    logger.error('Failed to fetch learning progress:', err);
-    throw new Error('Failed to fetch learning progress');
-  }
+  if (error) throw new Error('Failed to fetch learning progress');
+
+  return progress || [];
 };
 
 /**
@@ -171,39 +200,28 @@ const getProgress = async (userId, kidId) => {
  * @returns {Promise<Object>} Updated progress
  */
 const updateProgress = async (kidId, data) => {
-  try {
-    // kid_learning_progress has a unique constraint on [kid_id, subject, topic]
-    const progress = await prisma.kid_learning_progress.upsert({
-      where: {
-        kid_id_subject_topic: {
-          kid_id: BigInt(kidId),
-          subject: data.subject,
-          topic: data.topic
-        }
-      },
-      update: {
-        score: data.score,
-        time_spent: data.timeSpent,
-        completed: data.completed || false,
-        metadata: data.metadata || {},
-        updated_at: new Date()
-      },
-      create: {
-        kid_id: BigInt(kidId),
-        subject: data.subject,
-        topic: data.topic,
-        score: data.score,
-        time_spent: data.timeSpent,
-        completed: data.completed || false,
-        metadata: data.metadata || {}
-      }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    return progress;
-  } catch (err) {
-    logger.error('Failed to update learning progress:', err);
-    throw new Error('Failed to update learning progress');
-  }
+  const { data: progress, error } = await supabaseAdmin
+    .from('kid_learning_progress')
+    .upsert({
+      kid_id: kidId,
+      subject: data.subject,
+      topic: data.topic,
+      score: data.score,
+      time_spent: data.timeSpent,
+      completed: data.completed || false,
+      metadata: data.metadata || {},
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: 'kid_id,subject,topic'
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to update learning progress');
+
+  return progress;
 };
 
 /**
@@ -214,35 +232,34 @@ const updateProgress = async (kidId, data) => {
  * @returns {Promise<Object>} Activity history
  */
 const getActivityHistory = async (userId, kidId, { page = 1, limit = 20 } = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify ownership
   const existing = await getKidById(userId, kidId);
   if (!existing) throw new Error('Kid profile not found');
 
   const offset = (page - 1) * limit;
 
-  try {
-    const [total, activities] = await Promise.all([
-      prisma.kid_activity_log.count({
-        where: { kid_id: BigInt(kidId) }
-      }),
-      prisma.kid_activity_log.findMany({
-        where: { kid_id: BigInt(kidId) },
-        orderBy: { created_at: 'desc' },
-        skip: offset,
-        take: limit
-      })
-    ]);
+  const { count } = await supabaseAdmin
+    .from('kid_activity_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('kid_id', kidId);
 
-    return {
-      list: activities,
-      total,
-      page,
-      limit
-    };
-  } catch (err) {
-    logger.error('Failed to fetch activity history:', err);
-    throw new Error('Failed to fetch activity history');
-  }
+  const { data: activities, error } = await supabaseAdmin
+    .from('kid_activity_log')
+    .select('*')
+    .eq('kid_id', kidId)
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) throw new Error('Failed to fetch activity history');
+
+  return {
+    list: activities || [],
+    total: count || 0,
+    page,
+    limit
+  };
 };
 
 /**
@@ -252,23 +269,24 @@ const getActivityHistory = async (userId, kidId, { page = 1, limit = 20 } = {}) 
  * @returns {Promise<Object>} Created activity log
  */
 const logActivity = async (kidId, data) => {
-  try {
-    const activity = await prisma.kid_activity_log.create({
-      data: {
-        kid_id: BigInt(kidId),
-        activity_type: data.activityType,
-        content_type: data.contentType || null,
-        content_id: data.contentId || null,
-        duration: data.duration || null,
-        metadata: data.metadata || {}
-      }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    return activity;
-  } catch (err) {
-    logger.error('Failed to log activity:', err);
-    throw new Error('Failed to log activity');
-  }
+  const { data: activity, error } = await supabaseAdmin
+    .from('kid_activity_log')
+    .insert({
+      kid_id: kidId,
+      activity_type: data.activityType,
+      content_type: data.contentType,
+      content_id: data.contentId,
+      duration: data.duration,
+      metadata: data.metadata || {}
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to log activity');
+
+  return activity;
 };
 
 /**
@@ -277,22 +295,21 @@ const logActivity = async (kidId, data) => {
  * @returns {Promise<Object>} Preferences
  */
 const getPreferences = async (kidId) => {
-  try {
-    const profile = await prisma.kid_profile.findFirst({
-      where: { id: BigInt(kidId) },
-      select: { preferences: true, language: true, interests: true }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    if (!profile) return null;
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .select('preferences, language, interests')
+    .eq('id', kidId)
+    .single();
 
-    return {
-      language: profile.language,
-      interests: profile.interests,
-      ...(profile.preferences || {})
-    };
-  } catch (err) {
-    return null;
-  }
+  if (error || !profile) return null;
+
+  return {
+    language: profile.language,
+    interests: profile.interests,
+    ...profile.preferences
+  };
 };
 
 /**
@@ -303,28 +320,28 @@ const getPreferences = async (kidId) => {
  * @returns {Promise<Object>} Updated preferences
  */
 const updatePreferences = async (userId, kidId, preferences) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify ownership
   const existing = await getKidById(userId, kidId);
   if (!existing) throw new Error('Kid profile not found');
 
-  try {
-    const profile = await prisma.kid_profile.update({
-      where: { id: BigInt(kidId) },
-      data: {
-        preferences: {
-          ...(existing.preferences || {}),
-          ...preferences
-        },
-        updated_at: new Date()
+  const { data: profile, error } = await supabaseAdmin
+    .from('kid_profile')
+    .update({
+      preferences: {
+        ...existing.preferences,
+        ...preferences
       },
-      select: { preferences: true }
-    });
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', kidId)
+    .select('preferences')
+    .single();
 
-    return profile.preferences;
-  } catch (err) {
-    logger.error('Failed to update preferences:', err);
-    throw new Error('Failed to update preferences');
-  }
+  if (error) throw new Error('Failed to update preferences');
+
+  return profile.preferences;
 };
 
 // =============================================
@@ -333,248 +350,245 @@ const updatePreferences = async (userId, kidId, preferences) => {
 
 /**
  * Get parent profile for user
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  * @returns {Promise<Object>} Parent profile
  */
 const getParentProfile = async (userId) => {
-  try {
-    const profile = await prisma.parent_profile.findFirst({
-      where: { user_id: BigInt(userId) }
-    });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-    return profile || null;
-  } catch (err) {
-    logger.error('Failed to fetch parent profile', { err, userId });
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .select('*')
+    .eq('user_id', userId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch parent profile', { error, userId });
     throw new Error('Failed to fetch parent profile');
   }
+
+  return profile || null;
 };
 
 /**
  * Get parent profile by Supabase user ID
- * NOTE: supabase_user_id is no longer in the current schema.
- * This function is kept for API compatibility but will always return null.
- * @param {string} supabaseUserId - Supabase user ID (deprecated field)
+ * @param {string} supabaseUserId - Supabase user ID
  * @returns {Promise<Object>} Parent profile
  */
 const getParentBySupabaseId = async (supabaseUserId) => {
-  logger.warn('getParentBySupabaseId: supabase_user_id field no longer exists in schema. Returning null.', { supabaseUserId });
-  return null;
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .select('*')
+    .eq('supabase_user_id', supabaseUserId)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    logger.error('Failed to fetch parent profile by Supabase ID', { error, supabaseUserId });
+    throw new Error('Failed to fetch parent profile');
+  }
+
+  return profile || null;
 };
 
 /**
  * Create parent profile
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  * @param {Object} data - Profile data
  * @returns {Promise<Object>} Created profile
  */
 const createParentProfile = async (userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Check if profile already exists
   const existing = await getParentProfile(userId);
   if (existing) {
     throw new Error('Parent profile already exists for this user');
   }
 
-  try {
-    const profile = await prisma.parent_profile.create({
-      data: {
-        user_id: BigInt(userId),
-        // Map old field names to current schema columns
-        email: data.email || null,
-        phone_number: data.phoneNumber || null,
-        display_name: data.fullName || data.displayName || null,
-        language: data.preferredLanguage || data.language || 'en',
-        timezone: data.timezone || null,
-        onboarding_completed: data.onboardingCompleted || false,
-        terms_accepted_at: data.termsAcceptedAt ? new Date(data.termsAcceptedAt) : null
-        // notification_preferences is no longer a JSON column in current schema;
-        // email_notifications/push_notifications/weekly_report are separate booleans
-        // but data.notificationPreferences cannot be mapped without more context.
-        // privacy_policy_accepted_at no longer exists in current schema.
-      }
-    });
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .insert({
+      user_id: userId,
+      supabase_user_id: data.supabaseUserId,
+      full_name: data.fullName,
+      email: data.email,
+      phone_number: data.phoneNumber,
+      preferred_language: data.preferredLanguage || 'en',
+      timezone: data.timezone,
+      notification_preferences: data.notificationPreferences || {},
+      onboarding_completed: data.onboardingCompleted || false,
+      terms_accepted_at: data.termsAcceptedAt,
+      privacy_policy_accepted_at: data.privacyPolicyAcceptedAt
+    })
+    .select()
+    .single();
 
-    return profile;
-  } catch (err) {
-    logger.error('Failed to create parent profile', { err, userId });
+  if (error) {
+    logger.error('Failed to create parent profile', { error, userId });
     throw new Error('Failed to create parent profile');
   }
+
+  return profile;
 };
 
 /**
  * Update parent profile
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  * @param {Object} data - Update data
  * @returns {Promise<Object>} Updated profile
  */
 const updateParentProfile = async (userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify profile exists
   const existing = await getParentProfile(userId);
   if (!existing) throw new Error('Parent profile not found');
 
-  const updateData = { updated_at: new Date() };
+  const updateData = { updated_at: new Date().toISOString() };
 
-  // Map old camelCase fields to current schema columns
-  if (data.fullName !== undefined) updateData.display_name = data.fullName;
-  if (data.displayName !== undefined) updateData.display_name = data.displayName;
+  if (data.fullName !== undefined) updateData.full_name = data.fullName;
   if (data.email !== undefined) updateData.email = data.email;
   if (data.phoneNumber !== undefined) updateData.phone_number = data.phoneNumber;
-  if (data.preferredLanguage !== undefined) updateData.language = data.preferredLanguage;
-  if (data.language !== undefined) updateData.language = data.language;
+  if (data.preferredLanguage !== undefined) updateData.preferred_language = data.preferredLanguage;
   if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.notificationPreferences !== undefined) updateData.notification_preferences = data.notificationPreferences;
   if (data.onboardingCompleted !== undefined) updateData.onboarding_completed = data.onboardingCompleted;
-  if (data.termsAcceptedAt !== undefined) updateData.terms_accepted_at = data.termsAcceptedAt ? new Date(data.termsAcceptedAt) : null;
+  if (data.termsAcceptedAt !== undefined) updateData.terms_accepted_at = data.termsAcceptedAt;
+  if (data.privacyPolicyAcceptedAt !== undefined) updateData.privacy_policy_accepted_at = data.privacyPolicyAcceptedAt;
 
-  // Map notification_preferences object fields to individual boolean columns if provided
-  if (data.notificationPreferences !== undefined) {
-    const prefs = data.notificationPreferences;
-    if (prefs.email !== undefined) updateData.email_notifications = prefs.email;
-    if (prefs.push !== undefined) updateData.push_notifications = prefs.push;
-    if (prefs.weeklyReport !== undefined) updateData.weekly_report = prefs.weeklyReport;
-  }
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update(updateData)
+    .eq('user_id', userId)
+    .select()
+    .single();
 
-  // Individual notification flag overrides
-  if (data.emailNotifications !== undefined) updateData.email_notifications = data.emailNotifications;
-  if (data.pushNotifications !== undefined) updateData.push_notifications = data.pushNotifications;
-  if (data.weeklyReport !== undefined) updateData.weekly_report = data.weeklyReport;
-
-  try {
-    const profile = await prisma.parent_profile.update({
-      where: { id: existing.id },
-      data: updateData
-    });
-
-    return profile;
-  } catch (err) {
-    logger.error('Failed to update parent profile', { err, userId });
+  if (error) {
+    logger.error('Failed to update parent profile', { error, userId });
     throw new Error('Failed to update parent profile');
   }
+
+  return profile;
 };
 
 /**
  * Delete parent profile
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  */
 const deleteParentProfile = async (userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify profile exists
   const existing = await getParentProfile(userId);
   if (!existing) throw new Error('Parent profile not found');
 
-  try {
-    await prisma.parent_profile.delete({
-      where: { id: existing.id }
-    });
-  } catch (err) {
-    logger.error('Failed to delete parent profile', { err, userId });
+  const { error } = await supabaseAdmin
+    .from('parent_profile')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    logger.error('Failed to delete parent profile', { error, userId });
     throw new Error('Failed to delete parent profile');
   }
 };
 
 /**
  * Update notification preferences
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  * @param {Object} preferences - Notification preferences
  * @returns {Promise<Object>} Updated preferences
  */
 const updateNotificationPreferences = async (userId, preferences) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   // Verify profile exists
   const existing = await getParentProfile(userId);
   if (!existing) throw new Error('Parent profile not found');
 
-  // In the current schema, notification settings are individual boolean columns
-  const updateData = { updated_at: new Date() };
+  const updatedPrefs = {
+    ...existing.notification_preferences,
+    ...preferences
+  };
 
-  if (preferences.email !== undefined) updateData.email_notifications = preferences.email;
-  if (preferences.push !== undefined) updateData.push_notifications = preferences.push;
-  if (preferences.weeklyReport !== undefined) updateData.weekly_report = preferences.weeklyReport;
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update({
+      notification_preferences: updatedPrefs,
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', userId)
+    .select('notification_preferences')
+    .single();
 
-  // Also handle direct boolean field names
-  if (preferences.email_notifications !== undefined) updateData.email_notifications = preferences.email_notifications;
-  if (preferences.push_notifications !== undefined) updateData.push_notifications = preferences.push_notifications;
-  if (preferences.weekly_report !== undefined) updateData.weekly_report = preferences.weekly_report;
-
-  try {
-    const profile = await prisma.parent_profile.update({
-      where: { id: existing.id },
-      data: updateData,
-      select: {
-        email_notifications: true,
-        push_notifications: true,
-        weekly_report: true
-      }
-    });
-
-    // Return in the shape callers expect (mirrors old notification_preferences JSON shape)
-    return {
-      email: profile.email_notifications,
-      push: profile.push_notifications,
-      weeklyReport: profile.weekly_report,
-      // Also expose raw field names for backward compat
-      email_notifications: profile.email_notifications,
-      push_notifications: profile.push_notifications,
-      weekly_report: profile.weekly_report
-    };
-  } catch (err) {
-    logger.error('Failed to update notification preferences', { err, userId });
+  if (error) {
+    logger.error('Failed to update notification preferences', { error, userId });
     throw new Error('Failed to update notification preferences');
   }
+
+  return profile.notification_preferences;
 };
 
 /**
  * Mark onboarding as completed
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  * @returns {Promise<Object>} Updated profile
  */
 const completeOnboarding = async (userId) => {
-  // Verify profile exists first to get id
-  const existing = await getParentProfile(userId);
-  if (!existing) throw new Error('Parent profile not found');
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  try {
-    const profile = await prisma.parent_profile.update({
-      where: { id: existing.id },
-      data: {
-        onboarding_completed: true,
-        updated_at: new Date()
-      }
-    });
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update({
+      onboarding_completed: true,
+      updated_at: new Date().toISOString()
+    })
+    .eq('user_id', userId)
+    .select()
+    .single();
 
-    return profile;
-  } catch (err) {
-    logger.error('Failed to complete onboarding', { err, userId });
+  if (error) {
+    logger.error('Failed to complete onboarding', { error, userId });
     throw new Error('Failed to complete onboarding');
   }
+
+  return profile;
 };
 
 /**
  * Accept terms and privacy policy
- * @param {string|number} userId - User ID
+ * @param {string} userId - User ID
  * @param {Object} data - Acceptance data
  * @returns {Promise<Object>} Updated profile
  */
 const acceptTerms = async (userId, data = {}) => {
-  // Verify profile exists first to get id
-  const existing = await getParentProfile(userId);
-  if (!existing) throw new Error('Parent profile not found');
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const now = new Date();
+  const now = new Date().toISOString();
   const updateData = { updated_at: now };
 
   if (data.acceptTerms) {
     updateData.terms_accepted_at = now;
   }
-  // privacy_policy_accepted_at no longer exists in current schema — skip it silently
+  if (data.acceptPrivacyPolicy) {
+    updateData.privacy_policy_accepted_at = now;
+  }
 
-  try {
-    const profile = await prisma.parent_profile.update({
-      where: { id: existing.id },
-      data: updateData
-    });
+  const { data: profile, error } = await supabaseAdmin
+    .from('parent_profile')
+    .update(updateData)
+    .eq('user_id', userId)
+    .select()
+    .single();
 
-    return profile;
-  } catch (err) {
-    logger.error('Failed to accept terms', { err, userId });
+  if (error) {
+    logger.error('Failed to accept terms', { error, userId });
     throw new Error('Failed to accept terms');
   }
+
+  return profile;
 };
 
 module.exports = {

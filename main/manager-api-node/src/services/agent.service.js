@@ -4,7 +4,7 @@
  * Handles AI agent configuration, chat history, and device integration.
  */
 
-const { prisma } = require('../config/database');
+const { supabaseAdmin } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
@@ -16,28 +16,40 @@ const mem0Service = require('./integrations/mem0.service');
  * @returns {Promise<Object>} Created agent
  */
 const createAgent = async (userId, data) => {
-  const agent = await prisma.ai_agent.create({
-    data: {
-      user_id: BigInt(userId),
-      agent_code: data.agentCode || null,
-      agent_name: data.agentName,
-      asr_model_id: data.asrModelId || null,
-      vad_model_id: data.vadModelId || null,
-      llm_model_id: data.llmModelId || null,
-      vllm_model_id: data.vllmModelId || null,
-      tts_model_id: data.ttsModelId || null,
-      tts_voice_id: data.ttsVoiceId || null,
-      mem_model_id: data.memModelId || null,
-      intent_model_id: data.intentModelId || null,
-      chat_history_conf: data.chatHistoryConf || 0,
-      system_prompt: data.systemPrompt || null,
-      summary_memory: data.summaryMemory || null,
-      lang_code: data.langCode || 'en',
-      language: data.language || 'English',
-      sort: data.sort || 0,
-      creator: BigInt(userId),
-    },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const agentData = {
+    user_id: userId,
+    agent_code: data.agentCode,
+    agent_name: data.agentName,
+    asr_model_id: data.asrModelId,
+    vad_model_id: data.vadModelId,
+    llm_model_id: data.llmModelId,
+    vllm_model_id: data.vllmModelId,
+    tts_model_id: data.ttsModelId,
+    tts_voice_id: data.ttsVoiceId,
+    mem_model_id: data.memModelId,
+    intent_model_id: data.intentModelId,
+    chat_history_conf: data.chatHistoryConf || 0,
+    system_prompt: data.systemPrompt,
+    summary_memory: data.summaryMemory,
+    lang_code: data.langCode || 'en',
+    language: data.language || 'English',
+    sort: data.sort || 0,
+    creator: userId
+  };
+
+  const { data: agent, error } = await supabaseAdmin
+    .from('ai_agent')
+    .insert(agentData)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to create agent:', error);
+    throw new Error('Failed to create agent');
+  }
+
   return agent;
 };
 
@@ -48,10 +60,22 @@ const createAgent = async (userId, data) => {
  * @returns {Promise<Object>} Agent
  */
 const getAgentById = async (agentId, userId = null) => {
-  const agent = await prisma.ai_agent.findUnique({
-    where: { id: agentId, ...(userId ? { user_id: BigInt(userId) } : {}) },
-  });
-  return agent || null;
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  let query = supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .eq('id', agentId);
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data: agent, error } = await query.single();
+
+  if (error || !agent) return null;
+
+  return agent;
 };
 
 /**
@@ -62,10 +86,18 @@ const getAgentById = async (agentId, userId = null) => {
  * @returns {Promise<Object>} Updated agent
  */
 const updateAgent = async (agentId, _userId, data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Check if agent exists (Spring Boot doesn't filter by user ID)
   const existing = await getAgentById(agentId);
   if (!existing) throw new Error('Agent not found');
 
-  const updateData = { updated_at: new Date() };
+  const updateData = {
+    updated_at: new Date().toISOString()
+    // Note: ai_agent table doesn't have an 'updater' column (unlike ai_device)
+  };
+
+  // Map fields
   if (data.agentCode !== undefined) updateData.agent_code = data.agentCode;
   if (data.agentName !== undefined) updateData.agent_name = data.agentName;
   if (data.asrModelId !== undefined) updateData.asr_model_id = data.asrModelId;
@@ -83,28 +115,82 @@ const updateAgent = async (agentId, _userId, data) => {
   if (data.language !== undefined) updateData.language = data.language;
   if (data.sort !== undefined) updateData.sort = data.sort;
 
-  const agent = await prisma.ai_agent.update({ where: { id: agentId }, data: updateData });
+  const { data: agent, error } = await supabaseAdmin
+    .from('ai_agent')
+    .update(updateData)
+    .eq('id', agentId)
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to update agent:', error);
+    throw new Error('Failed to update agent');
+  }
+
   return agent;
 };
 
 /**
  * Delete agent and all associated records
- * Matches Spring Boot behavior: deletes devices, chat history, and plugins first
+ * Cascading delete: devices → chat history → plugins → agent
  * @param {string} agentId - Agent ID
  * @param {number} userId - User ID (kept for backward compatibility but not used for filtering)
  */
 const deleteAgent = async (agentId, _userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Check if agent exists
   const existing = await getAgentById(agentId);
   if (!existing) throw new Error('Agent not found');
 
-  // Unlink devices and unassign kids (set agent_id and kid_id to null rather than delete)
-  await prisma.ai_device.updateMany({ where: { agent_id: agentId }, data: { agent_id: null, kid_id: null } });
-  // Delete associated chat history
-  await prisma.ai_agent_chat_history.deleteMany({ where: { agent_id: agentId } });
-  // Delete plugin mappings via raw SQL (table not in Prisma schema)
-  await prisma.$executeRawUnsafe(`DELETE FROM ai_agent_plugin_mapping WHERE agent_id = $1::uuid`, agentId).catch(() => {});
-  // Delete the agent
-  await prisma.ai_agent.delete({ where: { id: agentId } });
+  logger.info(`[deleteAgent] Starting cascading delete for agent ${agentId}`);
+
+  // 1. Delete associated devices FIRST
+  const { error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .delete()
+    .eq('agent_id', agentId);
+
+  if (deviceError) {
+    logger.error('Failed to delete devices:', deviceError);
+    throw new Error('Failed to delete associated devices');
+  }
+  logger.info(`[deleteAgent] Deleted devices for agent ${agentId}`);
+
+  // 2. Delete associated chat history
+  const { error: chatError } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .delete()
+    .eq('agent_id', agentId);
+
+  if (chatError) {
+    logger.error('Failed to delete chat history:', chatError);
+  }
+  logger.info(`[deleteAgent] Deleted chat history for agent ${agentId}`);
+
+  // 3. Delete associated plugin mappings
+  const { error: pluginError } = await supabaseAdmin
+    .from('ai_agent_plugin_mapping')
+    .delete()
+    .eq('agent_id', agentId);
+
+  if (pluginError) {
+    logger.error('Failed to delete plugin mappings:', pluginError);
+  }
+  logger.info(`[deleteAgent] Deleted plugin mappings for agent ${agentId}`);
+
+  // 4. Finally delete the agent
+  const { error } = await supabaseAdmin
+    .from('ai_agent')
+    .delete()
+    .eq('id', agentId);
+
+  if (error) {
+    logger.error('Failed to delete agent:', error);
+    throw new Error('Failed to delete agent');
+  }
+
+  logger.info(`[deleteAgent] Successfully completed cascading delete for agent ${agentId}`);
 };
 
 /**
@@ -114,22 +200,30 @@ const deleteAgent = async (agentId, _userId) => {
  * @returns {Promise<Object>} Paginated agents
  */
 const listAgents = async (userId, { page = 1, limit = 10 } = {}) => {
-  const skip = (page - 1) * limit;
-  const where = { user_id: BigInt(userId) };
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const [total, agents] = await Promise.all([
-    prisma.ai_agent.count({ where }),
-    prisma.ai_agent.findMany({
-      where,
-      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
-      skip,
-      take: limit,
-    }),
-  ]);
+  const offset = (page - 1) * limit;
+
+  // Get total count
+  const { count } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id', { count: 'exact', head: true })
+    .eq('user_id', userId);
+
+  // Get agents
+  const { data: agents, error } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort', { ascending: true })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) throw new Error('Failed to fetch agents');
 
   return {
     list: agents || [],
-    total,
+    total: count || 0,
     page,
     limit
   };
@@ -141,10 +235,16 @@ const listAgents = async (userId, { page = 1, limit = 10 } = {}) => {
  * @returns {Promise<Array>} All agents
  */
 const getAllAgents = async (userId) => {
-  const agents = await prisma.ai_agent.findMany({
-    where: { user_id: BigInt(userId) },
-    orderBy: { sort: 'asc' },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: agents, error } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort', { ascending: true });
+
+  if (error) throw new Error('Failed to fetch agents');
+
   return agents || [];
 };
 
@@ -158,19 +258,23 @@ const getAllAgents = async (userId) => {
  * @returns {Promise<Object>} PageData with list, total
  */
 const getAgentSessions = async (agentId, options = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const page = parseInt(options.page) || 1;
   const limit = parseInt(options.limit) || 10;
 
   // Get all messages for this agent to group by session
-  const data = await prisma.ai_agent_chat_history.findMany({
-    where: { agent_id: agentId },
-    select: { session_id: true, created_at: true },
-    orderBy: { created_at: 'desc' },
-  });
+  const { data, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .select('session_id, created_at')
+    .eq('agent_id', agentId)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error('Failed to fetch sessions');
 
   // Group by session ID and track message counts and earliest timestamp
   const sessionGroups = new Map();
-  (data).forEach(item => {
+  (data || []).forEach(item => {
     const sessionId = item.session_id;
     if (!sessionGroups.has(sessionId)) {
       sessionGroups.set(sessionId, {
@@ -220,11 +324,19 @@ const getAgentSessions = async (agentId, options = {}) => {
  * @returns {Promise<Array>} Chat messages with camelCase fields
  */
 const getChatHistory = async (agentId, sessionId) => {
-  const messages = await prisma.ai_agent_chat_history.findMany({
-    where: { agent_id: agentId, session_id: sessionId },
-    select: { created_at: true, chat_type: true, content: true, audio_id: true, mac_address: true },
-    orderBy: { created_at: 'asc' },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .select('created_at, chat_type, content, audio_id, mac_address')
+    .eq('agent_id', agentId)
+    .eq('session_id', sessionId)
+    .order('created_at', { ascending: true });
+
+  if (error) throw new Error('Failed to fetch chat history');
+
+  // Get session creation time (earliest message) to match Spring Boot behavior
+  const messages = data || [];
   if (messages.length === 0) return [];
 
   const sessionCreationTime = messages.reduce((min, msg) => {
@@ -248,18 +360,24 @@ const getChatHistory = async (agentId, sessionId) => {
  * @returns {Promise<Object>} Created message
  */
 const addChatMessage = async ({ macAddress, agentId, sessionId, chatType, content, audioId }) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(macAddress);
 
-  const message = await prisma.ai_agent_chat_history.create({
-    data: {
+  const { data: message, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .insert({
       mac_address: normalizedMac,
       agent_id: agentId,
       session_id: sessionId,
       chat_type: chatType, // 1=user, 2=agent
       content,
-      audio_id: audioId,
-    },
-  });
+      audio_id: audioId
+    })
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to save chat message');
 
   return message;
 };
@@ -270,22 +388,29 @@ const addChatMessage = async ({ macAddress, agentId, sessionId, chatType, conten
  * @returns {Promise<Object>} Agent prompt config
  */
 const getPromptByMac = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { agent_id: true },
-  });
+  // Get device with agent
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
 
-  if (!device || !device.agent_id) {
+  if (deviceError || !device || !device.agent_id) {
     throw new Error('Device or agent not found');
   }
 
-  const agent = await prisma.ai_agent.findUnique({
-    where: { id: device.agent_id },
-  });
+  // Get agent
+  const { data: agent, error: agentError } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .eq('id', device.agent_id)
+    .single();
 
-  if (!agent) {
+  if (agentError || !agent) {
     throw new Error('Agent not found');
   }
 
@@ -311,12 +436,18 @@ const getPromptByMac = async (mac) => {
  * @returns {Promise<string>} Agent ID
  */
 const getAgentIdByMac = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { agent_id: true },
-  });
-  if (!device) throw new Error('Device not found');
+
+  const { data: device, error } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (error || !device) throw new Error('Device not found');
+
   return device.agent_id;
 };
 
@@ -326,33 +457,40 @@ const getAgentIdByMac = async (mac) => {
  * @returns {Promise<Object>} New agent info
  */
 const cycleCharacter = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { id: true, user_id: true, agent_id: true },
-  });
+  // Get device with current agent
+  const { data: device } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, user_id, agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
 
   if (!device) throw new Error('Device not found');
 
-  const agents = await prisma.ai_agent.findMany({
-    where: { user_id: device.user_id },
-    select: { id: true, agent_name: true },
-    orderBy: { sort: 'asc' },
-  });
+  // Get all agents for user
+  const { data: agents } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id, agent_name')
+    .eq('user_id', device.user_id)
+    .order('sort', { ascending: true });
 
   if (!agents || agents.length === 0) {
     throw new Error('No agents available');
   }
 
+  // Find next agent
   const currentIndex = agents.findIndex(a => a.id === device.agent_id);
   const nextIndex = (currentIndex + 1) % agents.length;
   const nextAgent = agents[nextIndex];
 
-  await prisma.ai_device.update({
-    where: { id: device.id },
-    data: { agent_id: nextAgent.id },
-  });
+  // Update device
+  await supabaseAdmin
+    .from('ai_device')
+    .update({ agent_id: nextAgent.id })
+    .eq('id', device.id);
 
   return {
     agentId: nextAgent.id,
@@ -368,19 +506,26 @@ const cycleCharacter = async (mac) => {
  * @returns {Promise<Object>} Agent info
  */
 const setCharacter = async (mac, agentId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
 
-  const agent = await prisma.ai_agent.findUnique({
-    where: { id: agentId },
-    select: { id: true, agent_name: true },
-  });
+  // Verify agent exists
+  const { data: agent } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id, agent_name')
+    .eq('id', agentId)
+    .single();
 
   if (!agent) throw new Error('Agent not found');
 
-  await prisma.ai_device.update({
-    where: { mac_address: normalizedMac },
-    data: { agent_id: agentId },
-  });
+  // Update device
+  const { error } = await supabaseAdmin
+    .from('ai_device')
+    .update({ agent_id: agentId })
+    .eq('mac_address', normalizedMac);
+
+  if (error) throw new Error('Failed to set character');
 
   return {
     agentId: agent.id,
@@ -390,68 +535,120 @@ const setCharacter = async (mac, agentId) => {
 
 /**
  * Set character (agent) for device by name
+ * One device = one agent (update existing agent instead of creating new ones)
  * @param {string} mac - Device MAC address
  * @param {string} characterName - Agent name to set
  * @returns {Promise<Object>} Agent info
  */
 const setCharacterByName = async (mac, characterName) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { id: true, user_id: true },
-  });
+  // Get device with current agent_id
+  const { data: device } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, user_id, agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
   if (!device) throw new Error('Device not found');
 
-  // Find existing agent by name (case-insensitive) for this user
-  let agent = await prisma.ai_agent.findFirst({
-    where: { user_id: device.user_id, agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true },
-  });
+  // Find template by character name
+  const { data: template } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .ilike('agent_name', characterName)
+    .eq('is_visible', 1)
+    .single();
 
-  if (!agent) {
-    // Look up template by character name to copy full config
-    const template = await prisma.ai_agent_template.findFirst({
-      where: { agent_name: { equals: characterName, mode: 'insensitive' } },
-    });
-
-    if (template) {
-      logger.info(`[setCharacterByName] Found template for "${characterName}", applying to new agent`);
-    } else {
-      logger.warn(`[setCharacterByName] No template found for "${characterName}", creating minimal agent`);
-    }
-
-    agent = await prisma.ai_agent.create({
-      data: {
-        user_id: device.user_id,
-        agent_name: characterName,
-        lang_code: template?.lang_code ?? 'en',
-        language: template?.language ?? 'English',
-        creator: device.user_id,
-        ...(template && {
-          agent_code: template.agent_code,
-          asr_model_id: template.asr_model_id,
-          vad_model_id: template.vad_model_id,
-          llm_model_id: template.llm_model_id,
-          vllm_model_id: template.vllm_model_id,
-          tts_model_id: template.tts_model_id,
-          tts_voice_id: template.tts_voice_id,
-          mem_model_id: template.mem_model_id,
-          intent_model_id: template.intent_model_id,
-          chat_history_conf: template.chat_history_conf,
-          system_prompt: template.system_prompt,
-          summary_memory: template.summary_memory,
-        }),
-      },
-      select: { id: true, agent_name: true },
-    });
-    logger.info(`[setCharacterByName] Auto-created agent "${characterName}" for user ${device.user_id}`);
+  if (!template) {
+    throw new Error(`Template "${characterName}" not found`);
   }
 
-  await prisma.ai_device.update({ where: { id: device.id }, data: { agent_id: agent.id } });
+  logger.info(`[setCharacterByName] Found template "${template.agent_name}" for character change`);
 
-  logger.info(`[setCharacterByName] Device ${normalizedMac} set to agent: ${agent.agent_name}`);
-  return { agentId: agent.id, agentName: agent.agent_name };
+  let agentId;
+  let agentName;
+
+  // Check if device already has an agent
+  if (device.agent_id) {
+    // UPDATE existing agent with new character's properties
+    logger.info(`[setCharacterByName] Updating existing agent ${device.agent_id} to "${template.agent_name}"`);
+
+    const { error: updateError } = await supabaseAdmin
+      .from('ai_agent')
+      .update({
+        agent_code: template.agent_code,
+        agent_name: template.agent_name,
+        asr_model_id: template.asr_model_id,
+        vad_model_id: template.vad_model_id,
+        llm_model_id: template.llm_model_id,
+        vllm_model_id: template.vllm_model_id,
+        tts_model_id: template.tts_model_id,
+        tts_voice_id: template.tts_voice_id,
+        mem_model_id: template.mem_model_id,
+        intent_model_id: template.intent_model_id,
+        chat_history_conf: template.chat_history_conf,
+        system_prompt: template.system_prompt,
+        summary_memory: template.summary_memory,
+        lang_code: template.lang_code,
+        language: template.language,
+        sort: template.sort,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', device.agent_id);
+
+    if (updateError) {
+      throw new Error(`Failed to update agent: ${updateError.message}`);
+    }
+
+    agentId = device.agent_id;
+    agentName = template.agent_name;
+    logger.info(`[setCharacterByName] Updated agent ${agentId} to "${agentName}"`);
+  } else {
+    // CREATE new agent from template (first time setup)
+    logger.info(`[setCharacterByName] Creating new agent "${template.agent_name}" for device`);
+
+    const newAgent = await createAgent(device.user_id, {
+      agentCode: template.agent_code,
+      agentName: template.agent_name,
+      asrModelId: template.asr_model_id,
+      vadModelId: template.vad_model_id,
+      llmModelId: template.llm_model_id,
+      vllmModelId: template.vllm_model_id,
+      ttsModelId: template.tts_model_id,
+      ttsVoiceId: template.tts_voice_id,
+      memModelId: template.mem_model_id,
+      intentModelId: template.intent_model_id,
+      chatHistoryConf: template.chat_history_conf,
+      systemPrompt: template.system_prompt,
+      summaryMemory: template.summary_memory,
+      langCode: template.lang_code,
+      language: template.language,
+      sort: template.sort
+    });
+
+    agentId = newAgent.id;
+    agentName = newAgent.agent_name;
+
+    // Link device to new agent
+    const { error: linkError } = await supabaseAdmin
+      .from('ai_device')
+      .update({ agent_id: agentId })
+      .eq('id', device.id);
+
+    if (linkError) {
+      throw new Error('Failed to link device to agent');
+    }
+
+    logger.info(`[setCharacterByName] Created and linked agent "${agentName}" (${agentId}) to device`);
+  }
+
+  return {
+    agentId: agentId,
+    agentName: agentName
+  };
 };
 
 /**
@@ -460,13 +657,22 @@ const setCharacterByName = async (mac, characterName) => {
  * @returns {Promise<Object>} Current agent info
  */
 const getCurrentCharacter = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
   logger.info(`[getCurrentCharacter] Looking up device: ${mac} -> normalized: ${normalizedMac}`);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { id: true, mac_address: true, agent_id: true },
-  });
+  // First check if device exists
+  const { data: device, error } = await supabaseAdmin
+    .from('ai_device')
+    .select('id, mac_address, agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
+
+  if (error) {
+    logger.info(`[getCurrentCharacter] Device query error: ${error.message}`);
+    throw new Error('Device not found');
+  }
 
   if (!device) {
     logger.info(`[getCurrentCharacter] Device not found for MAC: ${normalizedMac}`);
@@ -475,23 +681,30 @@ const getCurrentCharacter = async (mac) => {
 
   logger.info(`[getCurrentCharacter] Device found: id=${device.id}, agent_id=${device.agent_id}`);
 
+  // If no agent assigned, return null values
   if (!device.agent_id) {
     logger.info(`[getCurrentCharacter] Device has no agent assigned`);
     return { agentId: null, agentName: null, agentCode: null };
   }
 
-  const agent = await prisma.ai_agent.findUnique({
-    where: { id: device.agent_id },
-    select: { id: true, agent_name: true, agent_code: true },
-  });
+  // Get agent details
+  const { data: agent, error: agentError } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id, agent_name, agent_code')
+    .eq('id', device.agent_id)
+    .single();
 
-  if (!agent) {
+  if (agentError || !agent) {
     logger.info(`[getCurrentCharacter] Agent not found: ${device.agent_id}`);
     return { agentId: device.agent_id, agentName: null, agentCode: null };
   }
 
   logger.info(`[getCurrentCharacter] Agent found: ${agent.agent_name}`);
-  return { agentId: agent.id, agentName: agent.agent_name, agentCode: agent.agent_code };
+  return {
+    agentId: agent.id,
+    agentName: agent.agent_name,
+    agentCode: agent.agent_code
+  };
 };
 
 /**
@@ -656,25 +869,36 @@ const clearMemoriesByMac = async (mac) => {
  * @returns {Promise<Object>} Updated agent info
  */
 const saveMemory = async (mac, summaryMemory) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { agent_id: true },
-  });
+  // Get device with agent
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
 
-  if (!device || !device.agent_id) {
+  if (deviceError || !device || !device.agent_id) {
     throw new Error('Device or agent not found');
   }
 
-  const agent = await prisma.ai_agent.update({
-    where: { id: device.agent_id },
-    data: {
+  // Update agent's summary_memory field
+  const { data: agent, error: updateError } = await supabaseAdmin
+    .from('ai_agent')
+    .update({
       summary_memory: summaryMemory,
-      updated_at: new Date(),
-    },
-    select: { id: true, agent_name: true, summary_memory: true },
-  });
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', device.agent_id)
+    .select('id, agent_name, summary_memory')
+    .single();
+
+  if (updateError) {
+    logger.error('Failed to save memory:', updateError);
+    throw new Error('Failed to save memory');
+  }
 
   return {
     agentId: agent.id,
@@ -693,26 +917,34 @@ const saveMemory = async (mac, summaryMemory) => {
  * @returns {Promise<Object>} Updated agent
  */
 const updateModeFromTemplate = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const { macAddress, templateId, preserveMemory = true } = data;
   const normalizedMac = normalizeMacAddress(macAddress);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { agent_id: true },
-  });
+  // Get device with current agent
+  const { data: device, error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id')
+    .eq('mac_address', normalizedMac)
+    .single();
 
-  if (!device || !device.agent_id) {
+  if (deviceError || !device || !device.agent_id) {
     throw new Error('Device or agent not found');
   }
 
-  const template = await prisma.ai_agent_template.findUnique({
-    where: { id: templateId },
-  });
+  // Get the template
+  const { data: template, error: templateError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('id', templateId)
+    .single();
 
-  if (!template) {
+  if (templateError || !template) {
     throw new Error('Template not found');
   }
 
+  // Build update data from template
   const updateData = {
     agent_code: template.agent_code,
     agent_name: template.agent_name,
@@ -728,17 +960,26 @@ const updateModeFromTemplate = async (data) => {
     system_prompt: template.system_prompt,
     lang_code: template.lang_code,
     language: template.language,
-    updated_at: new Date(),
+    updated_at: new Date().toISOString()
   };
 
+  // Optionally update summary_memory from template
   if (!preserveMemory) {
     updateData.summary_memory = template.summary_memory;
   }
 
-  const agent = await prisma.ai_agent.update({
-    where: { id: device.agent_id },
-    data: updateData,
-  });
+  // Update the agent
+  const { data: agent, error: updateError } = await supabaseAdmin
+    .from('ai_agent')
+    .update(updateData)
+    .eq('id', device.agent_id)
+    .select()
+    .single();
+
+  if (updateError) {
+    logger.error('Failed to update mode from template:', updateError);
+    throw new Error('Failed to update mode from template');
+  }
 
   return agent;
 };
@@ -750,18 +991,26 @@ const updateModeFromTemplate = async (data) => {
  * @returns {Promise<Object>} Agent name and code
  */
 const getAgentNameByMac = async (mac) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const normalizedMac = normalizeMacAddress(mac);
 
-  const device = await prisma.ai_device.findUnique({
-    where: { mac_address: normalizedMac },
-    select: { agent_id: true, mode: true },
-  });
+  // Get device with agent name via join
+  const { data: device, error } = await supabaseAdmin
+    .from('ai_device')
+    .select(`
+      agent_id,
+      mode,
+      ai_agent:agent_id (id, agent_name, agent_code)
+    `)
+    .eq('mac_address', normalizedMac)
+    .single();
 
-  if (!device) {
+  if (error || !device) {
     throw new Error('Device not found');
   }
 
-  if (!device.agent_id) {
+  if (!device.ai_agent) {
     return {
       agentId: null,
       agentName: null,
@@ -770,15 +1019,10 @@ const getAgentNameByMac = async (mac) => {
     };
   }
 
-  const agent = await prisma.ai_agent.findUnique({
-    where: { id: device.agent_id },
-    select: { id: true, agent_name: true, agent_code: true },
-  });
-
   return {
-    agentId: agent ? agent.id : null,
-    agentName: agent ? agent.agent_name : null,
-    agentCode: agent ? agent.agent_code : null,
+    agentId: device.ai_agent.id,
+    agentName: device.ai_agent.agent_name,
+    agentCode: device.ai_agent.agent_code,
     mode: device.mode
   };
 };
@@ -800,28 +1044,39 @@ const getAgentNameByMac = async (mac) => {
  * @returns {Promise<Object>} Created message
  */
 const reportChatMessage = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const { macAddress, agentId, sessionId, chatType, content, audioId } = data;
   const normalizedMac = normalizeMacAddress(macAddress);
 
+  // If agentId not provided, try to get it from the device
   let resolvedAgentId = agentId;
   if (!resolvedAgentId) {
     try {
       resolvedAgentId = await getAgentIdByMac(normalizedMac);
     } catch {
+      // Agent ID is optional, continue without it
       resolvedAgentId = null;
     }
   }
 
-  const message = await prisma.ai_agent_chat_history.create({
-    data: {
+  const { data: message, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .insert({
       mac_address: normalizedMac,
       agent_id: resolvedAgentId,
       session_id: sessionId,
       chat_type: chatType,
       content,
-      audio_id: audioId,
-    },
-  });
+      audio_id: audioId
+    })
+    .select()
+    .single();
+
+  if (error) {
+    logger.error('Failed to report chat message:', error);
+    throw new Error('Failed to report chat message');
+  }
 
   return message;
 };
@@ -836,6 +1091,8 @@ const reportChatMessage = async (data) => {
  * @returns {Promise<Object>} Result with count of inserted messages
  */
 const batchUploadSession = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const { macAddress, agentId, sessionId, messages } = data;
 
   if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -844,25 +1101,33 @@ const batchUploadSession = async (data) => {
 
   const normalizedMac = normalizeMacAddress(macAddress);
 
+  // If agentId not provided, try to get it from the device
   let resolvedAgentId = agentId;
   if (!resolvedAgentId) {
     try {
       resolvedAgentId = await getAgentIdByMac(normalizedMac);
     } catch {
+      // Agent ID is optional, continue without it
       resolvedAgentId = null;
     }
   }
 
+  // Prepare batch insert data
   const insertData = messages.map((msg, index) => {
+    // Convert Unix timestamp (seconds) to ISO date string
+    // Python sends int(datetime.now().timestamp()) which is seconds since epoch
     let createdAt;
     if (msg.timestamp) {
+      // If timestamp is a number (Unix seconds), convert to ISO string
       if (typeof msg.timestamp === 'number') {
-        createdAt = new Date(msg.timestamp * 1000);
+        createdAt = new Date(msg.timestamp * 1000).toISOString();
       } else {
-        createdAt = new Date(msg.timestamp);
+        // Already a string, use as-is
+        createdAt = msg.timestamp;
       }
     } else {
-      createdAt = new Date(Date.now() + index);
+      // Default: current time with offset to maintain order
+      createdAt = new Date(Date.now() + index).toISOString();
     }
 
     return {
@@ -872,19 +1137,25 @@ const batchUploadSession = async (data) => {
       chat_type: msg.chatType,
       content: msg.content,
       audio_id: msg.audioId || null,
-      created_at: createdAt,
+      created_at: createdAt
     };
   });
 
-  const result = await prisma.ai_agent_chat_history.createMany({
-    data: insertData,
-  });
+  const { data: inserted, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .insert(insertData)
+    .select('id');
+
+  if (error) {
+    logger.error('Failed to batch upload session:', error);
+    throw new Error('Failed to batch upload session messages');
+  }
 
   return {
     sessionId,
     macAddress: normalizedMac,
     agentId: resolvedAgentId,
-    insertedCount: result.count || 0
+    insertedCount: inserted ? inserted.length : 0
   };
 };
 
@@ -897,17 +1168,23 @@ const batchUploadSession = async (data) => {
  * @returns {Promise<Array>} Recent chat messages with only content and audioId
  */
 const getRecentUserChatHistory = async (agentId, limit = 50) => {
-  const messages = await prisma.ai_agent_chat_history.findMany({
-    where: {
-      agent_id: agentId,
-      chat_type: 1, // USER messages only
-      audio_id: { not: null }, // Only messages with audio
-    },
-    select: { content: true, audio_id: true },
-    orderBy: { created_at: 'desc' },
-    take: limit,
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
+  const { data: messages, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .select('content, audio_id')
+    .eq('agent_id', agentId)
+    .eq('chat_type', 1) // USER messages only
+    .not('audio_id', 'is', null) // Only messages with audio
+    .order('id', { ascending: false }) // Use ID for efficient sorting
+    .limit(limit);
+
+  if (error) {
+    logger.error('Failed to get recent chat history:', error);
+    throw new Error('Failed to get recent chat history');
+  }
+
+  // Transform to camelCase and extract content from JSON if needed
   return (messages || []).map(msg => ({
     content: extractContentFromString(msg.content),
     audioId: msg.audio_id
@@ -947,10 +1224,22 @@ const extractContentFromString = (content) => {
  * @returns {Promise<string|null>} Content string or null
  */
 const getAudioContent = async (audioId) => {
-  const record = await prisma.ai_agent_chat_history.findFirst({
-    where: { audio_id: audioId },
-    select: { content: true },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const { data: record, error } = await supabaseAdmin
+    .from('ai_agent_chat_history')
+    .select('content')
+    .eq('audio_id', audioId)
+    .single();
+
+  if (error) {
+    // Not found is not an error, return null
+    if (error.code === 'PGRST116') {
+      return null;
+    }
+    logger.error('Failed to get audio content:', error);
+    throw new Error('Failed to get audio content');
+  }
 
   return record ? record.content : null;
 };
@@ -964,13 +1253,27 @@ const getAudioContent = async (audioId) => {
  * @returns {Promise<Array>} List of visible templates (camelCase keys for Spring Boot compatibility)
  */
 const getTemplates = async (includeHidden = false) => {
-  const where = includeHidden ? {} : { is_visible: 1 };
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const templates = await prisma.ai_agent_template.findMany({
-    where,
-    orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
-  });
+  let query = supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .order('sort', { ascending: true })
+    .order('created_at', { ascending: false });
 
+  // Only filter by visible if not including hidden templates
+  if (!includeHidden) {
+    query = query.eq('is_visible', 1);
+  }
+
+  const { data: templates, error } = await query;
+
+  if (error) {
+    logger.error('Failed to fetch templates:', error);
+    throw new Error('Failed to fetch templates');
+  }
+
+  // Transform to camelCase for Spring Boot compatibility
   return (templates || []).map(transformKeysToCamel);
 };
 
@@ -980,12 +1283,17 @@ const getTemplates = async (includeHidden = false) => {
  * @returns {Promise<Object|null>} Template or null (camelCase keys for Spring Boot compatibility)
  */
 const getTemplateById = async (templateId) => {
-  const template = await prisma.ai_agent_template.findUnique({
-    where: { id: templateId },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  if (!template) return null;
+  const { data: template, error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('id', templateId)
+    .single();
 
+  if (error || !template) return null;
+
+  // Transform to camelCase for Spring Boot compatibility
   return transformKeysToCamel(template);
 };
 
@@ -995,31 +1303,43 @@ const getTemplateById = async (templateId) => {
  * @returns {Promise<string>} Created template ID (matches Spring Boot Result<String>)
  */
 const createTemplate = async (data) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  // Helper to convert empty strings to null for UUID fields
   const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
 
-  const template = await prisma.ai_agent_template.create({
-    data: {
-      agent_code: data.agentCode || null,
-      agent_name: data.agentName,
-      asr_model_id: toNullIfEmpty(data.asrModelId),
-      vad_model_id: toNullIfEmpty(data.vadModelId),
-      llm_model_id: toNullIfEmpty(data.llmModelId),
-      vllm_model_id: toNullIfEmpty(data.vllmModelId),
-      tts_model_id: toNullIfEmpty(data.ttsModelId),
-      tts_voice_id: toNullIfEmpty(data.ttsVoiceId),
-      mem_model_id: toNullIfEmpty(data.memModelId),
-      intent_model_id: toNullIfEmpty(data.intentModelId),
-      chat_history_conf: data.chatHistoryConf || 0,
-      system_prompt: data.systemPrompt,
-      summary_memory: data.summaryMemory,
-      lang_code: data.langCode || 'en',
-      language: data.language || 'English',
-      is_visible: data.isVisible !== undefined ? data.isVisible : 1,
-      sort: data.sort || 0,
-    },
-    select: { id: true },
-  });
+  const templateData = {
+    agent_code: data.agentCode || null,
+    agent_name: data.agentName,
+    asr_model_id: toNullIfEmpty(data.asrModelId),
+    vad_model_id: toNullIfEmpty(data.vadModelId),
+    llm_model_id: toNullIfEmpty(data.llmModelId),
+    vllm_model_id: toNullIfEmpty(data.vllmModelId),
+    tts_model_id: toNullIfEmpty(data.ttsModelId),
+    tts_voice_id: toNullIfEmpty(data.ttsVoiceId),
+    mem_model_id: toNullIfEmpty(data.memModelId),
+    intent_model_id: toNullIfEmpty(data.intentModelId),
+    chat_history_conf: data.chatHistoryConf || 0,
+    system_prompt: data.systemPrompt,
+    summary_memory: data.summaryMemory,
+    lang_code: data.langCode || 'en',
+    language: data.language || 'English',
+    is_visible: data.isVisible !== undefined ? data.isVisible : 1,
+    sort: data.sort || 0
+  };
 
+  const { data: template, error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .insert(templateData)
+    .select('id')
+    .single();
+
+  if (error) {
+    logger.error('Failed to create template:', error);
+    throw new Error('Failed to create template');
+  }
+
+  // Return just the ID (matches Spring Boot Result<String>)
   return template.id;
 };
 
@@ -1030,19 +1350,25 @@ const createTemplate = async (data) => {
  * @returns {Promise<null>} null (matches Spring Boot Result<Void>)
  */
 const updateTemplate = async (templateId, data) => {
-  const existing = await prisma.ai_agent_template.findUnique({
-    where: { id: templateId },
-    select: { id: true },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  if (!existing) throw new Error('Template not found');
+  // Verify template exists (using raw query since getTemplateById now transforms)
+  const { data: existing, error: existsError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('id')
+    .eq('id', templateId)
+    .single();
 
+  if (existsError || !existing) throw new Error('Template not found');
+
+  // Helper to convert empty strings to null for UUID fields
   const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
 
   const updateData = {
-    updated_at: new Date(),
+    updated_at: new Date().toISOString()
   };
 
+  // Map fields conditionally (UUID fields use toNullIfEmpty to handle empty strings)
   if (data.agentCode !== undefined) updateData.agent_code = data.agentCode || null;
   if (data.agentName !== undefined) updateData.agent_name = data.agentName;
   if (data.asrModelId !== undefined) updateData.asr_model_id = toNullIfEmpty(data.asrModelId);
@@ -1061,11 +1387,17 @@ const updateTemplate = async (templateId, data) => {
   if (data.isVisible !== undefined) updateData.is_visible = data.isVisible;
   if (data.sort !== undefined) updateData.sort = data.sort;
 
-  await prisma.ai_agent_template.update({
-    where: { id: templateId },
-    data: updateData,
-  });
+  const { error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .update(updateData)
+    .eq('id', templateId);
 
+  if (error) {
+    logger.error('Failed to update template:', error);
+    throw new Error('Failed to update template');
+  }
+
+  // Return null (matches Spring Boot Result<Void>)
   return null;
 };
 
@@ -1075,25 +1407,47 @@ const updateTemplate = async (templateId, data) => {
  * @returns {Promise<Object>} Result with updatedCount
  */
 const applyTemplateToAgents = async (templateId) => {
-  const template = await prisma.ai_agent_template.findUnique({
-    where: { id: templateId },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  if (!template) throw new Error('Template not found');
+  // Get the template
+  const { data: template, error: templateError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
+    .eq('id', templateId)
+    .single();
 
-  // Build OR conditions for agent_code and agent_name
+  if (templateError || !template) throw new Error('Template not found');
+
+  // Build OR conditions for agent_code and agent_name (only include non-null values)
   const orConditions = [];
   if (template.agent_code) {
-    orConditions.push({ agent_code: template.agent_code });
+    orConditions.push(`agent_code.eq.${template.agent_code}`);
   }
   if (template.agent_name) {
-    orConditions.push({ agent_name: template.agent_name });
+    orConditions.push(`agent_name.eq.${template.agent_name}`);
   }
 
+  // If no conditions to match, return early
   if (orConditions.length === 0) {
     return { updatedCount: 0, agentCode: template.agent_code, agentName: template.agent_name };
   }
 
+  // Find all agents with matching agent_code OR agent_name
+  const { data: agents, error: agentsError } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id')
+    .or(orConditions.join(','));
+
+  if (agentsError) {
+    logger.error('Failed to find agents for template:', agentsError);
+    throw new Error('Failed to find agents');
+  }
+
+  if (!agents || agents.length === 0) {
+    return { updatedCount: 0, agentCode: template.agent_code, agentName: template.agent_name };
+  }
+
+  // Build update data from template (excluding id, timestamps, and is_visible)
   const updateData = {
     agent_name: template.agent_name,
     asr_model_id: template.asr_model_id,
@@ -1108,17 +1462,24 @@ const applyTemplateToAgents = async (templateId) => {
     system_prompt: template.system_prompt,
     lang_code: template.lang_code,
     language: template.language,
-    updated_at: new Date(),
+    updated_at: new Date().toISOString()
   };
 
-  const result = await prisma.ai_agent.updateMany({
-    where: { OR: orConditions },
-    data: updateData,
-  });
+  // Update all matching agents
+  const agentIds = agents.map(a => a.id);
+  const { error: updateError } = await supabaseAdmin
+    .from('ai_agent')
+    .update(updateData)
+    .in('id', agentIds);
 
-  logger.info(`Applied template "${template.agent_name}" (code: ${template.agent_code}) to ${result.count} agents`);
+  if (updateError) {
+    logger.error('Failed to apply template to agents:', updateError);
+    throw new Error('Failed to apply template to agents');
+  }
+
+  logger.info(`Applied template "${template.agent_name}" (code: ${template.agent_code}) to ${agentIds.length} agents`);
   return {
-    updatedCount: result.count,
+    updatedCount: agentIds.length,
     agentCode: template.agent_code,
     agentName: template.agent_name
   };
@@ -1130,16 +1491,26 @@ const applyTemplateToAgents = async (templateId) => {
  * @returns {Promise<void>}
  */
 const deleteTemplate = async (templateId) => {
-  const existing = await prisma.ai_agent_template.findUnique({
-    where: { id: templateId },
-    select: { id: true },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  if (!existing) throw new Error('Template not found');
+  // Verify template exists
+  const { data: existing, error: existsError } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('id')
+    .eq('id', templateId)
+    .single();
 
-  await prisma.ai_agent_template.delete({
-    where: { id: templateId },
-  });
+  if (existsError || !existing) throw new Error('Template not found');
+
+  const { error } = await supabaseAdmin
+    .from('ai_agent_template')
+    .delete()
+    .eq('id', templateId);
+
+  if (error) {
+    logger.error('Failed to delete template:', error);
+    throw new Error('Failed to delete template');
+  }
 };
 
 // ==============================================
@@ -1225,12 +1596,17 @@ const md5Hash = (text) => {
  * @returns {string|null} MCP WebSocket URL or null if not configured
  */
 const getMcpAddress = async (agentId) => {
-  const param = await prisma.sys_params.findFirst({
-    where: { param_code: SERVER_MCP_ENDPOINT },
-    select: { param_value: true },
-  });
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  if (!param || !param.param_value || param.param_value === 'null') {
+  // Get MCP endpoint from sys_params
+  const { data: param, error } = await supabaseAdmin
+    .from('sys_params')
+    .select('param_value')
+    .eq('param_code', SERVER_MCP_ENDPOINT)
+    .single();
+
+  if (error || !param || !param.param_value || param.param_value === 'null') {
+    // No MCP configured - return null (not an error)
     return null;
   }
 
@@ -1398,40 +1774,70 @@ const getMcpTools = async (agentId) => {
  * @returns {Promise<Object>} Object with list and total
  */
 const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const page = parseInt(options.page) || 1;
   const limit = parseInt(options.limit) || 10;
-  const skip = (page - 1) * limit;
-  const where = isSuperAdmin ? {} : { user_id: BigInt(userId) };
+  const offset = (page - 1) * limit;
 
-  const [totalCount, agents] = await Promise.all([
-    prisma.ai_agent.count({ where }),
-    prisma.ai_agent.findMany({
-      where,
-      select: {
-        id: true, agent_name: true, mem_model_id: true, system_prompt: true,
-        summary_memory: true, created_at: true, user_id: true,
-        ...(isSuperAdmin ? { sys_user: { select: { username: true } } } : {}),
-      },
-      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
-      skip,
-      take: limit,
-    }),
-  ]);
+  // Build base query for count
+  let countQuery = supabaseAdmin.from('ai_agent').select('id', { count: 'exact', head: true });
+  if (!isSuperAdmin) {
+    countQuery = countQuery.eq('user_id', userId);
+  }
+  const { count: totalCount } = await countQuery;
 
-  if (!agents.length) return { list: [], total: totalCount };
+  // Build query for agents with pagination
+  let query;
+  if (isSuperAdmin) {
+    // Admin sees all agents with owner information
+    query = supabaseAdmin
+      .from('ai_agent')
+      .select(`
+        id, agent_name, mem_model_id, system_prompt, summary_memory, created_at, user_id,
+        sys_user:user_id (username)
+      `)
+      .order('sort', { ascending: true })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+  } else {
+    // Regular user sees only their own agents
+    query = supabaseAdmin
+      .from('ai_agent')
+      .select('id, agent_name, mem_model_id, system_prompt, summary_memory, created_at, user_id')
+      .eq('user_id', userId)
+      .order('sort', { ascending: true })
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+  }
 
+  const { data: agents, error } = await query;
+  if (error) {
+    logger.error('Failed to fetch agents for list:', error);
+    throw new Error('Failed to fetch agents');
+  }
+
+  if (!agents || agents.length === 0) {
+    return { list: [], total: totalCount || 0 };
+  }
+
+  // Batch fetch all device data for these agents in one query
   const agentIds = agents.map(a => a.id);
-  const allDevices = await prisma.ai_device.findMany({
-    where: { agent_id: { in: agentIds } },
-    select: { agent_id: true, mac_address: true, last_connected_at: true },
-  });
+  const { data: allDevices } = await supabaseAdmin
+    .from('ai_device')
+    .select('agent_id, mac_address, last_connected_at')
+    .in('agent_id', agentIds);
 
+  // Build device stats map: { agentId: { count, macs, lastConnected } }
   const deviceStatsMap = {};
-  allDevices.forEach(device => {
+  (allDevices || []).forEach(device => {
     const aid = device.agent_id;
-    if (!deviceStatsMap[aid]) deviceStatsMap[aid] = { count: 0, macs: [], lastConnected: null };
+    if (!deviceStatsMap[aid]) {
+      deviceStatsMap[aid] = { count: 0, macs: [], lastConnected: null };
+    }
     deviceStatsMap[aid].count++;
     deviceStatsMap[aid].macs.push(device.mac_address);
+    // Track most recent connection
     if (device.last_connected_at) {
       const connTime = new Date(device.last_connected_at);
       if (!deviceStatsMap[aid].lastConnected || connTime > new Date(deviceStatsMap[aid].lastConnected)) {
@@ -1440,6 +1846,7 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
     }
   });
 
+  // Transform to AgentDTO format
   const list = agents.map(agent => {
     const stats = deviceStatsMap[agent.id] || { count: 0, macs: [], lastConnected: null };
     return {
@@ -1452,11 +1859,11 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
       deviceCount: stats.count,
       deviceMacAddresses: stats.macs.join(','),
       ownerUsername: isSuperAdmin ? (agent.sys_user?.username || null) : undefined,
-      createDate: agent.created_at,
+      createDate: agent.created_at
     };
   });
 
-  return { list, total: totalCount };
+  return { list, total: totalCount || 0 };
 };
 
 /**
@@ -1466,19 +1873,31 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
  * @returns {Promise<Object>} Paginated agents with {list, total, page, limit}
  */
 const adminAgentListPaginated = async (params = {}) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
   const page = parseInt(params.page) || 1;
   const limit = parseInt(params.limit) || 10;
-  const skip = (page - 1) * limit;
+  const offset = (page - 1) * limit;
 
-  const [count, agents] = await Promise.all([
-    prisma.ai_agent.count(),
-    prisma.ai_agent.findMany({
-      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
-      skip,
-      take: limit,
-    }),
-  ]);
+  // Get total count
+  const { count } = await supabaseAdmin
+    .from('ai_agent')
+    .select('id', { count: 'exact', head: true });
 
+  // Get agents with pagination
+  const { data: agents, error } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .order('sort', { ascending: true })
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    logger.error('Failed to fetch admin agent list:', error);
+    throw new Error('Failed to fetch agents');
+  }
+
+  // Transform to camelCase AgentEntity format
   const list = (agents || []).map(agent => ({
     id: agent.id,
     userId: agent.user_id,
@@ -1517,23 +1936,30 @@ const adminAgentListPaginated = async (params = {}) => {
  * @returns {Promise<Object|null>} Agent info with functions or null
  */
 const getAgentInfoById = async (agentId) => {
-  const agent = await prisma.ai_agent.findUnique({ where: { id: agentId } });
-  if (!agent) return null;
+  if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Plugin mappings table not in Prisma schema; use raw query
-  let functions = [];
-  try {
-    const pluginMappings = await prisma.$queryRawUnsafe(
-      `SELECT id, agent_id, plugin_id, param_info FROM ai_agent_plugin_mapping WHERE agent_id = $1::uuid`,
-      agentId
-    );
-    functions = (pluginMappings || []).map(mapping => ({
-      id: mapping.id,
-      agentId: mapping.agent_id,
-      pluginId: mapping.plugin_id,
-      paramInfo: mapping.param_info,
-    }));
-  } catch (_) { /* table may not exist */ }
+  // Get agent without user filtering (matches Spring Boot behavior)
+  const { data: agent, error } = await supabaseAdmin
+    .from('ai_agent')
+    .select('*')
+    .eq('id', agentId)
+    .single();
+
+  if (error || !agent) return null;
+
+  // Get plugin mappings for this agent
+  const { data: pluginMappings } = await supabaseAdmin
+    .from('ai_agent_plugin_mapping')
+    .select('id, agent_id, plugin_id, param_info')
+    .eq('agent_id', agentId);
+
+  // Transform plugin mappings to camelCase
+  const functions = (pluginMappings || []).map(mapping => ({
+    id: mapping.id,
+    agentId: mapping.agent_id,
+    pluginId: mapping.plugin_id,
+    paramInfo: mapping.param_info
+  }));
 
   // Transform agent to camelCase AgentInfoVO format
   return {
