@@ -200,3 +200,4 @@ main/mqtt-gateway/config/mqtt.json
 main/manager-api/src/main/resources/application-dev.yml
 main/livekit-server/cerebrium.zip
 main/livekit-server/LICENSE
+main/livekit-server/model_cache/embedding_all-MiniLM-L6-v2.pkl
