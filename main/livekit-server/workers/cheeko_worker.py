@@ -563,7 +563,8 @@ async def entrypoint(ctx: JobContext):
                 reset_reminder_count()
 
         if new_state_str == 'thinking':
-            if waiting_for_user_response:
+            # Thinking state = agent processing user input, always reset idle state
+            if waiting_for_user_response or reminder_count > 0:
                 logger.info("[IDLE] Agent thinking (user input detected) - resetting idle state")
                 waiting_for_user_response = False
                 reset_reminder_count()
@@ -593,7 +594,10 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("function_calls_started")
     def on_function_calls_idle_start(ev):
-        """Cancel idle timer during tool execution"""
+        """Reset idle state when function call starts (definitive proof of user interaction)"""
+        nonlocal waiting_for_user_response
+        waiting_for_user_response = False
+        reset_reminder_count()
         cancel_idle_timer()
 
     @session.on("function_calls_finished")
@@ -601,6 +605,7 @@ async def entrypoint(ctx: JobContext):
         """Reset idle state after tool execution"""
         nonlocal waiting_for_user_response
         waiting_for_user_response = False
+        reset_reminder_count()
 
     logger.info(f"[IDLE] Enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
 
