@@ -23,6 +23,10 @@ class WorkerPoolManager {
         this.workerCount = workerCount;
         this.performanceMonitor = new PerformanceMonitor();
         this.workerPendingCount = []; // Track pending requests per worker for load balancing
+        this.workerRestartCount = []; // Track restart counts per worker
+        this.workerLastRestart = []; // Track last restart time per worker
+        this.maxRestartAttempts = 5; // Max restarts before giving up
+        this.restartResetInterval = 60000; // Reset restart count after 60 seconds
 
         // DYNAMIC SCALING: Configuration
         this.minWorkers = 4; // Minimum workers (always keep at least 4)
@@ -66,6 +70,8 @@ class WorkerPoolManager {
 
             this.workers.push({ worker, id: i, active: true });
             this.workerPendingCount.push(0);
+            this.workerRestartCount.push(0);
+            this.workerLastRestart.push(0);
         }
 
         // console.log(`✅ [WORKER-POOL] Created pool with ${this.workerCount} workers`);
@@ -74,22 +80,47 @@ class WorkerPoolManager {
     restartWorker(index) {
         const workerPath = path.join(__dirname, "../audio-worker.js");
 
-        if (this.workers[index]) {
-            try {
-                this.workers[index].worker.terminate();
-            } catch (e) {
-                // Ignore termination errors
-            }
-
-            const newWorker = new Worker(workerPath);
-            newWorker.on("message", this.handleWorkerMessage.bind(this));
-            newWorker.on("error", (error) => {
-                console.error(`❌ [WORKER-${index}] Error:`, error);
-            });
-
-            this.workers[index] = { worker: newWorker, id: index, active: true };
-            // console.log(`🔄 [WORKER-POOL] Worker ${index} restarted`);
+        if (!this.workers[index]) {
+            return;
         }
+
+        // Reset restart count if enough time has passed
+        const now = Date.now();
+        if (now - this.workerLastRestart[index] > this.restartResetInterval) {
+            this.workerRestartCount[index] = 0;
+        }
+
+        // Check if we've exceeded max restart attempts
+        this.workerRestartCount[index]++;
+        this.workerLastRestart[index] = now;
+
+        if (this.workerRestartCount[index] > this.maxRestartAttempts) {
+            console.error(`❌ [WORKER-${index}] Exceeded max restart attempts (${this.maxRestartAttempts}), marking as inactive`);
+            this.workers[index].active = false;
+            return;
+        }
+
+        try {
+            this.workers[index].worker.terminate();
+        } catch (e) {
+            // Ignore termination errors
+        }
+
+        const newWorker = new Worker(workerPath);
+        newWorker.on("message", this.handleWorkerMessage.bind(this));
+        newWorker.on("error", (error) => {
+            console.error(`❌ [WORKER-${index}] Error:`, error);
+            this.restartWorker(index);
+        });
+        newWorker.on("exit", (code) => {
+            if (code !== 0) {
+                console.error(`❌ [WORKER-${index}] Exited with code ${code}, restarting...`);
+                this.restartWorker(index);
+            }
+        });
+
+        this.workers[index] = { worker: newWorker, id: index, active: true };
+        console.log(`🔄 [WORKER-POOL] Worker ${index} restarted (attempt ${this.workerRestartCount[index]}/${this.maxRestartAttempts})`);
     }
 
     async initializeWorker(type, params) {
@@ -195,12 +226,12 @@ class WorkerPoolManager {
 
     getNextWorker() {
         // JITTER FIX: Use least-loaded worker instead of round-robin
-        // Find worker with minimum pending requests
+        // Find worker with minimum pending requests (only consider active workers)
         let minPending = Infinity;
         let selectedIndex = 0;
 
         for (let i = 0; i < this.workers.length; i++) {
-            if (this.workerPendingCount[i] < minPending) {
+            if (this.workers[i].active && this.workerPendingCount[i] < minPending) {
                 minPending = this.workerPendingCount[i];
                 selectedIndex = i;
             }
@@ -383,6 +414,8 @@ class WorkerPoolManager {
 
             this.workers.push({ worker, id: workerId, active: true });
             this.workerPendingCount.push(0);
+            this.workerRestartCount.push(0);
+            this.workerLastRestart.push(0);
         }
 
         this.lastScaleAction = Date.now();
@@ -424,6 +457,8 @@ class WorkerPoolManager {
             // Remove from arrays
             this.workers.pop();
             this.workerPendingCount.pop();
+            this.workerRestartCount.pop();
+            this.workerLastRestart.pop();
         }
 
         this.lastScaleAction = Date.now();
