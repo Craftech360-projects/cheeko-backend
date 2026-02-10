@@ -1375,7 +1375,7 @@ class MQTTGateway {
 
     try {
       if (mode === "music" || mode === "story") {
-        // Send data channel message to LiveKit agent
+        // Send data channel message to LiveKit bot
         const room = deviceInfo.connection?.bridge?.room;
         if (!room) {
           logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
@@ -1408,12 +1408,13 @@ class MQTTGateway {
         );
 
         // Send TTS start message
+        const skipText = mode === "music" ? "Skipping to next song" : "Skipping to next story";
         if (clientId) {
           const controlTopic = `devices/p2p/${clientId}`;
           const ttsStartMsg = {
             type: "tts",
             state: "start",
-            text: `Skipping to next ${label}`,
+            text: skipText,
             session_id: deviceInfo.connection?.udp?.session_id || null,
           };
           this.mqttPublish(controlTopic, ttsStartMsg);
@@ -1421,7 +1422,7 @@ class MQTTGateway {
       } else {
         // Other modes not supported
         logger.warn(
-          `⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}`
+          `⚠️ [CONTROL] Next not supported for mode: ${mode}`
         );
         return;
       }
@@ -1478,7 +1479,7 @@ class MQTTGateway {
 
     try {
       if (mode === "music" || mode === "story") {
-        // Send data channel message to LiveKit agent
+        // Send data channel message to LiveKit bot
         const room = deviceInfo.connection?.bridge?.room;
         if (!room) {
           logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
@@ -1511,12 +1512,13 @@ class MQTTGateway {
         );
 
         // Send TTS start message
+        const skipText = mode === "music" ? "Going to previous song" : "Going to previous story";
         if (clientId) {
           const controlTopic = `devices/p2p/${clientId}`;
           const ttsStartMsg = {
             type: "tts",
             state: "start",
-            text: `Going to previous ${label}`,
+            text: skipText,
             session_id: deviceInfo.connection?.udp?.session_id || null,
           };
           this.mqttPublish(controlTopic, ttsStartMsg);

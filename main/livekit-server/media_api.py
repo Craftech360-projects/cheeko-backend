@@ -78,7 +78,11 @@ async def startup_event():
     await music_service.initialize()
     await story_service.initialize()
 
-    logger.info("✅ Media API services initialized")
+    logger.info(f"✅ Media API services initialized (music={music_service.is_initialized}, story={story_service.is_initialized})")
+    if not music_service.is_initialized:
+        logger.error("❌ [STARTUP] Music service FAILED to initialize - Qdrant may be unreachable")
+    if not story_service.is_initialized:
+        logger.error("❌ [STARTUP] Story service FAILED to initialize - Qdrant may be unreachable")
     
     # Log Loki status
     if os.getenv("LOKI_HOST"):
@@ -754,6 +758,7 @@ class MusicBot(MediaBot):
             else:
                 # No playlist - enter continuous random mode
                 logger.info("🎵 No playlist provided, entering continuous random mode")
+                logger.info(f"🎵 [MUSIC-DIAG] music_service initialized: {music_service.is_initialized if music_service else 'None'}, language: {self.language}")
                 self.random_mode = True
                 await self._run_random_mode()
 
@@ -951,7 +956,7 @@ class MusicBot(MediaBot):
                 is_from_history = False
 
                 if not song:
-                    logger.error("❌ No music available in random mode")
+                    logger.error(f"❌ No music available in random mode (service_initialized={music_service.is_initialized if music_service else 'None'}, language={self.language})")
                     break
 
             # Store current song info
@@ -1382,6 +1387,7 @@ class StoryBot(MediaBot):
             else:
                 # No playlist - enter continuous random mode
                 logger.info("📖 No playlist provided, entering continuous random mode")
+                logger.info(f"📖 [STORY-DIAG] story_service initialized: {story_service.is_initialized if story_service else 'None'}, age_group: {self.age_group}")
                 await self._run_random_mode()
 
             await asyncio.sleep(2)
@@ -1576,7 +1582,7 @@ class StoryBot(MediaBot):
                 is_from_history = False
 
                 if not story:
-                    logger.error("❌ No stories available in random mode")
+                    logger.error(f"❌ No stories available in random mode (service_initialized={story_service.is_initialized if story_service else 'None'}, age_group={self.age_group})")
                     break
 
             # Store current story info
