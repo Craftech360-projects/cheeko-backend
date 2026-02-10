@@ -482,6 +482,232 @@ async def entrypoint(ctx: JobContext):
 
     logger.info("📊 Debug logging for speech and function calls enabled")
 
+    # ============================================================================
+    # WATCHDOG: Detect when Gemini silently fails to respond
+    # ============================================================================
+    WATCHDOG_TIMEOUT_SECONDS = 8  # Time to wait for agent response after user speech
+    MAX_WATCHDOG_RECOVERIES = 2  # Max recovery attempts per silence event
+    _watchdog_task = None
+    _watchdog_waiting = False
+    _watchdog_recovery_attempts = 0
+
+    def _cancel_watchdog():
+        nonlocal _watchdog_task, _watchdog_waiting
+        if _watchdog_task and not _watchdog_task.done():
+            _watchdog_task.cancel()
+            logger.debug("[WATCHDOG] Timer cancelled")
+        _watchdog_task = None
+        _watchdog_waiting = False
+
+    async def attempt_watchdog_recovery():
+        """Try to recover from a silent Gemini failure"""
+        nonlocal _watchdog_recovery_attempts
+        _watchdog_recovery_attempts += 1
+        logger.warning(f"[WATCHDOG] Recovery attempt {_watchdog_recovery_attempts}/{MAX_WATCHDOG_RECOVERIES}")
+
+        # Attempt 1: Ask Gemini to generate a reply
+        try:
+            await asyncio.wait_for(
+                session.generate_reply(
+                    instructions="The user spoke to you but you didn't respond. Please respond now."
+                ),
+                timeout=6.0
+            )
+            logger.info("[WATCHDOG] Recovery successful via generate_reply")
+            return
+        except asyncio.TimeoutError:
+            logger.warning("[WATCHDOG] generate_reply timed out during recovery")
+        except Exception as e:
+            logger.warning(f"[WATCHDOG] generate_reply failed during recovery: {e}")
+
+        # Attempt 2: Fallback to ElevenLabs TTS
+        try:
+            await session.say("I'm sorry, could you say that again?")
+            logger.info("[WATCHDOG] Recovery successful via session.say fallback")
+        except Exception as e:
+            logger.error(f"[WATCHDOG] session.say fallback also failed: {e}")
+
+    async def _watchdog_timer():
+        """Wait for timeout, then attempt recovery if agent hasn't responded"""
+        nonlocal _watchdog_waiting
+        try:
+            await asyncio.sleep(WATCHDOG_TIMEOUT_SECONDS)
+            if _watchdog_waiting:
+                logger.warning(f"[WATCHDOG] Agent did not respond within {WATCHDOG_TIMEOUT_SECONDS}s!")
+                if _watchdog_recovery_attempts < MAX_WATCHDOG_RECOVERIES:
+                    await attempt_watchdog_recovery()
+                else:
+                    logger.warning("[WATCHDOG] Max recovery attempts reached, skipping")
+        except asyncio.CancelledError:
+            logger.debug("[WATCHDOG] Timer cancelled (normal)")
+        except Exception as e:
+            logger.error(f"[WATCHDOG] Error in watchdog timer: {e}")
+
+    @session.on("user_speech_committed")
+    def on_user_speech_watchdog(msg):
+        """Start watchdog timer when user speaks"""
+        nonlocal _watchdog_task, _watchdog_waiting, _watchdog_recovery_attempts
+        _cancel_watchdog()
+        _watchdog_waiting = True
+        _watchdog_recovery_attempts = 0
+        _watchdog_task = asyncio.create_task(_watchdog_timer())
+        logger.debug("[WATCHDOG] Timer started (user spoke)")
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech_watchdog(msg):
+        """Cancel watchdog when agent responds"""
+        nonlocal _watchdog_recovery_attempts
+        _cancel_watchdog()
+        _watchdog_recovery_attempts = 0
+        logger.debug("[WATCHDOG] Timer cancelled (agent responded)")
+
+    @session.on("agent_state_changed")
+    def on_state_for_watchdog(ev):
+        """Cancel watchdog when agent starts speaking"""
+        new_state = getattr(ev, 'new_state', None)
+        new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
+        if new_state_str == 'speaking':
+            _cancel_watchdog()
+            logger.debug("[WATCHDOG] Timer cancelled (agent speaking)")
+
+    @session.on("function_calls_started")
+    def on_function_calls_watchdog(ev):
+        """Cancel watchdog when a tool call starts (not a silent failure)"""
+        _cancel_watchdog()
+        logger.debug("[WATCHDOG] Timer cancelled (function call in progress)")
+
+    logger.info(f"[WATCHDOG] Enabled ({WATCHDOG_TIMEOUT_SECONDS}s timeout, max {MAX_WATCHDOG_RECOVERIES} recoveries)")
+
+    # ============================================================================
+    # IDLE REMINDER: Prompt user if no response for a while
+    # ============================================================================
+    IDLE_TIMEOUT_SECONDS = 20  # Relaxed vs game workers' 15s (open conversation)
+    idle_reminder_task = None
+    reminder_count = 0
+    MAX_REMINDERS = 3
+    waiting_for_user_response = False
+    _delivering_reminder = False  # True while _deliver_idle_reminder is running
+
+    IDLE_REMINDER_MESSAGES = [
+        "Hey, I'm still here! What would you like to talk about?",
+        "Take your time! I'm here whenever you want to chat.",
+        "Still there? I'd love to keep talking whenever you're ready!",
+    ]
+
+    async def send_idle_reminder():
+        """Sleep phase only - cancellable by cancel_idle_timer()"""
+        try:
+            await asyncio.sleep(IDLE_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            return  # Timer cancelled during sleep (user spoke, etc.) - that's fine
+
+        # Spawn delivery as separate task so it survives cancel_idle_timer()
+        # (the speaking state change from generate_reply triggers cancel_idle_timer,
+        #  which would kill this task mid-delivery if we didn't separate them)
+        asyncio.create_task(_deliver_idle_reminder())
+
+    async def _deliver_idle_reminder():
+        """Deliver the reminder - runs as separate task, not cancellable by idle timer"""
+        nonlocal reminder_count, waiting_for_user_response, _delivering_reminder
+
+        if reminder_count >= MAX_REMINDERS:
+            logger.info("[IDLE] Max reminders reached, stopping idle prompts")
+            waiting_for_user_response = True
+            return
+
+        _delivering_reminder = True
+        waiting_for_user_response = True
+        reminder_msg = IDLE_REMINDER_MESSAGES[reminder_count % len(IDLE_REMINDER_MESSAGES)]
+        logger.info(f"[IDLE] Sending reminder #{reminder_count + 1}: {reminder_msg[:50]}...")
+
+        try:
+            await session.generate_reply(instructions=reminder_msg)
+        except Exception as e:
+            logger.warning(f"[IDLE] Reminder delivery error: {e}")
+
+        _delivering_reminder = False
+        reminder_count += 1
+        waiting_for_user_response = False
+        logger.info(f"[IDLE] Reminder delivered, scheduling next check (count={reminder_count}/{MAX_REMINDERS})")
+        start_idle_timer()
+
+    def start_idle_timer():
+        nonlocal idle_reminder_task
+        cancel_idle_timer()
+        idle_reminder_task = asyncio.create_task(send_idle_reminder())
+        logger.debug("[IDLE] Timer started")
+
+    def cancel_idle_timer():
+        nonlocal idle_reminder_task
+        if idle_reminder_task and not idle_reminder_task.done():
+            idle_reminder_task.cancel()
+            logger.debug("[IDLE] Timer cancelled")
+        idle_reminder_task = None
+
+    def reset_reminder_count():
+        nonlocal reminder_count
+        reminder_count = 0
+
+    @session.on("agent_state_changed")
+    def on_state_for_idle_timer(ev):
+        """Manage idle timer based on agent state"""
+        nonlocal waiting_for_user_response
+        new_state = getattr(ev, 'new_state', None)
+        old_state = getattr(ev, 'old_state', None)
+        new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
+        old_state_str = old_state.name.lower() if hasattr(old_state, 'name') else str(old_state) if old_state else ''
+
+        # Detect user interaction: agent starts speaking from listening state
+        # and we're NOT delivering a reminder. This means the user triggered it.
+        # (Gemini Realtime may skip 'thinking' and not emit user_speech_committed)
+        if new_state_str == 'speaking' and old_state_str == 'listening' and not _delivering_reminder:
+            if waiting_for_user_response or reminder_count > 0:
+                logger.info(f"[IDLE] User interaction detected (listening->speaking, not reminder) - resetting idle state")
+                waiting_for_user_response = False
+                reset_reminder_count()
+
+        if new_state_str == 'thinking':
+            if waiting_for_user_response:
+                logger.info("[IDLE] Agent thinking (user input detected) - resetting idle state")
+                waiting_for_user_response = False
+                reset_reminder_count()
+
+        if new_state_str == 'listening':
+            if not waiting_for_user_response:
+                start_idle_timer()
+            else:
+                logger.debug("[IDLE] Skipping timer - waiting for user response")
+        else:
+            cancel_idle_timer()
+
+    @session.on("user_speech_committed")
+    def on_user_speech_idle(msg):
+        """Reset idle timer when user speaks"""
+        nonlocal waiting_for_user_response
+        cancel_idle_timer()
+        reset_reminder_count()
+        waiting_for_user_response = False
+
+    @session.on("agent_speech_committed")
+    def on_agent_speech_idle(msg):
+        """Safety net: clear waiting flag if agent_speech_committed fires (may not fire for Gemini Realtime)"""
+        nonlocal waiting_for_user_response
+        if waiting_for_user_response:
+            waiting_for_user_response = False
+
+    @session.on("function_calls_started")
+    def on_function_calls_idle_start(ev):
+        """Cancel idle timer during tool execution"""
+        cancel_idle_timer()
+
+    @session.on("function_calls_finished")
+    def on_function_calls_idle_finish(ev):
+        """Reset idle state after tool execution"""
+        nonlocal waiting_for_user_response
+        waiting_for_user_response = False
+
+    logger.info(f"[IDLE] Enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
+
     # Setup error handling
     error_manager = None
     try:
@@ -547,6 +773,10 @@ async def entrypoint(ctx: JobContext):
         try:
             logger.info("Initiating cleanup")
 
+            # Cancel watchdog and idle timers
+            _cancel_watchdog()
+            cancel_idle_timer()
+
             # Log usage summary before closing session (sends to Manager API)
             try:
                 if usage_manager:
@@ -602,6 +832,27 @@ async def entrypoint(ctx: JobContext):
     def on_room_disconnected():
         logger.info("Room disconnected, initiating cleanup")
         asyncio.create_task(cleanup_room_and_session())
+
+    # ============================================================================
+    # TRACK MONITORING: Log audio track lifecycle for observability
+    # ============================================================================
+    @ctx.room.on("track_published")
+    def on_track_published(publication, participant):
+        logger.info(f"[TRACK] Published: kind={publication.kind}, source={publication.source}, participant={participant.identity}")
+
+    @ctx.room.on("track_unpublished")
+    def on_track_unpublished(publication, participant):
+        logger.warning(f"[TRACK] Unpublished: kind={publication.kind}, source={publication.source}, participant={participant.identity}")
+
+    @ctx.room.on("track_subscribed")
+    def on_track_subscribed(track, publication, participant):
+        logger.info(f"[TRACK] Subscribed: kind={track.kind}, sid={track.sid}, participant={participant.identity}")
+
+    @ctx.room.on("track_unsubscribed")
+    def on_track_unsubscribed(track, publication, participant):
+        logger.warning(f"[TRACK] Unsubscribed: kind={track.kind}, sid={track.sid}, participant={participant.identity}")
+
+    logger.info("[TRACK] Audio track monitoring enabled")
 
     async def send_shutdown_ack(session_id: str):
         """Send shutdown acknowledgment back to gateway"""
