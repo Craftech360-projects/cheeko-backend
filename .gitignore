@@ -203,3 +203,6 @@ venv
 node_modules
 CLAUDE.md
 clerk-nextjs-guide
+main/livekit-server/cerebrium.zip
+main/livekit-server/LICENSE
+main/livekit-server/model_cache/embedding_all-MiniLM-L6-v2.pkl
