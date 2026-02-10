@@ -207,3 +207,6 @@ clerk-nextjs-guide
 
 # Excel / binary data files
 *.xlsx
+main/livekit-server/cerebrium.zip
+main/livekit-server/LICENSE
+main/livekit-server/model_cache/embedding_all-MiniLM-L6-v2.pkl
