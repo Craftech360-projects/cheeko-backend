@@ -132,10 +132,15 @@ class MusicService:
     async def get_random_song(self, language: Optional[str] = None) -> Optional[Dict]:
         """Get a random song using Qdrant cloud API"""
         if not self.is_initialized:
+            logger.warning(f"[MUSIC] get_random_song called but service not initialized (language={language})")
             return None
 
         # Use semantic search service to get random song from cloud
-        result = await self.semantic_search.get_random_music(language)
+        try:
+            result = await self.semantic_search.get_random_music(language)
+        except Exception as e:
+            logger.error(f"[MUSIC] get_random_song Qdrant error: {e} (language={language})")
+            return None
 
         if result:
             return {
@@ -145,6 +150,7 @@ class MusicService:
                 'url': self.get_song_url(result.filename, result.language_or_category)
             }
 
+        logger.warning(f"[MUSIC] get_random_song returned no results from Qdrant (language={language})")
         return None
 
     async def get_all_languages(self) -> List[str]:
