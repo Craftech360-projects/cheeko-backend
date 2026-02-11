@@ -1,134 +1,138 @@
--- Prisma Initial Migration
--- This migration was generated from prisma/schema.prisma
--- Created: 2026-01-24
+-- Cheeko Backend - Complete Database Schema
+-- Generated from live Supabase (project: fivhnaqizzcjckxvagfe)
+-- Updated: 2026-02-11
 
--- CreateSchema
+-- =====================================================
+-- SCHEMA
+-- =====================================================
 CREATE SCHEMA IF NOT EXISTS "public";
 
--- CreateTable
+-- =====================================================
+-- TABLES
+-- =====================================================
+
+-- sys_user
 CREATE TABLE IF NOT EXISTS "sys_user" (
-    "id" BIGSERIAL NOT NULL,
-    "username" VARCHAR(100) NOT NULL,
-    "password" VARCHAR(255) NOT NULL,
-    "super_admin" SMALLINT NOT NULL DEFAULT 0,
-    "status" SMALLINT NOT NULL DEFAULT 1,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "id" BIGINT NOT NULL DEFAULT nextval('sys_user_id_seq'::regclass),
+    "username" VARCHAR(100),
+    "password" VARCHAR(255),
+    "email" VARCHAR(255),
+    "phone" VARCHAR(50),
+    "nickname" VARCHAR(100),
+    "avatar" VARCHAR(500),
+    "gender" INTEGER DEFAULT 0,
+    "status" INTEGER DEFAULT 1,
+    "role" VARCHAR(50) DEFAULT 'user'::character varying,
+    "last_login_at" TIMESTAMPTZ,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "sys_user_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- sys_user_token
 CREATE TABLE IF NOT EXISTS "sys_user_token" (
-    "id" BIGSERIAL NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('sys_user_token_id_seq'::regclass),
     "user_id" BIGINT NOT NULL,
     "token" VARCHAR(500) NOT NULL,
-    "expire_date" TIMESTAMPTZ(6) NOT NULL,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expire_date" TIMESTAMPTZ NOT NULL,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "sys_user_token_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- sys_params
 CREATE TABLE IF NOT EXISTS "sys_params" (
-    "id" BIGSERIAL NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('sys_params_id_seq'::regclass),
     "param_code" VARCHAR(100) NOT NULL,
     "param_value" TEXT,
-    "value_type" VARCHAR(50) NOT NULL DEFAULT 'string',
-    "param_type" SMALLINT NOT NULL DEFAULT 1,
+    "value_type" VARCHAR(50) DEFAULT 'string'::character varying,
+    "param_type" INTEGER DEFAULT 1,
     "remark" VARCHAR(500),
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "sys_params_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- sys_dict_type
 CREATE TABLE IF NOT EXISTS "sys_dict_type" (
-    "id" BIGSERIAL NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('sys_dict_type_id_seq'::regclass),
     "dict_type" VARCHAR(100) NOT NULL,
     "dict_name" VARCHAR(255) NOT NULL,
     "remark" VARCHAR(500),
-    "sort" INTEGER NOT NULL DEFAULT 0,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sort" INTEGER DEFAULT 0,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "sys_dict_type_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- sys_dict_data
 CREATE TABLE IF NOT EXISTS "sys_dict_data" (
-    "id" BIGSERIAL NOT NULL,
-    "dict_type_id" BIGINT NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('sys_dict_data_id_seq'::regclass),
+    "dict_type_id" BIGINT,
+    "dict_type" VARCHAR(100),
     "dict_label" VARCHAR(255) NOT NULL,
     "dict_value" VARCHAR(255) NOT NULL,
     "remark" VARCHAR(500),
-    "sort" INTEGER NOT NULL DEFAULT 0,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sort" INTEGER DEFAULT 0,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "sys_dict_data_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable (merged: mobile app parent_profiles + backend parent_profile)
+-- parent_profiles (RLS enabled)
 CREATE TABLE IF NOT EXISTS "parent_profiles" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" UUID,
     "sys_user_id" BIGINT,
-    "parent_name" TEXT,
-    "display_name" VARCHAR(255),
-    "email" VARCHAR(255),
-    "phone_number" VARCHAR(50),
-    "avatar_url" VARCHAR(500),
-    "preferred_language" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "timezone" VARCHAR(100) DEFAULT 'UTC',
-    "notification_preferences" JSONB NOT NULL DEFAULT '{"push": true, "email": true, "daily_summary": true}',
-    "email_notifications" BOOLEAN DEFAULT true,
-    "push_notifications" BOOLEAN DEFAULT true,
-    "weekly_report" BOOLEAN DEFAULT true,
-    "onboarding_completed" BOOLEAN NOT NULL DEFAULT false,
-    "terms_accepted_at" TIMESTAMPTZ(6),
-    "terms_version" VARCHAR(20),
-    "privacy_policy_accepted_at" TIMESTAMPTZ(6),
+    "display_name" TEXT,
+    "email" TEXT,
+    "phone_number" TEXT,
+    "avatar_url" TEXT,
+    "preferred_language" TEXT DEFAULT 'en'::text,
+    "timezone" TEXT DEFAULT 'UTC'::text,
+    "notification_preferences" JSONB DEFAULT '{"push": true, "email": true, "daily_summary": true}'::jsonb,
+    "onboarding_completed" BOOLEAN DEFAULT false,
+    "terms_accepted_at" TIMESTAMPTZ,
+    "privacy_policy_accepted_at" TIMESTAMPTZ,
+    "terms_version" TEXT,
+    "fcm_token" TEXT,
     "java_user_id" INTEGER,
     "java_token" TEXT,
     "generated_password_hash" TEXT,
-    "fcm_token" TEXT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
+    "parent_name" TEXT,
+    "email_notifications" BOOLEAN DEFAULT true,
+    "push_notifications" BOOLEAN DEFAULT true,
+    "weekly_report" BOOLEAN DEFAULT true,
 
     CONSTRAINT "parent_profiles_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- kid_profile
 CREATE TABLE IF NOT EXISTS "kid_profile" (
-    "id" BIGSERIAL NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('kid_profile_id_seq'::regclass),
     "user_id" BIGINT,
-    "name" VARCHAR(255) NOT NULL,
-    "date_of_birth" DATE,
+    "name" VARCHAR(100) NOT NULL,
+    "birth_date" DATE,
     "gender" VARCHAR(20),
-    "interests" JSONB NOT NULL DEFAULT '[]',
-    "avatar_url" VARCHAR(500),
-    "primary_language" VARCHAR(10) NOT NULL DEFAULT 'en',
+    "grade" VARCHAR(50),
+    "interests" TEXT[],
+    "language" VARCHAR(10) DEFAULT 'en'::character varying,
+    "preferences" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
     "additional_notes" TEXT,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "kid_profile_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- kid_learning_progress
 CREATE TABLE IF NOT EXISTS "kid_learning_progress" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "kid_id" BIGINT,
@@ -136,15 +140,15 @@ CREATE TABLE IF NOT EXISTS "kid_learning_progress" (
     "topic" VARCHAR(200) NOT NULL,
     "score" INTEGER,
     "time_spent" INTEGER,
-    "completed" BOOLEAN NOT NULL DEFAULT false,
-    "metadata" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "completed" BOOLEAN DEFAULT false,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "kid_learning_progress_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- kid_activity_log
 CREATE TABLE IF NOT EXISTS "kid_activity_log" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "kid_id" BIGINT,
@@ -152,297 +156,263 @@ CREATE TABLE IF NOT EXISTS "kid_activity_log" (
     "content_type" VARCHAR(50),
     "content_id" UUID,
     "duration" INTEGER,
-    "metadata" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "kid_activity_log_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_model_provider
 CREATE TABLE IF NOT EXISTS "ai_model_provider" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" VARCHAR(36) NOT NULL DEFAULT (gen_random_uuid())::text,
     "model_type" VARCHAR(50) NOT NULL,
     "provider_code" VARCHAR(100) NOT NULL,
     "name" VARCHAR(255) NOT NULL,
-    "fields" JSONB NOT NULL DEFAULT '[]',
+    "fields" JSONB NOT NULL DEFAULT '[]'::jsonb,
     "sort" INTEGER NOT NULL DEFAULT 0,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ai_model_provider_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_model_config
 CREATE TABLE IF NOT EXISTS "ai_model_config" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" VARCHAR(36) NOT NULL DEFAULT (gen_random_uuid())::text,
     "model_type" VARCHAR(50) NOT NULL,
     "model_code" VARCHAR(100) NOT NULL,
     "model_name" VARCHAR(255) NOT NULL,
     "is_default" SMALLINT NOT NULL DEFAULT 0,
     "is_enabled" SMALLINT NOT NULL DEFAULT 1,
-    "config_json" JSONB NOT NULL DEFAULT '{}',
+    "config_json" JSONB NOT NULL DEFAULT '{}'::jsonb,
     "doc_link" VARCHAR(500),
     "remark" VARCHAR(500),
     "sort" INTEGER NOT NULL DEFAULT 0,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ai_model_config_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_tts_voice
 CREATE TABLE IF NOT EXISTS "ai_tts_voice" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" VARCHAR(36) NOT NULL DEFAULT (gen_random_uuid())::text,
     "tts_model_id" VARCHAR(36),
-    "tts_voice" VARCHAR(100),
-    "name" VARCHAR(255) NOT NULL,
-    "languages" VARCHAR(255),
-    "remark" VARCHAR(500),
-    "reference_audio" VARCHAR(500),
-    "reference_text" TEXT,
-    "voice_demo" VARCHAR(500),
     "sort" INTEGER NOT NULL DEFAULT 0,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "languages" VARCHAR(255),
+    "name" VARCHAR(255) NOT NULL,
+    "reference_audio" VARCHAR(500),
+    "reference_text" TEXT,
+    "remark" VARCHAR(500),
+    "tts_voice" VARCHAR(100),
+    "update_date" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "voice_demo" VARCHAR(500),
 
     CONSTRAINT "ai_tts_voice_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_agent
 CREATE TABLE IF NOT EXISTS "ai_agent" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" BIGINT,
     "agent_code" VARCHAR(100),
-    "agent_name" VARCHAR(255) NOT NULL,
-    "asr_model_id" VARCHAR(36),
-    "vad_model_id" VARCHAR(36),
-    "llm_model_id" VARCHAR(36),
-    "vllm_model_id" VARCHAR(36),
-    "tts_model_id" VARCHAR(36),
-    "tts_voice_id" VARCHAR(36),
-    "mem_model_id" VARCHAR(36),
-    "intent_model_id" VARCHAR(36),
-    "chat_history_conf" SMALLINT NOT NULL DEFAULT 0,
+    "agent_name" VARCHAR(200) NOT NULL,
+    "asr_model_id" UUID,
+    "vad_model_id" UUID,
+    "llm_model_id" UUID,
+    "vllm_model_id" UUID,
+    "tts_model_id" UUID,
+    "tts_voice_id" UUID,
+    "mem_model_id" UUID,
+    "intent_model_id" UUID,
+    "chat_history_conf" INTEGER DEFAULT 0,
     "system_prompt" TEXT,
     "summary_memory" TEXT,
-    "lang_code" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "language" VARCHAR(50) NOT NULL DEFAULT 'English',
-    "sort" INTEGER NOT NULL DEFAULT 0,
+    "lang_code" VARCHAR(10) DEFAULT 'en'::character varying,
+    "language" VARCHAR(50) DEFAULT 'English'::character varying,
+    "sort" INTEGER DEFAULT 0,
+    "status" INTEGER DEFAULT 1,
     "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_agent_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_agent_template
 CREATE TABLE IF NOT EXISTS "ai_agent_template" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "agent_code" VARCHAR(100),
-    "agent_name" VARCHAR(255) NOT NULL,
-    "asr_model_id" VARCHAR(36),
-    "vad_model_id" VARCHAR(36),
-    "llm_model_id" VARCHAR(36),
-    "vllm_model_id" VARCHAR(36),
-    "tts_model_id" VARCHAR(36),
-    "tts_voice_id" VARCHAR(36),
-    "mem_model_id" VARCHAR(36),
-    "intent_model_id" VARCHAR(36),
-    "chat_history_conf" SMALLINT NOT NULL DEFAULT 0,
+    "agent_name" VARCHAR(200) NOT NULL,
+    "asr_model_id" UUID,
+    "vad_model_id" UUID,
+    "llm_model_id" UUID,
+    "vllm_model_id" UUID,
+    "tts_model_id" UUID,
+    "tts_voice_id" UUID,
+    "mem_model_id" UUID,
+    "intent_model_id" UUID,
+    "chat_history_conf" INTEGER DEFAULT 1,
     "system_prompt" TEXT,
     "summary_memory" TEXT,
-    "lang_code" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "language" VARCHAR(50) NOT NULL DEFAULT 'English',
-    "is_visible" SMALLINT NOT NULL DEFAULT 1,
-    "sort" INTEGER NOT NULL DEFAULT 0,
+    "lang_code" VARCHAR(10) DEFAULT 'en'::character varying,
+    "language" VARCHAR(50) DEFAULT 'English'::character varying,
+    "sort" INTEGER DEFAULT 0,
+    "is_visible" INTEGER DEFAULT 1,
     "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ai_agent_template_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_agent_chat_history
 CREATE TABLE IF NOT EXISTS "ai_agent_chat_history" (
-    "id" BIGSERIAL NOT NULL,
-    "mac_address" VARCHAR(20) NOT NULL,
-    "agent_id" VARCHAR(36),
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "mac_address" VARCHAR(20),
+    "agent_id" UUID,
     "session_id" VARCHAR(100) NOT NULL,
-    "chat_type" SMALLINT NOT NULL,
+    "chat_type" INTEGER NOT NULL,
     "content" TEXT,
-    "audio_id" VARCHAR(255),
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "audio_id" VARCHAR(100),
+    "created_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_agent_chat_history_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE IF NOT EXISTS "ai_agent_plugin_mapping" (
-    "id" BIGSERIAL NOT NULL,
-    "agent_id" VARCHAR(36) NOT NULL,
-    "plugin_id" VARCHAR(100) NOT NULL,
-    "param_info" JSONB NOT NULL DEFAULT '{}',
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "ai_agent_plugin_mapping_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "ai_agent_mcp_access_point" (
-    "id" BIGSERIAL NOT NULL,
-    "agent_id" VARCHAR(36),
-    "mcp_server_url" VARCHAR(500),
-    "mcp_server_name" VARCHAR(255),
-    "is_enabled" SMALLINT NOT NULL DEFAULT 1,
-    "config_json" JSONB NOT NULL DEFAULT '{}',
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "ai_agent_mcp_access_point_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
+-- ai_device
 CREATE TABLE IF NOT EXISTS "ai_device" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" BIGINT,
     "mac_address" VARCHAR(20) NOT NULL,
-    "last_connected_at" TIMESTAMPTZ(6),
-    "auto_update" SMALLINT NOT NULL DEFAULT 1,
+    "last_connected_at" TIMESTAMPTZ,
+    "auto_update" SMALLINT DEFAULT 1,
     "board" VARCHAR(100),
     "alias" VARCHAR(255),
-    "agent_id" VARCHAR(36),
+    "agent_id" UUID,
     "kid_id" BIGINT,
-    "mode" VARCHAR(50) NOT NULL DEFAULT 'conversation',
-    "device_mode" VARCHAR(50) NOT NULL DEFAULT 'auto',
+    "mode" VARCHAR(50) DEFAULT 'conversation'::character varying,
+    "device_mode" VARCHAR(50) DEFAULT 'auto'::character varying,
     "app_version" VARCHAR(50),
-    "sort" INTEGER NOT NULL DEFAULT 0,
+    "sort" INTEGER DEFAULT 0,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ai_device_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- device_token_usage
 CREATE TABLE IF NOT EXISTS "device_token_usage" (
-    "id" BIGSERIAL NOT NULL,
-    "mac_address" VARCHAR(20) NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('device_token_usage_id_seq'::regclass),
+    "mac_address" VARCHAR(50) NOT NULL,
     "session_id" VARCHAR(100),
+    "input_tokens" INTEGER DEFAULT 0,
+    "output_tokens" INTEGER DEFAULT 0,
+    "total_tokens" INTEGER DEFAULT 0,
+    "avg_ttft_seconds" NUMERIC DEFAULT 0,
+    "message_count" INTEGER DEFAULT 0,
+    "session_count" INTEGER DEFAULT 0,
     "usage_date" DATE NOT NULL,
-    "input_tokens" BIGINT NOT NULL DEFAULT 0,
-    "output_tokens" BIGINT NOT NULL DEFAULT 0,
-    "input_audio_tokens" BIGINT NOT NULL DEFAULT 0,
-    "input_text_tokens" BIGINT NOT NULL DEFAULT 0,
-    "input_cached_tokens" BIGINT NOT NULL DEFAULT 0,
-    "output_audio_tokens" BIGINT NOT NULL DEFAULT 0,
-    "output_text_tokens" BIGINT NOT NULL DEFAULT 0,
-    "session_duration_seconds" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "avg_ttft_seconds" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "message_count" INTEGER NOT NULL DEFAULT 0,
-    "total_response_duration_seconds" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "session_count" INTEGER NOT NULL DEFAULT 1,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "input_audio_tokens" INTEGER DEFAULT 0,
+    "input_cached_tokens" INTEGER DEFAULT 0,
+    "input_text_tokens" INTEGER DEFAULT 0,
+    "output_audio_tokens" INTEGER DEFAULT 0,
+    "output_text_tokens" INTEGER DEFAULT 0,
+    "session_duration_seconds" NUMERIC DEFAULT 0,
+    "total_response_duration_seconds" NUMERIC DEFAULT 0,
 
     CONSTRAINT "device_token_usage_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_ota
 CREATE TABLE IF NOT EXISTS "ai_ota" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "firmware_name" VARCHAR(255) NOT NULL,
-    "type" VARCHAR(100),
+    "type" VARCHAR(50) NOT NULL,
     "version" VARCHAR(50) NOT NULL,
-    "size" BIGINT,
+    "size" INTEGER,
     "remark" TEXT,
     "firmware_path" VARCHAR(500),
-    "force_update" SMALLINT NOT NULL DEFAULT 0,
-    "sort" INTEGER NOT NULL DEFAULT 0,
+    "force_update" INTEGER DEFAULT 0,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "ai_ota_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- content_library
 CREATE TABLE IF NOT EXISTS "content_library" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
-    "title" VARCHAR(500) NOT NULL,
-    "romanized" VARCHAR(500),
-    "filename" VARCHAR(500),
+    "id" BIGINT NOT NULL DEFAULT nextval('content_library_id_seq'::regclass),
     "content_type" VARCHAR(50) NOT NULL,
-    "category" VARCHAR(255),
-    "alternatives" JSONB NOT NULL DEFAULT '[]',
-    "aws_s3_url" VARCHAR(1000),
+    "title" VARCHAR(500) NOT NULL,
+    "description" TEXT,
+    "url" VARCHAR(1000),
+    "thumbnail_url" VARCHAR(500),
     "duration_seconds" INTEGER,
-    "file_size_bytes" BIGINT,
-    "is_active" SMALLINT NOT NULL DEFAULT 1,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "category" VARCHAR(100),
+    "tags" JSONB DEFAULT '[]'::jsonb,
+    "age_min" INTEGER,
+    "age_max" INTEGER,
+    "language" VARCHAR(50) DEFAULT 'en'::character varying,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "status" INTEGER DEFAULT 1,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "content_library_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE IF NOT EXISTS "content_items" (
-    "id" VARCHAR(36) NOT NULL DEFAULT gen_random_uuid()::text,
-    "title" VARCHAR(500) NOT NULL,
-    "romanized" VARCHAR(500),
-    "filename" VARCHAR(500),
-    "content_type" VARCHAR(50) NOT NULL,
-    "category" VARCHAR(255),
-    "alternatives" JSONB NOT NULL DEFAULT '[]',
-    "file_url" VARCHAR(1000),
-    "thumbnail_url" VARCHAR(1000),
-    "duration_seconds" INTEGER,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+-- device_playlist
+CREATE TABLE IF NOT EXISTS "device_playlist" (
+    "id" BIGINT NOT NULL DEFAULT nextval('device_playlist_id_seq'::regclass),
+    "device_id" BIGINT,
+    "mac_address" VARCHAR(50),
+    "content_id" BIGINT,
+    "playlist_type" VARCHAR(50) DEFAULT 'music'::character varying,
+    "position" INTEGER DEFAULT 0,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "content_items_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "device_playlist_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- music_playlist
 CREATE TABLE IF NOT EXISTS "music_playlist" (
-    "id" BIGSERIAL NOT NULL,
-    "device_id" VARCHAR(36) NOT NULL,
-    "content_id" VARCHAR(36) NOT NULL,
-    "position" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "id" BIGINT NOT NULL DEFAULT nextval('music_playlist_id_seq'::regclass),
+    "device_id" UUID NOT NULL,
+    "content_id" BIGINT NOT NULL,
+    "position" INTEGER DEFAULT 0,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "music_playlist_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- story_playlist
 CREATE TABLE IF NOT EXISTS "story_playlist" (
-    "id" BIGSERIAL NOT NULL,
-    "device_id" VARCHAR(36) NOT NULL,
-    "content_id" VARCHAR(36) NOT NULL,
-    "position" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "id" BIGINT NOT NULL DEFAULT nextval('story_playlist_id_seq'::regclass),
+    "device_id" UUID NOT NULL,
+    "content_id" BIGINT NOT NULL,
+    "position" INTEGER DEFAULT 0,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "story_playlist_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_music
 CREATE TABLE IF NOT EXISTS "ai_music" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "title" VARCHAR(300) NOT NULL,
@@ -454,16 +424,16 @@ CREATE TABLE IF NOT EXISTS "ai_music" (
     "file_url" VARCHAR(500),
     "cover_url" VARCHAR(500),
     "lyrics" TEXT,
-    "sort" INTEGER NOT NULL DEFAULT 0,
-    "status" INTEGER NOT NULL DEFAULT 1,
+    "sort" INTEGER DEFAULT 0,
+    "status" INTEGER DEFAULT 1,
     "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_music_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_story
 CREATE TABLE IF NOT EXISTS "ai_story" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "title" VARCHAR(300) NOT NULL,
@@ -475,16 +445,16 @@ CREATE TABLE IF NOT EXISTS "ai_story" (
     "content" TEXT,
     "audio_url" VARCHAR(500),
     "cover_url" VARCHAR(500),
-    "sort" INTEGER NOT NULL DEFAULT 0,
-    "status" INTEGER NOT NULL DEFAULT 1,
+    "sort" INTEGER DEFAULT 0,
+    "status" INTEGER DEFAULT 1,
     "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_story_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_textbook
 CREATE TABLE IF NOT EXISTS "ai_textbook" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "title" VARCHAR(300) NOT NULL,
@@ -494,754 +464,126 @@ CREATE TABLE IF NOT EXISTS "ai_textbook" (
     "publisher" VARCHAR(200),
     "cover_url" VARCHAR(500),
     "description" TEXT,
-    "sort" INTEGER NOT NULL DEFAULT 0,
-    "status" INTEGER NOT NULL DEFAULT 1,
+    "sort" INTEGER DEFAULT 0,
+    "status" INTEGER DEFAULT 1,
     "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_textbook_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_textbook_chapter
 CREATE TABLE IF NOT EXISTS "ai_textbook_chapter" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "textbook_id" UUID,
     "title" VARCHAR(300) NOT NULL,
     "content" TEXT,
     "audio_url" VARCHAR(500),
-    "sort" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sort" INTEGER DEFAULT 0,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_textbook_chapter_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_pack" (
-    "id" BIGSERIAL NOT NULL,
-    "pack_code" VARCHAR(100) NOT NULL,
-    "name" VARCHAR(255) NOT NULL,
-    "description" TEXT,
-    "age_min" INTEGER,
-    "age_max" INTEGER,
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_pack_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_question" (
-    "id" BIGSERIAL NOT NULL,
-    "code" VARCHAR(100) NOT NULL,
-    "title" VARCHAR(255) NOT NULL,
-    "prompt_text" TEXT NOT NULL,
-    "language" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "category" VARCHAR(100),
-    "difficulty" INTEGER NOT NULL DEFAULT 1,
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_question_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_content_pack" (
-    "id" BIGSERIAL NOT NULL,
-    "pack_code" VARCHAR(100) NOT NULL,
-    "name" VARCHAR(255) NOT NULL,
-    "description" TEXT,
-    "content_type" VARCHAR(50) NOT NULL DEFAULT 'prompt',
-    "content_md" TEXT,
-    "total_items" INTEGER NOT NULL DEFAULT 0,
-    "language" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_content_pack_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_series" (
-    "id" BIGSERIAL NOT NULL,
-    "start_uid" VARCHAR(50) NOT NULL,
-    "end_uid" VARCHAR(50) NOT NULL,
-    "question_id" BIGINT,
-    "pack_id" BIGINT,
-    "priority" INTEGER NOT NULL DEFAULT 0,
-    "notes" VARCHAR(500),
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_series_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_card_mapping" (
-    "id" BIGSERIAL NOT NULL,
-    "rfid_uid" VARCHAR(50) NOT NULL,
-    "question_id" BIGINT,
-    "question_ids" JSONB NOT NULL DEFAULT '[]',
-    "pack_code" VARCHAR(100),
-    "pack_id" BIGINT,
-    "content_pack_id" BIGINT,
-    "notes" VARCHAR(500),
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_card_mapping_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_scan_log" (
-    "id" BIGSERIAL NOT NULL,
-    "mac_address" VARCHAR(50) NOT NULL,
-    "rfid_uid" VARCHAR(100) NOT NULL,
-    "action_taken" VARCHAR(100),
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_scan_log_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_tags" (
-    "id" BIGSERIAL NOT NULL,
-    "uid" VARCHAR(100) NOT NULL,
-    "name" VARCHAR(255),
-    "description" TEXT,
-    "content_type" VARCHAR(50),
-    "content_id" BIGINT,
-    "status" INTEGER NOT NULL DEFAULT 1,
-    "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "rfid_tags_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "analytics_game_sessions" (
-    "id" BIGSERIAL NOT NULL,
-    "session_id" VARCHAR(100) NOT NULL,
-    "mac_address" VARCHAR(20) NOT NULL,
-    "agent_id" VARCHAR(36),
-    "mode_type" VARCHAR(50) NOT NULL,
-    "started_at" TIMESTAMPTZ(6) NOT NULL,
-    "ended_at" TIMESTAMPTZ(6),
-    "duration_seconds" INTEGER,
-    "interaction_count" INTEGER NOT NULL DEFAULT 0,
-    "completion_status" VARCHAR(50),
-    "metadata" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "analytics_game_sessions_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "analytics_game_attempts" (
-    "id" BIGSERIAL NOT NULL,
-    "session_id" VARCHAR(100) NOT NULL,
-    "mac_address" VARCHAR(20) NOT NULL,
-    "game_type" VARCHAR(50) NOT NULL,
-    "question_text" TEXT,
-    "question_type" VARCHAR(100),
-    "difficulty_level" VARCHAR(20),
-    "correct_answer" VARCHAR(500),
-    "user_answer" VARCHAR(500),
-    "is_correct" BOOLEAN,
-    "attempt_number" SMALLINT NOT NULL DEFAULT 1,
-    "response_time_ms" INTEGER,
-    "answered_at" TIMESTAMPTZ(6),
-    "metadata" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "analytics_game_attempts_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "analytics_media_playback" (
-    "id" BIGSERIAL NOT NULL,
-    "session_id" VARCHAR(100),
-    "mac_address" VARCHAR(20) NOT NULL,
-    "media_type" VARCHAR(50) NOT NULL,
-    "media_id" VARCHAR(100),
-    "media_title" VARCHAR(500),
-    "started_at" TIMESTAMPTZ(6) NOT NULL,
-    "ended_at" TIMESTAMPTZ(6),
-    "duration_played_seconds" INTEGER,
-    "total_duration_seconds" INTEGER,
-    "completion_percentage" DECIMAL(5,2),
-    "skip_action" VARCHAR(50),
-    "skipped_at" TIMESTAMPTZ(6),
-    "metadata" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "analytics_media_playback_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "analytics_streaks" (
-    "id" BIGSERIAL NOT NULL,
-    "session_id" VARCHAR(100) NOT NULL,
-    "mac_address" VARCHAR(20) NOT NULL,
-    "game_type" VARCHAR(50) NOT NULL,
-    "streak_number" INTEGER NOT NULL,
-    "questions_in_streak" INTEGER NOT NULL,
-    "started_at" TIMESTAMPTZ(6) NOT NULL,
-    "ended_at" TIMESTAMPTZ(6),
-    "duration_seconds" INTEGER,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "analytics_streaks_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "analytics_user_progress" (
-    "id" BIGSERIAL NOT NULL,
-    "mac_address" VARCHAR(20) NOT NULL,
-    "mode_type" VARCHAR(50) NOT NULL,
-    "kid_id" BIGINT,
-    "total_sessions" INTEGER NOT NULL DEFAULT 0,
-    "total_time_seconds" BIGINT NOT NULL DEFAULT 0,
-    "total_interactions" INTEGER NOT NULL DEFAULT 0,
-    "success_rate_percentage" DECIMAL(5,2),
-    "longest_streak" INTEGER NOT NULL DEFAULT 0,
-    "total_streaks_completed" INTEGER NOT NULL DEFAULT 0,
-    "average_streak_time_seconds" INTEGER NOT NULL DEFAULT 0,
-    "skill_level" VARCHAR(50) NOT NULL DEFAULT 'beginner',
-    "last_played_at" TIMESTAMPTZ(6),
-    "weekly_summary_json" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "analytics_user_progress_pkey" PRIMARY KEY ("id")
-);
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "sys_user_username_key" ON "sys_user"("username");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_user_username_idx" ON "sys_user"("username");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_user_status_idx" ON "sys_user"("status");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_user_token_user_id_idx" ON "sys_user_token"("user_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_user_token_token_idx" ON "sys_user_token"("token");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_user_token_expire_date_idx" ON "sys_user_token"("expire_date");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "sys_params_param_code_key" ON "sys_params"("param_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_params_param_code_idx" ON "sys_params"("param_code");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "sys_dict_type_dict_type_key" ON "sys_dict_type"("dict_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_dict_type_dict_type_idx" ON "sys_dict_type"("dict_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "sys_dict_data_dict_type_id_idx" ON "sys_dict_data"("dict_type_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "parent_profiles_user_id_key" ON "parent_profiles"("user_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "parent_profiles_user_id_idx" ON "parent_profiles"("user_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "parent_profiles_sys_user_id_idx" ON "parent_profiles"("sys_user_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "parent_profiles_email_idx" ON "parent_profiles"("email");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "parent_profiles_created_at_idx" ON "parent_profiles"("created_at" DESC);
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "kid_profile_user_id_idx" ON "kid_profile"("user_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "kid_learning_progress_kid_id_subject_topic_key" ON "kid_learning_progress"("kid_id", "subject", "topic");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_model_provider_model_type_idx" ON "ai_model_provider"("model_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_model_provider_provider_code_idx" ON "ai_model_provider"("provider_code");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "ai_model_provider_model_type_provider_code_key" ON "ai_model_provider"("model_type", "provider_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_model_config_model_type_idx" ON "ai_model_config"("model_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_model_config_model_code_idx" ON "ai_model_config"("model_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_model_config_is_default_idx" ON "ai_model_config"("is_default");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_tts_voice_tts_model_id_idx" ON "ai_tts_voice"("tts_model_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_tts_voice_name_idx" ON "ai_tts_voice"("name");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_user_id_idx" ON "ai_agent"("user_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_agent_code_idx" ON "ai_agent"("agent_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_template_agent_code_idx" ON "ai_agent_template"("agent_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_template_is_visible_idx" ON "ai_agent_template"("is_visible");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_chat_history_mac_address_idx" ON "ai_agent_chat_history"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_chat_history_agent_id_idx" ON "ai_agent_chat_history"("agent_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_chat_history_session_id_idx" ON "ai_agent_chat_history"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_chat_history_created_at_idx" ON "ai_agent_chat_history"("created_at");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_plugin_mapping_agent_id_idx" ON "ai_agent_plugin_mapping"("agent_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_plugin_mapping_plugin_id_idx" ON "ai_agent_plugin_mapping"("plugin_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_agent_mcp_access_point_agent_id_idx" ON "ai_agent_mcp_access_point"("agent_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "ai_device_mac_address_key" ON "ai_device"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_device_user_id_idx" ON "ai_device"("user_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_device_mac_address_idx" ON "ai_device"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_device_agent_id_idx" ON "ai_device"("agent_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_device_kid_id_idx" ON "ai_device"("kid_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "device_token_usage_mac_address_idx" ON "device_token_usage"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "device_token_usage_usage_date_idx" ON "device_token_usage"("usage_date");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "device_token_usage_session_id_idx" ON "device_token_usage"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_ota_version_idx" ON "ai_ota"("version");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "ai_ota_type_idx" ON "ai_ota"("type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "content_library_content_type_idx" ON "content_library"("content_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "content_library_category_idx" ON "content_library"("category");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "content_library_is_active_idx" ON "content_library"("is_active");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "content_library_title_idx" ON "content_library"("title");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "content_items_content_type_idx" ON "content_items"("content_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "content_items_category_idx" ON "content_items"("category");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "music_playlist_device_id_idx" ON "music_playlist"("device_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "music_playlist_device_id_position_idx" ON "music_playlist"("device_id", "position");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "music_playlist_device_id_content_id_key" ON "music_playlist"("device_id", "content_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "story_playlist_device_id_idx" ON "story_playlist"("device_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "story_playlist_device_id_position_idx" ON "story_playlist"("device_id", "position");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "story_playlist_device_id_content_id_key" ON "story_playlist"("device_id", "content_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "rfid_pack_pack_code_key" ON "rfid_pack"("pack_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_pack_pack_code_idx" ON "rfid_pack"("pack_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_pack_active_idx" ON "rfid_pack"("active");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "rfid_question_code_key" ON "rfid_question"("code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_question_code_idx" ON "rfid_question"("code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_question_category_idx" ON "rfid_question"("category");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_question_language_idx" ON "rfid_question"("language");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_question_active_idx" ON "rfid_question"("active");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "rfid_content_pack_pack_code_key" ON "rfid_content_pack"("pack_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_content_pack_pack_code_idx" ON "rfid_content_pack"("pack_code");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_content_pack_content_type_idx" ON "rfid_content_pack"("content_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_content_pack_active_idx" ON "rfid_content_pack"("active");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_series_start_uid_end_uid_idx" ON "rfid_series"("start_uid", "end_uid");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_series_question_id_idx" ON "rfid_series"("question_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_series_pack_id_idx" ON "rfid_series"("pack_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_series_active_idx" ON "rfid_series"("active");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "rfid_card_mapping_rfid_uid_key" ON "rfid_card_mapping"("rfid_uid");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_card_mapping_rfid_uid_idx" ON "rfid_card_mapping"("rfid_uid");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_card_mapping_question_id_idx" ON "rfid_card_mapping"("question_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_card_mapping_pack_id_idx" ON "rfid_card_mapping"("pack_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_card_mapping_content_pack_id_idx" ON "rfid_card_mapping"("content_pack_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "rfid_card_mapping_active_idx" ON "rfid_card_mapping"("active");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "rfid_tags_uid_key" ON "rfid_tags"("uid");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "analytics_game_sessions_session_id_key" ON "analytics_game_sessions"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_sessions_session_id_idx" ON "analytics_game_sessions"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_sessions_mac_address_idx" ON "analytics_game_sessions"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_sessions_agent_id_idx" ON "analytics_game_sessions"("agent_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_sessions_mode_type_idx" ON "analytics_game_sessions"("mode_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_sessions_started_at_idx" ON "analytics_game_sessions"("started_at");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_attempts_session_id_idx" ON "analytics_game_attempts"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_attempts_mac_address_idx" ON "analytics_game_attempts"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_attempts_game_type_idx" ON "analytics_game_attempts"("game_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_game_attempts_is_correct_idx" ON "analytics_game_attempts"("is_correct");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_media_playback_session_id_idx" ON "analytics_media_playback"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_media_playback_mac_address_idx" ON "analytics_media_playback"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_media_playback_media_type_idx" ON "analytics_media_playback"("media_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_media_playback_started_at_idx" ON "analytics_media_playback"("started_at");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_streaks_session_id_idx" ON "analytics_streaks"("session_id");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_streaks_mac_address_idx" ON "analytics_streaks"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_streaks_game_type_idx" ON "analytics_streaks"("game_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_user_progress_mac_address_idx" ON "analytics_user_progress"("mac_address");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_user_progress_mode_type_idx" ON "analytics_user_progress"("mode_type");
-
--- CreateIndex
-CREATE INDEX IF NOT EXISTS "analytics_user_progress_skill_level_idx" ON "analytics_user_progress"("skill_level");
-
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "analytics_user_progress_mac_address_mode_type_key" ON "analytics_user_progress"("mac_address", "mode_type");
-
--- AddForeignKey
-ALTER TABLE "sys_user_token" ADD CONSTRAINT "sys_user_token_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "sys_dict_data" ADD CONSTRAINT "sys_dict_data_dict_type_id_fkey" FOREIGN KEY ("dict_type_id") REFERENCES "sys_dict_type"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "parent_profiles" ADD CONSTRAINT "parent_profiles_sys_user_id_fkey" FOREIGN KEY ("sys_user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "kid_profile" ADD CONSTRAINT "kid_profile_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "kid_learning_progress" ADD CONSTRAINT "kid_learning_progress_kid_id_fkey" FOREIGN KEY ("kid_id") REFERENCES "kid_profile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "kid_activity_log" ADD CONSTRAINT "kid_activity_log_kid_id_fkey" FOREIGN KEY ("kid_id") REFERENCES "kid_profile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_tts_voice" ADD CONSTRAINT "ai_tts_voice_tts_model_id_fkey" FOREIGN KEY ("tts_model_id") REFERENCES "ai_model_config"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_agent" ADD CONSTRAINT "ai_agent_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_agent_chat_history" ADD CONSTRAINT "ai_agent_chat_history_agent_id_fkey" FOREIGN KEY ("agent_id") REFERENCES "ai_agent"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_agent_plugin_mapping" ADD CONSTRAINT "ai_agent_plugin_mapping_agent_id_fkey" FOREIGN KEY ("agent_id") REFERENCES "ai_agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_agent_mcp_access_point" ADD CONSTRAINT "ai_agent_mcp_access_point_agent_id_fkey" FOREIGN KEY ("agent_id") REFERENCES "ai_agent"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_device" ADD CONSTRAINT "ai_device_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_device" ADD CONSTRAINT "ai_device_agent_id_fkey" FOREIGN KEY ("agent_id") REFERENCES "ai_agent"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_device" ADD CONSTRAINT "ai_device_kid_id_fkey" FOREIGN KEY ("kid_id") REFERENCES "kid_profile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "music_playlist" ADD CONSTRAINT "music_playlist_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "ai_device"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "music_playlist" ADD CONSTRAINT "music_playlist_content_id_fkey" FOREIGN KEY ("content_id") REFERENCES "content_library"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "story_playlist" ADD CONSTRAINT "story_playlist_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "ai_device"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "story_playlist" ADD CONSTRAINT "story_playlist_content_id_fkey" FOREIGN KEY ("content_id") REFERENCES "content_library"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "ai_textbook_chapter" ADD CONSTRAINT "ai_textbook_chapter_textbook_id_fkey" FOREIGN KEY ("textbook_id") REFERENCES "ai_textbook"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "rfid_series" ADD CONSTRAINT "rfid_series_question_id_fkey" FOREIGN KEY ("question_id") REFERENCES "rfid_question"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "rfid_series" ADD CONSTRAINT "rfid_series_pack_id_fkey" FOREIGN KEY ("pack_id") REFERENCES "rfid_pack"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_question_id_fkey" FOREIGN KEY ("question_id") REFERENCES "rfid_question"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_pack_id_fkey" FOREIGN KEY ("pack_id") REFERENCES "rfid_pack"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_content_pack_id_fkey" FOREIGN KEY ("content_pack_id") REFERENCES "rfid_content_pack"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- =====================================================
--- MISSING TABLES (Added to match Supabase)
--- =====================================================
-
--- CreateTable
+-- ai_rfid_tag
 CREATE TABLE IF NOT EXISTS "ai_rfid_tag" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "uid" VARCHAR(100) NOT NULL,
-    "name" VARCHAR(255),
+    "uid" VARCHAR(50) NOT NULL,
+    "name" VARCHAR(200),
     "description" TEXT,
     "content_type" VARCHAR(50),
-    "content_id" BIGINT,
+    "content_id" UUID,
     "action_type" VARCHAR(50),
-    "action_params" JSONB DEFAULT '{}',
-    "device_mac" VARCHAR(50),
-    "status" INTEGER NOT NULL DEFAULT 1,
+    "action_params" JSONB,
+    "device_mac" VARCHAR(20),
+    "status" INTEGER DEFAULT 1,
     "creator" BIGINT,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
+    "updated_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_rfid_tag_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- ai_rfid_scan_log
 CREATE TABLE IF NOT EXISTS "ai_rfid_scan_log" (
-    "id" BIGSERIAL NOT NULL,
-    "mac_address" VARCHAR(50) NOT NULL,
-    "rfid_uid" VARCHAR(100) NOT NULL,
-    "action_taken" VARCHAR(100),
-    "response_data" JSONB DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "mac_address" VARCHAR(20),
+    "rfid_uid" VARCHAR(50),
+    "tag_id" UUID,
+    "created_at" TIMESTAMPTZ DEFAULT now(),
 
     CONSTRAINT "ai_rfid_scan_log_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE IF NOT EXISTS "device_playlist" (
-    "id" BIGSERIAL NOT NULL,
-    "device_id" VARCHAR(36) NOT NULL,
-    "content_type" VARCHAR(50) NOT NULL,
-    "content_id" VARCHAR(36) NOT NULL,
-    "position" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+-- rfid_pack
+CREATE TABLE IF NOT EXISTS "rfid_pack" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_pack_id_seq'::regclass),
+    "pack_name" VARCHAR(255) NOT NULL,
+    "pack_code" VARCHAR(100),
+    "description" TEXT,
+    "age_min" INTEGER,
+    "age_max" INTEGER,
+    "language" VARCHAR(50) DEFAULT 'en'::character varying,
+    "active" BOOLEAN DEFAULT true,
+    "status" INTEGER DEFAULT 1,
+    "creator" BIGINT,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updater" BIGINT,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "device_playlist_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "rfid_pack_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE IF NOT EXISTS "email_report_config" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "enabled" BOOLEAN NOT NULL DEFAULT false,
-    "schedule_hour" INTEGER NOT NULL DEFAULT 8,
-    "schedule_timezone" VARCHAR(100) NOT NULL DEFAULT 'UTC',
-    "recipients" JSONB NOT NULL DEFAULT '[]',
-    "sections" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+-- rfid_question
+CREATE TABLE IF NOT EXISTS "rfid_question" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_question_id_seq'::regclass),
+    "code" VARCHAR(100) NOT NULL,
+    "title" VARCHAR(255) NOT NULL,
+    "prompt_text" TEXT NOT NULL,
+    "system_prompt_override" TEXT,
+    "allow_caching" BOOLEAN DEFAULT true,
+    "cached_audio_url" VARCHAR(500),
+    "language" VARCHAR(10) DEFAULT 'en'::character varying,
+    "category" VARCHAR(100),
+    "difficulty" INTEGER DEFAULT 1,
+    "active" BOOLEAN DEFAULT true,
+    "creator" BIGINT,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updater" BIGINT,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "email_report_config_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "rfid_question_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE IF NOT EXISTS "email_report_history" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "report_date" DATE NOT NULL,
-    "recipients" JSONB NOT NULL DEFAULT '[]',
-    "status" VARCHAR(50) NOT NULL DEFAULT 'pending',
-    "error_message" TEXT,
-    "report_data" JSONB DEFAULT '{}',
-    "sent_at" TIMESTAMPTZ(6),
-
-    CONSTRAINT "email_report_history_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "game_session" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "session_id" VARCHAR(100) NOT NULL,
-    "mac_address" VARCHAR(50) NOT NULL,
-    "game_type" VARCHAR(50) NOT NULL,
-    "started_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "ended_at" TIMESTAMPTZ(6),
-    "score" INTEGER,
-    "metadata" JSONB NOT NULL DEFAULT '{}',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "game_session_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "radio_schedule" (
-    "id" BIGSERIAL NOT NULL,
-    "start_time" TIME NOT NULL,
-    "end_time" TIME NOT NULL,
-    "program_name" VARCHAR(255) NOT NULL,
-    "playlist_id" VARCHAR(100),
-    "stream_url" VARCHAR(500),
-    "is_active" BOOLEAN NOT NULL DEFAULT true,
-    "day_of_week" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "radio_schedule_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "rfid_question_pack" (
-    "id" BIGSERIAL NOT NULL,
+-- rfid_content_pack
+CREATE TABLE IF NOT EXISTS "rfid_content_pack" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_content_pack_id_seq'::regclass),
     "pack_code" VARCHAR(100) NOT NULL,
     "name" VARCHAR(255) NOT NULL,
     "description" TEXT,
-    "question_ids" JSONB NOT NULL DEFAULT '[]',
-    "language" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "category" VARCHAR(100),
-    "version" INTEGER NOT NULL DEFAULT 1,
-    "status" VARCHAR(20) NOT NULL DEFAULT 'draft',
-    "active" BOOLEAN NOT NULL DEFAULT true,
+    "content_type" VARCHAR(50) DEFAULT 'prompt'::character varying,
+    "total_items" INTEGER DEFAULT 0,
+    "language" VARCHAR(10) DEFAULT 'en'::character varying,
+    "version" INTEGER DEFAULT 1,
+    "status" VARCHAR(20) DEFAULT 'draft'::character varying,
+    "age_range" VARCHAR(20),
+    "thumbnail_url" VARCHAR(500),
+    "content_md" TEXT,
+    "cached_audio_urls" TEXT,
+    "content_hash" VARCHAR(100),
+    "active" BOOLEAN DEFAULT true,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "rfid_question_pack_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "rfid_content_pack_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
+-- content_item
 CREATE TABLE IF NOT EXISTS "content_item" (
-    "id" BIGSERIAL NOT NULL,
+    "id" BIGINT NOT NULL DEFAULT nextval('content_item_id_seq'::regclass),
     "content_pack_id" BIGINT,
     "item_number" INTEGER NOT NULL,
     "title" VARCHAR(255),
@@ -1250,87 +592,520 @@ CREATE TABLE IF NOT EXISTS "content_item" (
     "image_url" VARCHAR(500),
     "content_text" TEXT,
     "audio_duration_ms" BIGINT,
-    "active" BOOLEAN NOT NULL DEFAULT true,
+    "active" BOOLEAN DEFAULT true,
     "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "content_item_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex for missing tables
-CREATE UNIQUE INDEX IF NOT EXISTS "ai_rfid_tag_uid_key" ON "ai_rfid_tag"("uid");
-CREATE INDEX IF NOT EXISTS "ai_rfid_tag_uid_idx" ON "ai_rfid_tag"("uid");
-CREATE INDEX IF NOT EXISTS "ai_rfid_tag_status_idx" ON "ai_rfid_tag"("status");
+-- rfid_question_pack
+CREATE TABLE IF NOT EXISTS "rfid_question_pack" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_question_pack_id_seq'::regclass),
+    "pack_code" VARCHAR(100) NOT NULL,
+    "name" VARCHAR(255) NOT NULL,
+    "description" TEXT,
+    "question_ids" JSONB DEFAULT '[]'::jsonb,
+    "language" VARCHAR(10) DEFAULT 'en'::character varying,
+    "category" VARCHAR(100),
+    "version" INTEGER DEFAULT 1,
+    "status" VARCHAR(20) DEFAULT 'draft'::character varying,
+    "active" BOOLEAN DEFAULT true,
+    "creator" BIGINT,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updater" BIGINT,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 
-CREATE INDEX IF NOT EXISTS "ai_rfid_scan_log_mac_address_idx" ON "ai_rfid_scan_log"("mac_address");
-CREATE INDEX IF NOT EXISTS "ai_rfid_scan_log_rfid_uid_idx" ON "ai_rfid_scan_log"("rfid_uid");
-CREATE INDEX IF NOT EXISTS "ai_rfid_scan_log_created_at_idx" ON "ai_rfid_scan_log"("created_at");
-
-CREATE INDEX IF NOT EXISTS "device_playlist_device_id_idx" ON "device_playlist"("device_id");
-CREATE INDEX IF NOT EXISTS "device_playlist_content_type_idx" ON "device_playlist"("content_type");
-CREATE UNIQUE INDEX IF NOT EXISTS "device_playlist_device_id_content_type_content_id_key" ON "device_playlist"("device_id", "content_type", "content_id");
-
-CREATE INDEX IF NOT EXISTS "email_report_history_report_date_idx" ON "email_report_history"("report_date");
-CREATE INDEX IF NOT EXISTS "email_report_history_status_idx" ON "email_report_history"("status");
-
-CREATE UNIQUE INDEX IF NOT EXISTS "game_session_session_id_key" ON "game_session"("session_id");
-CREATE INDEX IF NOT EXISTS "game_session_mac_address_idx" ON "game_session"("mac_address");
-CREATE INDEX IF NOT EXISTS "game_session_game_type_idx" ON "game_session"("game_type");
-
-CREATE INDEX IF NOT EXISTS "radio_schedule_day_of_week_idx" ON "radio_schedule"("day_of_week");
-CREATE INDEX IF NOT EXISTS "radio_schedule_is_active_idx" ON "radio_schedule"("is_active");
-
-CREATE UNIQUE INDEX IF NOT EXISTS "rfid_question_pack_pack_code_key" ON "rfid_question_pack"("pack_code");
-CREATE INDEX IF NOT EXISTS "rfid_question_pack_pack_code_idx" ON "rfid_question_pack"("pack_code");
-CREATE INDEX IF NOT EXISTS "rfid_question_pack_active_idx" ON "rfid_question_pack"("active");
-CREATE INDEX IF NOT EXISTS "rfid_question_pack_category_idx" ON "rfid_question_pack"("category");
-
-CREATE INDEX IF NOT EXISTS "content_item_content_pack_id_idx" ON "content_item"("content_pack_id");
-CREATE INDEX IF NOT EXISTS "content_item_item_number_idx" ON "content_item"("item_number");
-CREATE UNIQUE INDEX IF NOT EXISTS "content_item_content_pack_id_item_number_key" ON "content_item"("content_pack_id", "item_number");
-
--- AddForeignKey for missing tables
-ALTER TABLE "device_playlist" ADD CONSTRAINT "device_playlist_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "ai_device"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
-ALTER TABLE "content_item" ADD CONSTRAINT "content_item_content_pack_id_fkey" FOREIGN KEY ("content_pack_id") REFERENCES "rfid_content_pack"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "analytics_user_progress" ADD CONSTRAINT "analytics_user_progress_kid_id_fkey" FOREIGN KEY ("kid_id") REFERENCES "kid_profile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS "user_states" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "user_id" UUID,
-    "sys_user_id" BIGINT,
-    "email" VARCHAR(255),
-    "email_verified" BOOLEAN DEFAULT false,
-    "email_verified_at" TIMESTAMPTZ(6),
-    "profile_created" BOOLEAN DEFAULT false,
-    "profile_created_at" TIMESTAMPTZ(6),
-    "onboarding_completed" BOOLEAN DEFAULT false,
-    "onboarding_completed_at" TIMESTAMPTZ(6),
-    "node_backend_registered" BOOLEAN DEFAULT false,
-    "node_backend_token" VARCHAR(500),
-    "node_backend_token_timestamp" TIMESTAMPTZ(6),
-    "generated_password_hash" VARCHAR(255),
-    "current_stage" VARCHAR(50),
-    "onboarding_metadata" JSONB DEFAULT '{}',
-    "last_activity_at" TIMESTAMPTZ(6),
-    "auth_method" VARCHAR(50),
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "user_states_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "rfid_question_pack_pkey" PRIMARY KEY ("id")
 );
 
--- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "user_states_user_id_key" ON "user_states"("user_id");
-CREATE INDEX IF NOT EXISTS "user_states_user_id_idx" ON "user_states"("user_id");
-CREATE INDEX IF NOT EXISTS "user_states_sys_user_id_idx" ON "user_states"("sys_user_id");
-CREATE INDEX IF NOT EXISTS "user_states_email_idx" ON "user_states"("email");
-CREATE INDEX IF NOT EXISTS "user_states_current_stage_idx" ON "user_states"("current_stage");
+-- rfid_series
+CREATE TABLE IF NOT EXISTS "rfid_series" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_series_id_seq'::regclass),
+    "series_name" VARCHAR(255),
+    "start_uid" VARCHAR(100) NOT NULL,
+    "end_uid" VARCHAR(100) NOT NULL,
+    "content_pack_id" BIGINT,
+    "priority" INTEGER DEFAULT 0,
+    "status" INTEGER DEFAULT 1,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "question_pack_id" BIGINT,
 
--- AddForeignKey
-ALTER TABLE "user_states" ADD CONSTRAINT "user_states_sys_user_id_fkey" FOREIGN KEY ("sys_user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+    CONSTRAINT "rfid_series_pkey" PRIMARY KEY ("id")
+);
+
+-- rfid_card_mapping
+CREATE TABLE IF NOT EXISTS "rfid_card_mapping" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_card_mapping_id_seq'::regclass),
+    "rfid_uid" VARCHAR(100) NOT NULL,
+    "content_pack_id" BIGINT,
+    "pack_id" BIGINT,
+    "question_id" BIGINT,
+    "question_pack_id" BIGINT,
+    "question_ids" JSONB DEFAULT '[]'::jsonb,
+    "pack_code" VARCHAR(100),
+    "action_type" VARCHAR(50) DEFAULT 'content'::character varying,
+    "action_data" JSONB DEFAULT '{}'::jsonb,
+    "notes" TEXT,
+    "active" BOOLEAN DEFAULT true,
+    "status" INTEGER DEFAULT 1,
+    "creator" BIGINT,
+    "create_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updater" BIGINT,
+    "update_date" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "rfid_card_mapping_pkey" PRIMARY KEY ("id")
+);
+
+-- rfid_scan_log
+CREATE TABLE IF NOT EXISTS "rfid_scan_log" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_scan_log_id_seq'::regclass),
+    "mac_address" VARCHAR(50) NOT NULL,
+    "rfid_uid" VARCHAR(100) NOT NULL,
+    "action_taken" VARCHAR(100),
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "rfid_scan_log_pkey" PRIMARY KEY ("id")
+);
+
+-- rfid_tags
+CREATE TABLE IF NOT EXISTS "rfid_tags" (
+    "id" BIGINT NOT NULL DEFAULT nextval('rfid_tags_id_seq'::regclass),
+    "uid" VARCHAR(100) NOT NULL,
+    "name" VARCHAR(255),
+    "description" TEXT,
+    "content_type" VARCHAR(50),
+    "content_id" BIGINT,
+    "status" INTEGER DEFAULT 1,
+    "creator" BIGINT,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "rfid_tags_pkey" PRIMARY KEY ("id")
+);
+
+-- game_session
+CREATE TABLE IF NOT EXISTS "game_session" (
+    "id" BIGINT NOT NULL DEFAULT nextval('game_session_id_seq'::regclass),
+    "mac_address" VARCHAR(50) NOT NULL,
+    "game_type" VARCHAR(50) NOT NULL,
+    "session_id" VARCHAR(100),
+    "started_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "ended_at" TIMESTAMPTZ,
+    "duration_seconds" INTEGER,
+    "total_attempts" INTEGER DEFAULT 0,
+    "correct_attempts" INTEGER DEFAULT 0,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "game_session_pkey" PRIMARY KEY ("id")
+);
+
+-- radio_schedule (RLS enabled)
+CREATE TABLE IF NOT EXISTS "radio_schedule" (
+    "id" BIGINT NOT NULL,
+    "start_time" TIME NOT NULL,
+    "end_time" TIME NOT NULL,
+    "program_name" TEXT NOT NULL,
+    "playlist_id" TEXT,
+    "stream_url" TEXT,
+    "is_active" BOOLEAN DEFAULT true,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    "day_of_week" SMALLINT,
+
+    CONSTRAINT "radio_schedule_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "chk_day_of_week" CHECK (((day_of_week >= 0) AND (day_of_week <= 6)) OR (day_of_week IS NULL))
+);
+
+-- email_report_config
+CREATE TABLE IF NOT EXISTS "email_report_config" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "enabled" BOOLEAN NOT NULL DEFAULT false,
+    "schedule_hour" INTEGER NOT NULL DEFAULT 8,
+    "schedule_timezone" VARCHAR(50) NOT NULL DEFAULT 'Asia/Kolkata'::character varying,
+    "recipients" JSONB NOT NULL DEFAULT '[]'::jsonb,
+    "sections" JSONB NOT NULL DEFAULT '{"alerts": true, "tokens": true, "content": true, "devices": true, "summary": true, "learning": true}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "email_report_config_pkey" PRIMARY KEY ("id")
+);
+
+-- email_report_history
+CREATE TABLE IF NOT EXISTS "email_report_history" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "report_date" DATE NOT NULL,
+    "recipients" TEXT[],
+    "status" VARCHAR(50) NOT NULL,
+    "error_message" TEXT,
+    "report_data" JSONB DEFAULT '{}'::jsonb,
+    "sent_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "email_report_history_pkey" PRIMARY KEY ("id")
+);
+
+-- analytics_game_sessions
+CREATE TABLE IF NOT EXISTS "analytics_game_sessions" (
+    "id" BIGINT NOT NULL DEFAULT nextval('analytics_game_sessions_id_seq'::regclass),
+    "session_id" VARCHAR(100) NOT NULL,
+    "mac_address" VARCHAR(50) NOT NULL,
+    "agent_id" UUID,
+    "mode_type" VARCHAR(50) NOT NULL,
+    "started_at" TIMESTAMPTZ NOT NULL,
+    "ended_at" TIMESTAMPTZ,
+    "duration_seconds" INTEGER,
+    "interaction_count" INTEGER DEFAULT 0,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "completion_status" VARCHAR(50) DEFAULT 'completed'::character varying,
+
+    CONSTRAINT "analytics_game_sessions_pkey" PRIMARY KEY ("id")
+);
+
+-- analytics_game_attempts
+CREATE TABLE IF NOT EXISTS "analytics_game_attempts" (
+    "id" BIGINT NOT NULL DEFAULT nextval('analytics_game_attempts_id_seq'::regclass),
+    "session_id" VARCHAR(100) NOT NULL,
+    "mac_address" VARCHAR(50) NOT NULL,
+    "game_type" VARCHAR(50) NOT NULL,
+    "user_answer" TEXT,
+    "correct_answer" TEXT,
+    "is_correct" BOOLEAN,
+    "attempt_time" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "response_time_ms" INTEGER,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "answered_at" TIMESTAMPTZ,
+    "attempt_number" INTEGER DEFAULT 1,
+    "difficulty_level" VARCHAR(20),
+    "question_type" VARCHAR(50),
+    "question_text" TEXT,
+
+    CONSTRAINT "analytics_game_attempts_pkey" PRIMARY KEY ("id")
+);
+
+-- analytics_media_playback
+CREATE TABLE IF NOT EXISTS "analytics_media_playback" (
+    "id" BIGINT NOT NULL DEFAULT nextval('analytics_media_playback_id_seq'::regclass),
+    "mac_address" VARCHAR(50) NOT NULL,
+    "content_id" BIGINT,
+    "content_type" VARCHAR(50) NOT NULL,
+    "event_type" VARCHAR(50) NOT NULL,
+    "position_seconds" INTEGER DEFAULT 0,
+    "duration_seconds" INTEGER,
+    "metadata" JSONB DEFAULT '{}'::jsonb,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "analytics_media_playback_pkey" PRIMARY KEY ("id")
+);
+
+-- analytics_streaks
+CREATE TABLE IF NOT EXISTS "analytics_streaks" (
+    "id" BIGINT NOT NULL DEFAULT nextval('analytics_streaks_id_seq'::regclass),
+    "mac_address" VARCHAR(50) NOT NULL,
+    "streak_type" VARCHAR(50) NOT NULL,
+    "streak_date" DATE NOT NULL,
+    "streak_count" INTEGER DEFAULT 1,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "analytics_streaks_pkey" PRIMARY KEY ("id")
+);
+
+-- analytics_user_progress
+CREATE TABLE IF NOT EXISTS "analytics_user_progress" (
+    "id" BIGINT NOT NULL DEFAULT nextval('analytics_user_progress_id_seq'::regclass),
+    "mac_address" VARCHAR(50) NOT NULL,
+    "kid_id" BIGINT,
+    "total_sessions" INTEGER DEFAULT 0,
+    "total_duration_seconds" INTEGER DEFAULT 0,
+    "total_games_played" INTEGER DEFAULT 0,
+    "total_correct_answers" INTEGER DEFAULT 0,
+    "total_wrong_answers" INTEGER DEFAULT 0,
+    "current_streak" INTEGER DEFAULT 0,
+    "longest_streak" INTEGER DEFAULT 0,
+    "last_activity_at" TIMESTAMPTZ,
+    "created_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "analytics_user_progress_pkey" PRIMARY KEY ("id")
+);
+
+-- =====================================================
+-- UNIQUE CONSTRAINTS
+-- =====================================================
+
+ALTER TABLE "sys_user" ADD CONSTRAINT "sys_user_username_key" UNIQUE ("username");
+ALTER TABLE "sys_user" ADD CONSTRAINT "sys_user_email_key" UNIQUE ("email");
+ALTER TABLE "sys_params" ADD CONSTRAINT "sys_params_param_code_key" UNIQUE ("param_code");
+ALTER TABLE "sys_dict_type" ADD CONSTRAINT "sys_dict_type_dict_type_key" UNIQUE ("dict_type");
+ALTER TABLE "parent_profiles" ADD CONSTRAINT "parent_profiles_user_id_key" UNIQUE ("user_id");
+ALTER TABLE "parent_profiles" ADD CONSTRAINT "parent_profiles_sys_user_id_key" UNIQUE ("sys_user_id");
+ALTER TABLE "ai_model_provider" ADD CONSTRAINT "ai_model_provider_model_type_provider_code_key" UNIQUE ("model_type", "provider_code");
+ALTER TABLE "ai_ota" ADD CONSTRAINT "ai_ota_type_version_key" UNIQUE ("type", "version");
+ALTER TABLE "ai_device" ADD CONSTRAINT "ai_device_mac_address_key" UNIQUE ("mac_address");
+ALTER TABLE "ai_rfid_tag" ADD CONSTRAINT "ai_rfid_tag_uid_key" UNIQUE ("uid");
+ALTER TABLE "device_token_usage" ADD CONSTRAINT "device_token_usage_mac_address_usage_date_key" UNIQUE ("mac_address", "usage_date");
+ALTER TABLE "content_item" ADD CONSTRAINT "content_item_content_pack_id_item_number_key" UNIQUE ("content_pack_id", "item_number");
+ALTER TABLE "content_item" ADD CONSTRAINT "content_item_pack_sequence_key" UNIQUE ("content_pack_id", "item_number");
+ALTER TABLE "music_playlist" ADD CONSTRAINT "music_playlist_device_id_content_id_key" UNIQUE ("device_id", "content_id");
+ALTER TABLE "story_playlist" ADD CONSTRAINT "story_playlist_device_id_content_id_key" UNIQUE ("device_id", "content_id");
+ALTER TABLE "kid_learning_progress" ADD CONSTRAINT "kid_learning_progress_kid_id_subject_topic_key" UNIQUE ("kid_id", "subject", "topic");
+ALTER TABLE "rfid_pack" ADD CONSTRAINT "rfid_pack_pack_code_key" UNIQUE ("pack_code");
+ALTER TABLE "rfid_question" ADD CONSTRAINT "rfid_question_code_key" UNIQUE ("code");
+ALTER TABLE "rfid_content_pack" ADD CONSTRAINT "rfid_content_pack_pack_code_key" UNIQUE ("pack_code");
+ALTER TABLE "rfid_question_pack" ADD CONSTRAINT "rfid_question_pack_pack_code_key" UNIQUE ("pack_code");
+ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_rfid_uid_key" UNIQUE ("rfid_uid");
+ALTER TABLE "rfid_tags" ADD CONSTRAINT "rfid_tags_uid_key" UNIQUE ("uid");
+ALTER TABLE "analytics_game_sessions" ADD CONSTRAINT "analytics_game_sessions_session_id_key" UNIQUE ("session_id");
+ALTER TABLE "analytics_streaks" ADD CONSTRAINT "analytics_streaks_mac_address_streak_type_streak_date_key" UNIQUE ("mac_address", "streak_type", "streak_date");
+ALTER TABLE "analytics_user_progress" ADD CONSTRAINT "analytics_user_progress_mac_address_key" UNIQUE ("mac_address");
+
+-- =====================================================
+-- INDEXES
+-- =====================================================
+
+-- sys_user
+CREATE INDEX IF NOT EXISTS "idx_sys_user_token_user_id" ON "sys_user_token" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_sys_user_token_token" ON "sys_user_token" ("token");
+CREATE INDEX IF NOT EXISTS "idx_sys_user_token_expire" ON "sys_user_token" ("expire_date");
+
+-- sys_dict_data
+CREATE INDEX IF NOT EXISTS "idx_sys_dict_data_type" ON "sys_dict_data" ("dict_type");
+
+-- parent_profiles
+CREATE INDEX IF NOT EXISTS "idx_parent_profiles_user_id" ON "parent_profiles" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_parent_profiles_sys_user_id" ON "parent_profiles" ("sys_user_id");
+CREATE INDEX IF NOT EXISTS "idx_parent_profiles_email" ON "parent_profiles" ("email");
+CREATE INDEX IF NOT EXISTS "idx_parent_profiles_created_at" ON "parent_profiles" ("created_at" DESC);
+
+-- kid_profile
+CREATE INDEX IF NOT EXISTS "idx_kid_profile_user" ON "kid_profile" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_kid_profile_user_id" ON "kid_profile" ("user_id");
+
+-- ai_model_provider
+CREATE INDEX IF NOT EXISTS "ai_model_provider_model_type_idx" ON "ai_model_provider" ("model_type");
+CREATE INDEX IF NOT EXISTS "ai_model_provider_provider_code_idx" ON "ai_model_provider" ("provider_code");
+
+-- ai_model_config
+CREATE INDEX IF NOT EXISTS "ai_model_config_model_type_idx" ON "ai_model_config" ("model_type");
+CREATE INDEX IF NOT EXISTS "ai_model_config_model_code_idx" ON "ai_model_config" ("model_code");
+CREATE INDEX IF NOT EXISTS "ai_model_config_is_default_idx" ON "ai_model_config" ("is_default");
+
+-- ai_agent
+CREATE INDEX IF NOT EXISTS "idx_ai_agent_user" ON "ai_agent" ("user_id");
+
+-- ai_agent_template
+CREATE INDEX IF NOT EXISTS "ai_agent_template_agent_code_idx" ON "ai_agent_template" ("agent_code");
+CREATE INDEX IF NOT EXISTS "ai_agent_template_is_visible_idx" ON "ai_agent_template" ("is_visible");
+
+-- ai_agent_chat_history
+CREATE INDEX IF NOT EXISTS "idx_chat_history_agent" ON "ai_agent_chat_history" ("agent_id");
+CREATE INDEX IF NOT EXISTS "idx_chat_history_session" ON "ai_agent_chat_history" ("session_id");
+
+-- ai_device
+CREATE INDEX IF NOT EXISTS "idx_ai_device_user" ON "ai_device" ("user_id");
+CREATE INDEX IF NOT EXISTS "idx_ai_device_mac" ON "ai_device" ("mac_address");
+CREATE INDEX IF NOT EXISTS "idx_ai_device_agent" ON "ai_device" ("agent_id");
+CREATE INDEX IF NOT EXISTS "idx_ai_device_kid" ON "ai_device" ("kid_id");
+
+-- device_token_usage
+CREATE INDEX IF NOT EXISTS "idx_device_token_usage_mac" ON "device_token_usage" ("mac_address");
+CREATE INDEX IF NOT EXISTS "idx_device_token_usage_date" ON "device_token_usage" ("usage_date");
+
+-- ai_ota
+CREATE INDEX IF NOT EXISTS "idx_ai_ota_type" ON "ai_ota" ("type");
+CREATE INDEX IF NOT EXISTS "idx_ai_ota_version" ON "ai_ota" ("version");
+
+-- ai_rfid_tag
+CREATE INDEX IF NOT EXISTS "idx_rfid_uid" ON "ai_rfid_tag" ("uid");
+
+-- content_library
+CREATE INDEX IF NOT EXISTS "idx_content_library_type" ON "content_library" ("content_type");
+CREATE INDEX IF NOT EXISTS "idx_content_library_category" ON "content_library" ("category");
+
+-- content_item
+CREATE INDEX IF NOT EXISTS "idx_content_item_pack" ON "content_item" ("content_pack_id");
+
+-- device_playlist
+CREATE INDEX IF NOT EXISTS "idx_device_playlist_mac" ON "device_playlist" ("mac_address");
+CREATE INDEX IF NOT EXISTS "idx_device_playlist_type" ON "device_playlist" ("playlist_type");
+
+-- rfid_pack
+CREATE INDEX IF NOT EXISTS "idx_rfid_pack_code" ON "rfid_pack" ("pack_code");
+CREATE INDEX IF NOT EXISTS "idx_rfid_pack_active" ON "rfid_pack" ("active");
+
+-- rfid_question
+CREATE INDEX IF NOT EXISTS "idx_rfid_question_code" ON "rfid_question" ("code");
+CREATE INDEX IF NOT EXISTS "idx_rfid_question_active" ON "rfid_question" ("active");
+
+-- rfid_content_pack
+CREATE INDEX IF NOT EXISTS "idx_rfid_content_pack_code" ON "rfid_content_pack" ("pack_code");
+
+-- rfid_question_pack
+CREATE INDEX IF NOT EXISTS "idx_rfid_question_pack_code" ON "rfid_question_pack" ("pack_code");
+CREATE INDEX IF NOT EXISTS "idx_rfid_question_pack_active" ON "rfid_question_pack" ("active");
+
+-- rfid_series
+CREATE INDEX IF NOT EXISTS "idx_rfid_series_range" ON "rfid_series" ("start_uid", "end_uid");
+
+-- rfid_card_mapping
+CREATE INDEX IF NOT EXISTS "idx_rfid_card_mapping_uid" ON "rfid_card_mapping" ("rfid_uid");
+
+-- game_session
+CREATE INDEX IF NOT EXISTS "idx_game_session_mac" ON "game_session" ("mac_address");
+CREATE INDEX IF NOT EXISTS "idx_game_session_type" ON "game_session" ("game_type");
+
+-- radio_schedule
+CREATE INDEX IF NOT EXISTS "idx_radio_schedule_day_time" ON "radio_schedule" ("day_of_week", "start_time");
+
+-- analytics_game_sessions
+CREATE INDEX IF NOT EXISTS "idx_analytics_sessions_mac" ON "analytics_game_sessions" ("mac_address");
+CREATE INDEX IF NOT EXISTS "idx_analytics_sessions_started" ON "analytics_game_sessions" ("started_at");
+
+-- analytics_game_attempts
+CREATE INDEX IF NOT EXISTS "idx_analytics_attempts_session" ON "analytics_game_attempts" ("session_id");
+CREATE INDEX IF NOT EXISTS "idx_analytics_attempts_mac" ON "analytics_game_attempts" ("mac_address");
+CREATE INDEX IF NOT EXISTS "idx_analytics_attempts_game" ON "analytics_game_attempts" ("game_type");
+CREATE INDEX IF NOT EXISTS "idx_analytics_attempts_correct" ON "analytics_game_attempts" ("is_correct");
+
+-- analytics_media_playback
+CREATE INDEX IF NOT EXISTS "idx_analytics_media_mac" ON "analytics_media_playback" ("mac_address");
+
+-- =====================================================
+-- FOREIGN KEYS
+-- =====================================================
+
+-- sys_user_token -> sys_user
+ALTER TABLE "sys_user_token" ADD CONSTRAINT "sys_user_token_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE CASCADE;
+
+-- sys_dict_data -> sys_dict_type
+ALTER TABLE "sys_dict_data" ADD CONSTRAINT "sys_dict_data_dict_type_id_fkey"
+    FOREIGN KEY ("dict_type_id") REFERENCES "sys_dict_type"("id") ON DELETE CASCADE;
+
+-- parent_profiles -> auth.users (Supabase Auth)
+ALTER TABLE "parent_profiles" ADD CONSTRAINT "parent_profiles_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES auth.users("id") ON DELETE CASCADE;
+
+-- parent_profiles -> sys_user
+ALTER TABLE "parent_profiles" ADD CONSTRAINT "parent_profiles_sys_user_id_fkey"
+    FOREIGN KEY ("sys_user_id") REFERENCES "sys_user"("id") ON DELETE CASCADE;
+
+-- kid_profile -> sys_user
+ALTER TABLE "kid_profile" ADD CONSTRAINT "kid_profile_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "sys_user"("id");
+
+-- kid_learning_progress -> kid_profile
+ALTER TABLE "kid_learning_progress" ADD CONSTRAINT "kid_learning_progress_kid_id_fkey"
+    FOREIGN KEY ("kid_id") REFERENCES "kid_profile"("id");
+
+-- kid_activity_log -> kid_profile
+ALTER TABLE "kid_activity_log" ADD CONSTRAINT "kid_activity_log_kid_id_fkey"
+    FOREIGN KEY ("kid_id") REFERENCES "kid_profile"("id");
+
+-- ai_tts_voice -> ai_model_config
+ALTER TABLE "ai_tts_voice" ADD CONSTRAINT "ai_tts_voice_tts_model_id_fkey"
+    FOREIGN KEY ("tts_model_id") REFERENCES "ai_model_config"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- ai_agent -> sys_user
+ALTER TABLE "ai_agent" ADD CONSTRAINT "ai_agent_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "sys_user"("id");
+
+-- ai_agent_chat_history -> ai_agent
+ALTER TABLE "ai_agent_chat_history" ADD CONSTRAINT "ai_agent_chat_history_agent_id_fkey"
+    FOREIGN KEY ("agent_id") REFERENCES "ai_agent"("id");
+
+-- ai_device -> sys_user
+ALTER TABLE "ai_device" ADD CONSTRAINT "ai_device_user_id_fkey"
+    FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL;
+
+-- ai_textbook_chapter -> ai_textbook
+ALTER TABLE "ai_textbook_chapter" ADD CONSTRAINT "ai_textbook_chapter_textbook_id_fkey"
+    FOREIGN KEY ("textbook_id") REFERENCES "ai_textbook"("id") ON DELETE CASCADE;
+
+-- ai_rfid_scan_log -> ai_rfid_tag
+ALTER TABLE "ai_rfid_scan_log" ADD CONSTRAINT "ai_rfid_scan_log_tag_id_fkey"
+    FOREIGN KEY ("tag_id") REFERENCES "ai_rfid_tag"("id");
+
+-- device_playlist -> content_library
+ALTER TABLE "device_playlist" ADD CONSTRAINT "device_playlist_content_id_fkey"
+    FOREIGN KEY ("content_id") REFERENCES "content_library"("id") ON DELETE CASCADE;
+
+-- content_item -> rfid_content_pack
+ALTER TABLE "content_item" ADD CONSTRAINT "content_item_content_pack_id_fkey"
+    FOREIGN KEY ("content_pack_id") REFERENCES "rfid_content_pack"("id") ON DELETE CASCADE;
+
+-- rfid_series -> rfid_content_pack
+ALTER TABLE "rfid_series" ADD CONSTRAINT "rfid_series_content_pack_id_fkey"
+    FOREIGN KEY ("content_pack_id") REFERENCES "rfid_content_pack"("id") ON DELETE SET NULL;
+
+-- rfid_series -> rfid_question_pack
+ALTER TABLE "rfid_series" ADD CONSTRAINT "rfid_series_question_pack_id_fkey"
+    FOREIGN KEY ("question_pack_id") REFERENCES "rfid_question_pack"("id") ON DELETE SET NULL;
+
+-- rfid_card_mapping -> rfid_question
+ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_question_id_fkey"
+    FOREIGN KEY ("question_id") REFERENCES "rfid_question"("id") ON DELETE SET NULL;
+
+-- rfid_card_mapping -> rfid_pack
+ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_pack_id_fkey"
+    FOREIGN KEY ("pack_id") REFERENCES "rfid_pack"("id") ON DELETE SET NULL;
+
+-- rfid_card_mapping -> rfid_content_pack
+ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_content_pack_id_fkey"
+    FOREIGN KEY ("content_pack_id") REFERENCES "rfid_content_pack"("id") ON DELETE SET NULL;
+
+-- rfid_card_mapping -> rfid_question_pack
+ALTER TABLE "rfid_card_mapping" ADD CONSTRAINT "rfid_card_mapping_question_pack_id_fkey"
+    FOREIGN KEY ("question_pack_id") REFERENCES "rfid_question_pack"("id") ON DELETE SET NULL;
+
+-- =====================================================
+-- ROW LEVEL SECURITY (RLS)
+-- =====================================================
+
+-- Enable RLS on parent_profiles
+ALTER TABLE "parent_profiles" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service role full access parent profiles" ON "parent_profiles"
+    FOR ALL USING ((auth.jwt() ->> 'role'::text) = 'service_role'::text);
+
+CREATE POLICY "Service role has full access to parent profiles" ON "parent_profiles"
+    FOR ALL USING ((auth.jwt() ->> 'role'::text) = 'service_role'::text);
+
+CREATE POLICY "Users can view own parent profile" ON "parent_profiles"
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can view their own parent profile" ON "parent_profiles"
+    FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert own parent profile" ON "parent_profiles"
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own parent profile" ON "parent_profiles"
+    FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update own parent profile" ON "parent_profiles"
+    FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own parent profile" ON "parent_profiles"
+    FOR UPDATE USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete own parent profile" ON "parent_profiles"
+    FOR DELETE USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own parent profile" ON "parent_profiles"
+    FOR DELETE USING (auth.uid() = user_id);
+
+-- Enable RLS on radio_schedule
+ALTER TABLE "radio_schedule" ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Enable read access for all users" ON "radio_schedule"
+    FOR SELECT USING (true);
+
+CREATE POLICY "Enable write access for service role" ON "radio_schedule"
+    FOR ALL USING (auth.role() = 'service_role'::text);
