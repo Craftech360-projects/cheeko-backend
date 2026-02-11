@@ -67,6 +67,21 @@ MEMORY_TRIGGER_PATTERNS = [
     ("question", ["what's my", "who is my", "what is my"]),  # Direct memory questions
 ]
 
+def is_trivial_transcript(text: str) -> bool:
+    """Check if a transcript is trivial (noise/silence/punctuation only)."""
+    if not text:
+        return True
+    cleaned = text.strip()
+    if not cleaned:
+        return True
+    # Only punctuation/whitespace
+    if all(c in '.,!?;:-—…\'" ' for c in cleaned):
+        return True
+    # Very short non-alphabetic text (e.g. ".", "..", "?!")
+    if len(cleaned) <= 2 and not any(c.isalpha() for c in cleaned):
+        return True
+    return False
+
 def should_inject_memory(text: str) -> tuple[bool, str]:
     """
     Check if the user's message should trigger memory injection.
@@ -342,6 +357,13 @@ async def entrypoint(ctx: JobContext):
     # agent_prompt = agent_prompt + silence_instructions
     # logger.info("Added silence instructions for audio tools")
 
+    # Append noise filter instructions so Gemini ignores trivial/noise input
+    noise_filter_instructions = """
+
+NOISE FILTER: If you hear only silence, a brief noise, a click, a tap, a single dot-like sound, or any very short non-speech sound, do NOT respond. Stay completely silent and keep listening. Only respond when you hear clear, intentional speech from the child."""
+    agent_prompt = agent_prompt + noise_filter_instructions
+    logger.info("Added noise filter instructions to prompt")
+
     # Debug: Check if Rahul appears in final prompt
     logger.info(f"Child name '{child_profile.get('name') if child_profile else 'N/A'}' in prompt: {'Rahul' in agent_prompt}")
     # Debug: Show first 500 chars of prompt to verify child name
@@ -406,6 +428,11 @@ async def entrypoint(ctx: JobContext):
 
         text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
         logger.info(f"🎤 USER SAID: '{text}'")
+
+        # Filter trivial transcripts (noise, clicks, dots)
+        if is_trivial_transcript(text):
+            logger.info(f"🔇 [FILTER] Ignoring trivial transcript: '{text}'")
+            return
 
         # Skip memory injection if one is already in progress or happened recently
         current_time = time.time()
@@ -547,6 +574,10 @@ async def entrypoint(ctx: JobContext):
     def on_user_speech_watchdog(msg):
         """Start watchdog timer when user speaks"""
         nonlocal _watchdog_task, _watchdog_waiting, _watchdog_recovery_attempts
+        text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
+        # Don't start watchdog for trivial transcripts (noise)
+        if is_trivial_transcript(text):
+            return
         _cancel_watchdog()
         _watchdog_waiting = True
         _watchdog_recovery_attempts = 0

@@ -308,6 +308,28 @@ class LiveKitBridge extends EventEmitter {
 
     this.room = new Room();
 
+    // Register a handler for the lk.agent.events text stream topic
+    // The agent SDK sends events via both DataReceived (legacy) and text streams (new).
+    this.room.registerTextStreamHandler('lk.agent.events', async (reader, participantInfo) => {
+      try {
+        const text = await reader.readAll();
+        // console.log(`📝 [AGENT-EVENT] From ${participantInfo.identity}: ${text}`);
+      } catch (err) {
+        console.error(`❌ [AGENT-EVENT] Error reading text stream: ${err.message}`);
+      }
+    });
+
+    // Register a handler for the lk.transcription text stream topic
+    // This captures user and agent speech transcriptions
+    this.room.registerTextStreamHandler('lk.transcription', async (reader, participantInfo) => {
+      try {
+        const text = await reader.readAll();
+        // console.log(`🗣️ [TRANSCRIPT] From ${participantInfo.identity}: ${text}`);
+      } catch (err) {
+        console.error(`❌ [TRANSCRIPT] Error reading text stream: ${err.message}`);
+      }
+    });
+
     // Add connection state monitoring
     // this.room.on("connectionStateChanged", (state) => {
     //   console.log(`[LiveKitBridge] Connection state changed: ${state}`);
