@@ -8,6 +8,7 @@
 
 const { Worker } = require("worker_threads");
 const path = require("path");
+const os = require("os");
 const { PerformanceMonitor } = require("./performance-monitor");
 
 /**
@@ -30,7 +31,7 @@ class WorkerPoolManager {
 
         // DYNAMIC SCALING: Configuration
         this.minWorkers = 4; // Minimum workers (always keep at least 4)
-        this.maxWorkers = 8; // Maximum workers (cap based on typical CPU cores)
+        this.maxWorkers = Math.max(8, os.cpus().length); // Scale with available CPU cores, minimum 8
         this.scaleUpThreshold = 0.7; // Scale up when workers are 70% loaded
         this.scaleDownThreshold = 0.3; // Scale down when workers are 30% loaded
         this.scaleUpCpuThreshold = 60; // Scale up when CPU > 60%
