@@ -1,80 +1,93 @@
-@main/manager-api-node/prd.md @main/manager-api-node/activity.md
+@main/mqtt-gateway-go/prd.md @main/mqtt-gateway-go/activity.md
 
-We are testing and fixing the Node.js API to ensure full compatibility with the Vue.js manager-web frontend.
+We are building the MQTT Gateway in Go — a drop-in replacement for the existing Node.js gateway at `main/mqtt-gateway/`.
 
 First read activity.md to see what was recently accomplished.
 
 ## Project Locations
 
-- **Node.js API**: `main/manager-api-node/` (being tested/fixed)
-- **Spring Boot API**: `main/manager-api/` (reference for expected behavior)
-- **Frontend**: `main/manager-web/` (Vue.js application)
+- **Go Gateway**: `main/mqtt-gateway-go/` (being built)
+- **Node.js Gateway**: `main/mqtt-gateway/` (reference implementation)
+- **LiveKit Agents**: `main/livekit-server/workers/` (downstream — do not modify)
+- **Manager API**: `main/manager-api-node/` (upstream — do not modify)
 
-## Start the Applications
+## Reference Implementation
 
-### 1. Start Node.js API (port 8002)
+The existing Node.js gateway at `main/mqtt-gateway/` is the source of truth for all behavior. When in doubt about how something should work, read the Node.js code:
+
+- `gateway/mqtt-gateway.js` — MQTT connection, device lifecycle, message routing
+- `gateway/udp-server.js` — UDP packet handling, encryption
+- `livekit/livekit-bridge.js` — LiveKit rooms, audio tracks, agent dispatch
+- `livekit/audio-processor.js` — Audio pipeline (resample, buffer, silence detect)
+- `livekit/mcp-handler.js` — MCP request/response bridge
+- `core/worker-pool-manager.js` — Worker thread pool (replaced by goroutines in Go)
+- `core/opus-worker.js` — Opus encode/decode worker
+
+## Build & Run
+
+### Build the Go gateway
 ```bash
-cd main/manager-api-node
-npm run dev
+cd main/mqtt-gateway-go
+go build -o gateway ./cmd/gateway/
 ```
 
-### 2. Start Spring Boot API (port 8003) - Reference
+### Run in development
 ```bash
-cd main/manager-api
-mvn spring-boot:run -Dspring-boot.run.profiles=dev -Dserver.port=8003
+cd main/mqtt-gateway-go
+go run ./cmd/gateway/
 ```
 
-### 3. Start Frontend (port 8080)
+### Run tests
 ```bash
-cd main/manager-web
-npm run serve
+cd main/mqtt-gateway-go
+go test ./...
 ```
 
-## Testing Pattern
-
-For each API endpoint, compare responses between both backends:
-
+### Run tests with coverage
 ```bash
-# Get auth token from Spring Boot (reference)
-TOKEN=$(curl -s -X POST http://localhost:8003/toy/user/login \
-  -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"admin123"}' | jq -r '.data.token')
-
-# Compare responses
-echo "=== Spring Boot (expected) ==="
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8003/toy/endpoint | jq
-
-echo "=== Node.js (being tested) ==="
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8002/toy/endpoint | jq
+cd main/mqtt-gateway-go
+go test -cover ./...
 ```
+
+### Lint
+```bash
+cd main/mqtt-gateway-go
+go vet ./...
+```
+
+## System Dependencies
+
+The Go gateway requires libopus for Opus audio codec (CGo binding):
+- **Ubuntu/Debian**: `apt install libopus-dev`
+- **macOS**: `brew install opus`
+- **Windows**: Use MSYS2 or pre-built binaries
 
 ## Work on Tasks
 
 Open prd.md and find the next task where `"passes": false`.
 
 For each task:
-1. Test the endpoint(s) on Spring Boot API (port 8003) to see expected behavior
-2. Test the same endpoint(s) on Node.js API (port 8002)
-3. Compare the responses (fields, format, status codes)
-4. If different, fix the Node.js API code to match Spring Boot
-5. Verify the fix works
-6. Test in the frontend if applicable
+1. Read the corresponding Node.js reference code to understand expected behavior
+2. Implement the Go equivalent following Go idioms and best practices
+3. Write unit tests for the new code
+4. Verify tests pass with `go test ./...`
+5. Verify the build succeeds with `go build ./cmd/gateway/`
 
 ## Verification
 
-After fixing an endpoint:
-1. Verify curl responses match between both APIs
-2. Check if frontend uses this endpoint
-3. If yes, test the feature in the frontend
-4. Check browser console for any errors
+After completing a feature:
+1. Run `go vet ./...` — no warnings
+2. Run `go test ./...` — all tests pass
+3. Run `go build ./cmd/gateway/` — compiles successfully
+4. For integration features: test with a mock or real ESP32 device if possible
 
 ## Log Progress
 
 Append a dated progress entry to activity.md describing:
-- Which endpoints were tested
-- What differences were found
-- What fixes were made
-- Verification results
+- Which task was completed
+- What Go packages/patterns were used
+- Any deviations from the Node.js reference (and why)
+- Test results
 
 ## Update Task Status
 
@@ -84,8 +97,8 @@ When the task is confirmed working, update that task's `"passes"` field in prd.m
 
 Make one git commit for that task only:
 ```
-git add .
-git commit -m "fix: [brief description of what was fixed]"
+git add main/mqtt-gateway-go/
+git commit -m "feat(mqtt-gateway-go): [brief description]"
 ```
 
 Do NOT run `git init`, do NOT change git remotes, and do NOT push.
@@ -93,8 +106,12 @@ Do NOT run `git init`, do NOT change git remotes, and do NOT push.
 ## Important Rules
 
 - ONLY work on a SINGLE task per iteration
-- Always compare with Spring Boot API before fixing
-- Always verify in frontend when applicable
+- Always reference the Node.js gateway code for expected behavior
+- Follow Go conventions: error handling, naming, package organization
+- Use `context.Context` for cancellation — no manual timer cleanup
+- Use goroutines + channels instead of worker thread pools
+- Use `sync.Pool` for buffer reuse where performance matters
+- Always run `go vet` and `go test` before marking a task done
 - Always log your progress in activity.md
 - Always commit after completing a task
 
