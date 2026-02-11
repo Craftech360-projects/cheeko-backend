@@ -497,24 +497,32 @@ model music_playlist {
   @@unique([device_id, content_id])
 }
 
-model parent_profile {
-  id                   BigInt    @id @default(autoincrement())
-  user_id              BigInt?   @unique
-  email                String?   @db.VarChar(255)
-  phone_number         String?   @db.VarChar(50)
-  display_name         String?   @db.VarChar(255)
-  avatar_url           String?   @db.VarChar(500)
-  timezone             String?   @db.VarChar(50)
-  language             String?   @default("en") @db.VarChar(10)
-  email_notifications  Boolean?  @default(true)
-  push_notifications   Boolean?  @default(true)
-  weekly_report        Boolean?  @default(true)
-  onboarding_completed Boolean?  @default(false)
-  terms_accepted_at    DateTime? @db.Timestamptz(6)
-  terms_version        String?   @db.VarChar(20)
-  created_at           DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime? @default(now()) @db.Timestamptz(6)
-  sys_user             sys_user? @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+model parent_profiles {
+  id                         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                    String?   @unique @db.Uuid
+  sys_user_id                BigInt?
+  parent_name                String?
+  display_name               String?   @db.VarChar(255)
+  email                      String?   @db.VarChar(255)
+  phone_number               String?   @db.VarChar(50)
+  avatar_url                 String?   @db.VarChar(500)
+  preferred_language         String?   @default("en") @db.VarChar(10)
+  timezone                   String?   @default("UTC") @db.VarChar(100)
+  notification_preferences   Json?     @default("{\"push\": true, \"email\": true, \"daily_summary\": true}")
+  email_notifications        Boolean?  @default(true)
+  push_notifications         Boolean?  @default(true)
+  weekly_report              Boolean?  @default(true)
+  onboarding_completed       Boolean?  @default(false)
+  terms_accepted_at          DateTime? @db.Timestamptz(6)
+  terms_version              String?   @db.VarChar(20)
+  privacy_policy_accepted_at DateTime? @db.Timestamptz(6)
+  java_user_id               Int?
+  java_token                 String?
+  generated_password_hash    String?
+  fcm_token                  String?
+  created_at                 DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at                 DateTime? @default(now()) @db.Timestamptz(6)
+  sys_user                   sys_user? @relation(fields: [sys_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 }
 
 model rfid_card_mapping {
@@ -741,7 +749,7 @@ model sys_user {
   ai_agent       ai_agent[]
   ai_device      ai_device[]
   kid_profile    kid_profile[]
-  parent_profile parent_profile?
+  parent_profiles parent_profiles?
   sys_user_token sys_user_token[]
 }
 

@@ -103,32 +103,42 @@ CREATE INDEX idx_sys_dict_data_type_id ON sys_dict_data(dict_type_id);
 COMMENT ON TABLE sys_dict_data IS 'Dictionary values';
 
 -- =============================================
--- parent_profile - Parent/Guardian profiles
+-- parent_profiles - Parent/Guardian profiles (merged mobile + backend)
 -- =============================================
-CREATE TABLE IF NOT EXISTS parent_profile (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES sys_user(id) ON DELETE SET NULL,
-    supabase_user_id VARCHAR(100),
-    full_name VARCHAR(255),
+CREATE TABLE IF NOT EXISTS parent_profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID,
+    sys_user_id BIGINT REFERENCES sys_user(id) ON DELETE SET NULL,
+    parent_name TEXT,
+    display_name VARCHAR(255),
     email VARCHAR(255),
     phone_number VARCHAR(50),
+    avatar_url VARCHAR(500),
     preferred_language VARCHAR(10) DEFAULT 'en',
-    timezone VARCHAR(100),
-    notification_preferences JSONB DEFAULT '{}',
+    timezone VARCHAR(100) DEFAULT 'UTC',
+    notification_preferences JSONB DEFAULT '{"push": true, "email": true, "daily_summary": true}',
+    email_notifications BOOLEAN DEFAULT true,
+    push_notifications BOOLEAN DEFAULT true,
+    weekly_report BOOLEAN DEFAULT true,
     onboarding_completed BOOLEAN DEFAULT FALSE,
     terms_accepted_at TIMESTAMP WITH TIME ZONE,
+    terms_version VARCHAR(20),
     privacy_policy_accepted_at TIMESTAMP WITH TIME ZONE,
-    creator BIGINT,
-    create_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updater BIGINT,
-    update_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    java_user_id INTEGER,
+    java_token TEXT,
+    generated_password_hash TEXT,
+    fcm_token TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT parent_profiles_user_id_key UNIQUE(user_id)
 );
 
-CREATE INDEX idx_parent_profile_user_id ON parent_profile(user_id);
-CREATE INDEX idx_parent_profile_supabase_id ON parent_profile(supabase_user_id);
-CREATE INDEX idx_parent_profile_email ON parent_profile(email);
+CREATE INDEX idx_parent_profiles_user_id ON parent_profiles(user_id);
+CREATE INDEX idx_parent_profiles_sys_user_id ON parent_profiles(sys_user_id);
+CREATE INDEX idx_parent_profiles_email ON parent_profiles(email);
+CREATE INDEX idx_parent_profiles_created_at ON parent_profiles(created_at DESC);
 
-COMMENT ON TABLE parent_profile IS 'Parent/Guardian profile information';
+COMMENT ON TABLE parent_profiles IS 'Parent/Guardian profile information (merged mobile + backend)';
 
 -- =============================================
 -- kid_profile - Child profiles

@@ -79,26 +79,34 @@ CREATE TABLE "sys_dict_data" (
     CONSTRAINT "sys_dict_data_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "parent_profile" (
-    "id" BIGSERIAL NOT NULL,
-    "user_id" BIGINT,
-    "supabase_user_id" VARCHAR(100),
-    "full_name" VARCHAR(255),
+-- CreateTable (merged: mobile app parent_profiles + backend parent_profile)
+CREATE TABLE "parent_profiles" (
+    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "user_id" UUID,
+    "sys_user_id" BIGINT,
+    "parent_name" TEXT,
+    "display_name" VARCHAR(255),
     "email" VARCHAR(255),
     "phone_number" VARCHAR(50),
+    "avatar_url" VARCHAR(500),
     "preferred_language" VARCHAR(10) NOT NULL DEFAULT 'en',
-    "timezone" VARCHAR(100),
-    "notification_preferences" JSONB NOT NULL DEFAULT '{}',
+    "timezone" VARCHAR(100) DEFAULT 'UTC',
+    "notification_preferences" JSONB NOT NULL DEFAULT '{"push": true, "email": true, "daily_summary": true}',
+    "email_notifications" BOOLEAN DEFAULT true,
+    "push_notifications" BOOLEAN DEFAULT true,
+    "weekly_report" BOOLEAN DEFAULT true,
     "onboarding_completed" BOOLEAN NOT NULL DEFAULT false,
     "terms_accepted_at" TIMESTAMPTZ(6),
+    "terms_version" VARCHAR(20),
     "privacy_policy_accepted_at" TIMESTAMPTZ(6),
-    "creator" BIGINT,
-    "create_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updater" BIGINT,
-    "update_date" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "java_user_id" INTEGER,
+    "java_token" TEXT,
+    "generated_password_hash" TEXT,
+    "fcm_token" TEXT,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "parent_profile_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "parent_profiles_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -759,16 +767,19 @@ CREATE INDEX "sys_dict_type_dict_type_idx" ON "sys_dict_type"("dict_type");
 CREATE INDEX "sys_dict_data_dict_type_id_idx" ON "sys_dict_data"("dict_type_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "parent_profile_user_id_key" ON "parent_profile"("user_id");
+CREATE UNIQUE INDEX "parent_profiles_user_id_key" ON "parent_profiles"("user_id");
 
 -- CreateIndex
-CREATE INDEX "parent_profile_user_id_idx" ON "parent_profile"("user_id");
+CREATE INDEX "parent_profiles_user_id_idx" ON "parent_profiles"("user_id");
 
 -- CreateIndex
-CREATE INDEX "parent_profile_supabase_user_id_idx" ON "parent_profile"("supabase_user_id");
+CREATE INDEX "parent_profiles_sys_user_id_idx" ON "parent_profiles"("sys_user_id");
 
 -- CreateIndex
-CREATE INDEX "parent_profile_email_idx" ON "parent_profile"("email");
+CREATE INDEX "parent_profiles_email_idx" ON "parent_profiles"("email");
+
+-- CreateIndex
+CREATE INDEX "parent_profiles_created_at_idx" ON "parent_profiles"("created_at" DESC);
 
 -- CreateIndex
 CREATE INDEX "kid_profile_user_id_idx" ON "kid_profile"("user_id");
@@ -1038,7 +1049,7 @@ ALTER TABLE "sys_user_token" ADD CONSTRAINT "sys_user_token_user_id_fkey" FOREIG
 ALTER TABLE "sys_dict_data" ADD CONSTRAINT "sys_dict_data_dict_type_id_fkey" FOREIGN KEY ("dict_type_id") REFERENCES "sys_dict_type"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "parent_profile" ADD CONSTRAINT "parent_profile_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "parent_profiles" ADD CONSTRAINT "parent_profiles_sys_user_id_fkey" FOREIGN KEY ("sys_user_id") REFERENCES "sys_user"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "kid_profile" ADD CONSTRAINT "kid_profile_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "sys_user"("id") ON DELETE CASCADE ON UPDATE CASCADE;

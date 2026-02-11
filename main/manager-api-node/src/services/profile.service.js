@@ -357,9 +357,9 @@ const getParentProfile = async (userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .select('*')
-    .eq('user_id', userId)
+    .eq('sys_user_id', userId)
     .single();
 
   if (error && error.code !== 'PGRST116') {
@@ -379,9 +379,9 @@ const getParentBySupabaseId = async (supabaseUserId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .select('*')
-    .eq('supabase_user_id', supabaseUserId)
+    .eq('user_id', supabaseUserId)
     .single();
 
   if (error && error.code !== 'PGRST116') {
@@ -408,19 +408,23 @@ const createParentProfile = async (userId, data) => {
   }
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .insert({
-      user_id: userId,
-      supabase_user_id: data.supabaseUserId,
-      full_name: data.fullName,
+      sys_user_id: userId,
+      user_id: data.supabaseUserId || null,
+      parent_name: data.fullName || data.parentName,
+      display_name: data.displayName,
       email: data.email,
       phone_number: data.phoneNumber,
+      avatar_url: data.avatarUrl,
       preferred_language: data.preferredLanguage || 'en',
-      timezone: data.timezone,
-      notification_preferences: data.notificationPreferences || {},
+      timezone: data.timezone || 'UTC',
+      notification_preferences: data.notificationPreferences || { push: true, email: true, daily_summary: true },
       onboarding_completed: data.onboardingCompleted || false,
       terms_accepted_at: data.termsAcceptedAt,
-      privacy_policy_accepted_at: data.privacyPolicyAcceptedAt
+      terms_version: data.termsVersion,
+      privacy_policy_accepted_at: data.privacyPolicyAcceptedAt,
+      fcm_token: data.fcmToken
     })
     .select()
     .single();
@@ -448,20 +452,25 @@ const updateParentProfile = async (userId, data) => {
 
   const updateData = { updated_at: new Date().toISOString() };
 
-  if (data.fullName !== undefined) updateData.full_name = data.fullName;
+  if (data.fullName !== undefined) updateData.parent_name = data.fullName;
+  if (data.parentName !== undefined) updateData.parent_name = data.parentName;
+  if (data.displayName !== undefined) updateData.display_name = data.displayName;
   if (data.email !== undefined) updateData.email = data.email;
   if (data.phoneNumber !== undefined) updateData.phone_number = data.phoneNumber;
+  if (data.avatarUrl !== undefined) updateData.avatar_url = data.avatarUrl;
   if (data.preferredLanguage !== undefined) updateData.preferred_language = data.preferredLanguage;
   if (data.timezone !== undefined) updateData.timezone = data.timezone;
   if (data.notificationPreferences !== undefined) updateData.notification_preferences = data.notificationPreferences;
   if (data.onboardingCompleted !== undefined) updateData.onboarding_completed = data.onboardingCompleted;
   if (data.termsAcceptedAt !== undefined) updateData.terms_accepted_at = data.termsAcceptedAt;
+  if (data.termsVersion !== undefined) updateData.terms_version = data.termsVersion;
   if (data.privacyPolicyAcceptedAt !== undefined) updateData.privacy_policy_accepted_at = data.privacyPolicyAcceptedAt;
+  if (data.fcmToken !== undefined) updateData.fcm_token = data.fcmToken;
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .update(updateData)
-    .eq('user_id', userId)
+    .eq('sys_user_id', userId)
     .select()
     .single();
 
@@ -485,9 +494,9 @@ const deleteParentProfile = async (userId) => {
   if (!existing) throw new Error('Parent profile not found');
 
   const { error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .delete()
-    .eq('user_id', userId);
+    .eq('sys_user_id', userId);
 
   if (error) {
     logger.error('Failed to delete parent profile', { error, userId });
@@ -514,12 +523,12 @@ const updateNotificationPreferences = async (userId, preferences) => {
   };
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .update({
       notification_preferences: updatedPrefs,
       updated_at: new Date().toISOString()
     })
-    .eq('user_id', userId)
+    .eq('sys_user_id', userId)
     .select('notification_preferences')
     .single();
 
@@ -540,12 +549,12 @@ const completeOnboarding = async (userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .update({
       onboarding_completed: true,
       updated_at: new Date().toISOString()
     })
-    .eq('user_id', userId)
+    .eq('sys_user_id', userId)
     .select()
     .single();
 
@@ -577,9 +586,9 @@ const acceptTerms = async (userId, data = {}) => {
   }
 
   const { data: profile, error } = await supabaseAdmin
-    .from('parent_profile')
+    .from('parent_profiles')
     .update(updateData)
-    .eq('user_id', userId)
+    .eq('sys_user_id', userId)
     .select()
     .single();
 

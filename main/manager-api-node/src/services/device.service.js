@@ -1578,19 +1578,20 @@ const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
     // Fetch parent profiles if any
     let parentMap = {};
     if (userIds.length > 0) {
-      // First try parent_profile table
+      // First try parent_profiles table
       const { data: parents } = await supabaseAdmin
-        .from('parent_profile')
-        .select('user_id, display_name')
-        .in('user_id', userIds);
+        .from('parent_profiles')
+        .select('sys_user_id, display_name, parent_name')
+        .in('sys_user_id', userIds);
 
       for (const parent of parents || []) {
-        if (parent.display_name) {
-          parentMap[parent.user_id] = parent.display_name;
+        const name = parent.display_name || parent.parent_name;
+        if (name) {
+          parentMap[parent.sys_user_id] = name;
         }
       }
 
-      // Fallback to sys_user nickname for users without parent_profile
+      // Fallback to sys_user nickname for users without parent_profiles
       const usersWithoutProfile = userIds.filter(id => !parentMap[id]);
       if (usersWithoutProfile.length > 0) {
         const { data: users } = await supabaseAdmin

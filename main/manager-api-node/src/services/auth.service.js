@@ -56,9 +56,9 @@ const register = async ({ username, password, email, phone }) => {
   // Create parent profile if email provided
   if (email) {
     await supabaseAdmin
-      .from('parent_profile')
+      .from('parent_profiles')
       .insert({
-        user_id: user.id,
+        sys_user_id: user.id,
         email,
         phone_number: phone
       });
