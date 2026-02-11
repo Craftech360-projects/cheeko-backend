@@ -132,36 +132,54 @@ const updateAgent = async (agentId, _userId, data) => {
 
 /**
  * Delete agent and all associated records
- * Matches Spring Boot behavior: deletes devices, chat history, and plugins first
+ * Cascading delete: devices → chat history → plugins → agent
  * @param {string} agentId - Agent ID
  * @param {number} userId - User ID (kept for backward compatibility but not used for filtering)
  */
 const deleteAgent = async (agentId, _userId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  // Check if agent exists (Spring Boot doesn't filter by user ID)
+  // Check if agent exists
   const existing = await getAgentById(agentId);
   if (!existing) throw new Error('Agent not found');
 
-  // Delete associated devices first
-  await supabaseAdmin
+  logger.info(`[deleteAgent] Starting cascading delete for agent ${agentId}`);
+
+  // 1. Delete associated devices FIRST
+  const { error: deviceError } = await supabaseAdmin
     .from('ai_device')
     .delete()
     .eq('agent_id', agentId);
 
-  // Delete associated chat history
-  await supabaseAdmin
+  if (deviceError) {
+    logger.error('Failed to delete devices:', deviceError);
+    throw new Error('Failed to delete associated devices');
+  }
+  logger.info(`[deleteAgent] Deleted devices for agent ${agentId}`);
+
+  // 2. Delete associated chat history
+  const { error: chatError } = await supabaseAdmin
     .from('ai_agent_chat_history')
     .delete()
     .eq('agent_id', agentId);
 
-  // Delete associated plugin mappings
-  await supabaseAdmin
+  if (chatError) {
+    logger.error('Failed to delete chat history:', chatError);
+  }
+  logger.info(`[deleteAgent] Deleted chat history for agent ${agentId}`);
+
+  // 3. Delete associated plugin mappings
+  const { error: pluginError } = await supabaseAdmin
     .from('ai_agent_plugin_mapping')
     .delete()
     .eq('agent_id', agentId);
 
-  // Finally delete the agent
+  if (pluginError) {
+    logger.error('Failed to delete plugin mappings:', pluginError);
+  }
+  logger.info(`[deleteAgent] Deleted plugin mappings for agent ${agentId}`);
+
+  // 4. Finally delete the agent
   const { error } = await supabaseAdmin
     .from('ai_agent')
     .delete()
@@ -171,6 +189,8 @@ const deleteAgent = async (agentId, _userId) => {
     logger.error('Failed to delete agent:', error);
     throw new Error('Failed to delete agent');
   }
+
+  logger.info(`[deleteAgent] Successfully completed cascading delete for agent ${agentId}`);
 };
 
 /**
@@ -515,6 +535,7 @@ const setCharacter = async (mac, agentId) => {
 
 /**
  * Set character (agent) for device by name
+ * One device = one agent (update existing agent instead of creating new ones)
  * @param {string} mac - Device MAC address
  * @param {string} characterName - Agent name to set
  * @returns {Promise<Object>} Agent info
@@ -524,37 +545,109 @@ const setCharacterByName = async (mac, characterName) => {
 
   const normalizedMac = normalizeMacAddress(mac);
 
-  // Get device to find user
+  // Get device with current agent_id
   const { data: device } = await supabaseAdmin
     .from('ai_device')
-    .select('id, user_id')
+    .select('id, user_id, agent_id')
     .eq('mac_address', normalizedMac)
     .single();
 
   if (!device) throw new Error('Device not found');
 
-  // Find agent by name (case-insensitive) for this user
-  const { data: agent } = await supabaseAdmin
-    .from('ai_agent')
-    .select('id, agent_name')
-    .eq('user_id', device.user_id)
+  // Find template by character name
+  const { data: template } = await supabaseAdmin
+    .from('ai_agent_template')
+    .select('*')
     .ilike('agent_name', characterName)
+    .eq('is_visible', 1)
     .single();
 
-  if (!agent) throw new Error(`Agent "${characterName}" not found`);
+  if (!template) {
+    throw new Error(`Template "${characterName}" not found`);
+  }
 
-  // Update device
-  const { error } = await supabaseAdmin
-    .from('ai_device')
-    .update({ agent_id: agent.id })
-    .eq('id', device.id);
+  logger.info(`[setCharacterByName] Found template "${template.agent_name}" for character change`);
 
-  if (error) throw new Error('Failed to set character');
+  let agentId;
+  let agentName;
 
-  logger.info(`[setCharacterByName] Device ${normalizedMac} set to agent: ${agent.agent_name}`);
+  // Check if device already has an agent
+  if (device.agent_id) {
+    // UPDATE existing agent with new character's properties
+    logger.info(`[setCharacterByName] Updating existing agent ${device.agent_id} to "${template.agent_name}"`);
+
+    const { error: updateError } = await supabaseAdmin
+      .from('ai_agent')
+      .update({
+        agent_code: template.agent_code,
+        agent_name: template.agent_name,
+        asr_model_id: template.asr_model_id,
+        vad_model_id: template.vad_model_id,
+        llm_model_id: template.llm_model_id,
+        vllm_model_id: template.vllm_model_id,
+        tts_model_id: template.tts_model_id,
+        tts_voice_id: template.tts_voice_id,
+        mem_model_id: template.mem_model_id,
+        intent_model_id: template.intent_model_id,
+        chat_history_conf: template.chat_history_conf,
+        system_prompt: template.system_prompt,
+        summary_memory: template.summary_memory,
+        lang_code: template.lang_code,
+        language: template.language,
+        sort: template.sort,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', device.agent_id);
+
+    if (updateError) {
+      throw new Error(`Failed to update agent: ${updateError.message}`);
+    }
+
+    agentId = device.agent_id;
+    agentName = template.agent_name;
+    logger.info(`[setCharacterByName] Updated agent ${agentId} to "${agentName}"`);
+  } else {
+    // CREATE new agent from template (first time setup)
+    logger.info(`[setCharacterByName] Creating new agent "${template.agent_name}" for device`);
+
+    const newAgent = await createAgent(device.user_id, {
+      agentCode: template.agent_code,
+      agentName: template.agent_name,
+      asrModelId: template.asr_model_id,
+      vadModelId: template.vad_model_id,
+      llmModelId: template.llm_model_id,
+      vllmModelId: template.vllm_model_id,
+      ttsModelId: template.tts_model_id,
+      ttsVoiceId: template.tts_voice_id,
+      memModelId: template.mem_model_id,
+      intentModelId: template.intent_model_id,
+      chatHistoryConf: template.chat_history_conf,
+      systemPrompt: template.system_prompt,
+      summaryMemory: template.summary_memory,
+      langCode: template.lang_code,
+      language: template.language,
+      sort: template.sort
+    });
+
+    agentId = newAgent.id;
+    agentName = newAgent.agent_name;
+
+    // Link device to new agent
+    const { error: linkError } = await supabaseAdmin
+      .from('ai_device')
+      .update({ agent_id: agentId })
+      .eq('id', device.id);
+
+    if (linkError) {
+      throw new Error('Failed to link device to agent');
+    }
+
+    logger.info(`[setCharacterByName] Created and linked agent "${agentName}" (${agentId}) to device`);
+  }
+
   return {
-    agentId: agent.id,
-    agentName: agent.agent_name
+    agentId: agentId,
+    agentName: agentName
   };
 };
 
