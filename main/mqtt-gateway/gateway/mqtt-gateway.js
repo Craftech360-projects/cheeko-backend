@@ -839,7 +839,7 @@ class MQTTGateway {
         if (!greetingSent) {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
         }
-      } else if (originalPayload.type === "start_greeting_text" || originalPayload.type === "text_greeting") {
+      } else if (originalPayload.type === "start_greeting_text" || originalPayload.type === "card_lookup") {
         // RFID Card Scan: look up card mapping and route to Content Pack (device) or Q&A (agent)
         const rfidUid =
           originalPayload.rfid_uid ||
@@ -2900,7 +2900,7 @@ class MQTTGateway {
     const sessionId = payloadObj.session_id || "";
 
     logger.info(
-      `📤 [MQTT-OUT] ${deviceInfo || topic} | type: ${msgType}${msgState ? ` | state: ${msgState}` : ""
+      `📤 [MQTT-OUT] ${deviceInfo || topic} | topic: ${topic} | type: ${msgType}${msgState ? ` | state: ${msgState}` : ""
       }${sessionId ? ` | session: ${sessionId.substring(0, 20)}...` : ""}`
     );
 
