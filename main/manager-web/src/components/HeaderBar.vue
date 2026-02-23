@@ -16,6 +16,13 @@
             :style="{ filter: $route.path === '/home' || $route.path === '/role-config' || $route.path === '/device-management' ? 'brightness(0) invert(1)' : 'None' }" />
          Agent Management
         </div>
+        <div class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/openclaw-settings' }"
+          @click="goOpenClawSettings">
+          <i class="el-icon-connection"
+            :style="{ fontSize: '15px', color: $route.path === '/openclaw-settings' ? '#fff' : '#3d4566' }"></i>
+          OpenClaw
+        </div>
         <div v-if="isSuperAdmin" class="equipment-management"
           :class="{ 'active-tab': $route.path === '/user-management' }" @click="goUserManagement">
           <img loading="lazy" alt="" src="@/assets/header/user_management.png"

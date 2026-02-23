@@ -49,6 +49,7 @@
                 <div class="stats-label">Total Devices</div>
               </div>
               <el-popover
+                v-if="isAdmin"
                 placement="bottom"
                 width="280"
                 trigger="hover"
@@ -68,6 +69,7 @@
                 </div>
               </el-popover>
               <el-popover
+                v-if="isAdmin"
                 placement="bottom"
                 width="280"
                 trigger="hover"
@@ -160,23 +162,23 @@
               <el-table-column label="Actions" min-width="320" align="center">
                 <template slot-scope="scope">
                   <div class="action-buttons">
-                    <el-button type="text" size="small" @click="handleConfigure(scope.row)">
+                    <el-button v-if="isAdmin" type="text" size="small" @click="handleConfigure(scope.row)">
                       Configure Role
                     </el-button>
-                    <el-button type="text" size="small" @click="handleVoicePrint(scope.row)">
+                    <el-button v-if="isAdmin" type="text" size="small" @click="handleVoicePrint(scope.row)">
                       Voice Recognition
                     </el-button>
                     <el-button type="text" size="small" @click="handleDeviceManageRow(scope.row)">
                       Devices
                     </el-button>
-                    <el-button
+                    <el-button v-if="isAdmin"
                       type="text"
                       size="small"
                       @click="handleChatHistoryRow(scope.row)"
                     >
                       Chat History
                     </el-button>
-                    <el-button type="text" size="small" class="delete-btn" @click="handleDeleteAgent(scope.row.agentId)">
+                    <el-button v-if="isAdmin" type="text" size="small" class="delete-btn" @click="handleDeleteAgent(scope.row.agentId)">
                       <i class="el-icon-delete"></i>
                     </el-button>
                   </div>

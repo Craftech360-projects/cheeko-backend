@@ -24,12 +24,12 @@
                   <el-checkbox v-model="scope.row.selected"></el-checkbox>
                 </template>
               </el-table-column>
-              <el-table-column label="Device Model" prop="model" align="center">
+              <el-table-column v-if="isAdmin" label="Device Model" prop="model" align="center">
                 <template slot-scope="scope">
                   {{ getFirmwareTypeName(scope.row.model) }}
                 </template>
               </el-table-column>
-              <el-table-column label="Firmware Version" prop="firmwareVersion" align="center"></el-table-column>
+              <el-table-column v-if="isAdmin" label="Firmware Version" prop="firmwareVersion" align="center"></el-table-column>
               <el-table-column label="MAC Address" prop="macAddress" align="center"></el-table-column>
               <el-table-column label="Bind Time" prop="bindTime" align="center"></el-table-column>
               <el-table-column label="Last Conversation" prop="lastConversation" align="center"></el-table-column>
@@ -45,7 +45,7 @@
                   </span>
                 </template>
               </el-table-column>
-              <el-table-column label="Remark" align="center">
+              <el-table-column v-if="isAdmin" label="Remark" align="center">
                 <template #default="{ row }">
                   <el-input
                       v-show="row.isEdit"
@@ -76,10 +76,10 @@
               </el-table-column>
               <el-table-column label="Actions" align="center" min-width="200">
                 <template slot-scope="scope">
-                  <el-button size="mini" type="text" @click="handlePlaylist(scope.row)">
+                  <el-button v-if="isAdmin" size="mini" type="text" @click="handlePlaylist(scope.row)">
                     Playlist
                   </el-button>
-                  <el-button size="mini" type="text" @click="handleKidProfile(scope.row)">
+                  <el-button v-if="isAdmin" size="mini" type="text" @click="handleKidProfile(scope.row)">
                     Kid Profile
                   </el-button>
                   <el-button size="mini" type="text" @click="handleUnbind(scope.row.device_id)">
@@ -324,6 +324,9 @@ export default {
     };
   },
   computed: {
+    isAdmin() {
+      return this.$store.getters.getIsSuperAdmin;
+    },
     filteredDeviceList() {
       const keyword = this.activeSearchKeyword.toLowerCase();
       if (!keyword) return this.deviceList;
