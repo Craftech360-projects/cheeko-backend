@@ -99,7 +99,7 @@
             <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': userDropdownVisible }"></i>
           </span>
           <el-dropdown-menu slot="dropdown">
-            <el-dropdown-item @click.native="goOpenClawSetup">OpenClaw Setup</el-dropdown-item>
+            <el-dropdown-item @click.native="goOpenClawSettings">OpenClaw Settings</el-dropdown-item>
             <el-dropdown-item @click.native="showChangePasswordDialog">Change Password</el-dropdown-item>
             <el-dropdown-item @click.native="handleLogout">log out</el-dropdown-item>
           </el-dropdown-menu>
@@ -194,8 +194,8 @@ export default {
     goEmailReports() {
       this.$router.push('/email-reports')
     },
-    goOpenClawSetup() {
-      this.$router.push('/openclaw-setup')
+    goOpenClawSettings() {
+      this.$router.push('/openclaw-settings')
     },
     // Get user information
     fetchUserInfo() {

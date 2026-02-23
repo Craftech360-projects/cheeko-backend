@@ -15,7 +15,7 @@
       >
         <template slot="title">
           <span>OpenClaw is not configured &mdash; </span>
-          <span style="cursor: pointer; text-decoration: underline; color: var(--primary);" @click="$router.push('/openclaw-setup')">Set up now</span>
+          <span style="cursor: pointer; text-decoration: underline; color: var(--primary);" @click="$router.push('/openclaw-settings')">Set up now</span>
         </template>
       </el-alert>
       <div>

@@ -33,6 +33,18 @@
               <el-table-column label="MAC Address" prop="macAddress" align="center"></el-table-column>
               <el-table-column label="Bind Time" prop="bindTime" align="center"></el-table-column>
               <el-table-column label="Last Conversation" prop="lastConversation" align="center"></el-table-column>
+              <el-table-column label="AI Engine" align="center" min-width="160">
+                <template slot-scope="scope">
+                  <span v-if="scope.row.openclaw_url" class="openclaw-url">
+                    <span class="status-dot online"></span>
+                    <span class="url-text">{{ scope.row.openclaw_url }}</span>
+                  </span>
+                  <span v-else class="openclaw-not-configured">
+                    <span class="status-dot offline"></span>
+                    Not configured
+                  </span>
+                </template>
+              </el-table-column>
               <el-table-column label="Remark" align="center">
                 <template #default="{ row }">
                   <el-input
@@ -1318,5 +1330,47 @@ export default {
 .selected-count {
   font-size: 13px;
   color: #606266;
+}
+
+.openclaw-url {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+}
+
+.url-text {
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  color: #3d4566;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.openclaw-not-configured {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  color: #909399;
+  font-size: 12px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+
+.status-dot.offline {
+  background: #d1d5db;
 }
 </style>

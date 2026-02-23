@@ -173,20 +173,18 @@ const setOpenClawConfig = async (userId, { openclaw_url, openclaw_token }) => {
   }
 
   // Propagate to all existing devices for this user
-  if (openclaw_url) {
-    const { error: deviceError } = await supabaseAdmin
-      .from('ai_device')
-      .update({
-        openclaw_url: openclaw_url,
-        openclaw_token: openclaw_token || null,
-        update_date: new Date().toISOString()
-      })
-      .eq('user_id', userId);
+  const { error: deviceError } = await supabaseAdmin
+    .from('ai_device')
+    .update({
+      openclaw_url: openclaw_url || null,
+      openclaw_token: openclaw_token || null,
+      update_date: new Date().toISOString()
+    })
+    .eq('user_id', userId);
 
-    if (deviceError) {
-      logger.warn('Failed to propagate openclaw config to devices:', deviceError);
-      // Don't throw - profile was saved, device propagation is secondary
-    }
+  if (deviceError) {
+    logger.warn('Failed to propagate openclaw config to devices:', deviceError);
+    // Don't throw - profile was saved, device propagation is secondary
   }
 
   return { openclaw_url, openclaw_token };
