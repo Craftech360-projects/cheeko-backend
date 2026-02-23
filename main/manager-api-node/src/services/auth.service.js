@@ -53,16 +53,14 @@ const register = async ({ username, password, email, phone }) => {
     throw new Error('Failed to create user');
   }
 
-  // Create parent profile if email provided
-  if (email) {
-    await supabaseAdmin
-      .from('parent_profile')
-      .insert({
-        user_id: user.id,
-        email,
-        phone_number: phone
-      });
-  }
+  // Always create parent profile for new users
+  await supabaseAdmin
+    .from('parent_profile')
+    .insert({
+      user_id: user.id,
+      email: email || null,
+      phone_number: phone || null
+    });
 
   // Return user without password
   const { password: _, ...userWithoutPassword } = user;

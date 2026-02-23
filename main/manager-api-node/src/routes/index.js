@@ -28,6 +28,7 @@ const paramsRoutes = require('./params.routes');
 const dictRoutes = require('./dict.routes');
 const ttsVoiceRoutes = require('./ttsVoice.routes');
 const emailReportRoutes = require('./emailReport.routes');
+const openclawRoutes = require('./openclaw.routes');
 
 /**
  * @swagger
@@ -203,5 +204,6 @@ router.use('/admin/params', paramsRoutes);
 router.use('/admin/dict', dictRoutes);
 router.use('/ttsVoice', ttsVoiceRoutes);
 router.use('/admin/email-reports', emailReportRoutes);
+router.use('/', openclawRoutes); // OpenClaw routes mounted at root (has /user/* and /api/openclaw/*)
 
 module.exports = router;

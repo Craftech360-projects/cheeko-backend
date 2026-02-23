@@ -914,7 +914,7 @@ class TestClient:
     def __init__(self):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = "00:16:3e:ac:b5:38"
+        self.device_mac_formatted = "00:16:3e:ac:b5:41"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # MQTT credentials will be set from OTA response

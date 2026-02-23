@@ -99,7 +99,9 @@ router.post('/bind/:agentId/:deviceCode',
         alias: device.alias,
         board: device.board,
         kidId: device.kid_id,
-        appVersion: device.app_version
+        appVersion: device.app_version,
+        openclaw_url: device.openclaw_url,
+        openclaw_configured: !!device.openclaw_url
       };
 
       success(res, response);
@@ -155,7 +157,9 @@ router.get('/bind/:agentId',
       updater: device.updater,
       updateDate: device.update_date,
       creator: device.creator,
-      createDate: device.create_date
+      createDate: device.create_date,
+      openclaw_url: device.openclaw_url,
+      openclaw_configured: !!device.openclaw_url
     }));
 
     success(res, transformedDevices);

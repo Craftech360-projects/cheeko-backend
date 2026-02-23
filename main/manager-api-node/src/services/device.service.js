@@ -153,6 +153,19 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     throw new Error('Agent not found or does not belong to user');
   }
 
+  // Fetch user's OpenClaw URL from parent_profile to copy into device
+  let openclawUrl = null;
+  let openclawToken = null;
+  const { data: parentProfile } = await supabaseAdmin
+    .from('parent_profile')
+    .select('openclaw_url, openclaw_token')
+    .eq('user_id', userId)
+    .single();
+  if (parentProfile) {
+    openclawUrl = parentProfile.openclaw_url || null;
+    openclawToken = parentProfile.openclaw_token || null;
+  }
+
   if (device) {
     // Update existing device
     if (device.user_id && device.user_id !== userId) {
@@ -164,6 +177,8 @@ const bindDevice = async (userId, agentId, deviceCode) => {
       .update({
         user_id: userId,
         agent_id: agentId,
+        openclaw_url: openclawUrl,
+        openclaw_token: openclawToken,
         update_date: new Date().toISOString()
       })
       .eq('id', device.id)
@@ -194,6 +209,8 @@ const bindDevice = async (userId, agentId, deviceCode) => {
         auto_update: 1,
         mode: 'conversation',
         device_mode: 'manual',
+        openclaw_url: openclawUrl,
+        openclaw_token: openclawToken,
         create_date: now,
         update_date: now,
         last_connected_at: now,
@@ -311,6 +328,8 @@ const updateDevice = async (userId, deviceId, data, isSuperAdmin = false) => {
   if (data.agentId !== undefined) updateData.agent_id = data.agentId;
   if (data.deviceMode !== undefined) updateData.device_mode = data.deviceMode;
   if (data.mode !== undefined) updateData.mode = data.mode;
+  if (data.openclaw_url !== undefined) updateData.openclaw_url = data.openclaw_url;
+  if (data.openclaw_token !== undefined) updateData.openclaw_token = data.openclaw_token;
 
   const { data: updated, error } = await supabaseAdmin
     .from('ai_device')
@@ -701,18 +720,31 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
   }
 
   // Build WebSocket configuration
-  let wsUrl = await getSystemParam('server.websocket');
-  if (!wsUrl || wsUrl === 'null') {
-    wsUrl = 'ws://192.168.1.99:8000/cheeko/v1/';
+  // If device has openclaw_url configured, use that (OpenClaw mode)
+  // Otherwise fall back to system-wide LiveKit WebSocket URL
+  let wsUrl = '';
+  if (device && device.openclaw_url) {
+    wsUrl = device.openclaw_url;
   } else {
-    // If multiple URLs (semicolon separated), pick random one
-    const wsUrls = wsUrl.split(';');
-    wsUrl = wsUrls[Math.floor(Math.random() * wsUrls.length)];
+    wsUrl = await getSystemParam('server.websocket');
+    if (!wsUrl || wsUrl === 'null') {
+      wsUrl = 'ws://192.168.1.99:8000/cheeko/v1/';
+    } else {
+      // If multiple URLs (semicolon separated), pick random one
+      const wsUrls = wsUrl.split(';');
+      wsUrl = wsUrls[Math.floor(Math.random() * wsUrls.length)];
+    }
   }
   response.websocket = { url: wsUrl };
+  if (device && device.openclaw_token) {
+    response.websocket.token = device.openclaw_token;
+  }
 
-  // Build MQTT credentials (always included)
-  response.mqtt = await buildMqttCredentials(normalizedMac);
+  // Build MQTT credentials only if NOT using OpenClaw
+  // OpenClaw replaces MQTT entirely - devices connect directly via WebSocket
+  if (!(device && device.openclaw_url)) {
+    response.mqtt = await buildMqttCredentials(normalizedMac);
+  }
 
   // Build activation code for unregistered OR unbound devices
   // Unbound devices (user_id=null) need activation code so another user can bind them

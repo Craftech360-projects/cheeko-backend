@@ -273,8 +273,9 @@ export default {
       }
 
       Api.user.register(this.form, ({ data }) => {
-        showSuccess('Registration successful!')
-        goToPage('/login')
+        showSuccess('Registration successful! Please login to set up your AI engine.')
+        // Redirect to openclaw-setup; router guard will force login first
+        goToPage('/openclaw-setup')
       }, (err) => {
         showDanger(err.data.msg || 'Registration failed')
         if (err.data != null && err.data.msg != null && err.data.msg.indexOf('captcha') > -1) {

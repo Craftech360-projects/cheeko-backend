@@ -108,7 +108,7 @@ function httpHandlerError(info, failCallback, networkFailCallback) {
 
     /** Request successful, exit this function. Can be adjusted based on project requirements. Here status 200 means success */
     let networkError = false
-    if (info.status === 200) {
+    if (info.status === 200 || info.status === 304) {
         if (info.data.code === 'success' || info.data.code === 0 || info.data.code === undefined) {
             return networkError
         } else if (info.data.code === 401) {

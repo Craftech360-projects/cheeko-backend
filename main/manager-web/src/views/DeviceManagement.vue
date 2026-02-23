@@ -437,7 +437,27 @@ export default {
           });
     },
     handleAddDevice() {
-      this.addDeviceDialogVisible = true;
+      // Check if OpenClaw URL is configured before allowing device binding
+      Api.openclaw.getConfig((res) => {
+        if (res.data && res.data.data && res.data.data.openclaw_url) {
+          this.addDeviceDialogVisible = true;
+        } else {
+          this.$confirm(
+            'OpenClaw URL is not configured. You need to set it up before adding a device.',
+            'OpenClaw Not Configured',
+            {
+              confirmButtonText: 'Set Up Now',
+              cancelButtonText: 'Cancel',
+              type: 'warning'
+            }
+          ).then(() => {
+            this.$router.push('/openclaw-setup');
+          }).catch(() => {});
+        }
+      }, () => {
+        // On error, still allow opening dialog (fallback)
+        this.addDeviceDialogVisible = true;
+      });
     },
     handleManualAddDevice() {
       this.manualAddDeviceDialogVisible = true;

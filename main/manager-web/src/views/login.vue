@@ -131,22 +131,16 @@ export default {
   },
   methods: {
     fetchCaptcha() {
-      if (this.$store.getters.getToken) {
-        if (this.$route.path !== '/home') {
-          this.$router.push('/home')
-        }
-      } else {
-        this.captchaUuid = getUUID();
+      this.captchaUuid = getUUID();
 
-        Api.user.getCaptcha(this.captchaUuid, (res) => {
-          if (res.status === 200) {
-            const blob = new Blob([res.data], { type: res.data.type });
-            this.captchaUrl = URL.createObjectURL(blob);
-          } else {
-            showDanger('Failed to load verification code, click to refresh');
-          }
-        });
-      }
+      Api.user.getCaptcha(this.captchaUuid, (res) => {
+        if (res.status === 200) {
+          const blob = new Blob([res.data], { type: res.data.type });
+          this.captchaUrl = URL.createObjectURL(blob);
+        } else {
+          showDanger('Failed to load verification code, click to refresh');
+        }
+      });
     },
 
     // Switch login type
@@ -198,18 +192,29 @@ export default {
       Api.user.login(this.form, ({ data }) => {
         showSuccess('Login successful!');
         this.$store.commit('setToken', JSON.stringify(data.data));
-        goToPage('/home');
+        // Check for redirect from router guard (e.g. after registration)
+        const redirectPath = this.$route.query.redirect;
+        if (redirectPath) {
+          goToPage(redirectPath);
+          return;
+        }
+        // Check if user has OpenClaw configured; redirect to setup if missing
+        Api.openclaw.getConfig((res) => {
+          if (res.data && res.data.data && res.data.data.openclaw_url) {
+            goToPage('/home');
+          } else {
+            goToPage('/openclaw-setup');
+          }
+        }, () => {
+          // On error (e.g. no profile yet), redirect to setup
+          goToPage('/openclaw-setup');
+        });
       }, (err) => {
         showDanger(err.data.msg || 'Login failed')
         if (err.data != null && err.data.msg != null && err.data.msg.indexOf('verification code') > -1) {
           this.fetchCaptcha()
         }
       })
-
-      // Refresh captcha
-      setTimeout(() => {
-        this.fetchCaptcha();
-      }, 1000);
     },
 
     goToRegister() {

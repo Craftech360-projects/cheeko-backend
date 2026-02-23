@@ -53,6 +53,17 @@ const routes = [
       return import('../views/retrievePassword.vue')
     }
   },
+  {
+    path: '/openclaw-setup',
+    name: 'OpenClawSetup',
+    component: function () {
+      return import('../views/OpenClawSetup.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'OpenClaw Setup'
+    }
+  },
   // Device Management page route
   {
     path: '/device-management',
@@ -219,7 +230,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics', 'OpenClawSetup']
 
 // Route guard
 router.beforeEach((to, from, next) => {

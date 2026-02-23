@@ -3,6 +3,21 @@
     <!-- Common Header -->
     <HeaderBar :devices="devices" @search="handleSearch" @search-reset="handleSearchReset" />
     <el-main style="padding: 20px;display: flex;flex-direction: column;">
+      <!-- OpenClaw not configured warning -->
+      <el-alert
+        v-if="!openclawConfigured"
+        title="OpenClaw is not configured"
+        description="Your devices won't be able to connect to an AI engine. Set up OpenClaw to enable voice conversations."
+        type="warning"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 16px;"
+      >
+        <template slot="title">
+          <span>OpenClaw is not configured &mdash; </span>
+          <span style="cursor: pointer; text-decoration: underline; color: var(--primary);" @click="$router.push('/openclaw-setup')">Set up now</span>
+        </template>
+      </el-alert>
       <div>
         <!-- Home Page Content -->
         <div class="add-device">
@@ -256,7 +271,9 @@ export default {
         totalDevices: 0,
         totalAgents: 0,
         totalSessions: 0
-      }
+      },
+      // OpenClaw configuration status
+      openclawConfigured: true // default true to avoid flash
     }
   },
 
@@ -307,6 +324,12 @@ export default {
     if (this.isAdmin) {
       this.fetchSystemStats();
     }
+    // Check if OpenClaw is configured
+    Api.openclaw.getConfig((res) => {
+      this.openclawConfigured = !!(res.data && res.data.data && res.data.data.openclaw_url);
+    }, () => {
+      this.openclawConfigured = false;
+    });
   },
 
   activated() {
