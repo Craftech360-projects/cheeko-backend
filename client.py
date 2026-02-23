@@ -22,7 +22,7 @@ import opuslib
 
 SERVER_IP = "192.168.1.98"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "192.168.1.98"
+MQTT_BROKER_HOST = "64.227.170.31"
 
 
 MQTT_BROKER_PORT = 1883
@@ -914,7 +914,7 @@ class TestClient:
     def __init__(self):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = "00:16:3e:ac:b5:41"
+        self.device_mac_formatted = "00:16:3e:ac:b5:42"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # MQTT credentials will be set from OTA response

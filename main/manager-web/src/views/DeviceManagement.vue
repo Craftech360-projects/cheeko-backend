@@ -565,7 +565,8 @@ export default {
               otaSwitch: device.autoUpdate === 1,
               rawBindTime: new Date(device.createDate).getTime(),
               selected: false,
-              kidId: device.kidId || device.kid_id || null
+              kidId: device.kidId || device.kid_id || null,
+              openclaw_url: device.openclaw_url || null
             };
           })
               .sort((a, b) => a.rawBindTime - b.rawBindTime);
@@ -596,7 +597,8 @@ export default {
             otaSwitch: device.auto_update === 1,
             rawBindTime: device.create_date ? new Date(device.create_date).getTime() : 0,
             selected: false,
-            kidId: device.kid_id || null
+            kidId: device.kid_id || null,
+            openclaw_url: device.openclaw_url || null
           }];
           this.activeSearchKeyword = "";
           this.searchKeyword = "";
