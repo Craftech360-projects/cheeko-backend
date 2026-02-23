@@ -103,7 +103,10 @@ function sendRequest() {
  * failCallback: callback function
  * networkFailCallback: callback function
  */
-// Add logging in error handling function
+// Guard: prevent multiple simultaneous 401 redirects to login.
+// When 5+ API calls all return 401 at once, only the first should redirect.
+let isRedirectingToLogin = false
+
 function httpHandlerError(info, failCallback, networkFailCallback) {
 
     /** Request successful, exit this function. Can be adjusted based on project requirements. Here status 200 means success */
@@ -112,8 +115,14 @@ function httpHandlerError(info, failCallback, networkFailCallback) {
         if (info.data.code === 'success' || info.data.code === 0 || info.data.code === undefined) {
             return networkError
         } else if (info.data.code === 401) {
-            store.commit('clearAuth');
-            goToPage(Constant.PAGE.LOGIN, true);
+            // Only redirect once — skip if already redirecting or already on login page
+            if (!isRedirectingToLogin) {
+                isRedirectingToLogin = true
+                store.commit('clearAuth');
+                goToPage(Constant.PAGE.LOGIN, true);
+                // Reset flag after navigation settles so future 401s (after re-login) still work
+                setTimeout(() => { isRedirectingToLogin = false }, 2000)
+            }
             return true
         } else {
             if (failCallback) {

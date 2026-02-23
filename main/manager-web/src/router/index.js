@@ -226,15 +226,21 @@ const router = new VueRouter({
   routes
 })
 
-// Global handling of duplicate navigation, refresh page instead
+// Silently catch NavigationDuplicated errors instead of reloading the page.
+// Reloading on duplicate navigation causes infinite reload loops when
+// multiple API calls fail with 401 and each tries to redirect to /login.
 const originalPush = VueRouter.prototype.push
 VueRouter.prototype.push = function push(location) {
   return originalPush.call(this, location).catch(err => {
-    if (err.name === 'NavigationDuplicated') {
-      // If duplicate navigation, refresh page
-      window.location.reload()
-    } else {
-      // Throw other errors normally
+    if (err.name !== 'NavigationDuplicated') {
+      throw err
+    }
+  })
+}
+const originalReplace = VueRouter.prototype.replace
+VueRouter.prototype.replace = function replace(location) {
+  return originalReplace.call(this, location).catch(err => {
+    if (err.name !== 'NavigationDuplicated') {
       throw err
     }
   })
