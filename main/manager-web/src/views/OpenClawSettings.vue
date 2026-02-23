@@ -107,7 +107,6 @@ export default {
     return {
       loading: true,
       currentUrl: '',
-      currentToken: '',
       manualUrl: '',
       saving: false,
       testResult: null,
@@ -143,7 +142,6 @@ export default {
         const config = res.data && res.data.data;
         if (config && config.openclaw_url) {
           this.currentUrl = config.openclaw_url;
-          this.currentToken = config.openclaw_token || '';
           this.checkConnection();
         }
       }, () => {
@@ -257,7 +255,8 @@ export default {
             this.currentUrl = data.url;
             this.connectionStatus = 'online';
             showSuccess('OpenClaw reconnected: ' + data.url);
-            this.generateToken(); // Generate fresh token for next time
+            // Reset token without restarting polling
+            this.pairToken = '';
           } else if (data && data.expired) {
             this.stopPolling();
             this.generateToken();
@@ -281,10 +280,10 @@ export default {
         { confirmButtonText: 'Disconnect', cancelButtonText: 'Cancel', type: 'warning' }
       ).then(() => {
         this.disconnecting = true;
+        this.stopPolling();
         Api.openclaw.setConfig({ openclaw_url: null, openclaw_token: null }, () => {
           this.disconnecting = false;
           this.currentUrl = '';
-          this.currentToken = '';
           this.connectionStatus = 'unknown';
           this.testResult = null;
           showSuccess('OpenClaw disconnected from your profile and all devices');
@@ -300,6 +299,8 @@ export default {
       navigator.clipboard.writeText(cmd).then(() => {
         this.copied = true;
         setTimeout(() => { this.copied = false; }, 2000);
+      }).catch(() => {
+        showDanger('Failed to copy — use HTTPS or copy manually');
       });
     },
 
@@ -307,6 +308,8 @@ export default {
       if (!this.pairToken) return;
       navigator.clipboard.writeText(this.pairToken).then(() => {
         showSuccess('Token copied!');
+      }).catch(() => {
+        showDanger('Failed to copy — use HTTPS or copy manually');
       });
     }
   }

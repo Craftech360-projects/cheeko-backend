@@ -319,11 +319,10 @@ export default {
   },
 
   mounted() {
-    console.log('Home component mounted, fetching agent list'); // Debug log
     this.fetchAgentList();
-    this.fetchTodayDeviceCount();
-    this.fetchMonthDeviceCount();
     if (this.isAdmin) {
+      this.fetchTodayDeviceCount();
+      this.fetchMonthDeviceCount();
       this.fetchSystemStats();
     }
     // Check if OpenClaw is configured
@@ -335,21 +334,12 @@ export default {
   },
 
   activated() {
-    // This runs when component is activated (useful if using keep-alive)
-    console.log('Home component activated, fetching agent list'); // Debug log
     this.fetchAgentList();
   },
 
-  created() {
-    console.log('Home component created'); // Debug log
-  },
-
   watch: {
-    '$route'(to, from) {
-      // Watch for route changes - refetch data when navigating back to home
-      console.log('Route changed:', from.path, '->', to.path); // Debug log
+    '$route'(to) {
       if (to.name === 'home' || to.path === '/home') {
-        console.log('Navigated back to home, refetching agent list'); // Debug log
         this.$nextTick(() => {
           this.fetchAgentList();
         });
@@ -414,16 +404,9 @@ export default {
       const cleaned = mac.replace(/[:-]/g, '').toUpperCase();
       return cleaned.match(/.{1,2}/g)?.join(':') || mac;
     },
-    goToRoleConfig() {
-      // Navigate to role config page after clicking configure role
-      this.$router.push('/role-config')
-    },
     handleWisdomBodyAdded(res) {
       this.fetchAgentList();
       this.addDeviceDialogVisible = false;
-    },
-    handleDeviceManage() {
-      this.$router.push('/device-management');
     },
     handleSearch(regex) {
       this.isSearching = true;
@@ -457,14 +440,9 @@ export default {
         return this.searchRegex.test(device.agentName);
       });
     },
-    // Search and update agent list
-    handleSearchResult(filteredList) {
-      this.devices = filteredList; // Update device list
-    },
     // Get agent list
     fetchAgentList() {
       this.isLoading = true;
-      console.log('Starting to fetch agent list...'); // Debug log
 
       // Use /agent/list for both admin and regular users
       // Backend handles role-based filtering and includes ownerUsername for admins
@@ -473,10 +451,8 @@ export default {
         limit: this.pageSize
       };
       Api.agent.getUserAgentList(params, (response) => {
-        console.log('API response received:', response); // Debug log
         this.handleAgentListResponse(response.data);
-      }, (error) => {
-        console.error('Failed to fetch agent list:', error);
+      }, () => {
         this.$message.error('Failed to load agent list. Please check your connection and try again.');
         this.isLoading = false;
       });
@@ -484,61 +460,32 @@ export default {
 
     // Handle agent list response
     handleAgentListResponse(data) {
-      console.log('Raw API Response:', data); // Debug log
-
       if (data) {
-        // The parameter 'data' is already response.data from the API call
         let agentList = [];
         let total = 0;
 
-        // The API response structure is nested: response.data.data.list with total
         if (data.data && data.data.list && Array.isArray(data.data.list)) {
-          // For admin API: data.data.list (nested structure)
           agentList = data.data.list;
           total = data.data.total || agentList.length;
-          console.log('Using data.data.list structure, total:', total); // Debug log
         } else if (data.list && Array.isArray(data.list)) {
-          // For fallback: data.list
           agentList = data.list;
           total = data.total || agentList.length;
-          console.log('Using data.list structure, total:', total); // Debug log
         } else if (Array.isArray(data.data)) {
-          // For user API: data.data (direct array)
           agentList = data.data;
           total = agentList.length;
-          console.log('Using data.data array structure'); // Debug log
         } else if (Array.isArray(data)) {
-          // For direct array: data
           agentList = data;
           total = agentList.length;
-          console.log('Using direct array structure'); // Debug log
         } else {
-          console.error('Unexpected API response structure:', data);
-          console.error('Available keys in data:', Object.keys(data || {})); // Debug log
           this.$message.error('Failed to load agent list: Invalid response format');
           this.isLoading = false;
           return;
         }
 
-        // Store total for pagination
         this.totalAgents = total;
-
-        console.log('Agent list before processing:', agentList); // Debug log
-
-        // Process agent data and get model names
         this.processAgentListWithModelNames(agentList);
-
-        console.log('Final processed devices:', this.originalDevices); // Debug log
-
-        // Dynamically set skeleton count (optional)
-        this.skeletonCount = Math.min(
-          Math.max(this.originalDevices.length, 3), // Minimum 3
-          10 // Maximum 10
-        );
-
         this.setDevicesFromOriginal();
       } else {
-        console.error('No data in API response:', data);
         this.$message.error('Failed to load agent list: No data received');
       }
       this.isLoading = false;
@@ -585,8 +532,6 @@ export default {
           ownerUsername: item.ownerUsername || null
         }));
 
-      console.log('Basic devices processed:', basicDevices); // Debug log
-
       // Set basic data for initial display
       this.originalDevices = basicDevices;
       this.setDevicesFromOriginal();
@@ -597,13 +542,9 @@ export default {
 
     // Get device count and MAC addresses for all agents
     fetchDeviceDataForAgents() {
-      console.log('Fetching device data for agents...');
-
       this.originalDevices.forEach(device => {
         if (device.agentId) {
           Api.device.getAgentBindDevices(device.agentId, (response) => {
-            console.log(`Device response for agent ${device.agentId}:`, response);
-
             if (response.data && response.data.code === 0) {
               const devices = response.data.data || [];
               const deviceCount = Array.isArray(devices) ? devices.length : 0;
@@ -616,7 +557,6 @@ export default {
               // Update device count and MAC addresses
               this.updateDeviceInfo(device.agentId, 'deviceCount', deviceCount);
               this.updateDeviceInfo(device.agentId, 'macAddresses', macAddresses);
-              console.log(`Updated device data for ${device.agentName}: count=${deviceCount}, macs=${macAddresses.join(', ')}`);
             }
           });
         }

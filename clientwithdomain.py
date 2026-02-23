@@ -20,8 +20,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.1."
+SERVER_IP = "otadev.cheekoai.in"
 OTA_PORT = 8002
+SERVER_BASE_URL = "https://otadev.cheekoai.in"
 MQTT_BROKER_HOST = "64.227.170.31"
 
 
@@ -1297,7 +1298,7 @@ class TestClient:
     def get_ota_config(self) -> bool:
         """Requests OTA configuration from the server."""
         logger.info(
-            f"[STEP] STEP 1: Requesting OTA config from http://{SERVER_IP}:{OTA_PORT}/toy/ota/")
+            f"[STEP] STEP 1: Requesting OTA config from {SERVER_BASE_URL}/toy/ota/")
         try:
             # Generate a client ID for this session
             import uuid
@@ -1315,7 +1316,7 @@ class TestClient:
                 "client_id": session_client_id
             }
             response = requests.post(
-                f"http://{SERVER_IP}:{OTA_PORT}/toy/ota/", headers=headers, json=data, timeout=5)
+                f"{SERVER_BASE_URL}/toy/ota/", headers=headers, json=data, timeout=5)
             response.raise_for_status()
             self.ota_config = response.json()
             print(
@@ -1369,7 +1370,7 @@ class TestClient:
                             f"[EMOJI] Checking activation status... Attempt {attempt + 1}/10")
                         try:
                             status_response = requests.get(
-                                f"http://{SERVER_IP}:{OTA_PORT}/ota/active", params={"mac": self.device_mac_formatted}, timeout=3)
+                                f"{SERVER_BASE_URL}/ota/active", params={"mac": self.device_mac_formatted}, timeout=3)
                             print(
                                 f"Activation status response: {status_response.text}")
                             if status_response.ok and status_response.json().get("activated"):
