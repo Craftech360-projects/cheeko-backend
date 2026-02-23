@@ -3,7 +3,7 @@ import RequestService from '../httpRequest'
 
 
 export default {
-    // Login
+    // Login — no auto-retry (captcha is one-time-use)
     login(loginForm, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/user/login`)
@@ -15,12 +15,11 @@ export default {
             })
             .fail((err) => {
                 RequestService.clearRequestTime()
-                failCallback(err)
+                if (failCallback) failCallback(err)
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.login(loginForm, callback)
-                })
+            .networkFail((err) => {
+                RequestService.clearRequestTime()
+                if (failCallback) failCallback(err)
             }).send()
     },
     // Get captcha
@@ -62,7 +61,7 @@ export default {
                 })
             }).send()
     },
-    // Register account
+    // Register account — no auto-retry (captcha is one-time-use)
     register(registerForm, callback, failCallback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/user/register`)
@@ -74,12 +73,11 @@ export default {
             })
             .fail((err) => {
                 RequestService.clearRequestTime()
-                failCallback(err)
+                if (failCallback) failCallback(err)
             })
-            .networkFail(() => {
-                RequestService.reAjaxFun(() => {
-                    this.register(registerForm, callback, failCallback)
-                })
+            .networkFail((err) => {
+                RequestService.clearRequestTime()
+                if (failCallback) failCallback(err)
             }).send()
     },
     // Save device config

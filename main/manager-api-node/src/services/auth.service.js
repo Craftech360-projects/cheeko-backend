@@ -331,14 +331,16 @@ setInterval(() => {
 const generateCaptcha = (uuid) => {
   const svgCaptcha = require('svg-captcha');
 
-  const captcha = svgCaptcha.create({
-    size: 5, // 5 characters
-    noise: 2, // noise lines
+  const captcha = svgCaptcha.createMathExpr({
+    mathMin: 1,
+    mathMax: 20,
+    mathOperator: '+',
+    noise: 1,
     color: true,
-    background: '#f0f0f0',
+    background: '#f8f9fa',
     width: 150,
     height: 40,
-    fontSize: 40
+    fontSize: 35
   });
 
   // Store captcha code with 5-minute expiry
