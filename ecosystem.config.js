@@ -8,11 +8,21 @@ module.exports = {
       interpreter: "none"
     },
     {
+      name: "manager-api-node",
+      script: "npm",
+      args: "run dev",
+      cwd: "/root/xiaozhi-esp32-server/main/manager-api-node",
+      interpreter: "none"
+    },
+    {
       name: "manager-web",
       script: "npm",
       args: "run serve",
       cwd: "/root/xiaozhi-esp32-server/main/manager-web",
-      interpreter: "none"
+      interpreter: "none",
+      env: {
+        VUE_APP_DISABLE_HMR: "true"
+      }
     },
     {
       name: "mqtt-gateway",

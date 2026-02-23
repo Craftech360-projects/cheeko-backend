@@ -89,7 +89,9 @@ router.post('/bind/:agentId/:deviceCode',
     const { agentId, deviceCode } = req.params;
 
     try {
-      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode);
+      const isSuperAdmin = req.user.super_admin === 1;
+      logger.info(`[BIND] Attempt: userId=${req.user.id}, agentId=${agentId}, deviceCode=${deviceCode}, isSuperAdmin=${isSuperAdmin}`);
+      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode, isSuperAdmin);
 
       // Transform to DeviceResponseDTO format (matching Spring Boot)
       const response = {
@@ -104,8 +106,10 @@ router.post('/bind/:agentId/:deviceCode',
         openclaw_configured: !!device.openclaw_url
       };
 
+      logger.info(`[BIND] Success: device=${device.id}, mac=${device.mac_address}, agent=${agentId}`);
       success(res, response);
     } catch (error) {
+      logger.error(`[BIND] Failed: userId=${req.user.id}, agentId=${agentId}, deviceCode=${deviceCode}, error=${error.message}`);
       badRequest(res, error.message);
     }
   })

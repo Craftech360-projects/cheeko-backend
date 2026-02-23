@@ -93,7 +93,7 @@ const registerDevice = async ({ mac, board, appVersion }) => {
  * @param {string} deviceCode - 6-digit device code or MAC address
  * @returns {Promise<Object>} Bound device
  */
-const bindDevice = async (userId, agentId, deviceCode) => {
+const bindDevice = async (userId, agentId, deviceCode, isSuperAdmin = false) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   let device = null;
@@ -118,48 +118,102 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     // It's a 6-digit activation code
     activationData = activationCodeCache.get(deviceCode);
 
-    if (!activationData) {
-      throw new Error('Invalid or expired activation code');
+    if (activationData) {
+      macAddress = activationData.macAddress;
+      logger.info(`[BIND] Activation code ${deviceCode} found in memory cache for MAC ${macAddress}`);
+    } else {
+      logger.warn(`[BIND] Activation code ${deviceCode} NOT in memory cache. Cache has ${activationCodeCache.size} codes: [${[...activationCodeCache.keys()].join(', ')}]`);
+      // Fallback: look up activation code in DB (survives server restarts)
+      let dbDevice = null;
+      try {
+        const { data } = await supabaseAdmin
+          .from('ai_device')
+          .select('*')
+          .eq('activation_code', deviceCode)
+          .single();
+        dbDevice = data;
+      } catch (dbErr) {
+        logger.warn(`[BIND] DB activation code lookup failed: ${dbErr.message}`);
+      }
+
+      if (!dbDevice) {
+        logger.error(`[BIND] Activation code ${deviceCode} not found in memory or DB. Bind failed.`);
+        throw new Error('Invalid or expired activation code');
+      }
+
+      macAddress = dbDevice.mac_address;
+      device = dbDevice;
+      logger.info(`[BIND] Found activation code ${deviceCode} in DB for device ${macAddress}`);
     }
 
-    macAddress = activationData.macAddress;
+    // Check if device already exists (when found via in-memory cache)
+    if (!device) {
+      const { data: existingDevice } = await supabaseAdmin
+        .from('ai_device')
+        .select('*')
+        .eq('mac_address', macAddress)
+        .single();
 
-    // Check if device already exists
-    const { data: existingDevice } = await supabaseAdmin
-      .from('ai_device')
-      .select('*')
-      .eq('mac_address', macAddress)
-      .single();
-
-    if (existingDevice) {
-      if (existingDevice.user_id && existingDevice.user_id !== userId) {
-        throw new Error('Device is already bound to another user');
+      if (existingDevice) {
+        if (existingDevice.user_id && existingDevice.user_id !== userId) {
+          throw new Error('Device is already bound to another user');
+        }
+        device = existingDevice;
       }
-      device = existingDevice;
+    } else if (device.user_id && device.user_id !== userId) {
+      throw new Error('Device is already bound to another user');
     }
   } else {
     throw new Error('Invalid device code format. Use 6-digit activation code or MAC address.');
   }
 
-  // Verify agent belongs to user
+  // Verify agent exists
   const { data: agent } = await supabaseAdmin
     .from('ai_agent')
-    .select('id')
+    .select('id, user_id')
     .eq('id', agentId)
-    .eq('user_id', userId)
     .single();
 
+  let bindUserId = userId;
+
   if (!agent) {
-    throw new Error('Agent not found or does not belong to user');
+    // Agent doesn't exist at all - create a default one for the user
+    const { data: newAgent, error: createAgentErr } = await supabaseAdmin
+      .from('ai_agent')
+      .insert({
+        id: agentId,
+        user_id: userId,
+        agent_code: 'Cheeko',
+        agent_name: 'Cheeko',
+        system_prompt: 'You are CHEEKO, a fun, witty, and slightly mischievous AI friend for kids.',
+        lang_code: 'en',
+        language: 'English',
+        status: 1,
+        creator: userId
+      })
+      .select('id, user_id')
+      .single();
+
+    if (createAgentErr) {
+      throw new Error('Agent not found and failed to create: ' + createAgentErr.message);
+    }
+
+    logger.info(`Auto-created agent ${agentId} for user ${userId}`);
+    bindUserId = userId;
+  } else if (agent.user_id !== userId && !isSuperAdmin) {
+    throw new Error('Agent does not belong to user');
+  } else if (isSuperAdmin) {
+    // Super admin binds using agent owner's ID
+    bindUserId = agent.user_id;
   }
 
-  // Fetch user's OpenClaw URL from parent_profile to copy into device
+  // Fetch agent owner's OpenClaw URL from parent_profile to copy into device
   let openclawUrl = null;
   let openclawToken = null;
   const { data: parentProfile } = await supabaseAdmin
     .from('parent_profile')
     .select('openclaw_url, openclaw_token')
-    .eq('user_id', userId)
+    .eq('user_id', bindUserId)
     .single();
   if (parentProfile) {
     openclawUrl = parentProfile.openclaw_url || null;
@@ -168,15 +222,16 @@ const bindDevice = async (userId, agentId, deviceCode) => {
 
   if (device) {
     // Update existing device
-    if (device.user_id && device.user_id !== userId) {
+    if (device.user_id && device.user_id !== bindUserId && !isSuperAdmin) {
       throw new Error('Device is already bound to another user');
     }
 
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('ai_device')
       .update({
-        user_id: userId,
+        user_id: bindUserId,
         agent_id: agentId,
+        activation_code: null,
         openclaw_url: openclawUrl,
         openclaw_token: openclawToken,
         update_date: new Date().toISOString()
@@ -188,11 +243,9 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     if (updateError) throw new Error('Failed to bind device');
 
     // Clean up activation code cache
-    if (activationData) {
-      activationCodeCache.delete(deviceCode);
-      activationMacCache.delete(macAddress);
-      logger.info(`Device ${macAddress} activated and bound to agent ${agentId}`);
-    }
+    activationCodeCache.delete(deviceCode);
+    activationMacCache.delete(macAddress);
+    logger.info(`Device ${macAddress} activated and bound to agent ${agentId}`);
 
     return updated;
   } else {
@@ -202,7 +255,7 @@ const bindDevice = async (userId, agentId, deviceCode) => {
       .from('ai_device')
       .insert({
         mac_address: macAddress,
-        user_id: userId,
+        user_id: bindUserId,
         agent_id: agentId,
         board: activationData.board,
         app_version: activationData.appVersion,
@@ -214,8 +267,8 @@ const bindDevice = async (userId, agentId, deviceCode) => {
         create_date: now,
         update_date: now,
         last_connected_at: now,
-        creator: userId,
-        updater: userId
+        creator: bindUserId,
+        updater: bindUserId
       })
       .select()
       .single();
@@ -768,6 +821,13 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
 
       activationCodeCache.set(activationCode, activationData);
       activationMacCache.set(normalizedMac, activationCode);
+
+      // Persist activation code to DB so it survives server restarts
+      const { error: saveErr } = await supabaseAdmin
+        .from('ai_device')
+        .update({ activation_code: activationCode })
+        .eq('mac_address', normalizedMac);
+      if (saveErr) logger.warn(`Could not persist activation code to DB: ${saveErr.message}`);
 
       logger.info(`Generated activation code ${activationCode} for device ${normalizedMac}`);
     }

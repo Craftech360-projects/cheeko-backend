@@ -12,6 +12,7 @@ from generators import generate_audio, generate_image, init_clients
 
 # Load env variables
 load_dotenv()
+os.environ["GEMINI_API_KEY"] = "AIzaSyDQnuv8reaFvyUO68OE750MwOdGzSptuZw"
 
 st.set_page_config(page_title="Cheeko Content Factory", layout="wide")
 
@@ -66,7 +67,7 @@ def main():
 
         # Display Mode Config
         st.markdown("### 🖥️ Display Settings")
-        esp32_mode = st.checkbox("Optimize for ESP32 Display (240x296 px, Pixel Art + .bin)", value=True)
+        esp32_mode = st.checkbox("Optimize for ESP32 Display (296x240 px, Pixel Art + .bin)", value=True)
 
         # History / Load Previous
         st.markdown("---")

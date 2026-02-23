@@ -149,7 +149,7 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
     Generate image using Gemini (Nano Banana / Imagen 3) or Pollinations fallback.
     If esp32_mode is True:
     - Appends 'pixel art' to prompt
-    - Resizes to 240x296 (ESP32 display resolution)
+    - Resizes to 296x240 (ESP32 display resolution)
     - Converts to LVGL .bin format (RGB565)
     - Also keeps PNG for preview
     """
@@ -172,8 +172,8 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
                 img = Image.open(image_data) # Path or other object
 
             if esp32_mode:
-                # Resize to 240x296 (ESP32 display resolution)
-                img = img.resize((240, 296), Image.Resampling.NEAREST)
+                # Resize to 296x240 (ESP32 display resolution)
+                img = img.resize((296, 240), Image.Resampling.NEAREST)
 
                 # Ensure path ends in .png for preview file
                 if path.endswith(".jpg") or path.endswith(".jpeg"):
