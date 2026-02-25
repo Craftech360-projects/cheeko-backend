@@ -741,22 +741,23 @@ class LiveKitBridge extends EventEmitter {
               this.agentJoinTimeout = null;
             }
 
-            // Send ready_for_greeting to agent via data channel to trigger greeting
-            console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
-            try {
-              const greetingTrigger = JSON.stringify({
-                type: "ready_for_greeting",
-                session_id: this.connection?.udp?.session_id || "unknown",
-                timestamp: Date.now(),
-              });
-              await this.room.localParticipant.publishData(
-                Buffer.from(greetingTrigger),
-                { reliable: true }
-              );
-              console.log(`✅ [GREETING] ready_for_greeting sent to agent`);
-            } catch (greetErr) {
-              console.error(`❌ [GREETING] Failed to send ready_for_greeting: ${greetErr.message}`);
-            }
+            // ready_for_greeting is now only sent when the device explicitly requests it
+            // (via the device → gateway → agent pass-through flow)
+            // console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
+            // try {
+            //   const greetingTrigger = JSON.stringify({
+            //     type: "ready_for_greeting",
+            //     session_id: this.connection?.udp?.session_id || "unknown",
+            //     timestamp: Date.now(),
+            //   });
+            //   await this.room.localParticipant.publishData(
+            //     Buffer.from(greetingTrigger),
+            //     { reliable: true }
+            //   );
+            //   console.log(`✅ [GREETING] ready_for_greeting sent to agent`);
+            // } catch (greetErr) {
+            //   console.error(`❌ [GREETING] Failed to send ready_for_greeting: ${greetErr.message}`);
+            // }
           }
         });
 

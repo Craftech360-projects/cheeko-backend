@@ -2,6 +2,7 @@ livekit-agents
 livekit-plugins-groq
 livekit-plugins-elevenlabs
 livekit-plugins-deepgram
+livekit-plugins-sarvam
 livekit-plugins-inworld
 livekit-plugins-google
 google-genai
