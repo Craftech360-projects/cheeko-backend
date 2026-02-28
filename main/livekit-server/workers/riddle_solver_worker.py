@@ -50,6 +50,7 @@ from src.features.game_tools import check_riddle_answer, set_riddle_game_state, 
 from src.features.mode_switching import update_agent_mode
 from src.utils.helpers import UsageManager, GameAnalyticsManager
 from src.memory import MEMORY_TOOLS
+from src.utils.quota_manager import QuotaManager
 
 AGENT_NAME = "riddle-solver-agent"
 CHARACTER_NAME = "Riddle Solver"
@@ -134,13 +135,20 @@ async def entrypoint(ctx: JobContext):
     except Exception as e:
         logger.debug(f"No dispatch metadata or error parsing: {e}")
 
+    # Initialize QuotaManager
+    manager_api_url = os.getenv("MANAGER_API_URL", "")
+    manager_api_secret = os.getenv("MANAGER_API_SECRET", "")
+    quota_manager = QuotaManager(
+        mac_address=device_mac or "",
+        manager_api_url=manager_api_url,
+        secret=manager_api_secret
+    )
+
     if device_mac:
         try:
             # Use cached DatabaseHelper from prewarm (or create new if not available)
             db_helper = ctx.proc.userdata.get("db_helper")
             if not db_helper:
-                manager_api_url = os.getenv("MANAGER_API_URL")
-                manager_api_secret = os.getenv("MANAGER_API_SECRET")
                 db_helper = DatabaseHelper(manager_api_url, manager_api_secret)
 
             # Skip child profile fetch if already have from dispatch metadata
@@ -148,6 +156,7 @@ async def entrypoint(ctx: JobContext):
                 logger.info("👶 Skipping child profile API call - using dispatch metadata")
                 results = await asyncio.gather(
                     db_helper.get_agent_id(device_mac),
+                    quota_manager.initialize(),
                     return_exceptions=True
                 )
                 agent_id_result = results[0]
@@ -156,9 +165,10 @@ async def entrypoint(ctx: JobContext):
                 results = await asyncio.gather(
                     db_helper.get_agent_id(device_mac),
                     db_helper.get_child_profile_by_mac(device_mac),
+                    quota_manager.initialize(),
                     return_exceptions=True
                 )
-                agent_id_result, child_profile_result = results
+                agent_id_result, child_profile_result = results[0], results[1]
 
             if not isinstance(agent_id_result, Exception):
                 agent_id = agent_id_result
@@ -226,6 +236,31 @@ async def entrypoint(ctx: JobContext):
         """Log what the user said (transcription)"""
         text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
         logger.info(f"🎤 USER SAID: '{text}'")
+
+    # ============================================================================
+    # QUOTA: Track per-turn usage and enforce limits
+    # ============================================================================
+    @session.on("user_speech_committed")
+    def on_user_speech_quota(msg):
+        """Consume a question from quota on each user speech turn"""
+        async def _check_quota():
+            try:
+                allowed, remaining = await quota_manager.consume_question()
+                if not allowed:
+                    logger.warning(f"[QUOTA] Exhausted mid-session for {device_mac}")
+                    await session.generate_reply(
+                        instructions="Say exactly: '" + quota_manager.get_limit_message() + "'"
+                    )
+                    await asyncio.sleep(6)
+                    await delete_livekit_room(room_name)
+                elif quota_manager.should_warn_low_quota():
+                    logger.info(f"[QUOTA] Low quota warning: {remaining} remaining")
+                    await session.generate_reply(
+                        instructions=quota_manager.get_low_quota_instruction()
+                    )
+            except Exception as e:
+                logger.error(f"[QUOTA] Error in quota check: {e}")
+        asyncio.create_task(_check_quota())
 
     logger.info("📊 Debug logging for speech and function calls enabled")
 
@@ -675,6 +710,23 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"Error in skip: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
+
+    # ============================================================================
+    # QUOTA GATE: Block session if quota exhausted before connecting
+    # ============================================================================
+    if quota_manager.is_exhausted:
+        logger.warning(f"[QUOTA] Exhausted for {device_mac} - blocking session")
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+        participant = await ctx.wait_for_participant()
+        temp_session = AgentSession(llm=realtime_model, tools=[], userdata={"device_mac": device_mac or ""})
+        await temp_session.start(room=ctx.room, agent=assistant)
+        try:
+            await temp_session.say(quota_manager.get_limit_message())
+            await asyncio.sleep(6)
+        except Exception as e:
+            logger.error(f"[QUOTA] Error saying limit message: {e}")
+        await delete_livekit_room(room_name)
+        return
 
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
