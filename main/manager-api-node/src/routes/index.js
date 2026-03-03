@@ -6,7 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { testConnection, supabaseAdmin } = require('../config/database');
+const { testConnection } = require('../config/database');
 
 // Import route modules
 const authRoutes = require('./auth.routes');
@@ -82,7 +82,7 @@ router.get('/health', (req, res) => {
  *   get:
  *     tags: [Health]
  *     summary: Database health check
- *     description: Tests connectivity to Supabase database
+ *     description: Tests connectivity to DigitalOcean PostgreSQL database (via Prisma)
  *     responses:
  *       200:
  *         description: Database connection status
@@ -104,23 +104,13 @@ router.get('/health', (req, res) => {
  */
 router.get('/health/db', async (req, res) => {
   try {
-    if (!supabaseAdmin) {
-      return res.json({
-        code: 0,
-        msg: 'success',
-        data: {
-          database: 'not_configured',
-          message: 'Supabase credentials not configured'
-        }
-      });
-    }
-
     const isConnected = await testConnection();
     res.json({
       code: 0,
       msg: 'success',
       data: {
         database: isConnected ? 'connected' : 'disconnected',
+        provider: 'DigitalOcean PostgreSQL (Prisma)',
         timestamp: new Date().toISOString()
       }
     });
@@ -189,7 +179,8 @@ router.use('/device', deviceRoutes);
 router.use('/agent', agentRoutes);
 router.use('/content', contentRoutes);
 router.use('/admin/rfid', rfidRoutes);
-router.use('/api/mobile', profileRoutes);
+router.use('/api/mobile', profileRoutes); // Existing profile routes
+router.use('/api/mobile', require('./mobile.routes')); // New Firebase-backed mobile endpoints
 router.use('/models', modelRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/system', systemRoutes);

@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider   = "prisma-client-js"
+  engineType = "library"
 }
 
 datasource db {
@@ -726,6 +727,7 @@ model sys_params {
 
 model sys_user {
   id             BigInt           @id @default(autoincrement())
+  firebase_uid   String?          @unique @db.VarChar(128)
   username       String?          @unique @db.VarChar(100)
   password       String?          @db.VarChar(255)
   email          String?          @unique @db.VarChar(255)
@@ -743,6 +745,8 @@ model sys_user {
   kid_profile    kid_profile[]
   parent_profile parent_profile?
   sys_user_token sys_user_token[]
+
+  @@index([firebase_uid], map: "idx_sys_user_firebase_uid")
 }
 
 model sys_user_token {

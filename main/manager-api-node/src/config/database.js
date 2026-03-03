@@ -1,84 +1,62 @@
 /**
- * Supabase Database Configuration
+ * Database Configuration
  *
- * Initializes the Supabase client for database operations and authentication.
+ * Prisma is the primary DB client → DigitalOcean Managed PostgreSQL.
+ * Supabase clients are kept for the existing custom-token auth system
+ * (sys_user_token table) used by the admin dashboard. They will be
+ * removed in a later cleanup phase once the admin dashboard is migrated.
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const { PrismaClient } = require('@prisma/client');
 const logger = require('../utils/logger');
 
-// Environment variables
+// ─── Prisma (primary DB — DigitalOcean PostgreSQL) ───────────────────────────
+const prisma = new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+});
+
+/**
+ * Test database connection via Prisma (DigitalOcean PostgreSQL).
+ * @returns {Promise<boolean>}
+ */
+const testConnection = async () => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    logger.info('✅ DigitalOcean PostgreSQL connection successful (Prisma)');
+    return true;
+  } catch (error) {
+    logger.error('❌ DigitalOcean PostgreSQL connection failed:', { error: error.message });
+    return false;
+  }
+};
+
+// ─── Supabase (legacy — admin dashboard custom token auth only) ───────────────
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Validate required environment variables
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  logger.warn('Supabase credentials not configured. Database operations will fail.');
+  logger.warn('Supabase credentials not configured. Admin token verification will fail.');
 }
 
 /**
  * Supabase client for client-side operations (respects RLS)
- * Use this for user-authenticated requests
  */
 const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: false
-    }
+    auth: { autoRefreshToken: true, persistSession: false }
   })
   : null;
 
 /**
- * Supabase admin client (bypasses RLS)
- * Use this for server-side operations that need full access
+ * Supabase admin client (bypasses RLS) — used by auth.js for sys_user_token verification
  */
 const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
+    auth: { autoRefreshToken: false, persistSession: false }
   })
   : null;
-
-/**
- * Test database connection
- * @returns {Promise<boolean>} True if connection is successful
- */
-const testConnection = async () => {
-  if (!supabaseAdmin) {
-    logger.error('Supabase admin client not initialized');
-    return false;
-  }
-
-  try {
-    // Try to query sys_user table (should exist after migrations)
-    const { data, error } = await supabaseAdmin
-      .from('sys_user')
-      .select('id')
-      .limit(1);
-
-    // Check for table not found error
-    if (error) {
-      if (error.code === 'PGRST116' || error.code === '42P01' ||
-          error.message.includes('does not exist') ||
-          error.message.includes('schema cache')) {
-        // Table doesn't exist yet - migrations needed but connection works
-        logger.info('Supabase connected but tables not created');
-        return true;
-      }
-      throw error;
-    }
-
-    logger.info('Supabase connection successful');
-    return true;
-  } catch (error) {
-    logger.error('Supabase connection failed:', { error: error.message });
-    return false;
-  }
-};
 
 /**
  * Get a Supabase client with user's JWT token for RLS
@@ -89,23 +67,16 @@ const getClientWithAuth = (accessToken) => {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new Error('Supabase not configured');
   }
-
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: {
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    },
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { autoRefreshToken: false, persistSession: false }
   });
 };
 
 module.exports = {
+  prisma,
   supabase,
   supabaseAdmin,
   testConnection,
-  getClientWithAuth
+  getClientWithAuth,
 };
