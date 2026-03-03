@@ -9,10 +9,13 @@
 
 const { createClient } = require('@supabase/supabase-js');
 const { PrismaClient } = require('@prisma/client');
+const { PrismaPg } = require('@prisma/adapter-pg');
 const logger = require('../utils/logger');
 
 // ─── Prisma (primary DB — DigitalOcean PostgreSQL) ───────────────────────────
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({
+  adapter,
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
 });
 
