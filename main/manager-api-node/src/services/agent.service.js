@@ -534,14 +534,25 @@ const setCharacterByName = async (mac, characterName) => {
   if (!device) throw new Error('Device not found');
 
   // Find agent by name (case-insensitive) for this user
-  const { data: agent } = await supabaseAdmin
+  let { data: agent } = await supabaseAdmin
     .from('ai_agent')
     .select('id, agent_name')
     .eq('user_id', device.user_id)
     .ilike('agent_name', characterName)
     .single();
 
-  if (!agent) throw new Error(`Agent "${characterName}" not found`);
+  if (!agent) {
+    // Auto-create agent with this character name for the user
+    const { data: newAgent, error: createError } = await supabaseAdmin
+      .from('ai_agent')
+      .insert({ user_id: device.user_id, agent_name: characterName, lang_code: 'en', language: 'English', creator: device.user_id })
+      .select('id, agent_name')
+      .single();
+
+    if (createError || !newAgent) throw new Error(`Failed to create agent "${characterName}"`);
+    logger.info(`[setCharacterByName] Auto-created agent "${characterName}" for user ${device.user_id}`);
+    agent = newAgent;
+  }
 
   // Update device
   const { error } = await supabaseAdmin
