@@ -118,7 +118,21 @@ router.delete('/agents/:agentId', asyncHandler(async (req, res) => {
 
 router.get('/agents/:agentId/devices', asyncHandler(async (req, res) => {
     const devices = await deviceService.getDevicesByAgent(req.mobileUser.id, req.params.agentId);
-    success(res, devices);
+    const mapped = devices.map(d => ({
+        id: d.id != null ? d.id.toString() : null,
+        macAddress: d.mac_address,
+        agentId: d.agent_id,
+        deviceName: d.device_name || d.alias || 'Cheeko',
+        alias: d.alias,
+        board: d.board,
+        appVersion: d.app_version,
+        autoUpdate: d.auto_update || false,
+        lastConnectedAt: d.last_connected_at,
+        createDate: d.create_date,
+        updateDate: d.update_date,
+        kidId: d.kid_id,
+    }));
+    success(res, mapped);
 }));
 
 router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) => {
