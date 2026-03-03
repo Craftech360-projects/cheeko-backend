@@ -9,7 +9,7 @@
  * - Send history tracking
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { supabaseAdmin, prisma } = require('../config/database');
 const logger = require('../utils/logger');
 
 // =============================================
@@ -22,49 +22,18 @@ const logger = require('../utils/logger');
  * @returns {Promise<Object>} Configuration object
  */
 const getConfig = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  let config = await prisma.email_report_config.findFirst();
 
-  // Try to get existing config
-  const { data: config, error } = await supabaseAdmin
-    .from('email_report_config')
-    .select('*')
-    .limit(1)
-    .single();
-
-  if (error && error.code === 'PGRST116') {
-    // No config exists, create default
-    const defaultConfig = {
-      enabled: false,
-      schedule_hour: 8,
-      schedule_timezone: 'Asia/Kolkata',
-      recipients: [],
-      sections: {
-        summary: true,
-        devices: true,
-        learning: true,
-        content: true,
-        tokens: true,
-        alerts: true
-      }
-    };
-
-    const { data: newConfig, error: insertError } = await supabaseAdmin
-      .from('email_report_config')
-      .insert(defaultConfig)
-      .select()
-      .single();
-
-    if (insertError) {
-      logger.error('Failed to create default email config:', insertError);
-      throw new Error('Failed to create email configuration');
-    }
-
-    return transformConfig(newConfig);
-  }
-
-  if (error) {
-    logger.error('Failed to get email config:', error);
-    throw new Error('Failed to get email configuration');
+  if (!config) {
+    config = await prisma.email_report_config.create({
+      data: {
+        enabled: false,
+        schedule_hour: 8,
+        schedule_timezone: 'Asia/Kolkata',
+        recipients: [],
+        sections: { summary: true, devices: true, learning: true, content: true, tokens: true, alerts: true },
+      },
+    });
   }
 
   return transformConfig(config);
@@ -76,67 +45,29 @@ const getConfig = async () => {
  * @returns {Promise<Object>} Updated configuration
  */
 const updateConfig = async (updates) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Get existing config first
-  const { data: existing } = await supabaseAdmin
-    .from('email_report_config')
-    .select('id')
-    .limit(1)
-    .single();
-
-  const updateData = {
-    updated_at: new Date().toISOString()
-  };
-
+  const updateData = { updated_at: new Date() };
   if (updates.enabled !== undefined) updateData.enabled = updates.enabled;
   if (updates.scheduleHour !== undefined) updateData.schedule_hour = updates.scheduleHour;
   if (updates.scheduleTimezone !== undefined) updateData.schedule_timezone = updates.scheduleTimezone;
   if (updates.recipients !== undefined) updateData.recipients = updates.recipients;
   if (updates.sections !== undefined) updateData.sections = updates.sections;
 
+  const existing = await prisma.email_report_config.findFirst({ select: { id: true } });
+
   if (existing) {
-    // Update existing config
-    const { data: config, error } = await supabaseAdmin
-      .from('email_report_config')
-      .update(updateData)
-      .eq('id', existing.id)
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Failed to update email config:', error);
-      throw new Error('Failed to update email configuration');
-    }
-
+    const config = await prisma.email_report_config.update({ where: { id: existing.id }, data: updateData });
     return transformConfig(config);
   } else {
-    // Create new config with updates
-    const { data: config, error } = await supabaseAdmin
-      .from('email_report_config')
-      .insert({
+    const config = await prisma.email_report_config.create({
+      data: {
         ...updateData,
         enabled: updates.enabled ?? false,
         schedule_hour: updates.scheduleHour ?? 8,
         schedule_timezone: updates.scheduleTimezone ?? 'Asia/Kolkata',
         recipients: updates.recipients ?? [],
-        sections: updates.sections ?? {
-          summary: true,
-          devices: true,
-          learning: true,
-          content: true,
-          tokens: true,
-          alerts: true
-        }
-      })
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Failed to create email config:', error);
-      throw new Error('Failed to create email configuration');
-    }
-
+        sections: updates.sections ?? { summary: true, devices: true, learning: true, content: true, tokens: true, alerts: true },
+      },
+    });
     return transformConfig(config);
   }
 };

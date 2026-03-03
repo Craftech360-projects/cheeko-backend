@@ -4,7 +4,7 @@
  * Handles ESP32 device management, registration, binding, and mode control.
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { supabaseAdmin, prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
 
@@ -34,56 +34,29 @@ setInterval(() => {
  * @returns {Promise<Object>} Created device
  */
 const registerDevice = async ({ mac, board, appVersion }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  // Check if device already exists
-  const { data: existing } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, mac_address')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const now = new Date();
+  const existing = await prisma.ai_device.findUnique({ where: { mac_address: normalizedMac }, select: { id: true } });
 
   if (existing) {
-    // Update existing device
-    const { data: device, error } = await supabaseAdmin
-      .from('ai_device')
-      .update({
-        board,
-        app_version: appVersion,
-        last_connected_at: new Date().toISOString(),
-        update_date: new Date().toISOString()
-      })
-      .eq('id', existing.id)
-      .select()
-      .single();
-
-    if (error) throw new Error('Failed to update device');
-    return device;
+    return prisma.ai_device.update({
+      where: { id: existing.id },
+      data: { board: board || null, app_version: appVersion || null, last_connected_at: now, update_date: now },
+    });
   }
 
-  // Create new device
-  const { data: device, error } = await supabaseAdmin
-    .from('ai_device')
-    .insert({
+  return prisma.ai_device.create({
+    data: {
       mac_address: normalizedMac,
-      board,
-      app_version: appVersion,
+      board: board || null,
+      app_version: appVersion || null,
       mode: 'conversation',
       device_mode: 'manual',
-      last_connected_at: new Date().toISOString()
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to create device:', error);
-    throw new Error('Failed to register device');
-  }
-
-  return device;
+      last_connected_at: now,
+    },
+  });
 };
 
 /**
@@ -94,122 +67,67 @@ const registerDevice = async ({ mac, board, appVersion }) => {
  * @returns {Promise<Object>} Bound device
  */
 const bindDevice = async (userId, agentId, deviceCode) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   let device = null;
   let macAddress = null;
   let activationData = null;
 
-  // Check if it's a MAC address or an activation code
   if (deviceCode.includes(':') || deviceCode.length === 12) {
-    // It's a MAC address - find existing device
     macAddress = normalizeMacAddress(deviceCode);
-    const { data: existingDevice, error: findError } = await supabaseAdmin
-      .from('ai_device')
-      .select('*')
-      .eq('mac_address', macAddress)
-      .single();
-
-    if (findError || !existingDevice) {
-      throw new Error('Device not found. Please use the 6-digit activation code.');
-    }
-    device = existingDevice;
+    device = await prisma.ai_device.findUnique({ where: { mac_address: macAddress } });
+    if (!device) throw new Error('Device not found. Please use the 6-digit activation code.');
   } else if (/^\d{6}$/.test(deviceCode)) {
-    // It's a 6-digit activation code
     activationData = activationCodeCache.get(deviceCode);
-
-    if (!activationData) {
-      throw new Error('Invalid or expired activation code');
-    }
-
+    if (!activationData) throw new Error('Invalid or expired activation code');
     macAddress = activationData.macAddress;
-
-    // Check if device already exists
-    const { data: existingDevice } = await supabaseAdmin
-      .from('ai_device')
-      .select('*')
-      .eq('mac_address', macAddress)
-      .single();
-
-    if (existingDevice) {
-      if (existingDevice.user_id && existingDevice.user_id !== userId) {
-        throw new Error('Device is already bound to another user');
-      }
-      device = existingDevice;
+    const existing = await prisma.ai_device.findUnique({ where: { mac_address: macAddress } });
+    if (existing) {
+      if (existing.user_id && existing.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
+      device = existing;
     }
   } else {
     throw new Error('Invalid device code format. Use 6-digit activation code or MAC address.');
   }
 
-  // Verify agent belongs to user
-  const { data: agent } = await supabaseAdmin
-    .from('ai_agent')
-    .select('id')
-    .eq('id', agentId)
-    .eq('user_id', userId)
-    .single();
-
-  if (!agent) {
-    throw new Error('Agent not found or does not belong to user');
-  }
+  const agent = await prisma.ai_agent.findFirst({
+    where: { id: agentId, user_id: BigInt(userId) },
+    select: { id: true },
+  });
+  if (!agent) throw new Error('Agent not found or does not belong to user');
 
   if (device) {
-    // Update existing device
-    if (device.user_id && device.user_id !== userId) {
-      throw new Error('Device is already bound to another user');
-    }
-
-    const { data: updated, error: updateError } = await supabaseAdmin
-      .from('ai_device')
-      .update({
-        user_id: userId,
-        agent_id: agentId,
-        update_date: new Date().toISOString()
-      })
-      .eq('id', device.id)
-      .select()
-      .single();
-
-    if (updateError) throw new Error('Failed to bind device');
-
-    // Clean up activation code cache
+    if (device.user_id && device.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
+    const updated = await prisma.ai_device.update({
+      where: { id: device.id },
+      data: { user_id: BigInt(userId), agent_id: agentId, update_date: new Date() },
+    });
     if (activationData) {
       activationCodeCache.delete(deviceCode);
       activationMacCache.delete(macAddress);
       logger.info(`Device ${macAddress} activated and bound to agent ${agentId}`);
     }
-
     return updated;
   } else {
-    // Create new device from activation data
-    const now = new Date().toISOString();
-    const { data: newDevice, error: createError } = await supabaseAdmin
-      .from('ai_device')
-      .insert({
+    const now = new Date();
+    const newDevice = await prisma.ai_device.create({
+      data: {
         mac_address: macAddress,
-        user_id: userId,
+        user_id: BigInt(userId),
         agent_id: agentId,
-        board: activationData.board,
-        app_version: activationData.appVersion,
+        board: activationData.board || null,
+        app_version: activationData.appVersion || null,
         auto_update: 1,
         mode: 'conversation',
         device_mode: 'manual',
         create_date: now,
         update_date: now,
         last_connected_at: now,
-        creator: userId,
-        updater: userId
-      })
-      .select()
-      .single();
-
-    if (createError) throw new Error('Failed to create device: ' + createError.message);
-
-    // Clean up activation code cache
+        creator: BigInt(userId),
+        updater: BigInt(userId),
+      },
+    });
     activationCodeCache.delete(deviceCode);
     activationMacCache.delete(macAddress);
     logger.info(`New device ${macAddress} created and bound to agent ${agentId}`);
-
     return newDevice;
   }
 };
@@ -222,27 +140,12 @@ const bindDevice = async (userId, agentId, deviceCode) => {
  * @returns {Promise<Array>} List of devices
  */
 const getDevicesByAgent = async (userId, agentId, isSuperAdmin = false) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('ai_device')
-    .select('*')
-    .eq('agent_id', agentId);
-
-  // Super admin can see all devices for any agent
-  // Regular users can only see their own devices
-  if (!isSuperAdmin) {
-    query = query.eq('user_id', userId);
-  }
-
-  const { data: devices, error } = await query.order('create_date', { ascending: false });
-
-  if (error) {
-    logger.error('Failed to fetch devices:', error);
-    throw new Error('Failed to fetch devices: ' + error.message);
-  }
-
-  return devices || [];
+  const where = { agent_id: agentId, ...(!isSuperAdmin ? { user_id: BigInt(userId) } : {}) };
+  const devices = await prisma.ai_device.findMany({
+    where,
+    orderBy: { create_date: 'desc' },
+  });
+  return devices;
 };
 
 /**
@@ -378,22 +281,11 @@ const assignKidToDevice = async (userId, deviceId, kidId) => {
  * @returns {Promise<Object>} Updated device
  */
 const assignKidByMac = async (mac, kidId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
-
-  const { data: updated, error } = await supabaseAdmin
-    .from('ai_device')
-    .update({
-      kid_id: kidId,
-      update_date: new Date().toISOString()
-    })
-    .eq('mac_address', normalizedMac)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to assign kid to device');
-
+  const updated = await prisma.ai_device.update({
+    where: { mac_address: normalizedMac },
+    data: { kid_id: BigInt(kidId), update_date: new Date() },
+  });
   return updated;
 };
 
@@ -464,19 +356,8 @@ const getMode = async (mac) => {
  * @returns {Promise<Object>} Device
  */
 const getDeviceByMac = async (mac) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
-
-  const { data: device, error } = await supabaseAdmin
-    .from('ai_device')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .single();
-
-  if (error || !device) return null;
-
-  return device;
+  return prisma.ai_device.findUnique({ where: { mac_address: normalizedMac } });
 };
 
 /**
@@ -485,17 +366,7 @@ const getDeviceByMac = async (mac) => {
  * @returns {Promise<Object>} Device
  */
 const getDeviceById = async (deviceId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: device, error } = await supabaseAdmin
-    .from('ai_device')
-    .select('*')
-    .eq('id', deviceId)
-    .single();
-
-  if (error || !device) return null;
-
-  return device;
+  return prisma.ai_device.findUnique({ where: { id: deviceId } });
 };
 
 /**
@@ -505,32 +376,17 @@ const getDeviceById = async (deviceId) => {
  * @returns {Promise<Object>} Paginated devices
  */
 const listDevices = async (userId, { page = 1, limit = 10 } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const offset = (page - 1) * limit;
-
-  // Get total count
-  const { count } = await supabaseAdmin
-    .from('ai_device')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId);
-
-  // Get devices
-  const { data: devices, error } = await supabaseAdmin
-    .from('ai_device')
-    .select('*')
-    .eq('user_id', userId)
-    .order('create_date', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch devices');
-
-  return {
-    list: devices || [],
-    total: count || 0,
-    page,
-    limit
-  };
+  const where = { user_id: BigInt(userId) };
+  const [count, devices] = await Promise.all([
+    prisma.ai_device.count({ where }),
+    prisma.ai_device.findMany({
+      where,
+      orderBy: { create_date: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
+  return { list: devices, total: count, page, limit };
 };
 
 /**
@@ -592,19 +448,10 @@ const manualAddDevice = async (userId, { macAddress, mac, alias, agentId, board,
  * @returns {Promise<Object|null>} Latest firmware or null
  */
 const getLatestFirmware = async (type) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: firmware, error } = await supabaseAdmin
-    .from('ai_ota')
-    .select('*')
-    .eq('type', type)
-    .order('create_date', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error || !firmware) return null;
-
-  return firmware;
+  return prisma.ai_ota.findFirst({
+    where: { type },
+    orderBy: { create_date: 'desc' },
+  });
 };
 
 /**
@@ -613,20 +460,10 @@ const getLatestFirmware = async (type) => {
  * @returns {Promise<Object|null>} Force update firmware or null
  */
 const getForceUpdateFirmware = async (type) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: firmware, error } = await supabaseAdmin
-    .from('ai_ota')
-    .select('*')
-    .eq('type', type)
-    .eq('force_update', 1)
-    .order('create_date', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (error || !firmware) return null;
-
-  return firmware;
+  return prisma.ai_ota.findFirst({
+    where: { type, force_update: 1 },
+    orderBy: { create_date: 'desc' },
+  });
 };
 
 /**
@@ -637,7 +474,6 @@ const getForceUpdateFirmware = async (type) => {
  * @returns {Promise<Object>} OTA check response
  */
 const checkOtaVersion = async (mac, clientId, deviceReport) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
 
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
@@ -690,14 +526,14 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
 
   // Update device last connection time if device exists
   if (device) {
-    await supabaseAdmin
-      .from('ai_device')
-      .update({
-        last_connected_at: new Date().toISOString(),
+    await prisma.ai_device.update({
+      where: { id: device.id },
+      data: {
+        last_connected_at: new Date(),
         app_version: currentVersion || device.app_version,
-        board: board || device.board
-      })
-      .eq('id', device.id);
+        board: board || device.board,
+      },
+    });
   }
 
   // Build WebSocket configuration
@@ -799,16 +635,11 @@ const buildMqttCredentials = async (macAddress) => {
  * @returns {Promise<string|null>} Parameter value or null
  */
 const getSystemParam = async (paramCode) => {
-  if (!supabaseAdmin) return null;
-
-  const { data, error } = await supabaseAdmin
-    .from('sys_params')
-    .select('param_value')
-    .eq('param_code', paramCode)
-    .single();
-
-  if (error || !data) return null;
-  return data.param_value;
+  const row = await prisma.sys_params.findUnique({
+    where: { param_code: paramCode },
+    select: { param_value: true },
+  });
+  return row?.param_value ?? null;
 };
 
 /**
