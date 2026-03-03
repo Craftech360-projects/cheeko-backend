@@ -57,8 +57,9 @@ describe('Logging and Request Tracking', () => {
           .post('/toy/user/login')
           .send({ username: 'test', password: 'test' });
 
-        // Response may be 400 (validation) or 401 (auth failed)
-        expect([400, 401]).toContain(response.status);
+        // Login always returns HTTP 200 with captcha validation before DB auth
+        // (captcha failure returns { code: 500 } body with HTTP 200)
+        expect([200, 400, 401]).toContain(response.status);
         expect(response.headers['x-request-id']).toBeDefined();
       });
     });

@@ -5,7 +5,7 @@
  * Includes unified content library management.
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 
 // ==================== CONTENT LIBRARY METHODS ====================
@@ -16,46 +16,36 @@ const logger = require('../utils/logger');
  * @returns {Promise<Object>} Paginated content list
  */
 const getLibraryList = async ({ page = 1, limit = 10, contentType, category, isActive } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('content_library')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('content_library')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const where = {};
 
   if (contentType) {
-    countQuery = countQuery.eq('content_type', contentType);
-    dataQuery = dataQuery.eq('content_type', contentType);
+    where.content_type = contentType;
   }
 
   if (category) {
-    countQuery = countQuery.eq('category', category);
-    dataQuery = dataQuery.eq('category', category);
+    where.category = category;
   }
 
   if (isActive !== undefined) {
     const activeValue = isActive === true || isActive === 'true' || isActive === 1 ? 1 : 0;
-    countQuery = countQuery.eq('status', activeValue);
-    dataQuery = dataQuery.eq('status', activeValue);
+    where.status = activeValue;
   }
 
-  const { count } = await countQuery;
-  const { data: content, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error('Failed to fetch content library', { error: error.message });
-    throw new Error('Failed to fetch content library');
-  }
+  const [total, content] = await Promise.all([
+    prisma.content_library.count({ where }),
+    prisma.content_library.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: content || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -68,45 +58,37 @@ const getLibraryList = async ({ page = 1, limit = 10, contentType, category, isA
  * @returns {Promise<Object>} Search results
  */
 const searchLibrary = async (query, { page = 1, limit = 20, contentType, category } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
-  const searchPattern = `%${query}%`;
 
-  let countQuery = supabaseAdmin
-    .from('content_library')
-    .select('id', { count: 'exact', head: true })
-    .eq('status', 1)
-    .or(`title.ilike.${searchPattern},description.ilike.${searchPattern}`);
-
-  let dataQuery = supabaseAdmin
-    .from('content_library')
-    .select('*')
-    .eq('status', 1)
-    .or(`title.ilike.${searchPattern},description.ilike.${searchPattern}`)
-    .order('created_at', { ascending: false });
+  const where = {
+    status: 1,
+    OR: [
+      { title: { contains: query, mode: 'insensitive' } },
+      { description: { contains: query, mode: 'insensitive' } }
+    ]
+  };
 
   if (contentType) {
-    countQuery = countQuery.eq('content_type', contentType);
-    dataQuery = dataQuery.eq('content_type', contentType);
+    where.content_type = contentType;
   }
 
   if (category) {
-    countQuery = countQuery.eq('category', category);
-    dataQuery = dataQuery.eq('category', category);
+    where.category = category;
   }
 
-  const { count } = await countQuery;
-  const { data: content, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error('Failed to search content library', { error: error.message });
-    throw new Error('Failed to search content library');
-  }
+  const [total, content] = await Promise.all([
+    prisma.content_library.count({ where }),
+    prisma.content_library.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: content || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit,
     query
@@ -119,24 +101,19 @@ const searchLibrary = async (query, { page = 1, limit = 20, contentType, categor
  * @returns {Promise<Array>} List of categories
  */
 const getLibraryCategories = async (contentType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('content_library')
-    .select('category, content_type')
-    .eq('status', 1)
-    .not('category', 'is', null);
+  const where = {
+    status: 1,
+    category: { not: null }
+  };
 
   if (contentType) {
-    query = query.eq('content_type', contentType);
+    where.content_type = contentType;
   }
 
-  const { data, error } = await query;
-
-  if (error) {
-    logger.error('Failed to fetch categories', { error: error.message });
-    throw new Error('Failed to fetch categories');
-  }
+  const data = await prisma.content_library.findMany({
+    where,
+    select: { category: true, content_type: true }
+  });
 
   // Extract unique categories with counts
   const categoryMap = {};
@@ -161,17 +138,14 @@ const getLibraryCategories = async (contentType) => {
  * @returns {Promise<Object|null>} Content item
  */
 const getLibraryById = async (contentId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: content, error } = await supabaseAdmin
-    .from('content_library')
-    .select('*')
-    .eq('id', contentId)
-    .single();
-
-  if (error || !content) return null;
-
-  return content;
+  try {
+    const content = await prisma.content_library.findFirst({
+      where: { id: BigInt(contentId) }
+    });
+    return content || null;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -180,15 +154,12 @@ const getLibraryById = async (contentId) => {
  * @returns {Promise<Object>} Created content
  */
 const createLibraryItem = async (data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // Build metadata object if filename is provided
   const metadata = {};
   if (data.filename) metadata.filename = data.filename;
 
-  const { data: content, error } = await supabaseAdmin
-    .from('content_library')
-    .insert({
+  const content = await prisma.content_library.create({
+    data: {
       title: data.title,
       description: data.description || null,
       content_type: data.content_type || data.contentType,
@@ -200,14 +171,8 @@ const createLibraryItem = async (data) => {
       language: data.language || 'en',
       metadata: Object.keys(metadata).length > 0 ? metadata : null,
       status: data.status !== undefined ? data.status : 1
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to create content', { error: error.message });
-    throw new Error('Failed to create content');
-  }
+    }
+  });
 
   return content;
 };
@@ -219,9 +184,7 @@ const createLibraryItem = async (data) => {
  * @returns {Promise<Object>} Updated content
  */
 const updateLibraryItem = async (contentId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { updated_at: new Date() };
 
   if (data.title !== undefined) updateData.title = data.title;
   if (data.description !== undefined) updateData.description = data.description;
@@ -237,29 +200,20 @@ const updateLibraryItem = async (contentId, data) => {
   // Handle metadata/filename update
   if (data.filename !== undefined) {
     // First get current metadata
-    const { data: current } = await supabaseAdmin
-      .from('content_library')
-      .select('metadata')
-      .eq('id', contentId)
-      .single();
-
+    const current = await prisma.content_library.findFirst({
+      where: { id: BigInt(contentId) },
+      select: { metadata: true }
+    });
     updateData.metadata = {
       ...(current?.metadata || {}),
       filename: data.filename
     };
   }
 
-  const { data: content, error } = await supabaseAdmin
-    .from('content_library')
-    .update(updateData)
-    .eq('id', contentId)
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to update content', { error: error.message });
-    throw new Error('Failed to update content');
-  }
+  const content = await prisma.content_library.update({
+    where: { id: BigInt(contentId) },
+    data: updateData
+  });
 
   return content;
 };
@@ -269,17 +223,9 @@ const updateLibraryItem = async (contentId, data) => {
  * @param {string} contentId - Content ID
  */
 const deleteLibraryItem = async (contentId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('content_library')
-    .delete()
-    .eq('id', contentId);
-
-  if (error) {
-    logger.error('Failed to delete content', { error: error.message });
-    throw new Error('Failed to delete content');
-  }
+  await prisma.content_library.delete({
+    where: { id: BigInt(contentId) }
+  });
 };
 
 /**
@@ -288,8 +234,6 @@ const deleteLibraryItem = async (contentId) => {
  * @returns {Promise<Object>} Result with created count
  */
 const batchCreateLibraryItems = async (items) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Items must be a non-empty array');
   }
@@ -313,19 +257,13 @@ const batchCreateLibraryItems = async (items) => {
     };
   });
 
-  const { data: content, error } = await supabaseAdmin
-    .from('content_library')
-    .insert(insertData)
-    .select();
-
-  if (error) {
-    logger.error('Failed to batch create content', { error: error.message });
-    throw new Error('Failed to batch create content');
-  }
+  const result = await prisma.content_library.createMany({
+    data: insertData
+  });
 
   return {
-    created: content?.length || 0,
-    items: content || []
+    created: result.count || 0,
+    items: []
   };
 };
 
@@ -334,17 +272,11 @@ const batchCreateLibraryItems = async (items) => {
  * @returns {Promise<Object>} Statistics object
  */
 const getLibraryStatistics = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Get total count
-  const { count: total } = await supabaseAdmin
-    .from('content_library')
-    .select('id', { count: 'exact', head: true });
-
-  // Get count by type
-  const { data: typeData } = await supabaseAdmin
-    .from('content_library')
-    .select('content_type');
+  const [total, typeData, categoryData] = await Promise.all([
+    prisma.content_library.count(),
+    prisma.content_library.findMany({ select: { content_type: true } }),
+    prisma.content_library.findMany({ select: { category: true } })
+  ]);
 
   const byType = {};
   if (typeData) {
@@ -352,11 +284,6 @@ const getLibraryStatistics = async () => {
       byType[item.content_type] = (byType[item.content_type] || 0) + 1;
     });
   }
-
-  // Get count by category
-  const { data: categoryData } = await supabaseAdmin
-    .from('content_library')
-    .select('category');
 
   const byCategory = {};
   if (categoryData) {
@@ -382,38 +309,25 @@ const getLibraryStatistics = async () => {
  * @returns {Promise<Object>} Paginated music list
  */
 const getMusicList = async ({ page = 1, limit = 10, category, language } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
+  const where = {};
 
-  let countQuery = supabaseAdmin
-    .from('ai_music')
-    .select('id', { count: 'exact', head: true });
+  if (category) where.category = category;
+  if (language) where.language = language;
 
-  let dataQuery = supabaseAdmin
-    .from('ai_music')
-    .select('*')
-    .order('sort', { ascending: true })
-    .order('created_at', { ascending: false });
-
-  if (category) {
-    countQuery = countQuery.eq('category', category);
-    dataQuery = dataQuery.eq('category', category);
-  }
-
-  if (language) {
-    countQuery = countQuery.eq('language', language);
-    dataQuery = dataQuery.eq('language', language);
-  }
-
-  const { count } = await countQuery;
-  const { data: music, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch music');
+  const [total, music] = await Promise.all([
+    prisma.ai_music.count({ where }),
+    prisma.ai_music.findMany({
+      where,
+      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: music || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -425,17 +339,14 @@ const getMusicList = async ({ page = 1, limit = 10, category, language } = {}) =
  * @returns {Promise<Object>} Music item
  */
 const getMusicById = async (musicId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: music, error } = await supabaseAdmin
-    .from('ai_music')
-    .select('*')
-    .eq('id', musicId)
-    .single();
-
-  if (error || !music) return null;
-
-  return music;
+  try {
+    const music = await prisma.ai_music.findFirst({
+      where: { id: musicId }
+    });
+    return music || null;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -445,11 +356,8 @@ const getMusicById = async (musicId) => {
  * @returns {Promise<Object>} Created music
  */
 const createMusic = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: music, error } = await supabaseAdmin
-    .from('ai_music')
-    .insert({
+  const music = await prisma.ai_music.create({
+    data: {
       title: data.title,
       artist: data.artist,
       album: data.album,
@@ -461,13 +369,9 @@ const createMusic = async (userId, data) => {
       lyrics: data.lyrics,
       sort: data.sort || 0,
       status: data.status || 1,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to create music');
-
+      creator: userId ? BigInt(userId) : null
+    }
+  });
   return music;
 };
 
@@ -478,9 +382,7 @@ const createMusic = async (userId, data) => {
  * @returns {Promise<Object>} Updated music
  */
 const updateMusic = async (musicId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { updated_at: new Date() };
 
   if (data.title !== undefined) updateData.title = data.title;
   if (data.artist !== undefined) updateData.artist = data.artist;
@@ -494,15 +396,10 @@ const updateMusic = async (musicId, data) => {
   if (data.sort !== undefined) updateData.sort = data.sort;
   if (data.status !== undefined) updateData.status = data.status;
 
-  const { data: music, error } = await supabaseAdmin
-    .from('ai_music')
-    .update(updateData)
-    .eq('id', musicId)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to update music');
-
+  const music = await prisma.ai_music.update({
+    where: { id: musicId },
+    data: updateData
+  });
   return music;
 };
 
@@ -511,14 +408,7 @@ const updateMusic = async (musicId, data) => {
  * @param {string} musicId - Music ID
  */
 const deleteMusic = async (musicId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_music')
-    .delete()
-    .eq('id', musicId);
-
-  if (error) throw new Error('Failed to delete music');
+  await prisma.ai_music.delete({ where: { id: musicId } });
 };
 
 /**
@@ -527,43 +417,26 @@ const deleteMusic = async (musicId) => {
  * @returns {Promise<Object>} Paginated story list
  */
 const getStoryList = async ({ page = 1, limit = 10, category, language, ageGroup } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
+  const where = {};
 
-  let countQuery = supabaseAdmin
-    .from('ai_story')
-    .select('id', { count: 'exact', head: true });
+  if (category) where.category = category;
+  if (language) where.language = language;
+  if (ageGroup) where.age_group = ageGroup;
 
-  let dataQuery = supabaseAdmin
-    .from('ai_story')
-    .select('*')
-    .order('sort', { ascending: true })
-    .order('created_at', { ascending: false });
-
-  if (category) {
-    countQuery = countQuery.eq('category', category);
-    dataQuery = dataQuery.eq('category', category);
-  }
-
-  if (language) {
-    countQuery = countQuery.eq('language', language);
-    dataQuery = dataQuery.eq('language', language);
-  }
-
-  if (ageGroup) {
-    countQuery = countQuery.eq('age_group', ageGroup);
-    dataQuery = dataQuery.eq('age_group', ageGroup);
-  }
-
-  const { count } = await countQuery;
-  const { data: stories, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch stories');
+  const [total, stories] = await Promise.all([
+    prisma.ai_story.count({ where }),
+    prisma.ai_story.findMany({
+      where,
+      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: stories || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -575,17 +448,14 @@ const getStoryList = async ({ page = 1, limit = 10, category, language, ageGroup
  * @returns {Promise<Object>} Story item
  */
 const getStoryById = async (storyId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: story, error } = await supabaseAdmin
-    .from('ai_story')
-    .select('*')
-    .eq('id', storyId)
-    .single();
-
-  if (error || !story) return null;
-
-  return story;
+  try {
+    const story = await prisma.ai_story.findFirst({
+      where: { id: storyId }
+    });
+    return story || null;
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -595,11 +465,8 @@ const getStoryById = async (storyId) => {
  * @returns {Promise<Object>} Created story
  */
 const createStory = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: story, error } = await supabaseAdmin
-    .from('ai_story')
-    .insert({
+  const story = await prisma.ai_story.create({
+    data: {
       title: data.title,
       author: data.author,
       category: data.category,
@@ -611,13 +478,9 @@ const createStory = async (userId, data) => {
       cover_url: data.coverUrl,
       sort: data.sort || 0,
       status: data.status || 1,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to create story');
-
+      creator: userId ? BigInt(userId) : null
+    }
+  });
   return story;
 };
 
@@ -628,9 +491,7 @@ const createStory = async (userId, data) => {
  * @returns {Promise<Object>} Updated story
  */
 const updateStory = async (storyId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { updated_at: new Date() };
 
   if (data.title !== undefined) updateData.title = data.title;
   if (data.author !== undefined) updateData.author = data.author;
@@ -644,15 +505,10 @@ const updateStory = async (storyId, data) => {
   if (data.sort !== undefined) updateData.sort = data.sort;
   if (data.status !== undefined) updateData.status = data.status;
 
-  const { data: story, error } = await supabaseAdmin
-    .from('ai_story')
-    .update(updateData)
-    .eq('id', storyId)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to update story');
-
+  const story = await prisma.ai_story.update({
+    where: { id: storyId },
+    data: updateData
+  });
   return story;
 };
 
@@ -661,14 +517,7 @@ const updateStory = async (storyId, data) => {
  * @param {string} storyId - Story ID
  */
 const deleteStory = async (storyId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_story')
-    .delete()
-    .eq('id', storyId);
-
-  if (error) throw new Error('Failed to delete story');
+  await prisma.ai_story.delete({ where: { id: storyId } });
 };
 
 /**
@@ -677,43 +526,26 @@ const deleteStory = async (storyId) => {
  * @returns {Promise<Object>} Paginated textbook list
  */
 const getTextbookList = async ({ page = 1, limit = 10, subject, grade, language } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
+  const where = {};
 
-  let countQuery = supabaseAdmin
-    .from('ai_textbook')
-    .select('id', { count: 'exact', head: true });
+  if (subject) where.subject = subject;
+  if (grade) where.grade = grade;
+  if (language) where.language = language;
 
-  let dataQuery = supabaseAdmin
-    .from('ai_textbook')
-    .select('*')
-    .order('sort', { ascending: true })
-    .order('created_at', { ascending: false });
-
-  if (subject) {
-    countQuery = countQuery.eq('subject', subject);
-    dataQuery = dataQuery.eq('subject', subject);
-  }
-
-  if (grade) {
-    countQuery = countQuery.eq('grade', grade);
-    dataQuery = dataQuery.eq('grade', grade);
-  }
-
-  if (language) {
-    countQuery = countQuery.eq('language', language);
-    dataQuery = dataQuery.eq('language', language);
-  }
-
-  const { count } = await countQuery;
-  const { data: textbooks, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch textbooks');
+  const [total, textbooks] = await Promise.all([
+    prisma.ai_textbook.count({ where }),
+    prisma.ai_textbook.findMany({
+      where,
+      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: textbooks || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -725,26 +557,21 @@ const getTextbookList = async ({ page = 1, limit = 10, subject, grade, language 
  * @returns {Promise<Object>} Textbook with chapters
  */
 const getTextbookById = async (textbookId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const textbook = await prisma.ai_textbook.findFirst({
+    where: { id: textbookId },
+    include: {
+      ai_textbook_chapter: {
+        orderBy: { sort: 'asc' }
+      }
+    }
+  });
 
-  const { data: textbook, error } = await supabaseAdmin
-    .from('ai_textbook')
-    .select('*')
-    .eq('id', textbookId)
-    .single();
+  if (!textbook) return null;
 
-  if (error || !textbook) return null;
-
-  // Get chapters
-  const { data: chapters } = await supabaseAdmin
-    .from('ai_textbook_chapter')
-    .select('*')
-    .eq('textbook_id', textbookId)
-    .order('sort', { ascending: true });
-
+  const { ai_textbook_chapter, ...rest } = textbook;
   return {
-    ...textbook,
-    chapters: chapters || []
+    ...rest,
+    chapters: ai_textbook_chapter || []
   };
 };
 
@@ -755,11 +582,8 @@ const getTextbookById = async (textbookId) => {
  * @returns {Promise<Object>} Created textbook
  */
 const createTextbook = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: textbook, error } = await supabaseAdmin
-    .from('ai_textbook')
-    .insert({
+  const textbook = await prisma.ai_textbook.create({
+    data: {
       title: data.title,
       subject: data.subject,
       grade: data.grade,
@@ -769,13 +593,9 @@ const createTextbook = async (userId, data) => {
       description: data.description,
       sort: data.sort || 0,
       status: data.status || 1,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to create textbook');
-
+      creator: userId ? BigInt(userId) : null
+    }
+  });
   return textbook;
 };
 
@@ -786,19 +606,26 @@ const createTextbook = async (userId, data) => {
  * @returns {Promise<Object>} Random content item
  */
 const getRandomContent = async (mac, contentType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  let data;
 
-  const table = contentType === 'music' ? 'ai_music' :
-    contentType === 'story' ? 'ai_story' : 'ai_textbook';
+  if (contentType === 'music') {
+    data = await prisma.ai_music.findMany({
+      where: { status: 1 },
+      take: 10
+    });
+  } else if (contentType === 'story') {
+    data = await prisma.ai_story.findMany({
+      where: { status: 1 },
+      take: 10
+    });
+  } else {
+    data = await prisma.ai_textbook.findMany({
+      where: { status: 1 },
+      take: 10
+    });
+  }
 
-  // Get random content
-  const { data, error } = await supabaseAdmin
-    .from(table)
-    .select('*')
-    .eq('status', 1)
-    .limit(10);
-
-  if (error || !data || data.length === 0) {
+  if (!data || data.length === 0) {
     throw new Error(`No ${contentType} content available`);
   }
 
@@ -814,30 +641,38 @@ const getRandomContent = async (mac, contentType) => {
  * @returns {Promise<Object>} Search results
  */
 const searchContent = async (query, { page = 1, limit = 20 } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const searchPattern = `%${query}%`;
-
-  // Search music
-  const { data: music } = await supabaseAdmin
-    .from('ai_music')
-    .select('id, title, artist, category')
-    .or(`title.ilike.${searchPattern},artist.ilike.${searchPattern}`)
-    .limit(limit);
-
-  // Search stories
-  const { data: stories } = await supabaseAdmin
-    .from('ai_story')
-    .select('id, title, author, category')
-    .or(`title.ilike.${searchPattern},author.ilike.${searchPattern}`)
-    .limit(limit);
-
-  // Search textbooks
-  const { data: textbooks } = await supabaseAdmin
-    .from('ai_textbook')
-    .select('id, title, subject, grade')
-    .or(`title.ilike.${searchPattern},subject.ilike.${searchPattern}`)
-    .limit(limit);
+  const [music, stories, textbooks] = await Promise.all([
+    prisma.ai_music.findMany({
+      where: {
+        OR: [
+          { title: { contains: query, mode: 'insensitive' } },
+          { artist: { contains: query, mode: 'insensitive' } }
+        ]
+      },
+      select: { id: true, title: true, artist: true, category: true },
+      take: limit
+    }),
+    prisma.ai_story.findMany({
+      where: {
+        OR: [
+          { title: { contains: query, mode: 'insensitive' } },
+          { author: { contains: query, mode: 'insensitive' } }
+        ]
+      },
+      select: { id: true, title: true, author: true, category: true },
+      take: limit
+    }),
+    prisma.ai_textbook.findMany({
+      where: {
+        OR: [
+          { title: { contains: query, mode: 'insensitive' } },
+          { subject: { contains: query, mode: 'insensitive' } }
+        ]
+      },
+      select: { id: true, title: true, subject: true, grade: true },
+      take: limit
+    })
+  ]);
 
   return {
     music: (music || []).map(m => ({ ...m, type: 'music' })),
@@ -855,21 +690,17 @@ const searchContent = async (query, { page = 1, limit = 20 } = {}) => {
  * @returns {Promise<Array>} Playlist items with content details
  */
 const getPlaylist = async (deviceId, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
-  // First, get playlist items (no FK join - tables may not have relationships)
-  const { data: playlistItems, error: playlistError } = await supabaseAdmin
-    .from(table)
-    .select('id, position, created_at, content_id')
-    .eq('device_id', deviceId)
-    .order('position', { ascending: true });
-
-  if (playlistError) {
-    logger.error(`Failed to fetch ${playlistType} playlist`, { error: playlistError.message, deviceId });
-    throw new Error(`Failed to fetch ${playlistType} playlist`);
-  }
+  const playlistItems = playlistType === 'music'
+    ? await prisma.music_playlist.findMany({
+      where: { device_id: deviceId },
+      select: { id: true, position: true, created_at: true, content_id: true },
+      orderBy: { position: 'asc' }
+    })
+    : await prisma.story_playlist.findMany({
+      where: { device_id: deviceId },
+      select: { id: true, position: true, created_at: true, content_id: true },
+      orderBy: { position: 'asc' }
+    });
 
   if (!playlistItems || playlistItems.length === 0) {
     return [];
@@ -889,14 +720,25 @@ const getPlaylist = async (deviceId, playlistType) => {
   }
 
   // Fetch content details from content_library
-  const { data: contentItems, error: contentError } = await supabaseAdmin
-    .from('content_library')
-    .select('id, title, description, content_type, category, url, thumbnail_url, duration_seconds, metadata, status')
-    .in('id', contentIds);
-
-  if (contentError) {
-    logger.warn(`Failed to fetch content for playlist`, { error: contentError.message });
-    // Return playlist without content details
+  let contentItems = [];
+  try {
+    contentItems = await prisma.content_library.findMany({
+      where: { id: { in: contentIds } },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        content_type: true,
+        category: true,
+        url: true,
+        thumbnail_url: true,
+        duration_seconds: true,
+        metadata: true,
+        status: true
+      }
+    });
+  } catch (err) {
+    logger.warn('Failed to fetch content for playlist', { error: err.message });
     return playlistItems.map(item => ({
       id: item.id,
       position: item.position,
@@ -909,7 +751,7 @@ const getPlaylist = async (deviceId, playlistType) => {
   // Create content lookup map
   const contentMap = {};
   (contentItems || []).forEach(content => {
-    contentMap[content.id] = content;
+    contentMap[String(content.id)] = content;
   });
 
   // Merge playlist with content
@@ -918,7 +760,7 @@ const getPlaylist = async (deviceId, playlistType) => {
     position: item.position,
     contentId: item.content_id,
     createdAt: item.created_at,
-    content: contentMap[item.content_id] || null
+    content: contentMap[String(item.content_id)] || null
   }));
 };
 
@@ -931,37 +773,50 @@ const getPlaylist = async (deviceId, playlistType) => {
  * @returns {Promise<Object>} Created playlist item
  */
 const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
   // If position not specified, get the max position and add 1
   if (position === undefined || position === null) {
-    const { data: maxData } = await supabaseAdmin
-      .from(table)
-      .select('position')
-      .eq('device_id', deviceId)
-      .order('position', { ascending: false })
-      .limit(1)
-      .single();
-
-    position = maxData ? maxData.position + 1 : 0;
+    let maxItem;
+    if (playlistType === 'music') {
+      maxItem = await prisma.music_playlist.findFirst({
+        where: { device_id: deviceId },
+        select: { position: true },
+        orderBy: { position: 'desc' }
+      });
+    } else {
+      maxItem = await prisma.story_playlist.findFirst({
+        where: { device_id: deviceId },
+        select: { position: true },
+        orderBy: { position: 'desc' }
+      });
+    }
+    position = maxItem ? maxItem.position + 1 : 0;
   }
 
   // Insert playlist item
-  const { data, error } = await supabaseAdmin
-    .from(table)
-    .insert({
-      device_id: deviceId,
-      content_id: contentId,
-      position
-    })
-    .select('id, position, created_at, content_id')
-    .single();
-
-  if (error) {
-    // Check for duplicate entry
-    if (error.code === '23505') {
+  let data;
+  try {
+    if (playlistType === 'music') {
+      data = await prisma.music_playlist.create({
+        data: {
+          device_id: deviceId,
+          content_id: BigInt(contentId),
+          position
+        },
+        select: { id: true, position: true, created_at: true, content_id: true }
+      });
+    } else {
+      data = await prisma.story_playlist.create({
+        data: {
+          device_id: deviceId,
+          content_id: BigInt(contentId),
+          position
+        },
+        select: { id: true, position: true, created_at: true, content_id: true }
+      });
+    }
+  } catch (error) {
+    // Check for unique constraint violation
+    if (error.code === 'P2002') {
       throw new Error('Content already exists in playlist');
     }
     logger.error(`Failed to add to ${playlistType} playlist`, { error: error.message, deviceId, contentId });
@@ -971,12 +826,25 @@ const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
   // Fetch content details separately
   let content = null;
   if (contentId) {
-    const { data: contentData } = await supabaseAdmin
-      .from('content_library')
-      .select('id, title, description, content_type, category, url, thumbnail_url, duration_seconds, metadata, status')
-      .eq('id', contentId)
-      .single();
-    content = contentData;
+    try {
+      content = await prisma.content_library.findFirst({
+        where: { id: BigInt(contentId) },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          content_type: true,
+          category: true,
+          url: true,
+          thumbnail_url: true,
+          duration_seconds: true,
+          metadata: true,
+          status: true
+        }
+      });
+    } catch {
+      // ignore
+    }
   }
 
   return {
@@ -995,17 +863,17 @@ const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const removeFromPlaylist = async (deviceId, contentId, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
-  const { error } = await supabaseAdmin
-    .from(table)
-    .delete()
-    .eq('device_id', deviceId)
-    .eq('content_id', contentId);
-
-  if (error) {
+  try {
+    if (playlistType === 'music') {
+      await prisma.music_playlist.deleteMany({
+        where: { device_id: deviceId, content_id: BigInt(contentId) }
+      });
+    } else {
+      await prisma.story_playlist.deleteMany({
+        where: { device_id: deviceId, content_id: BigInt(contentId) }
+      });
+    }
+  } catch (error) {
     logger.error(`Failed to remove from ${playlistType} playlist`, { error: error.message, deviceId, contentId });
     throw new Error(`Failed to remove from ${playlistType} playlist`);
   }
@@ -1017,16 +885,17 @@ const removeFromPlaylist = async (deviceId, contentId, playlistType) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const removePlaylistItem = async (playlistItemId, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
-  const { error } = await supabaseAdmin
-    .from(table)
-    .delete()
-    .eq('id', playlistItemId);
-
-  if (error) {
+  try {
+    if (playlistType === 'music') {
+      await prisma.music_playlist.delete({
+        where: { id: BigInt(playlistItemId) }
+      });
+    } else {
+      await prisma.story_playlist.delete({
+        where: { id: BigInt(playlistItemId) }
+      });
+    }
+  } catch (error) {
     logger.error('Failed to remove playlist item', { error: error.message, playlistItemId });
     throw new Error('Failed to remove playlist item');
   }
@@ -1038,16 +907,13 @@ const removePlaylistItem = async (playlistItemId, playlistType) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const clearPlaylist = async (deviceId, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
-  const { error } = await supabaseAdmin
-    .from(table)
-    .delete()
-    .eq('device_id', deviceId);
-
-  if (error) {
+  try {
+    if (playlistType === 'music') {
+      await prisma.music_playlist.deleteMany({ where: { device_id: deviceId } });
+    } else {
+      await prisma.story_playlist.deleteMany({ where: { device_id: deviceId } });
+    }
+  } catch (error) {
     logger.error(`Failed to clear ${playlistType} playlist`, { error: error.message, deviceId });
     throw new Error(`Failed to clear ${playlistType} playlist`);
   }
@@ -1060,26 +926,22 @@ const clearPlaylist = async (deviceId, playlistType) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const reorderPlaylist = async (deviceId, itemIds, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
   // Update positions based on array order
-  const updates = itemIds.map((id, index) => ({
-    id,
-    position: index,
-    updated_at: new Date().toISOString()
-  }));
-
-  // Perform batch update
-  for (const update of updates) {
-    const { error } = await supabaseAdmin
-      .from(table)
-      .update({ position: update.position, updated_at: update.updated_at })
-      .eq('id', update.id)
-      .eq('device_id', deviceId);
-
-    if (error) {
+  for (let index = 0; index < itemIds.length; index++) {
+    const id = itemIds[index];
+    try {
+      if (playlistType === 'music') {
+        await prisma.music_playlist.updateMany({
+          where: { id: BigInt(id), device_id: deviceId },
+          data: { position: index, updated_at: new Date() }
+        });
+      } else {
+        await prisma.story_playlist.updateMany({
+          where: { id: BigInt(id), device_id: deviceId },
+          data: { position: index, updated_at: new Date() }
+        });
+      }
+    } catch (error) {
       logger.error(`Failed to reorder ${playlistType} playlist`, { error: error.message, deviceId });
       throw new Error(`Failed to reorder ${playlistType} playlist`);
     }
@@ -1097,24 +959,29 @@ const reorderPlaylist = async (deviceId, itemIds, playlistType) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const movePlaylistItem = async (deviceId, playlistItemId, newPosition, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
   // Get current playlist
-  const { data: playlist, error: fetchError } = await supabaseAdmin
-    .from(table)
-    .select('id, position')
-    .eq('device_id', deviceId)
-    .order('position', { ascending: true });
-
-  if (fetchError) {
-    logger.error('Failed to fetch playlist for reorder', { error: fetchError.message, deviceId });
+  let playlist;
+  try {
+    if (playlistType === 'music') {
+      playlist = await prisma.music_playlist.findMany({
+        where: { device_id: deviceId },
+        select: { id: true, position: true },
+        orderBy: { position: 'asc' }
+      });
+    } else {
+      playlist = await prisma.story_playlist.findMany({
+        where: { device_id: deviceId },
+        select: { id: true, position: true },
+        orderBy: { position: 'asc' }
+      });
+    }
+  } catch (error) {
+    logger.error('Failed to fetch playlist for reorder', { error: error.message, deviceId });
     throw new Error('Failed to move playlist item');
   }
 
-  // Find current item
-  const currentIndex = playlist.findIndex(item => item.id === playlistItemId);
+  // Find current item (compare as strings to handle BigInt)
+  const currentIndex = playlist.findIndex(item => String(item.id) === String(playlistItemId));
   if (currentIndex === -1) {
     throw new Error('Playlist item not found');
   }
@@ -1138,28 +1005,47 @@ const movePlaylistItem = async (deviceId, playlistItemId, newPosition, playlistT
  * @returns {Promise<Object|null>} Playlist item
  */
 const getPlaylistItem = async (playlistItemId, playlistType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  let data;
+  try {
+    if (playlistType === 'music') {
+      data = await prisma.music_playlist.findFirst({
+        where: { id: BigInt(playlistItemId) },
+        select: { id: true, device_id: true, position: true, created_at: true, content_id: true }
+      });
+    } else {
+      data = await prisma.story_playlist.findFirst({
+        where: { id: BigInt(playlistItemId) },
+        select: { id: true, device_id: true, position: true, created_at: true, content_id: true }
+      });
+    }
+  } catch {
+    return null;
+  }
 
-  const table = playlistType === 'music' ? 'music_playlist' : 'story_playlist';
-
-  // Get playlist item
-  const { data, error } = await supabaseAdmin
-    .from(table)
-    .select('id, device_id, position, created_at, content_id')
-    .eq('id', playlistItemId)
-    .single();
-
-  if (error || !data) return null;
+  if (!data) return null;
 
   // Fetch content details separately
   let content = null;
   if (data.content_id) {
-    const { data: contentData } = await supabaseAdmin
-      .from('content_library')
-      .select('id, title, description, content_type, category, url, thumbnail_url, duration_seconds, metadata, status')
-      .eq('id', data.content_id)
-      .single();
-    content = contentData;
+    try {
+      content = await prisma.content_library.findFirst({
+        where: { id: data.content_id },
+        select: {
+          id: true,
+          title: true,
+          description: true,
+          content_type: true,
+          category: true,
+          url: true,
+          thumbnail_url: true,
+          duration_seconds: true,
+          metadata: true,
+          status: true
+        }
+      });
+    } catch {
+      // ignore
+    }
   }
 
   return {
@@ -1173,6 +1059,7 @@ const getPlaylistItem = async (playlistItemId, playlistType) => {
 };
 
 // ==================== CONTENT ITEMS METHODS ====================
+// Note: 'content_items' table is not in the Prisma schema; using $queryRaw fallback.
 
 /**
  * Get content items with pagination
@@ -1180,44 +1067,47 @@ const getPlaylistItem = async (playlistItemId, playlistType) => {
  * @returns {Promise<Object>} Paginated content items list
  */
 const getContentItems = async ({ page = 1, limit = 10, contentType, category } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('content_items')
-    .select('id', { count: 'exact', head: true });
+  try {
+    // Build dynamic WHERE clauses
+    const conditions = [];
+    const params = [];
+    let paramIdx = 1;
 
-  let dataQuery = supabaseAdmin
-    .from('content_items')
-    .select('*')
-    .order('created_at', { ascending: false });
+    if (contentType) {
+      conditions.push(`content_type = $${paramIdx++}`);
+      params.push(contentType);
+    }
+    if (category) {
+      conditions.push(`category = $${paramIdx++}`);
+      params.push(category);
+    }
 
-  if (contentType) {
-    countQuery = countQuery.eq('content_type', contentType);
-    dataQuery = dataQuery.eq('content_type', contentType);
-  }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  if (category) {
-    countQuery = countQuery.eq('category', category);
-    dataQuery = dataQuery.eq('category', category);
-  }
+    const countResult = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS count FROM content_items ${whereClause}`,
+      ...params
+    );
+    const total = countResult[0]?.count || 0;
 
-  const { count } = await countQuery;
-  const { data: items, error } = await dataQuery.range(offset, offset + limit - 1);
+    const items = await prisma.$queryRawUnsafe(
+      `SELECT * FROM content_items ${whereClause} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      ...params, limit, offset
+    );
 
-  if (error) {
+    return {
+      list: items || [],
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit)
+    };
+  } catch (error) {
     logger.error('Failed to fetch content items', { error: error.message });
     throw new Error('Failed to fetch content items');
   }
-
-  return {
-    list: items || [],
-    total: count || 0,
-    page,
-    limit,
-    pages: Math.ceil((count || 0) / limit)
-  };
 };
 
 /**
@@ -1226,20 +1116,13 @@ const getContentItems = async ({ page = 1, limit = 10, contentType, category } =
  * @returns {Promise<Object>} Content item
  */
 const getContentItemById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: item, error } = await supabaseAdmin
-    .from('content_items')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error && error.code !== 'PGRST116') {
+  try {
+    const results = await prisma.$queryRaw`SELECT * FROM content_items WHERE id = ${id} LIMIT 1`;
+    return results[0] || null;
+  } catch (error) {
     logger.error('Failed to fetch content item', { error: error.message });
     throw new Error('Failed to fetch content item');
   }
-
-  return item || null;
 };
 
 /**
@@ -1269,47 +1152,46 @@ const getContentItemsByCategory = async (category, { page = 1, limit = 10 } = {}
  * @returns {Promise<Object>} Search results
  */
 const searchContentItems = async (query, { page = 1, limit = 20, contentType, category } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
-  const searchPattern = `%${query}%`;
 
-  let countQuery = supabaseAdmin
-    .from('content_items')
-    .select('id', { count: 'exact', head: true })
-    .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`);
+  try {
+    const conditions = [`(title ILIKE $1 OR romanized ILIKE $1)`];
+    const params = [`%${query}%`];
+    let paramIdx = 2;
 
-  let dataQuery = supabaseAdmin
-    .from('content_items')
-    .select('*')
-    .or(`title.ilike.${searchPattern},romanized.ilike.${searchPattern}`)
-    .order('created_at', { ascending: false });
+    if (contentType) {
+      conditions.push(`content_type = $${paramIdx++}`);
+      params.push(contentType);
+    }
+    if (category) {
+      conditions.push(`category = $${paramIdx++}`);
+      params.push(category);
+    }
 
-  if (contentType) {
-    countQuery = countQuery.eq('content_type', contentType);
-    dataQuery = dataQuery.eq('content_type', contentType);
-  }
+    const whereClause = `WHERE ${conditions.join(' AND ')}`;
 
-  if (category) {
-    countQuery = countQuery.eq('category', category);
-    dataQuery = dataQuery.eq('category', category);
-  }
+    const countResult = await prisma.$queryRawUnsafe(
+      `SELECT COUNT(*)::int AS count FROM content_items ${whereClause}`,
+      ...params
+    );
+    const total = countResult[0]?.count || 0;
 
-  const { count } = await countQuery;
-  const { data: items, error } = await dataQuery.range(offset, offset + limit - 1);
+    const items = await prisma.$queryRawUnsafe(
+      `SELECT * FROM content_items ${whereClause} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
+      ...params, limit, offset
+    );
 
-  if (error) {
+    return {
+      list: items || [],
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit)
+    };
+  } catch (error) {
     logger.error('Failed to search content items', { error: error.message });
     throw new Error('Failed to search content items');
   }
-
-  return {
-    list: items || [],
-    total: count || 0,
-    page,
-    limit,
-    pages: Math.ceil((count || 0) / limit)
-  };
 };
 
 /**
@@ -1318,27 +1200,20 @@ const searchContentItems = async (query, { page = 1, limit = 20, contentType, ca
  * @returns {Promise<Array>} List of categories
  */
 const getContentItemCategories = async (contentType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  try {
+    let results;
+    if (contentType) {
+      results = await prisma.$queryRaw`SELECT DISTINCT category FROM content_items WHERE category IS NOT NULL AND content_type = ${contentType}`;
+    } else {
+      results = await prisma.$queryRaw`SELECT DISTINCT category FROM content_items WHERE category IS NOT NULL`;
+    }
 
-  let query = supabaseAdmin
-    .from('content_items')
-    .select('category')
-    .not('category', 'is', null);
-
-  if (contentType) {
-    query = query.eq('content_type', contentType);
-  }
-
-  const { data, error } = await query;
-
-  if (error) {
+    const categories = (results || []).map(r => r.category).filter(Boolean);
+    return categories.sort();
+  } catch (error) {
     logger.error('Failed to fetch categories', { error: error.message });
     throw new Error('Failed to fetch categories');
   }
-
-  // Extract unique categories
-  const categories = [...new Set(data.map(item => item.category).filter(Boolean))];
-  return categories.sort();
 };
 
 /**
@@ -1346,44 +1221,36 @@ const getContentItemCategories = async (contentType) => {
  * @returns {Promise<Object>} Statistics object
  */
 const getContentItemStatistics = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  try {
+    const [countResult, typeData, categoryData] = await Promise.all([
+      prisma.$queryRaw`SELECT COUNT(*)::int AS count FROM content_items`,
+      prisma.$queryRaw`SELECT content_type FROM content_items`,
+      prisma.$queryRaw`SELECT category FROM content_items`
+    ]);
 
-  // Get total count
-  const { count: total } = await supabaseAdmin
-    .from('content_items')
-    .select('id', { count: 'exact', head: true });
+    const total = countResult[0]?.count || 0;
 
-  // Get count by type
-  const { data: typeData } = await supabaseAdmin
-    .from('content_items')
-    .select('content_type');
+    const byType = {};
+    if (typeData) {
+      typeData.forEach(item => {
+        byType[item.content_type] = (byType[item.content_type] || 0) + 1;
+      });
+    }
 
-  const byType = {};
-  if (typeData) {
-    typeData.forEach(item => {
-      byType[item.content_type] = (byType[item.content_type] || 0) + 1;
-    });
+    const byCategory = {};
+    if (categoryData) {
+      categoryData.forEach(item => {
+        if (item.category) {
+          byCategory[item.category] = (byCategory[item.category] || 0) + 1;
+        }
+      });
+    }
+
+    return { total, byType, byCategory };
+  } catch (error) {
+    logger.error('Failed to fetch content item statistics', { error: error.message });
+    throw new Error('Failed to fetch content item statistics');
   }
-
-  // Get count by category
-  const { data: categoryData } = await supabaseAdmin
-    .from('content_items')
-    .select('category');
-
-  const byCategory = {};
-  if (categoryData) {
-    categoryData.forEach(item => {
-      if (item.category) {
-        byCategory[item.category] = (byCategory[item.category] || 0) + 1;
-      }
-    });
-  }
-
-  return {
-    total: total || 0,
-    byType,
-    byCategory
-  };
 };
 
 /**
@@ -1392,32 +1259,27 @@ const getContentItemStatistics = async () => {
  * @returns {Promise<Object>} Created item
  */
 const createContentItem = async (data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const insertData = {
-    title: data.title,
-    romanized: data.romanized || null,
-    filename: data.filename || null,
-    content_type: data.contentType,
-    category: data.category || null,
-    alternatives: data.alternatives || [],
-    file_url: data.fileUrl || null,
-    thumbnail_url: data.thumbnailUrl || null,
-    duration_seconds: data.durationSeconds || null
-  };
-
-  const { data: item, error } = await supabaseAdmin
-    .from('content_items')
-    .insert(insertData)
-    .select()
-    .single();
-
-  if (error) {
+  try {
+    const results = await prisma.$queryRaw`
+      INSERT INTO content_items (title, romanized, filename, content_type, category, alternatives, file_url, thumbnail_url, duration_seconds)
+      VALUES (
+        ${data.title},
+        ${data.romanized || null},
+        ${data.filename || null},
+        ${data.contentType},
+        ${data.category || null},
+        ${JSON.stringify(data.alternatives || [])}::jsonb,
+        ${data.fileUrl || null},
+        ${data.thumbnailUrl || null},
+        ${data.durationSeconds || null}
+      )
+      RETURNING *
+    `;
+    return results[0];
+  } catch (error) {
     logger.error('Failed to create content item', { error: error.message });
     throw new Error('Failed to create content item');
   }
-
-  return item;
 };
 
 /**
@@ -1426,37 +1288,19 @@ const createContentItem = async (data) => {
  * @returns {Promise<Object>} Result with created count
  */
 const batchCreateContentItems = async (items) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('Items array is required');
   }
 
-  const insertData = items.map(item => ({
-    title: item.title,
-    romanized: item.romanized || null,
-    filename: item.filename || null,
-    content_type: item.contentType,
-    category: item.category || null,
-    alternatives: item.alternatives || [],
-    file_url: item.fileUrl || null,
-    thumbnail_url: item.thumbnailUrl || null,
-    duration_seconds: item.durationSeconds || null
-  }));
-
-  const { data, error } = await supabaseAdmin
-    .from('content_items')
-    .insert(insertData)
-    .select();
-
-  if (error) {
-    logger.error('Failed to batch create content items', { error: error.message });
-    throw new Error('Failed to batch create content items');
+  const created = [];
+  for (const item of items) {
+    const result = await createContentItem(item);
+    created.push(result);
   }
 
   return {
-    created: data.length,
-    items: data
+    created: created.length,
+    items: created
   };
 };
 
@@ -1467,35 +1311,32 @@ const batchCreateContentItems = async (items) => {
  * @returns {Promise<Object>} Updated item
  */
 const updateContentItem = async (id, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const setClauses = ['updated_at = NOW()'];
+  const params = [];
+  let paramIdx = 1;
 
-  const updateData = {
-    updated_at: new Date().toISOString()
-  };
+  if (data.title !== undefined) { setClauses.push(`title = $${paramIdx++}`); params.push(data.title); }
+  if (data.romanized !== undefined) { setClauses.push(`romanized = $${paramIdx++}`); params.push(data.romanized); }
+  if (data.filename !== undefined) { setClauses.push(`filename = $${paramIdx++}`); params.push(data.filename); }
+  if (data.contentType !== undefined) { setClauses.push(`content_type = $${paramIdx++}`); params.push(data.contentType); }
+  if (data.category !== undefined) { setClauses.push(`category = $${paramIdx++}`); params.push(data.category); }
+  if (data.alternatives !== undefined) { setClauses.push(`alternatives = $${paramIdx++}::jsonb`); params.push(JSON.stringify(data.alternatives)); }
+  if (data.fileUrl !== undefined) { setClauses.push(`file_url = $${paramIdx++}`); params.push(data.fileUrl); }
+  if (data.thumbnailUrl !== undefined) { setClauses.push(`thumbnail_url = $${paramIdx++}`); params.push(data.thumbnailUrl); }
+  if (data.durationSeconds !== undefined) { setClauses.push(`duration_seconds = $${paramIdx++}`); params.push(data.durationSeconds); }
 
-  if (data.title !== undefined) updateData.title = data.title;
-  if (data.romanized !== undefined) updateData.romanized = data.romanized;
-  if (data.filename !== undefined) updateData.filename = data.filename;
-  if (data.contentType !== undefined) updateData.content_type = data.contentType;
-  if (data.category !== undefined) updateData.category = data.category;
-  if (data.alternatives !== undefined) updateData.alternatives = data.alternatives;
-  if (data.fileUrl !== undefined) updateData.file_url = data.fileUrl;
-  if (data.thumbnailUrl !== undefined) updateData.thumbnail_url = data.thumbnailUrl;
-  if (data.durationSeconds !== undefined) updateData.duration_seconds = data.durationSeconds;
+  params.push(id);
 
-  const { data: item, error } = await supabaseAdmin
-    .from('content_items')
-    .update(updateData)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
+  try {
+    const results = await prisma.$queryRawUnsafe(
+      `UPDATE content_items SET ${setClauses.join(', ')} WHERE id = $${paramIdx} RETURNING *`,
+      ...params
+    );
+    return results[0];
+  } catch (error) {
     logger.error('Failed to update content item', { error: error.message });
     throw new Error('Failed to update content item');
   }
-
-  return item;
 };
 
 /**
@@ -1504,8 +1345,6 @@ const updateContentItem = async (id, data) => {
  * @returns {Promise<Object>} Result with updated count
  */
 const batchUpdateContentItems = async (updates) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   if (!Array.isArray(updates) || updates.length === 0) {
     throw new Error('Updates array is required');
   }
@@ -1538,19 +1377,13 @@ const batchUpdateContentItems = async (updates) => {
  * @returns {Promise<boolean>} Success status
  */
 const deleteContentItem = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('content_items')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
+  try {
+    await prisma.$queryRaw`DELETE FROM content_items WHERE id = ${id}`;
+    return true;
+  } catch (error) {
     logger.error('Failed to delete content item', { error: error.message });
     throw new Error('Failed to delete content item');
   }
-
-  return true;
 };
 
 /**
@@ -1559,25 +1392,20 @@ const deleteContentItem = async (id) => {
  * @returns {Promise<Object>} Result with deleted count
  */
 const batchDeleteContentItems = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   if (!Array.isArray(ids) || ids.length === 0) {
     throw new Error('IDs array is required');
   }
 
-  const { error, count } = await supabaseAdmin
-    .from('content_items')
-    .delete()
-    .in('id', ids);
-
-  if (error) {
+  try {
+    await prisma.$queryRawUnsafe(
+      `DELETE FROM content_items WHERE id = ANY($1::text[])`,
+      ids
+    );
+    return { deleted: ids.length };
+  } catch (error) {
     logger.error('Failed to batch delete content items', { error: error.message });
     throw new Error('Failed to batch delete content items');
   }
-
-  return {
-    deleted: count || ids.length
-  };
 };
 
 module.exports = {

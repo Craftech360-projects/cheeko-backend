@@ -208,13 +208,14 @@ describe('API Contract Validation', () => {
       // pubConfig has simple primitive fields that work with either convention
     });
 
-    it('captcha endpoint should return uuid and image', async () => {
+    it('captcha endpoint should return SVG when uuid is provided', async () => {
+      // The captcha endpoint requires a uuid query param and returns image/svg+xml
       const res = await request(app)
         .get('/toy/user/captcha')
+        .query({ uuid: '00000000-0000-0000-0000-000000000001' })
         .expect(200);
 
-      expect(res.body.data).toHaveProperty('uuid');
-      expect(res.body.data).toHaveProperty('image');
+      expect(res.headers['content-type']).toMatch(/svg/);
     });
 
     it('health endpoint should return expected fields', async () => {

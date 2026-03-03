@@ -1,10 +1,10 @@
 /**
  * Authentication Service
  *
- * Handles user registration, login, password management via Supabase Auth.
+ * Handles user registration, login, password management via Prisma ORM.
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 const { generateRandomString } = require('../utils/helpers');
@@ -15,16 +15,11 @@ const { generateRandomString } = require('../utils/helpers');
  * @returns {Promise<Object>} Created user
  */
 const register = async ({ username, password, email, phone }) => {
-  if (!supabaseAdmin) {
-    throw new Error('Database not configured');
-  }
-
   // Check if username already exists
-  const { data: existingUser } = await supabaseAdmin
-    .from('sys_user')
-    .select('id')
-    .eq('username', username)
-    .single();
+  const existingUser = await prisma.sys_user.findFirst({
+    where: { username },
+    select: { id: true },
+  });
 
   if (existingUser) {
     throw new Error('Username already exists');
@@ -35,33 +30,36 @@ const register = async ({ username, password, email, phone }) => {
   const hashedPassword = await bcrypt.hash(password, salt);
 
   // Create user in sys_user table
-  const { data: user, error } = await supabaseAdmin
-    .from('sys_user')
-    .insert({
-      username,
-      password: hashedPassword,
-      email: email || null,
-      phone: phone || null,
-      status: 1,
-      role: 'user'
-    })
-    .select()
-    .single();
-
-  if (error) {
+  let user;
+  try {
+    user = await prisma.sys_user.create({
+      data: {
+        username,
+        password: hashedPassword,
+        email: email || null,
+        status: 1,
+        role: 'user',
+      },
+    });
+  } catch (error) {
     logger.error('Failed to create user:', error);
     throw new Error('Failed to create user');
   }
 
   // Create parent profile if email provided
   if (email) {
-    await supabaseAdmin
-      .from('parent_profile')
-      .insert({
-        user_id: user.id,
-        email,
-        phone_number: phone
+    try {
+      await prisma.parent_profile.create({
+        data: {
+          user_id: user.id,
+          email,
+          phone_number: phone || null,
+        },
       });
+    } catch (error) {
+      logger.error('Failed to create parent profile:', error);
+      // Non-fatal: user was created; profile creation failure is logged but not thrown
+    }
   }
 
   // Return user without password
@@ -76,19 +74,12 @@ const register = async ({ username, password, email, phone }) => {
  * @returns {Promise<Object>} User with token
  */
 const login = async (username, password) => {
-  if (!supabaseAdmin) {
-    throw new Error('Database not configured');
-  }
-
   // Find user by username
-  const { data: user, error } = await supabaseAdmin
-    .from('sys_user')
-    .select('*')
-    .eq('username', username)
-    .eq('status', 1)
-    .single();
+  const user = await prisma.sys_user.findFirst({
+    where: { username, status: 1 },
+  });
 
-  if (error || !user) {
+  if (!user) {
     throw new Error('Invalid username or password');
   }
 
@@ -105,16 +96,16 @@ const login = async (username, password) => {
   expireDate.setSeconds(expireDate.getSeconds() + expireSeconds);
 
   // Store token
-  const { error: tokenError } = await supabaseAdmin
-    .from('sys_user_token')
-    .insert({
-      user_id: user.id,
-      token,
-      expire_date: expireDate.toISOString()
+  try {
+    await prisma.sys_user_token.create({
+      data: {
+        user_id: user.id,
+        token,
+        expire_date: expireDate,
+      },
     });
-
-  if (tokenError) {
-    logger.error('Failed to store token:', tokenError);
+  } catch (error) {
+    logger.error('Failed to store token:', error);
     throw new Error('Failed to create session');
   }
 
@@ -131,14 +122,7 @@ const login = async (username, password) => {
  * @param {string} token - User token
  */
 const logout = async (token) => {
-  if (!supabaseAdmin) {
-    throw new Error('Database not configured');
-  }
-
-  await supabaseAdmin
-    .from('sys_user_token')
-    .delete()
-    .eq('token', token);
+  await prisma.sys_user_token.deleteMany({ where: { token } });
 };
 
 /**
@@ -148,16 +132,11 @@ const logout = async (token) => {
  * @param {string} newPassword - New password
  */
 const changePassword = async (userId, oldPassword, newPassword) => {
-  if (!supabaseAdmin) {
-    throw new Error('Database not configured');
-  }
-
   // Get current user
-  const { data: user } = await supabaseAdmin
-    .from('sys_user')
-    .select('password')
-    .eq('id', userId)
-    .single();
+  const user = await prisma.sys_user.findFirst({
+    where: { id: BigInt(userId) },
+    select: { password: true },
+  });
 
   if (!user) {
     throw new Error('User not found');
@@ -174,15 +153,16 @@ const changePassword = async (userId, oldPassword, newPassword) => {
   const hashedPassword = await bcrypt.hash(newPassword, salt);
 
   // Update password
-  const { error } = await supabaseAdmin
-    .from('sys_user')
-    .update({
-      password: hashedPassword,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', userId);
-
-  if (error) {
+  try {
+    await prisma.sys_user.updateMany({
+      where: { id: BigInt(userId) },
+      data: {
+        password: hashedPassword,
+        updated_at: new Date(),
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to update password:', error);
     throw new Error('Failed to update password');
   }
 };
@@ -193,16 +173,11 @@ const changePassword = async (userId, oldPassword, newPassword) => {
  * @param {string} newPassword - New password
  */
 const updatePassword = async (username, newPassword) => {
-  if (!supabaseAdmin) {
-    throw new Error('Database not configured');
-  }
-
   // Find user
-  const { data: user } = await supabaseAdmin
-    .from('sys_user')
-    .select('id')
-    .eq('username', username)
-    .single();
+  const user = await prisma.sys_user.findFirst({
+    where: { username },
+    select: { id: true },
+  });
 
   if (!user) {
     throw new Error('User not found');
@@ -213,15 +188,16 @@ const updatePassword = async (username, newPassword) => {
   const hashedPassword = await bcrypt.hash(newPassword, salt);
 
   // Update password
-  const { error } = await supabaseAdmin
-    .from('sys_user')
-    .update({
-      password: hashedPassword,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', user.id);
-
-  if (error) {
+  try {
+    await prisma.sys_user.updateMany({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        updated_at: new Date(),
+      },
+    });
+  } catch (error) {
+    logger.error('Failed to update password:', error);
     throw new Error('Failed to update password');
   }
 };
@@ -232,16 +208,10 @@ const updatePassword = async (username, newPassword) => {
  * @param {string} password - Password for verification
  */
 const deleteAccount = async (username, password) => {
-  if (!supabaseAdmin) {
-    throw new Error('Database not configured');
-  }
-
   // Find user
-  const { data: user } = await supabaseAdmin
-    .from('sys_user')
-    .select('*')
-    .eq('username', username)
-    .single();
+  const user = await prisma.sys_user.findFirst({
+    where: { username },
+  });
 
   if (!user) {
     throw new Error('User not found');
@@ -254,18 +224,13 @@ const deleteAccount = async (username, password) => {
   }
 
   // Delete user tokens
-  await supabaseAdmin
-    .from('sys_user_token')
-    .delete()
-    .eq('user_id', user.id);
+  await prisma.sys_user_token.deleteMany({ where: { user_id: user.id } });
 
   // Delete user (cascades to profiles)
-  const { error } = await supabaseAdmin
-    .from('sys_user')
-    .delete()
-    .eq('id', user.id);
-
-  if (error) {
+  try {
+    await prisma.sys_user.deleteMany({ where: { id: user.id } });
+  } catch (error) {
+    logger.error('Failed to delete account:', error);
     throw new Error('Failed to delete account');
   }
 };
@@ -276,16 +241,11 @@ const deleteAccount = async (username, password) => {
  * @returns {Promise<Object|null>} User or null
  */
 const getUserByToken = async (token) => {
-  if (!supabaseAdmin) {
-    return null;
-  }
-
   // Find valid token
-  const { data: tokenData } = await supabaseAdmin
-    .from('sys_user_token')
-    .select('user_id, expire_date')
-    .eq('token', token)
-    .single();
+  const tokenData = await prisma.sys_user_token.findFirst({
+    where: { token },
+    select: { user_id: true, expire_date: true },
+  });
 
   if (!tokenData) {
     return null;
@@ -294,22 +254,17 @@ const getUserByToken = async (token) => {
   // Check expiration
   if (new Date(tokenData.expire_date) < new Date()) {
     // Token expired, delete it
-    await supabaseAdmin
-      .from('sys_user_token')
-      .delete()
-      .eq('token', token);
+    await prisma.sys_user_token.deleteMany({ where: { token } });
     return null;
   }
 
   // Get user
-  const { data: user } = await supabaseAdmin
-    .from('sys_user')
-    .select('id, username, role, status, created_at')
-    .eq('id', tokenData.user_id)
-    .eq('status', 1)
-    .single();
+  const user = await prisma.sys_user.findFirst({
+    where: { id: tokenData.user_id, status: 1 },
+    select: { id: true, username: true, role: true, status: true, created_at: true },
+  });
 
-  return user;
+  return user || null;
 };
 
 // In-memory captcha storage (in production, use Redis)
@@ -401,21 +356,25 @@ const getPublicConfig = async () => {
   };
 
   // Try to get config from database
-  if (supabaseAdmin) {
+  try {
     // Get system params
-    const { data: params } = await supabaseAdmin
-      .from('sys_params')
-      .select('param_code, param_value')
-      .in('param_code', [
-        'SERVER_NAME',
-        'SERVER_VERSION',
-        'SERVER_ENABLE_MOBILE_REGISTER',
-        'ALLOW_USER_REGISTER',
-        'BEIAN_ICP_NUM',
-        'BEIAN_GA_NUM'
-      ]);
+    const params = await prisma.sys_params.findMany({
+      where: {
+        param_code: {
+          in: [
+            'SERVER_NAME',
+            'SERVER_VERSION',
+            'SERVER_ENABLE_MOBILE_REGISTER',
+            'ALLOW_USER_REGISTER',
+            'BEIAN_ICP_NUM',
+            'BEIAN_GA_NUM'
+          ],
+        },
+      },
+      select: { param_code: true, param_value: true },
+    });
 
-    if (params) {
+    if (params && params.length > 0) {
       params.forEach(p => {
         switch (p.param_code) {
         case 'SERVER_NAME':
@@ -441,11 +400,11 @@ const getPublicConfig = async () => {
     }
 
     // Get mobile area list from dictionary
-    const { data: dictData } = await supabaseAdmin
-      .from('sys_dict_data')
-      .select('dict_label, dict_value, sort')
-      .eq('dict_type_id', 'MOBILE_AREA')
-      .order('sort', { ascending: true });
+    const dictData = await prisma.sys_dict_data.findMany({
+      where: { dict_type_id: 'MOBILE_AREA' },
+      select: { dict_label: true, dict_value: true, sort: true },
+      orderBy: { sort: 'asc' },
+    });
 
     if (dictData && dictData.length > 0) {
       config.mobileAreaList = dictData.map(d => ({
@@ -495,6 +454,9 @@ const getPublicConfig = async () => {
         { name: 'Russia', key: '+7' }
       ];
     }
+  } catch (error) {
+    logger.error('Failed to fetch public config from database:', error);
+    // Return defaults if DB queries fail
   }
 
   return config;

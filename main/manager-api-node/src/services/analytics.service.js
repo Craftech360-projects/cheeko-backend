@@ -5,7 +5,7 @@
  * streaks, and user progress analytics.
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateUUID, normalizeMacAddress } = require('../utils/helpers');
 
@@ -19,36 +19,31 @@ const { generateUUID, normalizeMacAddress } = require('../utils/helpers');
  * @returns {Promise<Object>} Created session
  */
 const startSession = async ({ mac, agentId, modeType, metadata = {} }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const sessionId = generateUUID();
-  const now = new Date().toISOString();
+  const now = new Date();
 
-  const { data: session, error } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .insert({
-      session_id: sessionId,
-      mac_address: normalizedMac,
-      agent_id: agentId || null,
-      mode_type: modeType,
-      started_at: now,
-      interaction_count: 0,
-      metadata: metadata,
-      created_at: now,
-      updated_at: now
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to start session:', error);
+  try {
+    const session = await prisma.analytics_game_sessions.create({
+      data: {
+        session_id: sessionId,
+        mac_address: normalizedMac,
+        agent_id: agentId || null,
+        mode_type: modeType,
+        started_at: now,
+        interaction_count: 0,
+        metadata: metadata,
+        created_at: now,
+        updated_at: now
+      }
+    });
+    return session;
+  } catch (err) {
+    logger.error('Failed to start session:', err);
     throw new Error('Failed to start session');
   }
-
-  return session;
 };
 
 /**
@@ -58,16 +53,12 @@ const startSession = async ({ mac, agentId, modeType, metadata = {} }) => {
  * @returns {Promise<Object>} Updated session
  */
 const endSession = async (sessionId, { completionStatus, interactionCount, metadata = {} }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // Get existing session
-  const { data: existing, error: findError } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('*')
-    .eq('session_id', sessionId)
-    .single();
+  const existing = await prisma.analytics_game_sessions.findFirst({
+    where: { session_id: sessionId }
+  });
 
-  if (findError || !existing) {
+  if (!existing) {
     throw new Error('Session not found');
   }
 
@@ -76,28 +67,26 @@ const endSession = async (sessionId, { completionStatus, interactionCount, metad
   const durationSeconds = Math.floor((now - startedAt) / 1000);
 
   // Merge metadata
-  const mergedMetadata = { ...existing.metadata, ...metadata };
+  const existingMeta = existing.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
+  const mergedMetadata = { ...existingMeta, ...metadata };
 
-  const { data: session, error } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .update({
-      ended_at: now.toISOString(),
-      duration_seconds: durationSeconds,
-      completion_status: completionStatus || 'completed',
-      interaction_count: interactionCount !== undefined ? interactionCount : existing.interaction_count,
-      metadata: mergedMetadata,
-      updated_at: now.toISOString()
-    })
-    .eq('session_id', sessionId)
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to end session:', error);
+  try {
+    const session = await prisma.analytics_game_sessions.update({
+      where: { session_id: sessionId },
+      data: {
+        ended_at: now,
+        duration_seconds: durationSeconds,
+        completion_status: completionStatus || 'completed',
+        interaction_count: interactionCount !== undefined ? interactionCount : existing.interaction_count,
+        metadata: mergedMetadata,
+        updated_at: now
+      }
+    });
+    return session;
+  } catch (err) {
+    logger.error('Failed to end session:', err);
     throw new Error('Failed to end session');
   }
-
-  return session;
 };
 
 /**
@@ -106,16 +95,14 @@ const endSession = async (sessionId, { completionStatus, interactionCount, metad
  * @returns {Promise<Object|null>} Session
  */
 const getSession = async (sessionId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: session, error } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('*')
-    .eq('session_id', sessionId)
-    .single();
-
-  if (error || !session) return null;
-  return session;
+  try {
+    const session = await prisma.analytics_game_sessions.findFirst({
+      where: { session_id: sessionId }
+    });
+    return session || null;
+  } catch (err) {
+    return null;
+  }
 };
 
 /**
@@ -125,37 +112,37 @@ const getSession = async (sessionId) => {
  * @returns {Promise<Object>} Paginated sessions
  */
 const getSessionsByMac = async (mac, { page = 1, limit = 10, modeType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const offset = (page - 1) * limit;
 
-  let query = supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('*', { count: 'exact' })
-    .eq('mac_address', normalizedMac);
-
+  const where = { mac_address: normalizedMac };
   if (modeType) {
-    query = query.eq('mode_type', modeType);
+    where.mode_type = modeType;
   }
 
-  const { data: sessions, count, error } = await query
-    .order('started_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [sessions, total] = await Promise.all([
+      prisma.analytics_game_sessions.findMany({
+        where,
+        orderBy: { started_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_game_sessions.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get sessions:', error);
+    return {
+      list: sessions || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get sessions:', err);
     throw new Error('Failed to get sessions');
   }
-
-  return {
-    list: sessions || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 // =============================================
@@ -181,43 +168,39 @@ const logGameAttempt = async ({
   responseTimeMs,
   metadata = {}
 }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const now = new Date().toISOString();
+  const now = new Date();
 
-  const { data: attempt, error } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .insert({
-      session_id: sessionId,
-      mac_address: normalizedMac,
-      game_type: gameType,
-      question_text: questionText,
-      question_type: questionType,
-      difficulty_level: difficultyLevel,
-      correct_answer: correctAnswer,
-      user_answer: userAnswer,
-      is_correct: isCorrect,
-      attempt_number: attemptNumber,
-      response_time_ms: responseTimeMs,
-      answered_at: now,
-      metadata: metadata,
-      created_at: now
-    })
-    .select()
-    .single();
+  try {
+    const attempt = await prisma.analytics_game_attempts.create({
+      data: {
+        session_id: sessionId,
+        mac_address: normalizedMac,
+        game_type: gameType,
+        question_text: questionText,
+        question_type: questionType,
+        difficulty_level: difficultyLevel,
+        correct_answer: correctAnswer,
+        user_answer: userAnswer,
+        is_correct: isCorrect,
+        attempt_number: attemptNumber,
+        response_time_ms: responseTimeMs,
+        answered_at: now,
+        metadata: metadata,
+        created_at: now
+      }
+    });
 
-  if (error) {
-    logger.error('Failed to log game attempt:', error);
+    // Note: interaction_count is set when ending the session via endSession()
+    // No need to increment here since we track attempt count separately
+
+    return attempt;
+  } catch (err) {
+    logger.error('Failed to log game attempt:', err);
     throw new Error('Failed to log game attempt');
   }
-
-  // Note: interaction_count is set when ending the session via endSession()
-  // No need to increment here since we track attempt count separately
-
-  return attempt;
 };
 
 /**
@@ -226,20 +209,16 @@ const logGameAttempt = async ({
  * @returns {Promise<Array>} List of attempts
  */
 const getAttemptsBySession = async (sessionId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: attempts, error } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('*')
-    .eq('session_id', sessionId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    logger.error('Failed to get attempts:', error);
+  try {
+    const attempts = await prisma.analytics_game_attempts.findMany({
+      where: { session_id: sessionId },
+      orderBy: { created_at: 'asc' }
+    });
+    return attempts || [];
+  } catch (err) {
+    logger.error('Failed to get attempts:', err);
     throw new Error('Failed to get attempts');
   }
-
-  return attempts || [];
 };
 
 /**
@@ -249,37 +228,37 @@ const getAttemptsBySession = async (sessionId) => {
  * @returns {Promise<Object>} Paginated attempts
  */
 const getAttemptsByMac = async (mac, { page = 1, limit = 20, gameType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const offset = (page - 1) * limit;
 
-  let query = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('*', { count: 'exact' })
-    .eq('mac_address', normalizedMac);
-
+  const where = { mac_address: normalizedMac };
   if (gameType) {
-    query = query.eq('game_type', gameType);
+    where.game_type = gameType;
   }
 
-  const { data: attempts, count, error } = await query
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [attempts, total] = await Promise.all([
+      prisma.analytics_game_attempts.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_game_attempts.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get attempts:', error);
+    return {
+      list: attempts || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get attempts:', err);
     throw new Error('Failed to get attempts');
   }
-
-  return {
-    list: attempts || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 // =============================================
@@ -288,6 +267,17 @@ const getAttemptsByMac = async (mac, { page = 1, limit = 20, gameType } = {}) =>
 
 /**
  * Log a media playback event
+ *
+ * Schema note: analytics_media_playback uses content_id (BigInt), content_type,
+ * event_type, position_seconds, duration_seconds. The legacy fields
+ * (session_id, media_type, media_id, media_title, started_at, ended_at,
+ * duration_played_seconds, completion_percentage, skip_action, skipped_at)
+ * do not exist in the current schema. We map to available columns:
+ *   mediaType  → content_type
+ *   mediaId    → content_id  (BigInt)
+ *   event      → event_type
+ *   durationPlayedSeconds → position_seconds (best available approximation)
+ *   totalDurationSeconds  → duration_seconds
  * @param {Object} data - Media event data
  * @returns {Promise<Object>} Created playback record
  */
@@ -302,115 +292,38 @@ const logMediaEvent = async ({
   totalDurationSeconds,
   metadata = {}
 }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const now = new Date().toISOString();
-
-  // Calculate completion percentage
-  let completionPercentage = null;
-  if (durationPlayedSeconds && totalDurationSeconds && totalDurationSeconds > 0) {
-    completionPercentage = Math.min(100, (durationPlayedSeconds / totalDurationSeconds) * 100);
+  if (!['start', 'end', 'skip'].includes(event)) {
+    throw new Error('Invalid event type');
   }
 
-  // Handle different event types
-  if (event === 'start') {
-    const { data: playback, error } = await supabaseAdmin
-      .from('analytics_media_playback')
-      .insert({
-        session_id: sessionId,
+  // Enrich metadata with fields that don't have dedicated columns
+  const enrichedMetadata = {
+    ...metadata,
+    session_id: sessionId,
+    media_title: mediaTitle,
+    event_type_detail: event
+  };
+
+  try {
+    const playback = await prisma.analytics_media_playback.create({
+      data: {
         mac_address: normalizedMac,
-        media_type: mediaType,
-        media_id: mediaId,
-        media_title: mediaTitle,
-        started_at: now,
-        total_duration_seconds: totalDurationSeconds,
-        metadata: metadata,
-        created_at: now
-      })
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Failed to log media start:', error);
-      throw new Error('Failed to log media event');
-    }
-
+        content_id: mediaId ? BigInt(mediaId) : null,
+        content_type: mediaType,
+        event_type: event,
+        position_seconds: durationPlayedSeconds || 0,
+        duration_seconds: totalDurationSeconds || null,
+        metadata: enrichedMetadata
+      }
+    });
     return playback;
+  } catch (err) {
+    logger.error('Failed to log media event:', err);
+    throw new Error('Failed to log media event');
   }
-
-  // Find existing playback record for end/skip events
-  const { data: existing } = await supabaseAdmin
-    .from('analytics_media_playback')
-    .select('id')
-    .eq('mac_address', normalizedMac)
-    .eq('media_id', mediaId)
-    .is('ended_at', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (event === 'end' || event === 'skip') {
-    const updateData = {
-      ended_at: now,
-      duration_played_seconds: durationPlayedSeconds,
-      completion_percentage: completionPercentage
-    };
-
-    if (event === 'skip') {
-      updateData.skip_action = metadata.skipAction || 'next';
-      updateData.skipped_at = now;
-    }
-
-    if (existing) {
-      const { data: playback, error } = await supabaseAdmin
-        .from('analytics_media_playback')
-        .update(updateData)
-        .eq('id', existing.id)
-        .select()
-        .single();
-
-      if (error) {
-        logger.error('Failed to update media playback:', error);
-        throw new Error('Failed to log media event');
-      }
-
-      return playback;
-    } else {
-      // No existing record, create new one with end data
-      const { data: playback, error } = await supabaseAdmin
-        .from('analytics_media_playback')
-        .insert({
-          session_id: sessionId,
-          mac_address: normalizedMac,
-          media_type: mediaType,
-          media_id: mediaId,
-          media_title: mediaTitle,
-          started_at: now,
-          ended_at: now,
-          duration_played_seconds: durationPlayedSeconds,
-          total_duration_seconds: totalDurationSeconds,
-          completion_percentage: completionPercentage,
-          skip_action: event === 'skip' ? (metadata.skipAction || 'next') : null,
-          skipped_at: event === 'skip' ? now : null,
-          metadata: metadata,
-          created_at: now
-        })
-        .select()
-        .single();
-
-      if (error) {
-        logger.error('Failed to log media event:', error);
-        throw new Error('Failed to log media event');
-      }
-
-      return playback;
-    }
-  }
-
-  throw new Error('Invalid event type');
 };
 
 /**
@@ -420,37 +333,37 @@ const logMediaEvent = async ({
  * @returns {Promise<Object>} Paginated playback records
  */
 const getMediaPlaybackByMac = async (mac, { page = 1, limit = 20, mediaType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const offset = (page - 1) * limit;
 
-  let query = supabaseAdmin
-    .from('analytics_media_playback')
-    .select('*', { count: 'exact' })
-    .eq('mac_address', normalizedMac);
-
+  const where = { mac_address: normalizedMac };
   if (mediaType) {
-    query = query.eq('media_type', mediaType);
+    where.content_type = mediaType;
   }
 
-  const { data: playback, count, error } = await query
-    .order('started_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [playback, total] = await Promise.all([
+      prisma.analytics_media_playback.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_media_playback.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get media playback:', error);
+    return {
+      list: playback || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get media playback:', err);
     throw new Error('Failed to get media playback');
   }
-
-  return {
-    list: playback || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 // =============================================
@@ -459,8 +372,16 @@ const getMediaPlaybackByMac = async (mac, { page = 1, limit = 20, mediaType } = 
 
 /**
  * Log a streak
+ *
+ * Schema note: analytics_streaks uses (mac_address, streak_type, streak_date,
+ * streak_count). Legacy fields (session_id, game_type, streak_number,
+ * questions_in_streak, started_at, ended_at, duration_seconds) do not exist.
+ * We map:
+ *   gameType       → streak_type
+ *   streakNumber   → streak_count
+ *   startedAt date → streak_date
  * @param {Object} data - Streak data
- * @returns {Promise<Object>} Created streak record
+ * @returns {Promise<Object>} Created or updated streak record
  */
 const logStreak = async ({
   sessionId,
@@ -472,35 +393,41 @@ const logStreak = async ({
   endedAt,
   durationSeconds
 }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const now = new Date().toISOString();
+  const streakDate = startedAt ? new Date(startedAt) : new Date();
+  // Normalise to date-only (midnight UTC) for the unique constraint
+  const streakDateOnly = new Date(
+    Date.UTC(streakDate.getUTCFullYear(), streakDate.getUTCMonth(), streakDate.getUTCDate())
+  );
 
-  const { data: streak, error } = await supabaseAdmin
-    .from('analytics_streaks')
-    .insert({
-      session_id: sessionId,
-      mac_address: normalizedMac,
-      game_type: gameType,
-      streak_number: streakNumber,
-      questions_in_streak: questionsInStreak,
-      started_at: startedAt || now,
-      ended_at: endedAt,
-      duration_seconds: durationSeconds,
-      created_at: now
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to log streak:', error);
+  try {
+    // upsert because of the unique(mac_address, streak_type, streak_date) constraint
+    const streak = await prisma.analytics_streaks.upsert({
+      where: {
+        mac_address_streak_type_streak_date: {
+          mac_address: normalizedMac,
+          streak_type: gameType,
+          streak_date: streakDateOnly
+        }
+      },
+      create: {
+        mac_address: normalizedMac,
+        streak_type: gameType,
+        streak_date: streakDateOnly,
+        streak_count: streakNumber || 1
+      },
+      update: {
+        streak_count: streakNumber || 1,
+        updated_at: new Date()
+      }
+    });
+    return streak;
+  } catch (err) {
+    logger.error('Failed to log streak:', err);
     throw new Error('Failed to log streak');
   }
-
-  return streak;
 };
 
 /**
@@ -510,37 +437,37 @@ const logStreak = async ({
  * @returns {Promise<Object>} Paginated streaks
  */
 const getStreaksByMac = async (mac, { page = 1, limit = 20, gameType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const offset = (page - 1) * limit;
 
-  let query = supabaseAdmin
-    .from('analytics_streaks')
-    .select('*', { count: 'exact' })
-    .eq('mac_address', normalizedMac);
-
+  const where = { mac_address: normalizedMac };
   if (gameType) {
-    query = query.eq('game_type', gameType);
+    where.streak_type = gameType;
   }
 
-  const { data: streaks, count, error } = await query
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [streaks, total] = await Promise.all([
+      prisma.analytics_streaks.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_streaks.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get streaks:', error);
+    return {
+      list: streaks || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get streaks:', err);
     throw new Error('Failed to get streaks');
   }
-
-  return {
-    list: streaks || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 // =============================================
@@ -549,142 +476,95 @@ const getStreaksByMac = async (mac, { page = 1, limit = 20, gameType } = {}) => 
 
 /**
  * Update or create user progress
+ *
+ * Schema note: analytics_user_progress is keyed on mac_address (unique).
+ * Available columns: total_sessions, total_duration_seconds, total_games_played,
+ * total_correct_answers, total_wrong_answers, current_streak, longest_streak,
+ * last_activity_at. Legacy columns (mode_type, total_time_seconds,
+ * total_interactions, success_rate_percentage, total_streaks_completed,
+ * average_streak_time_seconds, skill_level, last_played_at, weekly_summary_json)
+ * are not in the schema and are silently ignored.
  * @param {string} mac - Device MAC address
- * @param {string} modeType - Mode type
+ * @param {string} modeType - Mode type (informational only; not stored)
  * @param {Object} progressData - Progress data to update
  * @returns {Promise<Object>} Updated progress record
  */
 const updateUserProgress = async (mac, modeType, progressData) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const now = new Date().toISOString();
+  const now = new Date();
 
-  // Check if progress exists
-  const { data: existing } = await supabaseAdmin
-    .from('analytics_user_progress')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .eq('mode_type', modeType)
-    .single();
+  // Build update/create payload from available schema columns
+  const updatePayload = { updated_at: now };
+  const createPayload = { mac_address: normalizedMac, created_at: now, updated_at: now };
 
-  if (existing) {
-    // Update existing
-    const updateData = {
-      updated_at: now
-    };
-
-    if (progressData.totalSessions !== undefined) {
-      updateData.total_sessions = progressData.totalSessions;
-    }
-    if (progressData.totalTimeSeconds !== undefined) {
-      updateData.total_time_seconds = progressData.totalTimeSeconds;
-    }
-    if (progressData.totalInteractions !== undefined) {
-      updateData.total_interactions = progressData.totalInteractions;
-    }
-    if (progressData.successRatePercentage !== undefined) {
-      updateData.success_rate_percentage = progressData.successRatePercentage;
-    }
-    if (progressData.longestStreak !== undefined) {
-      updateData.longest_streak = progressData.longestStreak;
-    }
-    if (progressData.totalStreaksCompleted !== undefined) {
-      updateData.total_streaks_completed = progressData.totalStreaksCompleted;
-    }
-    if (progressData.averageStreakTimeSeconds !== undefined) {
-      updateData.average_streak_time_seconds = progressData.averageStreakTimeSeconds;
-    }
-    if (progressData.skillLevel !== undefined) {
-      updateData.skill_level = progressData.skillLevel;
-    }
-    if (progressData.lastPlayedAt !== undefined) {
-      updateData.last_played_at = progressData.lastPlayedAt;
-    }
-    if (progressData.weeklySummary !== undefined) {
-      updateData.weekly_summary_json = progressData.weeklySummary;
-    }
-
-    const { data: progress, error } = await supabaseAdmin
-      .from('analytics_user_progress')
-      .update(updateData)
-      .eq('id', existing.id)
-      .select()
-      .single();
-
-    if (error) {
-      logger.error('Failed to update user progress:', error);
-      throw new Error('Failed to update user progress');
-    }
-
-    return progress;
+  if (progressData.totalSessions !== undefined) {
+    updatePayload.total_sessions = progressData.totalSessions;
+    createPayload.total_sessions = progressData.totalSessions;
   } else {
-    // Create new
-    const { data: progress, error } = await supabaseAdmin
-      .from('analytics_user_progress')
-      .insert({
-        mac_address: normalizedMac,
-        mode_type: modeType,
-        total_sessions: progressData.totalSessions || 0,
-        total_time_seconds: progressData.totalTimeSeconds || 0,
-        total_interactions: progressData.totalInteractions || 0,
-        success_rate_percentage: progressData.successRatePercentage,
-        longest_streak: progressData.longestStreak || 0,
-        total_streaks_completed: progressData.totalStreaksCompleted || 0,
-        average_streak_time_seconds: progressData.averageStreakTimeSeconds || 0,
-        skill_level: progressData.skillLevel || 'beginner',
-        last_played_at: progressData.lastPlayedAt,
-        weekly_summary_json: progressData.weeklySummary || {},
-        created_at: now,
-        updated_at: now
-      })
-      .select()
-      .single();
+    createPayload.total_sessions = 0;
+  }
 
-    if (error) {
-      logger.error('Failed to create user progress:', error);
-      throw new Error('Failed to create user progress');
-    }
+  if (progressData.totalTimeSeconds !== undefined) {
+    updatePayload.total_duration_seconds = progressData.totalTimeSeconds;
+    createPayload.total_duration_seconds = progressData.totalTimeSeconds;
+  } else {
+    createPayload.total_duration_seconds = 0;
+  }
 
+  if (progressData.longestStreak !== undefined) {
+    updatePayload.longest_streak = progressData.longestStreak;
+    createPayload.longest_streak = progressData.longestStreak;
+  } else {
+    createPayload.longest_streak = 0;
+  }
+
+  if (progressData.lastPlayedAt !== undefined) {
+    updatePayload.last_activity_at = progressData.lastPlayedAt ? new Date(progressData.lastPlayedAt) : null;
+    createPayload.last_activity_at = progressData.lastPlayedAt ? new Date(progressData.lastPlayedAt) : null;
+  }
+
+  try {
+    const progress = await prisma.analytics_user_progress.upsert({
+      where: { mac_address: normalizedMac },
+      create: createPayload,
+      update: updatePayload
+    });
     return progress;
+  } catch (err) {
+    logger.error('Failed to update user progress:', err);
+    throw new Error('Failed to update user progress');
   }
 };
 
 /**
  * Get user progress by MAC address
  * @param {string} mac - Device MAC address
- * @param {string} modeType - Optional mode type filter
- * @returns {Promise<Object|Array>} Progress record(s)
+ * @param {string} modeType - Optional mode type filter (informational only in current schema)
+ * @returns {Promise<Object|null>} Progress record
  */
 const getUserProgress = async (mac, modeType = null) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const query = supabaseAdmin
-    .from('analytics_user_progress')
-    .select('*')
-    .eq('mac_address', normalizedMac);
+  try {
+    // analytics_user_progress has a unique constraint on mac_address
+    const progress = await prisma.analytics_user_progress.findFirst({
+      where: { mac_address: normalizedMac }
+    });
 
-  if (modeType) {
-    const { data: progress, error } = await query.eq('mode_type', modeType).single();
-    if (error && error.code !== 'PGRST116') {
-      logger.error('Failed to get user progress:', error);
-      throw new Error('Failed to get user progress');
+    if (modeType) {
+      // Schema has no mode_type; return single record or null
+      return progress || null;
     }
-    return progress || null;
-  }
 
-  const { data: progress, error } = await query;
-  if (error) {
-    logger.error('Failed to get user progress:', error);
+    // When no modeType, callers expect an array
+    return progress ? [progress] : [];
+  } catch (err) {
+    logger.error('Failed to get user progress:', err);
     throw new Error('Failed to get user progress');
   }
-
-  return progress || [];
 };
 
 /**
@@ -693,48 +573,23 @@ const getUserProgress = async (mac, modeType = null) => {
  * @returns {Promise<Object>} Overall statistics
  */
 const getOverallStats = async (mac) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  // Get all progress records
-  const { data: progress } = await supabaseAdmin
-    .from('analytics_user_progress')
-    .select('*')
-    .eq('mac_address', normalizedMac);
+  // Get progress record
+  const progress = await prisma.analytics_user_progress.findFirst({
+    where: { mac_address: normalizedMac }
+  });
 
-  // Get session counts
-  const { count: totalSessions } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('id', { count: 'exact', head: true })
-    .eq('mac_address', normalizedMac);
+  // Get session count
+  const [totalSessions, totalAttempts, correctAttempts] = await Promise.all([
+    prisma.analytics_game_sessions.count({ where: { mac_address: normalizedMac } }),
+    prisma.analytics_game_attempts.count({ where: { mac_address: normalizedMac } }),
+    prisma.analytics_game_attempts.count({ where: { mac_address: normalizedMac, is_correct: true } })
+  ]);
 
-  // Get total attempts
-  const { count: totalAttempts } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('id', { count: 'exact', head: true })
-    .eq('mac_address', normalizedMac);
-
-  // Get correct attempts
-  const { count: correctAttempts } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('id', { count: 'exact', head: true })
-    .eq('mac_address', normalizedMac)
-    .eq('is_correct', true);
-
-  // Calculate totals from progress
-  let totalTimeSeconds = 0;
-  let longestStreak = 0;
-
-  if (progress && progress.length > 0) {
-    for (const p of progress) {
-      totalTimeSeconds += p.total_time_seconds || 0;
-      if ((p.longest_streak || 0) > longestStreak) {
-        longestStreak = p.longest_streak;
-      }
-    }
-  }
+  const totalTimeSeconds = progress ? (Number(progress.total_duration_seconds) || 0) : 0;
+  const longestStreak = progress ? (progress.longest_streak || 0) : 0;
 
   const overallAccuracy = totalAttempts > 0
     ? Math.round((correctAttempts / totalAttempts) * 100)
@@ -747,7 +602,7 @@ const getOverallStats = async (mac) => {
     correctAttempts: correctAttempts || 0,
     overallAccuracy,
     longestStreak,
-    progressByMode: progress || []
+    progressByMode: progress ? [progress] : []
   };
 };
 
@@ -758,25 +613,25 @@ const getOverallStats = async (mac) => {
  * @returns {Promise<Object>} Game-specific statistics
  */
 const getGameStats = async (mac, gameType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   // Get attempts for this game type
-  const { data: attempts } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .eq('game_type', gameType);
+  const attempts = await prisma.analytics_game_attempts.findMany({
+    where: {
+      mac_address: normalizedMac,
+      game_type: gameType
+    }
+  });
 
-  // Get streaks for this game type
-  const { data: streaks } = await supabaseAdmin
-    .from('analytics_streaks')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .eq('game_type', gameType)
-    .order('questions_in_streak', { ascending: false });
+  // Get streaks for this game type (streak_type maps to gameType)
+  const streaks = await prisma.analytics_streaks.findMany({
+    where: {
+      mac_address: normalizedMac,
+      streak_type: gameType
+    },
+    orderBy: { streak_count: 'desc' }
+  });
 
   const totalAttempts = attempts?.length || 0;
   const correctAttempts = attempts?.filter(a => a.is_correct).length || 0;
@@ -820,7 +675,7 @@ const getGameStats = async (mac, gameType) => {
     correctAttempts,
     accuracy,
     averageResponseTimeMs,
-    longestStreak: streaks?.[0]?.questions_in_streak || 0,
+    longestStreak: streaks?.[0]?.streak_count || 0,
     totalStreaks: streaks?.length || 0,
     byDifficulty,
     byQuestionType,
@@ -835,26 +690,30 @@ const getGameStats = async (mac, gameType) => {
  * @returns {Promise<Array>} Daily usage data
  */
 const getDailyUsage = async (mac, days = 7) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
 
-  const { data: sessions } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('started_at, duration_seconds, mode_type')
-    .eq('mac_address', normalizedMac)
-    .gte('started_at', startDate.toISOString())
-    .order('started_at', { ascending: true });
+  const sessions = await prisma.analytics_game_sessions.findMany({
+    where: {
+      mac_address: normalizedMac,
+      started_at: { gte: startDate }
+    },
+    select: {
+      started_at: true,
+      duration_seconds: true,
+      mode_type: true
+    },
+    orderBy: { started_at: 'asc' }
+  });
 
   // Group by date
   const dailyData = {};
   if (sessions) {
     for (const session of sessions) {
-      const date = session.started_at.split('T')[0];
+      const date = session.started_at.toISOString().split('T')[0];
       if (!dailyData[date]) {
         dailyData[date] = {
           date,
@@ -885,20 +744,24 @@ const getDailyUsage = async (mac, days = 7) => {
  * @returns {Promise<Array>} Weekly usage data
  */
 const getWeeklyUsage = async (mac, weeks = 4) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - (weeks * 7));
 
-  const { data: sessions } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('started_at, duration_seconds, mode_type')
-    .eq('mac_address', normalizedMac)
-    .gte('started_at', startDate.toISOString())
-    .order('started_at', { ascending: true });
+  const sessions = await prisma.analytics_game_sessions.findMany({
+    where: {
+      mac_address: normalizedMac,
+      started_at: { gte: startDate }
+    },
+    select: {
+      started_at: true,
+      duration_seconds: true,
+      mode_type: true
+    },
+    orderBy: { started_at: 'asc' }
+  });
 
   // Group by ISO week
   const weeklyData = {};
@@ -947,8 +810,6 @@ const getWeeklyUsage = async (mac, weeks = 4) => {
  * @returns {Promise<Array>} Monthly usage data
  */
 const getMonthlyUsage = async (mac, months = 6) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
@@ -956,12 +817,18 @@ const getMonthlyUsage = async (mac, months = 6) => {
   startDate.setMonth(startDate.getMonth() - months);
   startDate.setDate(1); // Start from first of the month
 
-  const { data: sessions } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('started_at, duration_seconds, mode_type')
-    .eq('mac_address', normalizedMac)
-    .gte('started_at', startDate.toISOString())
-    .order('started_at', { ascending: true });
+  const sessions = await prisma.analytics_game_sessions.findMany({
+    where: {
+      mac_address: normalizedMac,
+      started_at: { gte: startDate }
+    },
+    select: {
+      started_at: true,
+      duration_seconds: true,
+      mode_type: true
+    },
+    orderBy: { started_at: 'asc' }
+  });
 
   // Group by month
   const monthlyData = {};
@@ -1048,16 +915,14 @@ const getWeekStart = (date) => {
  * @returns {Promise<Object|null>} Session
  */
 const getSessionById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: session, error } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !session) return null;
-  return session;
+  try {
+    const session = await prisma.analytics_game_sessions.findFirst({
+      where: { id: BigInt(id) }
+    });
+    return session || null;
+  } catch (err) {
+    return null;
+  }
 };
 
 /**
@@ -1066,16 +931,14 @@ const getSessionById = async (id) => {
  * @returns {Promise<Object|null>} Attempt
  */
 const getAttemptById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: attempt, error } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !attempt) return null;
-  return attempt;
+  try {
+    const attempt = await prisma.analytics_game_attempts.findFirst({
+      where: { id: BigInt(id) }
+    });
+    return attempt || null;
+  } catch (err) {
+    return null;
+  }
 };
 
 /**
@@ -1084,16 +947,14 @@ const getAttemptById = async (id) => {
  * @returns {Promise<Object|null>} Media playback
  */
 const getMediaPlaybackById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: playback, error } = await supabaseAdmin
-    .from('analytics_media_playback')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !playback) return null;
-  return playback;
+  try {
+    const playback = await prisma.analytics_media_playback.findFirst({
+      where: { id: BigInt(id) }
+    });
+    return playback || null;
+  } catch (err) {
+    return null;
+  }
 };
 
 /**
@@ -1102,16 +963,14 @@ const getMediaPlaybackById = async (id) => {
  * @returns {Promise<Object|null>} Streak
  */
 const getStreakById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: streak, error } = await supabaseAdmin
-    .from('analytics_streaks')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !streak) return null;
-  return streak;
+  try {
+    const streak = await prisma.analytics_streaks.findFirst({
+      where: { id: BigInt(id) }
+    });
+    return streak || null;
+  } catch (err) {
+    return null;
+  }
 };
 
 // =============================================
@@ -1124,57 +983,48 @@ const getStreakById = async (id) => {
  * @returns {Promise<Object>} Paginated sessions
  */
 const getAllSessions = async ({ page = 1, limit = 20, mac, modeType, startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('*');
+  const where = {};
 
   if (mac) {
     const normalizedMac = normalizeMacAddress(mac);
     if (normalizedMac) {
-      countQuery = countQuery.eq('mac_address', normalizedMac);
-      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+      where.mac_address = normalizedMac;
     }
   }
 
   if (modeType) {
-    countQuery = countQuery.eq('mode_type', modeType);
-    dataQuery = dataQuery.eq('mode_type', modeType);
+    where.mode_type = modeType;
   }
 
-  if (startDate) {
-    countQuery = countQuery.gte('started_at', startDate);
-    dataQuery = dataQuery.gte('started_at', startDate);
+  if (startDate || endDate) {
+    where.started_at = {};
+    if (startDate) where.started_at.gte = new Date(startDate);
+    if (endDate) where.started_at.lte = new Date(endDate);
   }
 
-  if (endDate) {
-    countQuery = countQuery.lte('started_at', endDate);
-    dataQuery = dataQuery.lte('started_at', endDate);
-  }
+  try {
+    const [sessions, total] = await Promise.all([
+      prisma.analytics_game_sessions.findMany({
+        where,
+        orderBy: { started_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_game_sessions.count({ where })
+    ]);
 
-  const { count } = await countQuery;
-  const { data: sessions, error } = await dataQuery
-    .order('started_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error('Failed to get sessions:', error);
+    return {
+      list: sessions || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get sessions:', err);
     throw new Error('Failed to get sessions');
   }
-
-  return {
-    list: sessions || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 /**
@@ -1183,52 +1033,46 @@ const getAllSessions = async ({ page = 1, limit = 20, mac, modeType, startDate, 
  * @returns {Promise<Object>} Paginated attempts
  */
 const getAllAttempts = async ({ page = 1, limit = 20, mac, gameType, questionType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('*');
+  const where = {};
 
   if (mac) {
     const normalizedMac = normalizeMacAddress(mac);
     if (normalizedMac) {
-      countQuery = countQuery.eq('mac_address', normalizedMac);
-      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+      where.mac_address = normalizedMac;
     }
   }
 
   if (gameType) {
-    countQuery = countQuery.eq('game_type', gameType);
-    dataQuery = dataQuery.eq('game_type', gameType);
+    where.game_type = gameType;
   }
 
   if (questionType) {
-    countQuery = countQuery.eq('question_type', questionType);
-    dataQuery = dataQuery.eq('question_type', questionType);
+    where.question_type = questionType;
   }
 
-  const { count } = await countQuery;
-  const { data: attempts, error } = await dataQuery
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [attempts, total] = await Promise.all([
+      prisma.analytics_game_attempts.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_game_attempts.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get attempts:', error);
+    return {
+      list: attempts || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get attempts:', err);
     throw new Error('Failed to get attempts');
   }
-
-  return {
-    list: attempts || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 /**
@@ -1237,47 +1081,42 @@ const getAllAttempts = async ({ page = 1, limit = 20, mac, gameType, questionTyp
  * @returns {Promise<Object>} Paginated media playback
  */
 const getAllMediaPlayback = async ({ page = 1, limit = 20, mac, mediaType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('analytics_media_playback')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('analytics_media_playback')
-    .select('*');
+  const where = {};
 
   if (mac) {
     const normalizedMac = normalizeMacAddress(mac);
     if (normalizedMac) {
-      countQuery = countQuery.eq('mac_address', normalizedMac);
-      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+      where.mac_address = normalizedMac;
     }
   }
 
   if (mediaType) {
-    countQuery = countQuery.eq('media_type', mediaType);
-    dataQuery = dataQuery.eq('media_type', mediaType);
+    where.content_type = mediaType;
   }
 
-  const { count } = await countQuery;
-  const { data: playback, error } = await dataQuery
-    .order('started_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [playback, total] = await Promise.all([
+      prisma.analytics_media_playback.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_media_playback.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get media playback:', error);
+    return {
+      list: playback || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get media playback:', err);
     throw new Error('Failed to get media playback');
   }
-
-  return {
-    list: playback || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 /**
@@ -1286,47 +1125,42 @@ const getAllMediaPlayback = async ({ page = 1, limit = 20, mac, mediaType } = {}
  * @returns {Promise<Object>} Paginated streaks
  */
 const getAllStreaks = async ({ page = 1, limit = 20, mac, gameType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('analytics_streaks')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('analytics_streaks')
-    .select('*');
+  const where = {};
 
   if (mac) {
     const normalizedMac = normalizeMacAddress(mac);
     if (normalizedMac) {
-      countQuery = countQuery.eq('mac_address', normalizedMac);
-      dataQuery = dataQuery.eq('mac_address', normalizedMac);
+      where.mac_address = normalizedMac;
     }
   }
 
   if (gameType) {
-    countQuery = countQuery.eq('game_type', gameType);
-    dataQuery = dataQuery.eq('game_type', gameType);
+    where.streak_type = gameType;
   }
 
-  const { count } = await countQuery;
-  const { data: streaks, error } = await dataQuery
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
+  try {
+    const [streaks, total] = await Promise.all([
+      prisma.analytics_streaks.findMany({
+        where,
+        orderBy: { created_at: 'desc' },
+        skip: offset,
+        take: limit
+      }),
+      prisma.analytics_streaks.count({ where })
+    ]);
 
-  if (error) {
-    logger.error('Failed to get streaks:', error);
+    return {
+      list: streaks || [],
+      total: total || 0,
+      page,
+      limit
+    };
+  } catch (err) {
+    logger.error('Failed to get streaks:', err);
     throw new Error('Failed to get streaks');
   }
-
-  return {
-    list: streaks || [],
-    total: count || 0,
-    page,
-    limit
-  };
 };
 
 // =============================================
@@ -1339,16 +1173,13 @@ const getAllStreaks = async ({ page = 1, limit = 20, mac, gameType } = {}) => {
  * @returns {Promise<Object>} Media stats
  */
 const getMediaStats = async (mac) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   // Get all media playback for this device
-  const { data: playback } = await supabaseAdmin
-    .from('analytics_media_playback')
-    .select('*')
-    .eq('mac_address', normalizedMac);
+  const playback = await prisma.analytics_media_playback.findMany({
+    where: { mac_address: normalizedMac }
+  });
 
   if (!playback || playback.length === 0) {
     return {
@@ -1357,42 +1188,47 @@ const getMediaStats = async (mac) => {
     };
   }
 
-  // Separate by media type
-  const musicPlays = playback.filter(p => p.media_type === 'music');
-  const storyPlays = playback.filter(p => p.media_type === 'story');
+  // Separate by content_type (maps to mediaType)
+  const musicPlays = playback.filter(p => p.content_type === 'music');
+  const storyPlays = playback.filter(p => p.content_type === 'story');
 
   // Calculate music stats
-  const musicDuration = musicPlays.reduce((sum, p) => sum + (p.duration_played_seconds || 0), 0);
-  const uniqueMusicIds = [...new Set(musicPlays.map(p => p.media_id).filter(Boolean))];
+  // position_seconds is the closest available column to duration_played_seconds
+  const musicDuration = musicPlays.reduce((sum, p) => sum + (p.position_seconds || 0), 0);
+  const uniqueMusicIds = [...new Set(musicPlays.map(p => p.content_id ? p.content_id.toString() : null).filter(Boolean))];
   const musicPlayCounts = {};
   musicPlays.forEach(p => {
-    if (p.media_id) {
-      musicPlayCounts[p.media_id] = (musicPlayCounts[p.media_id] || 0) + 1;
+    const cid = p.content_id ? p.content_id.toString() : null;
+    if (cid) {
+      musicPlayCounts[cid] = (musicPlayCounts[cid] || 0) + 1;
     }
   });
   const topMusic = Object.entries(musicPlayCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([mediaId, count]) => {
-      const play = musicPlays.find(p => p.media_id === mediaId);
-      return { mediaId, title: play?.media_title || 'Unknown', playCount: count };
+      const play = musicPlays.find(p => p.content_id && p.content_id.toString() === mediaId);
+      const meta = play?.metadata && typeof play.metadata === 'object' ? play.metadata : {};
+      return { mediaId, title: meta.media_title || 'Unknown', playCount: count };
     });
 
   // Calculate story stats
-  const storyDuration = storyPlays.reduce((sum, p) => sum + (p.duration_played_seconds || 0), 0);
-  const uniqueStoryIds = [...new Set(storyPlays.map(p => p.media_id).filter(Boolean))];
+  const storyDuration = storyPlays.reduce((sum, p) => sum + (p.position_seconds || 0), 0);
+  const uniqueStoryIds = [...new Set(storyPlays.map(p => p.content_id ? p.content_id.toString() : null).filter(Boolean))];
   const storyPlayCounts = {};
   storyPlays.forEach(p => {
-    if (p.media_id) {
-      storyPlayCounts[p.media_id] = (storyPlayCounts[p.media_id] || 0) + 1;
+    const cid = p.content_id ? p.content_id.toString() : null;
+    if (cid) {
+      storyPlayCounts[cid] = (storyPlayCounts[cid] || 0) + 1;
     }
   });
   const topStories = Object.entries(storyPlayCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([mediaId, count]) => {
-      const play = storyPlays.find(p => p.media_id === mediaId);
-      return { mediaId, title: play?.media_title || 'Unknown', playCount: count };
+      const play = storyPlays.find(p => p.content_id && p.content_id.toString() === mediaId);
+      const meta = play?.metadata && typeof play.metadata === 'object' ? play.metadata : {};
+      return { mediaId, title: meta.media_title || 'Unknown', playCount: count };
     });
 
   return {
@@ -1417,15 +1253,17 @@ const getMediaStats = async (mac) => {
  * @returns {Promise<Object>} Attempt stats by question type
  */
 const getAttemptStatsByQuestionType = async (mac) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const { data: attempts } = await supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('question_type, is_correct, response_time_ms')
-    .eq('mac_address', normalizedMac);
+  const attempts = await prisma.analytics_game_attempts.findMany({
+    where: { mac_address: normalizedMac },
+    select: {
+      question_type: true,
+      is_correct: true,
+      response_time_ms: true
+    }
+  });
 
   if (!attempts || attempts.length === 0) {
     return { stats: [], totalAttempts: 0, overallAccuracy: 0 };
@@ -1481,29 +1319,29 @@ const getAttemptStatsByQuestionType = async (mac) => {
  * @returns {Promise<number>} Device count
  */
 const getTodayDeviceCount = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   // Get devices that connected today (via OTA check or any API call)
-  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('mac_address')
-    .gte('last_connected_at', today.toISOString());
-
-  if (deviceError) {
-    logger.error('Failed to get today connected devices:', deviceError);
+  let connectedDevices = [];
+  try {
+    connectedDevices = await prisma.ai_device.findMany({
+      where: { last_connected_at: { gte: today } },
+      select: { mac_address: true }
+    });
+  } catch (err) {
+    logger.error('Failed to get today connected devices:', err);
   }
 
   // Get game sessions for today
-  const { data: sessions, error: sessionError } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('mac_address')
-    .gte('started_at', today.toISOString());
-
-  if (sessionError) {
-    logger.error('Failed to get today game sessions:', sessionError);
+  let sessions = [];
+  try {
+    sessions = await prisma.analytics_game_sessions.findMany({
+      where: { started_at: { gte: today } },
+      select: { mac_address: true }
+    });
+  } catch (err) {
+    logger.error('Failed to get today game sessions:', err);
   }
 
   // Combine unique MAC addresses from both sources
@@ -1519,30 +1357,30 @@ const getTodayDeviceCount = async () => {
  * @returns {Promise<number>} Device count
  */
 const getMonthDeviceCount = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
   // Get devices that connected this month (via OTA check or any API call)
-  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('mac_address')
-    .gte('last_connected_at', monthStart.toISOString());
-
-  if (deviceError) {
-    logger.error('Failed to get month connected devices:', deviceError);
+  let connectedDevices = [];
+  try {
+    connectedDevices = await prisma.ai_device.findMany({
+      where: { last_connected_at: { gte: monthStart } },
+      select: { mac_address: true }
+    });
+  } catch (err) {
+    logger.error('Failed to get month connected devices:', err);
   }
 
   // Get game sessions for this month
-  const { data: sessions, error: sessionError } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('mac_address')
-    .gte('started_at', monthStart.toISOString());
-
-  if (sessionError) {
-    logger.error('Failed to get month game sessions:', sessionError);
+  let sessions = [];
+  try {
+    sessions = await prisma.analytics_game_sessions.findMany({
+      where: { started_at: { gte: monthStart } },
+      select: { mac_address: true }
+    });
+  } catch (err) {
+    logger.error('Failed to get month game sessions:', err);
   }
 
   // Combine unique MAC addresses from both sources
@@ -1558,43 +1396,56 @@ const getMonthDeviceCount = async () => {
  * @returns {Promise<Array>} List of active device info
  */
 const getTodayActiveDevices = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Get devices that connected today (via OTA check or any API call)
-  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, mac_address, alias, board, app_version, last_connected_at, user_id')
-    .gte('last_connected_at', today.toISOString())
-    .order('last_connected_at', { ascending: false });
-
-  if (deviceError) {
-    logger.error('Failed to get today connected devices:', deviceError);
+  // Get devices that connected today
+  let connectedDevices = [];
+  try {
+    connectedDevices = await prisma.ai_device.findMany({
+      where: { last_connected_at: { gte: today } },
+      select: {
+        id: true,
+        mac_address: true,
+        alias: true,
+        board: true,
+        app_version: true,
+        last_connected_at: true,
+        user_id: true
+      },
+      orderBy: { last_connected_at: 'desc' }
+    });
+  } catch (err) {
+    logger.error('Failed to get today connected devices:', err);
   }
 
   // Get game sessions for today
-  const { data: sessions, error: sessionError } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('mac_address, mode_type, started_at, duration_seconds')
-    .gte('started_at', today.toISOString())
-    .order('started_at', { ascending: false });
-
-  if (sessionError) {
-    logger.error('Failed to get today game sessions:', sessionError);
+  let sessions = [];
+  try {
+    sessions = await prisma.analytics_game_sessions.findMany({
+      where: { started_at: { gte: today } },
+      select: {
+        mac_address: true,
+        mode_type: true,
+        started_at: true,
+        duration_seconds: true
+      },
+      orderBy: { started_at: 'desc' }
+    });
+  } catch (err) {
+    logger.error('Failed to get today game sessions:', err);
   }
 
   // Get unique user IDs to fetch usernames
   const userIds = [...new Set((connectedDevices || []).map(d => d.user_id).filter(Boolean))];
   let userMap = {};
   if (userIds.length > 0) {
-    const { data: users } = await supabaseAdmin
-      .from('sys_user')
-      .select('id, username')
-      .in('id', userIds);
+    const users = await prisma.sys_user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, username: true }
+    });
     (users || []).forEach(u => {
-      userMap[u.id] = u.username;
+      userMap[u.id.toString()] = u.username;
     });
   }
 
@@ -1609,8 +1460,8 @@ const getTodayActiveDevices = async () => {
         board: device.board,
         appVersion: device.app_version,
         lastConnected: device.last_connected_at,
-        userId: device.user_id,
-        ownerName: userMap[device.user_id] || null,
+        userId: device.user_id ? device.user_id.toString() : null,
+        ownerName: device.user_id ? (userMap[device.user_id.toString()] || null) : null,
         sessionCount: 0,
         totalDuration: 0,
         modes: []
@@ -1645,44 +1496,57 @@ const getTodayActiveDevices = async () => {
  * @returns {Promise<Array>} List of active device info
  */
 const getMonthActiveDevices = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const monthStart = new Date();
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  // Get devices that connected this month (via OTA check or any API call)
-  const { data: connectedDevices, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, mac_address, alias, board, app_version, last_connected_at, user_id')
-    .gte('last_connected_at', monthStart.toISOString())
-    .order('last_connected_at', { ascending: false });
-
-  if (deviceError) {
-    logger.error('Failed to get month connected devices:', deviceError);
+  // Get devices that connected this month
+  let connectedDevices = [];
+  try {
+    connectedDevices = await prisma.ai_device.findMany({
+      where: { last_connected_at: { gte: monthStart } },
+      select: {
+        id: true,
+        mac_address: true,
+        alias: true,
+        board: true,
+        app_version: true,
+        last_connected_at: true,
+        user_id: true
+      },
+      orderBy: { last_connected_at: 'desc' }
+    });
+  } catch (err) {
+    logger.error('Failed to get month connected devices:', err);
   }
 
   // Get game sessions for this month
-  const { data: sessions, error: sessionError } = await supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('mac_address, mode_type, started_at, duration_seconds')
-    .gte('started_at', monthStart.toISOString())
-    .order('started_at', { ascending: false });
-
-  if (sessionError) {
-    logger.error('Failed to get month game sessions:', sessionError);
+  let sessions = [];
+  try {
+    sessions = await prisma.analytics_game_sessions.findMany({
+      where: { started_at: { gte: monthStart } },
+      select: {
+        mac_address: true,
+        mode_type: true,
+        started_at: true,
+        duration_seconds: true
+      },
+      orderBy: { started_at: 'desc' }
+    });
+  } catch (err) {
+    logger.error('Failed to get month game sessions:', err);
   }
 
   // Get unique user IDs to fetch usernames
   const userIds = [...new Set((connectedDevices || []).map(d => d.user_id).filter(Boolean))];
   let userMap = {};
   if (userIds.length > 0) {
-    const { data: users } = await supabaseAdmin
-      .from('sys_user')
-      .select('id, username')
-      .in('id', userIds);
+    const users = await prisma.sys_user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, username: true }
+    });
     (users || []).forEach(u => {
-      userMap[u.id] = u.username;
+      userMap[u.id.toString()] = u.username;
     });
   }
 
@@ -1697,8 +1561,8 @@ const getMonthActiveDevices = async () => {
         board: device.board,
         appVersion: device.app_version,
         lastConnected: device.last_connected_at,
-        userId: device.user_id,
-        ownerName: userMap[device.user_id] || null,
+        userId: device.user_id ? device.user_id.toString() : null,
+        ownerName: device.user_id ? (userMap[device.user_id.toString()] || null) : null,
         sessionCount: 0,
         totalDuration: 0,
         modes: []
@@ -1738,47 +1602,29 @@ const getMonthActiveDevices = async () => {
  * @returns {Promise<Object>} Summary stats
  */
 const getDashboardSummary = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Build date filters
-  let sessionQuery = supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('id, duration_seconds, mac_address', { count: 'exact' });
-
-  let attemptQuery = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('id, is_correct', { count: 'exact' });
+  const sessionWhere = {};
+  const attemptWhere = {};
 
   if (startDate) {
-    sessionQuery = sessionQuery.gte('started_at', startDate);
-    attemptQuery = attemptQuery.gte('created_at', startDate);
+    sessionWhere.started_at = { ...(sessionWhere.started_at || {}), gte: new Date(startDate) };
+    attemptWhere.created_at = { ...(attemptWhere.created_at || {}), gte: new Date(startDate) };
   }
   if (endDate) {
-    sessionQuery = sessionQuery.lte('started_at', endDate);
-    attemptQuery = attemptQuery.lte('created_at', endDate);
+    sessionWhere.started_at = { ...(sessionWhere.started_at || {}), lte: new Date(endDate) };
+    attemptWhere.created_at = { ...(attemptWhere.created_at || {}), lte: new Date(endDate) };
   }
 
   // Execute queries in parallel
-  const [sessionsResult, attemptsResult, correctAttemptsResult] = await Promise.all([
-    sessionQuery,
-    attemptQuery,
-    (startDate || endDate)
-      ? supabaseAdmin
-          .from('analytics_game_attempts')
-          .select('id', { count: 'exact', head: true })
-          .eq('is_correct', true)
-          .gte('created_at', startDate || '1970-01-01')
-          .lte('created_at', endDate || '2099-12-31')
-      : supabaseAdmin
-          .from('analytics_game_attempts')
-          .select('id', { count: 'exact', head: true })
-          .eq('is_correct', true)
+  const [sessions, totalAttempts, correctAttempts] = await Promise.all([
+    prisma.analytics_game_sessions.findMany({
+      where: sessionWhere,
+      select: { duration_seconds: true, mac_address: true }
+    }),
+    prisma.analytics_game_attempts.count({ where: attemptWhere }),
+    prisma.analytics_game_attempts.count({ where: { ...attemptWhere, is_correct: true } })
   ]);
 
-  const sessions = sessionsResult.data || [];
-  const totalSessions = sessionsResult.count || 0;
-  const totalAttempts = attemptsResult.count || 0;
-  const correctAttempts = correctAttemptsResult.count || 0;
+  const totalSessions = sessions.length;
 
   // Calculate total time
   const totalTimeSeconds = sessions.reduce((sum, s) => sum + (s.duration_seconds || 0), 0);
@@ -1807,8 +1653,6 @@ const getDashboardSummary = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Array>} Daily session counts
  */
 const getSessionsPerDay = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // Default to last 30 days if no date range
   if (!startDate) {
     const defaultStart = new Date();
@@ -1819,52 +1663,59 @@ const getSessionsPerDay = async ({ startDate, endDate } = {}) => {
     endDate = new Date().toISOString().split('T')[0];
   }
 
-  let query = supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('started_at, duration_seconds, mode_type, mac_address')
-    .gte('started_at', startDate)
-    .lte('started_at', endDate + 'T23:59:59.999Z')
-    .order('started_at', { ascending: true });
+  try {
+    const sessions = await prisma.analytics_game_sessions.findMany({
+      where: {
+        started_at: {
+          gte: new Date(startDate),
+          lte: new Date(endDate + 'T23:59:59.999Z')
+        }
+      },
+      select: {
+        started_at: true,
+        duration_seconds: true,
+        mode_type: true,
+        mac_address: true
+      },
+      orderBy: { started_at: 'asc' }
+    });
 
-  const { data: sessions, error } = await query;
+    // Group by date
+    const dailyData = {};
+    (sessions || []).forEach(session => {
+      const date = session.started_at.toISOString().split('T')[0];
+      if (!dailyData[date]) {
+        dailyData[date] = {
+          date,
+          session_count: 0,
+          total_duration_seconds: 0,
+          unique_devices: new Set(),
+          by_mode: {}
+        };
+      }
+      dailyData[date].session_count++;
+      dailyData[date].total_duration_seconds += session.duration_seconds || 0;
+      dailyData[date].unique_devices.add(session.mac_address);
 
-  if (error) {
-    logger.error('Failed to get sessions per day:', error);
+      const mode = session.mode_type || 'Unknown';
+      if (!dailyData[date].by_mode[mode]) {
+        dailyData[date].by_mode[mode] = 0;
+      }
+      dailyData[date].by_mode[mode]++;
+    });
+
+    // Convert Sets to counts and return array
+    return Object.values(dailyData).map(day => ({
+      date: day.date,
+      session_count: day.session_count,
+      total_duration_seconds: day.total_duration_seconds,
+      unique_devices: day.unique_devices.size,
+      by_mode: day.by_mode
+    }));
+  } catch (err) {
+    logger.error('Failed to get sessions per day:', err);
     throw new Error('Failed to get sessions per day');
   }
-
-  // Group by date
-  const dailyData = {};
-  (sessions || []).forEach(session => {
-    const date = session.started_at.split('T')[0];
-    if (!dailyData[date]) {
-      dailyData[date] = {
-        date,
-        session_count: 0,
-        total_duration_seconds: 0,
-        unique_devices: new Set(),
-        by_mode: {}
-      };
-    }
-    dailyData[date].session_count++;
-    dailyData[date].total_duration_seconds += session.duration_seconds || 0;
-    dailyData[date].unique_devices.add(session.mac_address);
-
-    const mode = session.mode_type || 'Unknown';
-    if (!dailyData[date].by_mode[mode]) {
-      dailyData[date].by_mode[mode] = 0;
-    }
-    dailyData[date].by_mode[mode]++;
-  });
-
-  // Convert Sets to counts and return array
-  return Object.values(dailyData).map(day => ({
-    date: day.date,
-    session_count: day.session_count,
-    total_duration_seconds: day.total_duration_seconds,
-    unique_devices: day.unique_devices.size,
-    by_mode: day.by_mode
-  }));
 };
 
 /**
@@ -1873,63 +1724,65 @@ const getSessionsPerDay = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Object>} Accuracy per game type
  */
 const getGameAccuracyByType = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('game_type, is_correct, response_time_ms');
-
+  const where = {};
   if (startDate) {
-    query = query.gte('created_at', startDate);
+    where.created_at = { ...(where.created_at || {}), gte: new Date(startDate) };
   }
   if (endDate) {
-    query = query.lte('created_at', endDate + 'T23:59:59.999Z');
+    where.created_at = { ...(where.created_at || {}), lte: new Date(endDate + 'T23:59:59.999Z') };
   }
 
-  const { data: attempts, error } = await query;
+  try {
+    const attempts = await prisma.analytics_game_attempts.findMany({
+      where,
+      select: {
+        game_type: true,
+        is_correct: true,
+        response_time_ms: true
+      }
+    });
 
-  if (error) {
-    logger.error('Failed to get game accuracy by type:', error);
+    // Group by game type
+    const gameStats = {};
+    (attempts || []).forEach(attempt => {
+      const gameType = attempt.game_type || 'unknown';
+      if (!gameStats[gameType]) {
+        gameStats[gameType] = {
+          game_type: gameType,
+          total_attempts: 0,
+          correct_attempts: 0,
+          response_times: []
+        };
+      }
+      gameStats[gameType].total_attempts++;
+      if (attempt.is_correct) gameStats[gameType].correct_attempts++;
+      if (attempt.response_time_ms) {
+        gameStats[gameType].response_times.push(attempt.response_time_ms);
+      }
+    });
+
+    // Calculate accuracy and avg response time
+    const result = {};
+    Object.keys(gameStats).forEach(gameType => {
+      const stats = gameStats[gameType];
+      result[gameType] = {
+        game_type: gameType,
+        total_attempts: stats.total_attempts,
+        correct_attempts: stats.correct_attempts,
+        accuracy: stats.total_attempts > 0
+          ? Math.round((stats.correct_attempts / stats.total_attempts) * 100)
+          : 0,
+        avg_response_time_ms: stats.response_times.length > 0
+          ? Math.round(stats.response_times.reduce((a, b) => a + b, 0) / stats.response_times.length)
+          : null
+      };
+    });
+
+    return result;
+  } catch (err) {
+    logger.error('Failed to get game accuracy by type:', err);
     throw new Error('Failed to get game accuracy by type');
   }
-
-  // Group by game type
-  const gameStats = {};
-  (attempts || []).forEach(attempt => {
-    const gameType = attempt.game_type || 'unknown';
-    if (!gameStats[gameType]) {
-      gameStats[gameType] = {
-        game_type: gameType,
-        total_attempts: 0,
-        correct_attempts: 0,
-        response_times: []
-      };
-    }
-    gameStats[gameType].total_attempts++;
-    if (attempt.is_correct) gameStats[gameType].correct_attempts++;
-    if (attempt.response_time_ms) {
-      gameStats[gameType].response_times.push(attempt.response_time_ms);
-    }
-  });
-
-  // Calculate accuracy and avg response time
-  const result = {};
-  Object.keys(gameStats).forEach(gameType => {
-    const stats = gameStats[gameType];
-    result[gameType] = {
-      game_type: gameType,
-      total_attempts: stats.total_attempts,
-      correct_attempts: stats.correct_attempts,
-      accuracy: stats.total_attempts > 0
-        ? Math.round((stats.correct_attempts / stats.total_attempts) * 100)
-        : 0,
-      avg_response_time_ms: stats.response_times.length > 0
-        ? Math.round(stats.response_times.reduce((a, b) => a + b, 0) / stats.response_times.length)
-        : null
-    };
-  });
-
-  return result;
 };
 
 /**
@@ -1938,8 +1791,6 @@ const getGameAccuracyByType = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Object>} Counts per difficulty level
  */
 const getDifficultyDistribution = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // Default empty distribution
   const distribution = {
     easy: { count: 0, correct: 0, accuracy: 0 },
@@ -1949,29 +1800,21 @@ const getDifficultyDistribution = async ({ startDate, endDate } = {}) => {
   };
 
   try {
-    // Try to query with difficulty_level column
-    let query = supabaseAdmin
-      .from('analytics_game_attempts')
-      .select('difficulty_level, is_correct');
-
+    const where = {};
     if (startDate) {
-      query = query.gte('created_at', startDate);
+      where.created_at = { ...(where.created_at || {}), gte: new Date(startDate) };
     }
     if (endDate) {
-      query = query.lte('created_at', endDate + 'T23:59:59.999Z');
+      where.created_at = { ...(where.created_at || {}), lte: new Date(endDate + 'T23:59:59.999Z') };
     }
 
-    const { data: attempts, error } = await query;
-
-    if (error) {
-      // If column doesn't exist, return empty distribution
-      if (error.message && error.message.includes('does not exist')) {
-        logger.warn('difficulty_level column not found, returning empty distribution');
-        return distribution;
+    const attempts = await prisma.analytics_game_attempts.findMany({
+      where,
+      select: {
+        difficulty_level: true,
+        is_correct: true
       }
-      logger.error('Failed to get difficulty distribution:', error);
-      throw new Error('Failed to get difficulty distribution');
-    }
+    });
 
     // Group by difficulty level
     (attempts || []).forEach(attempt => {
@@ -2001,8 +1844,6 @@ const getDifficultyDistribution = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Array>} Daily average response time
  */
 const getTtftTrend = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // Default to last 30 days if no date range
   if (!startDate) {
     const defaultStart = new Date();
@@ -2013,42 +1854,47 @@ const getTtftTrend = async ({ startDate, endDate } = {}) => {
     endDate = new Date().toISOString().split('T')[0];
   }
 
-  let query = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('created_at, response_time_ms')
-    .not('response_time_ms', 'is', null)
-    .gte('created_at', startDate)
-    .lte('created_at', endDate + 'T23:59:59.999Z')
-    .order('created_at', { ascending: true });
+  try {
+    const attempts = await prisma.analytics_game_attempts.findMany({
+      where: {
+        response_time_ms: { not: null },
+        created_at: {
+          gte: new Date(startDate),
+          lte: new Date(endDate + 'T23:59:59.999Z')
+        }
+      },
+      select: {
+        created_at: true,
+        response_time_ms: true
+      },
+      orderBy: { created_at: 'asc' }
+    });
 
-  const { data: attempts, error } = await query;
+    // Group by date
+    const dailyData = {};
+    (attempts || []).forEach(attempt => {
+      const date = attempt.created_at.toISOString().split('T')[0];
+      if (!dailyData[date]) {
+        dailyData[date] = {
+          date,
+          response_times: []
+        };
+      }
+      dailyData[date].response_times.push(attempt.response_time_ms);
+    });
 
-  if (error) {
-    logger.error('Failed to get TTFT trend:', error);
+    // Calculate average for each day
+    return Object.values(dailyData).map(day => ({
+      date: day.date,
+      avg_response_time_ms: day.response_times.length > 0
+        ? Math.round(day.response_times.reduce((a, b) => a + b, 0) / day.response_times.length)
+        : 0,
+      total_attempts: day.response_times.length
+    }));
+  } catch (err) {
+    logger.error('Failed to get TTFT trend:', err);
     throw new Error('Failed to get TTFT trend');
   }
-
-  // Group by date
-  const dailyData = {};
-  (attempts || []).forEach(attempt => {
-    const date = attempt.created_at.split('T')[0];
-    if (!dailyData[date]) {
-      dailyData[date] = {
-        date,
-        response_times: []
-      };
-    }
-    dailyData[date].response_times.push(attempt.response_time_ms);
-  });
-
-  // Calculate average for each day
-  return Object.values(dailyData).map(day => ({
-    date: day.date,
-    avg_response_time_ms: day.response_times.length > 0
-      ? Math.round(day.response_times.reduce((a, b) => a + b, 0) / day.response_times.length)
-      : 0,
-    total_attempts: day.response_times.length
-  }));
 };
 
 /**
@@ -2057,43 +1903,40 @@ const getTtftTrend = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Array>} Top devices with stats
  */
 const getTopActiveDevices = async ({ startDate, endDate, limit = 10 } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Get sessions with date filter
-  let sessionQuery = supabaseAdmin
-    .from('analytics_game_sessions')
-    .select('mac_address, duration_seconds, mode_type');
+  const sessionWhere = {};
+  const attemptWhere = {};
 
   if (startDate) {
-    sessionQuery = sessionQuery.gte('started_at', startDate);
+    sessionWhere.started_at = { ...(sessionWhere.started_at || {}), gte: new Date(startDate) };
+    attemptWhere.created_at = { ...(attemptWhere.created_at || {}), gte: new Date(startDate) };
   }
   if (endDate) {
-    sessionQuery = sessionQuery.lte('started_at', endDate + 'T23:59:59.999Z');
+    sessionWhere.started_at = { ...(sessionWhere.started_at || {}), lte: new Date(endDate + 'T23:59:59.999Z') };
+    attemptWhere.created_at = { ...(attemptWhere.created_at || {}), lte: new Date(endDate + 'T23:59:59.999Z') };
   }
 
-  const { data: sessions, error: sessionError } = await sessionQuery;
+  // Get sessions and attempts in parallel
+  let sessions = [];
+  let attempts = [];
 
-  if (sessionError) {
-    logger.error('Failed to get sessions for top devices:', sessionError);
+  try {
+    sessions = await prisma.analytics_game_sessions.findMany({
+      where: sessionWhere,
+      select: { mac_address: true, duration_seconds: true, mode_type: true }
+    });
+  } catch (err) {
+    logger.error('Failed to get sessions for top devices:', err);
     throw new Error('Failed to get top active devices');
   }
 
-  // Get attempts with date filter for accuracy
-  let attemptQuery = supabaseAdmin
-    .from('analytics_game_attempts')
-    .select('mac_address, is_correct');
-
-  if (startDate) {
-    attemptQuery = attemptQuery.gte('created_at', startDate);
-  }
-  if (endDate) {
-    attemptQuery = attemptQuery.lte('created_at', endDate + 'T23:59:59.999Z');
-  }
-
-  const { data: attempts, error: attemptError } = await attemptQuery;
-
-  if (attemptError) {
-    logger.error('Failed to get attempts for top devices:', attemptError);
+  try {
+    attempts = await prisma.analytics_game_attempts.findMany({
+      where: attemptWhere,
+      select: { mac_address: true, is_correct: true }
+    });
+  } catch (err) {
+    logger.error('Failed to get attempts for top devices:', err);
+    // Non-fatal — continue without attempt stats
   }
 
   // Aggregate by device
@@ -2128,27 +1971,27 @@ const getTopActiveDevices = async ({ startDate, endDate, limit = 10 } = {}) => {
   const macs = Object.keys(deviceStats);
   let deviceInfoMap = {};
   if (macs.length > 0) {
-    const { data: devices } = await supabaseAdmin
-      .from('ai_device')
-      .select('mac_address, alias, user_id')
-      .in('mac_address', macs);
+    const devices = await prisma.ai_device.findMany({
+      where: { mac_address: { in: macs } },
+      select: { mac_address: true, alias: true, user_id: true }
+    });
 
     const userIds = [...new Set((devices || []).map(d => d.user_id).filter(Boolean))];
     let userMap = {};
     if (userIds.length > 0) {
-      const { data: users } = await supabaseAdmin
-        .from('sys_user')
-        .select('id, username')
-        .in('id', userIds);
+      const users = await prisma.sys_user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, username: true }
+      });
       (users || []).forEach(u => {
-        userMap[u.id] = u.username;
+        userMap[u.id.toString()] = u.username;
       });
     }
 
     (devices || []).forEach(d => {
       deviceInfoMap[d.mac_address] = {
         alias: d.alias,
-        owner_name: userMap[d.user_id] || null
+        owner_name: d.user_id ? (userMap[d.user_id.toString()] || null) : null
       };
     });
   }

@@ -5,7 +5,7 @@
  * Provides agent configuration, child profiles, templates, and system settings.
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 
@@ -15,22 +15,28 @@ const { normalizeMacAddress } = require('../utils/helpers');
  * @returns {Promise<Object>} Server configuration
  */
 const getServerBaseConfig = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // Get relevant system parameters
-  const { data: params } = await supabaseAdmin
-    .from('sys_params')
-    .select('param_code, param_value, value_type')
-    .in('param_code', [
-      'livekit_url',
-      'livekit_api_key',
-      'livekit_api_secret',
-      'default_language',
-      'default_tts_voice',
-      'enable_memory',
-      'enable_rag',
-      'server_region'
-    ]);
+  const params = await prisma.sys_params.findMany({
+    where: {
+      param_code: {
+        in: [
+          'livekit_url',
+          'livekit_api_key',
+          'livekit_api_secret',
+          'default_language',
+          'default_tts_voice',
+          'enable_memory',
+          'enable_rag',
+          'server_region'
+        ]
+      }
+    },
+    select: {
+      param_code: true,
+      param_value: true,
+      value_type: true
+    }
+  });
 
   // Convert to key-value object
   const config = {};
@@ -65,40 +71,36 @@ const getServerBaseConfig = async () => {
  * @returns {Promise<Object>} Agent model configuration
  */
 const getAgentModels = async (macAddress) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(macAddress);
 
   // Get device with agent
-  const { data: device, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('agent_id')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac },
+    select: { agent_id: true }
+  });
 
-  if (deviceError || !device || !device.agent_id) {
+  if (!device || !device.agent_id) {
     throw new Error('Device or agent not found');
   }
 
   // Get agent with model IDs
-  const { data: agent, error: agentError } = await supabaseAdmin
-    .from('ai_agent')
-    .select(`
-      id,
-      agent_name,
-      asr_model_id,
-      vad_model_id,
-      llm_model_id,
-      vllm_model_id,
-      tts_model_id,
-      tts_voice_id,
-      mem_model_id,
-      intent_model_id
-    `)
-    .eq('id', device.agent_id)
-    .single();
+  const agent = await prisma.ai_agent.findFirst({
+    where: { id: device.agent_id },
+    select: {
+      id: true,
+      agent_name: true,
+      asr_model_id: true,
+      vad_model_id: true,
+      llm_model_id: true,
+      vllm_model_id: true,
+      tts_model_id: true,
+      tts_voice_id: true,
+      mem_model_id: true,
+      intent_model_id: true
+    }
+  });
 
-  if (agentError || !agent) {
+  if (!agent) {
     throw new Error('Agent not found');
   }
 
@@ -115,10 +117,16 @@ const getAgentModels = async (macAddress) => {
 
   const models = {};
   if (modelIds.length > 0) {
-    const { data: modelConfigs } = await supabaseAdmin
-      .from('ai_model_config')
-      .select('id, model_type, model_code, model_name, config_json')
-      .in('id', modelIds);
+    const modelConfigs = await prisma.ai_model_config.findMany({
+      where: { id: { in: modelIds } },
+      select: {
+        id: true,
+        model_type: true,
+        model_code: true,
+        model_name: true,
+        config_json: true
+      }
+    });
 
     (modelConfigs || []).forEach(m => {
       models[m.model_type] = {
@@ -133,11 +141,15 @@ const getAgentModels = async (macAddress) => {
   // Get TTS voice if configured
   let voice = null;
   if (agent.tts_voice_id) {
-    const { data: voiceData } = await supabaseAdmin
-      .from('ai_tts_voice')
-      .select('id, tts_voice, name, languages')
-      .eq('id', agent.tts_voice_id)
-      .single();
+    const voiceData = await prisma.ai_tts_voice.findFirst({
+      where: { id: agent.tts_voice_id },
+      select: {
+        id: true,
+        tts_voice: true,
+        name: true,
+        languages: true
+      }
+    });
 
     if (voiceData) {
       voice = {
@@ -164,29 +176,33 @@ const getAgentModels = async (macAddress) => {
  * @returns {Promise<Object>} Agent prompt configuration
  */
 const getAgentPrompt = async (macAddress) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(macAddress);
 
   // Get device with agent
-  const { data: device, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('agent_id, kid_id')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac },
+    select: { agent_id: true, kid_id: true }
+  });
 
-  if (deviceError || !device || !device.agent_id) {
+  if (!device || !device.agent_id) {
     throw new Error('Device or agent not found');
   }
 
   // Get agent
-  const { data: agent, error: agentError } = await supabaseAdmin
-    .from('ai_agent')
-    .select('id, agent_name, agent_code, system_prompt, summary_memory, lang_code, language')
-    .eq('id', device.agent_id)
-    .single();
+  const agent = await prisma.ai_agent.findFirst({
+    where: { id: device.agent_id },
+    select: {
+      id: true,
+      agent_name: true,
+      agent_code: true,
+      system_prompt: true,
+      summary_memory: true,
+      lang_code: true,
+      language: true
+    }
+  });
 
-  if (agentError || !agent) {
+  if (!agent) {
     throw new Error('Agent not found');
   }
 
@@ -198,7 +214,7 @@ const getAgentPrompt = async (macAddress) => {
     summaryMemory: agent.summary_memory,
     langCode: agent.lang_code,
     language: agent.language,
-    kidId: device.kid_id
+    kidId: device.kid_id ? device.kid_id.toString() : null
   };
 };
 
@@ -209,18 +225,15 @@ const getAgentPrompt = async (macAddress) => {
  * @returns {Promise<Object|null>} Child profile or null
  */
 const getChildProfileByMac = async (macAddress) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(macAddress);
 
   // Get device with kid_id
-  const { data: device, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('kid_id')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac },
+    select: { kid_id: true }
+  });
 
-  if (deviceError || !device) {
+  if (!device) {
     throw new Error('Device not found');
   }
 
@@ -229,19 +242,17 @@ const getChildProfileByMac = async (macAddress) => {
   }
 
   // Get kid profile
-  const { data: kid, error: kidError } = await supabaseAdmin
-    .from('kid_profile')
-    .select('*')
-    .eq('id', device.kid_id)
-    .single();
+  const kid = await prisma.kid_profile.findFirst({
+    where: { id: device.kid_id }
+  });
 
-  if (kidError || !kid) {
+  if (!kid) {
     return null;
   }
 
-  // Calculate age from date_of_birth or birth_date
+  // Calculate age from birth_date
   let age = null;
-  const birthDate = kid.date_of_birth || kid.birth_date;
+  const birthDate = kid.birth_date;
   if (birthDate) {
     const dob = new Date(birthDate);
     const now = new Date();
@@ -249,14 +260,14 @@ const getChildProfileByMac = async (macAddress) => {
   }
 
   return {
-    id: kid.id,
+    id: kid.id ? kid.id.toString() : null,
     name: kid.name,
     dateOfBirth: birthDate,
     age,
     gender: kid.gender,
     interests: kid.interests,
-    primaryLanguage: kid.primary_language || kid.language,
-    additionalNotes: kid.additional_notes
+    primaryLanguage: kid.language,
+    additionalNotes: null // not in current schema
   };
 };
 
@@ -267,41 +278,42 @@ const getChildProfileByMac = async (macAddress) => {
  * @returns {Promise<Object>} Template ID info
  */
 const getAgentTemplateIdByMac = async (macAddress) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(macAddress);
 
   // Get device with agent
-  const { data: device, error: deviceError } = await supabaseAdmin
-    .from('ai_device')
-    .select('agent_id')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac },
+    select: { agent_id: true }
+  });
 
-  if (deviceError || !device || !device.agent_id) {
+  if (!device || !device.agent_id) {
     throw new Error('Device or agent not found');
   }
 
   // Get agent to check for template info
-  const { data: agent, error: agentError } = await supabaseAdmin
-    .from('ai_agent')
-    .select('id, agent_code, agent_name')
-    .eq('id', device.agent_id)
-    .single();
+  const agent = await prisma.ai_agent.findFirst({
+    where: { id: device.agent_id },
+    select: {
+      id: true,
+      agent_code: true,
+      agent_name: true
+    }
+  });
 
-  if (agentError || !agent) {
+  if (!agent) {
     throw new Error('Agent not found');
   }
 
   // Try to find matching template by agent_code
   let templateId = null;
   if (agent.agent_code) {
-    const { data: template } = await supabaseAdmin
-      .from('ai_agent_template')
-      .select('id')
-      .eq('agent_code', agent.agent_code)
-      .eq('is_visible', 1)
-      .single();
+    const template = await prisma.ai_agent_template.findFirst({
+      where: {
+        agent_code: agent.agent_code,
+        is_visible: 1
+      },
+      select: { id: true }
+    });
 
     if (template) {
       templateId = template.id;
@@ -322,15 +334,11 @@ const getAgentTemplateIdByMac = async (macAddress) => {
  * @returns {Promise<Object|null>} Template content or null
  */
 const getTemplateContent = async (templateId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { id: templateId }
+  });
 
-  const { data: template, error } = await supabaseAdmin
-    .from('ai_agent_template')
-    .select('*')
-    .eq('id', templateId)
-    .single();
-
-  if (error || !template) {
+  if (!template) {
     return null;
   }
 
@@ -357,18 +365,15 @@ const getTemplateContent = async (templateId) => {
  * @returns {Promise<Object|null>} Location info or null
  */
 const getDeviceLocation = async (macAddress) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(macAddress);
 
   // Check if device has location info stored
   // Note: This could be extended to store location in a device_location table
   // For now, we return null and let the caller handle geolocation
-  const { data: device } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, mac_address')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac },
+    select: { id: true, mac_address: true }
+  });
 
   if (!device) {
     throw new Error('Device not found');

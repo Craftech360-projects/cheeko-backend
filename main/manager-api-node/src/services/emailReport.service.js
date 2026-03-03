@@ -9,7 +9,7 @@
  * - Send history tracking
  */
 
-const { supabaseAdmin, prisma } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 
 // =============================================
@@ -100,7 +100,6 @@ const transformConfig = (config) => {
  * @returns {Promise<Object>} Report data
  */
 const generateReportData = async (reportDate = null) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
 
   // Default to yesterday
   const date = reportDate || new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -122,46 +121,39 @@ const generateReportData = async (reportDate = null) => {
 
   try {
     // Summary: Get overall counts
-    const [usersResult, devicesResult, agentsResult] = await Promise.all([
-      supabaseAdmin.from('sys_user').select('id', { count: 'exact', head: true }),
-      supabaseAdmin.from('ai_device').select('id', { count: 'exact', head: true }),
-      supabaseAdmin.from('ai_agent').select('id', { count: 'exact', head: true })
+    const [totalUsers, totalDevices, totalAgents] = await Promise.all([
+      prisma.sys_user.count(),
+      prisma.ai_device.count(),
+      prisma.ai_agent.count(),
     ]);
 
-    reportData.summary = {
-      totalUsers: usersResult.count || 0,
-      totalDevices: devicesResult.count || 0,
-      totalAgents: agentsResult.count || 0
-    };
+    reportData.summary = { totalUsers, totalDevices, totalAgents };
 
     // Devices: Active devices for the day
-    const { data: activeDevices, count: activeCount } = await supabaseAdmin
-      .from('ai_device')
-      .select('mac_address, alias, last_connected_at', { count: 'exact' })
-      .gte('last_connected_at', startOfDay.toISOString())
-      .lte('last_connected_at', endOfDay.toISOString());
+    const activeDevices = await prisma.ai_device.findMany({
+      where: { last_connected_at: { gte: startOfDay, lte: endOfDay } },
+      select: { mac_address: true, alias: true, last_connected_at: true },
+    });
 
     reportData.devices = {
-      activeToday: activeCount || 0,
-      deviceList: (activeDevices || []).slice(0, 10).map(d => ({
+      activeToday: activeDevices.length,
+      deviceList: activeDevices.slice(0, 10).map(d => ({
         macAddress: d.mac_address,
         alias: d.alias,
-        lastConnected: d.last_connected_at
-      }))
+        lastConnected: d.last_connected_at,
+      })),
     };
 
     // Learning: Game sessions and performance
-    const { data: sessions, count: sessionCount } = await supabaseAdmin
-      .from('analytics_game_sessions')
-      .select('*', { count: 'exact' })
-      .gte('started_at', startOfDay.toISOString())
-      .lte('started_at', endOfDay.toISOString());
-
-    const { data: attempts } = await supabaseAdmin
-      .from('analytics_game_attempts')
-      .select('is_correct, game_type')
-      .gte('attempt_time', startOfDay.toISOString())
-      .lte('attempt_time', endOfDay.toISOString());
+    const [sessionCount, attempts] = await Promise.all([
+      prisma.analytics_game_sessions.count({
+        where: { started_at: { gte: startOfDay, lte: endOfDay } },
+      }),
+      prisma.analytics_game_attempts.findMany({
+        where: { attempt_time: { gte: startOfDay, lte: endOfDay } },
+        select: { is_correct: true, game_type: true },
+      }),
+    ]);
 
     const correctAttempts = (attempts || []).filter(a => a.is_correct).length;
     const totalAttempts = (attempts || []).length;
@@ -191,14 +183,13 @@ const generateReportData = async (reportDate = null) => {
     };
 
     // Content: Most played content
-    const { data: mediaPlayback } = await supabaseAdmin
-      .from('analytics_media_playback')
-      .select('content_id, content_type')
-      .gte('created_at', startOfDay.toISOString())
-      .lte('created_at', endOfDay.toISOString());
+    const mediaPlayback = await prisma.analytics_media_playback.findMany({
+      where: { created_at: { gte: startOfDay, lte: endOfDay } },
+      select: { content_id: true, content_type: true },
+    });
 
     const contentCounts = {};
-    (mediaPlayback || []).forEach(p => {
+    mediaPlayback.forEach(p => {
       const key = `${p.content_type}:${p.content_id}`;
       contentCounts[key] = (contentCounts[key] || 0) + 1;
     });
@@ -211,39 +202,30 @@ const generateReportData = async (reportDate = null) => {
         return { contentType: type, contentId: id, playCount: count };
       });
 
-    reportData.content = {
-      totalPlays: (mediaPlayback || []).length,
-      topContent
-    };
+    reportData.content = { totalPlays: mediaPlayback.length, topContent };
 
     // Tokens: Usage and cost
-    const { data: tokenUsage } = await supabaseAdmin
-      .from('device_token_usage')
-      .select('input_tokens, output_tokens, total_tokens')
-      .eq('usage_date', date.toISOString().split('T')[0]);
+    const todayDate = new Date(date.toISOString().split('T')[0]);
+    const tokenUsage = await prisma.device_token_usage.findMany({
+      where: { usage_date: todayDate },
+      select: { input_tokens: true, output_tokens: true, total_tokens: true },
+    });
 
-    const tokenStats = (tokenUsage || []).reduce((acc, t) => ({
+    const tokenStats = tokenUsage.reduce((acc, t) => ({
       inputTokens: acc.inputTokens + (t.input_tokens || 0),
       outputTokens: acc.outputTokens + (t.output_tokens || 0),
-      totalTokens: acc.totalTokens + (t.total_tokens || 0)
+      totalTokens: acc.totalTokens + (t.total_tokens || 0),
     }), { inputTokens: 0, outputTokens: 0, totalTokens: 0 });
 
-    // Estimate cost (example rates: $0.015 per 1K input, $0.075 per 1K output)
     const inputCost = (tokenStats.inputTokens / 1000) * 0.015;
     const outputCost = (tokenStats.outputTokens / 1000) * 0.075;
-
-    reportData.tokens = {
-      ...tokenStats,
-      estimatedCost: Math.round((inputCost + outputCost) * 100) / 100
-    };
+    reportData.tokens = { ...tokenStats, estimatedCost: Math.round((inputCost + outputCost) * 100) / 100 };
 
     // Alerts: Identify issues
-    // Check for inactive devices (no activity in 7 days)
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const { data: inactiveDevices, count: inactiveCount } = await supabaseAdmin
-      .from('ai_device')
-      .select('mac_address, alias', { count: 'exact' })
-      .lt('last_connected_at', sevenDaysAgo.toISOString());
+    const inactiveCount = await prisma.ai_device.count({
+      where: { last_connected_at: { lt: sevenDaysAgo } },
+    });
 
     if (inactiveCount > 0) {
       reportData.alerts.push({
@@ -662,27 +644,16 @@ const sendEmailReport = async (recipients, reportData, sections) => {
  * @returns {Promise<Object>} History record
  */
 const recordHistory = async ({ reportDate, recipients, status, errorMessage = null, reportData = null }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data, error } = await supabaseAdmin
-    .from('email_report_history')
-    .insert({
-      report_date: reportDate,
+  return prisma.email_report_history.create({
+    data: {
+      report_date: reportDate ? new Date(reportDate) : new Date(),
       recipients,
       status,
       error_message: errorMessage,
       report_data: reportData,
-      sent_at: new Date().toISOString()
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to record email history:', error);
-    throw new Error('Failed to record email history');
-  }
-
-  return data;
+      sent_at: new Date(),
+    },
+  });
 };
 
 /**
@@ -691,34 +662,28 @@ const recordHistory = async ({ reportDate, recipients, status, errorMessage = nu
  * @returns {Promise<Object>} Paginated history
  */
 const getHistory = async ({ page = 1, limit = 20 } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const offset = (page - 1) * limit;
-
-  const { data: history, error, count } = await supabaseAdmin
-    .from('email_report_history')
-    .select('*', { count: 'exact' })
-    .order('sent_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error('Failed to get email history:', error);
-    throw new Error('Failed to get email history');
-  }
+  const [count, history] = await Promise.all([
+    prisma.email_report_history.count(),
+    prisma.email_report_history.findMany({
+      orderBy: { sent_at: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
 
   return {
-    list: (history || []).map(h => ({
+    list: history.map(h => ({
       id: h.id,
       reportDate: h.report_date,
       recipients: h.recipients,
       status: h.status,
       errorMessage: h.error_message,
       reportData: h.report_data || null,
-      sentAt: h.sent_at
+      sentAt: h.sent_at,
     })),
-    total: count || 0,
+    total: count,
     page,
-    limit
+    limit,
   };
 };
 

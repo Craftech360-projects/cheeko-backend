@@ -4,7 +4,7 @@
  * Handles system parameters and dictionary management
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 
 // ==================== SYSTEM PARAMETERS ====================
@@ -15,35 +15,27 @@ const logger = require('../utils/logger');
  * @returns {Promise<Object>} Paginated params
  */
 const listParams = async ({ page = 1, limit = 20, paramType } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('sys_params')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('sys_params')
-    .select('*')
-    .order('created_at', { ascending: false });
+  const where = {};
 
   if (paramType !== undefined) {
-    countQuery = countQuery.eq('param_type', paramType);
-    dataQuery = dataQuery.eq('param_type', paramType);
+    where.param_type = paramType;
   }
 
-  const { count } = await countQuery;
-  const { data: params, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error('Failed to fetch params:', error);
-    throw new Error('Failed to fetch system parameters');
-  }
+  const [total, params] = await Promise.all([
+    prisma.sys_params.count({ where }),
+    prisma.sys_params.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: params || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -54,17 +46,9 @@ const listParams = async ({ page = 1, limit = 20, paramType } = {}) => {
  * @returns {Promise<Array>} All params
  */
 const getAllParams = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: params, error } = await supabaseAdmin
-    .from('sys_params')
-    .select('*')
-    .order('param_code', { ascending: true });
-
-  if (error) {
-    logger.error('Failed to fetch all params:', error);
-    throw new Error('Failed to fetch system parameters');
-  }
+  const params = await prisma.sys_params.findMany({
+    orderBy: { param_code: 'asc' }
+  });
 
   return params || [];
 };
@@ -75,15 +59,11 @@ const getAllParams = async () => {
  * @returns {Promise<Object|null>} Parameter or null
  */
 const getParamById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const param = await prisma.sys_params.findFirst({
+    where: { id: BigInt(id) }
+  });
 
-  const { data: param, error } = await supabaseAdmin
-    .from('sys_params')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !param) return null;
+  if (!param) return null;
 
   return param;
 };
@@ -94,15 +74,11 @@ const getParamById = async (id) => {
  * @returns {Promise<Object|null>} Parameter or null
  */
 const getParamByCode = async (paramCode) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const param = await prisma.sys_params.findFirst({
+    where: { param_code: paramCode }
+  });
 
-  const { data: param, error } = await supabaseAdmin
-    .from('sys_params')
-    .select('*')
-    .eq('param_code', paramCode)
-    .single();
-
-  if (error || !param) return null;
+  if (!param) return null;
 
   return param;
 };
@@ -142,24 +118,21 @@ const getParamValue = async (paramCode, defaultValue = null) => {
  * @returns {Promise<Object>} Created parameter
  */
 const createParam = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: param, error } = await supabaseAdmin
-    .from('sys_params')
-    .insert({
-      param_code: data.paramCode,
-      param_value: data.paramValue,
-      value_type: data.valueType || 'string',
-      param_type: data.paramType !== undefined ? data.paramType : 1,
-      remark: data.remark
-      // Note: creator column doesn't exist in sys_params table
-    })
-    .select()
-    .single();
-
-  if (error) {
+  let param;
+  try {
+    param = await prisma.sys_params.create({
+      data: {
+        param_code: data.paramCode,
+        param_value: data.paramValue,
+        value_type: data.valueType || 'string',
+        param_type: data.paramType !== undefined ? data.paramType : 1,
+        remark: data.remark
+        // Note: creator column doesn't exist in sys_params table
+      }
+    });
+  } catch (error) {
     logger.error('Failed to create param:', error);
-    if (error.code === '23505') {
+    if (error.code === 'P2002') {
       throw new Error('Parameter code already exists');
     }
     throw new Error('Failed to create system parameter');
@@ -175,9 +148,7 @@ const createParam = async (userId, data) => {
  * @returns {Promise<Object>} Updated parameter
  */
 const updateParam = async (id, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { updated_at: new Date() };
 
   if (data.paramCode !== undefined) updateData.param_code = data.paramCode;
   if (data.paramValue !== undefined) updateData.param_value = data.paramValue;
@@ -186,16 +157,15 @@ const updateParam = async (id, data) => {
   if (data.remark !== undefined) updateData.remark = data.remark;
   // Note: updater column doesn't exist in sys_params table
 
-  const { data: param, error } = await supabaseAdmin
-    .from('sys_params')
-    .update(updateData)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
+  let param;
+  try {
+    param = await prisma.sys_params.update({
+      where: { id: BigInt(id) },
+      data: updateData
+    });
+  } catch (error) {
     logger.error('Failed to update param:', error);
-    if (error.code === '23505') {
+    if (error.code === 'P2002') {
       throw new Error('Parameter code already exists');
     }
     throw new Error('Failed to update system parameter');
@@ -209,14 +179,9 @@ const updateParam = async (id, data) => {
  * @param {string} id - Parameter ID
  */
 const deleteParam = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('sys_params')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
+  try {
+    await prisma.sys_params.delete({ where: { id: BigInt(id) } });
+  } catch (error) {
     logger.error('Failed to delete param:', error);
     throw new Error('Failed to delete system parameter');
   }
@@ -227,14 +192,11 @@ const deleteParam = async (id) => {
  * @param {Array<string>} ids - Parameter IDs to delete
  */
 const deleteParams = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('sys_params')
-    .delete()
-    .in('id', ids);
-
-  if (error) {
+  try {
+    await prisma.sys_params.deleteMany({
+      where: { id: { in: ids.map(id => BigInt(id)) } }
+    });
+  } catch (error) {
     logger.error('Failed to delete params:', error);
     throw new Error('Failed to delete system parameters');
   }
@@ -248,29 +210,20 @@ const deleteParams = async (ids) => {
  * @returns {Promise<Object>} Paginated dict types
  */
 const listDictTypes = async ({ page = 1, limit = 20 } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  const { count } = await supabaseAdmin
-    .from('sys_dict_type')
-    .select('id', { count: 'exact', head: true });
-
-  const { data: types, error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .select('*')
-    .order('sort', { ascending: true })
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error('Failed to fetch dict types:', error);
-    throw new Error('Failed to fetch dictionary types');
-  }
+  const [total, types] = await Promise.all([
+    prisma.sys_dict_type.count(),
+    prisma.sys_dict_type.findMany({
+      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: types || [],
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -281,17 +234,9 @@ const listDictTypes = async ({ page = 1, limit = 20 } = {}) => {
  * @returns {Promise<Array>} All dict types
  */
 const getAllDictTypes = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: types, error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .select('*')
-    .order('sort', { ascending: true });
-
-  if (error) {
-    logger.error('Failed to fetch all dict types:', error);
-    throw new Error('Failed to fetch dictionary types');
-  }
+  const types = await prisma.sys_dict_type.findMany({
+    orderBy: { sort: 'asc' }
+  });
 
   return types || [];
 };
@@ -302,15 +247,11 @@ const getAllDictTypes = async () => {
  * @returns {Promise<Object|null>} Dictionary type or null
  */
 const getDictTypeById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const type = await prisma.sys_dict_type.findFirst({
+    where: { id: BigInt(id) }
+  });
 
-  const { data: type, error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !type) return null;
+  if (!type) return null;
 
   return type;
 };
@@ -321,15 +262,11 @@ const getDictTypeById = async (id) => {
  * @returns {Promise<Object|null>} Dictionary type or null
  */
 const getDictTypeByCode = async (dictType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const type = await prisma.sys_dict_type.findFirst({
+    where: { dict_type: dictType }
+  });
 
-  const { data: type, error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .select('*')
-    .eq('dict_type', dictType)
-    .single();
-
-  if (error || !type) return null;
+  if (!type) return null;
 
   return type;
 };
@@ -341,23 +278,20 @@ const getDictTypeByCode = async (dictType) => {
  * @returns {Promise<Object>} Created dictionary type
  */
 const createDictType = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: type, error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .insert({
-      dict_type: data.dictType,
-      dict_name: data.dictName,
-      remark: data.remark,
-      sort: data.sort || 0
-      // Note: creator column removed as it doesn't exist in current schema
-    })
-    .select()
-    .single();
-
-  if (error) {
+  let type;
+  try {
+    type = await prisma.sys_dict_type.create({
+      data: {
+        dict_type: data.dictType,
+        dict_name: data.dictName,
+        remark: data.remark,
+        sort: data.sort || 0
+        // Note: creator column removed as it doesn't exist in current schema
+      }
+    });
+  } catch (error) {
     logger.error('Failed to create dict type:', error);
-    if (error.code === '23505') {
+    if (error.code === 'P2002') {
       throw new Error('Dictionary type code already exists');
     }
     throw new Error('Failed to create dictionary type');
@@ -373,26 +307,23 @@ const createDictType = async (userId, data) => {
  * @returns {Promise<Object>} Updated dictionary type
  */
 const updateDictType = async (id, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { updated_at: new Date().toISOString() };
+  const updateData = { updated_at: new Date() };
 
   if (data.dictType !== undefined) updateData.dict_type = data.dictType;
   if (data.dictName !== undefined) updateData.dict_name = data.dictName;
   if (data.remark !== undefined) updateData.remark = data.remark;
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.updater !== undefined) updateData.updater = data.updater;
+  // Note: updater column doesn't exist in sys_dict_type; skipping data.updater
 
-  const { data: type, error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .update(updateData)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) {
+  let type;
+  try {
+    type = await prisma.sys_dict_type.update({
+      where: { id: BigInt(id) },
+      data: updateData
+    });
+  } catch (error) {
     logger.error('Failed to update dict type:', error);
-    if (error.code === '23505') {
+    if (error.code === 'P2002') {
       throw new Error('Dictionary type code already exists');
     }
     throw new Error('Failed to update dictionary type');
@@ -406,15 +337,10 @@ const updateDictType = async (id, data) => {
  * @param {string} id - Dictionary type ID
  */
 const deleteDictType = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Note: Will cascade delete related dict_data entries
-  const { error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
+  try {
+    // Note: Will cascade delete related dict_data entries
+    await prisma.sys_dict_type.delete({ where: { id: BigInt(id) } });
+  } catch (error) {
     logger.error('Failed to delete dict type:', error);
     throw new Error('Failed to delete dictionary type');
   }
@@ -425,14 +351,11 @@ const deleteDictType = async (id) => {
  * @param {Array<string>} ids - Dictionary type IDs to delete
  */
 const deleteDictTypes = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('sys_dict_type')
-    .delete()
-    .in('id', ids);
-
-  if (error) {
+  try {
+    await prisma.sys_dict_type.deleteMany({
+      where: { id: { in: ids.map(id => BigInt(id)) } }
+    });
+  } catch (error) {
     logger.error('Failed to delete dict types:', error);
     throw new Error('Failed to delete dictionary types');
   }
@@ -446,36 +369,38 @@ const deleteDictTypes = async (ids) => {
  * @returns {Promise<Object>} Paginated dict data
  */
 const listDictData = async ({ page = 1, limit = 20, dictTypeId } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('sys_dict_data')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('sys_dict_data')
-    .select('*, dict_type:sys_dict_type(id, dict_type, dict_name)')
-    .order('sort', { ascending: true })
-    .order('created_at', { ascending: false });
+  const where = {};
 
   if (dictTypeId) {
-    countQuery = countQuery.eq('dict_type_id', dictTypeId);
-    dataQuery = dataQuery.eq('dict_type_id', dictTypeId);
+    where.dict_type_id = BigInt(dictTypeId);
   }
 
-  const { count } = await countQuery;
-  const { data: items, error } = await dataQuery.range(offset, offset + limit - 1);
+  const [total, items] = await Promise.all([
+    prisma.sys_dict_data.count({ where }),
+    prisma.sys_dict_data.findMany({
+      where,
+      include: {
+        sys_dict_type: {
+          select: { id: true, dict_type: true, dict_name: true }
+        }
+      },
+      orderBy: [{ sort: 'asc' }, { created_at: 'desc' }],
+      skip: offset,
+      take: limit
+    })
+  ]);
 
-  if (error) {
-    logger.error('Failed to fetch dict data:', error);
-    throw new Error('Failed to fetch dictionary data');
-  }
+  // Reshape to match original Supabase nested alias: dict_type: sys_dict_type(...)
+  const list = (items || []).map(item => {
+    const { sys_dict_type, ...rest } = item;
+    return { ...rest, dict_type: sys_dict_type };
+  });
 
   return {
-    list: items || [],
-    total: count || 0,
+    list,
+    total: total || 0,
     page,
     limit
   };
@@ -487,18 +412,10 @@ const listDictData = async ({ page = 1, limit = 20, dictTypeId } = {}) => {
  * @returns {Promise<Array>} All dict data for type
  */
 const getDictDataByTypeId = async (dictTypeId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: items, error } = await supabaseAdmin
-    .from('sys_dict_data')
-    .select('*')
-    .eq('dict_type_id', dictTypeId)
-    .order('sort', { ascending: true });
-
-  if (error) {
-    logger.error('Failed to fetch dict data by type:', error);
-    throw new Error('Failed to fetch dictionary data');
-  }
+  const items = await prisma.sys_dict_data.findMany({
+    where: { dict_type_id: BigInt(dictTypeId) },
+    orderBy: { sort: 'asc' }
+  });
 
   return items || [];
 };
@@ -510,8 +427,6 @@ const getDictDataByTypeId = async (dictTypeId) => {
  */
 const getDictDataByType = async (dictType) => {
   // Return empty array if database is not configured (public endpoint)
-  if (!supabaseAdmin) return [];
-
   // First get the dict type
   const type = await getDictTypeByCode(dictType);
   if (!type) return [];
@@ -525,17 +440,20 @@ const getDictDataByType = async (dictType) => {
  * @returns {Promise<Object|null>} Dictionary data or null
  */
 const getDictDataById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const item = await prisma.sys_dict_data.findFirst({
+    where: { id: BigInt(id) },
+    include: {
+      sys_dict_type: {
+        select: { id: true, dict_type: true, dict_name: true }
+      }
+    }
+  });
 
-  const { data: item, error } = await supabaseAdmin
-    .from('sys_dict_data')
-    .select('*, dict_type:sys_dict_type(id, dict_type, dict_name)')
-    .eq('id', id)
-    .single();
+  if (!item) return null;
 
-  if (error || !item) return null;
-
-  return item;
+  // Reshape to match original Supabase nested alias
+  const { sys_dict_type, ...rest } = item;
+  return { ...rest, dict_type: sys_dict_type };
 };
 
 /**
@@ -545,30 +463,34 @@ const getDictDataById = async (id) => {
  * @returns {Promise<Object>} Created dictionary data
  */
 const createDictData = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: item, error } = await supabaseAdmin
-    .from('sys_dict_data')
-    .insert({
-      dict_type_id: data.dictTypeId,
-      dict_label: data.dictLabel,
-      dict_value: data.dictValue,
-      remark: data.remark,
-      sort: data.sort || 0
-      // Note: creator column removed as it doesn't exist in current schema
-    })
-    .select('*, dict_type:sys_dict_type(id, dict_type, dict_name)')
-    .single();
-
-  if (error) {
+  let item;
+  try {
+    item = await prisma.sys_dict_data.create({
+      data: {
+        dict_type_id: data.dictTypeId ? BigInt(data.dictTypeId) : null,
+        dict_label: data.dictLabel,
+        dict_value: data.dictValue,
+        remark: data.remark,
+        sort: data.sort || 0
+        // Note: creator column removed as it doesn't exist in current schema
+      },
+      include: {
+        sys_dict_type: {
+          select: { id: true, dict_type: true, dict_name: true }
+        }
+      }
+    });
+  } catch (error) {
     logger.error('Failed to create dict data:', error);
-    if (error.code === '23503') {
+    if (error.code === 'P2003') {
       throw new Error('Invalid dictionary type ID');
     }
     throw new Error('Failed to create dictionary data');
   }
 
-  return item;
+  // Reshape to match original Supabase nested alias
+  const { sys_dict_type, ...rest } = item;
+  return { ...rest, dict_type: sys_dict_type };
 };
 
 /**
@@ -578,33 +500,37 @@ const createDictData = async (userId, data) => {
  * @returns {Promise<Object>} Updated dictionary data
  */
 const updateDictData = async (id, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const updateData = { updated_at: new Date() };
 
-  const updateData = { updated_at: new Date().toISOString() };
-
-  if (data.dictTypeId !== undefined) updateData.dict_type_id = data.dictTypeId;
+  if (data.dictTypeId !== undefined) updateData.dict_type_id = BigInt(data.dictTypeId);
   if (data.dictLabel !== undefined) updateData.dict_label = data.dictLabel;
   if (data.dictValue !== undefined) updateData.dict_value = data.dictValue;
   if (data.remark !== undefined) updateData.remark = data.remark;
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.updater !== undefined) updateData.updater = data.updater;
+  // Note: updater column doesn't exist in sys_dict_data; skipping data.updater
 
-  const { data: item, error } = await supabaseAdmin
-    .from('sys_dict_data')
-    .update(updateData)
-    .eq('id', id)
-    .select('*, dict_type:sys_dict_type(id, dict_type, dict_name)')
-    .single();
-
-  if (error) {
+  let item;
+  try {
+    item = await prisma.sys_dict_data.update({
+      where: { id: BigInt(id) },
+      data: updateData,
+      include: {
+        sys_dict_type: {
+          select: { id: true, dict_type: true, dict_name: true }
+        }
+      }
+    });
+  } catch (error) {
     logger.error('Failed to update dict data:', error);
-    if (error.code === '23503') {
+    if (error.code === 'P2003') {
       throw new Error('Invalid dictionary type ID');
     }
     throw new Error('Failed to update dictionary data');
   }
 
-  return item;
+  // Reshape to match original Supabase nested alias
+  const { sys_dict_type, ...rest } = item;
+  return { ...rest, dict_type: sys_dict_type };
 };
 
 /**
@@ -612,14 +538,9 @@ const updateDictData = async (id, data) => {
  * @param {string} id - Dictionary data ID
  */
 const deleteDictData = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('sys_dict_data')
-    .delete()
-    .eq('id', id);
-
-  if (error) {
+  try {
+    await prisma.sys_dict_data.delete({ where: { id: BigInt(id) } });
+  } catch (error) {
     logger.error('Failed to delete dict data:', error);
     throw new Error('Failed to delete dictionary data');
   }
@@ -630,14 +551,11 @@ const deleteDictData = async (id) => {
  * @param {Array<string>} ids - Dictionary data IDs to delete
  */
 const deleteDictDataBatch = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('sys_dict_data')
-    .delete()
-    .in('id', ids);
-
-  if (error) {
+  try {
+    await prisma.sys_dict_data.deleteMany({
+      where: { id: { in: ids.map(id => BigInt(id)) } }
+    });
+  } catch (error) {
     logger.error('Failed to delete dict data batch:', error);
     throw new Error('Failed to delete dictionary data');
   }

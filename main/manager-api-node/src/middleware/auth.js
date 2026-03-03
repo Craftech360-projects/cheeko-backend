@@ -2,11 +2,11 @@
  * Authentication Middleware
  *
  * Supports two authentication methods:
- * 1. Supabase Auth (Bearer token) - for user authentication
+ * 1. Custom Token (Bearer token) - for user authentication via sys_user_token
  * 2. Service Key (X-Service-Key header) - for backend-to-backend calls
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { unauthorized, forbidden } = require('../utils/response');
 
@@ -40,48 +40,35 @@ const extractServiceKey = (req) => {
  * @returns {Promise<Object|null>} User data or null
  */
 const verifyCustomToken = async (token) => {
-  if (!supabaseAdmin) {
-    logger.warn('Supabase not configured, cannot verify token');
-    return null;
-  }
-
   try {
     logger.debug('Verifying token:', token ? `${token.substring(0, 20)}...` : 'empty');
 
-    // Find valid token in sys_user_token table
-    const { data: tokenData, error: tokenError } = await supabaseAdmin
-      .from('sys_user_token')
-      .select('user_id, expire_date')
-      .eq('token', token)
-      .single();
+    // Find token in sys_user_token table
+    const tokenData = await prisma.sys_user_token.findFirst({
+      where: { token },
+      select: { user_id: true, expire_date: true },
+    });
 
-    if (tokenError || !tokenData) {
-      logger.debug('Token not found in sys_user_token:', tokenError?.message || 'no match');
-      logger.debug('Token length:', token?.length);
+    if (!tokenData) {
+      logger.debug('Token not found in sys_user_token');
       return null;
     }
 
     // Check expiration
     if (new Date(tokenData.expire_date) < new Date()) {
       logger.debug('Token expired');
-      // Delete expired token
-      await supabaseAdmin
-        .from('sys_user_token')
-        .delete()
-        .eq('token', token);
+      await prisma.sys_user_token.deleteMany({ where: { token } });
       return null;
     }
 
     // Get user
-    const { data: user, error: userError } = await supabaseAdmin
-      .from('sys_user')
-      .select('id, username, email, role, status, created_at')
-      .eq('id', tokenData.user_id)
-      .eq('status', 1)
-      .single();
+    const user = await prisma.sys_user.findFirst({
+      where: { id: tokenData.user_id, status: 1 },
+      select: { id: true, username: true, email: true, role: true, status: true, created_at: true },
+    });
 
-    if (userError || !user) {
-      logger.debug('User not found:', userError?.message);
+    if (!user) {
+      logger.debug('User not found');
       return null;
     }
 

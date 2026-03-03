@@ -5,7 +5,7 @@
  * Uses ai_model_config table to match Spring Boot structure
  */
 
-const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 
 // Helper to transform snake_case to camelCase
@@ -35,16 +35,13 @@ const transformToCamelCase = (obj) => {
  * @returns {Promise<Array>} Models
  */
 const getModelsByType = async (modelType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: models, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('*')
-    .eq('model_type', modelType)
-    .eq('is_enabled', 1)
-    .order('sort', { ascending: true });
-
-  if (error) throw new Error('Failed to fetch models');
+  const models = await prisma.ai_model_config.findMany({
+    where: {
+      model_type: modelType,
+      is_enabled: 1
+    },
+    orderBy: { sort: 'asc' }
+  });
 
   return (models || []).map(transformToCamelCase);
 };
@@ -55,15 +52,11 @@ const getModelsByType = async (modelType) => {
  * @returns {Promise<Object>} Model
  */
 const getModelById = async (modelId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const model = await prisma.ai_model_config.findFirst({
+    where: { id: modelId }
+  });
 
-  const { data: model, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('*')
-    .eq('id', modelId)
-    .single();
-
-  if (error || !model) return null;
+  if (!model) return null;
 
   return transformToCamelCase(model);
 };
@@ -75,37 +68,31 @@ const getModelById = async (modelId) => {
  * @returns {Promise<Object>} Paginated models
  */
 const listModels = async ({ page = 1, limit = 20, modelType, modelName } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('ai_model_config')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('ai_model_config')
-    .select('*')
-    .order('sort', { ascending: true });
+  const where = {};
 
   if (modelType) {
-    countQuery = countQuery.eq('model_type', modelType);
-    dataQuery = dataQuery.eq('model_type', modelType);
+    where.model_type = modelType;
   }
 
   if (modelName) {
-    countQuery = countQuery.ilike('model_name', `%${modelName}%`);
-    dataQuery = dataQuery.ilike('model_name', `%${modelName}%`);
+    where.model_name = { contains: modelName, mode: 'insensitive' };
   }
 
-  const { count } = await countQuery;
-  const { data: models, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch models');
+  const [total, models] = await Promise.all([
+    prisma.ai_model_config.count({ where }),
+    prisma.ai_model_config.findMany({
+      where,
+      orderBy: { sort: 'asc' },
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: (models || []).map(transformToCamelCase),
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -118,11 +105,8 @@ const listModels = async ({ page = 1, limit = 20, modelType, modelName } = {}) =
  * @returns {Promise<Object>} Created model (camelCase)
  */
 const createModel = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: model, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .insert({
+  const model = await prisma.ai_model_config.create({
+    data: {
       model_type: data.modelType,
       model_name: data.modelName,
       model_code: data.modelCode || data.modelName,
@@ -132,12 +116,9 @@ const createModel = async (userId, data) => {
       doc_link: data.docLink,
       remark: data.remark,
       sort: data.sort || 0,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to create model');
+      creator: userId ? BigInt(userId) : null
+    }
+  });
 
   return transformToCamelCase(model);
 };
@@ -149,9 +130,7 @@ const createModel = async (userId, data) => {
  * @returns {Promise<Object>} Updated model (camelCase)
  */
 const updateModel = async (modelId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { update_date: new Date() };
 
   if (data.modelName !== undefined) updateData.model_name = data.modelName;
   if (data.modelCode !== undefined) updateData.model_code = data.modelCode;
@@ -161,16 +140,12 @@ const updateModel = async (modelId, data) => {
   if (data.docLink !== undefined) updateData.doc_link = data.docLink;
   if (data.remark !== undefined) updateData.remark = data.remark;
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.updater !== undefined) updateData.updater = data.updater;
+  if (data.updater !== undefined) updateData.updater = BigInt(data.updater);
 
-  const { data: model, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .update(updateData)
-    .eq('id', modelId)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to update model');
+  const model = await prisma.ai_model_config.update({
+    where: { id: modelId },
+    data: updateData
+  });
 
   return transformToCamelCase(model);
 };
@@ -181,16 +156,13 @@ const updateModel = async (modelId, data) => {
  * @param {string} modelId - Model ID
  */
 const deleteModel = async (modelId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // First, check if the model exists and if it's a default model
-  const { data: model, error: fetchError } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('id, model_type, is_default')
-    .eq('id', modelId)
-    .single();
+  const model = await prisma.ai_model_config.findFirst({
+    where: { id: modelId },
+    select: { id: true, model_type: true, is_default: true }
+  });
 
-  if (fetchError || !model) {
+  if (!model) {
     throw new Error('Model not found');
   }
 
@@ -200,36 +172,45 @@ const deleteModel = async (modelId) => {
   }
 
   // Check if any agents reference this model
-  const { data: agents, error: agentError } = await supabaseAdmin
-    .from('ai_agent')
-    .select('id, agent_name')
-    .or(`vad_model_id.eq.${modelId},asr_model_id.eq.${modelId},llm_model_id.eq.${modelId},tts_model_id.eq.${modelId},mem_model_id.eq.${modelId},vllm_model_id.eq.${modelId},intent_model_id.eq.${modelId}`);
+  const agents = await prisma.ai_agent.findMany({
+    where: {
+      OR: [
+        { vad_model_id: modelId },
+        { asr_model_id: modelId },
+        { llm_model_id: modelId },
+        { tts_model_id: modelId },
+        { mem_model_id: modelId },
+        { vllm_model_id: modelId },
+        { intent_model_id: modelId }
+      ]
+    },
+    select: { id: true, agent_name: true }
+  });
 
-  if (!agentError && agents && agents.length > 0) {
+  if (agents && agents.length > 0) {
     const agentNames = agents.map(a => a.agent_name).join('、');
     throw new Error(`This model configuration is referenced by agent(s) [${agentNames}] and cannot be deleted`);
   }
 
   // Check if this LLM is referenced by any intent configurations
   if (model.model_type && model.model_type.toLowerCase() === 'llm') {
-    const { data: intentConfigs, error: intentError } = await supabaseAdmin
-      .from('ai_model_config')
-      .select('id')
-      .eq('model_type', 'intent')
-      .ilike('config_json', `%${modelId}%`);
+    const intentConfigs = await prisma.ai_model_config.findMany({
+      where: {
+        model_type: 'intent',
+        config_json: {
+          string_contains: modelId
+        }
+      },
+      select: { id: true }
+    });
 
-    if (!intentError && intentConfigs && intentConfigs.length > 0) {
+    if (intentConfigs && intentConfigs.length > 0) {
       throw new Error('This LLM model is referenced by intent recognition configuration and cannot be deleted');
     }
   }
 
   // All checks passed, delete the model
-  const { error } = await supabaseAdmin
-    .from('ai_model_config')
-    .delete()
-    .eq('id', modelId);
-
-  if (error) throw new Error('Failed to delete model');
+  await prisma.ai_model_config.delete({ where: { id: modelId } });
 };
 
 /**
@@ -238,20 +219,15 @@ const deleteModel = async (modelId) => {
  * @returns {Promise<Array>} TTS voices
  */
 const getTtsVoices = async (ttsModelId = null) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('ai_tts_voice')
-    .select('*')
-    .order('sort', { ascending: true });
-
+  const where = {};
   if (ttsModelId) {
-    query = query.eq('tts_model_id', ttsModelId);
+    where.tts_model_id = ttsModelId;
   }
 
-  const { data: voices, error } = await query;
-
-  if (error) throw new Error('Failed to fetch TTS voices');
+  const voices = await prisma.ai_tts_voice.findMany({
+    where,
+    orderBy: { sort: 'asc' }
+  });
 
   return voices || [];
 };
@@ -262,15 +238,11 @@ const getTtsVoices = async (ttsModelId = null) => {
  * @returns {Promise<Object>} TTS voice
  */
 const getTtsVoiceById = async (voiceId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const voice = await prisma.ai_tts_voice.findFirst({
+    where: { id: voiceId }
+  });
 
-  const { data: voice, error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .select('*')
-    .eq('id', voiceId)
-    .single();
-
-  if (error || !voice) return null;
+  if (!voice) return null;
 
   return voice;
 };
@@ -282,11 +254,8 @@ const getTtsVoiceById = async (voiceId) => {
  * @returns {Promise<Object>} Created voice
  */
 const createTtsVoice = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: voice, error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .insert({
+  const voice = await prisma.ai_tts_voice.create({
+    data: {
       tts_model_id: data.ttsModelId,
       tts_voice: data.ttsVoice || data.voiceCode,
       name: data.name || data.voiceName,
@@ -296,12 +265,9 @@ const createTtsVoice = async (userId, data) => {
       reference_text: data.referenceText,
       voice_demo: data.voiceDemo || data.previewUrl,
       sort: data.sort || 0,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to create TTS voice');
+      creator: userId ? BigInt(userId) : null
+    }
+  });
 
   return voice;
 };
@@ -313,9 +279,7 @@ const createTtsVoice = async (userId, data) => {
  * @returns {Promise<Object>} Updated voice
  */
 const updateTtsVoice = async (voiceId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { update_date: new Date() };
 
   if (data.ttsVoice !== undefined || data.voiceCode !== undefined) {
     updateData.tts_voice = data.ttsVoice || data.voiceCode;
@@ -333,16 +297,12 @@ const updateTtsVoice = async (voiceId, data) => {
     updateData.voice_demo = data.voiceDemo || data.previewUrl;
   }
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.updater !== undefined) updateData.updater = data.updater;
+  if (data.updater !== undefined) updateData.updater = BigInt(data.updater);
 
-  const { data: voice, error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .update(updateData)
-    .eq('id', voiceId)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to update TTS voice');
+  const voice = await prisma.ai_tts_voice.update({
+    where: { id: voiceId },
+    data: updateData
+  });
 
   return voice;
 };
@@ -352,14 +312,7 @@ const updateTtsVoice = async (voiceId, data) => {
  * @param {string} voiceId - Voice ID
  */
 const deleteTtsVoice = async (voiceId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .delete()
-    .eq('id', voiceId);
-
-  if (error) throw new Error('Failed to delete TTS voice');
+  await prisma.ai_tts_voice.delete({ where: { id: voiceId } });
 };
 
 /**
@@ -367,16 +320,11 @@ const deleteTtsVoice = async (voiceId) => {
  * @returns {Promise<Object>} Grouped model options
  */
 const getModelOptions = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: models, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('id, model_type, model_name, model_code')
-    .eq('is_enabled', 1)
-    .order('model_type', { ascending: true })
-    .order('sort', { ascending: true });
-
-  if (error) throw new Error('Failed to fetch model options');
+  const models = await prisma.ai_model_config.findMany({
+    where: { is_enabled: 1 },
+    select: { id: true, model_type: true, model_name: true, model_code: true },
+    orderBy: [{ model_type: 'asc' }, { sort: 'asc' }]
+  });
 
   // Group by type
   const grouped = {};
@@ -402,25 +350,21 @@ const getModelOptions = async () => {
  * @returns {Promise<Array>} Model names with {id, modelName}
  */
 const getModelNames = async (modelType, modelName) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('ai_model_config')
-    .select('id, model_name')
-    .eq('is_enabled', 1)
-    .order('sort', { ascending: true });
+  const where = { is_enabled: 1 };
 
   if (modelType) {
-    query = query.eq('model_type', modelType);
+    where.model_type = modelType;
   }
 
   if (modelName) {
-    query = query.ilike('model_name', `%${modelName}%`);
+    where.model_name = { contains: modelName, mode: 'insensitive' };
   }
 
-  const { data: models, error } = await query;
-
-  if (error) throw new Error('Failed to fetch model names');
+  const models = await prisma.ai_model_config.findMany({
+    where,
+    select: { id: true, model_name: true },
+    orderBy: { sort: 'asc' }
+  });
 
   // Return format matching ModelBasicInfoDTO: {id, modelName}
   return (models || []).map(model => ({
@@ -436,22 +380,20 @@ const getModelNames = async (modelType, modelName) => {
  * @returns {Promise<Array>} LLM model names with {id, modelName, type}
  */
 const getLlmNames = async (modelName) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('ai_model_config')
-    .select('id, model_name, config_json')
-    .eq('model_type', 'llm')
-    .eq('is_enabled', 1)
-    .order('sort', { ascending: true });
+  const where = {
+    model_type: 'llm',
+    is_enabled: 1
+  };
 
   if (modelName) {
-    query = query.ilike('model_name', `%${modelName}%`);
+    where.model_name = { contains: modelName, mode: 'insensitive' };
   }
 
-  const { data: models, error } = await query;
-
-  if (error) throw new Error('Failed to fetch LLM names');
+  const models = await prisma.ai_model_config.findMany({
+    where,
+    select: { id: true, model_name: true, config_json: true },
+    orderBy: { sort: 'asc' }
+  });
 
   // Return format matching LlmModelBasicInfoDTO: {id, modelName, type}
   return (models || []).map(model => ({
@@ -468,15 +410,10 @@ const getLlmNames = async (modelName) => {
  * @returns {Promise<Array>} Provider types
  */
 const getProviderTypes = async (modelType) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: providers, error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .select('*')
-    .eq('model_type', modelType)
-    .order('sort', { ascending: true });
-
-  if (error) throw new Error('Failed to fetch provider types');
+  const providers = await prisma.ai_model_provider.findMany({
+    where: { model_type: modelType },
+    orderBy: { sort: 'asc' }
+  });
 
   // Return full provider objects matching ModelProviderDTO
   return (providers || []).map(p => ({
@@ -499,22 +436,21 @@ const getProviderTypes = async (modelType) => {
  * @returns {Promise<Object>} Created model
  */
 const createModelByTypeProvider = async (userId, modelType, provideCode, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // First verify if provider exists (matching Spring Boot behavior)
-  const { data: providers } = await supabaseAdmin
-    .from('ai_model_provider')
-    .select('id')
-    .eq('model_type', modelType)
-    .eq('provider_code', provideCode);
+  const providers = await prisma.ai_model_provider.findMany({
+    where: {
+      model_type: modelType,
+      provider_code: provideCode
+    },
+    select: { id: true }
+  });
 
   if (!providers || providers.length === 0) {
     throw new Error('Provider does not exist');
   }
 
-  const { data: model, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .insert({
+  const model = await prisma.ai_model_config.create({
+    data: {
       model_type: modelType,
       model_name: data.modelName,
       model_code: data.modelCode || data.modelName,
@@ -524,15 +460,9 @@ const createModelByTypeProvider = async (userId, modelType, provideCode, data) =
       doc_link: data.docLink,
       remark: data.remark,
       sort: data.sort || 0,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to create model:', error);
-    throw new Error('Failed to create model');
-  }
+      creator: userId ? BigInt(userId) : null
+    }
+  });
 
   return transformToCamelCase(model);
 };
@@ -547,27 +477,26 @@ const createModelByTypeProvider = async (userId, modelType, provideCode, data) =
  * @returns {Promise<Object>} Updated model
  */
 const updateModelByTypeProvider = async (modelId, modelType, provideCode, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   // First verify if provider exists (matching Spring Boot behavior)
-  const { data: providers } = await supabaseAdmin
-    .from('ai_model_provider')
-    .select('id')
-    .eq('model_type', modelType)
-    .eq('provider_code', provideCode);
+  const providers = await prisma.ai_model_provider.findMany({
+    where: {
+      model_type: modelType,
+      provider_code: provideCode
+    },
+    select: { id: true }
+  });
 
   if (!providers || providers.length === 0) {
     throw new Error('Provider does not exist');
   }
 
   // Then verify the model exists
-  const { data: existing, error: fetchError } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('id')
-    .eq('id', modelId)
-    .single();
+  const existing = await prisma.ai_model_config.findFirst({
+    where: { id: modelId },
+    select: { id: true }
+  });
 
-  if (fetchError || !existing) {
+  if (!existing) {
     throw new Error('Model not found');
   }
 
@@ -575,13 +504,12 @@ const updateModelByTypeProvider = async (modelId, modelType, provideCode, data) 
   // If configJson contains "llm" key, verify the referenced LLM is valid
   if (data.configJson && data.configJson.llm) {
     const llmId = data.configJson.llm;
-    const { data: llmModel, error: llmError } = await supabaseAdmin
-      .from('ai_model_config')
-      .select('id, model_type, config_json')
-      .eq('id', llmId)
-      .single();
+    const llmModel = await prisma.ai_model_config.findFirst({
+      where: { id: llmId },
+      select: { id: true, model_type: true, config_json: true }
+    });
 
-    if (llmError || !llmModel) {
+    if (!llmModel) {
       throw new Error('The configured LLM does not exist');
     }
 
@@ -596,7 +524,7 @@ const updateModelByTypeProvider = async (modelId, modelType, provideCode, data) 
     }
   }
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { update_date: new Date() };
 
   if (data.modelName !== undefined) updateData.model_name = data.modelName;
   if (data.modelCode !== undefined) updateData.model_code = data.modelCode;
@@ -606,17 +534,10 @@ const updateModelByTypeProvider = async (modelId, modelType, provideCode, data) 
   if (data.remark !== undefined) updateData.remark = data.remark;
   if (data.sort !== undefined) updateData.sort = data.sort;
 
-  const { data: model, error } = await supabaseAdmin
-    .from('ai_model_config')
-    .update(updateData)
-    .eq('id', modelId)
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to update model:', error);
-    throw new Error('Failed to update model');
-  }
+  const model = await prisma.ai_model_config.update({
+    where: { id: modelId },
+    data: updateData
+  });
 
   return transformToCamelCase(model);
 };
@@ -628,27 +549,22 @@ const updateModelByTypeProvider = async (modelId, modelType, provideCode, data) 
  * @returns {Promise<void>}
  */
 const enableModel = async (modelId, status) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const model = await prisma.ai_model_config.findFirst({
+    where: { id: modelId },
+    select: { id: true }
+  });
 
-  const { data: model, error: fetchError } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('id')
-    .eq('id', modelId)
-    .single();
-
-  if (fetchError || !model) {
+  if (!model) {
     throw new Error('Model configuration does not exist');
   }
 
-  const { error } = await supabaseAdmin
-    .from('ai_model_config')
-    .update({
+  await prisma.ai_model_config.update({
+    where: { id: modelId },
+    data: {
       is_enabled: status,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', modelId);
-
-  if (error) throw new Error('Failed to update model status');
+      update_date: new Date()
+    }
+  });
 };
 
 /**
@@ -657,35 +573,30 @@ const enableModel = async (modelId, status) => {
  * @returns {Promise<void>}
  */
 const setDefaultModel = async (modelId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const model = await prisma.ai_model_config.findFirst({
+    where: { id: modelId },
+    select: { id: true, model_type: true }
+  });
 
-  const { data: model, error: fetchError } = await supabaseAdmin
-    .from('ai_model_config')
-    .select('id, model_type')
-    .eq('id', modelId)
-    .single();
-
-  if (fetchError || !model) {
+  if (!model) {
     throw new Error('Model configuration does not exist');
   }
 
   // Set other models of the same type as non-default
-  await supabaseAdmin
-    .from('ai_model_config')
-    .update({ is_default: 0, update_date: new Date().toISOString() })
-    .eq('model_type', model.model_type);
+  await prisma.ai_model_config.updateMany({
+    where: { model_type: model.model_type },
+    data: { is_default: 0, update_date: new Date() }
+  });
 
   // Set this model as default and enabled
-  const { error } = await supabaseAdmin
-    .from('ai_model_config')
-    .update({
+  await prisma.ai_model_config.update({
+    where: { id: modelId },
+    data: {
       is_default: 1,
       is_enabled: 1,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', modelId);
-
-  if (error) throw new Error('Failed to set default model');
+      update_date: new Date()
+    }
+  });
 };
 
 // =============================================
@@ -716,39 +627,35 @@ const transformProviderToCamelCase = (obj) => {
  * @returns {Promise<Object>} Paginated providers
  */
 const getProviders = async ({ page = 1, limit = 20, modelType, name } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  let countQuery = supabaseAdmin
-    .from('ai_model_provider')
-    .select('id', { count: 'exact', head: true });
-
-  let dataQuery = supabaseAdmin
-    .from('ai_model_provider')
-    .select('*')
-    .order('model_type', { ascending: true })
-    .order('sort', { ascending: true });
+  const where = {};
 
   if (modelType) {
-    countQuery = countQuery.eq('model_type', modelType);
-    dataQuery = dataQuery.eq('model_type', modelType);
+    where.model_type = modelType;
   }
 
   // Spring Boot: filters by name OR provider_code (LIKE search)
   if (name) {
-    countQuery = countQuery.or(`name.ilike.%${name}%,provider_code.ilike.%${name}%`);
-    dataQuery = dataQuery.or(`name.ilike.%${name}%,provider_code.ilike.%${name}%`);
+    where.OR = [
+      { name: { contains: name, mode: 'insensitive' } },
+      { provider_code: { contains: name, mode: 'insensitive' } }
+    ];
   }
 
-  const { count } = await countQuery;
-  const { data: providers, error } = await dataQuery.range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch providers');
+  const [total, providers] = await Promise.all([
+    prisma.ai_model_provider.count({ where }),
+    prisma.ai_model_provider.findMany({
+      where,
+      orderBy: [{ model_type: 'asc' }, { sort: 'asc' }],
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: (providers || []).map(transformProviderToCamelCase),
-    total: count || 0,
+    total: total || 0,
     page,
     limit
   };
@@ -760,15 +667,11 @@ const getProviders = async ({ page = 1, limit = 20, modelType, name } = {}) => {
  * @returns {Promise<Object|null>} Provider or null
  */
 const getProviderById = async (providerId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const provider = await prisma.ai_model_provider.findFirst({
+    where: { id: providerId }
+  });
 
-  const { data: provider, error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .select('*')
-    .eq('id', providerId)
-    .single();
-
-  if (error || !provider) return null;
+  if (!provider) return null;
 
   return provider;
 };
@@ -781,22 +684,19 @@ const getProviderById = async (providerId) => {
  * @returns {Promise<Object>} Created provider
  */
 const createProvider = async (userId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: provider, error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .insert({
-      model_type: data.modelType,
-      provider_code: data.providerCode,
-      name: data.name,
-      fields: data.fields || [],
-      sort: data.sort || 0,
-      creator: userId
-    })
-    .select()
-    .single();
-
-  if (error) {
+  let provider;
+  try {
+    provider = await prisma.ai_model_provider.create({
+      data: {
+        model_type: data.modelType,
+        provider_code: data.providerCode,
+        name: data.name,
+        fields: data.fields || [],
+        sort: data.sort || 0,
+        creator: userId ? BigInt(userId) : null
+      }
+    });
+  } catch (error) {
     logger.error('Failed to create provider:', error);
     throw new Error('Failed to add data');
   }
@@ -812,25 +712,22 @@ const createProvider = async (userId, data) => {
  * @returns {Promise<Object>} Updated provider
  */
 const updateProvider = async (providerId, data) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { update_date: new Date() };
 
   if (data.modelType !== undefined) updateData.model_type = data.modelType;
   if (data.providerCode !== undefined) updateData.provider_code = data.providerCode;
   if (data.name !== undefined) updateData.name = data.name;
   if (data.fields !== undefined) updateData.fields = data.fields;
   if (data.sort !== undefined) updateData.sort = data.sort;
-  if (data.updater !== undefined) updateData.updater = data.updater;
+  if (data.updater !== undefined) updateData.updater = BigInt(data.updater);
 
-  const { data: provider, error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .update(updateData)
-    .eq('id', providerId)
-    .select()
-    .single();
-
-  if (error) {
+  let provider;
+  try {
+    provider = await prisma.ai_model_provider.update({
+      where: { id: providerId },
+      data: updateData
+    });
+  } catch (error) {
     logger.error('Failed to update provider:', error);
     throw new Error('Failed to update data');
   }
@@ -843,14 +740,9 @@ const updateProvider = async (providerId, data) => {
  * @param {string} providerId - Provider ID
  */
 const deleteProvider = async (providerId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .delete()
-    .eq('id', providerId);
-
-  if (error) {
+  try {
+    await prisma.ai_model_provider.delete({ where: { id: providerId } });
+  } catch (error) {
     logger.error('Failed to delete provider:', error);
     throw new Error('Failed to delete data');
   }
@@ -862,14 +754,11 @@ const deleteProvider = async (providerId) => {
  * @param {Array<string>} ids - Provider IDs to delete
  */
 const deleteProviders = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .delete()
-    .in('id', ids);
-
-  if (error) {
+  try {
+    await prisma.ai_model_provider.deleteMany({
+      where: { id: { in: ids } }
+    });
+  } catch (error) {
     logger.error('Failed to delete providers:', error);
     throw new Error('Failed to delete data');
   }
@@ -881,15 +770,10 @@ const deleteProviders = async (ids) => {
  * @returns {Promise<Array>} Plugin names
  */
 const getProviderPluginNames = async () => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: providers, error } = await supabaseAdmin
-    .from('ai_model_provider')
-    .select('id, model_type, provider_code, name')
-    .order('model_type', { ascending: true })
-    .order('sort', { ascending: true });
-
-  if (error) throw new Error('Failed to fetch provider plugin names');
+  const providers = await prisma.ai_model_provider.findMany({
+    select: { id: true, model_type: true, provider_code: true, name: true },
+    orderBy: [{ model_type: 'asc' }, { sort: 'asc' }]
+  });
 
   // Return as simple list with model type context
   return (providers || []).map(p => ({
@@ -907,21 +791,25 @@ const getProviderPluginNames = async () => {
  * @returns {Promise<Array>} Voice list
  */
 const getVoicesByModelId = async (modelId, voiceName) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('ai_tts_voice')
-    .select('id, tts_voice, name, languages, remark, voice_demo, sort')
-    .eq('tts_model_id', modelId)
-    .order('sort', { ascending: true });
+  const where = { tts_model_id: modelId };
 
   if (voiceName) {
-    query = query.ilike('name', `%${voiceName}%`);
+    where.name = { contains: voiceName, mode: 'insensitive' };
   }
 
-  const { data: voices, error } = await query;
-
-  if (error) throw new Error('Failed to fetch voices');
+  const voices = await prisma.ai_tts_voice.findMany({
+    where,
+    select: {
+      id: true,
+      tts_voice: true,
+      name: true,
+      languages: true,
+      remark: true,
+      voice_demo: true,
+      sort: true
+    },
+    orderBy: { sort: 'asc' }
+  });
 
   // Return format matching VoiceDTO
   return (voices || []).map(v => ({
@@ -945,33 +833,28 @@ const getVoicesByModelId = async (modelId, voiceName) => {
  * @returns {Promise<Object>} PageData with list, total
  */
 const getTtsVoicesPage = async (ttsModelId, name, page = 1, limit = 10) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const offset = (page - 1) * limit;
 
-  // Build query with filters
-  let query = supabaseAdmin
-    .from('ai_tts_voice')
-    .select('*', { count: 'exact' })
-    .eq('tts_model_id', ttsModelId);
+  const where = { tts_model_id: ttsModelId };
 
   // Fuzzy match on name if provided
   if (name) {
-    query = query.ilike('name', `%${name}%`);
+    where.name = { contains: name, mode: 'insensitive' };
   }
 
-  // Add pagination and ordering
-  query = query
-    .order('sort', { ascending: true })
-    .range(offset, offset + limit - 1);
-
-  const { data: voices, count, error } = await query;
-
-  if (error) throw new Error('Failed to fetch TTS voices');
+  const [total, voices] = await Promise.all([
+    prisma.ai_tts_voice.count({ where }),
+    prisma.ai_tts_voice.findMany({
+      where,
+      orderBy: { sort: 'asc' },
+      skip: offset,
+      take: limit
+    })
+  ]);
 
   return {
     list: voices || [],
-    total: count || 0
+    total: total || 0
   };
 };
 
@@ -982,11 +865,8 @@ const getTtsVoicesPage = async (ttsModelId, name, page = 1, limit = 10) => {
  * @param {Object} dto - TimbreDataDTO
  */
 const createTimbre = async (userId, dto) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .insert({
+  await prisma.ai_tts_voice.create({
+    data: {
       tts_model_id: dto.ttsModelId,
       tts_voice: dto.ttsVoice,
       name: dto.name,
@@ -996,11 +876,10 @@ const createTimbre = async (userId, dto) => {
       reference_text: dto.referenceText,
       voice_demo: dto.voiceDemo,
       sort: dto.sort || 0,
-      creator: userId,
-      create_date: new Date().toISOString()
-    });
-
-  if (error) throw new Error('Failed to create timbre');
+      creator: userId ? BigInt(userId) : null,
+      create_date: new Date()
+    }
+  });
 };
 
 /**
@@ -1011,11 +890,9 @@ const createTimbre = async (userId, dto) => {
  * @param {Object} dto - TimbreDataDTO
  */
 const updateTimbre = async (timbreId, userId, dto) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .update({
+  await prisma.ai_tts_voice.update({
+    where: { id: timbreId },
+    data: {
       tts_model_id: dto.ttsModelId,
       tts_voice: dto.ttsVoice,
       name: dto.name,
@@ -1025,12 +902,10 @@ const updateTimbre = async (timbreId, userId, dto) => {
       reference_text: dto.referenceText,
       voice_demo: dto.voiceDemo,
       sort: dto.sort || 0,
-      updater: userId,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', timbreId);
-
-  if (error) throw new Error('Failed to update timbre');
+      updater: userId ? BigInt(userId) : null,
+      update_date: new Date()
+    }
+  });
 };
 
 /**
@@ -1039,14 +914,9 @@ const updateTimbre = async (timbreId, userId, dto) => {
  * @param {string[]} ids - Array of timbre IDs to delete
  */
 const deleteTimbreBatch = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { error } = await supabaseAdmin
-    .from('ai_tts_voice')
-    .delete()
-    .in('id', ids);
-
-  if (error) throw new Error('Failed to delete timbres');
+  await prisma.ai_tts_voice.deleteMany({
+    where: { id: { in: ids } }
+  });
 };
 
 module.exports = {

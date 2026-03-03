@@ -16,17 +16,31 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { unauthorized } = require('../utils/response');
 
-// ─── Firebase Admin SDK initialisation (singleton) ────────────────────────────
-if (!admin.apps.length) {
+// ─── Firebase Admin SDK initialisation (lazy singleton) ───────────────────────
+let firebaseInitialized = false;
+
+function ensureFirebaseInit() {
+    if (firebaseInitialized || admin.apps.length) {
+        firebaseInitialized = true;
+        return true;
+    }
     const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
     if (!serviceAccountPath) {
-        throw new Error('FIREBASE_SERVICE_ACCOUNT_PATH env var is required');
+        logger.warn('FIREBASE_SERVICE_ACCOUNT_PATH not set — Firebase auth unavailable');
+        return false;
     }
-    admin.initializeApp({
-        credential: admin.credential.cert(require('path').resolve(serviceAccountPath)),
-        projectId: process.env.FIREBASE_PROJECT_ID || 'cheekoai',
-    });
-    logger.info('✅ Firebase Admin SDK initialised');
+    try {
+        admin.initializeApp({
+            credential: admin.credential.cert(require('path').resolve(serviceAccountPath)),
+            projectId: process.env.FIREBASE_PROJECT_ID || 'cheekoai',
+        });
+        logger.info('✅ Firebase Admin SDK initialised');
+        firebaseInitialized = true;
+        return true;
+    } catch (err) {
+        logger.error('Firebase Admin SDK initialisation failed:', err.message);
+        return false;
+    }
 }
 
 /**
@@ -37,6 +51,10 @@ if (!admin.apps.length) {
  *   req.mobileUser    — sys_user row (created if first sign-in)
  */
 const requireFirebaseAuth = async (req, res, next) => {
+    if (!ensureFirebaseInit()) {
+        return unauthorized(res, 'Firebase authentication not configured');
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return unauthorized(res, 'Firebase ID token required');

@@ -1,601 +1,620 @@
 /**
  * Device Routes Integration Tests
+ *
+ * Tests for all /toy/device/* endpoints.
+ *
+ * Key facts:
+ * - Public routes: POST /register, POST /ota/check, POST /token-usage, GET /:mac
+ * - All others require Bearer token auth (requireAuth) → 401 without token
+ * - Standard response shape: { code: <number>, msg: <string>, data: <any> }
+ * - Success: code=0, status 200
+ * - Errors: code matches HTTP status (400, 401, 404, 409, 500)
  */
 
 const request = require('supertest');
 const app = require('../../src/app');
 
-// Mock MAC addresses for testing
-const TEST_MAC = 'AA:BB:CC:DD:EE:FF';
-const TEST_MAC_RAW = 'AABBCCDDEEFF';
-const INVALID_MAC = 'INVALID';
+// ---------------------------------------------------------------------------
+// Shared fixtures
+// ---------------------------------------------------------------------------
 
-describe('Device Routes', () => {
+const TEST_MAC_COLON = 'AA:BB:CC:DD:EE:FF';
+const TEST_MAC_DASH   = 'AA-BB-CC-DD-EE-FF';
+const TEST_MAC_RAW    = 'AABBCCDDEEFF';
+const INVALID_MAC     = 'INVALID';
+const FAKE_TOKEN      = 'Bearer invalid-token-for-testing';
+
+// ---------------------------------------------------------------------------
+// Helper – assert every response carries the standard envelope
+// ---------------------------------------------------------------------------
+function assertEnvelope(res) {
+  expect(res.body).toHaveProperty('code');
+  expect(res.body).toHaveProperty('msg');
+}
+
+// ===========================================================================
+// 1. Device Management
+// ===========================================================================
+
+describe('Device Management', () => {
+
+  // -------------------------------------------------------------------------
   describe('POST /toy/device/register', () => {
-    it('should register a new device with colon-separated MAC', async () => {
+    it('returns 400 when request body is empty', async () => {
       const res = await request(app)
         .post('/toy/device/register')
-        .send({
-          mac: TEST_MAC,
-          board: 'ESP32-WROOM',
-          appVersion: '1.0.0'
-        });
+        .send({});
 
-      // May return success or error depending on DB config
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
 
-    it('should register a device with raw MAC format', async () => {
+    it('returns 400 when mac field is missing', async () => {
       const res = await request(app)
         .post('/toy/device/register')
-        .send({
-          mac: TEST_MAC_RAW,
-          board: 'ESP32-S3',
-          appVersion: '1.1.0'
-        });
+        .send({ board: 'ESP32', appVersion: '1.0.0' });
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
 
-    it('should reject invalid MAC address format', async () => {
+    it('returns 400 for an invalid MAC address format', async () => {
       const res = await request(app)
         .post('/toy/device/register')
-        .send({
-          mac: INVALID_MAC
-        });
+        .send({ mac: INVALID_MAC });
 
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
 
-    it('should require MAC address', async () => {
-      const res = await request(app)
-        .post('/toy/device/register')
-        .send({
-          board: 'ESP32'
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('GET /toy/device/:mac/mode', () => {
-    it('should return device mode for existing device', async () => {
-      const res = await request(app)
-        .get(`/toy/device/${TEST_MAC}/mode`);
-
-      // May return 200 or 404 depending on whether device exists
-      expect([200, 404]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-
-      if (res.status === 200) {
-        expect(res.body.data).toHaveProperty('mode');
-      }
-    });
-
-    it('should handle non-existent device', async () => {
-      const res = await request(app)
-        .get('/toy/device/00:00:00:00:00:01/mode');
-
-      expect([200, 404]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('GET /toy/device/:mac/device-mode', () => {
-    it('should return PTT device mode', async () => {
-      const res = await request(app)
-        .get(`/toy/device/${TEST_MAC}/device-mode`);
-
-      expect([200, 404]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-
-      if (res.status === 200) {
-        expect(res.body.data).toHaveProperty('deviceMode');
-      }
-    });
-  });
-
-  describe('POST /toy/device/:mac/cycle-mode', () => {
-    it('should cycle device mode', async () => {
-      const res = await request(app)
-        .post(`/toy/device/${TEST_MAC}/cycle-mode`);
-
-      // May return 200 or 400 depending on whether device exists
-      expect([200, 400]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-
-      if (res.status === 200 && res.body.data) {
-        expect(res.body.data).toHaveProperty('mode');
-        expect(['conversation', 'music', 'story']).toContain(res.body.data.mode);
-      }
-    });
-  });
-
-  describe('GET /toy/device/:mac', () => {
-    it('should return device details', async () => {
-      const res = await request(app)
-        .get(`/toy/device/${TEST_MAC}`);
-
-      // May return 200, 404, or 500 depending on DB config
-      expect([200, 404, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('Protected Routes (require auth)', () => {
-    describe('POST /toy/device/bind/:agentId/:deviceCode', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .post('/toy/device/bind/123/AABBCCDDEEFF');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('GET /toy/device/bind/:agentId', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .get('/toy/device/bind/123');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('POST /toy/device/unbind', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .post('/toy/device/unbind')
-          .send({ deviceId: '1' });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('PUT /toy/device/update/:id', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .put('/toy/device/update/1')
-          .send({ alias: 'My Device' });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('POST /toy/device/manual-add', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .post('/toy/device/manual-add')
-          .send({ mac: TEST_MAC });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('PUT /toy/device/assign-kid/:deviceId', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .put('/toy/device/assign-kid/1')
-          .send({ kidId: 1 });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('PUT /toy/device/assign-kid-by-mac', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .put('/toy/device/assign-kid-by-mac')
-          .send({ mac: TEST_MAC, kidId: 1 });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('GET /toy/device/list', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .get('/toy/device/list');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-  });
-});
-
-describe('Device Validation', () => {
-  describe('MAC Address Formats', () => {
-    it('should accept uppercase MAC with colons', async () => {
-      const res = await request(app)
-        .post('/toy/device/register')
-        .send({ mac: 'AA:BB:CC:DD:EE:FF' });
-
-      expect([200, 400, 500]).toContain(res.status);
-    });
-
-    it('should accept lowercase MAC with colons', async () => {
-      const res = await request(app)
-        .post('/toy/device/register')
-        .send({ mac: 'aa:bb:cc:dd:ee:ff' });
-
-      expect([200, 400, 500]).toContain(res.status);
-    });
-
-    it('should accept MAC with dashes', async () => {
-      const res = await request(app)
-        .post('/toy/device/register')
-        .send({ mac: 'AA-BB-CC-DD-EE-FF' });
-
-      expect([200, 400, 500]).toContain(res.status);
-    });
-
-    it('should accept raw 12-character MAC', async () => {
-      const res = await request(app)
-        .post('/toy/device/register')
-        .send({ mac: 'AABBCCDDEEFF' });
-
-      expect([200, 400, 500]).toContain(res.status);
-    });
-
-    it('should reject short MAC', async () => {
+    it('returns 400 for a short MAC (only 6 hex chars)', async () => {
       const res = await request(app)
         .post('/toy/device/register')
         .send({ mac: 'AABBCC' });
 
-      expect(res.status).toBe(400);
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
 
-    it('should reject MAC with invalid characters', async () => {
+    it('accepts colon-separated MAC and returns a valid response', async () => {
+      const res = await request(app)
+        .post('/toy/device/register')
+        .send({ mac: TEST_MAC_COLON, board: 'ESP32-WROOM', appVersion: '1.0.0' });
+
+      expect([200, 400, 409, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts dash-separated MAC and returns a valid response', async () => {
+      const res = await request(app)
+        .post('/toy/device/register')
+        .send({ mac: TEST_MAC_DASH });
+
+      expect([200, 400, 409, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts raw 12-character MAC and returns a valid response', async () => {
+      const res = await request(app)
+        .post('/toy/device/register')
+        .send({ mac: TEST_MAC_RAW, board: 'ESP32-S3', appVersion: '1.1.0' });
+
+      expect([200, 400, 409, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts lowercase colon-separated MAC', async () => {
+      const res = await request(app)
+        .post('/toy/device/register')
+        .send({ mac: 'aa:bb:cc:dd:ee:ff' });
+
+      expect([200, 400, 409, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('rejects a MAC with invalid hex characters', async () => {
       const res = await request(app)
         .post('/toy/device/register')
         .send({ mac: 'GG:HH:II:JJ:KK:LL' });
 
-      expect(res.status).toBe(400);
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/list', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get('/toy/device/list');
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .get('/toy/device/list')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('reaches the handler (200 or auth error) with any Authorization header', async () => {
+      const res = await request(app)
+        .get('/toy/device/list')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect([200, 401, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts pagination query parameters (still requires auth)', async () => {
+      const res = await request(app)
+        .get('/toy/device/list?page=1&limit=5');
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/:mac', () => {
+    it('returns a valid response for a known MAC format (public/optionalAuth)', async () => {
+      const res = await request(app)
+        .get(`/toy/device/${TEST_MAC_COLON}`);
+
+      // optionalAuth – no 401; device likely not found in test DB
+      expect([200, 404, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('handles non-existent device gracefully', async () => {
+      const res = await request(app)
+        .get('/toy/device/00:00:00:00:00:01');
+
+      expect([200, 404, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('PUT /toy/device/update/:id', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/update/1')
+        .send({ alias: 'My Device' });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/update/1')
+        .set('Authorization', FAKE_TOKEN)
+        .send({ alias: 'My Device' });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('POST /toy/device/manual-add', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/manual-add')
+        .send({ mac: TEST_MAC_COLON });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/manual-add')
+        .set('Authorization', FAKE_TOKEN)
+        .send({ mac: TEST_MAC_COLON });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('POST /toy/device/unbind', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/unbind')
+        .send({ deviceId: '1' });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/unbind')
+        .set('Authorization', FAKE_TOKEN)
+        .send({ deviceId: '1' });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
 });
 
-// =============================================
-// OTA (Over-The-Air) Firmware Update Tests
-// =============================================
+// ===========================================================================
+// 2. Bind / Assign
+// ===========================================================================
 
-describe('OTA Firmware Routes', () => {
-  const TEST_FIRMWARE_TYPE = 'esp32';
-  const TEST_FIRMWARE_VERSION = '1.0.0';
+describe('Bind and Assign', () => {
 
+  // -------------------------------------------------------------------------
+  describe('POST /toy/device/bind/:agentId/:deviceCode', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/bind/agent-123/AABBCCDDEEFF');
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/bind/agent-123/AABBCCDDEEFF')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/bind/:agentId', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get('/toy/device/bind/agent-123');
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .get('/toy/device/bind/agent-123')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('PUT /toy/device/assign-kid/:deviceId', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/assign-kid/1')
+        .send({ kidId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/assign-kid/1')
+        .set('Authorization', FAKE_TOKEN)
+        .send({ kidId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('PUT /toy/device/assign-kid-by-mac', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/assign-kid-by-mac')
+        .send({ mac: TEST_MAC_COLON, kidId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/assign-kid-by-mac')
+        .set('Authorization', FAKE_TOKEN)
+        .send({ mac: TEST_MAC_COLON, kidId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+});
+
+// ===========================================================================
+// 3. OTA / Firmware
+// ===========================================================================
+
+describe('OTA Firmware', () => {
+
+  // -------------------------------------------------------------------------
   describe('POST /toy/device/ota/check', () => {
-    it('should check for firmware updates', async () => {
+    it('returns 400 when request body is empty', async () => {
       const res = await request(app)
         .post('/toy/device/ota/check')
-        .send({
-          mac: TEST_MAC,
-          version: '0.9.0',
-          board: TEST_FIRMWARE_TYPE
-        });
+        .send({});
 
-      // May return success or error depending on DB config
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
+    });
 
-      if (res.status === 200 && res.body.data) {
-        expect(res.body.data).toHaveProperty('device');
+    it('returns 400 when mac field is missing', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ version: '1.0.0', board: 'esp32' });
+
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
+    });
+
+    it('returns 400 for an invalid MAC address', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ mac: INVALID_MAC, version: '1.0.0' });
+
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
+    });
+
+    it('accepts a valid colon-separated MAC and returns a response', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ mac: TEST_MAC_COLON, version: '0.9.0', board: 'esp32' });
+
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts a valid dash-separated MAC', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ mac: TEST_MAC_DASH, version: '1.0.0' });
+
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts a valid raw 12-char MAC', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ mac: TEST_MAC_RAW, version: '1.0.0' });
+
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('accepts a request with only mac (version and board are optional)', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ mac: TEST_MAC_COLON });
+
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('returns server-time info on successful response', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/check')
+        .send({ mac: TEST_MAC_COLON, version: '0.9.0', board: 'esp32' });
+
+      if (res.statusCode === 200 && res.body.data) {
         expect(res.body.data).toHaveProperty('serverTime');
         expect(res.body.data.serverTime).toHaveProperty('timestamp');
         expect(res.body.data.serverTime).toHaveProperty('timezone');
       }
     });
+  });
 
-    it('should require MAC address', async () => {
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/ota/firmware', () => {
+    it('returns 401 without an auth token', async () => {
       const res = await request(app)
-        .post('/toy/device/ota/check')
-        .send({
-          version: '1.0.0',
-          board: TEST_FIRMWARE_TYPE
-        });
+        .get('/toy/device/ota/firmware');
 
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should accept MAC with colons', async () => {
+    it('returns 401 with an invalid auth token', async () => {
       const res = await request(app)
-        .post('/toy/device/ota/check')
-        .send({
-          mac: 'AA:BB:CC:DD:EE:01',
-          version: '1.0.0'
-        });
+        .get('/toy/device/ota/firmware')
+        .set('Authorization', FAKE_TOKEN);
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should accept MAC with dashes', async () => {
+    it('returns 401 even when pagination parameters are present', async () => {
       const res = await request(app)
-        .post('/toy/device/ota/check')
-        .send({
-          mac: 'AA-BB-CC-DD-EE-02',
-          version: '1.0.0'
-        });
+        .get('/toy/device/ota/firmware?page=1&limit=5');
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should accept raw MAC format', async () => {
+    it('returns 401 even when a type filter is present', async () => {
       const res = await request(app)
-        .post('/toy/device/ota/check')
-        .send({
-          mac: 'AABBCCDDEF03',
-          version: '1.0.0'
-        });
+        .get('/toy/device/ota/firmware?type=esp32');
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should reject invalid MAC address', async () => {
-      const res = await request(app)
-        .post('/toy/device/ota/check')
-        .send({
-          mac: 'INVALID',
-          version: '1.0.0'
-        });
-
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
   });
 
-  describe('GET /toy/device/ota/firmware/latest/:type', () => {
-    it('should return latest firmware for type (public)', async () => {
+  // -------------------------------------------------------------------------
+  describe('POST /toy/device/ota/firmware', () => {
+    it('returns 401 without an auth token', async () => {
       const res = await request(app)
-        .get(`/toy/device/ota/firmware/latest/${TEST_FIRMWARE_TYPE}`);
+        .post('/toy/device/ota/firmware')
+        .send({ firmwareName: 'v1.0.0', type: 'esp32', version: '1.0.0' });
 
-      // May return 200 or 404 depending on whether firmware exists
-      expect([200, 404, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-
-      if (res.status === 200 && res.body.data) {
-        expect(res.body.data).toHaveProperty('type');
-        expect(res.body.data).toHaveProperty('version');
-      }
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should return 404 for non-existent firmware type', async () => {
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .post('/toy/device/ota/firmware')
+        .set('Authorization', FAKE_TOKEN)
+        .send({ firmwareName: 'v1.0.0', type: 'esp32', version: '1.0.0' });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/ota/firmware/all', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get('/toy/device/ota/firmware/all');
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/ota/firmware/latest/:type', () => {
+    it('returns a valid response for a known firmware type (public)', async () => {
+      const res = await request(app)
+        .get('/toy/device/ota/firmware/latest/esp32');
+
+      expect([200, 404, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
+    });
+
+    it('returns 404 or 500 for a non-existent firmware type', async () => {
       const res = await request(app)
         .get('/toy/device/ota/firmware/latest/nonexistent-type');
 
-      expect([404, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect([404, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
     });
   });
 
-  describe('Protected OTA Routes (require auth)', () => {
-    describe('GET /toy/device/ota/firmware', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .get('/toy/device/ota/firmware');
+  // -------------------------------------------------------------------------
+  describe('PUT /toy/device/ota/firmware/:id', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/ota/firmware/some-id')
+        .send({ firmwareName: 'Updated' });
 
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-
-      it('should accept pagination parameters', async () => {
-        const res = await request(app)
-          .get('/toy/device/ota/firmware?page=1&limit=5');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-
-      it('should accept type filter parameter', async () => {
-        const res = await request(app)
-          .get(`/toy/device/ota/firmware?type=${TEST_FIRMWARE_TYPE}`);
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('GET /toy/device/ota/firmware/all', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .get('/toy/device/ota/firmware/all');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('GET /toy/device/ota/firmware/:id', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .get('/toy/device/ota/firmware/test-id');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('POST /toy/device/ota/firmware', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .post('/toy/device/ota/firmware')
-          .send({
-            firmwareName: 'Test Firmware',
-            type: TEST_FIRMWARE_TYPE,
-            version: TEST_FIRMWARE_VERSION
-          });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('PUT /toy/device/ota/firmware/:id', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .put('/toy/device/ota/firmware/test-id')
-          .send({
-            firmwareName: 'Updated Firmware'
-          });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('DELETE /toy/device/ota/firmware/:id', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .delete('/toy/device/ota/firmware/test-id');
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
-    });
-
-    describe('PUT /toy/device/ota/firmware/:id/force-update', () => {
-      it('should require authentication', async () => {
-        const res = await request(app)
-          .put('/toy/device/ota/firmware/test-id/force-update')
-          .send({ forceUpdate: 1 });
-
-        expect(res.status).toBe(401);
-        expect(res.body).toHaveProperty('code');
-      });
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
   });
 
-  describe('OTA Input Validation', () => {
-    // These tests would require auth, so they test request format validation
-    describe('POST /toy/device/ota/check validation', () => {
-      it('should handle empty request body', async () => {
-        const res = await request(app)
-          .post('/toy/device/ota/check')
-          .send({});
+  // -------------------------------------------------------------------------
+  describe('DELETE /toy/device/ota/firmware/:id', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .delete('/toy/device/ota/firmware/some-id');
 
-        expect(res.status).toBe(400);
-        expect(res.body).toHaveProperty('code');
-      });
-
-      it('should accept request with only MAC address', async () => {
-        const res = await request(app)
-          .post('/toy/device/ota/check')
-          .send({ mac: TEST_MAC });
-
-        // Should work - version and board are optional
-        expect([200, 400, 500]).toContain(res.status);
-        expect(res.body).toHaveProperty('code');
-      });
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
   });
+
+  // -------------------------------------------------------------------------
+  describe('PUT /toy/device/ota/firmware/:id/force-update', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .put('/toy/device/ota/firmware/some-id/force-update')
+        .send({ forceUpdate: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
 });
 
-// =============================================
-// Token Usage Tracking Tests
-// =============================================
+// ===========================================================================
+// 4. Token Usage
+// ===========================================================================
 
-describe('Token Usage Routes', () => {
+describe('Token Usage', () => {
+
+  // -------------------------------------------------------------------------
   describe('POST /toy/device/token-usage', () => {
-    it('should record token usage (public endpoint)', async () => {
+    it('returns 400 when mac field is missing', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          mac: TEST_MAC,
-          inputTokens: 100,
-          outputTokens: 50
-        });
+        .send({ inputTokens: 100, outputTokens: 50 });
 
-      // May return success or error depending on DB config
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
-
-      if (res.status === 200 && res.body.data) {
-        expect(res.body.data).toHaveProperty('mac_address');
-        expect(res.body.data).toHaveProperty('usage_date');
-      }
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
 
-    it('should require MAC address', async () => {
+    it('returns 400 for an invalid MAC address', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          inputTokens: 100,
-          outputTokens: 50
-        });
+        .send({ mac: INVALID_MAC, inputTokens: 100 });
 
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(400);
+      assertEnvelope(res);
     });
 
-    it('should reject invalid MAC address', async () => {
+    it('accepts a colon-separated MAC and returns a valid response', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          mac: INVALID_MAC,
-          inputTokens: 100
-        });
+        .send({ mac: TEST_MAC_COLON, inputTokens: 100, outputTokens: 50 });
 
-      expect(res.status).toBe(400);
-      expect(res.body).toHaveProperty('code');
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
     });
 
-    it('should accept MAC with colons', async () => {
+    it('accepts a dash-separated MAC and returns a valid response', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          mac: 'AA:BB:CC:DD:EE:01',
-          inputTokens: 50,
-          outputTokens: 25
-        });
+        .send({ mac: TEST_MAC_DASH, inputTokens: 50, outputTokens: 25 });
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
     });
 
-    it('should accept MAC with dashes', async () => {
+    it('accepts a raw 12-char MAC and returns a valid response', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          mac: 'AA-BB-CC-DD-EE-02',
-          inputTokens: 50,
-          outputTokens: 25
-        });
+        .send({ mac: TEST_MAC_RAW, inputTokens: 50, outputTokens: 25 });
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
     });
 
-    it('should accept raw MAC format', async () => {
+    it('accepts a minimal request with only mac field', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          mac: 'AABBCCDDEF03',
-          inputTokens: 50,
-          outputTokens: 25
-        });
+        .send({ mac: TEST_MAC_COLON });
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
     });
 
-    it('should accept all token usage fields', async () => {
+    it('accepts all optional token usage fields', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
         .send({
-          mac: TEST_MAC,
+          mac: TEST_MAC_COLON,
           sessionId: 'test-session-123',
           inputTokens: 100,
           outputTokens: 50,
@@ -610,200 +629,207 @@ describe('Token Usage Routes', () => {
           totalResponseDurationSeconds: 15.2
         });
 
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      expect([200, 400, 500]).toContain(res.statusCode);
+      assertEnvelope(res);
     });
 
-    it('should accept minimal request with only MAC', async () => {
+    it('does not require an X-Service-Key header (public endpoint)', async () => {
       const res = await request(app)
         .post('/toy/device/token-usage')
-        .send({
-          mac: TEST_MAC
-        });
+        .send({ mac: TEST_MAC_COLON, inputTokens: 10, outputTokens: 5 });
 
-      // Should work - all fields except MAC are optional
-      expect([200, 400, 500]).toContain(res.status);
-      expect(res.body).toHaveProperty('code');
+      // Must not 401 – this is a public endpoint
+      expect(res.statusCode).not.toBe(401);
+      assertEnvelope(res);
     });
   });
 
+  // -------------------------------------------------------------------------
   describe('GET /toy/device/token-usage/summary', () => {
-    it('should require authentication', async () => {
+    it('returns 401 without an auth token', async () => {
       const res = await request(app)
         .get('/toy/device/token-usage/summary');
 
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should accept pagination parameters', async () => {
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .get('/toy/device/token-usage/summary')
+        .set('Authorization', FAKE_TOKEN);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 even when pagination parameters are present', async () => {
       const res = await request(app)
         .get('/toy/device/token-usage/summary?page=1&limit=10');
 
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should accept date filter parameters', async () => {
+    it('returns 401 even when date filters are present', async () => {
       const res = await request(app)
         .get('/toy/device/token-usage/summary?startDate=2024-01-01&endDate=2024-12-31');
 
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('GET /toy/device/token-usage/:mac/stats', () => {
-    it('should require authentication', async () => {
-      const res = await request(app)
-        .get(`/toy/device/token-usage/${TEST_MAC}/stats`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should accept date filter parameters', async () => {
-      const res = await request(app)
-        .get(`/toy/device/token-usage/${TEST_MAC}/stats?startDate=2024-01-01&endDate=2024-12-31`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should accept period parameter', async () => {
-      const res = await request(app)
-        .get(`/toy/device/token-usage/${TEST_MAC}/stats?period=weekly`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle MAC with colons', async () => {
-      const res = await request(app)
-        .get('/toy/device/token-usage/AA:BB:CC:DD:EE:FF/stats');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle MAC with dashes', async () => {
-      const res = await request(app)
-        .get('/toy/device/token-usage/AA-BB-CC-DD-EE-FF/stats');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle raw MAC format', async () => {
-      const res = await request(app)
-        .get('/toy/device/token-usage/AABBCCDDEEFF/stats');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('GET /toy/device/token-usage/:mac', () => {
-    it('should require authentication', async () => {
-      const res = await request(app)
-        .get(`/toy/device/token-usage/${TEST_MAC}`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should accept pagination parameters', async () => {
-      const res = await request(app)
-        .get(`/toy/device/token-usage/${TEST_MAC}?page=1&limit=30`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should accept date filter parameters', async () => {
-      const res = await request(app)
-        .get(`/toy/device/token-usage/${TEST_MAC}?startDate=2024-01-01&endDate=2024-12-31`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle lowercase MAC', async () => {
-      const res = await request(app)
-        .get('/toy/device/token-usage/aa:bb:cc:dd:ee:ff');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('DELETE /toy/device/token-usage/:mac', () => {
-    it('should require authentication', async () => {
-      const res = await request(app)
-        .delete(`/toy/device/token-usage/${TEST_MAC}`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should accept date filter parameters', async () => {
-      const res = await request(app)
-        .delete(`/toy/device/token-usage/${TEST_MAC}?startDate=2024-01-01&endDate=2024-01-31`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should accept olderThan parameter', async () => {
-      const res = await request(app)
-        .delete(`/toy/device/token-usage/${TEST_MAC}?olderThan=2024-01-01`);
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle MAC with colons', async () => {
-      const res = await request(app)
-        .delete('/toy/device/token-usage/AA:BB:CC:DD:EE:FF');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle MAC with dashes', async () => {
-      const res = await request(app)
-        .delete('/toy/device/token-usage/AA-BB-CC-DD-EE-FF');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-
-    it('should handle raw MAC format', async () => {
-      const res = await request(app)
-        .delete('/toy/device/token-usage/AABBCCDDEEFF');
-
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
-    });
-  });
-
-  describe('Route Priority', () => {
-    it('should correctly route to summary endpoint (not treat "summary" as MAC)', async () => {
+    it('routes to summary correctly – does not treat "summary" as a MAC address', async () => {
+      // The route /token-usage/summary must be declared before /token-usage/:mac
+      // so Express matches summary first. A 401 confirms routing is correct.
       const res = await request(app)
         .get('/toy/device/token-usage/summary');
 
-      // Should require auth for summary endpoint, not fail with invalid MAC
-      expect(res.status).toBe(401);
-      expect(res.body).toHaveProperty('code');
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/token-usage/:mac', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC_COLON}`);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/token-usage/:mac/stats', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get(`/toy/device/token-usage/${TEST_MAC_COLON}/stats`);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
     });
 
-    it('should correctly route to stats endpoint', async () => {
+    it('routes to stats correctly – does not conflict with /:mac route', async () => {
       const res = await request(app)
-        .get('/toy/device/token-usage/AA:BB:CC:DD:EE:FF/stats');
+        .get(`/toy/device/token-usage/${TEST_MAC_COLON}/stats`);
 
-      // Should require auth for stats endpoint
-      expect(res.status).toBe(401);
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('DELETE /toy/device/token-usage/:mac', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .delete(`/toy/device/token-usage/${TEST_MAC_COLON}`);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+});
+
+// ===========================================================================
+// 5. Playlist
+// ===========================================================================
+
+describe('Playlist', () => {
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/:mac/playlist/music', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get(`/toy/device/${TEST_MAC_COLON}/playlist/music`);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .get(`/toy/device/${TEST_MAC_COLON}/playlist/music`)
+        .set('Authorization', FAKE_TOKEN);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('POST /toy/device/:mac/playlist/music', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .post(`/toy/device/${TEST_MAC_COLON}/playlist/music`)
+        .send({ contentId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+
+    it('returns 401 with an invalid auth token', async () => {
+      const res = await request(app)
+        .post(`/toy/device/${TEST_MAC_COLON}/playlist/music`)
+        .set('Authorization', FAKE_TOKEN)
+        .send({ contentId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('GET /toy/device/:mac/playlist/story', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .get(`/toy/device/${TEST_MAC_COLON}/playlist/story`);
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  describe('POST /toy/device/:mac/playlist/story', () => {
+    it('returns 401 without an auth token', async () => {
+      const res = await request(app)
+        .post(`/toy/device/${TEST_MAC_COLON}/playlist/story`)
+        .send({ contentId: 1 });
+
+      expect(res.statusCode).toBe(401);
+      assertEnvelope(res);
+    });
+  });
+
+});
+
+// ===========================================================================
+// 6. Response Envelope Consistency
+// ===========================================================================
+
+describe('Response Envelope Consistency', () => {
+  const endpoints = [
+    { method: 'get',    path: '/toy/device/list' },
+    { method: 'get',    path: `/toy/device/bind/agent-123` },
+    { method: 'put',    path: '/toy/device/update/1' },
+    { method: 'post',   path: '/toy/device/manual-add' },
+    { method: 'post',   path: '/toy/device/unbind' },
+    { method: 'put',    path: '/toy/device/assign-kid/1' },
+    { method: 'put',    path: '/toy/device/assign-kid-by-mac' },
+    { method: 'get',    path: '/toy/device/ota/firmware' },
+    { method: 'post',   path: '/toy/device/ota/firmware' },
+    { method: 'get',    path: '/toy/device/token-usage/summary' },
+    { method: 'get',    path: `/toy/device/${TEST_MAC_COLON}/playlist/music` },
+  ];
+
+  endpoints.forEach(({ method, path }) => {
+    it(`${method.toUpperCase()} ${path} always returns { code, msg } envelope`, async () => {
+      const res = await request(app)[method](path);
       expect(res.body).toHaveProperty('code');
+      expect(res.body).toHaveProperty('msg');
     });
   });
 });

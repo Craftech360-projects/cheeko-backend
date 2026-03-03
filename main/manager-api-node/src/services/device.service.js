@@ -4,7 +4,7 @@
  * Handles ESP32 device management, registration, binding, and mode control.
  */
 
-const { supabaseAdmin, prisma } = require('../config/database');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
 
@@ -154,32 +154,21 @@ const getDevicesByAgent = async (userId, agentId, isSuperAdmin = false) => {
  * @param {string} deviceId - Device ID
  */
 const unbindDevice = async (userId, deviceId, isSuperAdmin = false) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: device } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, user_id')
-    .eq('id', deviceId)
-    .single();
+  const device = await prisma.ai_device.findUnique({
+    where: { id: deviceId },
+    select: { id: true, user_id: true },
+  });
 
   if (!device) throw new Error('Device not found');
 
-  // Check ownership if not super admin
-  if (!isSuperAdmin && device.user_id !== userId) {
+  if (!isSuperAdmin && device.user_id !== BigInt(userId)) {
     throw new Error("You don't have permission to unbind this device");
   }
 
-  const { error } = await supabaseAdmin
-    .from('ai_device')
-    .update({
-      user_id: null,
-      agent_id: null,
-      kid_id: null,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', deviceId);
-
-  if (error) throw new Error('Failed to unbind device');
+  await prisma.ai_device.update({
+    where: { id: deviceId },
+    data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() },
+  });
 };
 
 /**
@@ -191,40 +180,24 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false) => {
  * @returns {Promise<Object>} Updated device
  */
 const updateDevice = async (userId, deviceId, data, isSuperAdmin = false) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: device } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, user_id')
-    .eq('id', deviceId)
-    .single();
+  const device = await prisma.ai_device.findUnique({
+    where: { id: deviceId },
+    select: { id: true, user_id: true },
+  });
 
   if (!device) throw new Error('Device not found');
-  // Super admin can update any device, regular users can only update their own
-  if (!isSuperAdmin && device.user_id && device.user_id !== userId) {
+  if (!isSuperAdmin && device.user_id && device.user_id !== BigInt(userId)) {
     throw new Error('Device does not belong to user');
   }
 
-  const updateData = {
-    update_date: new Date().toISOString()
-  };
-
+  const updateData = { update_date: new Date() };
   if (data.alias !== undefined) updateData.alias = data.alias;
   if (data.autoUpdate !== undefined) updateData.auto_update = data.autoUpdate ? 1 : 0;
   if (data.agentId !== undefined) updateData.agent_id = data.agentId;
   if (data.deviceMode !== undefined) updateData.device_mode = data.deviceMode;
   if (data.mode !== undefined) updateData.mode = data.mode;
 
-  const { data: updated, error } = await supabaseAdmin
-    .from('ai_device')
-    .update(updateData)
-    .eq('id', deviceId)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to update device');
-
-  return updated;
+  return prisma.ai_device.update({ where: { id: deviceId }, data: updateData });
 };
 
 /**
@@ -235,43 +208,26 @@ const updateDevice = async (userId, deviceId, data, isSuperAdmin = false) => {
  * @returns {Promise<Object>} Updated device
  */
 const assignKidToDevice = async (userId, deviceId, kidId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Verify device belongs to user
-  const { data: device } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, user_id')
-    .eq('id', deviceId)
-    .single();
+  const device = await prisma.ai_device.findUnique({
+    where: { id: deviceId },
+    select: { id: true, user_id: true },
+  });
 
   if (!device) throw new Error('Device not found');
-  if (device.user_id !== userId) throw new Error('Device does not belong to user');
+  if (device.user_id !== BigInt(userId)) throw new Error('Device does not belong to user');
 
-  // Verify kid profile belongs to user
   if (kidId) {
-    const { data: kid } = await supabaseAdmin
-      .from('kid_profile')
-      .select('id')
-      .eq('id', kidId)
-      .eq('user_id', userId)
-      .single();
-
+    const kid = await prisma.kid_profile.findFirst({
+      where: { id: BigInt(kidId), user_id: BigInt(userId) },
+      select: { id: true },
+    });
     if (!kid) throw new Error('Kid profile not found');
   }
 
-  const { data: updated, error } = await supabaseAdmin
-    .from('ai_device')
-    .update({
-      kid_id: kidId,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', deviceId)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to assign kid to device');
-
-  return updated;
+  return prisma.ai_device.update({
+    where: { id: deviceId },
+    data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
+  });
 };
 
 /**
@@ -295,15 +251,11 @@ const assignKidByMac = async (mac, kidId) => {
  * @returns {Promise<Object>} New mode
  */
 const cycleMode = async (mac) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
-
-  const { data: device } = await supabaseAdmin
-    .from('ai_device')
-    .select('id, mode')
-    .eq('mac_address', normalizedMac)
-    .single();
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true, mode: true },
+  });
 
   if (!device) throw new Error('Device not found');
 
@@ -311,17 +263,11 @@ const cycleMode = async (mac) => {
   const currentIndex = modes.indexOf(device.mode || 'conversation');
   const nextMode = modes[(currentIndex + 1) % modes.length];
 
-  const { data: updated, error } = await supabaseAdmin
-    .from('ai_device')
-    .update({
-      mode: nextMode,
-      update_date: new Date().toISOString()
-    })
-    .eq('id', device.id)
-    .select('mode')
-    .single();
-
-  if (error) throw new Error('Failed to cycle mode');
+  const updated = await prisma.ai_device.update({
+    where: { id: device.id },
+    data: { mode: nextMode, update_date: new Date() },
+    select: { mode: true },
+  });
 
   return { mode: updated.mode, previousMode: device.mode };
 };
@@ -332,21 +278,17 @@ const cycleMode = async (mac) => {
  * @returns {Promise<Object>} Device mode
  */
 const getMode = async (mac) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { mode: true, device_mode: true },
+  });
 
-  const { data: device, error } = await supabaseAdmin
-    .from('ai_device')
-    .select('mode, device_mode')
-    .eq('mac_address', normalizedMac)
-    .single();
-
-  if (error || !device) throw new Error('Device not found');
+  if (!device) throw new Error('Device not found');
 
   return {
     mode: device.mode || 'conversation',
-    deviceMode: device.device_mode || 'auto'
+    deviceMode: device.device_mode || 'auto',
   };
 };
 
@@ -396,46 +338,31 @@ const listDevices = async (userId, { page = 1, limit = 10 } = {}) => {
  * @returns {Promise<Object>} Created device
  */
 const manualAddDevice = async (userId, { macAddress, mac, alias, agentId, board, appVersion }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Support both 'mac' and 'macAddress' for compatibility
   const deviceMac = macAddress || mac;
   const normalizedMac = normalizeMacAddress(deviceMac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  // Check if device exists
-  const { data: existing } = await supabaseAdmin
-    .from('ai_device')
-    .select('id')
-    .eq('mac_address', normalizedMac)
-    .single();
-
+  const existing = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true },
+  });
   if (existing) throw new Error('Device already exists');
 
-  const now = new Date().toISOString();
-  const { data: device, error } = await supabaseAdmin
-    .from('ai_device')
-    .insert({
+  return prisma.ai_device.create({
+    data: {
       mac_address: normalizedMac,
-      user_id: userId,
+      user_id: BigInt(userId),
       alias,
-      agent_id: agentId,
+      agent_id: agentId ? BigInt(agentId) : null,
       board,
       app_version: appVersion,
       mode: 'conversation',
       device_mode: 'manual',
       auto_update: 1,
-      create_date: now,
-      update_date: now,
-      creator: userId,
-      updater: userId
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to create device');
-
-  return device;
+      creator: BigInt(userId),
+      updater: BigInt(userId),
+    },
+  });
 };
 
 // =============================================
@@ -648,28 +575,17 @@ const getSystemParam = async (paramCode) => {
  * @returns {Promise<Object>} Paginated firmware list
  */
 const listFirmware = async ({ page = 1, limit = 10, type } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const offset = (page - 1) * limit;
-
-  let query = supabaseAdmin.from('ai_ota').select('*', { count: 'exact' });
-
-  if (type) {
-    query = query.eq('type', type);
-  }
-
-  const { data: firmware, count, error } = await query
-    .order('create_date', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) throw new Error('Failed to fetch firmware list');
-
-  return {
-    list: firmware || [],
-    total: count || 0,
-    page,
-    limit
-  };
+  const where = type ? { type } : {};
+  const [count, firmware] = await Promise.all([
+    prisma.ai_ota.count({ where }),
+    prisma.ai_ota.findMany({
+      where,
+      orderBy: { create_date: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
+  return { list: firmware || [], total: count || 0, page, limit };
 };
 
 /**
@@ -678,17 +594,7 @@ const listFirmware = async ({ page = 1, limit = 10, type } = {}) => {
  * @returns {Promise<Object|null>} Firmware or null
  */
 const getFirmwareById = async (id) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  const { data: firmware, error } = await supabaseAdmin
-    .from('ai_ota')
-    .select('*')
-    .eq('id', id)
-    .single();
-
-  if (error || !firmware) return null;
-
-  return firmware;
+  return prisma.ai_ota.findUnique({ where: { id } });
 };
 
 /**
@@ -697,49 +603,19 @@ const getFirmwareById = async (id) => {
  * @returns {Promise<Object>} Created firmware
  */
 const createFirmware = async ({ firmwareName, type, version, size, remark, firmwarePath, forceUpdate = 0 }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
+  const existing = await prisma.ai_ota.findFirst({ where: { type, version }, select: { id: true } });
+  if (existing) throw new Error('Firmware with this type and version already exists');
 
-  // Check for duplicate type+version
-  const { data: existing } = await supabaseAdmin
-    .from('ai_ota')
-    .select('id')
-    .eq('type', type)
-    .eq('version', version)
-    .single();
-
-  if (existing) {
-    throw new Error('Firmware with this type and version already exists');
-  }
-
-  // If force update is enabled, disable it on other firmware of the same type
   if (forceUpdate === 1) {
-    await supabaseAdmin
-      .from('ai_ota')
-      .update({ force_update: 0, update_date: new Date().toISOString() })
-      .eq('type', type)
-      .eq('force_update', 1);
+    await prisma.ai_ota.updateMany({
+      where: { type, force_update: 1 },
+      data: { force_update: 0, update_date: new Date() },
+    });
   }
 
-  const { data: firmware, error } = await supabaseAdmin
-    .from('ai_ota')
-    .insert({
-      firmware_name: firmwareName,
-      type,
-      version,
-      size,
-      remark,
-      firmware_path: firmwarePath,
-      force_update: forceUpdate
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to create firmware:', error);
-    throw new Error('Failed to create firmware record');
-  }
-
-  return firmware;
+  return prisma.ai_ota.create({
+    data: { firmware_name: firmwareName, type, version, size, remark, firmware_path: firmwarePath, force_update: forceUpdate },
+  });
 };
 
 /**
@@ -749,39 +625,26 @@ const createFirmware = async ({ firmwareName, type, version, size, remark, firmw
  * @returns {Promise<Object>} Updated firmware
  */
 const updateFirmware = async (id, { firmwareName, type, version, size, remark, firmwarePath, forceUpdate }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Get current firmware
   const current = await getFirmwareById(id);
   if (!current) throw new Error('Firmware not found');
 
-  // Check for duplicate type+version (if changing)
   if (type && version && (type !== current.type || version !== current.version)) {
-    const { data: existing } = await supabaseAdmin
-      .from('ai_ota')
-      .select('id')
-      .eq('type', type)
-      .eq('version', version)
-      .neq('id', id)
-      .single();
-
-    if (existing) {
-      throw new Error('Firmware with this type and version already exists');
-    }
+    const existing = await prisma.ai_ota.findFirst({
+      where: { type, version, NOT: { id } },
+      select: { id: true },
+    });
+    if (existing) throw new Error('Firmware with this type and version already exists');
   }
 
-  // If enabling force update, disable it on other firmware of the same type
   if (forceUpdate === 1 && current.force_update !== 1) {
     const targetType = type || current.type;
-    await supabaseAdmin
-      .from('ai_ota')
-      .update({ force_update: 0, update_date: new Date().toISOString() })
-      .eq('type', targetType)
-      .eq('force_update', 1)
-      .neq('id', id);
+    await prisma.ai_ota.updateMany({
+      where: { type: targetType, force_update: 1, NOT: { id } },
+      data: { force_update: 0, update_date: new Date() },
+    });
   }
 
-  const updateData = { update_date: new Date().toISOString() };
+  const updateData = { update_date: new Date() };
   if (firmwareName !== undefined) updateData.firmware_name = firmwareName;
   if (type !== undefined) updateData.type = type;
   if (version !== undefined) updateData.version = version;
@@ -790,16 +653,7 @@ const updateFirmware = async (id, { firmwareName, type, version, size, remark, f
   if (firmwarePath !== undefined) updateData.firmware_path = firmwarePath;
   if (forceUpdate !== undefined) updateData.force_update = forceUpdate;
 
-  const { data: firmware, error } = await supabaseAdmin
-    .from('ai_ota')
-    .update(updateData)
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to update firmware');
-
-  return firmware;
+  return prisma.ai_ota.update({ where: { id }, data: updateData });
 };
 
 /**
@@ -807,16 +661,8 @@ const updateFirmware = async (id, { firmwareName, type, version, size, remark, f
  * @param {string|string[]} ids - Firmware ID(s) to delete
  */
 const deleteFirmware = async (ids) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const idArray = Array.isArray(ids) ? ids : [ids];
-
-  const { error } = await supabaseAdmin
-    .from('ai_ota')
-    .delete()
-    .in('id', idArray);
-
-  if (error) throw new Error('Failed to delete firmware');
+  await prisma.ai_ota.deleteMany({ where: { id: { in: idArray } } });
 };
 
 /**
@@ -826,31 +672,20 @@ const deleteFirmware = async (ids) => {
  * @returns {Promise<Object>} Updated firmware
  */
 const setForceUpdate = async (id, forceUpdate) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const firmware = await getFirmwareById(id);
   if (!firmware) throw new Error('Firmware not found');
 
-  // If enabling force update, disable it on other firmware of the same type
   if (forceUpdate === 1) {
-    await supabaseAdmin
-      .from('ai_ota')
-      .update({ force_update: 0, update_date: new Date().toISOString() })
-      .eq('type', firmware.type)
-      .eq('force_update', 1)
-      .neq('id', id);
+    await prisma.ai_ota.updateMany({
+      where: { type: firmware.type, force_update: 1, NOT: { id } },
+      data: { force_update: 0, update_date: new Date() },
+    });
   }
 
-  const { data: updated, error } = await supabaseAdmin
-    .from('ai_ota')
-    .update({ force_update: forceUpdate, update_date: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw new Error('Failed to set force update');
-
-  return updated;
+  return prisma.ai_ota.update({
+    where: { id },
+    data: { force_update: forceUpdate, update_date: new Date() },
+  });
 };
 
 /**
@@ -859,20 +694,10 @@ const setForceUpdate = async (id, forceUpdate) => {
  * @returns {Promise<Array>} List of all firmware
  */
 const getAllFirmware = async (type) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin.from('ai_ota').select('*');
-
-  if (type) {
-    query = query.eq('type', type);
-  }
-
-  const { data: firmware, error } = await query
-    .order('create_date', { ascending: false });
-
-  if (error) throw new Error('Failed to fetch firmware');
-
-  return firmware || [];
+  return prisma.ai_ota.findMany({
+    where: type ? { type } : {},
+    orderBy: { create_date: 'desc' },
+  });
 };
 
 // =============================================
@@ -885,78 +710,53 @@ const getAllFirmware = async (type) => {
  * @returns {Promise<Object>} Created or updated usage record
  */
 const recordTokenUsage = async ({
-  mac,
-  sessionId,
-  inputTokens = 0,
-  outputTokens = 0,
-  inputAudioTokens = 0,
-  inputTextTokens = 0,
-  inputCachedTokens = 0,
-  outputAudioTokens = 0,
-  outputTextTokens = 0,
-  sessionDurationSeconds = 0,
-  avgTtftSeconds = 0,
-  messageCount = 0,
-  totalResponseDurationSeconds = 0
+  mac, sessionId, inputTokens = 0, outputTokens = 0, inputAudioTokens = 0,
+  inputTextTokens = 0, inputCachedTokens = 0, outputAudioTokens = 0,
+  outputTextTokens = 0, sessionDurationSeconds = 0, avgTtftSeconds = 0,
+  messageCount = 0, totalResponseDurationSeconds = 0
 }) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const today = new Date().toISOString().split('T')[0];
+  const todayDate = new Date(new Date().toISOString().split('T')[0]);
 
-  // Check if we have an existing record for this mac + date
-  // Note: unique constraint is on (mac_address, usage_date), so we aggregate all sessions per day
-  const { data: existing } = await supabaseAdmin
-    .from('device_token_usage')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .eq('usage_date', today)
-    .single();
+  const existing = await prisma.device_token_usage.findFirst({
+    where: { mac_address: normalizedMac, usage_date: todayDate },
+  });
 
   if (existing) {
-    // Update existing record - accumulate values
-    const { data: updated, error } = await supabaseAdmin
-      .from('device_token_usage')
-      .update({
-        input_tokens: existing.input_tokens + inputTokens,
-        output_tokens: existing.output_tokens + outputTokens,
-        input_audio_tokens: existing.input_audio_tokens + inputAudioTokens,
-        input_text_tokens: existing.input_text_tokens + inputTextTokens,
-        input_cached_tokens: existing.input_cached_tokens + inputCachedTokens,
-        output_audio_tokens: existing.output_audio_tokens + outputAudioTokens,
-        output_text_tokens: existing.output_text_tokens + outputTextTokens,
-        session_duration_seconds: existing.session_duration_seconds + sessionDurationSeconds,
-        // Calculate weighted average for TTFT
-        avg_ttft_seconds: existing.message_count + messageCount > 0
-          ? ((existing.avg_ttft_seconds * existing.message_count) + (avgTtftSeconds * messageCount)) /
-            (existing.message_count + messageCount)
-          : avgTtftSeconds,
-        message_count: existing.message_count + messageCount,
-        total_response_duration_seconds: existing.total_response_duration_seconds + totalResponseDurationSeconds,
-        session_count: sessionId ? existing.session_count + 1 : existing.session_count,
-        update_date: new Date().toISOString()
-      })
-      .eq('id', existing.id)
-      .select()
-      .single();
+    const prevCount = Number(existing.message_count || 0);
+    const newCount = prevCount + messageCount;
+    const prevTtft = Number(existing.avg_ttft_seconds || 0);
+    const newAvgTtft = newCount > 0
+      ? ((prevTtft * prevCount) + (avgTtftSeconds * messageCount)) / newCount
+      : avgTtftSeconds;
 
-    if (error) {
-      logger.error('Failed to update token usage:', error);
-      throw new Error('Failed to update token usage');
-    }
-
-    return updated;
+    return prisma.device_token_usage.update({
+      where: { id: existing.id },
+      data: {
+        input_tokens: (existing.input_tokens || 0) + inputTokens,
+        output_tokens: (existing.output_tokens || 0) + outputTokens,
+        input_audio_tokens: (existing.input_audio_tokens || 0) + inputAudioTokens,
+        input_text_tokens: (existing.input_text_tokens || 0) + inputTextTokens,
+        input_cached_tokens: (existing.input_cached_tokens || 0) + inputCachedTokens,
+        output_audio_tokens: (existing.output_audio_tokens || 0) + outputAudioTokens,
+        output_text_tokens: (existing.output_text_tokens || 0) + outputTextTokens,
+        session_duration_seconds: Number(existing.session_duration_seconds || 0) + sessionDurationSeconds,
+        avg_ttft_seconds: newAvgTtft,
+        message_count: newCount,
+        total_response_duration_seconds: Number(existing.total_response_duration_seconds || 0) + totalResponseDurationSeconds,
+        session_count: sessionId ? (existing.session_count || 0) + 1 : existing.session_count,
+        update_date: new Date(),
+      },
+    });
   }
 
-  // Create new record
-  const { data: record, error } = await supabaseAdmin
-    .from('device_token_usage')
-    .insert({
+  return prisma.device_token_usage.create({
+    data: {
       mac_address: normalizedMac,
       session_id: sessionId,
-      usage_date: today,
+      usage_date: todayDate,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
       input_audio_tokens: inputAudioTokens,
@@ -968,17 +768,9 @@ const recordTokenUsage = async ({
       avg_ttft_seconds: avgTtftSeconds,
       message_count: messageCount,
       total_response_duration_seconds: totalResponseDurationSeconds,
-      session_count: 1
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error('Failed to record token usage:', error);
-    throw new Error('Failed to record token usage');
-  }
-
-  return record;
+      session_count: 1,
+    },
+  });
 };
 
 /**
@@ -988,31 +780,20 @@ const recordTokenUsage = async ({
  * @returns {Promise<Object>} Token usage statistics
  */
 const getTokenUsageStats = async (mac, { startDate, endDate, period = 'daily' } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  let query = supabaseAdmin
-    .from('device_token_usage')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .order('usage_date', { ascending: false });
-
-  // Apply date filters
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
+  const where = { mac_address: normalizedMac };
+  if (startDate || endDate) {
+    where.usage_date = {};
+    if (startDate) where.usage_date.gte = new Date(startDate);
+    if (endDate) where.usage_date.lte = new Date(endDate);
   }
 
-  const { data: records, error } = await query;
-
-  if (error) {
-    logger.error('Failed to fetch token usage:', error);
-    throw new Error('Failed to fetch token usage statistics');
-  }
+  const records = await prisma.device_token_usage.findMany({
+    where,
+    orderBy: { usage_date: 'desc' },
+  });
 
   // Aggregate statistics
   const totals = {
@@ -1074,40 +855,27 @@ const getTokenUsageStats = async (mac, { startDate, endDate, period = 'daily' } 
  * @returns {Promise<Object>} Paginated token usage list
  */
 const listTokenUsage = async (mac, { page = 1, limit = 30, startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const offset = (page - 1) * limit;
-
-  let query = supabaseAdmin
-    .from('device_token_usage')
-    .select('*', { count: 'exact' })
-    .eq('mac_address', normalizedMac);
-
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
+  const where = { mac_address: normalizedMac };
+  if (startDate || endDate) {
+    where.usage_date = {};
+    if (startDate) where.usage_date.gte = new Date(startDate);
+    if (endDate) where.usage_date.lte = new Date(endDate);
   }
 
-  const { data: records, count, error } = await query
-    .order('usage_date', { ascending: false })
-    .range(offset, offset + limit - 1);
+  const [count, records] = await Promise.all([
+    prisma.device_token_usage.count({ where }),
+    prisma.device_token_usage.findMany({
+      where,
+      orderBy: { usage_date: 'desc' },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+  ]);
 
-  if (error) {
-    logger.error('Failed to list token usage:', error);
-    throw new Error('Failed to list token usage');
-  }
-
-  return {
-    list: records || [],
-    total: count || 0,
-    page,
-    limit
-  };
+  return { list: records, total: count, page, limit };
 };
 
 /**
@@ -1116,70 +884,35 @@ const listTokenUsage = async (mac, { page = 1, limit = 30, startDate, endDate } 
  * @returns {Promise<Object>} Summary by device
  */
 const getTokenUsageSummary = async ({ startDate, endDate, page = 1, limit = 20 } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // For now, fetch all records and aggregate in memory
-  // In production, this could use a database view or aggregation query
-  let query = supabaseAdmin
-    .from('device_token_usage')
-    .select('*');
-
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
+  const where = {};
+  if (startDate || endDate) {
+    where.usage_date = {};
+    if (startDate) where.usage_date.gte = new Date(startDate);
+    if (endDate) where.usage_date.lte = new Date(endDate);
   }
 
-  const { data: records, error } = await query;
+  const records = await prisma.device_token_usage.findMany({ where });
 
-  if (error) {
-    logger.error('Failed to fetch token usage summary:', error);
-    throw new Error('Failed to fetch token usage summary');
-  }
-
-  // Group by MAC address
   const byDevice = {};
-  for (const record of records || []) {
+  for (const record of records) {
     const mac = record.mac_address;
     if (!byDevice[mac]) {
-      byDevice[mac] = {
-        mac,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalTokens: 0,
-        sessionCount: 0,
-        messageCount: 0,
-        sessionDurationSeconds: 0,
-        dayCount: 0
-      };
+      byDevice[mac] = { mac, inputTokens: 0, outputTokens: 0, totalTokens: 0, sessionCount: 0, messageCount: 0, sessionDurationSeconds: 0, dayCount: 0 };
     }
     byDevice[mac].inputTokens += record.input_tokens || 0;
     byDevice[mac].outputTokens += record.output_tokens || 0;
     byDevice[mac].totalTokens += record.total_tokens || 0;
     byDevice[mac].sessionCount += record.session_count || 0;
     byDevice[mac].messageCount += record.message_count || 0;
-    byDevice[mac].sessionDurationSeconds += record.session_duration_seconds || 0;
+    byDevice[mac].sessionDurationSeconds += Number(record.session_duration_seconds || 0);
     byDevice[mac].dayCount += 1;
   }
 
-  // Sort by total tokens (descending)
-  const devices = Object.values(byDevice)
-    .sort((a, b) => b.totalTokens - a.totalTokens);
-
-  // Paginate
+  const devices = Object.values(byDevice).sort((a, b) => b.totalTokens - a.totalTokens);
   const total = devices.length;
   const offset = (page - 1) * limit;
-  const paginatedDevices = devices.slice(offset, offset + limit);
 
-  return {
-    list: paginatedDevices,
-    total,
-    page,
-    limit,
-    startDate: startDate || null,
-    endDate: endDate || null
-  };
+  return { list: devices.slice(offset, offset + limit), total, page, limit, startDate: startDate || null, endDate: endDate || null };
 };
 
 /**
@@ -1189,19 +922,14 @@ const getTokenUsageSummary = async ({ startDate, endDate, page = 1, limit = 20 }
  * @returns {Promise<Object|null>} Session usage data or null
  */
 const getSessionTokenUsage = async (mac, sessionId) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  const { data: record, error } = await supabaseAdmin
-    .from('device_token_usage')
-    .select('*')
-    .eq('mac_address', normalizedMac)
-    .eq('session_id', sessionId)
-    .single();
+  const record = await prisma.device_token_usage.findFirst({
+    where: { mac_address: normalizedMac, session_id: sessionId },
+  });
 
-  if (error || !record) return null;
+  if (!record) return null;
 
   return {
     macAddress: record.mac_address,
@@ -1254,9 +982,6 @@ const calculateCostInINR = (inputTextTokens, inputAudioTokens, outputTextTokens,
  * @returns {Promise<Object>} Daily summary
  */
 const getDailyUsageSummary = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Default to last 30 days if no dates provided (matching Spring Boot)
   if (!startDate) {
     const date = new Date();
     date.setDate(date.getDate() - 30);
@@ -1266,21 +991,13 @@ const getDailyUsageSummary = async ({ startDate, endDate } = {}) => {
     endDate = new Date().toISOString().split('T')[0];
   }
 
-  const { data: records, error } = await supabaseAdmin
-    .from('device_token_usage')
-    .select('*')
-    .gte('usage_date', startDate)
-    .lte('usage_date', endDate);
+  const records = await prisma.device_token_usage.findMany({
+    where: { usage_date: { gte: new Date(startDate), lte: new Date(endDate) } },
+  });
 
-  if (error) {
-    logger.error('Failed to fetch daily usage summary:', error);
-    throw new Error('Failed to fetch daily usage summary');
-  }
-
-  // Group by date - use snake_case to match Spring Boot
   const byDate = {};
-  for (const record of records || []) {
-    const date = record.usage_date;
+  for (const record of records) {
+    const date = record.usage_date.toISOString().split('T')[0];
     if (!byDate[date]) {
       byDate[date] = {
         usage_date: date,
@@ -1354,9 +1071,6 @@ const getDailyUsageSummary = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Object>} Per-device daily usage
  */
 const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  // Default to last 30 days if no dates provided (matching Spring Boot)
   if (!startDate) {
     const date = new Date();
     date.setDate(date.getDate() - 30);
@@ -1366,95 +1080,72 @@ const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
     endDate = new Date().toISOString().split('T')[0];
   }
 
-  // Fetch token usage records
-  const { data: records, error } = await supabaseAdmin
-    .from('device_token_usage')
-    .select('*')
-    .gte('usage_date', startDate)
-    .lte('usage_date', endDate);
+  const records = await prisma.device_token_usage.findMany({
+    where: { usage_date: { gte: new Date(startDate), lte: new Date(endDate) } },
+  });
 
-  if (error) {
-    logger.error('Failed to fetch per-device usage:', error);
-    throw new Error('Failed to fetch per-device usage');
-  }
-
-  // Get unique MAC addresses from records
-  const macAddresses = [...new Set((records || []).map(r => r.mac_address))];
-
-  // Fetch device info with kid and parent profiles
+  const macAddresses = [...new Set(records.map(r => r.mac_address))];
   let deviceMap = {};
+
   if (macAddresses.length > 0) {
-    const { data: devices } = await supabaseAdmin
-      .from('ai_device')
-      .select('mac_address, alias, kid_id, user_id')
-      .in('mac_address', macAddresses);
+    const devices = await prisma.ai_device.findMany({
+      where: { mac_address: { in: macAddresses } },
+      select: { mac_address: true, alias: true, kid_id: true, user_id: true },
+    });
 
-    // Get kid IDs and user IDs that exist
-    const kidIds = (devices || []).filter(d => d.kid_id).map(d => d.kid_id);
-    const userIds = (devices || []).filter(d => d.user_id).map(d => d.user_id);
+    const kidIds = devices.filter(d => d.kid_id).map(d => d.kid_id);
+    const userIds = devices.filter(d => d.user_id).map(d => d.user_id);
 
-    // Fetch kid profiles if any
     let kidMap = {};
     if (kidIds.length > 0) {
-      const { data: kids } = await supabaseAdmin
-        .from('kid_profile')
-        .select('id, name, nickname')
-        .in('id', kidIds);
-
-      for (const kid of kids || []) {
-        kidMap[kid.id] = kid.nickname || kid.name;
+      const kids = await prisma.kid_profile.findMany({
+        where: { id: { in: kidIds } },
+        select: { id: true, name: true, nickname: true },
+      });
+      for (const kid of kids) {
+        kidMap[kid.id.toString()] = kid.nickname || kid.name;
       }
     }
 
-    // Fetch parent profiles if any
     let parentMap = {};
     if (userIds.length > 0) {
-      // First try parent_profile table
-      const { data: parents } = await supabaseAdmin
-        .from('parent_profile')
-        .select('user_id, display_name')
-        .in('user_id', userIds);
-
-      for (const parent of parents || []) {
-        if (parent.display_name) {
-          parentMap[parent.user_id] = parent.display_name;
-        }
+      const parents = await prisma.parent_profile.findMany({
+        where: { user_id: { in: userIds } },
+        select: { user_id: true, display_name: true },
+      });
+      for (const parent of parents) {
+        if (parent.display_name) parentMap[parent.user_id.toString()] = parent.display_name;
       }
 
-      // Fallback to sys_user nickname for users without parent_profile
-      const usersWithoutProfile = userIds.filter(id => !parentMap[id]);
+      const usersWithoutProfile = userIds.filter(id => !parentMap[id.toString()]);
       if (usersWithoutProfile.length > 0) {
-        const { data: users } = await supabaseAdmin
-          .from('sys_user')
-          .select('id, nickname, username')
-          .in('id', usersWithoutProfile);
-
-        for (const user of users || []) {
-          if (!parentMap[user.id]) {
-            parentMap[user.id] = user.nickname || user.username;
+        const users = await prisma.sys_user.findMany({
+          where: { id: { in: usersWithoutProfile } },
+          select: { id: true, nickname: true, username: true },
+        });
+        for (const user of users) {
+          if (!parentMap[user.id.toString()]) {
+            parentMap[user.id.toString()] = user.nickname || user.username;
           }
         }
       }
     }
 
-    // Build device map with separate kid_name and owner_name (parent)
-    for (const device of devices || []) {
-      const kidName = device.kid_id && kidMap[device.kid_id] ? kidMap[device.kid_id] : null;
-      const parentName = device.user_id && parentMap[device.user_id] ? parentMap[device.user_id] : null;
-
-      deviceMap[device.mac_address] = {
-        kid_name: kidName,
-        owner_name: parentName || device.alias || null
-      };
+    for (const device of devices) {
+      const kidName = device.kid_id && kidMap[device.kid_id.toString()] ? kidMap[device.kid_id.toString()] : null;
+      const parentName = device.user_id && parentMap[device.user_id.toString()] ? parentMap[device.user_id.toString()] : null;
+      deviceMap[device.mac_address] = { kid_name: kidName, owner_name: parentName || device.alias || null };
     }
   }
 
-  // Transform records to snake_case format with cost_inr, kid_name, and owner_name
-  const usage = (records || []).map(record => {
+  const usage = records.map(record => {
     const deviceInfo = deviceMap[record.mac_address] || {};
+    const usageDateStr = record.usage_date instanceof Date
+      ? record.usage_date.toISOString().split('T')[0]
+      : record.usage_date;
     return {
       mac_address: record.mac_address,
-      usage_date: record.usage_date,
+      usage_date: usageDateStr,
       input_tokens: record.input_tokens || 0,
       output_tokens: record.output_tokens || 0,
       total_tokens: record.total_tokens || 0,
@@ -1464,27 +1155,17 @@ const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
       output_audio_tokens: record.output_audio_tokens || 0,
       session_count: record.session_count || 0,
       message_count: record.message_count || 0,
-      session_duration_seconds: record.session_duration_seconds || 0,
-      // Frontend-expected aliases
-      total_duration_seconds: record.session_duration_seconds || 0,
-      avg_ttft_seconds: record.avg_ttft_seconds || 0,
+      session_duration_seconds: Number(record.session_duration_seconds || 0),
+      total_duration_seconds: Number(record.session_duration_seconds || 0),
+      avg_ttft_seconds: Number(record.avg_ttft_seconds || 0),
       kid_name: deviceInfo.kid_name || null,
       owner_name: deviceInfo.owner_name || null,
-      cost_inr: calculateCostInINR(
-        record.input_text_tokens || 0,
-        record.input_audio_tokens || 0,
-        record.output_text_tokens || 0,
-        record.output_audio_tokens || 0
-      )
+      cost_inr: calculateCostInINR(record.input_text_tokens || 0, record.input_audio_tokens || 0, record.output_text_tokens || 0, record.output_audio_tokens || 0)
     };
   });
 
-  // Sort by date descending
   usage.sort((a, b) => b.usage_date.localeCompare(a.usage_date));
-
-  return {
-    list: usage
-  };
+  return { list: usage };
 };
 
 /**
@@ -1493,50 +1174,27 @@ const getPerDeviceDailyUsage = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<Object>} Usage totals
  */
 const getUsageTotals = async ({ startDate, endDate } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
-  let query = supabaseAdmin
-    .from('device_token_usage')
-    .select('*');
-
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
+  const where = {};
+  if (startDate || endDate) {
+    where.usage_date = {};
+    if (startDate) where.usage_date.gte = new Date(startDate);
+    if (endDate) where.usage_date.lte = new Date(endDate);
   }
 
-  const { data: records, error } = await query;
+  const records = await prisma.device_token_usage.findMany({ where });
 
-  if (error) {
-    logger.error('Failed to fetch usage totals:', error);
-    throw new Error('Failed to fetch usage totals');
-  }
-
-  // Aggregate totals
   const totals = {
-    inputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-    inputAudioTokens: 0,
-    inputTextTokens: 0,
-    inputCachedTokens: 0,
-    outputAudioTokens: 0,
-    outputTextTokens: 0,
-    sessionDurationSeconds: 0,
-    avgTtftSeconds: 0,
-    messageCount: 0,
-    totalResponseDurationSeconds: 0,
-    sessionCount: 0,
-    deviceCount: 0,
-    dayCount: 0
+    inputTokens: 0, outputTokens: 0, totalTokens: 0, inputAudioTokens: 0,
+    inputTextTokens: 0, inputCachedTokens: 0, outputAudioTokens: 0, outputTextTokens: 0,
+    sessionDurationSeconds: 0, avgTtftSeconds: 0, messageCount: 0,
+    totalResponseDurationSeconds: 0, sessionCount: 0, deviceCount: 0, dayCount: 0
   };
 
-  const devices = new Set();
-  const days = new Set();
+  const devicesSet = new Set();
+  const daysSet = new Set();
   let weightedTtftSum = 0;
 
-  for (const record of records || []) {
+  for (const record of records) {
     totals.inputTokens += record.input_tokens || 0;
     totals.outputTokens += record.output_tokens || 0;
     totals.totalTokens += record.total_tokens || 0;
@@ -1545,30 +1203,20 @@ const getUsageTotals = async ({ startDate, endDate } = {}) => {
     totals.inputCachedTokens += record.input_cached_tokens || 0;
     totals.outputAudioTokens += record.output_audio_tokens || 0;
     totals.outputTextTokens += record.output_text_tokens || 0;
-    totals.sessionDurationSeconds += record.session_duration_seconds || 0;
+    totals.sessionDurationSeconds += Number(record.session_duration_seconds || 0);
     totals.messageCount += record.message_count || 0;
-    totals.totalResponseDurationSeconds += record.total_response_duration_seconds || 0;
+    totals.totalResponseDurationSeconds += Number(record.total_response_duration_seconds || 0);
     totals.sessionCount += record.session_count || 0;
-    weightedTtftSum += (record.avg_ttft_seconds || 0) * (record.message_count || 0);
-    devices.add(record.mac_address);
-    days.add(record.usage_date);
+    weightedTtftSum += Number(record.avg_ttft_seconds || 0) * (record.message_count || 0);
+    devicesSet.add(record.mac_address);
+    daysSet.add(record.usage_date?.toISOString?.() || record.usage_date);
   }
 
-  // Calculate weighted average TTFT
-  if (totals.messageCount > 0) {
-    totals.avgTtftSeconds = weightedTtftSum / totals.messageCount;
-  }
+  if (totals.messageCount > 0) totals.avgTtftSeconds = weightedTtftSum / totals.messageCount;
+  totals.deviceCount = devicesSet.size;
+  totals.dayCount = daysSet.size;
 
-  totals.deviceCount = devices.size;
-  totals.dayCount = days.size;
-
-  return {
-    period: {
-      startDate: startDate || null,
-      endDate: endDate || null
-    },
-    totals
-  };
+  return { period: { startDate: startDate || null, endDate: endDate || null }, totals };
 };
 
 /**
@@ -1578,33 +1226,18 @@ const getUsageTotals = async ({ startDate, endDate } = {}) => {
  * @returns {Promise<number>} Number of deleted records
  */
 const deleteTokenUsage = async (mac, { startDate, endDate, olderThan } = {}) => {
-  if (!supabaseAdmin) throw new Error('Database not configured');
-
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  let query = supabaseAdmin
-    .from('device_token_usage')
-    .delete()
-    .eq('mac_address', normalizedMac);
-
-  if (startDate) {
-    query = query.gte('usage_date', startDate);
-  }
-  if (endDate) {
-    query = query.lte('usage_date', endDate);
-  }
-  if (olderThan) {
-    query = query.lt('usage_date', olderThan);
+  const where = { mac_address: normalizedMac };
+  if (startDate || endDate || olderThan) {
+    where.usage_date = {};
+    if (startDate) where.usage_date.gte = new Date(startDate);
+    if (endDate) where.usage_date.lte = new Date(endDate);
+    if (olderThan) where.usage_date.lt = new Date(olderThan);
   }
 
-  const { error, count } = await query;
-
-  if (error) {
-    logger.error('Failed to delete token usage:', error);
-    throw new Error('Failed to delete token usage');
-  }
-
+  const { count } = await prisma.device_token_usage.deleteMany({ where });
   return count || 0;
 };
 
