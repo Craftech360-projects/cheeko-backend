@@ -17,8 +17,9 @@ async function createParentProfile(firebaseUid, data) {
     });
     if (!user) throw new Error('User not found');
 
-    return prisma.parent_profile.create({
-        data: {
+    return prisma.parent_profile.upsert({
+        where: { user_id: user.id },
+        create: {
             user_id: user.id,
             email: user.email,
             display_name: data.parent_name || data.fullName,
@@ -26,6 +27,12 @@ async function createParentProfile(firebaseUid, data) {
             language: data.preferred_language,
             timezone: data.timezone,
             onboarding_completed: false,
+        },
+        update: {
+            display_name: data.parent_name || data.fullName || undefined,
+            phone_number: data.phone_number || undefined,
+            language: data.preferred_language || undefined,
+            timezone: data.timezone || undefined,
         },
     });
 }
