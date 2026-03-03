@@ -135,6 +135,12 @@ router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) =
     success(res, response);
 }));
 
+router.put('/devices/assign-kid-by-mac', asyncHandler(async (req, res) => {
+    const { mac, kidId } = req.body;
+    const device = await deviceService.assignKidByMac(mac, kidId);
+    success(res, device, 'Kid assigned to device');
+}));
+
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 // Activation code check is best-effort (codes live in device service in-memory cache)
