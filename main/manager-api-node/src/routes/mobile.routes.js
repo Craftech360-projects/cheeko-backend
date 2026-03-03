@@ -155,6 +155,26 @@ router.put('/devices/assign-kid-by-mac', asyncHandler(async (req, res) => {
     success(res, device, 'Kid assigned to device');
 }));
 
+// ─── Chat History ────────────────────────────────────────────────────────────
+
+router.get('/agents/:agentId/sessions', asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const sessions = await agentService.getAgentSessions(req.params.agentId, { page, limit });
+    success(res, sessions);
+}));
+
+router.get('/agents/:agentId/chat-history/:sessionId', asyncHandler(async (req, res) => {
+    const history = await agentService.getChatHistory(req.params.agentId, req.params.sessionId);
+    success(res, history);
+}));
+
+// ─── Device → Agent lookup ────────────────────────────────────────────────────
+
+router.get('/agents/device/:mac/agent-id', asyncHandler(async (req, res) => {
+    const agentId = await agentService.getAgentIdByMac(req.params.mac);
+    success(res, agentId);
+}));
+
 // ─── Activation ──────────────────────────────────────────────────────────────
 
 // Activation code check is best-effort (codes live in device service in-memory cache)
