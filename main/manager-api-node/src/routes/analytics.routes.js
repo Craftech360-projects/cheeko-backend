@@ -11,6 +11,7 @@ const router = express.Router();
 const analyticsService = require('../services/analytics.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireServiceKey } = require('../middleware/auth');
+const { requireFlexAuth } = require('../middleware/flexAuth');
 const { success, badRequest, notFound } = require('../utils/response');
 const { isValidMacAddress } = require('../utils/helpers');
 
@@ -837,7 +838,7 @@ router.post('/streak', requireServiceKey, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/user/:mac/overall', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user/:mac/overall', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -885,7 +886,7 @@ router.get('/user/:mac/overall', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/user/:mac/math', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user/:mac/math', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -933,7 +934,7 @@ router.get('/user/:mac/math', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/user/:mac/riddle', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user/:mac/riddle', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -981,7 +982,7 @@ router.get('/user/:mac/riddle', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/user/:mac/wordladder', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user/:mac/wordladder', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -1057,7 +1058,7 @@ router.get('/user/:mac/wordladder', requireAuth, asyncHandler(async (req, res) =
  *       401:
  *         description: Unauthorized
  */
-router.get('/sessions/:mac', requireAuth, asyncHandler(async (req, res) => {
+router.get('/sessions/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
   const { page = 1, limit = 10, modeType } = req.query;
 
@@ -1129,7 +1130,7 @@ router.get('/sessions/:mac', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/usage/daily/:mac', requireAuth, asyncHandler(async (req, res) => {
+router.get('/usage/daily/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
   const { days = 7 } = req.query;
 
@@ -1208,7 +1209,7 @@ router.get('/usage/daily/:mac', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/usage/weekly/:mac', requireAuth, asyncHandler(async (req, res) => {
+router.get('/usage/weekly/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
   const { weeks = 4 } = req.query;
 
@@ -1287,7 +1288,7 @@ router.get('/usage/weekly/:mac', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/usage/monthly/:mac', requireAuth, asyncHandler(async (req, res) => {
+router.get('/usage/monthly/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
   const { months = 6 } = req.query;
 
@@ -1327,7 +1328,7 @@ router.get('/usage/monthly/:mac', requireAuth, asyncHandler(async (req, res) => 
  *       401:
  *         description: Unauthorized
  */
-router.get('/session-by-id/:id', requireAuth, asyncHandler(async (req, res) => {
+router.get('/session-by-id/:id', requireFlexAuth, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const session = await analyticsService.getSessionById(parseInt(id));
@@ -1384,7 +1385,7 @@ router.get('/session-by-id/:id', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/sessions', requireAuth, asyncHandler(async (req, res) => {
+router.get('/sessions', requireFlexAuth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, mac, modeType, startDate, endDate } = req.query;
 
   const sessions = await analyticsService.getAllSessions({
@@ -1423,7 +1424,7 @@ router.get('/sessions', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/attempts/stats/:mac', requireAuth, asyncHandler(async (req, res) => {
+router.get('/attempts/stats/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -1458,7 +1459,7 @@ router.get('/attempts/stats/:mac', requireAuth, asyncHandler(async (req, res) =>
  *       401:
  *         description: Unauthorized
  */
-router.get('/attempts/:id', requireAuth, asyncHandler(async (req, res) => {
+router.get('/attempts/:id', requireFlexAuth, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const attempt = await analyticsService.getAttemptById(parseInt(id));
@@ -1510,7 +1511,7 @@ router.get('/attempts/:id', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/attempts', requireAuth, asyncHandler(async (req, res) => {
+router.get('/attempts', requireFlexAuth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, mac, gameType, questionType } = req.query;
 
   const attempts = await analyticsService.getAllAttempts({
@@ -1548,7 +1549,7 @@ router.get('/attempts', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/media-playback/:id', requireAuth, asyncHandler(async (req, res) => {
+router.get('/media-playback/:id', requireFlexAuth, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const playback = await analyticsService.getMediaPlaybackById(parseInt(id));
@@ -1596,7 +1597,7 @@ router.get('/media-playback/:id', requireAuth, asyncHandler(async (req, res) => 
  *       401:
  *         description: Unauthorized
  */
-router.get('/media-playback', requireAuth, asyncHandler(async (req, res) => {
+router.get('/media-playback', requireFlexAuth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, mac, mediaType } = req.query;
 
   const playback = await analyticsService.getAllMediaPlayback({
@@ -1633,7 +1634,7 @@ router.get('/media-playback', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/streaks/:id', requireAuth, asyncHandler(async (req, res) => {
+router.get('/streaks/:id', requireFlexAuth, asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const streak = await analyticsService.getStreakById(parseInt(id));
@@ -1680,7 +1681,7 @@ router.get('/streaks/:id', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/streaks', requireAuth, asyncHandler(async (req, res) => {
+router.get('/streaks', requireFlexAuth, asyncHandler(async (req, res) => {
   const { page = 1, limit = 20, mac, gameType } = req.query;
 
   const streaks = await analyticsService.getAllStreaks({
@@ -1727,7 +1728,7 @@ router.get('/streaks', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/user-progress/:mac/:modeType', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user-progress/:mac/:modeType', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac, modeType } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -1762,7 +1763,7 @@ router.get('/user-progress/:mac/:modeType', requireAuth, asyncHandler(async (req
  *       401:
  *         description: Unauthorized
  */
-router.get('/user-progress/:mac', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user-progress/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -1898,7 +1899,7 @@ router.post('/user-progress/update', requireServiceKey, asyncHandler(async (req,
  *       401:
  *         description: Unauthorized
  */
-router.get('/user/:mac/media', requireAuth, asyncHandler(async (req, res) => {
+router.get('/user/:mac/media', requireFlexAuth, asyncHandler(async (req, res) => {
   const { mac } = req.params;
 
   if (!isValidMacAddress(mac)) {
@@ -1946,7 +1947,7 @@ router.get('/user/:mac/media', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/today/device-count', requireAuth, asyncHandler(async (req, res) => {
+router.get('/today/device-count', requireFlexAuth, asyncHandler(async (req, res) => {
   const count = await analyticsService.getTodayDeviceCount();
   const now = new Date();
   const date = now.toISOString().split('T')[0]; // YYYY-MM-DD format
@@ -1999,7 +2000,7 @@ router.get('/today/device-count', requireAuth, asyncHandler(async (req, res) => 
  *       401:
  *         description: Unauthorized
  */
-router.get('/month/device-count', requireAuth, asyncHandler(async (req, res) => {
+router.get('/month/device-count', requireFlexAuth, asyncHandler(async (req, res) => {
   const count = await analyticsService.getMonthDeviceCount();
   const now = new Date();
   const year = now.getFullYear();
@@ -2057,7 +2058,7 @@ router.get('/month/device-count', requireAuth, asyncHandler(async (req, res) => 
  *       401:
  *         description: Unauthorized
  */
-router.get('/today/active-devices', requireAuth, asyncHandler(async (req, res) => {
+router.get('/today/active-devices', requireFlexAuth, asyncHandler(async (req, res) => {
   const devices = await analyticsService.getTodayActiveDevices();
   return success(res, devices);
 }));
@@ -2102,7 +2103,7 @@ router.get('/today/active-devices', requireAuth, asyncHandler(async (req, res) =
  *       401:
  *         description: Unauthorized
  */
-router.get('/month/active-devices', requireAuth, asyncHandler(async (req, res) => {
+router.get('/month/active-devices', requireFlexAuth, asyncHandler(async (req, res) => {
   const devices = await analyticsService.getMonthActiveDevices();
   return success(res, devices);
 }));
@@ -2157,7 +2158,7 @@ router.get('/month/active-devices', requireAuth, asyncHandler(async (req, res) =
  *       401:
  *         description: Unauthorized
  */
-router.get('/dashboard/summary', requireAuth, asyncHandler(async (req, res) => {
+router.get('/dashboard/summary', requireFlexAuth, asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
   const summary = await analyticsService.getDashboardSummary({ startDate, endDate });
   return success(res, summary);
@@ -2213,7 +2214,7 @@ router.get('/dashboard/summary', requireAuth, asyncHandler(async (req, res) => {
  *       401:
  *         description: Unauthorized
  */
-router.get('/dashboard/sessions-per-day', requireAuth, asyncHandler(async (req, res) => {
+router.get('/dashboard/sessions-per-day', requireFlexAuth, asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
   const data = await analyticsService.getSessionsPerDay({ startDate, endDate });
   return success(res, data);
@@ -2267,7 +2268,7 @@ router.get('/dashboard/sessions-per-day', requireAuth, asyncHandler(async (req, 
  *       401:
  *         description: Unauthorized
  */
-router.get('/dashboard/game-accuracy', requireAuth, asyncHandler(async (req, res) => {
+router.get('/dashboard/game-accuracy', requireFlexAuth, asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
   const data = await analyticsService.getGameAccuracyByType({ startDate, endDate });
   return success(res, data);
@@ -2324,7 +2325,7 @@ router.get('/dashboard/game-accuracy', requireAuth, asyncHandler(async (req, res
  *       401:
  *         description: Unauthorized
  */
-router.get('/dashboard/difficulty-distribution', requireAuth, asyncHandler(async (req, res) => {
+router.get('/dashboard/difficulty-distribution', requireFlexAuth, asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
   const data = await analyticsService.getDifficultyDistribution({ startDate, endDate });
   return success(res, data);
@@ -2376,7 +2377,7 @@ router.get('/dashboard/difficulty-distribution', requireAuth, asyncHandler(async
  *       401:
  *         description: Unauthorized
  */
-router.get('/dashboard/ttft-trend', requireAuth, asyncHandler(async (req, res) => {
+router.get('/dashboard/ttft-trend', requireFlexAuth, asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.query;
   const data = await analyticsService.getTtftTrend({ startDate, endDate });
   return success(res, data);
@@ -2442,7 +2443,7 @@ router.get('/dashboard/ttft-trend', requireAuth, asyncHandler(async (req, res) =
  *       401:
  *         description: Unauthorized
  */
-router.get('/dashboard/top-devices', requireAuth, asyncHandler(async (req, res) => {
+router.get('/dashboard/top-devices', requireFlexAuth, asyncHandler(async (req, res) => {
   const { startDate, endDate, limit = 10 } = req.query;
   const data = await analyticsService.getTopActiveDevices({
     startDate,
