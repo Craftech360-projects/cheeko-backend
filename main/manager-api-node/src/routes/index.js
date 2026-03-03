@@ -179,8 +179,8 @@ router.use('/device', deviceRoutes);
 router.use('/agent', agentRoutes);
 router.use('/content', contentRoutes);
 router.use('/admin/rfid', rfidRoutes);
-router.use('/api/mobile', profileRoutes); // Existing profile routes
-router.use('/api/mobile', require('./mobile.routes')); // New Firebase-backed mobile endpoints
+router.use('/api/mobile', require('./mobile.routes')); // Firebase-backed mobile endpoints (must come first)
+router.use('/api/mobile', profileRoutes); // Legacy profile routes (fallback)
 router.use('/models', modelRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/system', systemRoutes);
