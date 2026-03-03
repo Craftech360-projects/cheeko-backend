@@ -46,17 +46,22 @@ const requireFirebaseAuth = async (req, res, next) => {
 
     try {
         // 1. Verify the token with Firebase
+        logger.debug(`🔑 [firebaseAuth] Verifying Firebase ID token...`);
         const decoded = await admin.auth().verifyIdToken(idToken);
+        logger.debug(`✅ [firebaseAuth] Token verified — uid: ${decoded.uid}, email: ${decoded.email}`);
 
         req.firebaseUser = decoded; // uid, email, name, picture …
 
         // 2. Find or create the corresponding sys_user record
+        logger.debug(`🔍 [firebaseAuth] Looking up sys_user for uid: ${decoded.uid}`);
         let mobileUser = await prisma.sys_user.findFirst({
             where: { firebase_uid: decoded.uid },
         });
+        logger.debug(`📋 [firebaseAuth] sys_user lookup result: ${mobileUser ? `found id=${mobileUser.id}` : 'not found'}`);
 
         if (!mobileUser) {
             // First login — create a sys_user record for this Firebase user
+            logger.debug(`🆕 [firebaseAuth] Creating new sys_user for uid: ${decoded.uid}`);
             mobileUser = await prisma.sys_user.create({
                 data: {
                     firebase_uid: decoded.uid,
@@ -72,7 +77,9 @@ const requireFirebaseAuth = async (req, res, next) => {
         req.mobileUser = mobileUser;
         next();
     } catch (error) {
-        logger.warn('Firebase token verification failed:', error.message);
+        logger.warn(`Firebase token verification failed: ${error.message}`);
+        logger.warn(`  code: ${error.code || 'n/a'} | type: ${error.constructor?.name || 'Error'}`);
+        if (error.cause) logger.warn(`  cause: ${error.cause.message || error.cause}`);
         return unauthorized(res, 'Invalid or expired Firebase token');
     }
 };

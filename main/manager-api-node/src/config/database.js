@@ -8,12 +8,34 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const { Pool } = require('pg');
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const logger = require('../utils/logger');
 
 // ─── Prisma (primary DB — DigitalOcean PostgreSQL) ───────────────────────────
-const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+// Strip sslmode from the URL to prevent pg v8.19 from treating 'require' as
+// 'verify-full' (which rejects DigitalOcean's self-signed CA cert chain).
+// SSL is re-enabled explicitly via ssl: { rejectUnauthorized: false }.
+const _rawUrl = process.env.DATABASE_URL || '';
+const dbConnectionString = _rawUrl
+  .replace(/([?&])sslmode=[^&]*/g, '$1') // remove sslmode value
+  .replace(/\?&/g, '?')                  // fix ?& → ?
+  .replace(/[?&]$/g, '');               // remove trailing ? or &
+
+logger.info(`🔌 DB connecting to: ${dbConnectionString.replace(/:[^@]*@/, ':***@')}`);
+logger.info(`🔐 SSL: rejectUnauthorized=false (DigitalOcean self-signed CA)`);
+
+const pgPool = new Pool({
+  connectionString: dbConnectionString,
+  ssl: { rejectUnauthorized: false },
+});
+
+pgPool.on('error', (err) => {
+  logger.error('❌ Unexpected idle pg pool error:', err.message);
+});
+
+const adapter = new PrismaPg(pgPool);
 const prisma = new PrismaClient({
   adapter,
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],

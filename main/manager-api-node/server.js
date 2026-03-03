@@ -7,6 +7,11 @@
 
 require('dotenv').config();
 
+// BigInt serialization: Prisma returns BigInt for @id @default(autoincrement()) columns.
+// JSON.stringify doesn't handle BigInt natively — serialize as string to avoid crashes.
+// eslint-disable-next-line no-extend-native
+BigInt.prototype.toJSON = function () { return this.toString(); };
+
 const app = require('./src/app');
 const logger = require('./src/utils/logger');
 const { runPrismaMigrations } = require('./src/config/prisma-migrations');
