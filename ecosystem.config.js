@@ -2,9 +2,9 @@ module.exports = {
   apps: [
     {
       name: "manager-api",
-      script: "mvn",
-      args: "spring-boot:run -Dspring-boot.run.profiles=dev",
-      cwd: "/root/xiaozhi-esp32-server/main/manager-api",
+      script: "npm",
+      args: "start",
+      cwd: "/root/xiaozhi-esp32-server/main/manager-api-node",
       interpreter: "none"
     },
     {
@@ -29,13 +29,6 @@ module.exports = {
       interpreter: "python3"
     },
     {
-      name: "livekit-media-api",
-      script: "media_api.py",
-      cwd: "/root/xiaozhi-esp32-server/main/livekit-server",
-      interpreter: "python3",
-      watch: false
-    },
-    {
       name: "livekit-react-cheeko",
       script: "npm",
       args: "run dev",
@@ -47,3 +40,5 @@ module.exports = {
     }
   ]
 };
+
+

@@ -107,9 +107,9 @@ const transformSeriesToCamelCase = (series) => {
   };
 
   // Include content pack name if joined
-  if (series.rfid_content_pack) {
-    result.contentPackName = series.rfid_content_pack.name;
-    result.contentPackCode = series.rfid_content_pack.pack_code;
+  if (series.rfid_pack) {
+    result.contentPackName = series.rfid_pack.pack_name;
+    result.contentPackCode = series.rfid_pack.pack_code;
   }
 
   return result;
@@ -300,7 +300,7 @@ const lookupCardByUid = async (rfidUid) => {
   if (!mapping) {
     logger.info(`[RFID-LOOKUP] No individual card mapping for uid=${normalizedUid}, checking bulk-range/series...`);
 
-    // Fallback to series/bulk-range lookup (supports Content Packs only — rfid_question_pack does not exist)
+    // Fallback to series/bulk-range lookup (matches Java: series → question + pack)
     let series = null;
     try {
       series = await prisma.rfid_series.findFirst({
@@ -311,59 +311,32 @@ const lookupCardByUid = async (rfidUid) => {
         },
         orderBy: { priority: 'desc' },
         include: {
-          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
+          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
+          rfid_question: true
         }
       });
     } catch (seriesErr) {
       logger.error('[RFID-LOOKUP] Series lookup DB error:', seriesErr);
     }
 
-    // Fetch content pack separately if content_pack_id exists on series
-    if (series?.content_pack_id) {
-      let contentPack = null;
-      let items = [];
-      try {
-        contentPack = await prisma.rfid_content_pack.findFirst({
-          where: { id: series.content_pack_id }
-        });
-      } catch (cpErr) {
-        logger.error('[RFID-LOOKUP] Content pack query error:', cpErr);
-      }
-
-      if (contentPack) {
-        try {
-          items = await prisma.content_item.findMany({
-            where: { content_pack_id: series.content_pack_id, active: true },
-            orderBy: { item_number: 'asc' }
-          });
-        } catch (itemsErr) {
-          logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
-        }
-
-        const mappedItems = items.map((item, idx) => ({
-          sequence: item.item_number || idx + 1,
-          title: item.title,
-          audioUrl: item.audio_url,
-          imageUrl: null, // content_item has no image_url column
-          promptText: item.lyrics_text || null
-        }));
-
-        logger.info(`[RFID-LOOKUP] Bulk-range Content Pack resolved: name="${contentPack.name}", type=${contentPack.content_type}, items=${mappedItems.length}`);
-
+    if (series) {
+      // Series links to rfid_question (prompt) and rfid_pack (physical SKU)
+      if (series.rfid_question) {
+        const question = series.rfid_question;
+        logger.info(`[RFID-LOOKUP] Series Q&A resolved: title="${question.title}"`);
         return {
           rfid_uid: normalizedUid,
           source: 'bulk_range',
           series_id: Number(series.id),
-          contentType: contentPack.content_type || 'story_pack',
-          title: contentPack.name,
-          packCode: contentPack.pack_code,
-          version: contentPack.version,
-          items: mappedItems
+          contentType: 'prompt',
+          title: question.title,
+          promptText: question.prompt_text,
+          packCode: series.rfid_pack?.pack_code || null,
+          language: question.language
         };
       }
+      logger.warn(`[RFID-LOOKUP] Series found but no question linked: series_id=${series.id}`);
     }
-
-    // rfid_question_pack does not exist in Prisma schema — skip Q&A Pack series fallback
 
     logger.warn(`[RFID-LOOKUP] No bulk-range match for uid=${normalizedUid}`);
     return null;
@@ -1199,16 +1172,12 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
         skip: offset,
         take: limit,
         include: {
-          rfid_content_pack: { select: { id: true, name: true, pack_code: true } }
+          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
         }
       })
     ]);
 
-    // Normalize to match transformSeriesToCamelCase expectations
-    const normalized = seriesRows.map(s => ({
-      ...s,
-      // rfid_content_pack is included via Prisma relation
-    }));
+    const normalized = seriesRows;
 
     return {
       list: normalized.map(transformSeriesToCamelCase),
@@ -1246,7 +1215,7 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
       where,
       orderBy: { priority: 'desc' },
       include: {
-        rfid_content_pack: { select: { id: true, name: true, pack_code: true } }
+        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
       }
     });
     return seriesRows.map(transformSeriesToCamelCase);
@@ -1266,7 +1235,7 @@ const getSeriesById = async (seriesId) => {
     const series = await prisma.rfid_series.findFirst({
       where: { id: BigInt(seriesId) },
       include: {
-        rfid_content_pack: { select: { id: true, name: true, pack_code: true } }
+        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
       }
     });
     return transformSeriesToCamelCase(series);
@@ -2268,7 +2237,7 @@ const lookupContentByRfidUid = async (rfidUid, sequence) => {
     }
   }
 
-  // Try series range match if no exact match
+  // Try series range match if no exact match (series → question, like Java RFID_RAG)
   if (!questionEntity) {
     try {
       const series = await prisma.rfid_series.findFirst({
@@ -2279,29 +2248,13 @@ const lookupContentByRfidUid = async (rfidUid, sequence) => {
         },
         orderBy: { priority: 'desc' },
         include: {
-          rfid_content_pack: true
+          rfid_question: true
         }
       });
 
-      if (series?.rfid_content_pack?.content_md && sequence && sequence > 0) {
-        const pack = series.rfid_content_pack;
-        result.contentType = pack.content_type;
-        result.packCode = pack.pack_code;
-        result.language = pack.language;
-
-        const item = extractBySequence(pack.content_md, sequence);
-        if (item) {
-          result.title = item.title;
-          result.contentText = item.content;
-        }
-
-        const cachedAudioUrl = getCachedAudioUrl(pack.cached_audio_urls, sequence);
-        if (cachedAudioUrl) {
-          result.cachedAudioUrl = cachedAudioUrl;
-          result.cached = true;
-        }
-
-        return result;
+      if (series?.rfid_question) {
+        questionEntity = series.rfid_question;
+        logger.info('Found question via series range match:', { rfidUid: normalizedUid, title: questionEntity.title });
       }
     } catch (seriesErr) {
       logger.error('Failed to lookup series for content:', seriesErr);
