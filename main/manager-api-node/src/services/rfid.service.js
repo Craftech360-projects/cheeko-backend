@@ -75,13 +75,17 @@ const transformCardMappingToCamelCase = (card) => {
     id: card.id ? Number(card.id) : null,
     rfidUid: card.rfid_uid,
     questionId: card.question_id ? Number(card.question_id) : null,
-    questionPackId: null, // rfid_question_pack does not exist in Prisma schema
+    questionPackId: card.question_pack_id ? Number(card.question_pack_id) : null,
     questionIds: card.question_ids || [],
     packCode: card.pack_code,
     packId: card.pack_id ? Number(card.pack_id) : null,
     contentPackId: card.content_pack_id ? Number(card.content_pack_id) : null,
+    actionType: card.action_type,
+    actionData: card.action_data || {},
+    cardType: card.card_type || 'ai',
     notes: card.notes,
     active: card.active,
+    status: card.status,
     createDate: formatDate(card.create_date || card.created_at),
     updateDate: formatDate(card.update_date || card.updated_at)
   };
@@ -98,18 +102,39 @@ const transformSeriesToCamelCase = (series) => {
     seriesName: series.series_name,
     startUid: series.start_uid,
     endUid: series.end_uid,
-    contentPackId: series.content_pack_id ? Number(series.content_pack_id) : null,
-    questionPackId: null, // rfid_question_pack does not exist in Prisma schema
+    packId: series.content_pack_id ? Number(series.content_pack_id) : null,
+    contentPackId: series.content_ref_id ? Number(series.content_ref_id) : null,
+    questionPackId: series.question_pack_id ? Number(series.question_pack_id) : null,
+    questionId: series.question_id ? Number(series.question_id) : null,
     priority: series.priority,
+    notes: series.notes,
     active: series.status === 1,
     createDate: formatDate(series.created_at),
     updateDate: formatDate(series.updated_at)
   };
 
-  // Include content pack name if joined
+  // Include physical product SKU name if joined (rfid_pack)
   if (series.rfid_pack) {
-    result.contentPackName = series.rfid_pack.pack_name;
-    result.contentPackCode = series.rfid_pack.pack_code;
+    result.packName = series.rfid_pack.pack_name;
+    result.packCode = series.rfid_pack.pack_code;
+  }
+
+  // Include content pack name if joined (rfid_content_pack)
+  if (series.rfid_content_pack) {
+    result.contentPackName = series.rfid_content_pack.name;
+    result.contentPackCode = series.rfid_content_pack.pack_code;
+  }
+
+  // Include question pack name if joined (rfid_question_pack)
+  if (series.rfid_question_pack) {
+    result.questionPackName = series.rfid_question_pack.name;
+    result.questionPackCode = series.rfid_question_pack.pack_code;
+  }
+
+  // Include question name if joined
+  if (series.rfid_question) {
+    result.questionName = series.rfid_question.title;
+    result.questionCode = series.rfid_question.code;
   }
 
   return result;
@@ -312,7 +337,9 @@ const lookupCardByUid = async (rfidUid) => {
         orderBy: { priority: 'desc' },
         include: {
           rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-          rfid_question: true
+          rfid_question: true,
+          rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
+          rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
         }
       });
     } catch (seriesErr) {
@@ -483,13 +510,17 @@ const createCardMapping = async (data, _userId) => {
       data: {
         rfid_uid: normalizedUid,
         question_id: data.questionId ? BigInt(data.questionId) : null,
-        // question_pack_id does not exist; store question IDs in question_ids Json
+        question_pack_id: data.questionPackId ? BigInt(data.questionPackId) : null,
         question_ids: data.questionIds || [],
         pack_code: data.packCode || null,
         pack_id: data.packId ? BigInt(data.packId) : null,
         content_pack_id: data.contentPackId ? BigInt(data.contentPackId) : null,
+        action_type: data.actionType || null,
+        action_data: data.actionData || {},
+        card_type: data.cardType || 'ai',
         notes: data.notes || null,
-        active: data.active !== false
+        active: data.active !== false,
+        status: 1
       }
     });
   } catch (error) {
@@ -523,11 +554,26 @@ const updateCardMapping = async (data, _userId) => {
     updateData.rfid_uid = data.rfidUid.toUpperCase().replace(/[:-]/g, '');
   }
   if (data.questionId !== undefined) updateData.question_id = data.questionId ? BigInt(data.questionId) : null;
-  // question_pack_id does not exist; if caller passes questionIds, store them
+  if (data.questionPackId !== undefined) {
+    updateData.question_pack_id = data.questionPackId ? BigInt(data.questionPackId) : null;
+    // Mutual exclusivity: setting questionPackId clears contentPackId
+    if (data.questionPackId && data.contentPackId === undefined) {
+      updateData.content_pack_id = null;
+    }
+  }
   if (data.questionIds !== undefined) updateData.question_ids = data.questionIds;
   if (data.packCode !== undefined) updateData.pack_code = data.packCode;
   if (data.packId !== undefined) updateData.pack_id = data.packId ? BigInt(data.packId) : null;
-  if (data.contentPackId !== undefined) updateData.content_pack_id = data.contentPackId ? BigInt(data.contentPackId) : null;
+  if (data.contentPackId !== undefined) {
+    updateData.content_pack_id = data.contentPackId ? BigInt(data.contentPackId) : null;
+    // Mutual exclusivity: setting contentPackId clears questionPackId
+    if (data.contentPackId && data.questionPackId === undefined) {
+      updateData.question_pack_id = null;
+    }
+  }
+  if (data.actionType !== undefined) updateData.action_type = data.actionType;
+  if (data.actionData !== undefined) updateData.action_data = data.actionData;
+  if (data.cardType !== undefined) updateData.card_type = data.cardType;
   if (data.notes !== undefined) updateData.notes = data.notes;
   if (data.active !== undefined) updateData.active = data.active;
 
@@ -1172,7 +1218,10 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
         skip: offset,
         take: limit,
         include: {
-          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
+          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
+          rfid_question: { select: { id: true, title: true, code: true } },
+          rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
+          rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
         }
       })
     ]);
@@ -1215,7 +1264,10 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
       where,
       orderBy: { priority: 'desc' },
       include: {
-        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
+        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
+        rfid_question: { select: { id: true, title: true, code: true } },
+        rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
+        rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
       }
     });
     return seriesRows.map(transformSeriesToCamelCase);
@@ -1235,7 +1287,10 @@ const getSeriesById = async (seriesId) => {
     const series = await prisma.rfid_series.findFirst({
       where: { id: BigInt(seriesId) },
       include: {
-        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } }
+        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
+        rfid_question: { select: { id: true, title: true, code: true } },
+        rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
+        rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
       }
     });
     return transformSeriesToCamelCase(series);
@@ -1262,14 +1317,14 @@ const createSeries = async (data, _userId) => {
   }
 
   // DB uses 'status' (Int) instead of 'active' (Boolean)
-  // Note: rfid_question_pack does not exist; ignore questionPackId
   const createData = {
     series_name: data.seriesName || data.notes || `Series ${startUid}-${endUid}`,
     start_uid: startUid,
     end_uid: endUid,
-    content_pack_id: data.contentPackId ? BigInt(data.contentPackId) : null,
-    // question_id is a valid FK on rfid_series to rfid_question
+    content_ref_id: data.contentPackId ? BigInt(data.contentPackId) : null,
+    question_pack_id: data.questionPackId ? BigInt(data.questionPackId) : null,
     question_id: data.questionId ? BigInt(data.questionId) : null,
+    notes: data.notes || null,
     priority: data.priority || 0,
     status: data.active !== false ? 1 : 0
   };
@@ -1308,8 +1363,31 @@ const updateSeries = async (data, _userId) => {
     updateData.end_uid = data.endUid.toUpperCase().replace(/[:-]/g, '');
   }
   if (data.seriesName !== undefined) updateData.series_name = data.seriesName;
-  if (data.contentPackId !== undefined) updateData.content_pack_id = data.contentPackId ? BigInt(data.contentPackId) : null;
-  // question_id is valid on rfid_series; questionPackId is not (table doesn't exist)
+  if (data.notes !== undefined) updateData.notes = data.notes;
+
+  // content_pack_id is FK to rfid_pack (physical product SKU) — legacy field
+  if (data.packId !== undefined) {
+    updateData.content_pack_id = data.packId ? BigInt(data.packId) : null;
+  }
+
+  // content_ref_id is FK to rfid_content_pack (story/rhyme content)
+  if (data.contentPackId !== undefined) {
+    updateData.content_ref_id = data.contentPackId ? BigInt(data.contentPackId) : null;
+    // Mutual exclusivity: clear question_pack_id when setting content pack
+    if (data.contentPackId && data.questionPackId === undefined) {
+      updateData.question_pack_id = null;
+    }
+  }
+
+  // question_pack_id is FK to rfid_question_pack (Q&A pack)
+  if (data.questionPackId !== undefined) {
+    updateData.question_pack_id = data.questionPackId ? BigInt(data.questionPackId) : null;
+    // Mutual exclusivity: clear content_ref_id when setting Q&A pack
+    if (data.questionPackId && data.contentPackId === undefined) {
+      updateData.content_ref_id = null;
+    }
+  }
+
   if (data.questionId !== undefined) updateData.question_id = data.questionId ? BigInt(data.questionId) : null;
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.active !== undefined) updateData.status = data.active ? 1 : 0;
@@ -2874,14 +2952,10 @@ const deleteContentPacks = async (ids) => {
 
 // =============================================
 // Question Pack CRUD Methods
-// NOTE: rfid_question_pack table does NOT exist in Prisma schema.
-// These functions return empty/null gracefully for API compatibility.
-// The question_ids Json field on rfid_card_mapping is the replacement.
 // =============================================
 
 /**
- * Transform a mock question pack object to camelCase DTO
- * (Used since rfid_question_pack table does not exist)
+ * Transform rfid_question_pack row to camelCase DTO
  */
 const transformQuestionPackToCamelCase = (pack) => {
   if (!pack) return null;
@@ -2903,66 +2977,104 @@ const transformQuestionPackToCamelCase = (pack) => {
 
 /**
  * Get question packs with pagination
- * NOTE: rfid_question_pack table does not exist. Returns empty result.
  */
 const getQuestionPackPage = async ({ page = 1, limit = 10, packCode, name, category, language, active } = {}) => {
-  logger.warn('[getQuestionPackPage] rfid_question_pack table does not exist in Prisma schema. Returning empty result.');
-  return {
-    list: [],
-    total: 0,
-    page,
-    limit,
-    pages: 0,
-  };
+  const offset = (page - 1) * limit;
+  const where = {};
+  if (packCode) where.pack_code = { contains: packCode, mode: 'insensitive' };
+  if (name) where.name = { contains: name, mode: 'insensitive' };
+  if (category) where.category = { contains: category, mode: 'insensitive' };
+  if (language) where.language = language;
+  if (active !== undefined && active !== null && active !== '') {
+    where.active = (active === true || active === 'true' || active === '1');
+  }
+
+  try {
+    const [total, packs] = await Promise.all([
+      prisma.rfid_question_pack.count({ where }),
+      prisma.rfid_question_pack.findMany({
+        where,
+        orderBy: { create_date: 'desc' },
+        skip: offset,
+        take: limit
+      })
+    ]);
+    return {
+      list: packs.map(transformQuestionPackToCamelCase),
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+    };
+  } catch (error) {
+    logger.error('Failed to fetch question packs:', error);
+    throw new Error('Failed to fetch question packs');
+  }
 };
 
 /**
  * Get all question packs (no pagination)
- * NOTE: rfid_question_pack table does not exist. Returns empty array.
  */
 const getQuestionPackList = async ({ packCode, name, category, language, active } = {}) => {
-  logger.warn('[getQuestionPackList] rfid_question_pack table does not exist in Prisma schema. Returning empty array.');
-  return [];
+  const where = {};
+  if (packCode) where.pack_code = { contains: packCode, mode: 'insensitive' };
+  if (name) where.name = { contains: name, mode: 'insensitive' };
+  if (category) where.category = { contains: category, mode: 'insensitive' };
+  if (language) where.language = language;
+  if (active !== undefined && active !== null && active !== '') {
+    where.active = (active === true || active === 'true' || active === '1');
+  }
+
+  try {
+    const packs = await prisma.rfid_question_pack.findMany({ where, orderBy: { create_date: 'desc' } });
+    return packs.map(transformQuestionPackToCamelCase);
+  } catch (error) {
+    logger.error('Failed to fetch question pack list:', error);
+    throw new Error('Failed to fetch question pack list');
+  }
 };
 
 /**
  * Get question pack by pack code
- * NOTE: rfid_question_pack table does not exist. Returns null.
  */
 const getQuestionPackByCode = async (packCode) => {
-  logger.warn('[getQuestionPackByCode] rfid_question_pack table does not exist in Prisma schema. Returning null.');
-  return null;
+  try {
+    const pack = await prisma.rfid_question_pack.findFirst({ where: { pack_code: packCode } });
+    return transformQuestionPackToCamelCase(pack);
+  } catch (error) {
+    logger.error('Failed to fetch question pack by code:', error);
+    throw new Error('Failed to fetch question pack');
+  }
 };
 
 /**
  * Get all active question packs
- * NOTE: rfid_question_pack table does not exist. Returns empty array.
  */
 const getAllActiveQuestionPacks = async () => {
-  logger.warn('[getAllActiveQuestionPacks] rfid_question_pack table does not exist in Prisma schema. Returning empty array.');
-  return [];
+  try {
+    const packs = await prisma.rfid_question_pack.findMany({
+      where: { active: true },
+      orderBy: { name: 'asc' }
+    });
+    return packs.map(transformQuestionPackToCamelCase);
+  } catch (error) {
+    logger.error('Failed to fetch active question packs:', error);
+    return [];
+  }
 };
 
 /**
- * Create question pack with packCode uniqueness check
- * NOTE: rfid_question_pack table does not exist.
- * Instead, creates questions and returns their IDs for use in rfid_card_mapping.question_ids.
- * The caller should update rfid_card_mapping.question_ids with the returned IDs.
+ * Create question pack with inline question support
+ * Creates questions in rfid_question table and stores their IDs in rfid_question_pack.question_ids
  */
 const createQuestionPack = async (data, userId) => {
-  logger.warn('[createQuestionPack] rfid_question_pack table does not exist. Handling inline questions only via rfid_question table.');
-
   let finalQuestionIds = data.questionIds || [];
-  logger.info('[createQuestionPack] Step A: Initial questionIds:', finalQuestionIds);
 
-  // Handle inline questions provided during creation — insert into rfid_question
+  // Handle inline questions — insert into rfid_question first
   if (data.questions && Array.isArray(data.questions) && data.questions.length > 0) {
-    logger.info(`[createQuestionPack] Step B: Processing ${data.questions.length} inline questions for pack ${data.packCode}`);
-
     const newQuestions = data.questions.map((q, index) => {
       const suffix = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
       const qCode = `${data.packCode}_Q${index + 1}_${suffix}`;
-
       return {
         code: qCode,
         title: q.text ? (q.text.length > 50 ? q.text.substring(0, 47) + '...' : q.text) : `Question ${index + 1}`,
@@ -2975,78 +3087,109 @@ const createQuestionPack = async (data, userId) => {
       };
     });
 
-    logger.info(`[createQuestionPack] Step C: Inserting ${newQuestions.length} questions into database`);
-
     try {
-      await prisma.rfid_question.createMany({
-        data: newQuestions,
-        skipDuplicates: true
-      });
-
-      // Fetch the created questions to get their IDs
+      await prisma.rfid_question.createMany({ data: newQuestions, skipDuplicates: true });
       const codes = newQuestions.map(q => q.code);
       const createdQs = await prisma.rfid_question.findMany({
         where: { code: { in: codes } },
         select: { id: true }
       });
-
-      logger.info(`[createQuestionPack] Step D: Database insert result: ${createdQs.length} questions`);
-
-      if (createdQs.length > 0) {
-        const newIds = createdQs.map(q => Number(q.id));
-        logger.info(`[createQuestionPack] Step E: Successfully created ${newIds.length} questions with IDs:`, newIds);
-        finalQuestionIds = [...finalQuestionIds, ...newIds];
-        logger.info(`[createQuestionPack] Step F: Final questionIds array:`, finalQuestionIds);
-      } else {
-        logger.warn('[createQuestionPack] Step E: WARNING - No questions were created despite no error');
-      }
+      const newIds = createdQs.map(q => Number(q.id));
+      finalQuestionIds = [...finalQuestionIds, ...newIds];
+      logger.info(`Created ${newIds.length} inline questions for pack ${data.packCode}`);
     } catch (qError) {
-      logger.error('[createQuestionPack] Step C: ERROR - Failed to create inline questions:', qError);
+      logger.error('Failed to create inline questions:', qError);
       throw new Error('Failed to create inline questions: ' + qError.message);
     }
-  } else {
-    logger.info('[createQuestionPack] Step B: No inline questions provided, using existing questionIds:', data.questionIds);
   }
 
-  logger.info('[createQuestionPack] Step G: rfid_question_pack table does not exist. Returning finalQuestionIds for caller to store in rfid_card_mapping.question_ids:', finalQuestionIds);
+  // Check pack_code uniqueness
+  const existing = await prisma.rfid_question_pack.findFirst({ where: { pack_code: data.packCode } });
+  if (existing) {
+    throw new Error(`Question pack with code "${data.packCode}" already exists`);
+  }
 
-  // Since rfid_question_pack doesn't exist, we return the questionIds
-  // so the caller can store them in rfid_card_mapping.question_ids if needed.
-  // Return null for Spring Boot Result<Void> compatibility.
+  try {
+    await prisma.rfid_question_pack.create({
+      data: {
+        pack_code: data.packCode,
+        name: data.name || data.packCode,
+        description: data.description || null,
+        question_ids: finalQuestionIds,
+        language: data.language || 'en',
+        category: data.category || 'general',
+        version: data.version || '1',
+        active: true,
+        status: 1,
+        creator: userId ? BigInt(userId) : null,
+      }
+    });
+    logger.info(`Created question pack: ${data.packCode} with ${finalQuestionIds.length} questions`);
+  } catch (error) {
+    logger.error('Failed to create question pack:', error);
+    throw new Error('Failed to create question pack');
+  }
+
   return null;
 };
 
 /**
  * Update question pack by id
- * NOTE: rfid_question_pack table does not exist. Returns null gracefully.
  */
 const updateQuestionPack = async (data, userId) => {
-  logger.warn('[updateQuestionPack] rfid_question_pack table does not exist in Prisma schema. No-op.');
   if (!data.id) {
     throw new Error('Question pack ID is required');
+  }
+
+  const updateData = { update_date: new Date() };
+  if (data.packCode !== undefined) updateData.pack_code = data.packCode;
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.questionIds !== undefined) updateData.question_ids = data.questionIds;
+  if (data.language !== undefined) updateData.language = data.language;
+  if (data.category !== undefined) updateData.category = data.category;
+  if (data.version !== undefined) updateData.version = data.version;
+  if (data.active !== undefined) updateData.active = data.active;
+  if (userId) updateData.updater = BigInt(userId);
+
+  try {
+    await prisma.rfid_question_pack.updateMany({
+      where: { id: BigInt(data.id) },
+      data: updateData
+    });
+  } catch (error) {
+    logger.error('Failed to update question pack:', error);
+    throw new Error('Failed to update question pack');
   }
   return null;
 };
 
 /**
  * Delete question packs by IDs
- * NOTE: rfid_question_pack table does not exist. Returns null gracefully.
  */
 const deleteQuestionPacks = async (ids) => {
-  logger.warn('[deleteQuestionPacks] rfid_question_pack table does not exist in Prisma schema. No-op.');
   if (!ids || !Array.isArray(ids) || ids.length === 0) {
     throw new Error('Question pack IDs are required');
+  }
+
+  try {
+    await prisma.rfid_question_pack.deleteMany({
+      where: { id: { in: ids.map(id => BigInt(id)) } }
+    });
+  } catch (error) {
+    logger.error('Failed to delete question packs:', error);
+    throw new Error('Failed to delete question packs');
   }
   return null;
 };
 
 /**
  * Get RFID mapping options for dropdowns
- * Returns combined list of questions, packs, content packs (no question packs — table doesn't exist)
+ * Returns combined list of questions, packs, content packs, and question packs
  */
 const getRfidMappingOptions = async () => {
   try {
-    const [questions, packs, contentPacks] = await Promise.all([
+    const [questions, packs, contentPacks, questionPacks] = await Promise.all([
       prisma.rfid_question.findMany({
         where: { active: true },
         select: { id: true, code: true, title: true },
@@ -3061,6 +3204,11 @@ const getRfidMappingOptions = async () => {
         where: { active: true },
         select: { id: true, pack_code: true, name: true },
         orderBy: { name: 'asc' }
+      }),
+      prisma.rfid_question_pack.findMany({
+        where: { active: true },
+        select: { id: true, pack_code: true, name: true },
+        orderBy: { name: 'asc' }
       })
     ]);
 
@@ -3068,8 +3216,7 @@ const getRfidMappingOptions = async () => {
       questions: questions.map(q => ({ id: Number(q.id), name: q.title, code: q.code })),
       packs: packs.map(p => ({ id: Number(p.id), name: p.pack_name, code: p.pack_code })),
       contentPacks: contentPacks.map(cp => ({ id: Number(cp.id), name: cp.name, code: cp.pack_code })),
-      // rfid_question_pack does not exist — return empty array for backward compatibility
-      questionPacks: []
+      questionPacks: questionPacks.map(qp => ({ id: Number(qp.id), name: qp.name, code: qp.pack_code }))
     };
   } catch (error) {
     logger.error('Failed to fetch RFID mapping options:', error);

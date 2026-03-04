@@ -171,6 +171,13 @@ export default {
       if (newVal) {
         this.dialogKey = Date.now();
       }
+    },
+    'form.actionType'(newVal) {
+      if (newVal === 'qna') {
+        this.form.contentPackId = null;
+      } else if (newVal === 'content') {
+        this.form.questionPackId = null;
+      }
     }
   }
 };

@@ -185,6 +185,9 @@
                                         <el-tag v-if="scope.row.contentPackId" type="warning" size="small" class="content-badge">
                                             <i class="el-icon-notebook-2"></i> Story/Rhyme
                                         </el-tag>
+                                        <el-tag v-else-if="scope.row.questionPackId" type="success" size="small" class="content-badge">
+                                            <i class="el-icon-chat-square"></i> Q&A Pack
+                                        </el-tag>
                                         <el-tag v-else-if="(scope.row.questionIds && scope.row.questionIds.length) || scope.row.questionId" size="small" class="content-badge">
                                             <i class="el-icon-chat-line-round"></i> AI Prompt
                                         </el-tag>
@@ -198,6 +201,12 @@
                                         <el-tooltip v-if="(scope.row.questionIds && scope.row.questionIds.length) || scope.row.questionId" :content="getQuestionsLabel(scope.row.questionIds || (scope.row.questionId ? [scope.row.questionId] : []))" placement="top">
                                             <el-tag size="small" type="info">{{ (scope.row.questionIds || (scope.row.questionId ? [scope.row.questionId] : [])).length }} prompt(s)</el-tag>
                                         </el-tooltip>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Q&A Pack" align="center" width="140" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.questionPackId" type="success" size="small">{{ getQuestionPackLabel(scope.row.questionPackId) }}</el-tag>
                                         <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
@@ -443,29 +452,21 @@
                                 </el-table-column>
                                 <el-table-column label="Start UID" prop="startUid" align="center" width="120"></el-table-column>
                                 <el-table-column label="End UID" prop="endUid" align="center" width="120"></el-table-column>
-                                <el-table-column label="Question" align="center" show-overflow-tooltip>
+                                <el-table-column label="Content Type" align="center" width="140">
                                     <template slot-scope="scope">
-                                        {{ getQuestionLabel(scope.row.questionId) }}
+                                        <el-tag v-if="scope.row.questionPackId" type="success" size="small" class="content-badge">
+                                            <i class="el-icon-chat-square"></i> Q&A Pack
+                                        </el-tag>
+                                        <el-tag v-else-if="scope.row.contentPackId" type="" size="small" class="content-badge">
+                                            <i class="el-icon-notebook-2"></i> Content Pack
+                                        </el-tag>
+                                        <span v-else class="text-muted">Not assigned</span>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Pack" align="center" width="150">
+                                <el-table-column label="Content" align="center" show-overflow-tooltip>
                                     <template slot-scope="scope">
-                                        {{ getPackLabel(scope.row.packId) }}
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Content Pack" align="center" width="180">
-                                    <template slot-scope="scope">
-                                        <span v-if="scope.row.contentPackName" class="content-pack-badge">
-                                            {{ scope.row.contentPackName }}
-                                        </span>
-                                        <span v-else class="text-muted">-</span>
-                                    </template>
-                                </el-table-column>
-                                <el-table-column label="Q&A Pack" align="center" width="180">
-                                    <template slot-scope="scope">
-                                        <span v-if="scope.row.questionPackName" class="qa-pack-badge">
-                                            {{ scope.row.questionPackName }}
-                                        </span>
+                                        <span v-if="scope.row.questionPackName">{{ scope.row.questionPackName }}</span>
+                                        <span v-else-if="scope.row.contentPackName">{{ scope.row.contentPackName }}</span>
                                         <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
@@ -965,6 +966,12 @@ export default {
             if (!id) return '-';
             const cp = this.contentPacksDropdown.find(cp => cp.id === id);
             return cp ? cp.name : `#${id}`;
+        },
+
+        getQuestionPackLabel(id) {
+            if (!id) return '-';
+            const qp = this.questionPacksDropdown.find(qp => qp.id === id);
+            return qp ? qp.name : `#${id}`;
         },
 
         // ==================== QUESTIONS ====================
