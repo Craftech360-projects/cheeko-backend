@@ -27,10 +27,6 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-try:
-    from livekit.plugins import aws  # noqa: F401 - must register on main thread
-except ImportError:
-    pass
 
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
@@ -105,12 +101,6 @@ async def entrypoint(ctx: JobContext):
     api_keys = yaml_config.get('api_keys', {})
     if 'google' in api_keys and not os.getenv('GOOGLE_API_KEY'):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
-
-    # Load AWS credentials from config.yaml if not in env
-    if api_keys.get('aws_access_key_id') and not os.getenv('AWS_ACCESS_KEY_ID'):
-        os.environ['AWS_ACCESS_KEY_ID'] = api_keys['aws_access_key_id']
-    if api_keys.get('aws_secret_access_key') and not os.getenv('AWS_SECRET_ACCESS_KEY'):
-        os.environ['AWS_SECRET_ACCESS_KEY'] = api_keys['aws_secret_access_key']
 
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
@@ -205,11 +195,19 @@ async def entrypoint(ctx: JobContext):
             agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
         )
 
+    # Start protected game session (must be after quota_manager.initialize())
+    game_session_allowed = True
+    if not quota_manager.is_unbound:
+        game_session_allowed, game_session_reason = await quota_manager.start_game_session(
+            agent_type="math_tutor", session_id=room_name
+        )
+        logger.info(f"[QUOTA] Game session check: allowed={game_session_allowed}, reason={game_session_reason}")
+
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
-    # Create Realtime model (Gemini or AWS Nova Sonic based on REALTIME_PROVIDER)
+    # Create Gemini Realtime model
     from src.utils.realtime_factory import create_realtime_model
-    realtime_model, audio_sample_rate = create_realtime_model(instructions=agent_prompt)
+    realtime_model, audio_sample_rate, _ = create_realtime_model(instructions=agent_prompt)
 
     session = AgentSession(llm=realtime_model, tools=GAME_TOOLS, userdata={"device_mac": device_mac or ""})
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game + memory tools")
@@ -240,18 +238,21 @@ async def entrypoint(ctx: JobContext):
     # DEBUG: Track user speech and function calls
     # ============================================================================
 
-    @session.on("user_speech_committed")
-    def on_user_speech(msg):
+    @session.on("user_input_transcribed")
+    def on_user_speech(ev):
         """Log what the user said (transcription)"""
-        text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
-        logger.info(f"🎤 USER SAID: '{text}'")
+        if not ev.is_final:
+            return
+        logger.info(f"🎤 USER SAID: '{ev.transcript}'")
 
     # ============================================================================
     # QUOTA: Track per-turn usage and enforce limits
     # ============================================================================
-    @session.on("user_speech_committed")
-    def on_user_speech_quota(msg):
-        """Consume a question from quota on each user speech turn"""
+    @session.on("user_input_transcribed")
+    def on_user_speech_quota(ev):
+        """Consume a question from quota on each final user speech turn"""
+        if not ev.is_final:
+            return
         async def _check_quota():
             try:
                 allowed, remaining = await quota_manager.consume_question()
@@ -332,9 +333,11 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"[WATCHDOG] Error in watchdog timer: {e}")
 
-    @session.on("user_speech_committed")
-    def on_user_speech_watchdog(msg):
-        """Start watchdog timer when user speaks"""
+    @session.on("user_input_transcribed")
+    def on_user_speech_watchdog(ev):
+        """Start watchdog timer when user finishes speaking"""
+        if not ev.is_final:
+            return
         nonlocal _watchdog_task, _watchdog_waiting, _watchdog_recovery_attempts
         _cancel_watchdog()
         _watchdog_waiting = True
@@ -342,28 +345,22 @@ async def entrypoint(ctx: JobContext):
         _watchdog_task = asyncio.create_task(_watchdog_timer())
         logger.debug("[WATCHDOG] Timer started (user spoke)")
 
-    @session.on("agent_speech_committed")
-    def on_agent_speech_watchdog(msg):
-        """Cancel watchdog when agent responds"""
-        nonlocal _watchdog_recovery_attempts
-        _cancel_watchdog()
-        _watchdog_recovery_attempts = 0
-        logger.debug("[WATCHDOG] Timer cancelled (agent responded)")
-
     @session.on("agent_state_changed")
     def on_state_for_watchdog(ev):
         """Cancel watchdog when agent starts speaking"""
+        nonlocal _watchdog_recovery_attempts
         new_state = getattr(ev, 'new_state', None)
         new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
         if new_state_str == 'speaking':
             _cancel_watchdog()
+            _watchdog_recovery_attempts = 0
             logger.debug("[WATCHDOG] Timer cancelled (agent speaking)")
 
-    @session.on("function_calls_started")
-    def on_function_calls_watchdog(ev):
-        """Cancel watchdog when a tool call starts (not a silent failure)"""
+    @session.on("function_tools_executed")
+    def on_function_tools_watchdog(ev):
+        """Cancel watchdog when tools execute (not a silent failure)"""
         _cancel_watchdog()
-        logger.debug("[WATCHDOG] Timer cancelled (function call in progress)")
+        logger.debug("[WATCHDOG] Timer cancelled (function tools executed)")
 
     logger.info(f"[WATCHDOG] Enabled ({WATCHDOG_TIMEOUT_SECONDS}s timeout, max {MAX_WATCHDOG_RECOVERIES} recoveries)")
 
@@ -464,38 +461,24 @@ async def entrypoint(ctx: JobContext):
         else:
             cancel_idle_timer()
 
-    @session.on("user_speech_committed")
-    def on_user_speech_idle(msg):
-        """Reset idle timer when user speaks"""
+    @session.on("user_input_transcribed")
+    def on_user_speech_idle(ev):
+        """Reset idle timer when user finishes speaking"""
+        if not ev.is_final:
+            return
         nonlocal waiting_for_user_response
         cancel_idle_timer()
         reset_reminder_count()
         waiting_for_user_response = False
 
-    @session.on("agent_speech_committed")
-    def on_agent_speech_idle(msg):
-        """Safety net: clear waiting flag if agent_speech_committed fires"""
+    @session.on("function_tools_executed")
+    def on_function_tools_idle(ev):
+        """Reset idle state when tools execute (definitive proof of user interaction)"""
         nonlocal waiting_for_user_response
-        if waiting_for_user_response:
-            waiting_for_user_response = False
-
-    @session.on("function_calls_started")
-    def on_function_calls_idle_start(ev):
-        """Log and reset idle state when function call starts"""
-        nonlocal waiting_for_user_response
-        logger.info(f"🔧 FUNCTION CALL STARTED: {ev}")
-        # Function call = definitive proof of user interaction, always reset
+        logger.info(f"🔧 FUNCTION TOOLS EXECUTED: {len(ev.function_calls)} call(s)")
         waiting_for_user_response = False
         reset_reminder_count()
         cancel_idle_timer()
-
-    @session.on("function_calls_finished")
-    def on_function_calls_idle_finish(ev):
-        """Log and reset idle state when function call finishes"""
-        nonlocal waiting_for_user_response
-        logger.info(f"✅ FUNCTION CALL FINISHED: {ev}")
-        waiting_for_user_response = False
-        reset_reminder_count()
 
     logger.info(f"[IDLE] Enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
 
@@ -584,6 +567,17 @@ async def entrypoint(ctx: JobContext):
                 logger.warning("Game analytics was cancelled but should complete")
             except Exception as e:
                 logger.warning(f"Failed to send game analytics: {e}")
+
+            # End protected game session
+            try:
+                if quota_manager.in_game_session:
+                    game_status = "completed" if assistant.math_game_state.streak >= 5 else "abandoned"
+                    await asyncio.wait_for(
+                        asyncio.shield(quota_manager.end_game_session(game_status)),
+                        timeout=5.0
+                    )
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+                logger.warning(f"Game session end issue: {e}")
 
             # Extract and send chat history
             try:
@@ -724,16 +718,17 @@ async def entrypoint(ctx: JobContext):
     ctx.add_shutdown_callback(cleanup_room_and_session)
 
     # ============================================================================
-    # QUOTA GATE: Block session if quota exhausted before connecting
+    # QUOTA GATE: Block session if game session was denied (quota exhausted or active session)
     # ============================================================================
-    if quota_manager.is_exhausted:
-        logger.warning(f"[QUOTA] Exhausted for {device_mac} - blocking session")
+    if not game_session_allowed:
+        logger.warning(f"[QUOTA] Game session denied for {device_mac} - blocking session")
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
         participant = await ctx.wait_for_participant()
         temp_session = AgentSession(llm=realtime_model, tools=[], userdata={"device_mac": device_mac or ""})
         await temp_session.start(room=ctx.room, agent=assistant)
         try:
-            await temp_session.say(quota_manager.get_limit_message())
+            denied_msg = quota_manager.get_game_session_denied_message()
+            await temp_session.generate_reply(instructions=f"Say exactly this to the child: '{denied_msg}'")
             await asyncio.sleep(6)
         except Exception as e:
             logger.error(f"[QUOTA] Error saying limit message: {e}")

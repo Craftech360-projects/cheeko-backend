@@ -29,11 +29,7 @@ from livekit.agents import (
     # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
 from livekit import rtc, api
-from livekit.plugins import elevenlabs
-try:
-    from livekit.plugins import aws  # noqa: F401 - must register on main thread
-except ImportError:
-    pass
+from livekit.plugins import groq as groq_plugin
 import io
 from pydub import AudioSegment
 
@@ -226,12 +222,6 @@ async def entrypoint(ctx: JobContext):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
         logger.info("Loaded GOOGLE_API_KEY from config.yaml")
 
-    # Load AWS credentials from config.yaml if not in env
-    if api_keys.get('aws_access_key_id') and not os.getenv('AWS_ACCESS_KEY_ID'):
-        os.environ['AWS_ACCESS_KEY_ID'] = api_keys['aws_access_key_id']
-    if api_keys.get('aws_secret_access_key') and not os.getenv('AWS_SECRET_ACCESS_KEY'):
-        os.environ['AWS_SECRET_ACCESS_KEY'] = api_keys['aws_secret_access_key']
-
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
 
@@ -379,29 +369,29 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Realtime model (Gemini or AWS Nova Sonic based on REALTIME_PROVIDER)
+    # Create Gemini Realtime model
     from src.utils.realtime_factory import create_realtime_model
-    realtime_model, audio_sample_rate = create_realtime_model(
+    realtime_model, audio_sample_rate, provider_tools = create_realtime_model(
         instructions=agent_prompt,
         enable_google_search=True,
     )
 
-    # Create ElevenLabs TTS for session.say() with pre-synthesized audio
+    # Create Groq TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
-    elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "ecp3DWciuUyW7BYM7II1")
-    elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
-    logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
+    groq_tts = groq_plugin.TTS(model="canopylabs/orpheus-v1-english", voice="autumn")
+    logger.info("Groq TTS created (model=canopylabs/orpheus-v1-english, voice=autumn)")
 
-    # Create AgentSession with mode switching tools, OpenClaw tools, memory tools, and TTS for session.say()
-    # Note: Google Search is passed to RealtimeModel as a provider tool, not here
+    # Create AgentSession with all tools (agent tools + provider tools like GoogleSearch)
+    # Provider tools (e.g. GoogleSearch) are now passed via AgentSession in SDK v1.4+
     # userdata must be passed in constructor (v1.3+ raises ValueError if set after creation)
+    all_tools = ALL_AGENT_TOOLS + provider_tools
     session = AgentSession(
         llm=realtime_model,
-        tts=elevenlabs_tts,
-        tools=ALL_AGENT_TOOLS,
+        tts=groq_tts,
+        tools=all_tools,
         userdata={"device_mac": device_mac or ""},
     )
-    logger.info(f"AgentSession created with {len(ALL_AGENT_TOOLS)} tools (mode switching + OpenClaw + memory) + ElevenLabs TTS")
+    logger.info(f"AgentSession created with {len(all_tools)} tools ({len(ALL_AGENT_TOOLS)} agent + {len(provider_tools)} provider) + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
@@ -431,12 +421,14 @@ async def entrypoint(ctx: JobContext):
     memory_injection_in_progress = False
     last_memory_injection_time = 0
 
-    @session.on("user_speech_committed")
-    def on_user_speech(msg):
+    @session.on("user_input_transcribed")
+    def on_user_speech(ev):
         """Log what the user said and inject memory context if relevant"""
+        if not ev.is_final or _quota_session_ending:
+            return
         nonlocal memory_injection_in_progress, last_memory_injection_time
 
-        text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
+        text = ev.transcript
         logger.info(f"🎤 USER SAID: '{text}'")
 
         # Skip memory injection if one is already in progress or happened recently
@@ -498,33 +490,46 @@ async def entrypoint(ctx: JobContext):
         finally:
             memory_injection_in_progress = False
 
-    @session.on("function_calls_started")
-    def on_function_calls_started(ev):
-        """Log when function calls are initiated"""
-        logger.info(f"🔧 FUNCTION CALL STARTED: {ev}")
-
-    @session.on("function_calls_finished")
-    def on_function_calls_finished(ev):
-        """Log when function calls complete"""
-        logger.info(f"✅ FUNCTION CALL FINISHED: {ev}")
+    @session.on("function_tools_executed")
+    def on_function_tools_executed(ev):
+        """Log when function tools are executed"""
+        logger.info(f"🔧 FUNCTION TOOLS EXECUTED: {len(ev.function_calls)} call(s)")
 
     logger.info("📊 Debug logging for speech and function calls enabled")
 
     # ============================================================================
     # QUOTA: Track per-turn usage and enforce limits
     # ============================================================================
-    @session.on("user_speech_committed")
-    def on_user_speech_quota(msg):
-        """Consume a question from quota on each user speech turn"""
+    _quota_session_ending = False  # Flag to block further interaction after exhaustion
+
+    @session.on("user_input_transcribed")
+    def on_user_speech_quota(ev):
+        """Consume a question from quota on each final user speech turn"""
+        if not ev.is_final or _quota_session_ending:
+            return
         async def _check_quota():
+            nonlocal _quota_session_ending
             try:
                 allowed, remaining = await quota_manager.consume_question()
                 if not allowed:
+                    _quota_session_ending = True
                     logger.warning(f"[QUOTA] Exhausted mid-session for {device_mac}")
-                    await session.generate_reply(
-                        instructions="Say exactly: '" + quota_manager.get_limit_message() + "'"
-                    )
-                    await asyncio.sleep(6)
+                    limit_msg = quota_manager.get_limit_message()
+                    try:
+                        logger.info(f"[QUOTA] Saying limit message via generate_reply")
+                        await session.generate_reply(
+                            instructions=f"Say exactly this to the child: '{limit_msg}'"
+                        )
+                        # Wait for Gemini to finish speaking
+                        await asyncio.sleep(10)
+                    except Exception as e:
+                        logger.error(f"[QUOTA] generate_reply failed: {e}")
+                    # Close session gracefully before deleting room
+                    try:
+                        await session.aclose()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(1)
                     await delete_livekit_room(room_name)
                 elif quota_manager.should_warn_low_quota():
                     logger.info(f"[QUOTA] Low quota warning: {remaining} remaining")
@@ -596,9 +601,11 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"[WATCHDOG] Error in watchdog timer: {e}")
 
-    @session.on("user_speech_committed")
-    def on_user_speech_watchdog(msg):
-        """Start watchdog timer when user speaks"""
+    @session.on("user_input_transcribed")
+    def on_user_speech_watchdog(ev):
+        """Start watchdog timer when user finishes speaking"""
+        if not ev.is_final or _quota_session_ending:
+            return
         nonlocal _watchdog_task, _watchdog_waiting, _watchdog_recovery_attempts
         _cancel_watchdog()
         _watchdog_waiting = True
@@ -606,28 +613,22 @@ async def entrypoint(ctx: JobContext):
         _watchdog_task = asyncio.create_task(_watchdog_timer())
         logger.debug("[WATCHDOG] Timer started (user spoke)")
 
-    @session.on("agent_speech_committed")
-    def on_agent_speech_watchdog(msg):
-        """Cancel watchdog when agent responds"""
-        nonlocal _watchdog_recovery_attempts
-        _cancel_watchdog()
-        _watchdog_recovery_attempts = 0
-        logger.debug("[WATCHDOG] Timer cancelled (agent responded)")
-
     @session.on("agent_state_changed")
     def on_state_for_watchdog(ev):
         """Cancel watchdog when agent starts speaking"""
+        nonlocal _watchdog_recovery_attempts
         new_state = getattr(ev, 'new_state', None)
         new_state_str = new_state.name.lower() if hasattr(new_state, 'name') else str(new_state)
         if new_state_str == 'speaking':
             _cancel_watchdog()
+            _watchdog_recovery_attempts = 0
             logger.debug("[WATCHDOG] Timer cancelled (agent speaking)")
 
-    @session.on("function_calls_started")
-    def on_function_calls_watchdog(ev):
-        """Cancel watchdog when a tool call starts (not a silent failure)"""
+    @session.on("function_tools_executed")
+    def on_function_tools_watchdog(ev):
+        """Cancel watchdog when tools execute (not a silent failure)"""
         _cancel_watchdog()
-        logger.debug("[WATCHDOG] Timer cancelled (function call in progress)")
+        logger.debug("[WATCHDOG] Timer cancelled (function tools executed)")
 
     logger.info(f"[WATCHDOG] Enabled ({WATCHDOG_TIMEOUT_SECONDS}s timeout, max {MAX_WATCHDOG_RECOVERIES} recoveries)")
 
@@ -712,7 +713,7 @@ async def entrypoint(ctx: JobContext):
 
         # Detect user interaction: agent starts speaking from listening state
         # and we're NOT delivering a reminder. This means the user triggered it.
-        # (Gemini Realtime may skip 'thinking' and not emit user_speech_committed)
+        # (Realtime models go directly listening->speaking without 'thinking')
         if new_state_str == 'speaking' and old_state_str == 'listening' and not _delivering_reminder:
             if waiting_for_user_response or reminder_count > 0:
                 logger.info(f"[IDLE] User interaction detected (listening->speaking, not reminder) - resetting idle state")
@@ -734,35 +735,23 @@ async def entrypoint(ctx: JobContext):
         else:
             cancel_idle_timer()
 
-    @session.on("user_speech_committed")
-    def on_user_speech_idle(msg):
-        """Reset idle timer when user speaks"""
+    @session.on("user_input_transcribed")
+    def on_user_speech_idle(ev):
+        """Reset idle timer when user finishes speaking"""
+        if not ev.is_final:
+            return
         nonlocal waiting_for_user_response
         cancel_idle_timer()
         reset_reminder_count()
         waiting_for_user_response = False
 
-    @session.on("agent_speech_committed")
-    def on_agent_speech_idle(msg):
-        """Safety net: clear waiting flag if agent_speech_committed fires (may not fire for Gemini Realtime)"""
-        nonlocal waiting_for_user_response
-        if waiting_for_user_response:
-            waiting_for_user_response = False
-
-    @session.on("function_calls_started")
-    def on_function_calls_idle_start(ev):
-        """Reset idle state when function call starts (definitive proof of user interaction)"""
+    @session.on("function_tools_executed")
+    def on_function_tools_idle(ev):
+        """Reset idle state when tools execute (definitive proof of user interaction)"""
         nonlocal waiting_for_user_response
         waiting_for_user_response = False
         reset_reminder_count()
         cancel_idle_timer()
-
-    @session.on("function_calls_finished")
-    def on_function_calls_idle_finish(ev):
-        """Reset idle state after tool execution"""
-        nonlocal waiting_for_user_response
-        waiting_for_user_response = False
-        reset_reminder_count()
 
     logger.info(f"[IDLE] Enabled ({IDLE_TIMEOUT_SECONDS}s timeout, max {MAX_REMINDERS} reminders)")
 
@@ -956,6 +945,52 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"👋 [END-PROMPT] Error in goodbye handler: {e}")
 
+    async def _deliver_quota_limit_and_disconnect():
+        """Deliver quota limit message using the same session.generate_reply() as greeting,
+        then disconnect. Called from ready_for_greeting when quota is exhausted."""
+        nonlocal _quota_session_ending
+        _quota_session_ending = True
+        limit_msg = quota_manager.get_limit_message()
+
+        # Try to import RealtimeError, fallback to Exception if not available
+        try:
+            from livekit.agents.llm.realtime import RealtimeError
+        except ImportError:
+            RealtimeError = Exception
+
+        # Retry logic matching play_greeting() pattern in base_assistant.py
+        max_retries = 3
+        delivered = False
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"[QUOTA] Delivering limit message via session.generate_reply() (attempt {attempt + 1}/{max_retries})")
+                await session.generate_reply(
+                    instructions=f"Say exactly this to the child: '{limit_msg}'"
+                )
+                delivered = True
+                logger.info("[QUOTA] Limit message delivered successfully")
+                # Wait for Gemini to finish speaking
+                await asyncio.sleep(10)
+                break  # Success, exit retry loop
+            except RealtimeError as e:
+                logger.warning(f"[QUOTA] Attempt {attempt + 1} encountered RealtimeError: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(0.5)
+            except Exception as e:
+                logger.warning(f"[QUOTA] Attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1.0)
+                else:
+                    logger.error(f"[QUOTA] Failed to deliver limit message after {max_retries} attempts")
+
+        # Clean up
+        try:
+            await session.aclose()
+        except Exception:
+            pass
+        await asyncio.sleep(1)
+        await delete_livekit_room(room_name)
+
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):
         """Handle data channel messages from gateway"""
@@ -965,6 +1000,10 @@ async def entrypoint(ctx: JobContext):
 
             # Handle greeting trigger from device
             if msg_type == 'ready_for_greeting':
+                if quota_manager.is_exhausted:
+                    logger.info("🎤 Device ready but quota exhausted - delivering limit message")
+                    asyncio.create_task(_deliver_quota_limit_and_disconnect())
+                    return
                 logger.info("🎤 Device ready for greeting - triggering greeting now")
                 asyncio.create_task(assistant.play_greeting())
                 return
@@ -1174,23 +1213,6 @@ async def entrypoint(ctx: JobContext):
     #         logger.error(f"Error in skip: {e}")
 
     ctx.add_shutdown_callback(cleanup_room_and_session)
-
-    # ============================================================================
-    # QUOTA GATE: Block session if quota exhausted before connecting
-    # ============================================================================
-    if quota_manager.is_exhausted:
-        logger.warning(f"[QUOTA] Exhausted for {device_mac} - blocking session")
-        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-        participant = await ctx.wait_for_participant()
-        temp_session = AgentSession(llm=realtime_model, tools=[], userdata={"device_mac": device_mac or ""})
-        await temp_session.start(room=ctx.room, agent=assistant)
-        try:
-            await temp_session.say(quota_manager.get_limit_message())
-            await asyncio.sleep(6)
-        except Exception as e:
-            logger.error(f"[QUOTA] Error saying limit message: {e}")
-        await delete_livekit_room(room_name)
-        return
 
     # Connect and start session
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
