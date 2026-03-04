@@ -1,8 +1,7 @@
 """
 Realtime Model Factory
 
-Creates the appropriate RealtimeModel (Google Gemini or AWS Nova Sonic)
-based on the REALTIME_PROVIDER config setting.
+Creates a Google Gemini RealtimeModel for voice interaction.
 
 Usage:
     from src.utils.realtime_factory import create_realtime_model
@@ -19,49 +18,34 @@ logger = logging.getLogger(__name__)
 
 
 def create_realtime_model(instructions: str, enable_google_search: bool = False):
-    """Create a RealtimeModel based on REALTIME_PROVIDER config.
+    """Create a Gemini RealtimeModel.
 
     Args:
         instructions: The system prompt / instructions for the model.
-        enable_google_search: Whether to enable Google Search tool (Gemini only).
+        enable_google_search: Whether to enable Google Search tool.
 
     Returns:
-        Tuple of (realtime_model, audio_sample_rate).
+        Tuple of (realtime_model, audio_sample_rate, provider_tools).
+        provider_tools is a list of provider-specific tools (e.g. GoogleSearch)
+        that must be added to AgentSession(tools=...).
     """
+    from livekit.plugins import google
+
     realtime_config = ConfigLoader.get_gemini_realtime_config()
-    provider = realtime_config.get('provider', 'gemini')
+    provider_tools = []
 
-    if provider == 'aws':
-        from livekit.plugins import aws
-        aws_config = ConfigLoader.get_aws_realtime_config()
+    model_kwargs = {
+        'model': realtime_config['model'],
+        'voice': realtime_config['voice'],
+        'instructions': instructions,
+        'temperature': realtime_config['temperature'],
+        'modalities': ["AUDIO"],
+    }
 
-        model = aws.realtime.RealtimeModel.with_nova_sonic_2(
-            voice=aws_config['voice'],
-            tool_choice=aws_config['tool_choice'],
-            max_tokens=aws_config['max_tokens'],
-            region=aws_config['region'],
-            turn_detection=aws_config['turn_detection'],
-        )
-        sample_rate = 24000  # Nova Sonic requires 24kHz
-        logger.info(f"AWS Nova Sonic model created (voice={aws_config['voice']}, region={aws_config['region']})")
-        return model, sample_rate
+    if enable_google_search:
+        provider_tools.append(google.tools.GoogleSearch())
 
-    else:  # default: gemini
-        from livekit.plugins import google
-
-        model_kwargs = {
-            'model': realtime_config['model'],
-            'voice': realtime_config['voice'],
-            'instructions': instructions,
-            'temperature': realtime_config['temperature'],
-            'modalities': ["AUDIO"],
-        }
-
-        if enable_google_search:
-            google_search_tool = google.tools.GoogleSearch()
-            model_kwargs['_gemini_tools'] = [google_search_tool]
-
-        model = google.realtime.RealtimeModel(**model_kwargs)
-        sample_rate = 16000
-        logger.info(f"Gemini Realtime model created (model={realtime_config['model']}, voice={realtime_config['voice']})")
-        return model, sample_rate
+    model = google.realtime.RealtimeModel(**model_kwargs)
+    sample_rate = 16000
+    logger.info(f"Gemini Realtime model created (model={realtime_config['model']}, voice={realtime_config['voice']})")
+    return model, sample_rate, provider_tools

@@ -25,6 +25,15 @@ const getCurrentMonthKey = () => {
 };
 
 /**
+ * Validate a month key string is in YYYY-MM format
+ * @param {string} key
+ * @returns {boolean}
+ */
+const isValidMonthKey = (key) => {
+  return typeof key === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(key);
+};
+
+/**
  * Resolve MAC address to user_id via ai_device table
  * @param {string} mac - Device MAC address
  * @returns {Promise<number|null>} user_id or null
@@ -116,12 +125,13 @@ const getQuotaByMac = async (mac) => {
 
 /**
  * Increment question count for a device by MAC address
- * Upserts the current month row and increments questions_used by 1
+ * Uses atomic RPC function to avoid race conditions and UNIQUE constraint violations
  *
  * @param {string} mac - Device MAC address
+ * @param {string} [clientMonthKey] - Optional month key from client (for month-rollover handling)
  * @returns {Promise<Object>} Updated quota status
  */
-const incrementByMac = async (mac) => {
+const incrementByMac = async (mac, clientMonthKey) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
   const userId = await resolveUserIdFromMac(mac);
@@ -136,73 +146,40 @@ const incrementByMac = async (mac) => {
     };
   }
 
-  const monthKey = getCurrentMonthKey();
+  // Use client month key if valid, otherwise server's current month
+  const monthKey = (clientMonthKey && isValidMonthKey(clientMonthKey))
+    ? clientMonthKey
+    : getCurrentMonthKey();
   const freeLimit = await getFreeMonthlyLimit();
 
-  // Upsert: insert if not exists, increment if exists
-  const { data: existing } = await supabaseAdmin
-    .from('user_question_quota')
-    .select('id, questions_used, extra_purchased')
-    .eq('user_id', userId)
-    .eq('month_key', monthKey)
+  // Atomic upsert via RPC - no race window, no UNIQUE violation
+  const { data, error } = await supabaseAdmin
+    .rpc('increment_question_quota', {
+      p_user_id: userId,
+      p_month_key: monthKey,
+      p_free_limit: freeLimit
+    })
     .single();
 
-  let questionsUsed;
-  let extraPurchased;
-
-  if (existing) {
-    // Update existing row
-    questionsUsed = existing.questions_used + 1;
-    extraPurchased = existing.extra_purchased;
-
-    const { error } = await supabaseAdmin
-      .from('user_question_quota')
-      .update({
-        questions_used: questionsUsed,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', existing.id);
-
-    if (error) {
-      logger.error('Failed to increment quota:', error);
-      throw new Error('Failed to increment quota');
-    }
-  } else {
-    // Insert new row for this month
-    questionsUsed = 1;
-    extraPurchased = 0;
-
-    const { error } = await supabaseAdmin
-      .from('user_question_quota')
-      .insert({
-        user_id: userId,
-        month_key: monthKey,
-        questions_used: 1,
-        extra_purchased: 0
-      });
-
-    if (error) {
-      logger.error('Failed to create quota row:', error);
-      throw new Error('Failed to create quota row');
-    }
+  if (error) {
+    logger.error('Failed to increment quota via RPC:', error);
+    throw new Error('Failed to increment quota');
   }
 
-  const totalAllowed = freeLimit + extraPurchased;
-  const remaining = totalAllowed - questionsUsed;
-
   return {
-    remaining: Math.max(0, remaining),
-    isExhausted: remaining <= 0,
-    questionsUsed,
+    remaining: data.out_remaining,
+    isExhausted: data.out_is_exhausted,
+    questionsUsed: data.out_questions_used,
     freeLimit,
-    extraPurchased,
+    extraPurchased: data.out_extra_purchased,
     userId,
-    monthKey
+    monthKey: data.out_month_key
   };
 };
 
 /**
  * Grant extra questions to a user for the current month
+ * Uses atomic RPC function to avoid race conditions
  *
  * @param {number} userId - User ID
  * @param {number} amount - Number of extra questions to grant
@@ -218,62 +195,29 @@ const grantExtra = async (userId, amount) => {
   const monthKey = getCurrentMonthKey();
   const freeLimit = await getFreeMonthlyLimit();
 
-  const { data: existing } = await supabaseAdmin
-    .from('user_question_quota')
-    .select('id, questions_used, extra_purchased')
-    .eq('user_id', userId)
-    .eq('month_key', monthKey)
+  // Atomic upsert via RPC - no race window, no UNIQUE violation
+  const { data, error } = await supabaseAdmin
+    .rpc('grant_extra_quota', {
+      p_user_id: userId,
+      p_month_key: monthKey,
+      p_amount: amount,
+      p_free_limit: freeLimit
+    })
     .single();
 
-  let questionsUsed;
-  let extraPurchased;
-
-  if (existing) {
-    extraPurchased = existing.extra_purchased + amount;
-    questionsUsed = existing.questions_used;
-
-    const { error } = await supabaseAdmin
-      .from('user_question_quota')
-      .update({
-        extra_purchased: extraPurchased,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', existing.id);
-
-    if (error) {
-      logger.error('Failed to grant extra quota:', error);
-      throw new Error('Failed to grant extra quota');
-    }
-  } else {
-    extraPurchased = amount;
-    questionsUsed = 0;
-
-    const { error } = await supabaseAdmin
-      .from('user_question_quota')
-      .insert({
-        user_id: userId,
-        month_key: monthKey,
-        questions_used: 0,
-        extra_purchased: amount
-      });
-
-    if (error) {
-      logger.error('Failed to create quota with extras:', error);
-      throw new Error('Failed to create quota with extras');
-    }
+  if (error) {
+    logger.error('Failed to grant extra quota via RPC:', error);
+    throw new Error('Failed to grant extra quota');
   }
 
-  const totalAllowed = freeLimit + extraPurchased;
-  const remaining = totalAllowed - questionsUsed;
-
   return {
-    remaining: Math.max(0, remaining),
-    isExhausted: remaining <= 0,
-    questionsUsed,
+    remaining: data.out_remaining,
+    isExhausted: data.out_is_exhausted,
+    questionsUsed: data.out_questions_used,
     freeLimit,
-    extraPurchased,
+    extraPurchased: data.out_extra_purchased,
     userId,
-    monthKey
+    monthKey: data.out_month_key
   };
 };
 
@@ -376,6 +320,96 @@ const listQuotas = async ({ page = 1, limit = 20, monthKey } = {}) => {
   };
 };
 
+/**
+ * Start a protected game session for a device
+ * Atomically checks quota, stale sessions, and inserts new session via RPC.
+ *
+ * @param {string} mac - Device MAC address
+ * @param {string} agentType - Game type ('math_tutor', 'riddle_solver', 'word_ladder')
+ * @param {string} sessionId - Room name for correlation
+ * @returns {Promise<Object>} { allowed, reason, sessionId, remaining, isExhausted }
+ */
+const startGameSession = async (mac, agentType, sessionId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const userId = await resolveUserIdFromMac(mac);
+
+  // Unbound devices (no user_id) get unlimited - allow immediately
+  if (!userId) {
+    return {
+      allowed: true,
+      reason: 'unbound_device',
+      sessionId,
+      remaining: -1,
+      isExhausted: false
+    };
+  }
+
+  const freeLimit = await getFreeMonthlyLimit();
+
+  const { data, error } = await supabaseAdmin
+    .rpc('start_game_session', {
+      p_user_id: userId,
+      p_mac_address: normalizeMacAddress(mac),
+      p_agent_type: agentType,
+      p_session_id: sessionId,
+      p_free_limit: freeLimit,
+      p_stale_minutes: 60
+    })
+    .single();
+
+  if (error) {
+    logger.error('Failed to start game session via RPC:', error);
+    throw new Error('Failed to start game session');
+  }
+
+  return {
+    allowed: data.allowed,
+    reason: data.reason,
+    sessionId: data.session_id,
+    remaining: data.remaining != null ? data.remaining : -1,
+    isExhausted: data.allowed === false && data.reason === 'quota_exhausted'
+  };
+};
+
+/**
+ * End a protected game session
+ *
+ * @param {string} mac - Device MAC address
+ * @param {string} agentType - Game type
+ * @param {string} sessionId - Room name for correlation
+ * @param {string} status - Final status ('completed' or 'abandoned')
+ * @returns {Promise<Object>} { ended: true/false }
+ */
+const endGameSession = async (mac, agentType, sessionId, status = 'completed') => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const validStatuses = ['completed', 'abandoned'];
+  if (!validStatuses.includes(status)) {
+    throw new Error(`Invalid status: ${status}. Must be one of: ${validStatuses.join(', ')}`);
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from('game_session_protection')
+    .update({
+      status,
+      ended_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq('session_id', sessionId)
+    .eq('status', 'active')
+    .select('id');
+
+  if (error) {
+    logger.error('Failed to end game session:', error);
+    throw new Error('Failed to end game session');
+  }
+
+  return {
+    ended: data && data.length > 0
+  };
+};
+
 module.exports = {
   getQuotaByMac,
   incrementByMac,
@@ -383,5 +417,8 @@ module.exports = {
   getQuotaForUser,
   listQuotas,
   getCurrentMonthKey,
-  getFreeMonthlyLimit
+  getFreeMonthlyLimit,
+  isValidMonthKey,
+  startGameSession,
+  endGameSession
 };

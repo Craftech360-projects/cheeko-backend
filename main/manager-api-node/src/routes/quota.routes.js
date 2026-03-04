@@ -79,16 +79,139 @@ router.post('/increment/:mac',
   requireServiceKey,
   asyncHandler(async (req, res) => {
     const { mac } = req.params;
+    const { month_key: monthKey } = req.body || {};
 
     if (!mac) {
       return badRequest(res, 'MAC address is required');
     }
 
     try {
-      const quota = await quotaService.incrementByMac(mac);
+      const quota = await quotaService.incrementByMac(mac, monthKey);
       success(res, quota, 'Quota incremented');
     } catch (error) {
       logger.error('Error incrementing quota:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==================== GAME SESSION PROTECTION ENDPOINTS (Service Key) ====================
+
+/**
+ * @swagger
+ * /quota/game-session/start/{mac}:
+ *   post:
+ *     tags: [Quota]
+ *     summary: Start a protected game session
+ *     description: Atomically checks quota and registers a game session. Active games can finish even if quota expires mid-game.
+ *     security:
+ *       - serviceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - agent_type
+ *               - session_id
+ *             properties:
+ *               agent_type:
+ *                 type: string
+ *                 enum: [math_tutor, riddle_solver, word_ladder]
+ *               session_id:
+ *                 type: string
+ *                 description: Room name for correlation
+ *     responses:
+ *       200:
+ *         description: Game session start result
+ */
+router.post('/game-session/start/:mac',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { agent_type, session_id } = req.body || {};
+
+    if (!mac) {
+      return badRequest(res, 'MAC address is required');
+    }
+    if (!agent_type || !session_id) {
+      return badRequest(res, 'agent_type and session_id are required');
+    }
+
+    try {
+      const result = await quotaService.startGameSession(mac, agent_type, session_id);
+      success(res, result, result.allowed ? 'Game session started' : 'Game session denied');
+    } catch (error) {
+      logger.error('Error starting game session:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /quota/game-session/end/{mac}:
+ *   post:
+ *     tags: [Quota]
+ *     summary: End a protected game session
+ *     description: Marks an active game session as completed or abandoned.
+ *     security:
+ *       - serviceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - agent_type
+ *               - session_id
+ *             properties:
+ *               agent_type:
+ *                 type: string
+ *               session_id:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *                 enum: [completed, abandoned]
+ *                 default: completed
+ *     responses:
+ *       200:
+ *         description: Game session end result
+ */
+router.post('/game-session/end/:mac',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { agent_type, session_id, status = 'completed' } = req.body || {};
+
+    if (!mac) {
+      return badRequest(res, 'MAC address is required');
+    }
+    if (!agent_type || !session_id) {
+      return badRequest(res, 'agent_type and session_id are required');
+    }
+
+    try {
+      const result = await quotaService.endGameSession(mac, agent_type, session_id, status);
+      success(res, result, result.ended ? 'Game session ended' : 'No active session found');
+    } catch (error) {
+      logger.error('Error ending game session:', error);
       badRequest(res, error.message);
     }
   })
