@@ -1,0 +1,5 @@
+node_modules/
+reports/runs/
+reports/test-history.json
+suites/
+.env
