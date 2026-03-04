@@ -12,6 +12,7 @@ const contentService = require('../services/content.service');
 const uploadService = require('../services/upload.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireFlexAuth } = require('../middleware/flexAuth');
 const { success, badRequest, notFound } = require('../utils/response');
 
 // Configure multer for memory storage (files go to buffer, then to S3)
@@ -101,7 +102,7 @@ const upload = multer({
  *                       type: integer
  */
 router.get('/library',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { page, limit, contentType, category, isActive } = req.query;
     const result = await contentService.getLibraryList({
@@ -162,7 +163,7 @@ router.get('/library',
  *         description: Invalid search query
  */
 router.get('/library/search',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { q, page, limit, contentType, category } = req.query;
 
@@ -220,7 +221,7 @@ router.get('/library/search',
  *                         type: integer
  */
 router.get('/library/categories',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { contentType } = req.query;
     const categories = await contentService.getLibraryCategories(contentType);
@@ -263,7 +264,7 @@ router.get('/library/categories',
  *                         type: integer
  */
 router.get('/library/statistics',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const stats = await contentService.getLibraryStatistics();
     success(res, stats);
@@ -381,7 +382,7 @@ router.post('/library/batch',
  *         description: Content not found
  */
 router.get('/library/:id',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const content = await contentService.getLibraryById(req.params.id);
     if (!content) {
@@ -1212,7 +1213,7 @@ router.post('/textbook/create',
  *                         type: object
  */
 router.get('/playlist/music/:deviceId',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const playlist = await contentService.getPlaylist(req.params.deviceId, 'music');
     success(res, playlist);
@@ -1257,7 +1258,7 @@ router.get('/playlist/music/:deviceId',
  *         description: Invalid input or content already in playlist
  */
 router.post('/playlist/music/:deviceId',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { contentId, position } = req.body;
 
@@ -1315,7 +1316,7 @@ router.post('/playlist/music/:deviceId',
  *         description: Item removed from playlist
  */
 router.delete('/playlist/music/:deviceId/:contentId',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     try {
       await contentService.removeFromPlaylist(
@@ -1351,7 +1352,7 @@ router.delete('/playlist/music/:deviceId/:contentId',
  *         description: Playlist cleared
  */
 router.delete('/playlist/music/:deviceId/clear',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     try {
       await contentService.clearPlaylist(req.params.deviceId, 'music');
@@ -1399,7 +1400,7 @@ router.delete('/playlist/music/:deviceId/clear',
  *         description: Invalid input
  */
 router.put('/playlist/music/:deviceId/reorder',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { itemIds } = req.body;
 
@@ -1504,7 +1505,7 @@ router.put('/playlist/music/:deviceId/move',
  *         description: Story playlist
  */
 router.get('/playlist/story/:deviceId',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const playlist = await contentService.getPlaylist(req.params.deviceId, 'story');
     success(res, playlist);
@@ -1549,7 +1550,7 @@ router.get('/playlist/story/:deviceId',
  *         description: Invalid input or content already in playlist
  */
 router.post('/playlist/story/:deviceId',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { contentId, position } = req.body;
 
@@ -1607,7 +1608,7 @@ router.post('/playlist/story/:deviceId',
  *         description: Item removed from playlist
  */
 router.delete('/playlist/story/:deviceId/:contentId',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     try {
       await contentService.removeFromPlaylist(
@@ -1643,7 +1644,7 @@ router.delete('/playlist/story/:deviceId/:contentId',
  *         description: Playlist cleared
  */
 router.delete('/playlist/story/:deviceId/clear',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     try {
       await contentService.clearPlaylist(req.params.deviceId, 'story');
@@ -1691,7 +1692,7 @@ router.delete('/playlist/story/:deviceId/clear',
  *         description: Invalid input
  */
 router.put('/playlist/story/:deviceId/reorder',
-  requireAuth,
+  requireFlexAuth,
   asyncHandler(async (req, res) => {
     const { itemIds } = req.body;
 

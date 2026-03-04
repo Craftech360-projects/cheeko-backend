@@ -684,12 +684,35 @@ const searchContent = async (query, { page = 1, limit = 20 } = {}) => {
 // ==================== PLAYLIST METHODS ====================
 
 /**
+ * Resolve a device identifier to a UUID.
+ * Accepts either a UUID directly or a MAC address (e.g. "28:56:2F:06:A5:E4").
+ * @param {string} deviceIdOrMac
+ * @returns {Promise<string>} UUID
+ */
+const resolveDeviceId = async (deviceIdOrMac) => {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (uuidRegex.test(deviceIdOrMac)) {
+    return deviceIdOrMac;
+  }
+  // Treat as MAC address — look up the ai_device record
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: deviceIdOrMac },
+    select: { id: true }
+  });
+  if (!device) {
+    throw new Error(`Device not found: ${deviceIdOrMac}`);
+  }
+  return device.id;
+};
+
+/**
  * Get playlist for a device
- * @param {string} deviceId - Device ID
+ * @param {string} deviceId - Device ID or MAC address
  * @param {string} playlistType - 'music' or 'story'
  * @returns {Promise<Array>} Playlist items with content details
  */
 const getPlaylist = async (deviceId, playlistType) => {
+  deviceId = await resolveDeviceId(deviceId);
   const playlistItems = playlistType === 'music'
     ? await prisma.music_playlist.findMany({
       where: { device_id: deviceId },
@@ -773,6 +796,7 @@ const getPlaylist = async (deviceId, playlistType) => {
  * @returns {Promise<Object>} Created playlist item
  */
 const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
+  deviceId = await resolveDeviceId(deviceId);
   // If position not specified, get the max position and add 1
   if (position === undefined || position === null) {
     let maxItem;
@@ -863,6 +887,7 @@ const addToPlaylist = async (deviceId, contentId, playlistType, position) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const removeFromPlaylist = async (deviceId, contentId, playlistType) => {
+  deviceId = await resolveDeviceId(deviceId);
   try {
     if (playlistType === 'music') {
       await prisma.music_playlist.deleteMany({
@@ -907,6 +932,7 @@ const removePlaylistItem = async (playlistItemId, playlistType) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const clearPlaylist = async (deviceId, playlistType) => {
+  deviceId = await resolveDeviceId(deviceId);
   try {
     if (playlistType === 'music') {
       await prisma.music_playlist.deleteMany({ where: { device_id: deviceId } });
@@ -926,6 +952,7 @@ const clearPlaylist = async (deviceId, playlistType) => {
  * @param {string} playlistType - 'music' or 'story'
  */
 const reorderPlaylist = async (deviceId, itemIds, playlistType) => {
+  deviceId = await resolveDeviceId(deviceId);
   // Update positions based on array order
   for (let index = 0; index < itemIds.length; index++) {
     const id = itemIds[index];
