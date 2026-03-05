@@ -1,5 +1,5 @@
 # Include package.json (override parent *.json ignore)
 !package.json
 
-# Include config/mqtt.json for Railway deployment (override parent *.json ignore)
-!config/mqtt.json
+# Ignore config/mqtt.json (contains local MQTT credentials)
+config/mqtt.json
