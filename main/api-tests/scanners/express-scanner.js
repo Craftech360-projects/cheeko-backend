@@ -102,14 +102,27 @@ function parseInlineRoutes(indexFilePath) {
   return routes;
 }
 
+// Priority order: most restrictive middleware wins when multiple are present.
+// e.g. requireAuth + requireSuperAdmin → superAdmin (not bearer)
+const AUTH_PRIORITY = [
+  'requireSuperAdmin',
+  'requireAdmin',
+  'requireServiceKey',
+  'requireDualAuth',
+  'requireFlexAuth',
+  'requireFirebaseAuth',
+  'requireAuth',
+  'optionalAuth'
+];
+
 /**
- * Extract auth middleware from the code between route path and handler
+ * Extract auth middleware from the code between route path and handler.
+ * Returns the most restrictive auth type found.
  */
 function extractMiddleware(codeFragment) {
-  // Look for known middleware names before asyncHandler or arrow function
-  for (const [mwName, authType] of Object.entries(AUTH_MIDDLEWARE_MAP)) {
+  for (const mwName of AUTH_PRIORITY) {
     if (codeFragment.includes(mwName)) {
-      return authType;
+      return AUTH_MIDDLEWARE_MAP[mwName];
     }
   }
   return null;

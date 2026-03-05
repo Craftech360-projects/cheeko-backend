@@ -87,6 +87,14 @@ const verifyCustomToken = async (token) => {
  * Attaches user to req.user if authenticated
  */
 const requireAuth = async (req, res, next) => {
+  // Accept Service Key as god mode (same as requireAdmin)
+  const serviceKey = extractServiceKey(req);
+  if (serviceKey && SERVICE_SECRET_KEY && serviceKey === SERVICE_SECRET_KEY) {
+    req.isServiceAuth = true;
+    req.user = { id: 0, role: 'admin', super_admin: 1, email: 'service@internal' };
+    return next();
+  }
+
   const token = extractBearerToken(req);
 
   if (!token) {

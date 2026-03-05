@@ -8,6 +8,8 @@
 const fs = require('fs');
 const path = require('path');
 const httpGenerator = require('./http-test-generator');
+const mqttGenerator = require('./mqtt-test-generator');
+const fastapiGenerator = require('./fastapi-test-generator');
 
 /**
  * Generate all test files from discovered routes
@@ -39,8 +41,13 @@ function generateAll(routes, envName) {
     const serviceDir = path.join(suitesDir, group.service);
     fs.mkdirSync(serviceDir, { recursive: true });
 
-    // Generate test file
-    const content = httpGenerator.generateTestFile(group.category, group.routes, envName);
+    // Generate test file — use mqtt generator for mqtt-gateway service
+    const GENERATORS = {
+      'mqtt-gateway': mqttGenerator,
+      'livekit-server': fastapiGenerator
+    };
+    const generator = GENERATORS[group.service] || httpGenerator;
+    const content = generator.generateTestFile(group.category, group.routes, envName);
 
     // Count tests (rough: count 'test(' occurrences)
     const testCount = (content.match(/test\(/g) || []).length;

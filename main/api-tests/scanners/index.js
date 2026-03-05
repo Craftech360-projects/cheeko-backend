@@ -5,6 +5,8 @@
  */
 
 const expressScanner = require('./express-scanner');
+const mqttScanner = require('./mqtt-scanner');
+const fastapiScanner = require('./fastapi-scanner');
 const config = require('../test.config');
 
 /**
@@ -38,8 +40,31 @@ function scanAll(options = {}) {
     }
   }
 
-  // TODO: Add mqtt-scanner when building mqtt-gateway tests
-  // TODO: Add fastapi-scanner when building livekit-server tests
+  // Scan mqtt-gateway
+  if (!options.service || options.service === 'mqtt-gateway') {
+    try {
+      const routes = mqttScanner.scan(config.sources.mqttGateway, {
+        category: options.category
+      });
+
+      results.routes = results.routes.concat(routes);
+    } catch (err) {
+      console.error('MQTT scanner error:', err.message);
+    }
+  }
+
+  // Scan livekit-server (media_api.py)
+  if (!options.service || options.service === 'livekit-server') {
+    try {
+      const routes = fastapiScanner.scan(config.sources.mediaApi, {
+        category: options.category
+      });
+
+      results.routes = results.routes.concat(routes);
+    } catch (err) {
+      console.error('FastAPI scanner error:', err.message);
+    }
+  }
 
   // Compute summary
   results.summary.total = results.routes.length;

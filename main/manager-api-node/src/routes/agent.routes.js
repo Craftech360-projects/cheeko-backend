@@ -9,7 +9,7 @@ const express = require('express');
 const router = express.Router();
 const agentService = require('../services/agent.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
@@ -142,16 +142,8 @@ router.get('/list',
  */
 router.get('/all',
   requireAuth,
+  requireSuperAdmin,
   asyncHandler(async (req, res) => {
-    // Check if user is super admin
-    if (req.user.super_admin !== 1) {
-      return res.status(403).json({
-        code: 403,
-        msg: 'Not authorized - admin only',
-        data: null
-      });
-    }
-
     const params = {
       page: req.query.page,
       limit: req.query.limit

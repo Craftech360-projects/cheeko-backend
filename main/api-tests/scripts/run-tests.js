@@ -75,9 +75,17 @@ console.log('');
 const jestBin = path.resolve(__dirname, '..', 'node_modules', '.bin', 'jest');
 const jestConfig = path.resolve(__dirname, '..', 'jest.config.js');
 
+// Build Jest command — filter to specific service directory if --service is set
+let jestCmd = `"${jestBin}" --config="${jestConfig}"`;
+if (args.service) {
+  // Map service names to suite directory names
+  const serviceDir = args.service; // e.g. 'mqtt-gateway', 'manager-api', 'livekit-server'
+  jestCmd += ` --testPathPattern="suites/${serviceDir}/"`;
+}
+
 try {
   execSync(
-    `"${jestBin}" --config="${jestConfig}"`,
+    jestCmd,
     {
       cwd: path.resolve(__dirname, '..'),
       stdio: 'inherit',

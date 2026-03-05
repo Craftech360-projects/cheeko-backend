@@ -9,11 +9,13 @@
  *   - Public: 200 happy path, envelope check, response time
  */
 
-// Placeholder values for parameterized paths
+// Placeholder values for parameterized paths.
+// IMPORTANT: Values must NOT contain colons — colons look like :param
+// placeholders and get mangled by the fallback regex.
 const PARAM_DEFAULTS = {
   ':id': 'test-id-000',
-  ':mac': 'AA:BB:CC:DD:EE:FF',
-  ':macAddress': 'AA:BB:CC:DD:EE:FF',
+  ':mac': '28562F06A5E4',
+  ':macAddress': '28562F06A5E4',
   ':agentId': 'test-agent-000',
   ':deviceId': 'test-device-000',
   ':deviceCode': 'TEST000',
@@ -27,19 +29,27 @@ const PARAM_DEFAULTS = {
   ':templateId': 'test-template-000',
   ':modeType': 'math',
   ':room_name': 'test-room',
-  ':key': 'test-key'
+  ':key': 'test-key',
+  ':age': '8',
+  ':packCode': 'TEST-PACK-001',
+  ':questionId': 'test-question-000'
 };
 
 /**
- * Replace :param placeholders in a path with test values
+ * Replace :param placeholders in a path with test values.
+ * Fallback regex runs FIRST so known params always win,
+ * and no value containing colons can be re-processed.
  */
 function resolvePath(routePath) {
   let resolved = routePath;
-  for (const [param, value] of Object.entries(PARAM_DEFAULTS)) {
-    resolved = resolved.replace(param, value);
-  }
-  // Catch any remaining :params not in our map
-  resolved = resolved.replace(/:(\w+)/g, 'test-$1');
+  // Step 1: Replace unknown :params with safe fallback (no colons)
+  resolved = resolved.replace(/:(\w+)/g, (match) => {
+    // If we have a known value, use it; otherwise use safe fallback
+    if (PARAM_DEFAULTS[match]) {
+      return PARAM_DEFAULTS[match];
+    }
+    return 'test-' + match.substring(1);
+  });
   return resolved;
 }
 
@@ -76,14 +86,15 @@ function generateTestFile(category, routes, envName) {
   lines.push(``);
 
   for (const route of routes) {
-    const testPath = resolvePath(route.path);
+    const testPath = resolvePath(route.fullPath.replace(/^\/toy/, ''));
     const describeLabel = `${route.method} ${route.fullPath}`;
-    const isProtected = route.auth !== 'none' && route.auth !== 'optional' && route.auth !== 'flexAuth';
+    // flexAuth REQUIRES a token (Firebase or JWT) — it is protected, not public
+    const isProtected = route.auth !== 'none' && route.auth !== 'optional';
     const isFlexAuth = route.auth === 'flexAuth';
 
     lines.push(`describe('${esc(describeLabel)}', () => {`);
 
-    // Test 1: Protected → 401 without auth (skip for flexAuth — it allows unauthenticated access)
+    // Test 1: Protected → 401 without auth
     if (isProtected) {
       lines.push(`  test('[${route.method} ${esc(route.fullPath)}] should return 401 without auth', async () => {`);
       lines.push(`    const res = await client.request('${route.method}', '${esc(testPath)}');`);
@@ -92,21 +103,8 @@ function generateTestFile(category, routes, envName) {
       lines.push(``);
     }
 
-    // Test 1b: FlexAuth → should be accessible without auth (returns a valid response, not 401)
-    if (isFlexAuth) {
-      lines.push(`  test('[${route.method} ${esc(route.fullPath)}] should be accessible without auth (flexAuth)', async () => {`);
-      if (route.method === 'POST' || route.method === 'PUT' || route.method === 'PATCH') {
-        lines.push(`    const res = await client.request('${route.method}', '${esc(testPath)}', { body: {} });`);
-      } else {
-        lines.push(`    const res = await client.request('${route.method}', '${esc(testPath)}');`);
-      }
-      lines.push(`    expect([200, 400, 404, 422, 429, 500]).toContain(res.status);`);
-      lines.push(`  });`);
-      lines.push(``);
-    }
-
     // Test 2: Happy path with auth
-    if (isProtected || isFlexAuth) {
+    if (isProtected) {
       lines.push(`  test('[${route.method} ${esc(route.fullPath)}] should not return 401/403 with valid auth', async () => {`);
       lines.push(`    const headers = await getAuthHeaders('${route.auth}', envConfig);`);
 

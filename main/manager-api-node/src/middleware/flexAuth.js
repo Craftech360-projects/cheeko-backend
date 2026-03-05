@@ -23,6 +23,15 @@ const { unauthorized } = require('../utils/response');
  * For Firebase tokens also sets req.firebaseUser and req.mobileUser.
  */
 const requireFlexAuth = async (req, res, next) => {
+    // Accept Service Key as god mode (same as requireAuth/requireAdmin)
+    const serviceKey = req.headers['x-service-key'];
+    const SERVICE_SECRET_KEY = process.env.SERVICE_SECRET_KEY;
+    if (serviceKey && SERVICE_SECRET_KEY && serviceKey === SERVICE_SECRET_KEY) {
+        req.isServiceAuth = true;
+        req.user = { id: 0, role: 'admin', super_admin: 1, email: 'service@internal' };
+        return next();
+    }
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return unauthorized(res, 'No authorization token provided');

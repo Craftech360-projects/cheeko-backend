@@ -3,3 +3,4 @@ reports/runs/
 reports/test-history.json
 suites/
 .env
+.auth-token.json
