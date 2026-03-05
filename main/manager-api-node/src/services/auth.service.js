@@ -104,7 +104,12 @@ const login = async (username, password) => {
   const expireSeconds = 3600 * 24 * 7; // 7 days in seconds
   expireDate.setSeconds(expireDate.getSeconds() + expireSeconds);
 
-  // Store token
+  // Delete any existing tokens for this user, then store new token
+  await supabaseAdmin
+    .from('sys_user_token')
+    .delete()
+    .eq('user_id', user.id);
+
   const { error: tokenError } = await supabaseAdmin
     .from('sys_user_token')
     .insert({

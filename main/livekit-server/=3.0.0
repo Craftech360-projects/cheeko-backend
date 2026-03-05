@@ -1,0 +1,8 @@
+Collecting jiwer
+  Downloading jiwer-4.0.0-py3-none-any.whl (23 kB)
+Requirement already satisfied: click>=8.1.8 in ./env/lib/python3.10/site-packages (from jiwer) (8.1.8)
+Collecting rapidfuzz>=3.9.7
+  Downloading rapidfuzz-3.14.3-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (3.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.2/3.2 MB 32.0 MB/s eta 0:00:00
+Installing collected packages: rapidfuzz, jiwer
+Successfully installed jiwer-4.0.0 rapidfuzz-3.14.3

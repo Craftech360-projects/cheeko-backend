@@ -33,6 +33,8 @@ from livekit.plugins import google, elevenlabs
 import io
 from pydub import AudioSegment
 
+from livekit.agents import metrics as lk_metrics, MetricsCollectedEvent
+
 from src.config.config_loader import ConfigLoader
 from src.services.elevenlabs_tts_service import get_elevenlabs_service
 from src.services.animal_audio_service import AnimalAudioService
@@ -82,6 +84,115 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
+
+# Gemini metrics output file
+GEMINI_METRICS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+GEMINI_METRICS_FILE = os.path.join(GEMINI_METRICS_DIR, "gemini_metrics.jsonl")
+
+
+class GeminiMetricsCollector:
+    """Collects per-turn latency metrics for Gemini Realtime model.
+    Writes to gemini_metrics.jsonl for comparison with Sarvam pipeline."""
+
+    def __init__(self, room_name, device_mac, model, voice):
+        self.room_name = room_name
+        self.device_mac = device_mac
+        self.model = model
+        self.voice = voice
+        self.session_start = time.time()
+        self.turn_count = 0
+        self.ttfts = []
+        self.durations = []
+        self._thinking_started_at = None
+        self.pipeline_response_latencies = []
+        os.makedirs(GEMINI_METRICS_DIR, exist_ok=True)
+
+    def on_agent_state_changed(self, old_state, new_state):
+        now = time.time()
+        if new_state == "thinking":
+            self._thinking_started_at = now
+        elif old_state == "thinking" and new_state == "speaking":
+            if self._thinking_started_at:
+                response_lat = now - self._thinking_started_at
+                self.pipeline_response_latencies.append(response_lat)
+                logger.info(f"[GEMINI-METRICS] Response latency: {response_lat:.3f}s")
+                self._write({
+                    "timestamp": now,
+                    "type": "pipeline_turn",
+                    "room": self.room_name,
+                    "response_latency": round(response_lat, 4),
+                    "model": self.model,
+                    "voice": self.voice,
+                })
+
+    def collect(self, ev: MetricsCollectedEvent):
+        m = ev.metrics
+        ts = time.time()
+        # RealtimeModelMetrics has ttft, duration, tokens_per_second, input_tokens, output_tokens
+        ttft = getattr(m, 'ttft', None)
+        duration = getattr(m, 'duration', None)
+        tps = getattr(m, 'tokens_per_second', None)
+        input_tokens = getattr(m, 'input_tokens', 0)
+        output_tokens = getattr(m, 'output_tokens', 0)
+
+        if ttft and ttft > 0:
+            self.ttfts.append(ttft)
+            self.turn_count += 1
+
+        if duration and duration > 0:
+            self.durations.append(duration)
+
+        logger.info(f"[GEMINI-METRICS] TTFT={ttft:.3f}s duration={duration:.3f}s tps={tps:.1f} in={input_tokens} out={output_tokens}")
+        self._write({
+            "timestamp": ts,
+            "type": "realtime",
+            "room": self.room_name,
+            "model": self.model,
+            "voice": self.voice,
+            "ttft": round(ttft, 4) if ttft else 0,
+            "duration": round(duration, 4) if duration else 0,
+            "tokens_per_second": round(tps, 2) if tps else 0,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        })
+
+    def _percentile(self, data, p):
+        if not data:
+            return 0.0
+        s = sorted(data)
+        idx = min(int(len(s) * p / 100), len(s) - 1)
+        return round(s[idx], 4)
+
+    def _write(self, record):
+        try:
+            with open(GEMINI_METRICS_FILE, "a") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to write gemini metrics: {e}")
+
+    def log_session_summary(self):
+        duration = time.time() - self.session_start
+        summary = {
+            "timestamp": time.time(),
+            "type": "session_summary",
+            "session_duration": round(duration, 2),
+            "room": self.room_name,
+            "turn_count": self.turn_count,
+            "model": self.model,
+            "voice": self.voice,
+            "ttft_avg": round(sum(self.ttfts) / len(self.ttfts), 4) if self.ttfts else 0,
+            "ttft_p50": self._percentile(self.ttfts, 50),
+            "ttft_p95": self._percentile(self.ttfts, 95),
+            "response_latency_avg": round(sum(self.pipeline_response_latencies) / len(self.pipeline_response_latencies), 4) if self.pipeline_response_latencies else 0,
+            "response_latency_p50": self._percentile(self.pipeline_response_latencies, 50),
+        }
+        logger.info("=" * 50)
+        logger.info(f"[GEMINI-SESSION] {self.turn_count} turns | {round(duration, 1)}s")
+        logger.info(f"[GEMINI-SESSION] TTFT: avg={summary['ttft_avg']}s p50={summary['ttft_p50']}s p95={summary['ttft_p95']}s")
+        logger.info(f"[GEMINI-SESSION] Response: avg={summary['response_latency_avg']}s p50={summary['response_latency_p50']}s")
+        logger.info("=" * 50)
+        self._write(summary)
+
 
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
@@ -347,8 +458,7 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model with Google Search enabled
-    # GoogleSearch is a provider tool that must be passed to RealtimeModel, not AgentSession
+    # Create Gemini Realtime model
     google_search_tool = google.tools.GoogleSearch()
     realtime_model = google.realtime.RealtimeModel(
         model=gemini_model,
@@ -356,9 +466,8 @@ async def entrypoint(ctx: JobContext):
         instructions=agent_prompt,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
-        _gemini_tools=[google_search_tool],
     )
-    logger.info("Gemini Realtime model created with Google Search enabled")
+    logger.info("Gemini Realtime model created")
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
@@ -366,10 +475,10 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching tools and TTS for session.say()
-    # Note: Google Search is passed to RealtimeModel as a provider tool, not here
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=MODE_SWITCH_TOOLS)
-    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + ElevenLabs TTS")
+    # Create AgentSession with mode switching tools, Google Search, and TTS for session.say()
+    all_tools = MODE_SWITCH_TOOLS + [google_search_tool]
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=all_tools)
+    logger.info(f"AgentSession created with {len(all_tools)} tools (mode switching + Google Search) + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
@@ -383,6 +492,26 @@ async def entrypoint(ctx: JobContext):
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
     logger.info("State management registered")
+
+    # ============================================================================
+    # GEMINI LATENCY METRICS (for comparison with Sarvam pipeline)
+    # ============================================================================
+    gemini_metrics = GeminiMetricsCollector(
+        room_name=room_name, device_mac=device_mac,
+        model=gemini_model, voice=gemini_voice,
+    )
+
+    @session.on("metrics_collected")
+    def _on_gemini_metrics(ev: MetricsCollectedEvent):
+        gemini_metrics.collect(ev)
+
+    @session.on("agent_state_changed")
+    def _on_gemini_state(ev):
+        old_state = str(getattr(ev, 'old_state', ''))
+        new_state = str(getattr(ev, 'new_state', ''))
+        gemini_metrics.on_agent_state_changed(old_state, new_state)
+
+    logger.info(f"Gemini metrics → {GEMINI_METRICS_FILE}")
 
     # ============================================================================
     # USAGE TRACKING: Capture prompt_tokens, completion_tokens, TTFT per response
@@ -546,6 +675,12 @@ async def entrypoint(ctx: JobContext):
 
         try:
             logger.info("Initiating cleanup")
+
+            # Log Gemini latency session summary
+            try:
+                gemini_metrics.log_session_summary()
+            except Exception as e:
+                logger.warning(f"Failed to log gemini metrics summary: {e}")
 
             # Log usage summary before closing session (sends to Manager API)
             try:

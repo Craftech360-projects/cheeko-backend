@@ -15,7 +15,7 @@
     "@voicehype/audify-plus": "^2.0.9",
     "axios": "^1.6.0",
     "debug": "^4.4.1",
-    "dotenv": "^17.2.1",
+    "dotenv": "^17.3.1",
     "json5": "^2.2.3",
     "livekit-server-sdk": "^2.13.3",
     "mqtt": "^5.14.1",

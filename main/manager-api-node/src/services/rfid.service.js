@@ -72,6 +72,7 @@ const transformCardMappingToCamelCase = (card) => {
   return {
     id: card.id ? Number(card.id) : null,
     rfidUid: card.rfid_uid,
+    cardType: card.card_type || 'content',
     questionId: card.question_id ? Number(card.question_id) : null,
     questionPackId: card.question_pack_id ? Number(card.question_pack_id) : null,
     packCode: card.pack_code,
@@ -346,6 +347,13 @@ const lookupCardByUid = async (rfidUid) => {
     .single();
 
   if (error && error.code !== 'PGRST116') logger.error('[RFID-LOOKUP] Card lookup DB error:', error);
+
+  // AI card: return minimal response immediately (no content/question lookups needed)
+  if (mapping && mapping.card_type === 'ai') {
+    logger.info(`[RFID-LOOKUP] AI card detected for uid=${normalizedUid}, returning card_ai`);
+    return { rfid_uid: normalizedUid, cardType: 'ai' };
+  }
+
   if (!mapping) {
     logger.info(`[RFID-LOOKUP] No individual card mapping for uid=${normalizedUid}, checking bulk-range/series...`);
 
@@ -596,6 +604,7 @@ const createCardMapping = async (data, _userId) => {
 
   const insertData = {
     rfid_uid: normalizedUid,
+    card_type: data.cardType || 'content',
     question_id: data.questionId || null,
     question_pack_id: data.questionPackId || null,
     pack_code: data.packCode || null,
@@ -641,6 +650,7 @@ const updateCardMapping = async (data, _userId) => {
   if (data.rfidUid !== undefined) {
     updateData.rfid_uid = data.rfidUid.toUpperCase().replace(/[:-]/g, '');
   }
+  if (data.cardType !== undefined) updateData.card_type = data.cardType;
   if (data.questionId !== undefined) updateData.question_id = data.questionId;
   if (data.questionPackId !== undefined) updateData.question_pack_id = data.questionPackId;
   if (data.packCode !== undefined) updateData.pack_code = data.packCode;

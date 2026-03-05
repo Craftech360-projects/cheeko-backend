@@ -1,0 +1,159 @@
+# WER (Word Error Rate) Reference Sentences
+# These are test sentences to be spoken in order during a WER test session.
+# The system will compare Sarvam STT output against these references.
+#
+# Instructions:
+#   1. Set wer_test_mode: true in config.yaml under sarvam.stt
+#   2. Restart the agent
+#   3. Speak each sentence clearly, one at a time, in order
+#   4. After the session, run: python scripts/analyze_sarvam_metrics.py --wer
+#
+# Categories:
+#   - simple: Short, clear sentences (warm-up)
+#   - conversational: Natural speech patterns
+#   - numbers: Sentences with numbers/counting
+#   - code_mixed: Mixed language (Indian language + English)
+#   - complex: Long or complex sentences
+#   - children: Sentences a child (3-16) would say
+
+kn-IN:
+  simple:
+    - "ನಮಸ್ಕಾರ ಚೀಕೋ"
+    - "ನನ್ನ ಹೆಸರು ಅರ್ಜುನ್"
+    - "ನಾನು ಚೆನ್ನಾಗಿದ್ದೇನೆ"
+    - "ನೀನು ಹೇಗಿದ್ದೀಯ"
+    - "ಇವತ್ತು ಶಾಲೆ ಇಲ್ಲ"
+  conversational:
+    - "ನನಗೆ ಒಂದು ಕಥೆ ಹೇಳು"
+    - "ನಿನ್ನೆ ನಾನು ಪಾರ್ಕ್ ಗೆ ಹೋಗಿದ್ದೆ"
+    - "ನನ್ನ ಅಮ್ಮ ಅಡುಗೆ ಮಾಡ್ತಾ ಇದ್ದಾರೆ"
+    - "ನನಗೆ ಐಸ್ ಕ್ರೀಮ್ ತುಂಬಾ ಇಷ್ಟ"
+    - "ನಾಳೆ ನಮ್ಮ ಹುಟ್ಟುಹಬ್ಬ ಇದೆ"
+  numbers:
+    - "ನನಗೆ ಎಂಟು ವರ್ಷ"
+    - "ಒಂದು ಎರಡು ಮೂರು ನಾಲ್ಕು ಐದು"
+    - "ನಾನು ಐದನೇ ತರಗತಿಯಲ್ಲಿ ಓದುತ್ತಿದ್ದೇನೆ"
+    - "ಇಪ್ಪತ್ತು ಹತ್ತು ಸೇರಿಸಿದರೆ ಮೂವತ್ತು"
+  code_mixed:
+    - "ನನಗೆ math ತುಂಬಾ ಇಷ್ಟ"
+    - "school ನಲ್ಲಿ ನಾವು cricket ಆಡ್ತೀವಿ"
+    - "ನನ್ನ favourite colour blue"
+    - "ನಾನು YouTube ನಲ್ಲಿ videos ನೋಡ್ತೀನಿ"
+  complex:
+    - "ನಮ್ಮ ಮನೆಯ ಹತ್ತಿರ ಒಂದು ದೊಡ್ಡ ಮರ ಇದೆ ಅಲ್ಲಿ ಪಕ್ಷಿಗಳು ಬರುತ್ತವೆ"
+    - "ರಾಮಾಯಣದಲ್ಲಿ ಹನುಮಂತ ಸಮುದ್ರ ದಾಟಿ ಲಂಕೆಗೆ ಹೋದನು"
+    - "ಬೆಂಗಳೂರಿನಲ್ಲಿ ಮಳೆ ಬರ್ತಾ ಇದೆ ಛತ್ರಿ ತೆಗೆದುಕೊಂಡು ಹೋಗು"
+  children:
+    - "ಚೀಕೋ ನನಗೊಂದು ಹಾಡು ಹೇಳು"
+    - "ನನಗೆ ಹಸಿವಾಗ್ತಿದೆ"
+    - "ನಾನು ಆಟ ಆಡ್ಬೇಕು"
+    - "ನಿನಗೆ ಏನು ಗೊತ್ತು"
+
+hi-IN:
+  simple:
+    - "नमस्ते चीको"
+    - "मेरा नाम अर्जुन है"
+    - "मैं ठीक हूँ"
+    - "तुम कैसे हो"
+    - "आज स्कूल नहीं है"
+  conversational:
+    - "मुझे एक कहानी सुनाओ"
+    - "कल मैं पार्क गया था"
+    - "मेरी माँ खाना बना रही हैं"
+    - "मुझे आइसक्रीम बहुत पसंद है"
+    - "कल हमारा जन्मदिन है"
+  numbers:
+    - "मेरी उम्र आठ साल है"
+    - "एक दो तीन चार पाँच"
+    - "मैं पाँचवीं कक्षा में पढ़ता हूँ"
+    - "बीस और दस जोड़ो तो तीस"
+  code_mixed:
+    - "मुझे math बहुत पसंद है"
+    - "school में हम cricket खेलते हैं"
+    - "मेरा favourite colour blue है"
+    - "मैं YouTube पर videos देखता हूँ"
+  complex:
+    - "हमारे घर के पास एक बड़ा पेड़ है जहाँ पक्षी आते हैं"
+    - "रामायण में हनुमान ने समुद्र पार करके लंका पहुँचे"
+    - "दिल्ली में बहुत गर्मी है छाता लेकर जाओ"
+  children:
+    - "चीको मुझे एक गाना सुनाओ"
+    - "मुझे भूख लगी है"
+    - "मैं खेलना चाहता हूँ"
+    - "तुम्हें क्या पता"
+
+ta-IN:
+  simple:
+    - "வணக்கம் சீக்கோ"
+    - "என் பெயர் அர்ஜுன்"
+    - "நான் நல்லா இருக்கேன்"
+    - "நீ எப்படி இருக்க"
+    - "இன்னிக்கு பள்ளிக்கூடம் இல்ல"
+  conversational:
+    - "எனக்கு ஒரு கதை சொல்லு"
+    - "நேத்து நான் பார்க் போனேன்"
+    - "என் அம்மா சமையல் பண்றாங்க"
+    - "எனக்கு ஐஸ் க்ரீம் ரொம்ப பிடிக்கும்"
+    - "நாளைக்கு எங்க பிறந்த நாள்"
+  numbers:
+    - "எனக்கு எட்டு வயசு"
+    - "ஒன்னு ரெண்டு மூணு நாலு ஐந்து"
+    - "நான் ஐந்தாவது வகுப்பு படிக்கிறேன்"
+  code_mixed:
+    - "எனக்கு math ரொம்ப பிடிக்கும்"
+    - "school ல நாங்க cricket விளையாடுவோம்"
+    - "என் favourite colour blue"
+  children:
+    - "சீக்கோ எனக்கு ஒரு பாட்டு பாடு"
+    - "எனக்கு பசிக்குது"
+    - "நான் விளையாடணும்"
+
+te-IN:
+  simple:
+    - "నమస్కారం చీకో"
+    - "నా పేరు అర్జున్"
+    - "నేను బాగున్నాను"
+    - "నువ్వు ఎలా ఉన్నావ్"
+    - "ఈరోజు స్కూల్ లేదు"
+  conversational:
+    - "నాకు ఒక కథ చెప్పు"
+    - "నిన్న నేను పార్క్ కి వెళ్ళాను"
+    - "మా అమ్మ వంట చేస్తున్నారు"
+    - "నాకు ఐస్ క్రీమ్ చాలా ఇష్టం"
+    - "రేపు మా పుట్టినరోజు"
+  numbers:
+    - "నాకు ఎనిమిది సంవత్సరాలు"
+    - "ఒకటి రెండు మూడు నాలుగు ఐదు"
+    - "నేను ఐదవ తరగతి చదువుతున్నాను"
+  code_mixed:
+    - "నాకు math చాలా ఇష్టం"
+    - "school లో మేము cricket ఆడతాము"
+    - "నా favourite colour blue"
+  children:
+    - "చీకో నాకు ఒక పాట పాడు"
+    - "నాకు ఆకలి వేస్తుంది"
+    - "నేను ఆడాలి"
+
+en-IN:
+  simple:
+    - "Hello Cheeko"
+    - "My name is Arjun"
+    - "I am doing fine"
+    - "How are you doing"
+    - "There is no school today"
+  conversational:
+    - "Tell me a story please"
+    - "Yesterday I went to the park"
+    - "My mother is cooking food"
+    - "I really like ice cream"
+    - "Tomorrow is my birthday"
+  numbers:
+    - "I am eight years old"
+    - "One two three four five"
+    - "I am studying in fifth standard"
+    - "Twenty plus ten is thirty"
+  children:
+    - "Cheeko sing me a song"
+    - "I am feeling hungry"
+    - "I want to play games"
+    - "What do you know"

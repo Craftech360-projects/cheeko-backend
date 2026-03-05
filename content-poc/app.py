@@ -3,6 +3,8 @@ import os
 import json
 import re
 import time
+import hashlib
+from datetime import datetime
 from dotenv import load_dotenv
 from crewai import Crew, Process
 
@@ -14,6 +16,14 @@ from generators import generate_audio, generate_image, init_clients
 load_dotenv()
 
 st.set_page_config(page_title="Cheeko Content Factory", layout="wide")
+
+def generate_folder_name(topic_text):
+    """Generate a short folder name from topic: first 4 words + short hash."""
+    words = re.sub(r'[^\w\s]', '', topic_text).split()
+    short_name = "_".join(words[:4]) if words else "Untitled"
+    # Add a short hash of the full topic for uniqueness
+    topic_hash = hashlib.md5(topic_text.encode()).hexdigest()[:6]
+    return f"{short_name}_{topic_hash}"
 
 def main():
     st.title("🧸 Cheeko Content Factory")
@@ -84,15 +94,21 @@ def main():
                 if os.path.exists(plan_path):
                     with open(plan_path, "r") as f:
                         st.session_state['raw_result'] = f.read()
-                    # Update active topic
-                    st.session_state['topic'] = current_selection.replace("_", " ")
+                    # Load original topic from topic.txt if available
+                    topic_path = os.path.join(history_dir, "topic.txt")
+                    if os.path.exists(topic_path):
+                        with open(topic_path, "r") as f:
+                            st.session_state['topic'] = f.read().strip()
+                    else:
+                        st.session_state['topic'] = current_selection.replace("_", " ")
+                    # Track the folder name separately
+                    st.session_state['folder_name'] = current_selection
                 else:
                     st.toast("No plan.json found in this folder.", icon="⚠️")
             else:
-                # Optional: Reset only if you want "New" to be blank? 
-                # Or keep the last topic. Let's keep it safe and not auto-clear 
-                # unless we want a fresh start.
-                pass
+                # Clear folder_name so new generation creates a fresh one
+                if 'folder_name' in st.session_state:
+                    del st.session_state['folder_name']
 
         selected_history = st.selectbox(
             "Load Previous Project", 
@@ -126,7 +142,7 @@ def main():
     st.markdown("---")
     
     # Topic Input (bound to session state)
-    topic = st.text_input("Topic", key="topic") # Direct binding to session_state['topic']
+    topic = st.text_area("Topic / Prompt", key="topic", height=100, placeholder="Enter your topic or detailed prompt here...")
     
     col_gen, col_redo = st.columns(2)
     with col_gen:
@@ -153,8 +169,7 @@ def main():
     if st.session_state.confirm_gen:
         st.markdown("---")
         # Calc target dir
-        target_dir_name = topic.replace(" ", "_").strip()
-        if not target_dir_name: target_dir_name = "Untitled_Project"
+        target_dir_name = generate_folder_name(topic)
         target_path = os.path.join("output", target_dir_name)
         
         st.write(f"**Target Folder:** `{target_path}`")
@@ -178,6 +193,11 @@ def main():
         c1, c2 = st.columns([1,2])
         if c1.button(confirm_label, key="confirm_btn"):
             st.session_state.confirm_gen = False
+            st.session_state['folder_name'] = target_dir_name
+            # Save original topic text for later retrieval
+            os.makedirs(target_path, exist_ok=True)
+            with open(os.path.join(target_path, "topic.txt"), "w") as f:
+                f.write(topic)
             start_generation = True
         if c2.button("❌ Cancel", key="cancel_btn"):
             st.session_state.confirm_gen = False
@@ -249,14 +269,8 @@ def main():
                  st.text(raw_text)
 
         if content_data:
-            # Setup Output Directory
-            # CRITICAL FIX: ALWAYS derive directory from current TOPIC. 
-            # If we loaded history, 'topic' was updated to history name.
-            # If user typed new topic, 'topic' is the new topic.
-            # We NEVER rely on the dropdown value directly here, only the active topic variable.
-            
-            dir_name = display_topic.replace(" ", "_").strip()
-            if not dir_name: dir_name = "Untitled_Project"
+            # Use stored folder name if available, otherwise derive from topic
+            dir_name = st.session_state.get('folder_name', generate_folder_name(display_topic))
                 
             output_dir = os.path.join("output", dir_name)
             os.makedirs(output_dir, exist_ok=True)
@@ -397,8 +411,7 @@ def main():
 
     if st.sidebar.button("📤 Upload to Cheeko Cloud"):
         # Determine output dir again
-        dir_name = display_topic.replace(" ", "_").strip()
-        if not dir_name: dir_name = "Untitled_Project"
+        dir_name = st.session_state.get('folder_name', generate_folder_name(display_topic))
         export_dir = os.path.join("output", dir_name)
         
         if not os.path.exists(export_dir):

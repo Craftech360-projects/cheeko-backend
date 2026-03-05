@@ -30,10 +30,14 @@ from livekit.agents import (
 from livekit import rtc, api
 from livekit.plugins import groq, sarvam
 
+from livekit.agents import metrics as lk_metrics, MetricsCollectedEvent
+from livekit.agents.metrics import STTMetrics, TTSMetrics, LLMMetrics
+
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 from src.utils.loki_agent_logger import logger
+from src.utils.helpers import UsageManager
 from src.shared.base_assistant import BaseAssistant
 from src.shared.entrypoint_utils import (
     parse_room_name,
@@ -51,11 +55,192 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MODE_SWITCH_TOOLS = [update_agent_mode]  # COMMENTED OUT - tools disabled for testing
 
+# Sarvam metrics output file
+SARVAM_METRICS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+SARVAM_METRICS_FILE = os.path.join(SARVAM_METRICS_DIR, "sarvam_metrics.jsonl")
+
+
+class SarvamMetricsCollector:
+    """Collects per-turn latency metrics: STT, LLM, TTS individually + combined turn latency.
+    Grouped by model and language."""
+
+    def __init__(self, room_name: str, device_mac: str, stt_model: str, tts_model: str, llm_model: str,
+                 stt_language: str = "", tts_language: str = "", tts_speaker: str = "", tts_pace: float = 1.0):
+        self.room_name = room_name
+        self.device_mac = device_mac
+        self.stt_model = stt_model
+        self.tts_model = tts_model
+        self.llm_model = llm_model
+        self.stt_language = stt_language
+        self.tts_language = tts_language
+        self.tts_speaker = tts_speaker
+        self.tts_pace = tts_pace
+        self.session_start = time.time()
+        self.turn_count = 0
+
+        # LiveKit SDK metrics aggregates
+        self.tts_ttfbs = []
+        self.llm_ttfts = []
+
+        # Pipeline timing using agent_state_changed:
+        #   listening → thinking : user done, STT done, LLM starts
+        #   thinking → speaking  : LLM+TTS done, agent speaks
+        # Only thinking→speaking is meaningful (the wait time user feels)
+        self._thinking_started_at = None
+
+        # Per-session latency aggregates
+        self.pipeline_response_latencies = []  # thinking → speaking (user waits this long)
+
+        os.makedirs(SARVAM_METRICS_DIR, exist_ok=True)
+
+    # --- Pipeline timing (from agent_state_changed) ---
+
+    def on_agent_state_changed(self, old_state: str, new_state: str):
+        now = time.time()
+
+        if new_state == "thinking":
+            # STT done, LLM starts processing
+            self._thinking_started_at = now
+
+        elif old_state == "thinking" and new_state == "speaking":
+            # LLM + TTS TTFB done, agent starts speaking
+            # This is the response latency the user actually feels
+            if self._thinking_started_at:
+                response_lat = now - self._thinking_started_at
+                self.pipeline_response_latencies.append(response_lat)
+                logger.info(f"[METRICS] Response latency (LLM+TTS): {response_lat:.3f}s")
+                self._write({
+                    "timestamp": now,
+                    "type": "pipeline_turn",
+                    "room": self.room_name,
+                    "mac": self.device_mac,
+                    "response_latency": round(response_lat, 4),
+                    "stt_model": self.stt_model,
+                    "tts_model": self.tts_model,
+                    "llm_model": self.llm_model,
+                    "stt_language": self.stt_language,
+                    "tts_language": self.tts_language,
+                    "tts_speaker": self.tts_speaker,
+                })
+
+    def collect(self, ev: MetricsCollectedEvent):
+        """Collect LLM/TTS metrics from session-level event"""
+        m = ev.metrics
+        ts = time.time()
+        base = {
+            "timestamp": ts,
+            "room": self.room_name,
+            "mac": self.device_mac,
+            "stt_language": self.stt_language,
+            "tts_language": self.tts_language,
+            "tts_speaker": self.tts_speaker,
+        }
+
+        if isinstance(m, TTSMetrics):
+            base.update({
+                "type": "tts",
+                "tts_model": self.tts_model,
+                "tts_ttfb": round(m.ttfb, 4),
+                "tts_duration": round(m.duration, 4),
+                "tts_audio_duration": round(m.audio_duration, 4),
+                "tts_characters": m.characters_count,
+            })
+            if m.ttfb > 0:
+                self.tts_ttfbs.append(m.ttfb)
+            logger.info(f"[METRICS] TTS event: ttfb={m.ttfb:.3f}s duration={m.duration:.3f}s")
+            self._write(base)
+
+        elif isinstance(m, LLMMetrics):
+            base.update({
+                "type": "llm",
+                "llm_model": self.llm_model,
+                "llm_ttft": round(m.ttft, 4),
+                "llm_duration": round(m.duration, 4),
+                "llm_tokens_per_sec": round(m.tokens_per_second, 2),
+                "llm_prompt_tokens": m.prompt_tokens,
+                "llm_completion_tokens": m.completion_tokens,
+            })
+            if m.ttft > 0:
+                self.llm_ttfts.append(m.ttft)
+            self.turn_count += 1
+            logger.info(f"[METRICS] LLM event: ttft={m.ttft:.3f}s tps={m.tokens_per_second:.1f}")
+            self._write(base)
+
+    def on_stt_metrics(self, metrics):
+        """Direct STT component metrics (attached to stt.on('metrics_collected'))"""
+        ts = time.time()
+        record = {
+            "timestamp": ts,
+            "type": "stt",
+            "room": self.room_name,
+            "mac": self.device_mac,
+            "stt_model": self.stt_model,
+            "stt_language": self.stt_language,
+            "stt_duration": round(metrics.duration, 4),
+            "stt_audio_duration": round(metrics.audio_duration, 4),
+            "stt_streamed": metrics.streamed,
+            "stt_speech_id": getattr(metrics, 'speech_id', ''),
+            "stt_error": str(getattr(metrics, 'error', '')) if getattr(metrics, 'error', None) else None,
+        }
+        logger.info(f"[METRICS] STT: duration={metrics.duration:.3f}s audio={metrics.audio_duration:.2f}s streamed={metrics.streamed}")
+        self._write(record)
+
+
+    def _write(self, record: dict):
+        try:
+            with open(SARVAM_METRICS_FILE, "a") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception as e:
+            logger.warning(f"Failed to write metrics: {e}")
+
+    def _percentile(self, data: list, p: int) -> float:
+        if not data:
+            return 0.0
+        s = sorted(data)
+        idx = min(int(len(s) * p / 100), len(s) - 1)
+        return round(s[idx], 4)
+
+    def get_session_summary(self) -> dict:
+        duration = time.time() - self.session_start
+        return {
+            "timestamp": time.time(),
+            "type": "session_summary",
+            "session_duration": round(duration, 2),
+            "room": self.room_name,
+            "mac": self.device_mac,
+            "turn_count": self.turn_count,
+            "stt_model": self.stt_model,
+            "tts_model": self.tts_model,
+            "llm_model": self.llm_model,
+            "stt_language": self.stt_language,
+            "tts_language": self.tts_language,
+            "tts_speaker": self.tts_speaker,
+            "tts_ttfb_avg": round(sum(self.tts_ttfbs) / len(self.tts_ttfbs), 4) if self.tts_ttfbs else 0,
+            "tts_ttfb_p50": self._percentile(self.tts_ttfbs, 50),
+            "tts_ttfb_p95": self._percentile(self.tts_ttfbs, 95),
+            "llm_ttft_avg": round(sum(self.llm_ttfts) / len(self.llm_ttfts), 4) if self.llm_ttfts else 0,
+            "llm_ttft_p50": self._percentile(self.llm_ttfts, 50),
+            "llm_ttft_p95": self._percentile(self.llm_ttfts, 95),
+            "response_latency_avg": round(sum(self.pipeline_response_latencies) / len(self.pipeline_response_latencies), 4) if self.pipeline_response_latencies else 0,
+            "response_latency_p50": self._percentile(self.pipeline_response_latencies, 50),
+            "response_latency_p95": self._percentile(self.pipeline_response_latencies, 95),
+        }
+
+    def log_session_summary(self):
+        summary = self.get_session_summary()
+        logger.info("=" * 50)
+        logger.info(f"[SESSION] {summary['turn_count']} turns | {summary['session_duration']}s")
+        logger.info(f"[SESSION] LLM TTFT ({self.llm_model}): avg={summary['llm_ttft_avg']}s p50={summary['llm_ttft_p50']}s p95={summary['llm_ttft_p95']}s")
+        logger.info(f"[SESSION] TTS TTFB ({self.tts_model}): avg={summary['tts_ttfb_avg']}s p50={summary['tts_ttfb_p50']}s p95={summary['tts_ttfb_p95']}s")
+        logger.info(f"[SESSION] Response (LLM+TTS): avg={summary['response_latency_avg']}s p50={summary['response_latency_p50']}s p95={summary['response_latency_p95']}s")
+        logger.info("=" * 50)
+        self._write(summary)
+
 
 class CheekoAssistant(BaseAssistant):
     """Cheeko Assistant - Sarvam STT/TTS conversational agent"""
 
-    GREETING_INSTRUCTION = "Greet the user warmly as Cheeko, a friendly AI companion. Keep it brief and playful."
+    GREETING_INSTRUCTION = "ಚೀಕೋ ಆಗಿ ಒಂದು ಚಿಕ್ಕ, ಮಜಾ ಶುಭಾಶಯ ಹೇಳಿ. ಕನ್ನಡದಲ್ಲಿ ಮಾತ್ರ 1-2 ವಾಕ್ಯಗಳಲ್ಲಿ ಹೇಳಿ."
 
     def __init__(self, instructions: str = None) -> None:
         super().__init__(instructions=instructions)
@@ -248,6 +433,43 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info("AgentSession created (no tools - testing mode)")
 
+    # Initialize UsageManager for standard metrics (sends to Manager API)
+    usage_manager = UsageManager(mac_address=device_mac, session_id=room_name)
+    usage_manager.setup_metrics_collection(session)
+    logger.info("Usage tracking initialized - subscribed to metrics_collected event")
+
+    # Initialize Sarvam-specific metrics collector (writes to sarvam_metrics.jsonl)
+    sarvam_metrics = SarvamMetricsCollector(
+        room_name=room_name,
+        device_mac=device_mac,
+        stt_model=stt_model,
+        tts_model=tts_model,
+        llm_model=llm_model,
+        stt_language=stt_language,
+        tts_language=tts_language,
+        tts_speaker=tts_speaker,
+        tts_pace=tts_pace,
+    )
+
+    @session.on("metrics_collected")
+    def _on_sarvam_metrics(ev: MetricsCollectedEvent):
+        sarvam_metrics.collect(ev)
+
+    # Direct STT component listener
+    stt.on("metrics_collected", sarvam_metrics.on_stt_metrics)
+
+    logger.info(f"Sarvam metrics collector initialized (output: {SARVAM_METRICS_FILE})")
+
+    # Pipeline timing: uses agent_state_changed transitions
+    # listening→thinking = STT time, thinking→speaking = LLM+TTS time
+    @session.on("agent_state_changed")
+    def _on_agent_state_changed(ev):
+        old_state = getattr(ev, 'old_state', '')
+        new_state = getattr(ev, 'new_state', '')
+        sarvam_metrics.on_agent_state_changed(str(old_state), str(new_state))
+
+    logger.info("Pipeline timing hooks registered")
+
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
     logger.info("State management registered")
@@ -299,6 +521,26 @@ async def entrypoint(ctx: JobContext):
         cleanup_completed = True
         try:
             logger.info("Initiating cleanup")
+
+            # Log Sarvam metrics session summary
+            try:
+                sarvam_metrics.log_session_summary()
+            except Exception as e:
+                logger.warning(f"Failed to log Sarvam session summary: {e}")
+
+            # Log UsageManager session summary (sends to Manager API)
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(usage_manager.log_session_summary()),
+                    timeout=5.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Usage logging timed out after 5s")
+            except asyncio.CancelledError:
+                logger.warning("Usage logging was cancelled but should complete")
+            except Exception as e:
+                logger.warning(f"Failed to log usage summary: {e}")
+
             try:
                 await asyncio.shield(
                     extract_and_send_chat_history(session, chat_history_service, device_mac)
@@ -454,6 +696,12 @@ async def entrypoint(ctx: JobContext):
     init_elapsed = (asyncio.get_event_loop().time() - init_start_time) * 1000
     logger.info(f"Total initialization: {init_elapsed:.0f}ms")
     logger.info(f"{CHARACTER_NAME} Sarvam agent is LIVE!")
+
+    # If greeting was missed during init (race condition), trigger it now
+    if not assistant.greeting_played:
+        logger.info("🎤 [GREETING-CATCHUP] Greeting not yet played - triggering now in case ready_for_greeting was missed during init")
+        if not assistant.greeting_played:
+            await assistant.play_greeting()
 
 
 if __name__ == "__main__":

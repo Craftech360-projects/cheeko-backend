@@ -557,6 +557,11 @@ router.post('/rag/search',
  *                 type: string
  *                 description: RFID UID (hex string)
  *                 example: "04A3B2C1D00000"
+ *               cardType:
+ *                 type: string
+ *                 enum: [content, ai]
+ *                 default: content
+ *                 description: Card type - "content" for content/Q&A cards, "ai" for AI voice trigger cards
  *               questionId:
  *                 type: integer
  *                 description: Primary question ID
@@ -627,6 +632,10 @@ router.post('/card',
  *                 description: Card mapping ID
  *               rfidUid:
  *                 type: string
+ *               cardType:
+ *                 type: string
+ *                 enum: [content, ai]
+ *                 description: Card type - "content" for content/Q&A cards, "ai" for AI voice trigger cards
  *               questionId:
  *                 type: integer
  *               questionIds:

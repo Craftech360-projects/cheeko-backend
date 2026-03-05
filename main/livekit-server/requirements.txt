@@ -37,6 +37,9 @@ jinja2
 gtts
 pyttsx3
 
+# WER (Word Error Rate) calculation for STT accuracy
+jiwer>=3.0.0
+
 silero-vad==6.2.0
 
 # Datadog monitoring and logging
@@ -45,3 +48,6 @@ ddtrace
 
 # Grafana Loki logging
 python-logging-loki>=0.3.1
+
+# AWS SDK (S3 for rhyme cache, etc.)
+boto3

@@ -2,48 +2,100 @@ module.exports = {
   apps: [
     {
       name: "manager-api",
-      script: "mvn",
-      args: "spring-boot:run -Dspring-boot.run.profiles=dev",
-      cwd: "/root/xiaozhi-esp32-server/main/manager-api",
-      interpreter: "none"
+      script: "npm",
+      args: "start",
+      cwd: "/root/cheeko-backend/main/manager-api-node",
+      interpreter: "none",
     },
     {
       name: "manager-web",
       script: "npm",
       args: "run serve",
-      cwd: "/root/xiaozhi-esp32-server/main/manager-web",
-      interpreter: "none"
+      cwd: "/root/cheeko-backend/main/manager-web",
+      interpreter: "none",
     },
     {
       name: "mqtt-gateway",
       script: "app.js",
-      cwd: "/root/xiaozhi-esp32-server/main/mqtt-gateway",
+      cwd: "/root/cheeko-backend/main/mqtt-gateway",
       interpreter: "node",
-      watch: false
-    },
-    {
-      name: "livekit-server",
-      script: "main.py",
-      args: "dev",
-      cwd: "/root/xiaozhi-esp32-server/main/livekit-server",
-      interpreter: "python3"
+      watch: false,
+      env: {
+        EMQX_HOST: "127.0.0.1",
+      },
     },
     {
       name: "livekit-media-api",
       script: "media_api.py",
-      cwd: "/root/xiaozhi-esp32-server/main/livekit-server",
+      cwd: "/root/cheeko-backend/main/livekit-server",
       interpreter: "python3",
-      watch: false
+      watch: false,
     },
     {
-      name: "livekit-react-cheeko",
-      script: "npm",
-      args: "run dev",
-      cwd: "/root/xiaozhi-esp32-server/livkit-react-with-python-cheeko",
+      name: "cheeko-agent",
+      script: "env/bin/python",
+      args: "workers/cheeko_worker.py dev",
+      cwd: "/root/cheeko-backend/main/livekit-server",
       interpreter: "none",
       env: {
-        NODE_ENV: "development"
-      }
-    }
-  ]
+        PORT: "8081",
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "2G",
+    },
+    {
+      name: "math-tutor-agent",
+      script: "env/bin/python",
+      args: "workers/math_tutor_worker.py dev",
+      cwd: "/root/cheeko-backend/main/livekit-server",
+      interpreter: "none",
+      env: {
+        PORT: "8082",
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "2G",
+    },
+{
+      name: "riddle-solver-agent",
+      script: "env/bin/python",
+      args: "workers/riddle_solver_worker.py dev",
+      cwd: "/root/cheeko-backend/main/livekit-server",
+      interpreter: "none",
+      env: {
+        PORT: "8085",
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "2G",
+    },
+    {
+      name: "word-ladder-agent",
+      script: "env/bin/python",
+      args: "workers/word_ladder_worker.py dev",
+      cwd: "/root/cheeko-backend/main/livekit-server",
+      interpreter: "none",
+      env: {
+        PORT: "8086",
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "2G",
+    },
+    {
+      name: "content-poc",
+      script: "env/bin/streamlit",
+      args: "run app.py --server.port 8501 --server.headless true",
+      cwd: "/root/cheeko-backend/content-poc",
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "1G",
+    },
+  ],
 };

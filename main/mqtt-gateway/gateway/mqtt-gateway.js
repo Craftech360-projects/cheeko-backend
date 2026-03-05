@@ -110,6 +110,13 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     }
 
     const data = body.data;
+
+    // AI card: return minimal object immediately (no content validation needed)
+    if (data.cardType === 'ai') {
+      logger.info(`🤖 [RFID-LOOKUP] AI card detected for UID ${trimmedUid}`);
+      return { cardType: 'ai', rfidUid: data.rfid_uid || trimmedUid };
+    }
+
     const contentType = data.contentType || "prompt";
     const title = (data.title || data.packName || "").trim();
     const contentText = (data.contentText || "").trim();
@@ -867,6 +874,20 @@ class MQTTGateway {
           };
           this.mqttPublish(`devices/p2p/${clientId}`, unknownResponse);
           logger.warn(`[RFID-SCAN] Unknown card ${rfidUid}, sent card_unknown to device ${deviceId}`);
+          return;
+        }
+
+        // ====== BRANCH: AI CARD — send card_ai + start conversation agent ======
+        if (rfidContent.cardType === 'ai') {
+          // 1. Send card_ai response to device
+          this.mqttPublish(`devices/p2p/${clientId}`, {
+            type: "card_ai",
+            rfid_uid: rfidUid
+          });
+          logger.info(`🤖 [RFID-AI] AI card ${rfidUid}, sent card_ai to device ${deviceId}`);
+
+          // 2. Switch to conversation mode and start agent
+          await this.handleModeChange(deviceId, "conversation", clientId);
           return;
         }
 

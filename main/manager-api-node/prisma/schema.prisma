@@ -520,6 +520,7 @@ model parent_profile {
 model rfid_card_mapping {
   id                BigInt              @id @default(autoincrement())
   rfid_uid          String              @unique @db.VarChar(50)
+  card_type         String?             @default("content") @db.VarChar(20)
   content_pack_id   BigInt?
   pack_id           BigInt?
   question_id       BigInt?
