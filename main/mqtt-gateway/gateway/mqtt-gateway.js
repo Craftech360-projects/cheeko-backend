@@ -934,6 +934,31 @@ class MQTTGateway {
           return;
         }
 
+        // ====== BRANCH C: AI PROMPT CARD — send prompt text directly via MQTT (no LiveKit needed) ======
+        const isAiPromptCard = !hasItems && rfidContent.contentType === "prompt";
+        if (isAiPromptCard) {
+          const deviceInfo = this.deviceConnections.get(deviceId);
+          const hasConnection = deviceInfo && deviceInfo.connection && deviceInfo.connection.bridge;
+
+          if (hasConnection && deviceInfo.connection.roomType === "conversation") {
+            // If there IS an active connection, route to agent for AI response
+            logger.info(
+              `🤖 [RFID-ROUTING] AI Prompt card with active connection, routing to agent for device ${deviceId}`
+            );
+          } else {
+            // No active connection — send card_ai to set device into conversation mode
+            logger.info(
+              `🤖 [RFID-ROUTING] AI Prompt card (no active connection). Sending card_ai to device ${deviceId}`
+            );
+
+            this.mqttPublish(`devices/p2p/${clientId}`, {
+              type: "card_ai",
+              rfid_uid: rfidUid,
+            });
+            return;
+          }
+        }
+
         // ====== BRANCH B: Q&A — requires LiveKit connection ======
         const deviceInfo = this.deviceConnections.get(deviceId);
         if (!deviceInfo || !deviceInfo.connection || !deviceInfo.connection.bridge) {

@@ -369,7 +369,18 @@ const lookupCardByUid = async (rfidUid) => {
     return null;
   }
 
-  logger.info(`[RFID-LOOKUP] Found mapping: id=${mapping.id}, content_pack_id=${mapping.content_pack_id || 'null'}, question_id=${mapping.question_id || 'null'}`);
+  logger.info(`[RFID-LOOKUP] Found mapping: id=${mapping.id}, card_type=${mapping.card_type}, content_pack_id=${mapping.content_pack_id || 'null'}, question_id=${mapping.question_id || 'null'}`);
+
+  // AI Card: No linked content — forward to AI agent as a prompt
+  if (mapping.card_type === 'ai') {
+    logger.info(`[RFID-LOOKUP] AI card detected: uid=${normalizedUid}`);
+    return {
+      rfid_uid: normalizedUid,
+      contentType: 'prompt',
+      title: mapping.notes || 'AI Card',
+      promptText: mapping.notes || 'The child tapped an AI card. Engage them in a fun, interactive conversation.'
+    };
+  }
 
   // Track 1: Content Pack (Story/Rhyme)
   if (mapping.content_pack_id) {

@@ -78,39 +78,52 @@ class BaseAssistant(Agent):
             from livekit.agents.llm.realtime import RealtimeError
         except ImportError:
             RealtimeError = Exception
-        
+
         agent_name = self.__class__.__name__
-        
+
         # Check if greeting already played
         if self.greeting_played:
             logger.warning(f"{agent_name} greeting already played, skipping duplicate")
             return
-        
+
         logger.info(f"{agent_name} playing greeting now (device is ready)...")
-        
+
+        # Wait for Gemini Realtime connection to fully establish
+        # The connection starts async and needs time before generate_reply works
+        await asyncio.sleep(3.0)
+        logger.info(f"{agent_name} waited for Gemini connection, now sending greeting")
+
         # Retry logic for greeting
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 logger.info(f"{agent_name} sending greeting (attempt {attempt + 1}/{max_retries})")
-                await self.session.generate_reply(
+                speech_handle = self.session.generate_reply(
                     instructions=self.GREETING_INSTRUCTION
                 )
+                # Wait for the speech to actually complete
+                await speech_handle
+
+                # Verify it actually spoke by checking if interrupted or empty
+                if hasattr(speech_handle, 'interrupted') and speech_handle.interrupted:
+                    logger.warning(f"{agent_name} greeting was interrupted, retrying...")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2.0)
+                        continue
+
                 self.greeting_played = True
                 logger.info(f"{agent_name} greeting sent successfully")
                 return  # Success, exit
             except RealtimeError as e:
                 logger.warning(f"{agent_name} greeting attempt {attempt + 1} encountered RealtimeError: {e}")
-                # Handle specific Gemini Realtime timeout
-                if "timed out" in str(e):
-                    logger.warning(f"{agent_name} greeting timed out - retrying...")
-                
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(3.0)  # Wait longer for connection to stabilize
+                else:
+                    logger.error(f"{agent_name} greeting failed after {max_retries} attempts: {e}")
             except Exception as e:
                 logger.warning(f"{agent_name} greeting attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(1.0)  # Wait longer before retry
+                    await asyncio.sleep(2.0)
                 else:
                     logger.error(f"{agent_name} failed to send greeting after {max_retries} attempts")
 
