@@ -347,18 +347,16 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model with Google Search enabled
-    # GoogleSearch is a provider tool that must be passed to RealtimeModel, not AgentSession
-    google_search_tool = google.tools.GoogleSearch()
+    # Create Gemini Realtime model
     realtime_model = google.realtime.RealtimeModel(
         model=gemini_model,
         voice=gemini_voice,
         instructions=agent_prompt,
         temperature=gemini_temperature,
         modalities=["AUDIO"],
-        _gemini_tools=[google_search_tool],
     )
-    logger.info("Gemini Realtime model created with Google Search enabled")
+    google_search_tool = google.tools.GoogleSearch()
+    logger.info("Gemini Realtime model created")
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
@@ -366,10 +364,9 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching tools and TTS for session.say()
-    # Note: Google Search is passed to RealtimeModel as a provider tool, not here
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=MODE_SWITCH_TOOLS)
-    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + ElevenLabs TTS")
+    # Create AgentSession with mode switching tools, Google Search, and TTS for session.say()
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=[*MODE_SWITCH_TOOLS, google_search_tool])
+    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + Google Search + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()
