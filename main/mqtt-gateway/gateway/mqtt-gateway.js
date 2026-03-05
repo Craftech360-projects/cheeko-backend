@@ -685,7 +685,9 @@ class MQTTGateway {
           await this.handleModeChange(deviceId, mode, clientId);
           return;
         } else {
-          logger.warn(`⚠️ [MODE-CHANGE] No mode specified in payload`);
+          // No mode specified - use cycle mode (conversation → music → story → conversation)
+          logger.info(`🔄 [MODE-CHANGE] No mode specified, using cycle mode for ${deviceId}`);
+          await this.handleDeviceModeChange(deviceId, originalPayload);
           return;
         }
       }
@@ -1183,7 +1185,7 @@ class MQTTGateway {
     }
 
     try {
-      if (mode === "music") {
+      if (mode === "music" || mode === "story") {
         // Send data channel message to LiveKit agent
         const room = deviceInfo.connection?.bridge?.room;
         if (!room) {
@@ -1211,6 +1213,7 @@ class MQTTGateway {
           new TextEncoder().encode(playbackMessage),
           { reliable: true }
         );
+        const label = mode === "music" ? "song" : "story";
         logger.info(
           `✅ [CONTROL] Sent 'next' command via data channel to ${roomName}`
         );
@@ -1221,7 +1224,7 @@ class MQTTGateway {
           const ttsStartMsg = {
             type: "tts",
             state: "start",
-            text: "Skipping to next song",
+            text: `Skipping to next ${label}`,
             session_id: deviceInfo.connection?.udp?.session_id || null,
           };
           this.mqttPublish(controlTopic, ttsStartMsg);
@@ -1285,7 +1288,7 @@ class MQTTGateway {
     }
 
     try {
-      if (mode === "music") {
+      if (mode === "music" || mode === "story") {
         // Send data channel message to LiveKit agent
         const room = deviceInfo.connection?.bridge?.room;
         if (!room) {
@@ -1313,6 +1316,7 @@ class MQTTGateway {
           new TextEncoder().encode(playbackMessage),
           { reliable: true }
         );
+        const label = mode === "music" ? "song" : "story";
         logger.info(
           `✅ [CONTROL] Sent 'previous' command via data channel to ${roomName}`
         );
@@ -1323,7 +1327,7 @@ class MQTTGateway {
           const ttsStartMsg = {
             type: "tts",
             state: "start",
-            text: "Going to previous song",
+            text: `Going to previous ${label}`,
             session_id: deviceInfo.connection?.udp?.session_id || null,
           };
           this.mqttPublish(controlTopic, ttsStartMsg);
@@ -2655,8 +2659,9 @@ class MQTTGateway {
       logger.info(`[MODE-CHANGE] API Response - Status: ${response.status}, Code: ${response.data?.code}`);
       logger.info(`[MODE-CHANGE] API Response Data:`, JSON.stringify(response.data));
 
-      if (response.data.code === 0 && response.data.data.success) {
-        const { newMode, oldMode } = response.data.data;
+      if (response.data.code === 0 && response.data.data) {
+        const newMode = response.data.data.newMode || response.data.data.mode;
+        const oldMode = response.data.data.oldMode || response.data.data.previousMode;
         logger.info(`[MODE-CHANGE] Step 5: Mode change approved - ${oldMode} → ${newMode}`);
 
         if (deviceInfo) {
@@ -2832,7 +2837,7 @@ class MQTTGateway {
 
         logger.info(`✅ [MODE-CHANGE] Complete: ${oldMode} → ${newMode}`);
       } else {
-        logger.error(`❌ [MODE-CHANGE] API error - Code: ${response.data?.code}, Success: ${response.data?.data?.success}`);
+        logger.error(`❌ [MODE-CHANGE] API error - Code: ${response.data?.code}, Data: ${JSON.stringify(response.data?.data)}`);
         logger.error(`[MODE-CHANGE] Full API response:`, JSON.stringify(response.data));
       }
     } catch (error) {

@@ -1513,7 +1513,6 @@ router.delete('/token-usage/:mac',
  *                     type: object
  */
 router.get('/:mac/playlist/music',
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { mac } = req.params;
 
@@ -1765,7 +1764,6 @@ router.put('/:mac/playlist/music/reorder',
  *         description: Story playlist
  */
 router.get('/:mac/playlist/story',
-  requireAuth,
   asyncHandler(async (req, res) => {
     const { mac } = req.params;
 

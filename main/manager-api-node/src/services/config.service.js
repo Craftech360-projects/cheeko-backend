@@ -227,24 +227,32 @@ const getAgentPrompt = async (macAddress) => {
 const getChildProfileByMac = async (macAddress) => {
   const normalizedMac = normalizeMacAddress(macAddress);
 
-  // Get device with kid_id
+  // Get device with kid_id and user_id
   const device = await prisma.ai_device.findFirst({
     where: { mac_address: normalizedMac },
-    select: { kid_id: true }
+    select: { kid_id: true, user_id: true }
   });
 
   if (!device) {
     throw new Error('Device not found');
   }
 
-  if (!device.kid_id) {
-    return null;
+  let kid = null;
+
+  // Try direct kid_id first
+  if (device.kid_id) {
+    kid = await prisma.kid_profile.findFirst({
+      where: { id: device.kid_id }
+    });
   }
 
-  // Get kid profile
-  const kid = await prisma.kid_profile.findFirst({
-    where: { id: device.kid_id }
-  });
+  // Fallback: find kid profile through device owner (user_id)
+  if (!kid && device.user_id) {
+    kid = await prisma.kid_profile.findFirst({
+      where: { user_id: device.user_id },
+      orderBy: { created_at: 'desc' }
+    });
+  }
 
   if (!kid) {
     return null;
