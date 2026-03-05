@@ -440,6 +440,37 @@ class MediaBot:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
 
+    @staticmethod
+    def normalize_playlist(playlist):
+        """Normalize playlist items from API format to flat format.
+
+        API returns nested items like:
+          {id, position, contentId, content: {title, category, url, ...}}
+        Bot expects flat items like:
+          {filename, category, title, url}
+        """
+        if not playlist:
+            return playlist
+        normalized = []
+        for item in playlist:
+            content = item.get('content') if isinstance(item.get('content'), dict) else None
+            if content:
+                url = content.get('url', '')
+                filename = content.get('metadata', {}).get('filename') if isinstance(content.get('metadata'), dict) else None
+                if not filename and url:
+                    from urllib.parse import unquote, urlparse
+                    filename = unquote(urlparse(url).path.split('/')[-1])
+                normalized.append({
+                    'filename': filename,
+                    'category': content.get('category'),
+                    'title': content.get('title', filename),
+                    'url': url,
+                    'content_type': content.get('content_type'),
+                })
+            else:
+                normalized.append(item)
+        return normalized
+
 
 class StreamingAudioIterator:
     """
@@ -650,7 +681,7 @@ class MusicBot(MediaBot):
     def __init__(self, room_name: str, token: str, language: Optional[str] = None, playlist: Optional[List[dict]] = None, analytics_service: Optional[AnalyticsService] = None):
         super().__init__(room_name, token, "music")
         self.language = language
-        self.playlist = playlist  # List of {filename, category/language, title, etc.}
+        self.playlist = self.normalize_playlist(playlist) if playlist else playlist  # List of {filename, category/language, title, url}
         self.current_index = 0  # Track current position in playlist
         self.skip_requested = False  # Flag to interrupt current song
         self.skip_direction = None  # 'next', 'previous', or None
@@ -805,15 +836,16 @@ class MusicBot(MediaBot):
             filename = playlist_item.get('filename')
             category = playlist_item.get('category')  # For music, this is language (English, Hindi, etc.)
             title = playlist_item.get('title', filename)
+            direct_url = playlist_item.get('url')
 
-            if not filename or not category:
+            if not direct_url and (not filename or not category):
                 logger.warning(f"⚠️ Skipping invalid playlist item: {playlist_item}")
                 # Move to next
                 self.current_index = (self.current_index + 1) % len(self.playlist)
                 continue
 
-            # Construct URL using music_service
-            song_url = music_service.get_song_url(filename, category)
+            # Use direct URL if available, otherwise construct from filename/category
+            song_url = direct_url if direct_url else music_service.get_song_url(filename, category)
             logger.info(f"🎵 [{self.current_index + 1}/{len(self.playlist)}] Playing: '{title}' ({category})")
 
             # Reset skip flag before streaming
@@ -1277,7 +1309,7 @@ class StoryBot(MediaBot):
     def __init__(self, room_name: str, token: str, age_group: Optional[str] = None, playlist: Optional[List[dict]] = None, analytics_service: Optional[AnalyticsService] = None):
         super().__init__(room_name, token, "story")
         self.age_group = age_group
-        self.playlist = playlist  # List of {filename, category, title, etc.}
+        self.playlist = self.normalize_playlist(playlist) if playlist else playlist  # List of {filename, category, title, url}
         self.current_index = 0  # Track current position in playlist
         self.skip_requested = False  # Flag to interrupt current story
         self.skip_direction = None  # 'next', 'previous', or None
@@ -1429,15 +1461,16 @@ class StoryBot(MediaBot):
             filename = playlist_item.get('filename')
             category = playlist_item.get('category')  # Adventure, Bedtime, Fantasy, etc.
             title = playlist_item.get('title', filename)
+            direct_url = playlist_item.get('url')
 
-            if not filename or not category:
+            if not direct_url and (not filename or not category):
                 logger.warning(f"⚠️ Skipping invalid playlist item: {playlist_item}")
                 # Move to next
                 self.current_index = (self.current_index + 1) % len(self.playlist)
                 continue
 
-            # Construct URL using story_service
-            story_url = story_service.get_story_url(filename, category)
+            # Use direct URL if available, otherwise construct from filename/category
+            story_url = direct_url if direct_url else story_service.get_story_url(filename, category)
             logger.info(f"📖 [{self.current_index + 1}/{len(self.playlist)}] Playing: '{title}' ({category})")
 
             # Reset skip flag before streaming
