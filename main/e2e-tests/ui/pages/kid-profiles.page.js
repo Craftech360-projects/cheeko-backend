@@ -14,7 +14,7 @@ class KidProfilesPage {
   }
 
   async goto(macAddress) {
-    const url = macAddress ? `/kid-profiles?mac=${macAddress}` : '/kid-profiles';
+    const url = macAddress ? `/#/kid-profiles?mac=${macAddress}` : '/#/kid-profiles';
     await this.page.goto(url);
     await this.page.waitForLoadState('networkidle');
   }

@@ -17,7 +17,7 @@ class DeviceManagementPage {
   }
 
   async goto() {
-    await this.page.goto('/device-management');
+    await this.page.goto('/#/device-management');
     await this.deviceTable.waitFor();
   }
 

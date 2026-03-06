@@ -25,10 +25,10 @@ test.describe('Analytics Scenarios', () => {
 
   test('Analytics page is accessible from navigation', async ({ page }) => {
     // Start from home
-    await page.goto('/home');
+    await page.goto('/#/home');
 
     // Navigate to analytics
-    await page.goto('/game-analytics');
+    await page.goto('/#/game-analytics');
 
     await expect(page).toHaveURL(/game-analytics/);
   });

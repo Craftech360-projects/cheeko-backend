@@ -10,7 +10,7 @@ class UserManagementPage {
   }
 
   async goto() {
-    await this.page.goto('/user-management');
+    await this.page.goto('/#/user-management');
     await this.page.waitForLoadState('networkidle');
   }
 

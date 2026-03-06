@@ -26,7 +26,7 @@ class RfidManagementPage {
   }
 
   async goto() {
-    await this.page.goto('/rfid-management');
+    await this.page.goto('/#/rfid-management');
     await this.page.waitForLoadState('networkidle');
   }
 

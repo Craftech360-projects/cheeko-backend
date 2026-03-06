@@ -17,7 +17,7 @@ class ContentLibraryPage {
   }
 
   async goto() {
-    await this.page.goto('/content-library');
+    await this.page.goto('/#/content-library');
     await this.contentTable.waitFor();
   }
 

@@ -9,7 +9,12 @@ require('dotenv').config({ path: path.resolve(__dirname, '.env'), quiet: true })
 
 const DASHBOARD_URL = process.env.DASHBOARD_URL || 'http://localhost:8080';
 
+// Timestamped report folder so each run is preserved
+const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const reportFolder = `reports/playwright/${timestamp}`;
+
 module.exports = defineConfig({
+  globalTeardown: './scripts/playwright-teardown.js',
   testDir: './ui/scenarios',
   fullyParallel: false, // scenarios are sequential
   forbidOnly: !!process.env.CI,
@@ -18,14 +23,15 @@ module.exports = defineConfig({
   timeout: 60000,
 
   reporter: [
-    ['html', { outputFolder: 'reports/playwright', open: 'never' }],
+    ['html', { outputFolder: reportFolder, open: 'never' }],
+    ['json', { outputFile: `${reportFolder}/results.json` }],
     ['list'],
   ],
 
   use: {
     baseURL: DASHBOARD_URL,
     trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    screenshot: 'on',
     video: 'retain-on-failure',
     headless: process.env.HEADLESS !== 'false',
     actionTimeout: 10000,

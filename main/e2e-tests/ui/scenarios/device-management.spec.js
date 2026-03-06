@@ -51,9 +51,9 @@ test.describe('Device Management Scenarios', () => {
 
     await devicePage.bindWithCodeButton.click();
 
-    // Dialog should appear
-    const dialog = page.locator('.el-dialog');
-    await expect(dialog).toBeVisible();
+    // Dialog should appear — use Verification Code text unique to bind dialog
+    const dialog = page.locator('.el-dialog').filter({ hasText: 'Verification Code' });
+    await expect(dialog.first()).toBeVisible();
   });
 
   test('2.1 - Manual add device dialog opens', async ({ page }) => {
@@ -62,8 +62,8 @@ test.describe('Device Management Scenarios', () => {
 
     await devicePage.manualAddButton.click();
 
-    // Dialog should appear
-    const dialog = page.locator('.el-dialog');
+    // Dialog should appear — manual add may reuse the same "Add Device" dialog
+    const dialog = page.locator('.el-dialog').filter({ hasText: /Add Device|Manual/i });
     await expect(dialog).toBeVisible();
   });
 

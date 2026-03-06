@@ -9,7 +9,7 @@ class GameAnalyticsPage {
   }
 
   async goto() {
-    await this.page.goto('/game-analytics');
+    await this.page.goto('/#/game-analytics');
     await this.page.waitForLoadState('networkidle');
   }
 

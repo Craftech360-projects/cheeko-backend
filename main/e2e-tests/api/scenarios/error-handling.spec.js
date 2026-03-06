@@ -85,14 +85,14 @@ describe('Error Handling E2E', () => {
 
   describe('Request with empty body', () => {
     it('should handle empty body on POST endpoint gracefully', async () => {
-      const res = await pactum.spec()
+      await pactum.spec()
         .post('/device/manual-add')
         .withHeaders(getBearerHeaders())
         .withJson({})
-        .returns('res.status');
-
-      // Should be 400 (validation error), not 500
-      expect([200, 400, 422]).toContain(res);
+        .expect((ctx) => {
+          // Should be 400 (validation error), not 500
+          expect([200, 400, 422]).toContain(ctx.res.statusCode);
+        });
     });
   });
 
@@ -103,14 +103,14 @@ describe('Error Handling E2E', () => {
         contentType: 'music',
       };
 
-      const res = await pactum.spec()
+      await pactum.spec()
         .post('/content/library')
         .withHeaders(getServiceKeyHeaders())
         .withJson(largePayload)
-        .returns('res.status');
-
-      // Should handle gracefully (400 or 413)
-      expect([200, 400, 413, 422]).toContain(res);
+        .expect((ctx) => {
+          // Should handle gracefully (400 or 413)
+          expect([200, 400, 413, 422]).toContain(ctx.res.statusCode);
+        });
     });
   });
 

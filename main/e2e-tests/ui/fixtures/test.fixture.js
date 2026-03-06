@@ -5,7 +5,9 @@
  * after UI actions in the same test.
  */
 
-const { test as base, expect } = require('@playwright/test');
+const playwright = require('@playwright/test');
+const base = playwright.test;
+const expect = playwright.expect;
 const config = require('../../test.config');
 
 const test = base.extend({

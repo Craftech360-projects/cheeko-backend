@@ -13,11 +13,11 @@ const AUTH_STATE_FILE = path.resolve(__dirname, '..', '..', '.auth-state.json');
 setup('authenticate as admin', async ({ page }) => {
   const config = require('../../test.config');
 
-  // Navigate to login page
-  await page.goto('/login');
+  // Navigate to login page (hash mode router)
+  await page.goto('/#/login');
 
   // Wait for the login form to be ready
-  await page.waitForSelector('.login-box');
+  await page.waitForSelector('.login-box', { timeout: 15000 });
 
   // Fill username
   await page.locator('.input-box').filter({ hasText: '' }).first()
@@ -33,8 +33,8 @@ setup('authenticate as admin', async ({ page }) => {
   // Click login button
   await page.locator('.login-btn').click();
 
-  // Wait for navigation to home page
-  await page.waitForURL('**/home', { timeout: 15000 });
+  // Wait for navigation to home page (hash mode)
+  await page.waitForURL(/#\/home/, { timeout: 15000 });
 
   // Save auth state for other tests to reuse
   await page.context().storageState({ path: AUTH_STATE_FILE });

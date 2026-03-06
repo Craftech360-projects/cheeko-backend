@@ -14,7 +14,7 @@ class HomePage {
   }
 
   async goto() {
-    await this.page.goto('/home');
+    await this.page.goto('/#/home');
     await this.page.waitForLoadState('networkidle');
   }
 

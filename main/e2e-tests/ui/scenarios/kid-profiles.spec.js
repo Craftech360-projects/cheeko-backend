@@ -30,10 +30,12 @@ test.describe('Kid Profiles Scenarios', () => {
     await profilesPage.goto();
 
     await profilesPage.addButton.click();
-    await expect(profilesPage.dialog).toBeVisible();
+
+    const dialog = page.locator('.el-dialog').filter({ hasText: 'Add Kid Profile' }).first();
+    await expect(dialog).toBeVisible();
 
     // Dialog should have Name field
-    await expect(profilesPage.dialog.locator('label').filter({ hasText: 'Name' })).toBeVisible();
+    await expect(dialog.locator('label').filter({ hasText: 'Name' }).first()).toBeVisible();
   });
 
   test('Profile table has expected columns', async ({ page }) => {

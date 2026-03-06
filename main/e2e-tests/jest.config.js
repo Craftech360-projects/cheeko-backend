@@ -9,10 +9,15 @@ module.exports = {
   testMatch: [
     '**/api/scenarios/**/*.spec.js',
     '**/mqtt/scenarios/**/*.spec.js',
+    '**/livekit/scenarios/**/*.spec.js',
   ],
   testTimeout: 30000,
   globalSetup: './api/helpers/global-setup.js',
   globalTeardown: './api/helpers/global-teardown.js',
+  reporters: [
+    'default',
+    './scripts/jest-json-reporter.js',
+  ],
   verbose: true,
   forceExit: true,
   detectOpenHandles: true,
