@@ -401,7 +401,7 @@ const getPublicConfig = async () => {
 
     // Get mobile area list from dictionary
     const dictData = await prisma.sys_dict_data.findMany({
-      where: { dict_type_id: 'MOBILE_AREA' },
+      where: { dict_type: 'MOBILE_AREA' },
       select: { dict_label: true, dict_value: true, sort: true },
       orderBy: { sort: 'asc' },
     });

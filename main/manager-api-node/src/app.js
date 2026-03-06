@@ -47,7 +47,7 @@ app.set('trust proxy', 1);
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 1000, // Increased for frontend dev
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 5000, // Increased for frontend dev
   message: {
     code: 429,
     msg: 'Too many requests, please try again later.',

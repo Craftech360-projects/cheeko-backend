@@ -43,6 +43,8 @@ module.exports = defineConfig({
   productionSourceMap: process.env.NODE_ENV !== "production", // 生产环境不生成 source map
   devServer: {
     port: 8001, // 指定端口为 8886 (matches production)
+    host: '0.0.0.0',
+    allowedHosts: 'all',
     proxy: {
       "/toy": {
         // target: "https://manager-api-production-e079.up.railway.app",
@@ -52,6 +54,7 @@ module.exports = defineConfig({
     },
     client: {
       overlay: false, // 不显示 webpack 错误覆盖层
+      webSocketURL: 'auto://0.0.0.0:0/ws',
     },
   },
   publicPath: process.env.VUE_APP_PUBLIC_PATH || "/",
