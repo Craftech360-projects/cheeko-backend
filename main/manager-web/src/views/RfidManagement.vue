@@ -42,6 +42,13 @@
                     <div class="stat-label">Card Mappings</div>
                 </div>
             </div>
+            <div class="stat-item" @click="switchTab('aiCards')">
+                <div class="stat-icon ai-cards" style="background: rgba(231, 76, 60, 0.1); color: #e74c3c;"><i class="el-icon-cpu"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalAiCards }}</div>
+                    <div class="stat-label">AI Cards</div>
+                </div>
+            </div>
             <div class="stat-item" @click="switchTab('series')">
                 <div class="stat-icon series"><i class="el-icon-s-operation"></i></div>
                 <div class="stat-content">
@@ -66,6 +73,9 @@
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'cards' }" @click="switchTab('cards')">
                     <i class="el-icon-postcard"></i> Card Mappings
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'aiCards' }" @click="switchTab('aiCards')">
+                    <i class="el-icon-cpu"></i> AI Cards
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     <i class="el-icon-s-operation"></i> Bulk Ranges
@@ -182,7 +192,10 @@
                                 </el-table-column>
                                 <el-table-column label="Content Type" align="center" width="130">
                                     <template slot-scope="scope">
-                                        <el-tag v-if="scope.row.contentPackId" type="warning" size="small" class="content-badge">
+                                        <el-tag v-if="scope.row.cardType === 'ai'" type="danger" size="small" class="content-badge">
+                                            <i class="el-icon-cpu"></i> AI Card
+                                        </el-tag>
+                                        <el-tag v-else-if="scope.row.contentPackId" type="warning" size="small" class="content-badge">
                                             <i class="el-icon-notebook-2"></i> Story/Rhyme
                                         </el-tag>
                                         <el-tag v-else-if="scope.row.questionPackId" type="success" size="small" class="content-badge">
@@ -259,6 +272,86 @@
                             </div>
                         </template>
 
+                        <!-- AI Cards Tab -->
+                        <template v-if="activeTab === 'aiCards'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-cpu"></i> AI Cards
+                                        <el-tag size="mini" type="info" class="section-count">{{ aiCardsTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Cards that switch the device to AI conversation mode when tapped.
+                                        <el-tooltip content="AI Cards have no linked content pack or Q&amp;A pack. When tapped, the device enters AI conversation mode." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
+                            <el-table ref="aiCardsTable" :data="aiCardsList" class="transparent-table" v-loading="aiCardsLoading"
+                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)"
+                                :header-cell-class-name="headerCellClassName">
+                                <el-table-column label="Select" align="center" width="60">
+                                    <template slot-scope="scope">
+                                        <el-checkbox v-model="scope.row.selected"></el-checkbox>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="RFID UID" align="center" width="150">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.rfidUid }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Content Type" align="center" width="130">
+                                    <template slot-scope="scope">
+                                        <el-tag type="danger" size="small" class="content-badge">
+                                            <i class="el-icon-cpu"></i> AI Card
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Notes" prop="notes" align="center" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Product SKU" align="center" width="140">
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.packId" type="success" size="small">{{ getPackLabel(scope.row.packId) }}</el-tag>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Active" align="center" width="70">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
+                                            {{ scope.row.active ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" align="center" width="120">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" type="text" @click="editCard(scope.row)">Edit</el-button>
+                                        <el-button size="mini" type="text" @click="deleteAiCard(scope.row)">Delete</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn">
+                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllAiCards">
+                                        {{ isAllAiCardsSelected ? 'Deselect All' : 'Select All' }}
+                                    </el-button>
+                                    <el-button size="mini" type="success" @click="showAddAiCardDialog">Add</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedAiCards">Delete</el-button>
+                                </div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="aiCardsPageSize" @change="handleAiCardsPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="aiCardsCurrentPage === 1" @click="goFirstAiCards">First</button>
+                                    <button class="pagination-btn" :disabled="aiCardsCurrentPage === 1" @click="goPrevAiCards">Previous</button>
+                                    <button v-for="page in aiCardsVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === aiCardsCurrentPage }" @click="goToAiCardsPage(page)">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="aiCardsCurrentPage === aiCardsPageCount" @click="goNextAiCards">Next</button>
+                                    <span class="total-text">Total {{ aiCardsTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
 
                         <!-- Q&A Packs Tab (Grid View) -->
                         <template v-if="activeTab === 'questionPacks'">
@@ -460,7 +553,9 @@
                                         <el-tag v-else-if="scope.row.contentPackId" type="" size="small" class="content-badge">
                                             <i class="el-icon-notebook-2"></i> Content Pack
                                         </el-tag>
-                                        <span v-else class="text-muted">Not assigned</span>
+                                        <el-tag v-else type="danger" size="small" class="content-badge">
+                                            <i class="el-icon-cpu"></i> AI Card
+                                        </el-tag>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="Content" align="center" show-overflow-tooltip>
@@ -717,6 +812,14 @@ export default {
             cardDialogTitle: 'Add Card Mapping',
             cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', notes: '', active: true },
 
+            // AI Cards
+            aiCardsList: [],
+            aiCardsLoading: false,
+            aiCardsCurrentPage: 1,
+            aiCardsPageSize: 10,
+            aiCardsTotal: 0,
+            isAllAiCardsSelected: false,
+
             // Series
             seriesList: [],
             seriesLoading: false,
@@ -771,6 +874,7 @@ export default {
                 totalContentPacks: 0,
                 totalProductSkus: 0,
                 totalCards: 0,
+                totalAiCards: 0,
                 totalSeries: 0,
                 totalQuestionPacks: 0
             },
@@ -811,6 +915,13 @@ export default {
         },
         cardsVisiblePages() {
             return this.getVisiblePages(this.cardsCurrentPage, this.cardsPageCount);
+        },
+        // AI Cards pagination
+        aiCardsPageCount() {
+            return Math.ceil(this.aiCardsTotal / this.aiCardsPageSize);
+        },
+        aiCardsVisiblePages() {
+            return this.getVisiblePages(this.aiCardsCurrentPage, this.aiCardsPageCount);
         },
         // Series pagination
         seriesPageCount() {
@@ -855,6 +966,7 @@ export default {
             else if (tab === 'contentPacks') this.fetchContentPacks();
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'questionPacks') this.fetchQuestionPacks();
+            else if (tab === 'aiCards') this.fetchAiCards();
         },
 
         handleSearch() {
@@ -876,6 +988,9 @@ export default {
             } else if (this.activeTab === 'questionPacks') {
                 this.questionPacksCurrentPage = 1;
                 this.fetchQuestionPacks();
+            } else if (this.activeTab === 'aiCards') {
+                this.aiCardsCurrentPage = 1;
+                this.fetchAiCards();
             }
         },
 
@@ -907,7 +1022,7 @@ export default {
             let completed = 0;
             const checkDone = () => {
                 completed++;
-                if (completed >= 5) this.statsLoading = false;
+                if (completed >= 6) this.statsLoading = false;
             };
             Api.rfid.getQuestionPackPage({ page: 1, limit: 1 }, ({ data }) => {
                 if (data.code === 0) this.stats.totalQuestionPacks = data.data.total || 0;
@@ -927,6 +1042,10 @@ export default {
             });
             Api.rfid.getSeriesPage({ page: 1, limit: 1 }, ({ data }) => {
                 if (data.code === 0) this.stats.totalSeries = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getCardPage({ page: 1, limit: 1, cardType: 'ai' }, ({ data }) => {
+                if (data.code === 0) this.stats.totalAiCards = data.data.total || 0;
                 checkDone();
             });
         },
@@ -1206,7 +1325,7 @@ export default {
                 form.questionIds = [];
             }
             if (!form.actionType) {
-                form.actionType = form.questionPackId ? 'qna' : 'content';
+                form.actionType = form.cardType === 'ai' ? 'ai' : (form.questionPackId ? 'qna' : 'content');
             }
             this.cardForm = form;
             this.cardDialogVisible = true;
@@ -1220,6 +1339,7 @@ export default {
                     this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
                     this.cardDialogVisible = false;
                     this.fetchCards();
+                    if (this.activeTab === 'aiCards') this.fetchAiCards();
                     this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
@@ -1254,6 +1374,75 @@ export default {
                 return;
             }
             this.deleteCard(selected);
+        },
+
+        // ==================== AI CARDS ====================
+        fetchAiCards() {
+            this.aiCardsLoading = true;
+            Api.rfid.getCardPage({
+                page: this.aiCardsCurrentPage,
+                limit: this.aiCardsPageSize,
+                rfidUid: this.searchKeyword,
+                cardType: 'ai'
+            }, ({ data }) => {
+                this.aiCardsLoading = false;
+                if (data.code === 0) {
+                    this.aiCardsList = (data.data.list || []).map(item => ({ ...item, selected: false }));
+                    this.aiCardsTotal = data.data.total || 0;
+                } else {
+                    this.$message.error(data.msg || 'Failed to load AI cards');
+                }
+            });
+        },
+
+        handleAiCardsPageSizeChange(val) {
+            this.aiCardsPageSize = val;
+            this.aiCardsCurrentPage = 1;
+            this.fetchAiCards();
+        },
+        goFirstAiCards() { this.aiCardsCurrentPage = 1; this.fetchAiCards(); },
+        goPrevAiCards() { if (this.aiCardsCurrentPage > 1) { this.aiCardsCurrentPage--; this.fetchAiCards(); } },
+        goNextAiCards() { if (this.aiCardsCurrentPage < this.aiCardsPageCount) { this.aiCardsCurrentPage++; this.fetchAiCards(); } },
+        goToAiCardsPage(page) { this.aiCardsCurrentPage = page; this.fetchAiCards(); },
+
+        handleSelectAllAiCards() {
+            this.isAllAiCardsSelected = !this.isAllAiCardsSelected;
+            this.aiCardsList.forEach(row => { row.selected = this.isAllAiCardsSelected; });
+        },
+
+        showAddAiCardDialog() {
+            this.cardDialogTitle = 'Add AI Card';
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', notes: '', active: true };
+            this.cardDialogVisible = true;
+        },
+
+        deleteAiCard(row) {
+            const items = Array.isArray(row) ? row : [row];
+            if (items.length === 0) return;
+            this.$confirm(`Delete ${items.length} AI card(s)?`, 'Warning', {
+                confirmButtonText: 'Confirm',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                Api.rfid.deleteCard(items.map(i => i.id), ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchAiCards();
+                        this.loadStats();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        deleteSelectedAiCards() {
+            const selected = this.aiCardsList.filter(r => r.selected);
+            if (selected.length === 0) {
+                this.$message.warning('Please select items to delete');
+                return;
+            }
+            this.deleteAiCard(selected);
         },
 
         // ==================== CONTENT PACKS ====================
