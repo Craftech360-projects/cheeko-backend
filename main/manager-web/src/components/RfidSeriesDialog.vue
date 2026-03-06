@@ -32,6 +32,7 @@
           <el-radio-group v-model="packType" @change="handlePackTypeChange">
             <el-radio label="qa">Q&A Pack</el-radio>
             <el-radio label="content">Content Pack</el-radio>
+            <el-radio label="ai">AI Card</el-radio>
           </el-radio-group>
         </el-form-item>
 
@@ -135,11 +136,13 @@ export default {
   },
   methods: {
     handlePackTypeChange(type) {
-      // Clear the other pack selection when switching types
       if (type === 'qa') {
         this.form.contentPackId = null;
-      } else {
+      } else if (type === 'content') {
         this.form.questionPackId = null;
+      } else if (type === 'ai') {
+        this.form.questionPackId = null;
+        this.form.contentPackId = null;
       }
     },
     submit() {
@@ -163,11 +166,12 @@ export default {
       this.$emit('cancel');
     },
     detectPackType() {
-      // Auto-detect pack type based on existing form data
       if (this.form.questionPackId) {
         this.packType = 'qa';
-      } else {
+      } else if (this.form.contentPackId) {
         this.packType = 'content';
+      } else {
+        this.packType = 'ai';
       }
     }
   },
