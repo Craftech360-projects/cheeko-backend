@@ -149,7 +149,7 @@ const transformSeriesToCamelCase = (series) => {
  * @param {Object} options - Pagination and filter options
  * @returns {Promise<Object>} Paginated card mapping list with camelCase fields
  */
-const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, questionId, questionPackId, contentPackId, active } = {}) => {
+const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, questionId, questionPackId, contentPackId, cardType, active } = {}) => {
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -166,6 +166,9 @@ const getCardMappingPage = async ({ page = 1, limit = 10, rfidUid, packCode, que
   // questionPackId: rfid_question_pack does not exist; skip filter gracefully
   if (contentPackId) {
     where.content_pack_id = BigInt(contentPackId);
+  }
+  if (cardType) {
+    where.card_type = cardType;
   }
   if (active !== undefined && active !== null && active !== '') {
     where.active = active === true || active === 'true' || active === '1';

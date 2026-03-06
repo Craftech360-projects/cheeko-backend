@@ -93,7 +93,7 @@ const logger = require('../utils/logger');
 router.get('/card/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, active } = req.query;
+    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, cardType, active } = req.query;
     const result = await rfidService.getCardMappingPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
@@ -102,6 +102,7 @@ router.get('/card/page',
       questionId: questionId ? parseInt(questionId) : undefined,
       questionPackId: questionPackId ? parseInt(questionPackId) : undefined,
       contentPackId: contentPackId ? parseInt(contentPackId) : undefined,
+      cardType,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
     success(res, result);
