@@ -26,13 +26,17 @@
 
         <el-form-item label="Content Type" class="form-item">
             <div class="type-selector">
-                <div class="type-option" :class="{ active: form.actionType === 'qna' }" @click="form.actionType = 'qna'">
+                <div class="type-option" :class="{ active: form.actionType === 'qna' }" @click="setActionType('qna')">
                     <i class="el-icon-chat-square"></i>
                     <span>Q&A Pack</span>
                 </div>
-                <div class="type-option" :class="{ active: form.actionType === 'content' }" @click="form.actionType = 'content'">
+                <div class="type-option" :class="{ active: form.actionType === 'content' }" @click="setActionType('content')">
                     <i class="el-icon-notebook-2"></i>
                     <span>Content Pack</span>
+                </div>
+                <div class="type-option" :class="{ active: form.actionType === 'ai' }" @click="setActionType('ai')">
+                    <i class="el-icon-cpu"></i>
+                    <span>AI Card</span>
                 </div>
             </div>
         </el-form-item>
@@ -161,6 +165,9 @@ export default {
         }
       });
     },
+    setActionType(type) {
+      this.form.actionType = type;
+    },
     cancel() {
       this.saving = false;
       this.$emit('cancel');
@@ -175,8 +182,14 @@ export default {
     'form.actionType'(newVal) {
       if (newVal === 'qna') {
         this.form.contentPackId = null;
+        this.form.cardType = null;
       } else if (newVal === 'content') {
         this.form.questionPackId = null;
+        this.form.cardType = null;
+      } else if (newVal === 'ai') {
+        this.form.questionPackId = null;
+        this.form.contentPackId = null;
+        this.form.cardType = 'ai';
       }
     }
   }
