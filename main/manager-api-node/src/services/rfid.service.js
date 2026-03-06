@@ -82,7 +82,7 @@ const transformCardMappingToCamelCase = (card) => {
     contentPackId: card.content_pack_id ? Number(card.content_pack_id) : null,
     actionType: card.action_type,
     actionData: card.action_data || {},
-    cardType: card.card_type || 'ai',
+    cardType: card.card_type || null,
     notes: card.notes,
     active: card.active,
     status: card.status,
@@ -456,8 +456,55 @@ const lookupCardByUid = async (rfidUid) => {
     }
   }
 
-  // Track 3: Q&A Pack via question_ids Json array on the mapping itself
-  // (rfid_question_pack table does not exist in Prisma schema)
+  // Track 3: Q&A Pack via question_pack_id FK
+  if (mapping.question_pack_id) {
+    logger.info(`[RFID-LOOKUP] Track 3: Q&A Pack lookup via question_pack_id=${mapping.question_pack_id}`);
+    try {
+      const qaPack = await prisma.rfid_question_pack.findFirst({
+        where: { id: mapping.question_pack_id }
+      });
+
+      if (qaPack) {
+        // question_ids is stored as JSON array on the pack
+        const packQuestionIds = Array.isArray(qaPack.question_ids) ? qaPack.question_ids : [];
+        if (packQuestionIds.length > 0) {
+          const questions = await prisma.rfid_question.findMany({
+            where: { id: { in: packQuestionIds.map(id => BigInt(id)) } }
+          });
+
+          const sortedItems = packQuestionIds.map((qId, index) => {
+            const q = questions.find(x => String(x.id) === String(qId));
+            if (!q) return null;
+            return {
+              sequence: index + 1,
+              title: q.title,
+              promptText: q.prompt_text,
+              audioUrl: q.allow_caching ? q.cached_audio_url : null,
+              allowCaching: q.allow_caching,
+              systemPromptOverride: q.system_prompt_override
+            };
+          }).filter(Boolean);
+
+          logger.info(`[RFID-LOOKUP] Q&A Pack resolved: name="${qaPack.name}", questions=${sortedItems.length}`);
+
+          return {
+            rfid_uid: normalizedUid,
+            contentType: 'prompt_pack',
+            packCode: qaPack.pack_code,
+            packName: qaPack.name,
+            items: sortedItems
+          };
+        }
+        logger.warn(`[RFID-LOOKUP] Q&A Pack id=${mapping.question_pack_id} has no question_ids`);
+      } else {
+        logger.warn(`[RFID-LOOKUP] Q&A Pack id=${mapping.question_pack_id} not found in rfid_question_pack table`);
+      }
+    } catch (qpErr) {
+      logger.error('[RFID-LOOKUP] Q&A Pack query error:', qpErr);
+    }
+  }
+
+  // Track 4: Q&A Pack via question_ids Json array on the mapping itself
   // The mapping's question_ids field holds an array of question IDs directly.
   const questionIds = Array.isArray(mapping.question_ids) ? mapping.question_ids : [];
   if (questionIds.length > 0) {
