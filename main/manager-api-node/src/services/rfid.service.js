@@ -119,22 +119,22 @@ const transformSeriesToCamelCase = (series) => {
     result.packCode = series.rfid_pack.pack_code;
   }
 
-  // Include content pack name if joined (rfid_content_pack)
+  // Include question name if joined
+  if (series.rfid_question) {
+    result.questionName = series.rfid_question.title;
+    result.questionCode = series.rfid_question.code;
+  }
+
+  // Include content pack name if joined
   if (series.rfid_content_pack) {
     result.contentPackName = series.rfid_content_pack.name;
     result.contentPackCode = series.rfid_content_pack.pack_code;
   }
 
-  // Include question pack name if joined (rfid_question_pack)
+  // Include question pack name if joined
   if (series.rfid_question_pack) {
     result.questionPackName = series.rfid_question_pack.name;
     result.questionPackCode = series.rfid_question_pack.pack_code;
-  }
-
-  // Include question name if joined
-  if (series.rfid_question) {
-    result.questionName = series.rfid_question.title;
-    result.questionCode = series.rfid_question.code;
   }
 
   return result;
@@ -340,9 +340,7 @@ const lookupCardByUid = async (rfidUid) => {
         orderBy: { priority: 'desc' },
         include: {
           rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-          rfid_question: true,
-          rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-          rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
+          rfid_question: true
         }
       });
     } catch (seriesErr) {
