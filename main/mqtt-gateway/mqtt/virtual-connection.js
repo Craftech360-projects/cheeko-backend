@@ -330,98 +330,21 @@ class VirtualMQTTConnection {
         .bridge}`
     );
 
-    // ADD: Query database for device mode instead of reading from hello message
     const macAddress = this.deviceId.replace(/:/g, "").toLowerCase();
-    const axios = require("axios");
 
-    try {
-      const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
-      const apiUrl = `${baseUrl}/toy/device/${macAddress}/mode`;
-
-      console.log(
-        `🔍 [ROOM-TYPE] Querying database for device ${this.deviceId} mode...`
-      );
-      const response = await axios.get(apiUrl, { timeout: 5000 });
-
-      if (response.data.code === 0) {
-        this.roomType = response.data.data;
-        console.log(
-          `✅ [ROOM-TYPE] Device ${this.deviceId} mode from DB: ${this.roomType}`
-        );
-      } else {
-        console.warn(
-          `⚠️ [ROOM-TYPE] API returned error: ${response.data.msg}, using default 'conversation'`
-        );
-        this.roomType = "conversation";
-      }
-    } catch (error) {
-      console.error(
-        `❌ [ROOM-TYPE] Error querying mode from DB: ${error.message}, using default 'conversation'`
-      );
-      this.roomType = "conversation";
-    }
+    // ═══════════════════════════════════════════════════════════
+    // FAST PATH: Send hello response IMMEDIATELY (< 50ms)
+    // Device exits "Connecting" state right away
+    // ═══════════════════════════════════════════════════════════
 
     // Extract language from hello message
     this.language = json.language || null;
-    console.log(
-      `📱 [ROOM-TYPE] Final room type: ${this.roomType}, language: ${this.language || "N/A"
-      }`
-    );
 
-    // Validate room type
-    if (!["conversation", "music", "story"].includes(this.roomType)) {
-      console.error(
-        `❌ [ROOM-TYPE] Invalid room_type from DB: ${this.roomType}, using 'conversation'`
-      );
-      this.roomType = "conversation";
-    }
+    // Use defaults — DB queries happen in background
+    this.roomType = "conversation"; // Default, updated by deferred DB query
+    this.deviceMode = "manual";     // Default, updated by deferred DB query
 
-    // Fetch device_mode (PTT mode: auto/manual) from database
-    this.deviceMode = "manual"; // Default to manual (push-to-talk)
-    try {
-      const deviceModeUrl = `${process.env.MANAGER_API_URL.replace("/toy", "")}/toy/device/${macAddress}/device-mode`;
-      console.log(`🔍 [DEVICE-MODE] Querying PTT mode for device ${this.deviceId}...`);
-      const deviceModeResponse = await axios.get(deviceModeUrl, { timeout: 5000 });
-
-      if (deviceModeResponse.data.code === 0) {
-        this.deviceMode = deviceModeResponse.data.data;
-        console.log(`✅ [DEVICE-MODE] Device ${this.deviceId} PTT mode from DB: ${this.deviceMode}`);
-      } else {
-        console.warn(`⚠️ [DEVICE-MODE] API returned error: ${deviceModeResponse.data.msg}, using default 'manual'`);
-      }
-    } catch (error) {
-      console.error(`❌ [DEVICE-MODE] Error querying PTT mode from DB: ${error.message}, using default 'manual'`);
-    }
-
-    // Validate device_mode
-    if (!["auto", "manual"].includes(this.deviceMode)) {
-      console.warn(`⚠️ [DEVICE-MODE] Invalid device_mode: ${this.deviceMode}, using 'manual'`);
-      this.deviceMode = "manual";
-    }
-
-    // Fetch current character, child profile, and Mem0 memories for conversation mode
-    this.currentCharacter = null;
-    this.childProfile = null;
-    this.mem0Memories = null;
-    if (this.roomType === "conversation") {
-      // Fetch character, child profile, and Mem0 memories in parallel for faster initialization
-      const [character, childProfile, memoryData] = await Promise.all([
-        this.fetchCurrentCharacter(this.deviceId),
-        this.fetchChildProfile(this.deviceId),
-        fetchMemoriesWithTimeout(this.deviceId)  // Mem0 memories with 2s timeout
-      ]);
-      this.currentCharacter = character;
-      this.childProfile = childProfile;
-      this.mem0Memories = memoryData;
-      logger.info(`🎭 [CHARACTER] Conversation mode - using character: "${this.currentCharacter}"`);
-      if (this.childProfile) {
-        logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
-      }
-      if (this.mem0Memories && this.mem0Memories.memories && this.mem0Memories.memories.length > 0) {
-        logger.info(`🧠 [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
-      }
-    }
-
+    // Generate UDP encryption keys immediately
     this.udp = {
       ...this.udp,
       key: crypto.randomBytes(16),
@@ -431,57 +354,175 @@ class VirtualMQTTConnection {
       localSequence: 0,
       startTime: Date.now(),
     };
-    console.log(
-      `🔄 [UDP-CHECK] After UDP recreation, remoteAddress: ${this.udp.remoteAddress
-        ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
-        : "null"
-      }`
-    );
 
-    if (this.bridge) {
-      debug(
-        `${this.deviceId} received duplicate hello message, closing previous bridge`
-      );
-      await this.bridge.close(); // FIXED: await the async close() to ensure room is deleted
-      this.bridge = null;
-    }
-
-    // Generate new UUID for session
+    // Generate new UUID for session (use "conversation" as default room type)
     const newSessionUuid = crypto.randomUUID();
-    console.log(`🔄 [NEW-SESSION] Generated UUID: ${newSessionUuid}`);
-
-    // Generate session_id for room WITH ROOM TYPE
     const macForRoom = this.macAddress.replace(/:/g, "");
     const futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
     this.udp.session_id = futureSessionId;
 
-    console.log(`🏠 [ROOM-NAME] Room will be: ${futureSessionId}`);
+    console.log(`🚀 [FAST-HELLO] Sending hello response immediately to device ${this.deviceId}`);
 
-    console.log(
-      `🏗️ [HELLO] Creating LiveKit room and connecting gateway (NO agent deployment yet)`
-    );
-
-    // Clean up ALL old sessions for this device BEFORE creating new room
-    // This prevents ghost rooms with agents from causing duplicate joins
-    if (this.gateway.roomService) {
-      const newRoomName = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
-      console.log(
-        `🧹 [CLEANUP] Cleaning up old sessions for device: ${this.deviceId}`
+    // Close old bridge if exists
+    if (this.bridge) {
+      debug(
+        `${this.deviceId} received duplicate hello message, closing previous bridge`
       );
+      // Don't await — let old bridge close in background
+      const oldBridge = this.bridge;
+      this.bridge = null;
+      oldBridge.close().catch((err) => {
+        console.warn(`⚠️ [OLD-BRIDGE] Close error (non-fatal):`, err.message);
+      });
+    }
+
+    // Send hello response to device IMMEDIATELY — device exits "Connecting" now!
+    const helloResponseMsg = {
+      type: "hello",
+      version: json.version,
+      mode: this.roomType,
+      session_id: this.udp.session_id,
+      timestamp: Date.now(),
+      transport: "udp",
+      udp: {
+        server: this.gateway.publicIp,
+        port: this.gateway.udpPort,
+        encryption: this.udp.encryption,
+        key: this.udp.key.toString("hex"),
+        nonce: this.udp.nonce.toString("hex"),
+        connection_id: this.connectionId,
+        cookie: this.connectionId,
+      },
+      audio_params: {
+        sample_rate: 24000,
+        channels: 1,
+        frame_duration: 60,
+        format: "opus",
+      },
+    };
+    this.sendMqttMessage(JSON.stringify(helloResponseMsg));
+    console.log(`📤 [FAST-HELLO] Hello response sent in < 50ms — device can start streaming`);
+
+    // Reset activity timer
+    this.lastActivityTime = Date.now();
+
+    // ═══════════════════════════════════════════════════════════
+    // DEFERRED PATH: DB queries + LiveKit setup in background
+    // Audio received before bridge is ready will be silently dropped
+    // (acceptable: first 1-3s while user positions device)
+    // ═══════════════════════════════════════════════════════════
+
+    this._deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId)
+      .catch((error) => {
+        console.error(`❌ [DEFERRED-SETUP] Background setup failed for ${this.deviceId}:`, error);
+        // Send error to device so it knows something went wrong
+        this.sendMqttMessage(
+          JSON.stringify({
+            type: "goodbye",
+            session_id: this.udp?.session_id,
+            reason: "setup_failed",
+            timestamp: Date.now(),
+          })
+        );
+        this.close();
+      });
+  }
+
+  /**
+   * Deferred setup — runs in background after hello response is sent.
+   * Handles DB queries, LiveKit room creation, and agent dispatch.
+   */
+  async _deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId) {
+    const deferredStart = Date.now();
+    const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
+
+    // ── Step 1: ALL DB queries in parallel ──
+    console.log(`🔄 [DEFERRED] Starting parallel DB queries for ${this.deviceId}...`);
+
+    const [roomTypeResult, deviceModeResult, character, childProfile, memoryData] = await Promise.allSettled([
+      // Room type (conversation/music/story)
+      axios.get(`${baseUrl}/toy/device/${macAddress}/mode`, { timeout: 5000 })
+        .then((r) => r.data?.code === 0 ? r.data.data : "conversation")
+        .catch(() => "conversation"),
+      // PTT mode (auto/manual)
+      axios.get(`${baseUrl}/toy/device/${macAddress}/device-mode`, { timeout: 5000 })
+        .then((r) => r.data?.code === 0 ? r.data.data : "manual")
+        .catch(() => "manual"),
+      // Character
+      this.fetchCurrentCharacter(this.deviceId),
+      // Child profile
+      this.fetchChildProfile(this.deviceId),
+      // Mem0 memories
+      fetchMemoriesWithTimeout(this.deviceId),
+    ]);
+
+    // Extract results from settled promises
+    this.roomType = roomTypeResult.status === "fulfilled" ? roomTypeResult.value : "conversation";
+    this.deviceMode = deviceModeResult.status === "fulfilled" ? deviceModeResult.value : "manual";
+    this.currentCharacter = character.status === "fulfilled" ? character.value : "Cheeko";
+    this.childProfile = childProfile.status === "fulfilled" ? childProfile.value : null;
+    this.mem0Memories = memoryData.status === "fulfilled" ? memoryData.value : null;
+
+    // Validate
+    if (!["conversation", "music", "story"].includes(this.roomType)) {
+      this.roomType = "conversation";
+    }
+    if (!["auto", "manual"].includes(this.deviceMode)) {
+      this.deviceMode = "manual";
+    }
+
+    const dbTime = Date.now() - deferredStart;
+    console.log(`✅ [DEFERRED] DB queries completed in ${dbTime}ms — roomType: ${this.roomType}, mode: ${this.deviceMode}, character: ${this.currentCharacter}`);
+
+    // Update session_id if roomType changed from default
+    if (this.roomType !== "conversation") {
+      const updatedSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
+      this.udp.session_id = updatedSessionId;
+      console.log(`🔄 [DEFERRED] Updated session_id for ${this.roomType}: ${updatedSessionId}`);
+    }
+
+    // Send mode_update to device with actual values from DB
+    const modeUpdateMsg = {
+      type: "mode_update",
+      mode: this.roomType,
+      listening_mode: this.deviceMode,
+      ...(this.roomType === "conversation" && this.currentCharacter
+        ? { character: this.currentCharacter }
+        : {}),
+      session_id: this.udp.session_id,
+      timestamp: Date.now(),
+    };
+    this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
+    console.log(`📤 [DEFERRED] Sent mode_update: ${this.roomType}, listening_mode: ${this.deviceMode}`);
+
+    if (this.currentCharacter) {
+      logger.info(`🎭 [CHARACTER] Using character: "${this.currentCharacter}"`);
+    }
+    if (this.childProfile) {
+      logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
+    }
+    if (this.mem0Memories?.memories?.length > 0) {
+      logger.info(`🧠 [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
+    }
+
+    // ── Step 2: LiveKit room setup ──
+    console.log(`🏗️ [DEFERRED] Creating LiveKit room for ${this.deviceId}...`);
+
+    // Clean up old sessions
+    if (this.gateway.roomService) {
       try {
         await LiveKitBridge.cleanupOldSessionsForDevice(
           this.deviceId,
           this.gateway.roomService,
-          newRoomName
+          this.udp.session_id
         );
         console.log(`✅ [CLEANUP] Old sessions cleaned up`);
       } catch (err) {
         console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err.message);
-        // Continue anyway - don't block room creation
       }
     }
 
-    // Create bridge after cleanup completes
+    // Create bridge
     this.bridge = new LiveKitBridge(
       this,
       json.version,
@@ -490,8 +531,6 @@ class VirtualMQTTConnection {
       this.userData,
       this.workerPool
     );
-
-    // Mark bridge as waiting for agent deployment
     this.bridge.agentDeployed = false;
 
     // Setup bridge close handler
@@ -504,162 +543,93 @@ class VirtualMQTTConnection {
       this.bridge = null;
     });
 
-    // Reset activity timer
-    this.lastActivityTime = Date.now();
+    // ── Step 3: Connect bridge to LiveKit room ──
+    const roomCreationStart = Date.now();
+    await this.bridge.connect(
+      json.audio_params,
+      json.features,
+      this.server?.roomService || this.gateway?.roomService
+    );
+    const roomCreationTime = Date.now() - roomCreationStart;
+    console.log(`✅ [DEFERRED] LiveKit room created in ${roomCreationTime}ms`);
 
-    try {
-      // Connect to LiveKit room (gateway joins, but agent doesn't deploy yet)
-      const roomCreationStart = Date.now();
-      await this.bridge.connect(
-        json.audio_params,
-        json.features,
-        this.server?.roomService || this.gateway?.roomService
-      );
-      const roomCreationTime = Date.now() - roomCreationStart;
-      console.log(
-        `✅ [HELLO] Room created and gateway connected in ${roomCreationTime}ms`
-      );
+    // Room type-specific initialization
+    if (this.roomType === "music") {
+      console.log(`🎵 [MUSIC] Spawning music bot via Python API...`);
+      await this.spawnMusicBot(this.udp.session_id);
+    } else if (this.roomType === "story") {
+      console.log(`📖 [STORY] Spawning story bot via Python API...`);
+      await this.spawnStoryBot(this.udp.session_id);
+    }
 
-      // Send mode_update to device firmware (includes listening_mode for PTT)
-      console.log(`📤 [HELLO] Sending mode_update to device...`);
-      const modeUpdateMsg = {
-        type: "mode_update",
-        mode: this.roomType,
-        listening_mode: this.deviceMode,
-        ...(this.roomType === "conversation" && this.currentCharacter
-          ? { character: this.currentCharacter }
-          : {}),
-        session_id: futureSessionId,
-        timestamp: Date.now(),
-      };
-      this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-      console.log(
-        `✅ [HELLO] Sent mode_update (${this.roomType}, listening_mode: ${this.deviceMode}${this.currentCharacter ? ", character: " + this.currentCharacter : ""
-        }) to device`
-      );
-
-      // ADD: Room type-specific initialization
-      if (this.roomType === "conversation") {
-        console.log(`🗣️ [CONVERSATION] Waiting for agent dispatch...`);
-        // Agent dispatched separately
-      } else if (this.roomType === "music") {
-        console.log(`🎵 [MUSIC] Spawning music bot via Python API...`);
-        await this.spawnMusicBot(futureSessionId);
-      } else if (this.roomType === "story") {
-        console.log(`📖 [STORY] Spawning story bot via Python API...`);
-        await this.spawnStoryBot(futureSessionId);
+    // ── Step 4: Dispatch agent (conversation mode) ──
+    if (
+      this.roomType === "conversation" &&
+      this.gateway?.agentDispatchClient
+    ) {
+      if (this.bridge?.agentDeployed) {
+        logger.warn(`[AUTO-DEPLOY] Agent already deployed, skipping duplicate dispatch`);
+        return;
       }
 
-      console.log(
-        `⏰ [HELLO] Room will auto-close if no participants join within 60 seconds (LiveKit emptyTimeout)`
-      );
+      const roomName = this.bridge?.room?.name || this.udp.session_id;
+      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-agent";
+      logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
 
-      // Send hello response with UDP session details
-      // this.sendMqttMessage(JSON.stringify({
-      //   type: "mode_update",
-      //   mode: this.roomType,
-      //   session_id: futureSessionId,
-      //   timestamp: Date.now()
-      // }));
-      const helloResponseMsg = {
-        type: "hello",
-        version: json.version,
-        mode: this.roomType,
-        ...(this.roomType === "conversation" && this.currentCharacter
-          ? { character: this.currentCharacter }
-          : {}),
+      try {
+        this.bridge.agentDeployed = true;
+        await this.gateway.agentDispatchClient.createDispatch(
+          roomName,
+          agentName,
+          {
+            metadata: buildDispatchMetadata({
+              macAddress: this.macAddress,
+              deviceId: this.deviceId,
+              character: this.currentCharacter,
+              childProfile: this.childProfile,
+              memoryData: this.mem0Memories
+            }),
+          }
+        );
+        logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
+
+        // Set hard timeout — if agent doesn't join within 15s, notify device
+        this.agentJoinFailsafeTimeout = setTimeout(() => {
+          if (this.bridge && !this.bridge.agentJoined && !this.closing) {
+            logger.error(`❌ [AGENT-TIMEOUT] Agent "${agentName}" didn't join within 15s`);
+            this.sendMqttMessage(JSON.stringify({
+              type: "goodbye",
+              session_id: this.udp?.session_id,
+              reason: "agent_timeout",
+              timestamp: Date.now(),
+            }));
+            this.sendMqttMessage(JSON.stringify({
+              type: "alert",
+              status: "error",
+              message: "Server is busy, please try again",
+              emotion: "circle_xmark",
+              session_id: this.udp?.session_id,
+            }));
+            this.close();
+          }
+        }, 15000);
+      } catch (dispatchError) {
+        this.bridge.agentDeployed = false;
+        logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
+      }
+    } else if (this.roomType !== "conversation") {
+      console.log(`🎵 [MODE] ${this.roomType} mode - no agent deployment needed`);
+    } else {
+      console.log(`⚠️ [FALLBACK] No agentDispatchClient, sending ready_for_greeting`);
+      this.sendMqttMessage(JSON.stringify({
+        type: "ready_for_greeting",
         session_id: this.udp.session_id,
         timestamp: Date.now(),
-        transport: "udp",
-        udp: {
-          server: this.gateway.publicIp,
-          port: this.gateway.udpPort,
-          encryption: this.udp.encryption,
-          key: this.udp.key.toString("hex"),
-          nonce: this.udp.nonce.toString("hex"),
-          connection_id: this.connectionId,
-          cookie: this.connectionId,
-        },
-        audio_params: {
-          sample_rate: 24000,
-          channels: 1,
-          frame_duration: 60,
-          format: "opus",
-        },
-      };
-      this.sendMqttMessage(JSON.stringify(helloResponseMsg));
-      console.log(`📤 [HELLO] Sent hello response with mode: ${this.roomType}`);
-
-      // AUTO-DEPLOY AGENT: Dispatch agent immediately for conversation mode
-      // Agent will auto-greet via on_enter lifecycle hook - no gateway greeting trigger needed
-      if (
-        this.roomType === "conversation" &&
-        this.gateway?.agentDispatchClient
-      ) {
-        // Guard: Skip if agent already deployed (prevent duplicate dispatches)
-        if (this.bridge?.agentDeployed) {
-          logger.warn(`[AUTO-DEPLOY] Agent already deployed, skipping duplicate dispatch`);
-          return;
-        }
-
-        const roomName = this.bridge?.room?.name || this.udp.session_id;
-
-        // Use currentCharacter (fetched from DB earlier) to dispatch correct agent
-        const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-agent";
-        logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
-        logger.info(`🚀 [AUTO-DEPLOY] Dispatching ${agentName} to room: ${roomName}`);
-
-        try {
-          // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
-          this.bridge.agentDeployed = true;
-
-          await this.gateway.agentDispatchClient.createDispatch(
-            roomName,
-            agentName,
-            {
-              metadata: buildDispatchMetadata({
-                macAddress: this.macAddress,
-                deviceId: this.deviceId,
-                character: this.currentCharacter,
-                childProfile: this.childProfile,
-                memoryData: this.mem0Memories
-              }),
-            }
-          );
-          logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
-          // Agent will greet user via on_enter lifecycle hook
-        } catch (dispatchError) {
-          // Reset flag on failure so retry can work
-          this.bridge.agentDeployed = false;
-          logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
-        }
-      } else if (this.roomType !== "conversation") {
-        // For music/story modes, no agent needed
-        console.log(
-          `🎵 [MODE] ${this.roomType} mode - no agent deployment needed`
-        );
-      } else {
-        // Fallback: Send ready_for_greeting if no dispatch client available
-        console.log(
-          `⚠️ [FALLBACK] No agentDispatchClient, sending ready_for_greeting`
-        );
-        this.sendMqttMessage(
-          JSON.stringify({
-            type: "ready_for_greeting",
-            session_id: this.udp.session_id,
-            timestamp: Date.now(),
-          })
-        );
-      }
-    } catch (error) {
-      this.sendMqttMessage(
-        JSON.stringify({
-          type: "error",
-          message: "Failed to create room",
-        })
-      );
-      console.error(`${this.deviceId} failed to create room: ${error}`);
+      }));
     }
+
+    const totalDeferredTime = Date.now() - deferredStart;
+    console.log(`✅ [DEFERRED] Total background setup completed in ${totalDeferredTime}ms for ${this.deviceId}`)
   }
 
   async fetchPlaylist(mode) {
@@ -939,22 +909,28 @@ class VirtualMQTTConnection {
 
     if (json.type === "goodbye") {
       console.log(
-        `🔌 [DISCONNECT-AGENT] Received goodbye from device: ${this.deviceId} - disconnecting agent but keeping room alive`
+        `🔌 [GOODBYE] Received goodbye from device: ${this.deviceId} - fully closing room`
       );
 
-      // Disconnect agent participant but keep room alive
+      // Clear agent join failsafe timeout
+      if (this.agentJoinFailsafeTimeout) {
+        clearTimeout(this.agentJoinFailsafeTimeout);
+        this.agentJoinFailsafeTimeout = null;
+      }
+
+      // Notify agent of disconnect before closing room
       if (
         this.bridge &&
         this.bridge.room &&
         this.bridge.room.localParticipant
       ) {
         try {
-          // Send disconnect message to agent via data channel
           const disconnectMessage = {
             type: "disconnect_agent",
             session_id: json.session_id,
             timestamp: Date.now(),
             source: "mqtt_gateway",
+            reason: "device_goodbye",
           };
 
           const messageString = JSON.stringify(disconnectMessage);
@@ -966,29 +942,26 @@ class VirtualMQTTConnection {
             reliable: true,
           });
 
-          console.log(`✅ [DISCONNECT-AGENT] Sent disconnect signal to agent`);
-
-          // Mark agent as not joined so it can rejoin
-          this.bridge.agentJoined = false;
-          this.bridge.agentDeployed = false;
-
-          // Reset agent join promise for next join
-          this.bridge.agentJoinPromise = new Promise((resolve) => {
-            this.bridge.agentJoinResolve = resolve;
-          });
-
-          console.log(
-            `🏠 [DISCONNECT-AGENT] Room remains alive, agent can rejoin on 's' press`
-          );
+          console.log(`✅ [GOODBYE] Sent disconnect signal to agent`);
         } catch (error) {
-          console.error(
-            `❌ [DISCONNECT-AGENT] Failed to disconnect agent:`,
-            error
+          console.warn(
+            `⚠️ [GOODBYE] Could not notify agent (non-fatal):`,
+            error.message
           );
         }
       }
 
-      // Keep bridge and room alive - agent can rejoin with 's'
+      // Fully close bridge and room — MQTT gateway creates a new room per hello,
+      // so keeping the room alive only creates ghost rooms in LiveKit
+      if (this.bridge) {
+        const bridgeToClose = this.bridge;
+        this.bridge = null;
+        bridgeToClose.close().catch((err) => {
+          console.warn(`⚠️ [GOODBYE] Bridge close error (non-fatal):`, err.message);
+        });
+        console.log(`🗑️ [GOODBYE] Room fully closed for ${this.deviceId}`);
+      }
+
       return;
     }
 
@@ -1318,6 +1291,130 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // Handle RFID card_lookup messages - query Manager API and respond to device
+    if (json.type === "card_lookup") {
+      console.log(
+        `🏷️ [RFID] Card lookup received: uid=${json.rfid_uid} from device ${this.deviceId}`
+      );
+
+      try {
+        const cleanMac = this.macAddress.replace(/:/g, "").toLowerCase();
+        const rfidUid = json.rfid_uid;
+        const baseUrl = process.env.MANAGER_API_URL;
+
+        // Call Manager API RFID lookup endpoint
+        const lookupUrl = `${baseUrl}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}`;
+        console.log(`🔍 [RFID] Looking up card at: ${lookupUrl}`);
+
+        const response = await axios.get(lookupUrl, { timeout: 5000 });
+
+        if (response.data && response.data.code === 0 && response.data.data) {
+          const cardData = response.data.data;
+          console.log(
+            `✅ [RFID] Card found: contentType=${cardData.contentType}, title="${cardData.title || cardData.packName || ""}"`
+          );
+
+          // Determine response type based on card data
+          let responseType = "card_content";
+          if (cardData.contentType === "ai" || cardData.type === "ai") {
+            responseType = "card_ai";
+          }
+
+          // Send card response back to device
+          this.sendMqttMessage(
+            JSON.stringify({
+              type: responseType,
+              session_id: json.session_id,
+              rfid_uid: rfidUid,
+              ...cardData,
+            })
+          );
+          console.log(
+            `📤 [RFID] Sent ${responseType} response to device ${this.deviceId}`
+          );
+        } else {
+          // Card not found in database
+          console.log(
+            `ℹ️ [RFID] No card mapping found for uid=${rfidUid}`
+          );
+          this.sendMqttMessage(
+            JSON.stringify({
+              type: "card_unknown",
+              session_id: json.session_id,
+              rfid_uid: rfidUid,
+            })
+          );
+        }
+      } catch (error) {
+        console.error(
+          `❌ [RFID] Card lookup failed: ${error.message}`
+        );
+        // Fallback: tell device card is unknown so it doesn't hang
+        this.sendMqttMessage(
+          JSON.stringify({
+            type: "card_unknown",
+            session_id: json.session_id,
+            rfid_uid: json.rfid_uid,
+            error: "lookup_failed",
+          })
+        );
+      }
+      return;
+    }
+
+    // Handle speech_end messages - forward to LiveKit agent for explicit turn detection
+    if (json.type === "speech_end") {
+      console.log(
+        `🎤 [SPEECH-END] User finished speaking, device: ${this.deviceId}`
+      );
+
+      try {
+        if (this.bridge?.room?.localParticipant) {
+          const speechEndMessage = {
+            type: "speech_end",
+            session_id: json.session_id || this.udp?.session_id,
+            device_id: this.macAddress,
+            timestamp: Date.now(),
+            source: "device_firmware",
+          };
+
+          const messageData = new Uint8Array(
+            Buffer.from(JSON.stringify(speechEndMessage), "utf8")
+          );
+
+          await this.bridge.room.localParticipant.publishData(messageData, {
+            reliable: true,
+          });
+
+          console.log(
+            `✅ [SPEECH-END] Forwarded speech_end to LiveKit agent`
+          );
+        } else {
+          console.warn(
+            `⚠️ [SPEECH-END] Cannot forward - no LiveKit connection`
+          );
+        }
+      } catch (error) {
+        console.error(
+          `❌ [SPEECH-END] Failed to forward speech_end: ${error.message}`
+        );
+      }
+      return;
+    }
+
+    // Handle MCP response messages from device
+    if (json.type === "mcp") {
+      console.log(
+        `🔋 [MCP] MCP message received from device ${this.deviceId}`
+      );
+      if (this.bridge) {
+        const sessionId = json.session_id || this.udp?.session_id;
+        const requestId = json.request_id;
+        await this.forwardMcpResponse(json.payload || json, sessionId, requestId);
+      }
+      return;
+    }
+
     debug("Received other message, not forwarding to LiveKit:", json);
   }
 
@@ -1550,6 +1647,12 @@ class VirtualMQTTConnection {
     );
     console.log(`📍 [CLEANUP-TRACE] close() called from: ${callerLine}`);
     this.closing = true;
+
+    // Clear agent join failsafe timeout
+    if (this.agentJoinFailsafeTimeout) {
+      clearTimeout(this.agentJoinFailsafeTimeout);
+      this.agentJoinFailsafeTimeout = null;
+    }
 
     // ADD: Stop media bot if music/story room
     if (

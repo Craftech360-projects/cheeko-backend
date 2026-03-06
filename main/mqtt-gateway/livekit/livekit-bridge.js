@@ -741,6 +741,12 @@ class LiveKitBridge extends EventEmitter {
               this.agentJoinTimeout = null;
             }
 
+            // Clear the failsafe timeout on the connection side
+            if (this.connection?.agentJoinFailsafeTimeout) {
+              clearTimeout(this.connection.agentJoinFailsafeTimeout);
+              this.connection.agentJoinFailsafeTimeout = null;
+            }
+
             // Send ready_for_greeting to agent via data channel to trigger greeting
             console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
             try {
