@@ -69,6 +69,14 @@ class VirtualMQTTConnection {
     this.isEnding = false; // Track if end prompt has been sent
     this.endPromptSentTime = null; // Track when end prompt was sent
 
+    // Audio stats tracking
+    this.audioStats = {
+      packetCount: 0,
+      totalBytes: 0,
+      lastLogTime: Date.now(),
+      logIntervalMs: 10000,
+    };
+
     // Session duration tracking (max 60 minutes)
     this.sessionStartTime = Date.now();
     this.maxSessionDurationMs = 60 * 60 * 1000; // 60 minutes max session duration
@@ -1425,6 +1433,10 @@ class VirtualMQTTConnection {
       return;
     }
 
+    if (!rinfo) {
+      return;
+    }
+
     if (this.udp.remoteAddress !== rinfo) {
       // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
       this.udp.remoteAddress = rinfo;
@@ -1454,16 +1466,40 @@ class VirtualMQTTConnection {
 
     this.bridge.sendAudio(payload, timestamp);
     this.udp.remoteSequence = sequence;
+
+    // Count packets — stats logged by checkKeepAlive every 10s
+    this.audioStats.packetCount++;
+    this.audioStats.totalBytes += payload.length;
   }
 
   async checkKeepAlive() {
     // Don't check keepalive if connection is closing
-    console.log("timer 2");
     if (this.closing) {
       return;
     }
 
     const now = Date.now();
+
+    // Periodic audio status log
+    if (this.audioStats) {
+      const elapsed = (now - this.audioStats.lastLogTime) / 1000;
+      if (elapsed >= 10) {
+        if (this.audioStats.packetCount > 0) {
+          const pps = Math.round(this.audioStats.packetCount / elapsed);
+          const kbps = ((this.audioStats.totalBytes * 8) / elapsed / 1000).toFixed(1);
+          console.log(
+            `🎤 [AUDIO-STATS] Device ${this.deviceId}: ${this.audioStats.packetCount} packets in ${elapsed.toFixed(0)}s (${pps} pkt/s, ${kbps} kbps)`
+          );
+        } else {
+          console.log(
+            `🔇 [AUDIO-STATS] Device ${this.deviceId}: NO audio packets received in ${elapsed.toFixed(0)}s`
+          );
+        }
+        this.audioStats.packetCount = 0;
+        this.audioStats.totalBytes = 0;
+        this.audioStats.lastLogTime = now;
+      }
+    }
 
     // Check max session duration (60 minutes absolute limit)
     const sessionDuration = now - this.sessionStartTime;

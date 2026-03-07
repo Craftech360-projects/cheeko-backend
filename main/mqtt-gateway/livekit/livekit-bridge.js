@@ -308,6 +308,24 @@ class LiveKitBridge extends EventEmitter {
     //   console.log("[LiveKitBridge] Room connected event fired");
     // });
 
+    // Register text stream handlers to log incoming streams
+    this.room.registerTextStreamHandler("lk.agent.events", async (reader, participantIdentity) => {
+      try {
+        const text = await reader.readAll();
+        console.log(`📡 [AGENT-EVENT] From ${participantIdentity}: ${text}`);
+      } catch (err) {
+        console.error(`❌ [AGENT-EVENT] Read error:`, err.message);
+      }
+    });
+    this.room.registerTextStreamHandler("lk.transcription", async (reader, participantIdentity) => {
+      try {
+        const text = await reader.readAll();
+        console.log(`📝 [TRANSCRIPTION] From ${participantIdentity}: ${text}`);
+      } catch (err) {
+        console.error(`❌ [TRANSCRIPTION] Read error:`, err.message);
+      }
+    });
+
     this.room.on("disconnected", (reason) => {
       console.log(`[LiveKitBridge] Room disconnected: ${reason}`);
       // CRITICAL: Clear audio flag on disconnect to prevent stuck state
