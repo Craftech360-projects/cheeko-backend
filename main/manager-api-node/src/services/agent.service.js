@@ -399,22 +399,47 @@ const setCharacterByName = async (mac, characterName) => {
 
   const device = await prisma.ai_device.findUnique({
     where: { mac_address: normalizedMac },
-    select: { id: true, user_id: true },
+    select: { id: true, user_id: true, agent_id: true },
   });
   if (!device) throw new Error('Device not found');
 
-  // Find existing agent by name (case-insensitive) for this user
-  let agent = await prisma.ai_agent.findFirst({
-    where: { user_id: device.user_id, agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true },
+  // Look up character template by name
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: characterName, mode: 'insensitive' } },
   });
 
-  if (!agent) {
-    // Look up template by character name to copy full config
-    const template = await prisma.ai_agent_template.findFirst({
-      where: { agent_name: { equals: characterName, mode: 'insensitive' } },
-    });
+  const templateData = {
+    agent_name: characterName,
+    lang_code: template?.lang_code ?? 'en',
+    language: template?.language ?? 'English',
+    ...(template && {
+      agent_code: template.agent_code,
+      asr_model_id: template.asr_model_id,
+      vad_model_id: template.vad_model_id,
+      llm_model_id: template.llm_model_id,
+      vllm_model_id: template.vllm_model_id,
+      tts_model_id: template.tts_model_id,
+      tts_voice_id: template.tts_voice_id,
+      mem_model_id: template.mem_model_id,
+      intent_model_id: template.intent_model_id,
+      chat_history_conf: template.chat_history_conf,
+      system_prompt: template.system_prompt,
+      summary_memory: template.summary_memory,
+    }),
+  };
 
+  let agent;
+
+  if (device.agent_id) {
+    // Update the existing agent in-place instead of creating a new one
+    agent = await prisma.ai_agent.update({
+      where: { id: device.agent_id },
+      data: templateData,
+      select: { id: true, agent_name: true },
+    });
+    logger.info(`[setCharacterByName] Updated existing agent ${agent.id} to "${characterName}"`);
+  } else {
+    // First-time setup: create a new agent
     if (template) {
       logger.info(`[setCharacterByName] Found template for "${characterName}", applying to new agent`);
     } else {
@@ -423,32 +448,16 @@ const setCharacterByName = async (mac, characterName) => {
 
     agent = await prisma.ai_agent.create({
       data: {
+        ...templateData,
         user_id: device.user_id,
-        agent_name: characterName,
-        lang_code: template?.lang_code ?? 'en',
-        language: template?.language ?? 'English',
         creator: device.user_id,
-        ...(template && {
-          agent_code: template.agent_code,
-          asr_model_id: template.asr_model_id,
-          vad_model_id: template.vad_model_id,
-          llm_model_id: template.llm_model_id,
-          vllm_model_id: template.vllm_model_id,
-          tts_model_id: template.tts_model_id,
-          tts_voice_id: template.tts_voice_id,
-          mem_model_id: template.mem_model_id,
-          intent_model_id: template.intent_model_id,
-          chat_history_conf: template.chat_history_conf,
-          system_prompt: template.system_prompt,
-          summary_memory: template.summary_memory,
-        }),
       },
       select: { id: true, agent_name: true },
     });
-    logger.info(`[setCharacterByName] Auto-created agent "${characterName}" for user ${device.user_id}`);
-  }
 
-  await prisma.ai_device.update({ where: { id: device.id }, data: { agent_id: agent.id } });
+    await prisma.ai_device.update({ where: { id: device.id }, data: { agent_id: agent.id } });
+    logger.info(`[setCharacterByName] Created new agent "${characterName}" for user ${device.user_id}`);
+  }
 
   logger.info(`[setCharacterByName] Device ${normalizedMac} set to agent: ${agent.agent_name}`);
   return { agentId: agent.id, agentName: agent.agent_name };

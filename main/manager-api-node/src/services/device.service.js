@@ -66,7 +66,7 @@ const registerDevice = async ({ mac, board, appVersion }) => {
  * @param {string} deviceCode - 6-digit device code or MAC address
  * @returns {Promise<Object>} Bound device
  */
-const bindDevice = async (userId, agentId, deviceCode) => {
+const bindDevice = async (userId, agentId, deviceCode, isSuperAdmin = false) => {
   let device = null;
   let macAddress = null;
   let activationData = null;
@@ -81,24 +81,31 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     macAddress = activationData.macAddress;
     const existing = await prisma.ai_device.findUnique({ where: { mac_address: macAddress } });
     if (existing) {
-      if (existing.user_id && existing.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
+      if (!isSuperAdmin && existing.user_id && existing.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
       device = existing;
     }
   } else {
     throw new Error('Invalid device code format. Use 6-digit activation code or MAC address.');
   }
 
+  // Admin can bind any agent; regular users can only bind their own
+  const agentWhere = isSuperAdmin
+    ? { id: agentId }
+    : { id: agentId, user_id: BigInt(userId) };
   const agent = await prisma.ai_agent.findFirst({
-    where: { id: agentId, user_id: BigInt(userId) },
-    select: { id: true },
+    where: agentWhere,
+    select: { id: true, user_id: true },
   });
   if (!agent) throw new Error('Agent not found or does not belong to user');
 
+  // For admin, bind to the agent's owner; for regular users, bind to themselves
+  const bindUserId = isSuperAdmin ? agent.user_id : BigInt(userId);
+
   if (device) {
-    if (device.user_id && device.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
+    if (!isSuperAdmin && device.user_id && device.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
     const updated = await prisma.ai_device.update({
       where: { id: device.id },
-      data: { user_id: BigInt(userId), agent_id: agentId, update_date: new Date() },
+      data: { user_id: bindUserId, agent_id: agentId, update_date: new Date() },
     });
     if (activationData) {
       activationCodeCache.delete(deviceCode);
@@ -111,7 +118,7 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     const newDevice = await prisma.ai_device.create({
       data: {
         mac_address: macAddress,
-        user_id: BigInt(userId),
+        user_id: bindUserId,
         agent_id: agentId,
         board: activationData.board || null,
         app_version: activationData.appVersion || null,
@@ -121,8 +128,8 @@ const bindDevice = async (userId, agentId, deviceCode) => {
         create_date: now,
         update_date: now,
         last_connected_at: now,
-        creator: BigInt(userId),
-        updater: BigInt(userId),
+        creator: bindUserId,
+        updater: bindUserId,
       },
     });
     activationCodeCache.delete(deviceCode);

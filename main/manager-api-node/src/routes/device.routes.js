@@ -87,9 +87,10 @@ router.post('/bind/:agentId/:deviceCode',
   requireAuth,
   asyncHandler(async (req, res) => {
     const { agentId, deviceCode } = req.params;
+    const isSuperAdmin = req.user.super_admin === 1 || req.user.role === 'admin';
 
     try {
-      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode);
+      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode, isSuperAdmin);
 
       // Transform to DeviceResponseDTO format (matching Spring Boot)
       const response = {
