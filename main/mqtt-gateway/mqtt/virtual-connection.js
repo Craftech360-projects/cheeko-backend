@@ -1361,7 +1361,6 @@ class VirtualMQTTConnection {
 
   async checkKeepAlive() {
     // Don't check keepalive if connection is closing
-    console.log("timer 2");
     if (this.closing) {
       return;
     }

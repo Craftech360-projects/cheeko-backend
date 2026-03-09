@@ -202,4 +202,5 @@ main/manager-api/src/main/resources/application-dev.yml
 venv
 node_modules
 CLAUDE.md
-clerk-nextjs-guidemain/mqtt-gateway/config/mqtt.json
+clerk-nextjs-guide
+log.md

@@ -833,6 +833,7 @@ model sys_user {
   username             String?                @unique @db.VarChar(100)
   password             String?                @db.VarChar(255)
   email                String?                @unique @db.VarChar(255)
+  firebase_uid         String?                @unique @db.VarChar(128)
   phone                String?                @db.VarChar(50)
   nickname             String?                @db.VarChar(100)
   avatar               String?                @db.VarChar(500)
