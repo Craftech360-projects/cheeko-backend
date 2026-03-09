@@ -2067,7 +2067,6 @@ class MQTTGateway {
       const oldConnectionId = existingDeviceInfo.connectionId;
       this.connections.delete(oldConnectionId);
       if (oldConnection && !oldConnection.closing) {
-        oldConnection.closing = true;
         oldConnection.close();
       }
     }

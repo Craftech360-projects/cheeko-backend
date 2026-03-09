@@ -74,6 +74,16 @@ class LiveKitBridge extends EventEmitter {
     this.pendingMcpRequests = new Map();
     this.mcpRequestCounter = 1;
 
+    // LLM text dedup: track last text sent from speech_created to avoid duplicates from legacy llm event
+    this.lastLlmTextSent = null;
+
+    // STT dedup: prevent sending the same transcription text multiple times
+    // (lk.transcription stream fires multiple times for the same utterance)
+    this.lastSttText = null;
+    this.lastSttTime = 0;
+    this.lastLlmStreamText = null;
+    this.lastLlmStreamTime = 0;
+
     // Volume adjustment queue for request serialization
     this.volumeAdjustmentQueue = [];
     this.isAdjustingVolume = false;
@@ -308,24 +318,6 @@ class LiveKitBridge extends EventEmitter {
     //   console.log("[LiveKitBridge] Room connected event fired");
     // });
 
-    // Register text stream handlers to log incoming streams
-    this.room.registerTextStreamHandler("lk.agent.events", async (reader, participantIdentity) => {
-      try {
-        const text = await reader.readAll();
-        console.log(`📡 [AGENT-EVENT] From ${participantIdentity}: ${text}`);
-      } catch (err) {
-        console.error(`❌ [AGENT-EVENT] Read error:`, err.message);
-      }
-    });
-    this.room.registerTextStreamHandler("lk.transcription", async (reader, participantIdentity) => {
-      try {
-        const text = await reader.readAll();
-        console.log(`📝 [TRANSCRIPTION] From ${participantIdentity}: ${text}`);
-      } catch (err) {
-        console.error(`❌ [TRANSCRIPTION] Read error:`, err.message);
-      }
-    });
-
     this.room.on("disconnected", (reason) => {
       console.log(`[LiveKitBridge] Room disconnected: ${reason}`);
       // CRITICAL: Clear audio flag on disconnect to prevent stuck state
@@ -339,6 +331,12 @@ class LiveKitBridge extends EventEmitter {
       (payload, participant, kind, topic) => {
         try {
           const str = Buffer.from(payload).toString("utf-8");
+
+          // Skip topic-based messages here — they are handled by registerTextStreamHandler below.
+          // DataReceived still fires for these topics but registerTextStreamHandler is the primary handler.
+          if (topic === "lk.transcription" || topic === "lk.agent.events") {
+            return;
+          }
 
           let data;
           try {
@@ -403,17 +401,15 @@ class LiveKitBridge extends EventEmitter {
                 data.data.old_state === "listening" &&
                 data.data.new_state === "thinking"
               ) {
-                // DISABLED: Skip forwarding thinking message to ESP32
-                console.log(
-                  `🤔 [LLM] Thinking message received, forwarding to MQTT is skipped`
-                );
-                // this.sendLLMThinkMessage();
+                console.log(`🤔 [LLM] Thinking → forwarding to device`);
+                this.sendLLMThinkMessage();
               }
               break;
             case "user_input_transcribed":
-              // DISABLED: Don't send intermediate STT results to device (too many messages)
-              // The device doesn't need partial transcriptions
-              // this.sendSttMessage(data.data.text || data.data.transcript);
+              // Send final STT transcription to device for display
+              if (data.data && (data.data.text || data.data.transcript)) {
+                this.sendSttMessage(data.data.text || data.data.transcript);
+              }
               break;
             case "speech_created":
               // Set audio playing flag and reset inactivity timer
@@ -454,8 +450,14 @@ class LiveKitBridge extends EventEmitter {
               this.sendTtsStopMessage();
               break;
             case "llm":
-              // Handle emotion from LLM response
-              // console.log(`😊 [EMOTION] Received: ${data.emotion} (${data.text})`);
+              // Forward LLM response text + emotion to device display
+              // Dedup: skip if already sent from speech_created text stream handler
+              if (data.text && data.text !== this.lastLlmTextSent) {
+                this.sendLlmMessage(data.text);
+              } else if (data.text) {
+                console.log(`📝 [LLM-DEDUP] Skipping duplicate LLM text (already sent from speech_created)`);
+              }
+              this.lastLlmTextSent = null; // Reset after processing
               this.sendEmotionMessage(data.text, data.emotion);
               break;
             case "character-change":
@@ -492,6 +494,142 @@ class LiveKitBridge extends EventEmitter {
         });
         const roomConnectedTime = Date.now();
         console.log(`✅ [LIVEKIT] Connected to room: ${roomName}`);
+
+        // ────────────────────────────────────────────────────────────────
+        // TEXT STREAM HANDLERS
+        // Newer LiveKit Agents deliver agent events and transcriptions as
+        // text streams (room.registerTextStreamHandler) instead of (or in
+        // addition to) the legacy DataReceived binary packets.
+        // Without these handlers the SDK logs:
+        //   "ignoring incoming text stream due to no handler for topic: …"
+        // ────────────────────────────────────────────────────────────────
+
+        // Handle lk.agent.events text streams
+        this.room.registerTextStreamHandler("lk.agent.events", async (reader, participantInfo) => {
+          try {
+            const text = await reader.readAll();
+            if (!text) return;
+            const event = JSON.parse(text);
+            const type = event.type || (event.data && event.data.type);
+            console.log(`🤖 [AGENT-EVENT-STREAM] ${type || JSON.stringify(event).substring(0, 100)}`);
+
+            // Re-use the same state-machine logic as the DataReceived handler
+            if (type === "agent_state_changed" && event.data) {
+              const { old_state, new_state } = event.data;
+              console.log(`🔄 [STATE] Agent state changed: ${old_state} → ${new_state} (device: ${this.macAddress})`);
+              if (old_state === "speaking" && new_state === "listening") {
+                this.isAudioPlaying = false;
+                this.audioPlayingStartTime = null;
+                console.log(`🎵 [AUDIO-STOP] TTS stopped via stream, sending tts_stop in 500ms (device: ${this.macAddress})`);
+                setTimeout(() => {
+                  console.log(`📤 [TTS-STOP] Sending tts stop message now (device: ${this.macAddress})`);
+                  this.sendTtsStopMessage();
+                }, 500);
+                if (this.connection && this.connection.isEnding && !this.connection.goodbyeSent) {
+                  this.connection.goodbyeSent = true;
+                  this.connection.sendMqttMessage(JSON.stringify({
+                    type: "goodbye",
+                    session_id: this.connection.udp ? this.connection.udp.session_id : null,
+                    reason: "inactivity_timeout",
+                    timestamp: Date.now(),
+                  }));
+                  setTimeout(() => { if (this.connection) this.connection.close(); }, 500);
+                }
+              } else if (old_state === "listening" && new_state === "thinking") {
+                console.log(`🤔 [LLM] Thinking → forwarding to device`);
+                this.sendLLMThinkMessage();
+              }
+            } else if (type === "speech_created" && event.data) {
+              this.isAudioPlaying = true;
+              this.audioPlayingStartTime = Date.now();
+              if (this.connection && this.connection.updateActivityTime) this.connection.updateActivityTime();
+              // Log speech_created data to diagnose what fields are available
+              console.log(`📨 [SPEECH-CREATED] Data keys: ${Object.keys(event.data).join(", ")} | text=${!!event.data.text} | content=${!!event.data.content}`);
+              // Try multiple possible field names for the LLM text
+              const speechText = event.data.text || event.data.content || event.data.source_text || null;
+              if (speechText) {
+                this.sendLlmMessage(speechText);
+                this.lastLlmTextSent = speechText;
+              }
+              this.sendTtsStartMessage(speechText);
+            } else if (type === "conversation_item_added" && event.data) {
+              // Extract assistant response text when added to conversation
+              const item = event.data.item || event.data;
+              if (item.role === "assistant" && item.content) {
+                // content can be a string or array of content parts
+                let assistantText = "";
+                if (typeof item.content === "string") {
+                  assistantText = item.content;
+                } else if (Array.isArray(item.content)) {
+                  assistantText = item.content
+                    .filter(c => c.type === "text" || c.text)
+                    .map(c => c.text || c.value || "")
+                    .join(" ")
+                    .trim();
+                }
+                if (assistantText) {
+                  console.log(`📝 [CONVERSATION-ITEM] Assistant text: "${assistantText.substring(0, 80)}..."`);
+                  // Send as LLM text — this is a fallback if speech_created didn't have text
+                  this.sendLlmMessage(assistantText);
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`❌ [AGENT-EVENT-STREAM] Error: ${err.message}`);
+          }
+        });
+
+        // Handle lk.transcription text streams
+        // The framework fires this for EACH transcription chunk. We pass all through —
+        // the device display naturally shows the latest text (interim gets overwritten by final).
+        this.room.registerTextStreamHandler("lk.transcription", async (reader, participantInfo) => {
+          try {
+            const attrs = reader.attributes || {};
+            const isFinal = attrs["lk.final"] === "true" || attrs["lk.final"] === true;
+
+            const text = await reader.readAll();
+            if (!text || !text.trim()) return;
+
+            // Robust identity detection — participantInfo can be an object or plain string
+            const identity = participantInfo?.identity ?? participantInfo ?? "unknown";
+            const isAgent = identity?.toString().includes("agent");
+
+            console.log(`📝 [TRANSCRIPTION-STREAM] ${isAgent ? "Agent" : "User"} (final=${isFinal}): "${text.trim().substring(0, 80)}"`);
+
+            // Try JSON segments format first
+            try {
+              const transcription = JSON.parse(text);
+              if (transcription.segments && transcription.segments.length > 0) {
+                // Filter to only final segments to avoid partial words
+                const finalSegments = transcription.segments.filter(s => s.final !== false);
+                const fullText = (finalSegments.length > 0 ? finalSegments : transcription.segments)
+                  .map(s => s.text).join(" ").trim();
+                if (fullText) {
+                  if (isAgent) {
+                    console.log(`📝 [TRANSCRIPTION-STREAM] Agent: "${fullText}"`);
+                    this.sendLlmMessage(fullText);
+                  } else {
+                    console.log(`📝 [TRANSCRIPTION-STREAM] User: "${fullText}"`);
+                    this.sendSttMessage(fullText);
+                  }
+                }
+                return;
+              }
+            } catch (_) { /* not JSON segments, treat as plain text */ }
+
+            // Plain-text fallback
+            const plain = text.trim();
+            if (isAgent) {
+              console.log(`📝 [TRANSCRIPTION-STREAM] Agent: "${plain}"`);
+              this.sendLlmMessage(plain);
+            } else {
+              console.log(`📝 [TRANSCRIPTION-STREAM] User: "${plain}"`);
+              this.sendSttMessage(plain);
+            }
+          } catch (err) {
+            console.error(`❌ [TRANSCRIPTION-STREAM] Error: ${err.message}`);
+          }
+        });
         // console.log(`⏱️ [TIMING-ROOM] Room connection took ${roomConnectedTime - connectStartTime}ms`);
         // console.log(`🔗 [CONNECTION] State: ${this.room.connectionState}`);
         // console.log(`🟢 [STATUS] Is connected: ${this.room.isConnected}`);
@@ -765,21 +903,48 @@ class LiveKitBridge extends EventEmitter {
               this.connection.agentJoinFailsafeTimeout = null;
             }
 
-            // Send ready_for_greeting to agent via data channel to trigger greeting
-            console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
-            try {
-              const greetingTrigger = JSON.stringify({
-                type: "ready_for_greeting",
-                session_id: this.connection?.udp?.session_id || "unknown",
-                timestamp: Date.now(),
-              });
-              await this.room.localParticipant.publishData(
-                Buffer.from(greetingTrigger),
-                { reliable: true }
-              );
-              console.log(`✅ [GREETING] ready_for_greeting sent to agent`);
-            } catch (greetErr) {
-              console.error(`❌ [GREETING] Failed to send ready_for_greeting: ${greetErr.message}`);
+            // Flush any audio buffered during setup (before agent joined)
+            const hasBufferedAudio = this.connection?.audioBuffer && this.connection.audioBuffer.length > 0;
+
+            if (hasBufferedAudio) {
+              // User was already speaking during setup — flush their audio, skip greeting
+              console.log(`🔊 [AGENT-JOIN] Flushing ${this.connection.audioBuffer.length} buffered audio frames (user already speaking, skipping greeting)`);
+              for (const frame of this.connection.audioBuffer) {
+                this.connection.onUdpMessage(
+                  this.connection.udp.remoteAddress,
+                  frame.message,
+                  frame.payloadLength,
+                  frame.timestamp,
+                  frame.sequence
+                );
+              }
+              this.connection.audioBuffer = null;
+            } else {
+              // No buffered audio — send greeting trigger as normal
+              console.log(`📤 [GREETING] Sending ready_for_greeting to agent via data channel`);
+              try {
+                const greetingTrigger = JSON.stringify({
+                  type: "ready_for_greeting",
+                  session_id: this.connection?.udp?.session_id || "unknown",
+                  timestamp: Date.now(),
+                });
+                await this.room.localParticipant.publishData(
+                  Buffer.from(greetingTrigger),
+                  { reliable: true }
+                );
+                console.log(`✅ [GREETING] ready_for_greeting sent to agent`);
+              } catch (greetErr) {
+                console.error(`❌ [GREETING] Failed to send ready_for_greeting: ${greetErr.message}`);
+              }
+            }
+
+            // Notify device that agent is ready (for pre-warm UI update)
+            if (this.connection) {
+              this.connection.sendMqttMessage(JSON.stringify({
+                type: "agent_ready",
+                session_id: this.connection.udp?.session_id,
+              }));
+              console.log(`📤 [AGENT-READY] Sent agent_ready to device`);
             }
           }
         });
@@ -1203,9 +1368,17 @@ class LiveKitBridge extends EventEmitter {
     return this.room && this.room.isConnected;
   }
 
-  // Send TTS start message to device
+  // Send TTS start message to device (with dedup — both DataReceived and text stream fire)
   sendTtsStartMessage(text = "") {
     if (!this.connection) return;
+
+    // Dedup: don't send tts start twice within 3 seconds
+    const now = Date.now();
+    if (this._lastTtsStartTime && (now - this._lastTtsStartTime) < 3000) {
+      // console.log(`📝 [TTS-START-DEDUP] Skipping duplicate tts start`);
+      return;
+    }
+    this._lastTtsStartTime = now;
 
     const message = {
       type: "tts",
@@ -1217,9 +1390,7 @@ class LiveKitBridge extends EventEmitter {
       message.text = text;
     }
 
-    // console.log(
-    //   `📤 [MQTT OUT] Sending TTS start to device: ${this.macAddress}`
-    // );
+    console.log(`📤 [TTS-START] Sending tts start (device: ${this.macAddress})`);
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
@@ -1238,12 +1409,20 @@ class LiveKitBridge extends EventEmitter {
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
-  // Send TTS stop message to device
+  // Send TTS stop message to device (with dedup — both DataReceived and text stream fire)
   sendTtsStopMessage() {
     if (!this.connection) {
       console.log(`⚠️ [TTS-STOP] No connection, cannot send tts stop`);
       return;
     }
+
+    // Dedup: don't send tts stop twice within 3 seconds
+    const now = Date.now();
+    if (this._lastTtsStopTime && (now - this._lastTtsStopTime) < 3000) {
+      // console.log(`📝 [TTS-STOP-DEDUP] Skipping duplicate tts stop`);
+      return;
+    }
+    this._lastTtsStopTime = now;
 
     const message = {
       type: "tts",
@@ -1255,21 +1434,39 @@ class LiveKitBridge extends EventEmitter {
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
+  // Send LLM think message to device (with dedup — both DataReceived and text stream fire)
   sendLLMThinkMessage() {
     if (!this.connection) return;
-    // console.log("Sending LLM think message");
+
+    // Dedup: don't send think twice within 3 seconds
+    const now = Date.now();
+    if (this._lastThinkTime && (now - this._lastThinkTime) < 3000) {
+      return;
+    }
+    this._lastThinkTime = now;
+
     const message = {
       type: "llm",
       state: "think",
       session_id: this.connection.udp.session_id,
     };
 
+    console.log(`🤔 [LLM-THINK] Sending think to device (device: ${this.macAddress})`);
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 
-  // Send STT (Speech-to-Text) result to device
+  // Send STT (Speech-to-Text) result to device (with dedup)
   sendSttMessage(text) {
     if (!this.connection || !text) return;
+
+    // Dedup: skip if same text was sent within the last 3 seconds
+    const now = Date.now();
+    if (text === this.lastSttText && (now - this.lastSttTime) < 3000) {
+      // console.log(`📝 [STT-DEDUP] Skipping duplicate: "${text.substring(0, 50)}"`);
+      return;
+    }
+    this.lastSttText = text;
+    this.lastSttTime = now;
 
     const message = {
       type: "stt",
@@ -1884,9 +2081,18 @@ class LiveKitBridge extends EventEmitter {
     }
   }
 
-  // Send LLM response to device
+  // Send LLM response to device (with dedup)
   sendLlmMessage(text) {
     if (!this.connection || !text) return;
+
+    // Dedup: skip if same text was sent within the last 5 seconds
+    const now = Date.now();
+    if (text === this.lastLlmStreamText && (now - this.lastLlmStreamTime) < 5000) {
+      console.log(`📝 [LLM-DEDUP] Skipping duplicate LLM: "${text.substring(0, 50)}..."`);
+      return;
+    }
+    this.lastLlmStreamText = text;
+    this.lastLlmStreamTime = now;
 
     const message = {
       type: "llm",
@@ -1894,7 +2100,7 @@ class LiveKitBridge extends EventEmitter {
       session_id: this.connection.udp.session_id,
     };
 
-    // console.log(`📤 [MQTT OUT] Sending LLM response to device: ${this.macAddress} - "${text}"`);
+    console.log(`📤 [MQTT-OUT] LLM: "${text.substring(0, 80)}..."`);
     this.connection.sendMqttMessage(JSON.stringify(message));
   }
 

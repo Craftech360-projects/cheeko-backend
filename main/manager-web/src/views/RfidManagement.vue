@@ -1914,14 +1914,13 @@ export default {
 <style lang="scss" scoped>
 .welcome {
     min-width: 900px;
-    min-height: 506px;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     position: relative;
     flex-direction: column;
     background-size: cover;
     background: linear-gradient(to bottom right, #fff5eb, #fff7f0, #ffe8d6) center;
-    overflow: hidden;
+    overflow-y: auto;
 }
 
 .main-wrapper {
@@ -1929,7 +1928,6 @@ export default {
     border-radius: 15px;
     min-height: calc(100vh - 24vh);
     height: auto;
-    max-height: 80vh;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
     position: relative;
     background: rgba(237, 242, 255, 0.5);

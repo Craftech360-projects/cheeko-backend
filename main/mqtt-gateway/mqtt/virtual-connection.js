@@ -69,7 +69,7 @@ class VirtualMQTTConnection {
     this.isEnding = false; // Track if end prompt has been sent
     this.endPromptSentTime = null; // Track when end prompt was sent
 
-    // Audio stats tracking
+        // Audio stats tracking
     this.audioStats = {
       packetCount: 0,
       totalBytes: 0,
@@ -420,8 +420,10 @@ class VirtualMQTTConnection {
     // (acceptable: first 1-3s while user positions device)
     // ═══════════════════════════════════════════════════════════
 
+    this.deferredSetupInProgress = true;
     this._deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId)
       .catch((error) => {
+        this.deferredSetupInProgress = false;
         console.error(`❌ [DEFERRED-SETUP] Background setup failed for ${this.deviceId}:`, error);
         // Send error to device so it knows something went wrong
         this.sendMqttMessage(
@@ -559,7 +561,15 @@ class VirtualMQTTConnection {
       this.server?.roomService || this.gateway?.roomService
     );
     const roomCreationTime = Date.now() - roomCreationStart;
+    this.deferredSetupInProgress = false;
     console.log(`✅ [DEFERRED] LiveKit room created in ${roomCreationTime}ms`);
+
+    // Audio buffer is NOT flushed here — it continues buffering in onUdpMessage()
+    // until the agent actually joins the room. The flush happens in livekit-bridge.js
+    // ParticipantConnected handler to ensure the agent is present to receive the audio.
+    if (this.audioBuffer && this.audioBuffer.length > 0) {
+      console.log(`📦 [DEFERRED] ${this.audioBuffer.length} audio frames buffered — will flush when agent joins`);
+    }
 
     // Room type-specific initialization
     if (this.roomType === "music") {
@@ -907,6 +917,11 @@ class VirtualMQTTConnection {
 
   async parseOtherMessage(json) {
     if (!this.bridge) {
+      if (this.deferredSetupInProgress) {
+        // Bridge not ready yet — deferred setup still running. Don't kill the session.
+        console.log(`⏳ [DEFERRED] Message type=${json.type} received before bridge ready — ignoring`);
+        return;
+      }
       if (json.type !== "goodbye") {
         this.sendMqttMessage(
           JSON.stringify({ type: "goodbye", session_id: json.session_id })
@@ -1430,6 +1445,24 @@ class VirtualMQTTConnection {
     // UDP messages do not reset inactivity timer - only MQTT messages do
 
     if (!this.bridge) {
+      if (this.deferredSetupInProgress) {
+        // Buffer audio during deferred setup — replay once bridge is ready
+        if (!this.audioBuffer) this.audioBuffer = [];
+        // Cap buffer at 5 seconds (~250 frames at 20ms each) to avoid memory issues
+        if (this.audioBuffer.length < 250) {
+          this.audioBuffer.push({ message: Buffer.from(message), payloadLength, timestamp, sequence });
+        }
+      }
+      return;
+    }
+
+    // Bridge exists but agent hasn't joined yet — keep buffering
+    // Audio sent to LiveKit room before agent subscribes is lost (real-time, no server buffering)
+    if (this.bridge && !this.bridge.agentJoined) {
+      if (!this.audioBuffer) this.audioBuffer = [];
+      if (this.audioBuffer.length < 250) {
+        this.audioBuffer.push({ message: Buffer.from(message), payloadLength, timestamp, sequence });
+      }
       return;
     }
 
@@ -1474,6 +1507,7 @@ class VirtualMQTTConnection {
 
   async checkKeepAlive() {
     // Don't check keepalive if connection is closing
+    console.log("timer 2");
     if (this.closing) {
       return;
     }

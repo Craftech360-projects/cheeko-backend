@@ -372,18 +372,11 @@ const lookupCardByUid = async (rfidUid) => {
 
   logger.info(`[RFID-LOOKUP] Found mapping: id=${mapping.id}, card_type=${mapping.card_type}, content_pack_id=${mapping.content_pack_id || 'null'}, question_id=${mapping.question_id || 'null'}`);
 
-  // AI Card: No linked content — forward to AI agent as a prompt
-  if (mapping.card_type === 'ai') {
-    logger.info(`[RFID-LOOKUP] AI card detected: uid=${normalizedUid}`);
-    return {
-      rfid_uid: normalizedUid,
-      contentType: 'prompt',
-      title: mapping.notes || 'AI Card',
-      promptText: mapping.notes || 'The child tapped an AI card. Engage them in a fun, interactive conversation.'
-    };
-  }
+  // ✅ PRIORITY ORDER: Content data always wins over card_type label.
+  // Check content_pack_id FIRST so that cards with a pack linked are never
+  // misrouted to AI even if their card_type was accidentally set to 'ai'.
 
-  // Track 1: Content Pack (Story/Rhyme)
+  // Track 1: Content Pack (Story/Rhyme) — highest priority
   if (mapping.content_pack_id) {
     logger.info(`[RFID-LOOKUP] Track 1: Content Pack lookup, pack_id=${mapping.content_pack_id}`);
     let pack = null;
@@ -427,6 +420,18 @@ const lookupCardByUid = async (rfidUid) => {
     } else {
       logger.warn(`[RFID-LOOKUP] Content pack id=${mapping.content_pack_id} not found in rfid_content_pack table`);
     }
+  }
+
+  // AI Card: Only treat as AI if card_type is 'ai' AND no content_pack_id is linked above.
+  // This guard prevents misconfigured content cards from accidentally firing AI flow.
+  if (mapping.card_type === 'ai') {
+    logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}`);
+    return {
+      rfid_uid: normalizedUid,
+      contentType: 'prompt',
+      title: mapping.notes || 'AI Card',
+      promptText: mapping.notes || 'The child tapped an AI card. Engage them in a fun, interactive conversation.'
+    };
   }
 
   // Track 2: Q&A / Single Question
@@ -576,7 +581,7 @@ const createCardMapping = async (data, _userId) => {
         content_pack_id: data.contentPackId ? BigInt(data.contentPackId) : null,
         action_type: data.actionType || null,
         action_data: data.actionData || {},
-        card_type: data.cardType || 'ai',
+        card_type: data.cardType || 'content',
         notes: data.notes || null,
         active: data.active !== false,
         status: 1
