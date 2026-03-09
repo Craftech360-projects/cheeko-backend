@@ -103,8 +103,7 @@ const transformSeriesToCamelCase = (series) => {
     startUid: series.start_uid,
     endUid: series.end_uid,
     packId: series.content_pack_id ? Number(series.content_pack_id) : null,
-    contentPackId: series.content_ref_id ? Number(series.content_ref_id) : null,
-    questionPackId: series.question_pack_id ? Number(series.question_pack_id) : null,
+    contentPackId: series.content_pack_id ? Number(series.content_pack_id) : null,
     questionId: series.question_id ? Number(series.question_id) : null,
     priority: series.priority,
     notes: series.notes,
@@ -340,7 +339,7 @@ const lookupCardByUid = async (rfidUid) => {
         orderBy: { priority: 'desc' },
         include: {
           rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-          rfid_question: true
+          rfid_question: true,
         }
       });
     } catch (seriesErr) {
@@ -1279,8 +1278,6 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
         include: {
           rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
           rfid_question: { select: { id: true, title: true, code: true } },
-          rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-          rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
         }
       })
     ]);
@@ -1324,9 +1321,7 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
       orderBy: { priority: 'desc' },
       include: {
         rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-        rfid_question: { select: { id: true, title: true, code: true } },
-        rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-        rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
+        rfid_question: { select: { id: true, title: true, code: true } }
       }
     });
     return seriesRows.map(transformSeriesToCamelCase);
@@ -1347,9 +1342,7 @@ const getSeriesById = async (seriesId) => {
       where: { id: BigInt(seriesId) },
       include: {
         rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-        rfid_question: { select: { id: true, title: true, code: true } },
-        rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-        rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
+        rfid_question: { select: { id: true, title: true, code: true } }
       }
     });
     return transformSeriesToCamelCase(series);
@@ -1380,8 +1373,7 @@ const createSeries = async (data, _userId) => {
     series_name: data.seriesName || data.notes || `Series ${startUid}-${endUid}`,
     start_uid: startUid,
     end_uid: endUid,
-    content_ref_id: data.contentPackId ? BigInt(data.contentPackId) : null,
-    question_pack_id: data.questionPackId ? BigInt(data.questionPackId) : null,
+    content_pack_id: data.contentPackId ? BigInt(data.contentPackId) : null,
     question_id: data.questionId ? BigInt(data.questionId) : null,
     notes: data.notes || null,
     priority: data.priority || 0,
@@ -1429,22 +1421,9 @@ const updateSeries = async (data, _userId) => {
     updateData.content_pack_id = data.packId ? BigInt(data.packId) : null;
   }
 
-  // content_ref_id is FK to rfid_content_pack (story/rhyme content)
+  // contentPackId maps to content_pack_id (FK to rfid_pack)
   if (data.contentPackId !== undefined) {
-    updateData.content_ref_id = data.contentPackId ? BigInt(data.contentPackId) : null;
-    // Mutual exclusivity: clear question_pack_id when setting content pack
-    if (data.contentPackId && data.questionPackId === undefined) {
-      updateData.question_pack_id = null;
-    }
-  }
-
-  // question_pack_id is FK to rfid_question_pack (Q&A pack)
-  if (data.questionPackId !== undefined) {
-    updateData.question_pack_id = data.questionPackId ? BigInt(data.questionPackId) : null;
-    // Mutual exclusivity: clear content_ref_id when setting Q&A pack
-    if (data.questionPackId && data.contentPackId === undefined) {
-      updateData.content_ref_id = null;
-    }
+    updateData.content_pack_id = data.contentPackId ? BigInt(data.contentPackId) : null;
   }
 
   if (data.questionId !== undefined) updateData.question_id = data.questionId ? BigInt(data.questionId) : null;
