@@ -78,18 +78,25 @@ const requireFirebaseAuth = async (req, res, next) => {
         logger.debug(`📋 [firebaseAuth] sys_user lookup result: ${mobileUser ? `found id=${mobileUser.id}` : 'not found'}`);
 
         if (!mobileUser) {
-            // First login — create a sys_user record for this Firebase user
+            // First login — upsert to handle race conditions where two
+            // concurrent requests both see no existing user and try to insert.
             logger.debug(`🆕 [firebaseAuth] Creating new sys_user for uid: ${decoded.uid}`);
-            mobileUser = await prisma.sys_user.create({
-                data: {
+            const username = decoded.email || decoded.uid;
+            mobileUser = await prisma.sys_user.upsert({
+                where: { username },
+                create: {
                     firebase_uid: decoded.uid,
                     email: decoded.email || '',
-                    username: decoded.email || decoded.uid,
+                    username,
                     role: 'parent',
                     status: 1,
                 },
+                update: {
+                    firebase_uid: decoded.uid,
+                    email: decoded.email || '',
+                },
             });
-            logger.info(`🆕 Created sys_user for Firebase uid: ${decoded.uid}`);
+            logger.info(`🆕 Upserted sys_user id=${mobileUser.id} for Firebase uid: ${decoded.uid}`);
         }
 
         req.mobileUser = mobileUser;
