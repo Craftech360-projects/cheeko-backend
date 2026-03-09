@@ -1,332 +1,156 @@
-# Cheeko E2E Testing Framework
+# Cheeko E2E Test Suite
 
-Scenario-based end-to-end tests that simulate real user journeys across all Cheeko services.
+Scenario-based end-to-end tests for the Cheeko system, covering all four backend modules with a unified reporting dashboard.
 
 > **This is separate from `api-tests/`** which does per-endpoint validation (auth, status codes, envelope).
 > E2E tests chain multiple actions into complete business flows.
 
 ---
 
-## Architecture
+## Modules Tested
+
+| Module | Framework | Service Under Test | Default Port |
+|--------|-----------|-------------------|------|
+| **API** | Jest + PactumJS | manager-api-node (Express) | 8002 |
+| **MQTT** | Jest + mqtt.js | mqtt-gateway (EMQX broker) | 1883 / 8000 |
+| **LiveKit** | Jest + Axios | livekit-server media_api.py | 8003 |
+| **UI** | Playwright | manager-web (Vue.js) | 8080 |
+
+---
+
+## Quick Start
+
+```bash
+cd main/e2e-tests
+npm install
+```
+
+### Run all tests
+
+```bash
+npm run test:all
+```
+
+### Run a single module
+
+```bash
+npm run test:api        # API tests only
+npm run test:mqtt       # MQTT tests only
+npm run test:livekit    # LiveKit tests only
+npm run test:ui         # UI tests only (Playwright)
+```
+
+### Run with report dashboard
+
+```bash
+npm run test:all:report   # Run all + open dashboard at http://localhost:3000
+npm run report            # Just open dashboard for existing reports
+```
+
+---
+
+## Project Structure
 
 ```
-main/
-├── api-tests/                  <-- EXISTING (per-endpoint, auto-discovery)
-│   ├── scanners/                   "Does each endpoint work?"
-│   ├── generators/
-│   └── suites/
+e2e-tests/
+├── api/                          # API tests (manager-api-node)
+│   ├── helpers/
+│   │   ├── auth.helper.js        # Token management & auth headers
+│   │   ├── data.helper.js        # Test data factories (devices, content, etc.)
+│   │   ├── cleanup.helper.js     # Post-test cleanup utilities
+│   │   ├── global-setup.js       # Login + cache auth token before tests
+│   │   └── global-teardown.js    # Cleanup after all tests
+│   └── scenarios/
+│       ├── auth-flow.spec.js         # Login, token refresh, invalid credentials
+│       ├── device-lifecycle.spec.js  # Register, update, delete devices
+│       ├── content-pipeline.spec.js  # CRUD music/stories, playlists
+│       ├── profile-flow.spec.js      # Kid profiles CRUD
+│       ├── rfid-flow.spec.js         # RFID cards and series management
+│       ├── analytics-flow.spec.js    # Game sessions, media playback stats
+│       ├── cross-service.spec.js     # Multi-module integration flows
+│       └── error-handling.spec.js    # Invalid requests, edge cases
 │
-├── e2e-tests/                  <-- THIS PROJECT (scenario flows)
-│   ├── playwright.config.js        Playwright configuration
-│   ├── pactum.config.js            PactumJS configuration
-│   ├── .env                        Environment variables (gitignored)
-│   ├── .env.example                Template for .env
-│   │
-│   ├── ui/                         PLAYWRIGHT — Browser UI tests
-│   │   ├── fixtures/
-│   │   │   ├── auth.fixture.js         Login state reuse (storageState)
-│   │   │   └── test.fixture.js         Extended test with API helpers
-│   │   ├── pages/                      Page Object Models
-│   │   │   ├── login.page.js
-│   │   │   ├── device-management.page.js
-│   │   │   ├── content-library.page.js
-│   │   │   ├── rfid-management.page.js
-│   │   │   ├── kid-profiles.page.js
-│   │   │   ├── user-management.page.js
-│   │   │   ├── game-analytics.page.js
-│   │   │   └── home.page.js
-│   │   └── scenarios/                  Test files (one per feature area)
-│   │       ├── auth.spec.js                Login, logout, role-based access
-│   │       ├── device-management.spec.js   CRUD devices, activation
-│   │       ├── content-library.spec.js     Upload, edit, delete content
-│   │       ├── rfid-management.spec.js     RFID CRUD, link to content
-│   │       ├── kid-profiles.spec.js        Profile CRUD, assign to device
-│   │       ├── analytics.spec.js           View game/usage analytics
-│   │       └── settings.spec.js            System config, dictionaries
-│   │
-│   ├── api/                        PACTUMJS — Multi-step API flows
-│   │   ├── helpers/
-│   │   │   ├── auth.helper.js          Token acquisition (reuses api-tests pattern)
-│   │   │   ├── cleanup.helper.js       Test data teardown
-│   │   │   └── data.helper.js          Test data factories
-│   │   └── scenarios/
-│   │       ├── auth-flow.spec.js           Login, refresh, role checks
-│   │       ├── device-lifecycle.spec.js    Register -> config -> update -> deactivate
-│   │       ├── content-pipeline.spec.js    Upload -> playlist -> assign -> verify
-│   │       ├── rfid-flow.spec.js           Create tag -> link content -> verify lookup
-│   │       ├── profile-flow.spec.js        Create profile -> assign device -> verify config
-│   │       ├── analytics-flow.spec.js      Record session -> query stats -> verify
-│   │       ├── error-handling.spec.js      XSS, SQL injection, invalid input, rate limit
-│   │       └── cross-service.spec.js       Full content delivery pipeline (scenario 12.2, 12.3)
-│   │
-│   ├── mqtt/                       MQTT.JS + JEST — Device simulation
-│   │   ├── helpers/
-│   │   │   ├── mqtt-client.helper.js   MQTT connection wrapper
-│   │   │   └── device-simulator.js     Simulates ESP32 behavior
-│   │   └── scenarios/
-│   │       ├── device-connect.spec.js      Hello, goodbye, reconnection
-│   │       ├── mode-change.spec.js         Mode/character change messages
-│   │       ├── playback-control.spec.js    Next, previous, start_agent
-│   │       ├── rfid-scan.spec.js           card_lookup, greeting triggers
-│   │       ├── content-request.spec.js     play_music, play_story function calls
-│   │       ├── resilience.spec.js          Malformed messages, broker recovery
-│   │       └── multi-device.spec.js        Concurrent devices, isolation
-│   │
-│   └── reports/                    Generated (gitignored)
-│       ├── playwright/                 Playwright HTML report
-│       └── api/                        PactumJS JSON reports
+├── mqtt/                         # MQTT tests (mqtt-gateway)
+│   ├── helpers/
+│   │   ├── mqtt-client.helper.js # MQTT client wrapper for tests
+│   │   ├── device-simulator.js   # Simulates ESP32 device MQTT messages
+│   │   ├── global-setup.js       # Verify broker connectivity
+│   │   └── global-teardown.js    # Disconnect clients
+│   └── scenarios/
+│       ├── device-connect.spec.js    # Device connect/disconnect, LWT
+│       ├── mode-change.spec.js       # Mode switching (conversation, game, music)
+│       ├── playback-control.spec.js  # Play, pause, next, volume commands
+│       ├── content-request.spec.js   # Content delivery via MQTT
+│       ├── rfid-scan.spec.js         # RFID scan event flow
+│       ├── multi-device.spec.js      # Multiple devices simultaneously
+│       └── resilience.spec.js        # Reconnect, malformed messages, QoS
 │
-└── livekit-server/tests/       <-- EXISTING (pytest — agent/memory)
+├── livekit/                      # LiveKit tests (media_api.py)
+│   ├── helpers/
+│   │   └── media-api.helper.js   # Axios wrapper for media API calls
+│   └── scenarios/
+│       ├── health-check.spec.js      # /health endpoint, active_bots, service init
+│       ├── music-bot.spec.js         # Start, playlist, status, controls, stop
+│       ├── story-bot.spec.js         # Start, playlist, controls, status, stop
+│       ├── error-handling.spec.js    # Missing fields, wrong types, concurrent limits
+│       └── bot-lifecycle.spec.js     # Full start-to-stop lifecycle flows
+│
+├── ui/                           # UI tests (manager-web)
+│   ├── fixtures/
+│   │   ├── auth.setup.js         # Playwright login + save storage state
+│   │   └── test.fixture.js       # Custom test fixture with auth
+│   ├── pages/                    # Page Object Models
+│   │   ├── login.page.js
+│   │   ├── home.page.js
+│   │   ├── device-management.page.js
+│   │   ├── content-library.page.js
+│   │   ├── kid-profiles.page.js
+│   │   ├── rfid-management.page.js
+│   │   ├── game-analytics.page.js
+│   │   └── user-management.page.js
+│   └── scenarios/
+│       ├── auth.spec.js              # Login, logout, session persistence
+│       ├── device-management.spec.js # Device list, add, edit, delete
+│       ├── content-library.spec.js   # Content browsing, upload, playlists
+│       ├── kid-profiles.spec.js      # Profile CRUD via UI
+│       ├── rfid-management.spec.js   # RFID card/series management UI
+│       ├── analytics.spec.js         # Analytics dashboard rendering
+│       └── settings.spec.js          # System settings pages
+│
+├── scripts/
+│   ├── jest-json-reporter.js     # Custom Jest reporter -> reports/jest/{module}/{timestamp}/
+│   ├── update-report-index.js    # Scans all reports -> reports/reports.json
+│   ├── report-server.js          # Dashboard server at http://localhost:3000
+│   ├── playwright-teardown.js    # Playwright post-run cleanup
+│   └── run-all-tests.sh          # Bash runner (Linux/macOS only)
+│
+├── reports/                      # Generated reports (git-ignored)
+│   ├── jest/
+│   │   ├── api/{timestamp}/results.json
+│   │   ├── mqtt/{timestamp}/results.json
+│   │   └── livekit/{timestamp}/results.json
+│   ├── playwright/{timestamp}/
+│   │   ├── index.html            # Playwright HTML report
+│   │   └── results.json
+│   └── reports.json              # Unified index for dashboard
+│
+├── test.config.js                # Shared config (URLs, ports, auth)
+├── jest.config.js                # Jest config (API + MQTT + LiveKit)
+├── jest.mqtt.config.js           # Jest config (MQTT only)
+├── jest.livekit.config.js        # Jest config (LiveKit only)
+├── playwright.config.js          # Playwright config (UI)
+├── package.json
+└── .env                          # Environment overrides (not committed)
 ```
-
----
-
-## Tech Stack
-
-| Tool | Version | Purpose | Scope |
-|------|---------|---------|-------|
-| **Playwright** | ^1.50 | Browser automation + API assertions | `ui/` scenarios |
-| **PactumJS** | ^3.7 | API E2E flow chaining | `api/` scenarios |
-| **Jest** | ^29.7 | Test runner for API + MQTT | `api/` + `mqtt/` scenarios |
-| **MQTT.js** | ^5.10 | MQTT client for device simulation | `mqtt/` scenarios |
-| **dotenv** | ^16.4 | Environment config | All |
-
----
-
-## How Each Tool Is Used
-
-### Playwright (ui/)
-
-Tests the Vue.js admin dashboard through a real browser.
-
-**Example: Device Activation Flow**
-
-```js
-test('admin activates device with activation code', async ({ page, apiClient }) => {
-  // 1. Navigate to device management
-  await page.goto('/device-management');
-
-  // 2. Click "Add Device"
-  await page.click('button:has-text("Add")');
-
-  // 3. Enter activation code
-  await page.fill('[placeholder="Activation Code"]', 'ABC-123-XYZ');
-
-  // 4. Submit
-  await page.click('button:has-text("Activate")');
-
-  // 5. Assert UI shows success
-  await expect(page.locator('.el-message--success')).toBeVisible();
-
-  // 6. Verify via API that device is actually active
-  const device = await apiClient.get('/toy/device/info?code=ABC-123-XYZ');
-  expect(device.data.status).toBe(1); // active
-});
-```
-
-**Key patterns:**
-- **Page Object Model** — each Vue page gets a POM class for reusable selectors
-- **Auth fixture** — login once, reuse `storageState` across all tests (no re-login per test)
-- **API verification** — after UI action, call API to confirm backend state
-- **Auto-wait** — Playwright waits for elements automatically, no manual sleeps
-
-### PactumJS (api/)
-
-Tests multi-step API scenarios by chaining requests and passing data between steps.
-
-**Example: Content Delivery Pipeline (Scenario 12.2)**
-
-```js
-const { e2e } = require('pactum');
-
-describe('Content Delivery Pipeline', () => {
-  let flow;
-
-  beforeAll(() => { flow = e2e('Content Pipeline'); });
-  afterAll(async () => { await flow.cleanup(); });
-
-  it('Step 1: Admin uploads music', async () => {
-    await flow.step('Upload Music')
-      .spec()
-      .post('/toy/content/music/save')
-      .withHeaders('X-Service-Key', '$S{serviceKey}')
-      .withJson({ name: 'Space Song', type: 'music', url: 'https://cdn/space.mp3' })
-      .expectStatus(200)
-      .stores('musicId', 'data.id');
-  });
-
-  it('Step 2: Create playlist with music', async () => {
-    await flow.step('Create Playlist')
-      .spec()
-      .post('/toy/content/playlist/save')
-      .withHeaders('X-Service-Key', '$S{serviceKey}')
-      .withJson({ name: 'Test Playlist', items: ['$S{musicId}'] })
-      .expectStatus(200)
-      .stores('playlistId', 'data.id');
-  });
-
-  it('Step 3: Assign playlist to device', async () => {
-    await flow.step('Assign to Device')
-      .spec()
-      .put('/toy/device/update')
-      .withHeaders('X-Service-Key', '$S{serviceKey}')
-      .withJson({ id: '$S{deviceId}', playlistId: '$S{playlistId}' })
-      .expectStatus(200);
-  });
-
-  it('Step 4: Verify device config has playlist', async () => {
-    await flow.step('Verify Config')
-      .spec()
-      .get('/toy/agent/config/{mac}')
-      .withPathParams('mac', '$S{testMac}')
-      .withHeaders('X-Service-Key', '$S{serviceKey}')
-      .expectStatus(200)
-      .expectJsonLike({ data: { playlistId: '$S{playlistId}' } });
-  });
-
-  // Cleanup: delete test content and playlist
-  flow.cleanup()
-    .spec()
-    .delete('/toy/content/music/{id}')
-    .withPathParams('id', '$S{musicId}')
-    .withHeaders('X-Service-Key', '$S{serviceKey}');
-});
-```
-
-**Key patterns:**
-- **`e2e.step()`** — ordered steps with named checkpoints
-- **`stores()` / `$S{}`** — pass data between steps (IDs, tokens) without manual variables
-- **`.cleanup()`** — auto-delete test data after flow completes
-- **`expectJsonLike()`** — partial JSON matching for flexible assertions
-
-### MQTT.js + Jest (mqtt/)
-
-Simulates ESP32 device behavior by publishing MQTT messages and verifying responses.
-
-**Example: Device Connect + Mode Change**
-
-```js
-const { DeviceSimulator } = require('../helpers/device-simulator');
-
-describe('Device Lifecycle via MQTT', () => {
-  let device;
-
-  beforeAll(async () => {
-    device = new DeviceSimulator({ mac: 'AA:BB:CC:DD:EE:01' });
-    await device.connect();
-  });
-
-  afterAll(async () => {
-    await device.disconnect();
-  });
-
-  it('should send hello and receive acknowledgement', async () => {
-    const response = await device.sendHello();
-    expect(response.type).toBe('hello_ack');
-  });
-
-  it('should change mode to music', async () => {
-    const response = await device.sendModeChange('music');
-    expect(response.type).toBe('mode_changed');
-  });
-
-  it('should handle RFID scan', async () => {
-    const response = await device.sendCardLookup('RFID-TAG-001');
-    expect(response.type).toBe('card_response');
-    expect(response.content).toBeDefined();
-  });
-
-  it('gateway health should still be OK after all messages', async () => {
-    const health = await axios.get(`${gatewayUrl}/health`);
-    expect(health.status).toBe(200);
-  });
-});
-```
-
----
-
-## Scenario Coverage Map
-
-Maps each scenario from `E2E-TEST-SCENARIOS.md` to a test file and tool.
-
-### P0 - Critical
-
-| Scenario | Description | Test File | Tool |
-|----------|-------------|-----------|------|
-| 1.1 | Admin login | `ui/scenarios/auth.spec.js` | Playwright |
-| 1.2 | Invalid credentials | `api/scenarios/auth-flow.spec.js` | PactumJS |
-| 1.3 | Token refresh | `api/scenarios/auth-flow.spec.js` | PactumJS |
-| 1.4 | Service-to-service auth | `api/scenarios/auth-flow.spec.js` | PactumJS |
-| 1.5 | Firebase auth on content | `api/scenarios/auth-flow.spec.js` | PactumJS |
-| 1.6 | Unauthorized blocked | `api/scenarios/auth-flow.spec.js` | PactumJS |
-| 1.7 | Role-based access | `ui/scenarios/auth.spec.js` + `api/scenarios/auth-flow.spec.js` | Both |
-| 2.1 | Register device | `ui/scenarios/device-management.spec.js` | Playwright |
-| 2.2 | Device config retrieval | `api/scenarios/device-lifecycle.spec.js` | PactumJS |
-| 2.3 | Update device settings | `ui/scenarios/device-management.spec.js` | Playwright |
-| 12.2 | Content delivery pipeline | `api/scenarios/cross-service.spec.js` | PactumJS |
-| 12.3 | RFID to playback | `api/scenarios/cross-service.spec.js` + `mqtt/scenarios/rfid-scan.spec.js` | Both |
-
-### P1 - High
-
-| Scenario | Description | Test File | Tool |
-|----------|-------------|-----------|------|
-| 2.4 | Assign device to profile | `api/scenarios/device-lifecycle.spec.js` | PactumJS |
-| 2.6 | Duplicate MAC | `api/scenarios/device-lifecycle.spec.js` | PactumJS |
-| 2.7 | Device list pagination | `ui/scenarios/device-management.spec.js` | Playwright |
-| 4.4 | Game analytics recorded | `api/scenarios/analytics-flow.spec.js` | PactumJS |
-| 5.1-5.3 | Upload content | `ui/scenarios/content-library.spec.js` | Playwright |
-| 5.4 | Assign to playlist | `api/scenarios/content-pipeline.spec.js` | PactumJS |
-| 5.5 | Assign playlist to device | `api/scenarios/content-pipeline.spec.js` | PactumJS |
-| 5.8 | Playback analytics | `api/scenarios/analytics-flow.spec.js` | PactumJS |
-| 5.9 | Delete content | `ui/scenarios/content-library.spec.js` | Playwright |
-| 6.1 | Register RFID tag | `ui/scenarios/rfid-management.spec.js` | Playwright |
-| 6.2 | RFID scan triggers content | `mqtt/scenarios/rfid-scan.spec.js` | MQTT.js |
-| 6.5 | Reassign RFID content | `api/scenarios/rfid-flow.spec.js` | PactumJS |
-
-### P2 - Medium
-
-| Scenario | Description | Test File | Tool |
-|----------|-------------|-----------|------|
-| 7.1 | Create child profile | `ui/scenarios/kid-profiles.spec.js` | Playwright |
-| 7.2 | Update child age | `api/scenarios/profile-flow.spec.js` | PactumJS |
-| 8.1 | MQTT connection | `mqtt/scenarios/device-connect.spec.js` | MQTT.js |
-| 8.2 | UDP audio stream | `mqtt/scenarios/device-connect.spec.js` | MQTT.js |
-| 8.4 | Multi-device concurrent | `mqtt/scenarios/multi-device.spec.js` | MQTT.js |
-| 9.1-9.9 | Dashboard CRUD | `ui/scenarios/*.spec.js` | Playwright |
-| 10.1-10.3 | Analytics queries | `api/scenarios/analytics-flow.spec.js` | PactumJS |
-
-### P3 - Low
-
-| Scenario | Description | Test File | Tool |
-|----------|-------------|-----------|------|
-| 8.5 | Malformed MQTT message | `mqtt/scenarios/resilience.spec.js` | MQTT.js |
-| 8.6 | Broker recovery | `mqtt/scenarios/resilience.spec.js` | MQTT.js |
-| 11.1-11.4 | Provider failures | Out of scope (needs mock infra) | - |
-| 11.5 | Concurrent updates | `api/scenarios/error-handling.spec.js` | PactumJS |
-| 11.7 | XSS attempt | `api/scenarios/error-handling.spec.js` | PactumJS |
-| 11.8 | SQL injection | `api/scenarios/error-handling.spec.js` | PactumJS |
-| 11.9 | Rate limiting | `api/scenarios/error-handling.spec.js` | PactumJS |
-| 11.10 | Invalid MAC format | `api/scenarios/error-handling.spec.js` | PactumJS |
-| 12.4 | Profile-aware conversation | Out of scope (needs live agent) | pytest |
-| 12.5 | Multi-device household | `mqtt/scenarios/multi-device.spec.js` | MQTT.js |
-
-### Not Automatable in E2E (Agent-level — use pytest)
-
-| Scenario | Reason |
-|----------|--------|
-| 3.1-3.7 | Voice session — requires real audio I/O |
-| 4.1-4.3, 4.5-4.6 | Game modes — requires voice trigger to agent |
-| 5.6-5.7, 5.10 | Content via voice/semantic search — agent internal |
-| 7.3-7.6 | Memory system — tested via existing pytest suite |
 
 ---
 
 ## Configuration
 
-### .env.example
+All test configuration lives in `test.config.js`. Override any value via `.env`:
 
 ```bash
-# Target environment
+# .env (create this file in e2e-tests/)
 TEST_ENV=dev
 
 # Manager API
@@ -351,160 +175,382 @@ DASHBOARD_URL=http://localhost:8080
 
 # Playwright
 HEADLESS=true
-SLOW_MO=0
 ```
 
-### Shared Config
+### Default Service URLs
 
-Both PactumJS and Playwright read from the same `.env` and share the same server targets as `api-tests/test.config.js`. No duplication.
+| Service | URL |
+|---------|-----|
+| Manager API | `http://localhost:8002/toy` |
+| MQTT Broker | `mqtt://localhost:1883` |
+| Gateway HTTP | `http://localhost:8000` |
+| Media API | `http://localhost:8003` |
+| Dashboard (Vue) | `http://localhost:8080` |
 
 ---
 
-## Page Object Models (Playwright)
+## Prerequisites
 
-Each Vue page gets a POM class that encapsulates selectors and actions:
+Before running tests, ensure the relevant services are running:
+
+| Tests | Services Required |
+|-------|-------------------|
+| `test:api` | manager-api-node |
+| `test:mqtt` | mqtt-gateway + EMQX broker |
+| `test:livekit` | livekit-server (`python media_api.py`) |
+| `test:ui` | manager-web + manager-api-node |
+
+```bash
+# Start services (in separate terminals)
+cd main/manager-api-node && npm run dev       # API
+cd main/mqtt-gateway && node app.js           # MQTT Gateway
+cd main/livekit-server && python media_api.py # Media API
+cd main/manager-web && npm run serve          # Vue Dashboard
+```
+
+Tests gracefully degrade when services are unavailable -- they'll skip assertions rather than crash.
+
+---
+
+## Writing New Test Scenarios
+
+### Adding a new API scenario
+
+1. Create `api/scenarios/your-feature.spec.js`:
 
 ```js
-// pages/device-management.page.js
-class DeviceManagementPage {
+const pactum = require('pactum');
+const { getBearerHeaders } = require('../helpers/auth.helper');
+const { testDevice } = require('../helpers/data.helper');
+const config = require('../../test.config');
+
+const BASE = config.managerApi.baseUrl;
+
+describe('Your Feature Flow', () => {
+  beforeAll(() => {
+    pactum.request.setDefaultTimeout(config.settings.timeoutMs);
+  });
+
+  it('should create a resource', async () => {
+    await pactum.spec()
+      .post(`${BASE}/your/endpoint`)
+      .withHeaders(getBearerHeaders())
+      .withJson({ name: 'test-resource' })
+      .expectStatus(200)
+      .expectJsonLike({ success: true });
+  });
+
+  it('should verify the resource exists', async () => {
+    await pactum.spec()
+      .get(`${BASE}/your/endpoint/list`)
+      .withHeaders(getBearerHeaders())
+      .expectStatus(200);
+  });
+});
+```
+
+2. The file will be auto-discovered -- `jest.config.js` matches `**/api/scenarios/**/*.spec.js`.
+
+### Adding a new MQTT scenario
+
+1. Create `mqtt/scenarios/your-feature.spec.js`:
+
+```js
+const { createTestClient } = require('../helpers/mqtt-client.helper');
+const config = require('../../test.config');
+
+describe('Your MQTT Feature', () => {
+  let client;
+
+  beforeAll(async () => {
+    client = createTestClient('test-your-feature');
+    await client.connect();
+  });
+
+  afterAll(async () => {
+    await client.disconnect();
+  });
+
+  it('should handle a message', async () => {
+    await client.subscribe('response/topic');
+    await client.publish('internal/server-ingest', JSON.stringify({
+      sender_client_id: 'test-device',
+      orginal_payload: { type: 'your_type', data: 'test' }
+    }));
+    // Assert on received messages
+  });
+});
+```
+
+2. To run standalone: `npm run test:mqtt`
+
+### Adding a new LiveKit scenario
+
+1. Create `livekit/scenarios/your-feature.spec.js`:
+
+```js
+const { isMediaApiAvailable, mediaGet, mediaPost } = require('../helpers/media-api.helper');
+
+describe('Your LiveKit Feature', () => {
+  let available;
+
+  beforeAll(async () => {
+    available = await isMediaApiAvailable();
+  });
+
+  it('should call media API endpoint', async () => {
+    if (!available) return; // Skip if service is down
+    const res = await mediaPost('/your/endpoint', { key: 'value' });
+    expect(res.status).toBe(200);
+  });
+});
+```
+
+### Adding a new UI scenario
+
+1. Create a Page Object in `ui/pages/your-page.page.js`:
+
+```js
+class YourPage {
   constructor(page) {
     this.page = page;
-    this.addButton = page.locator('button:has-text("Add")');
-    this.deviceTable = page.locator('.el-table');
-    this.searchInput = page.locator('[placeholder="Search"]');
-    this.activationCodeInput = page.locator('[placeholder="Activation Code"]');
+    this.heading = page.locator('h1');
+    this.submitBtn = page.locator('button:has-text("Submit")');
   }
 
   async goto() {
-    await this.page.goto('/device-management');
-  }
-
-  async addDevice(activationCode) {
-    await this.addButton.click();
-    await this.activationCodeInput.fill(activationCode);
-    await this.page.click('button:has-text("Confirm")');
-  }
-
-  async searchDevice(query) {
-    await this.searchInput.fill(query);
-    await this.page.keyboard.press('Enter');
-  }
-
-  async getDeviceCount() {
-    return await this.deviceTable.locator('tr').count() - 1; // minus header
+    await this.page.goto('/#/your-page'); // Hash-mode routing!
   }
 }
+
+module.exports = YourPage;
 ```
 
-### Pages to create (matches Vue views):
+2. Create `ui/scenarios/your-page.spec.js`:
 
-| POM File | Vue View | Dashboard Route |
-|----------|----------|-----------------|
-| `login.page.js` | `login.vue` | `/login` |
-| `home.page.js` | `home.vue` | `/home` |
-| `device-management.page.js` | `DeviceManagement.vue` | `/device-management` |
-| `content-library.page.js` | `ContentLibrary.vue` | `/content-library` |
-| `rfid-management.page.js` | `RfidManagement.vue` | `/rfid-management` |
-| `kid-profiles.page.js` | `KidProfiles.vue` | `/kid-profiles` |
-| `user-management.page.js` | `UserManagement.vue` | `/user-management` |
-| `game-analytics.page.js` | `GameAnalytics.vue` | `/game-analytics` |
+```js
+const { test, expect } = require('../fixtures/test.fixture');
+const YourPage = require('../pages/your-page.page');
+
+test.describe('Your Page', () => {
+  test('should load correctly', async ({ page }) => {
+    const yourPage = new YourPage(page);
+    await yourPage.goto();
+    await expect(yourPage.heading).toBeVisible();
+  });
+});
+```
+
+> **Important:** The Vue app uses hash-mode routing. All paths must start with `/#/`.
 
 ---
 
-## Test Data Strategy
+## Test Data Conventions
 
-| Concern | Approach |
-|---------|----------|
-| **Creation** | Each test creates its own data via API before UI interaction |
-| **Isolation** | Test data uses unique prefixes (`e2e-test-{uuid}`) to avoid conflicts |
-| **Cleanup** | PactumJS `.cleanup()` + Jest `afterAll` delete test data |
-| **No shared state** | Tests don't depend on pre-existing data in the database |
+| Convention | Detail |
+|------------|--------|
+| **Prefix** | All test data uses `e2e-test-` prefix for easy identification |
+| **Factories** | `api/helpers/data.helper.js` provides generators |
+| **Unique IDs** | Each factory call generates a UUID-based unique ID |
+| **Cleanup** | Tests clean up their own data in `afterAll` blocks |
 | **Idempotent** | Tests can run repeatedly without manual DB cleanup |
 
----
+### Available test data factories
 
-## CLI Commands
-
-```bash
-cd main/e2e-tests
-npm install
-
-# --- Run all E2E tests ---
-npm test                              # Everything
-
-# --- Run by layer ---
-npm run test:ui                       # Playwright UI tests only
-npm run test:api                      # PactumJS API flows only
-npm run test:mqtt                     # MQTT device simulation only
-
-# --- Run by scenario category ---
-npm run test:ui -- --grep "device"    # Only device management UI tests
-npm run test:api -- --grep "content"  # Only content pipeline API tests
-
-# --- Playwright specific ---
-npx playwright test --headed          # Watch browser (non-headless)
-npx playwright test --ui              # Interactive Playwright UI mode
-npx playwright show-report            # Open HTML report
-
-# --- Debug ---
-npx playwright test --debug           # Step-through debugger
-npm run test:api -- --verbose         # Verbose PactumJS output
+```js
+const {
+  testDevice,      // { macAddress, model, remark }
+  testContent,     // { title, contentType, url, category, description }
+  testPlaylist,    // { name, description }
+  testKidProfile,  // { name, nickname, birthDate, gender, language, interests }
+  testRfidCard,    // { rfidUid, name }
+  testRfidSeries,  // { name, startUid, endUid }
+} = require('../helpers/data.helper');
 ```
 
 ---
 
-## Implementation Phases
+## Report Dashboard
 
-### Phase 1: Foundation (scaffold + auth)
-| File | Purpose |
-|------|---------|
-| `package.json` | Dependencies: playwright, pactum, jest, mqtt, dotenv |
-| `playwright.config.js` | Playwright setup: base URL, auth state, reporters |
-| `pactum.config.js` | PactumJS setup: base URL, default headers, stores |
-| `jest.config.js` | Jest config for api/ and mqtt/ folders |
-| `.env.example` | Environment template |
-| `ui/fixtures/auth.fixture.js` | Playwright login + storageState reuse |
-| `ui/pages/login.page.js` | Login page POM |
-| `api/helpers/auth.helper.js` | Token acquisition for PactumJS |
+The built-in dashboard aggregates results from all 4 modules into a single view.
 
-### Phase 2: UI Scenarios (Playwright)
-| File | Scenarios Covered |
-|------|-------------------|
-| `ui/pages/*.page.js` | All 8 page object models |
-| `ui/scenarios/auth.spec.js` | 1.1, 1.7 |
-| `ui/scenarios/device-management.spec.js` | 2.1, 2.3, 2.5, 2.7 |
-| `ui/scenarios/content-library.spec.js` | 5.1-5.3, 5.9 |
-| `ui/scenarios/rfid-management.spec.js` | 6.1, 6.5 |
-| `ui/scenarios/kid-profiles.spec.js` | 7.1, 9.4 |
-| `ui/scenarios/analytics.spec.js` | 10.5 |
-| `ui/scenarios/settings.spec.js` | 9.8 |
+### Start the dashboard
 
-### Phase 3: API Scenarios (PactumJS)
-| File | Scenarios Covered |
-|------|-------------------|
-| `api/helpers/data.helper.js` | Test data factories |
-| `api/helpers/cleanup.helper.js` | Teardown utilities |
-| `api/scenarios/auth-flow.spec.js` | 1.2-1.6 |
-| `api/scenarios/device-lifecycle.spec.js` | 2.2, 2.4, 2.6 |
-| `api/scenarios/content-pipeline.spec.js` | 5.4, 5.5, 12.2 |
-| `api/scenarios/rfid-flow.spec.js` | 6.5, 12.3 (API parts) |
-| `api/scenarios/profile-flow.spec.js` | 7.2 |
-| `api/scenarios/analytics-flow.spec.js` | 4.4, 5.8, 10.1-10.3 |
-| `api/scenarios/error-handling.spec.js` | 11.5, 11.7-11.10 |
-| `api/scenarios/cross-service.spec.js` | 12.2, 12.3 |
+```bash
+npm run report                        # Update index + start server
+node scripts/report-server.js         # Start server only (port 3000)
+node scripts/report-server.js 4000    # Custom port
+```
 
-### Phase 4: MQTT Scenarios
-| File | Scenarios Covered |
-|------|-------------------|
-| `mqtt/helpers/mqtt-client.helper.js` | MQTT connection wrapper |
-| `mqtt/helpers/device-simulator.js` | ESP32 simulator |
-| `mqtt/scenarios/device-connect.spec.js` | 8.1, 8.2 |
-| `mqtt/scenarios/mode-change.spec.js` | 8.3 |
-| `mqtt/scenarios/playback-control.spec.js` | Playback next/prev/start |
-| `mqtt/scenarios/rfid-scan.spec.js` | 6.2-6.4, 6.6 |
-| `mqtt/scenarios/content-request.spec.js` | play_music, play_story |
-| `mqtt/scenarios/resilience.spec.js` | 8.5, 8.6 |
-| `mqtt/scenarios/multi-device.spec.js` | 8.4, 12.5 |
+### Features
+
+- Filter reports by module (API, MQTT, LiveKit, UI)
+- Stat cards with pass rate progress bar
+- Collapsible test suites with per-suite pass/fail counts
+- Failed tests highlighted with error details in dark code blocks
+- Screenshot viewer for Playwright failures
+- Timestamps in IST (dd/mm/yyyy 12-hour format)
+
+### How reports are generated
+
+```
+Jest tests run
+  └─> jest-json-reporter.js writes results.json
+        └─> reports/jest/{api|mqtt|livekit}/{timestamp}/results.json
+
+Playwright tests run
+  └─> playwright built-in reporters write HTML + JSON
+        └─> reports/playwright/{timestamp}/results.json
+
+update-report-index.js
+  └─> Scans all report directories
+        └─> reports/reports.json (unified index)
+
+report-server.js
+  └─> Reads reports.json + serves dashboard at http://localhost:3000
+```
+
+### Adding a new module to the dashboard
+
+If you add a new test module (e.g., `websocket/`):
+
+1. **`scripts/jest-json-reporter.js`** -- Add path detection:
+   ```js
+   else if (relPath.startsWith('websocket/')) moduleName = 'websocket';
+   ```
+
+2. **`scripts/update-report-index.js`** -- Add to MODULE_LABELS and scan list:
+   ```js
+   const MODULE_LABELS = {
+     // ...existing...
+     websocket: 'websocket-server (WS)',
+   };
+   // In the loop:
+   for (const moduleName of ['api', 'mqtt', 'livekit', 'websocket']) {
+   ```
+
+3. **`scripts/report-server.js`** -- Add tab in the `modules` array inside `buildTabs()` and a color in `MODULE_COLORS`.
+
+---
+
+## npm Scripts Reference
+
+| Script | Description |
+|--------|-------------|
+| `npm test` | Run API + MQTT + LiveKit + UI tests |
+| `npm run test:all` | Run all tests + update report index |
+| `npm run test:all:report` | Run all + update index + start dashboard |
+| `npm run test:api` | API tests only (Jest + PactumJS) |
+| `npm run test:api:verbose` | API tests with verbose output |
+| `npm run test:mqtt` | MQTT tests only (Jest) |
+| `npm run test:mqtt:verbose` | MQTT tests with verbose output |
+| `npm run test:livekit` | LiveKit tests only (Jest) |
+| `npm run test:ui` | UI tests (Playwright, headless) |
+| `npm run test:ui:headed` | UI tests with browser visible |
+| `npm run test:ui:debug` | UI tests in debug mode |
+| `npm run test:ui:report` | Open Playwright's built-in HTML report |
+| `npm run report` | Update report index + start dashboard |
+| `npm run report:update` | Update report index only |
+
+---
+
+## Test Count Summary
+
+| Module | Spec Files | Approx. Test Cases |
+|--------|-----------|-------------------|
+| API | 8 | ~65 |
+| MQTT | 7 | ~50 |
+| LiveKit | 5 | ~50 |
+| UI | 7 | ~50 |
+| **Total** | **27** | **~215** |
+
+---
+
+## Scenario Coverage Map
+
+Maps each scenario from `E2E-TEST-SCENARIOS.md` to a test file and tool.
+
+### P0 - Critical
+
+| Scenario | Description | Test File | Tool |
+|----------|-------------|-----------|------|
+| 1.1 | Admin login | `ui/scenarios/auth.spec.js` | Playwright |
+| 1.2 | Invalid credentials | `api/scenarios/auth-flow.spec.js` | PactumJS |
+| 1.3 | Token refresh | `api/scenarios/auth-flow.spec.js` | PactumJS |
+| 1.4 | Service-to-service auth | `api/scenarios/auth-flow.spec.js` | PactumJS |
+| 2.1 | Register device | `ui/scenarios/device-management.spec.js` | Playwright |
+| 2.2 | Device config retrieval | `api/scenarios/device-lifecycle.spec.js` | PactumJS |
+| 12.2 | Content delivery pipeline | `api/scenarios/cross-service.spec.js` | PactumJS |
+
+### P1 - High
+
+| Scenario | Description | Test File | Tool |
+|----------|-------------|-----------|------|
+| 5.1-5.3 | Upload content | `ui/scenarios/content-library.spec.js` | Playwright |
+| 6.1 | Register RFID tag | `ui/scenarios/rfid-management.spec.js` | Playwright |
+| 6.2 | RFID scan triggers content | `mqtt/scenarios/rfid-scan.spec.js` | MQTT.js |
+| Media | Music/story bot lifecycle | `livekit/scenarios/bot-lifecycle.spec.js` | Jest |
+
+### P2 - Medium
+
+| Scenario | Description | Test File | Tool |
+|----------|-------------|-----------|------|
+| 7.1 | Create child profile | `ui/scenarios/kid-profiles.spec.js` | Playwright |
+| 8.1 | MQTT device connection | `mqtt/scenarios/device-connect.spec.js` | MQTT.js |
+| 8.4 | Multi-device concurrent | `mqtt/scenarios/multi-device.spec.js` | MQTT.js |
+| Media | Health check + bot status | `livekit/scenarios/health-check.spec.js` | Jest |
+
+### P3 - Low
+
+| Scenario | Description | Test File | Tool |
+|----------|-------------|-----------|------|
+| 8.5 | Malformed MQTT message | `mqtt/scenarios/resilience.spec.js` | MQTT.js |
+| 11.7 | XSS attempt | `api/scenarios/error-handling.spec.js` | PactumJS |
+| 11.8 | SQL injection | `api/scenarios/error-handling.spec.js` | PactumJS |
+| Media | Invalid bot requests | `livekit/scenarios/error-handling.spec.js` | Jest |
+
+### Not automatable in E2E (Agent-level -- use pytest)
+
+| Scenario | Reason |
+|----------|--------|
+| 3.1-3.7 | Voice session -- requires real audio I/O |
+| 4.1-4.3 | Game modes -- requires voice trigger to agent |
+| 7.3-7.6 | Memory system -- tested via existing pytest suite |
+
+---
+
+## Troubleshooting
+
+### Tests skip or show "service unavailable"
+
+Tests gracefully handle unavailable services. Make sure the required service is running before the test module. See [Prerequisites](#prerequisites).
+
+### Port 3000 already in use (dashboard)
+
+The dashboard server handles this gracefully and shows a message. Kill the existing process or use a different port:
+
+```bash
+node scripts/report-server.js 4000
+```
+
+### Playwright tests fail on first run
+
+Install Playwright browsers:
+
+```bash
+npx playwright install chromium
+```
+
+### `npm run test:all` fails with WSL errors on Windows
+
+The npm scripts use chained `npm run` commands (not bash), so this should work on Windows with Git Bash. If you see WSL errors, run modules individually:
+
+```bash
+npm run test:api
+npm run test:mqtt
+npm run test:livekit
+npm run test:ui
+```
 
 ---
 
@@ -525,43 +571,3 @@ npm run test:api -- --verbose         # Verbose PactumJS output
 ```
 
 7 dependencies. No Docker required. Tests run against your existing dev/prod servers.
-
----
-
-## Relationship to Existing Test Layers
-
-```
-                    Scope
-                      |
-  Unit tests          |   pytest (memory, agent)
-  (single function)   |   Jest (api-tests per-endpoint)
-                      |
-  Integration tests   |   PactumJS (multi-step API flows)
-                      |   MQTT.js (device simulation)
-                      |
-  E2E tests           |   Playwright (full user journeys through browser)
-                      |
-                      +-----------------------------------------> Confidence
-```
-
-| Layer | Tool | Location | What it answers |
-|-------|------|----------|-----------------|
-| Per-endpoint | Jest + Axios | `api-tests/` | "Does this endpoint return correct status?" |
-| API flows | PactumJS | `e2e-tests/api/` | "Does this multi-step scenario work?" |
-| MQTT flows | MQTT.js + Jest | `e2e-tests/mqtt/` | "Does the device-to-cloud path work?" |
-| UI flows | Playwright | `e2e-tests/ui/` | "Can the admin complete this task in the dashboard?" |
-| Agent/Memory | pytest | `livekit-server/tests/` | "Does the AI agent behave correctly?" |
-
----
-
-## Total File Count
-
-| Phase | Files | Tests Created |
-|-------|-------|---------------|
-| Phase 1: Foundation | 8 | 0 (infrastructure only) |
-| Phase 2: UI Scenarios | 16 | ~45 test cases |
-| Phase 3: API Scenarios | 10 | ~35 test cases |
-| Phase 4: MQTT Scenarios | 9 | ~25 test cases |
-| **Total** | **~43 files** | **~105 test cases** |
-
-Covering **~75 scenarios** from `E2E-TEST-SCENARIOS.md` (the remaining ~15 are voice/agent-level, handled by pytest).
