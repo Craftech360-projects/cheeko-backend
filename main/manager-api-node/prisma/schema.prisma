@@ -97,8 +97,6 @@ model ai_device {
   create_date       DateTime? @default(now()) @db.Timestamptz(6)
   updater           BigInt?
   update_date       DateTime? @default(now()) @db.Timestamptz(6)
-  openclaw_url      String?
-  openclaw_token    String?
   sys_user          sys_user? @relation(fields: [user_id], references: [id], onUpdate: NoAction)
 
   @@index([agent_id], map: "idx_ai_device_agent")
@@ -367,14 +365,14 @@ model content_item {
   audio_size_bytes  BigInt?
   audio_duration_ms BigInt?
   images_json       Json?
-  image_url         String?            @db.VarChar(500)
   lyrics_text       String?
-  content_text      String?
   active            Boolean?           @default(true)
   creator           BigInt?
   create_date       DateTime?          @default(now()) @db.Timestamptz(6)
   updater           BigInt?
   update_date       DateTime?          @default(now()) @db.Timestamptz(6)
+  content_text      String?
+  image_url         String?            @db.VarChar(500)
   rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([active], map: "idx_content_item_active")
@@ -403,20 +401,6 @@ model content_library {
 
   @@index([category], map: "idx_content_library_category")
   @@index([content_type], map: "idx_content_library_type")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model device_memories {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  mac_id     String
-  file_type  String
-  file_date  DateTime? @db.Date
-  content    String    @default("")
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([mac_id, file_type, file_date], map: "uq_device_memory")
-  @@index([file_date], map: "idx_device_memories_date", where: raw("(file_date IS NOT NULL)"))
-  @@index([mac_id], map: "idx_device_memories_mac")
 }
 
 model device_playlist {
@@ -549,25 +533,6 @@ model kid_profile {
   @@index([user_id], map: "idx_kid_profile_user_id")
 }
 
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-model memory_chunks {
-  id           BigInt                 @id @default(autoincrement())
-  mac_id       String
-  text         String
-  file_path    String?
-  start_line   Int?                   @default(0)
-  end_line     Int?                   @default(0)
-  embedding    Unsupported("vector")?
-  category     String?                @default("general")
-  created_at   DateTime?              @default(now()) @db.Timestamptz(6)
-  content_hash String
-
-  @@unique([mac_id, content_hash])
-  @@index([embedding], map: "idx_memory_chunks_embedding")
-  @@index([mac_id], map: "idx_memory_chunks_mac")
-}
-
 model music_playlist {
   id         BigInt    @id @default(autoincrement())
   device_id  String    @db.Uuid
@@ -577,21 +542,6 @@ model music_playlist {
   updated_at DateTime? @default(now()) @db.Timestamptz(6)
 
   @@unique([device_id, content_id])
-}
-
-model openclaw_pair_tokens {
-  id           BigInt    @id @default(autoincrement())
-  user_id      BigInt
-  token        String    @unique @db.VarChar(20)
-  openclaw_url String?
-  paired       Boolean   @default(false)
-  expires_at   DateTime  @db.Timestamptz(6)
-  created_at   DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
-  sys_user     sys_user  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pair_token_user")
-
-  @@index([token], map: "idx_pair_token")
-  @@index([user_id], map: "idx_pair_token_user")
 }
 
 model parent_profile {
@@ -611,38 +561,38 @@ model parent_profile {
   terms_version        String?   @db.VarChar(20)
   created_at           DateTime? @default(now()) @db.Timestamptz(6)
   updated_at           DateTime? @default(now()) @db.Timestamptz(6)
-  openclaw_url         String?
-  openclaw_token       String?
   sys_user             sys_user? @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
 
 model rfid_card_mapping {
-  id                BigInt             @id @default(autoincrement())
-  rfid_uid          String             @unique @db.VarChar(50)
-  content_pack_id   BigInt?
-  pack_id           BigInt?
-  question_id       BigInt?
-  question_pack_id  BigInt?
-  question_ids      Json               @default("[]")
-  pack_code         String?            @db.VarChar(100)
-  action_type       String?            @db.VarChar(50)
-  action_data       Json?              @default("{}")
-  notes             String?            @db.VarChar(500)
-  active            Boolean            @default(true)
-  status            Int?               @default(1)
-  creator           BigInt?
-  create_date       DateTime           @default(now()) @db.Timestamptz(6)
-  updater           BigInt?
-  update_date       DateTime           @default(now()) @db.Timestamptz(6)
-  card_type         String?            @default("content") @db.VarChar(20)
-  rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onUpdate: NoAction)
-  rfid_pack         rfid_pack?         @relation(fields: [pack_id], references: [id], onUpdate: NoAction)
-  rfid_question     rfid_question?     @relation(fields: [question_id], references: [id], onUpdate: NoAction)
+  id                 BigInt              @id @default(autoincrement())
+  rfid_uid           String              @unique @db.VarChar(50)
+  content_pack_id    BigInt?
+  pack_id            BigInt?
+  question_id        BigInt?
+  question_ids       Json                @default("[]")
+  pack_code          String?             @db.VarChar(100)
+  notes              String?             @db.VarChar(500)
+  active             Boolean             @default(true)
+  creator            BigInt?
+  create_date        DateTime            @default(now()) @db.Timestamptz(6)
+  updater            BigInt?
+  update_date        DateTime            @default(now()) @db.Timestamptz(6)
+  action_data        Json?               @default("{}")
+  action_type        String?             @db.VarChar(50)
+  card_type          String?             @default("ai") @db.VarChar(50)
+  question_pack_id   BigInt?
+  status             Int?                @default(1)
+  rfid_content_pack  rfid_content_pack?  @relation(fields: [content_pack_id], references: [id], onUpdate: NoAction)
+  rfid_pack          rfid_pack?          @relation(fields: [pack_id], references: [id], onUpdate: NoAction)
+  rfid_question      rfid_question?      @relation(fields: [question_id], references: [id], onUpdate: NoAction)
+  rfid_question_pack rfid_question_pack? @relation(fields: [question_pack_id], references: [id], onUpdate: NoAction)
 
   @@index([active], map: "idx_rfid_card_mapping_active")
   @@index([content_pack_id], map: "idx_rfid_card_mapping_pack")
   @@index([pack_id], map: "idx_rfid_card_mapping_pack_id")
   @@index([question_id], map: "idx_rfid_card_mapping_question")
+  @@index([question_pack_id], map: "idx_rfid_card_mapping_question_pack")
   @@index([rfid_uid], map: "idx_rfid_card_mapping_uid")
 }
 
@@ -657,17 +607,18 @@ model rfid_content_pack {
   language          String?             @default("en") @db.VarChar(10)
   cached_audio_urls String?
   version           String?             @db.VarChar(50)
-  status            String?             @db.VarChar(50)
-  age_range         String?             @db.VarChar(50)
-  thumbnail_url     String?             @db.VarChar(500)
   content_hash      String?             @db.VarChar(255)
   active            Boolean?            @default(true)
   creator           BigInt?
   create_date       DateTime?           @default(now()) @db.Timestamptz(6)
   updater           BigInt?
   update_date       DateTime?           @default(now()) @db.Timestamptz(6)
+  age_range         String?             @db.VarChar(50)
+  status            String?             @default("active") @db.VarChar(50)
+  thumbnail_url     String?             @db.VarChar(500)
   content_item      content_item[]
   rfid_card_mapping rfid_card_mapping[]
+  rfid_series       rfid_series[]
 
   @@index([active], map: "idx_rfid_content_pack_active")
   @@index([pack_code], map: "idx_rfid_content_pack_code")
@@ -702,9 +653,6 @@ model rfid_question {
   code                   String              @unique @db.VarChar(100)
   title                  String              @db.VarChar(255)
   prompt_text            String?
-  system_prompt_override String?
-  allow_caching          Boolean?            @default(true)
-  cached_audio_url       String?             @db.VarChar(500)
   language               String?             @default("en") @db.VarChar(10)
   category               String?             @db.VarChar(100)
   difficulty             Int?                @default(1)
@@ -713,6 +661,9 @@ model rfid_question {
   create_date            DateTime?           @default(now()) @db.Timestamptz(6)
   updater                BigInt?
   update_date            DateTime?           @default(now()) @db.Timestamptz(6)
+  allow_caching          Boolean?            @default(true)
+  cached_audio_url       String?             @db.VarChar(500)
+  system_prompt_override String?
   rfid_card_mapping      rfid_card_mapping[]
   rfid_series            rfid_series[]
 
@@ -723,75 +674,26 @@ model rfid_question {
 }
 
 model rfid_question_pack {
-  id           BigInt    @id @default(autoincrement())
-  pack_code    String    @db.VarChar(100)
-  name         String    @db.VarChar(255)
-  description  String?
-  question_ids Json?     @default("[]")
-  language     String?   @default("en") @db.VarChar(10)
-  category     String?   @db.VarChar(100)
-  version      Int?
-  status       String?   @db.VarChar(50)
-  active       Boolean?  @default(true)
-  creator      BigInt?
-  create_date  DateTime? @default(now()) @db.Timestamptz(6)
-  updater      BigInt?
-  update_date  DateTime? @default(now()) @db.Timestamptz(6)
-  rfid_series  rfid_series[]
-}
-
-model rfid_content_pack {
   id                BigInt              @id @default(autoincrement())
   pack_code         String              @unique @db.VarChar(100)
   name              String              @db.VarChar(255)
   description       String?
-  content_type      String?             @default("prompt") @db.VarChar(50)
-  content_md        String?
-  total_items       Int?                @default(0)
+  question_ids      Json                @default("[]")
   language          String?             @default("en") @db.VarChar(10)
-  cached_audio_urls String?
+  category          String?             @db.VarChar(100)
   version           String?             @db.VarChar(50)
-  status            String?             @db.VarChar(50)
-  age_range         String?             @db.VarChar(50)
-  thumbnail_url     String?             @db.VarChar(500)
-  content_hash      String?             @db.VarChar(255)
   active            Boolean?            @default(true)
+  status            Int?                @default(1)
   creator           BigInt?
   create_date       DateTime?           @default(now()) @db.Timestamptz(6)
   updater           BigInt?
   update_date       DateTime?           @default(now()) @db.Timestamptz(6)
-  content_item      content_item[]
   rfid_card_mapping rfid_card_mapping[]
   rfid_series       rfid_series[]
 
-  @@index([pack_code], map: "idx_rfid_content_pack_code")
-  @@index([content_type], map: "idx_rfid_content_pack_type")
-  @@index([active], map: "idx_rfid_content_pack_active")
-}
-
-model content_item {
-  id                BigInt             @id @default(autoincrement())
-  content_pack_id   BigInt?
-  item_number       Int
-  title             String?            @db.VarChar(255)
-  description       String?
-  audio_url         String?            @db.VarChar(500)
-  audio_size_bytes  BigInt?
-  audio_duration_ms BigInt?
-  images_json       Json?
-  image_url         String?            @db.VarChar(500)
-  lyrics_text       String?
-  content_text      String?
-  active            Boolean?           @default(true)
-  creator           BigInt?
-  create_date       DateTime?          @default(now()) @db.Timestamptz(6)
-  updater           BigInt?
-  update_date       DateTime?          @default(now()) @db.Timestamptz(6)
-  rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([content_pack_id], map: "idx_content_item_pack")
-  @@index([content_pack_id, item_number], map: "idx_content_item_number")
-  @@index([active], map: "idx_content_item_active")
+  @@index([active], map: "idx_rfid_question_pack_active")
+  @@index([category], map: "idx_rfid_question_pack_category")
+  @@index([pack_code], map: "idx_rfid_question_pack_code")
 }
 
 model rfid_scan_log {
@@ -803,22 +705,28 @@ model rfid_scan_log {
 }
 
 model rfid_series {
-  id              BigInt         @id @default(autoincrement())
-  series_name     String         @db.VarChar(255)
-  start_uid       String         @db.VarChar(100)
-  end_uid         String         @db.VarChar(100)
-  content_pack_id BigInt?
-  question_id     BigInt?
-  priority        Int?           @default(0)
-  notes           String?        @db.VarChar(500)
-  status          Int?           @default(1)
-  created_at      DateTime?      @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime?      @default(now()) @db.Timestamptz(6)
-  rfid_pack       rfid_pack?     @relation(fields: [content_pack_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  rfid_question   rfid_question? @relation(fields: [question_id], references: [id], onUpdate: NoAction)
+  id                 BigInt              @id @default(autoincrement())
+  series_name        String              @db.VarChar(255)
+  start_uid          String              @db.VarChar(100)
+  end_uid            String              @db.VarChar(100)
+  content_pack_id    BigInt?
+  question_id        BigInt?
+  priority           Int?                @default(0)
+  notes              String?             @db.VarChar(500)
+  status             Int?                @default(1)
+  created_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?           @default(now()) @db.Timestamptz(6)
+  content_ref_id     BigInt?
+  question_pack_id   BigInt?
+  rfid_pack          rfid_pack?          @relation(fields: [content_pack_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rfid_content_pack  rfid_content_pack?  @relation(fields: [content_ref_id], references: [id], onUpdate: NoAction)
+  rfid_question      rfid_question?      @relation(fields: [question_id], references: [id], onUpdate: NoAction)
+  rfid_question_pack rfid_question_pack? @relation(fields: [question_pack_id], references: [id], onUpdate: NoAction)
 
+  @@index([content_ref_id], map: "idx_rfid_series_content_ref")
   @@index([content_pack_id], map: "idx_rfid_series_pack")
   @@index([question_id], map: "idx_rfid_series_question")
+  @@index([question_pack_id], map: "idx_rfid_series_question_pack")
   @@index([start_uid, end_uid], map: "idx_rfid_series_uid_range")
 }
 
@@ -884,27 +792,27 @@ model sys_params {
 }
 
 model sys_user {
-  id                   BigInt                 @id @default(autoincrement())
-  username             String?                @unique @db.VarChar(100)
-  password             String?                @db.VarChar(255)
-  email                String?                @unique @db.VarChar(255)
-  firebase_uid         String?                @unique @db.VarChar(128)
-  phone                String?                @db.VarChar(50)
-  nickname             String?                @db.VarChar(100)
-  avatar               String?                @db.VarChar(500)
-  gender               Int?                   @default(0)
-  status               Int?                   @default(1)
-  role                 String?                @default("user") @db.VarChar(50)
-  last_login_at        DateTime?              @db.Timestamptz(6)
-  created_at           DateTime?              @default(now()) @db.Timestamptz(6)
-  updated_at           DateTime?              @default(now()) @db.Timestamptz(6)
-  ai_agent             ai_agent[]
-  ai_device            ai_device[]
-  kid_profile          kid_profile[]
-  openclaw_pair_tokens openclaw_pair_tokens[]
-  parent_profile       parent_profile?
-  sys_user_token       sys_user_token[]
-  user_question_quota  user_question_quota[]
+  id             BigInt           @id @default(autoincrement())
+  firebase_uid   String?          @unique @db.VarChar(128)
+  username       String?          @unique @db.VarChar(100)
+  password       String?          @db.VarChar(255)
+  email          String?          @unique @db.VarChar(255)
+  phone          String?          @db.VarChar(50)
+  nickname       String?          @db.VarChar(100)
+  avatar         String?          @db.VarChar(500)
+  gender         Int?             @default(0)
+  status         Int?             @default(1)
+  role           String?          @default("user") @db.VarChar(50)
+  last_login_at  DateTime?        @db.Timestamptz(6)
+  created_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime?        @default(now()) @db.Timestamptz(6)
+  ai_agent       ai_agent[]
+  ai_device      ai_device[]
+  kid_profile    kid_profile[]
+  parent_profile parent_profile?
+  sys_user_token sys_user_token[]
+
+  @@index([firebase_uid], map: "idx_sys_user_firebase_uid")
 }
 
 model sys_user_token {
@@ -919,79 +827,4 @@ model sys_user_token {
   @@index([expire_date], map: "idx_sys_user_token_expire")
   @@index([token], map: "idx_sys_user_token_token")
   @@index([user_id], map: "idx_sys_user_token_user_id")
-}
-
-model email_report_config {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  enabled           Boolean   @default(false)
-  schedule_hour     Int       @default(8)
-  schedule_timezone String    @default("Asia/Kolkata") @db.VarChar(50)
-  recipients        Json      @default("[]")
-  sections          Json      @default("{\"alerts\": true, \"tokens\": true, \"content\": true, \"devices\": true, \"summary\": true, \"learning\": true}")
-  created_at        DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model device_memories {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  mac_id     String
-  file_type  String
-  file_date  DateTime? @db.Date
-  content    String    @default("")
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([mac_id, file_type, file_date], map: "uq_device_memory")
-  @@index([file_date], map: "idx_device_memories_date", where: raw("(file_date IS NOT NULL)"))
-  @@index([mac_id], map: "idx_device_memories_mac")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-model memory_chunks {
-  id           BigInt                 @id @default(autoincrement())
-  mac_id       String
-  text         String
-  file_path    String?
-  start_line   Int?                   @default(0)
-  end_line     Int?                   @default(0)
-  embedding    Unsupported("vector")?
-  category     String?                @default("general")
-  created_at   DateTime?              @default(now()) @db.Timestamptz(6)
-  content_hash String
-
-  @@unique([mac_id, content_hash])
-  @@index([embedding], map: "idx_memory_chunks_embedding")
-  @@index([mac_id], map: "idx_memory_chunks_mac")
-}
-
-model openclaw_pair_tokens {
-  id           BigInt    @id @default(autoincrement())
-  user_id      BigInt
-  token        String    @unique @db.VarChar(20)
-  openclaw_url String?
-  paired       Boolean   @default(false)
-  expires_at   DateTime  @db.Timestamptz(6)
-  created_at   DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
-  sys_user     sys_user  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pair_token_user")
-
-  @@index([token], map: "idx_pair_token")
-  @@index([user_id], map: "idx_pair_token_user")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model user_question_quota {
-  id              BigInt    @id @default(autoincrement())
-  user_id         BigInt
-  month_key       String    @db.VarChar(7)
-  questions_used  Int       @default(0)
-  extra_purchased Int       @default(0)
-  created_at      DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at      DateTime? @default(now()) @db.Timestamptz(6)
-  sys_user        sys_user  @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@unique([user_id, month_key])
-  @@index([month_key], map: "idx_user_question_quota_month_key")
-  @@index([user_id], map: "idx_user_question_quota_user_id")
 }

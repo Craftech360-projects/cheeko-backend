@@ -195,13 +195,75 @@ class DeviceSimulator {
     await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
   }
 
-  async sendListen(state) {
+  async sendListen(state, mode) {
     const payload = {
       type: 'listen',
       mac: this.normalizedMac,
-      state: state, // e.g. 'start', 'stop'
+      state: state, // 'start', 'stop'
+    };
+    if (mode) payload.mode = mode; // 'manual', 'vad'
+    await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
+  }
+
+  async sendSpeechEnd() {
+    const payload = {
+      type: 'speech_end',
+      mac: this.normalizedMac,
     };
     await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
+  }
+
+  async sendMcpResponse(data = {}) {
+    const payload = {
+      type: 'mcp',
+      mac: this.normalizedMac,
+      ...data,
+    };
+    await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
+  }
+
+  async sendMobileMusicRequest(songName, contentType = 'music', language = 'en') {
+    const payload = {
+      type: 'mobile_music_request',
+      mac: this.normalizedMac,
+      song_name: songName,
+      content_type: contentType,
+      language: language,
+    };
+    await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
+  }
+
+  async sendHabitDownloadRequest(rfidUid) {
+    const payload = {
+      type: 'habit_download_request',
+      mac: this.normalizedMac,
+      rfid_uid: rfidUid,
+    };
+    await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
+  }
+
+  async sendRhymeDownloadRequest(rfidUid) {
+    const payload = {
+      type: 'rhyme_download_request',
+      mac: this.normalizedMac,
+      rfid_uid: rfidUid,
+    };
+    await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
+  }
+
+  async sendReadyForGreeting() {
+    const payload = {
+      type: 'ready_for_greeting',
+      mac: this.normalizedMac,
+    };
+    await this.mqttClient.publish(INGEST_TOPIC, this._wrapPayload(payload));
+    return this._waitResponse();
   }
 
   // ── Message inspection ────────────────────────────────────────────

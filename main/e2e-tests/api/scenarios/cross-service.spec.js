@@ -52,7 +52,7 @@ describe('12.2 - Content Delivery Pipeline (Full Flow)', () => {
   it('Step 3: Verify content library has the music', async () => {
     await pactum.spec()
       .get('/content/library')
-      .withHeaders(getServiceKeyHeaders())
+      .withHeaders(getBearerHeaders())
       .expectStatus(200)
       .expectJsonLike({ code: 0 });
   });
@@ -60,7 +60,7 @@ describe('12.2 - Content Delivery Pipeline (Full Flow)', () => {
   it('Step 4: Verify device exists in list', async () => {
     await pactum.spec()
       .get('/device/list')
-      .withHeaders(getServiceKeyHeaders())
+      .withHeaders(getBearerHeaders())
       .expectStatus(200)
       .expectJsonLike({ code: 0 });
   });

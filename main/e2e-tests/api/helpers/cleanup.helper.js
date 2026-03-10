@@ -7,7 +7,7 @@
 
 const axios = require('axios');
 const config = require('../../test.config');
-const { getServiceKeyHeaders } = require('./auth.helper');
+const { getBearerHeaders } = require('./auth.helper');
 
 class CleanupTracker {
   constructor() {
@@ -29,7 +29,7 @@ class CleanupTracker {
    * Delete all tracked resources in reverse order (LIFO)
    */
   async cleanAll() {
-    const headers = getServiceKeyHeaders();
+    const headers = getBearerHeaders();
     const baseUrl = config.managerApi.baseUrl;
     const errors = [];
 
@@ -50,26 +50,37 @@ class CleanupTracker {
   }
 
   async _deleteResource(baseUrl, headers, type, id) {
-    // Some endpoints use DELETE with body instead of URL param
+    const opts = { headers, timeout: 10000, validateStatus: () => true };
     switch (type) {
       case 'device':
-        // No direct device delete; unbind instead
-        await axios.post(`${baseUrl}/device/unbind`, { deviceId: id }, { headers, timeout: 10000, validateStatus: () => true });
+        await axios.post(`${baseUrl}/device/unbind`, { deviceId: id }, opts);
         break;
       case 'content':
-        await axios.delete(`${baseUrl}/content/library/${id}`, { headers, timeout: 10000, validateStatus: () => true });
+        await axios.delete(`${baseUrl}/content/library/${id}`, opts);
         break;
       case 'rfid-card':
-        // DELETE /admin/rfid/card expects array of IDs in body
-        await axios.delete(`${baseUrl}/admin/rfid/card`, { headers, timeout: 10000, data: [id], validateStatus: () => true });
+        await axios.delete(`${baseUrl}/admin/rfid/card`, { ...opts, data: [id] });
         break;
       case 'rfid-series':
-        // DELETE /admin/rfid/series expects array of IDs in body
-        await axios.delete(`${baseUrl}/admin/rfid/series`, { headers, timeout: 10000, data: [id], validateStatus: () => true });
+        await axios.delete(`${baseUrl}/admin/rfid/series`, { ...opts, data: [id] });
         break;
       case 'profile':
-        // Profile deletion via admin route
-        await axios.delete(`${baseUrl}/admin/kids/${id}`, { headers, timeout: 10000, validateStatus: () => true });
+        await axios.delete(`${baseUrl}/admin/kids/${id}`, opts);
+        break;
+      case 'agent':
+        await axios.delete(`${baseUrl}/agent/${id}`, opts);
+        break;
+      case 'agent-template':
+        await axios.delete(`${baseUrl}/agent/template/${id}`, opts);
+        break;
+      case 'model':
+        await axios.delete(`${baseUrl}/models/delete/${id}`, opts);
+        break;
+      case 'tts-voice':
+        await axios.delete(`${baseUrl}/models/tts-voices/delete/${id}`, opts);
+        break;
+      case 'ota':
+        await axios.delete(`${baseUrl}/device/ota/firmware/${id}`, opts);
         break;
       default:
         console.warn(`Unknown cleanup type: ${type}`);

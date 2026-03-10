@@ -68,6 +68,63 @@ function testRfidSeries() {
   };
 }
 
+function testAgent() {
+  const id = uniqueId();
+  return {
+    agentName: `e2e-test-agent-${id}`,
+    agentCode: `e2e_${id}`,
+    systemPrompt: 'You are a friendly test assistant.',
+    langCode: 'en',
+    language: 'English',
+  };
+}
+
+function testAgentTemplate() {
+  const id = uniqueId();
+  return {
+    agentName: `e2e-test-template-${id}`,
+    agentCode: `e2e_tpl_${id}`,
+    systemPrompt: 'You are a template assistant for testing.',
+    langCode: 'en',
+    language: 'English',
+    isVisible: 1,
+  };
+}
+
+function testModel() {
+  const id = uniqueId();
+  return {
+    modelType: 'LLM',
+    modelCode: `e2e-model-${id}`,
+    modelName: `E2E Test Model ${id}`,
+    configJson: { provider: 'test', apiKey: 'test-key' },
+    isDefault: 0,
+    isEnabled: 1,
+  };
+}
+
+function testTtsVoice(ttsModelId) {
+  const id = uniqueId();
+  const voice = {
+    voiceName: `e2e-voice-${id}`,
+    voiceCode: `voice_${id}`,
+    language: 'en',
+  };
+  if (ttsModelId) voice.ttsModelId = ttsModelId;
+  return voice;
+}
+
+function testOtaFirmware() {
+  const id = uniqueId();
+  return {
+    firmwareName: `e2e-firmware-${id}`,
+    type: 'esp32',
+    version: `0.0.${Date.now() % 10000}`,
+    size: 1024,
+    remark: 'E2E test firmware',
+  };
+}
+
 module.exports = {
   uniqueId,
   testDevice,
@@ -76,4 +133,9 @@ module.exports = {
   testKidProfile,
   testRfidCard,
   testRfidSeries,
+  testAgent,
+  testAgentTemplate,
+  testModel,
+  testTtsVoice,
+  testOtaFirmware,
 };

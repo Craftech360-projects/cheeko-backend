@@ -60,7 +60,7 @@ describe('Device Lifecycle E2E', () => {
     it('should return paginated device list', async () => {
       await pactum.spec()
         .get('/device/list')
-        .withHeaders(getServiceKeyHeaders())
+        .withHeaders(getBearerHeaders())
         .withQueryParams({ page: 1, size: 10 })
         .expectStatus(200)
         .expectJsonLike({ code: 0 });

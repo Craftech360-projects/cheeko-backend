@@ -61,7 +61,7 @@ describe('Content Delivery Pipeline E2E', () => {
     it('should find created content in library list', async () => {
       await pactum.spec()
         .get('/content/library')
-        .withHeaders(getServiceKeyHeaders())
+        .withHeaders(getBearerHeaders())
         .expectStatus(200)
         .expectJsonLike({ code: 0 });
     });
@@ -69,7 +69,7 @@ describe('Content Delivery Pipeline E2E', () => {
     it('should filter content by type', async () => {
       await pactum.spec()
         .get('/content/library')
-        .withHeaders(getServiceKeyHeaders())
+        .withHeaders(getBearerHeaders())
         .withQueryParams({ contentType: 'music' })
         .expectStatus(200)
         .expectJsonLike({ code: 0 });
@@ -82,7 +82,7 @@ describe('Content Delivery Pipeline E2E', () => {
 
       await pactum.spec()
         .get(`/content/library/${musicId}`)
-        .withHeaders(getServiceKeyHeaders())
+        .withHeaders(getBearerHeaders())
         .expectStatus(200)
         .expectJsonLike({ code: 0 });
     });

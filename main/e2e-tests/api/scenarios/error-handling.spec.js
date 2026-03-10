@@ -37,14 +37,14 @@ describe('Error Handling E2E', () => {
     it('should not execute injected SQL in search params', async () => {
       await pactum.spec()
         .get('/device/list')
-        .withHeaders(getServiceKeyHeaders())
+        .withHeaders(getBearerHeaders())
         .withQueryParams({ search: "'; DROP TABLE devices; --" })
         .expectStatus(200);
 
       // Verify the system still works after injection attempt
       await pactum.spec()
         .get('/device/list')
-        .withHeaders(getServiceKeyHeaders())
+        .withHeaders(getBearerHeaders())
         .expectStatus(200)
         .expectJsonLike({ code: 0 });
     });
@@ -66,7 +66,7 @@ describe('Error Handling E2E', () => {
 
   describe('11.5 - Concurrent updates', () => {
     it('should handle simultaneous requests without crashing', async () => {
-      const headers = getServiceKeyHeaders();
+      const headers = getBearerHeaders();
 
       // Fire 5 simultaneous list requests
       const promises = Array(5).fill(null).map(() =>

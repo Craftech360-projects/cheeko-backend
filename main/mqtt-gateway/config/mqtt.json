@@ -1,1 +1,17 @@
-{}
+{
+  "debug": false,
+  "mqtt_broker": {
+    "host": "192.168.1.168",
+    "port": 1883,
+    "protocol": "mqtt",
+    "keepalive": 60,
+    "clean": true,
+    "reconnectPeriod": 1000,
+    "connectTimeout": 30000
+  },
+  "livekit": {
+    "url": "wss://cheeko-prod-68ib8ma4.livekit.cloud",
+    "api_key": "APIiA6wPEdDqa9U",
+    "api_secret": "PuevKxhh7jhi2apAWmKziOBmDoHfjCpICBeokRRNCAnB"
+  }
+}

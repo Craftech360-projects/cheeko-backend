@@ -165,27 +165,26 @@ describe('Auth Flow E2E', () => {
   // ── Service Key Auth ───────────────────────────────────────────────────────
 
   describe('Service-to-service auth', () => {
-    it('should accept valid service key on requireAuth route', async () => {
+    it('should accept valid service key on requireAdmin route', async () => {
+      await pactum.spec()
+        .get('/models/provider')
+        .withHeaders(getServiceKeyHeaders())
+        .expectStatus(200)
+        .expectJsonLike({ code: 0 });
+    });
+
+    it('should reject service key on requireAuth route (no god mode)', async () => {
       await pactum.spec()
         .get('/device/list')
         .withHeaders(getServiceKeyHeaders())
-        .expectStatus(200)
-        .expectJsonLike({ code: 0 });
+        .expectStatus(401);
     });
 
-    it('should accept valid service key on requireAdmin route', async () => {
-      await pactum.spec()
-        .get('/admin/users/list')
-        .withHeaders(getServiceKeyHeaders())
-        .expectStatus(200)
-        .expectJsonLike({ code: 0 });
-    });
-
-    it('should accept valid service key on flexAuth route', async () => {
+    it('should reject service key on flexAuth route (no god mode)', async () => {
       await pactum.spec()
         .get('/content/library')
         .withHeaders(getServiceKeyHeaders())
-        .expectStatus(200);
+        .expectStatus(401);
     });
 
     it('should reject invalid service key', async () => {
