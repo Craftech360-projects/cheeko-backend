@@ -123,27 +123,8 @@ const bindDevice = async (userId, agentId, deviceCode, isSuperAdmin = false) => 
       logger.info(`[BIND] Activation code ${deviceCode} found in memory cache for MAC ${macAddress}`);
     } else {
       logger.warn(`[BIND] Activation code ${deviceCode} NOT in memory cache. Cache has ${activationCodeCache.size} codes: [${[...activationCodeCache.keys()].join(', ')}]`);
-      // Fallback: look up activation code in DB (survives server restarts)
-      let dbDevice = null;
-      try {
-        const { data } = await supabaseAdmin
-          .from('ai_device')
-          .select('*')
-          .eq('activation_code', deviceCode)
-          .single();
-        dbDevice = data;
-      } catch (dbErr) {
-        logger.warn(`[BIND] DB activation code lookup failed: ${dbErr.message}`);
-      }
-
-      if (!dbDevice) {
-        logger.error(`[BIND] Activation code ${deviceCode} not found in memory or DB. Bind failed.`);
-        throw new Error('Invalid or expired activation code');
-      }
-
-      macAddress = dbDevice.mac_address;
-      device = dbDevice;
-      logger.info(`[BIND] Found activation code ${deviceCode} in DB for device ${macAddress}`);
+      logger.error(`[BIND] Activation code ${deviceCode} not found in memory cache. Bind failed. Device may need to reconnect.`);
+      throw new Error('Invalid or expired activation code. Please restart the device to get a new code.');
     }
 
     // Check if device already exists (when found via in-memory cache)
@@ -226,21 +207,25 @@ const bindDevice = async (userId, agentId, deviceCode, isSuperAdmin = false) => 
       throw new Error('Device is already bound to another user');
     }
 
+    const updatePayload = {
+      user_id: bindUserId,
+      agent_id: agentId,
+      openclaw_url: openclawUrl,
+      openclaw_token: openclawToken,
+      update_date: new Date().toISOString()
+    };
+
     const { data: updated, error: updateError } = await supabaseAdmin
       .from('ai_device')
-      .update({
-        user_id: bindUserId,
-        agent_id: agentId,
-        activation_code: null,
-        openclaw_url: openclawUrl,
-        openclaw_token: openclawToken,
-        update_date: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', device.id)
       .select()
       .single();
 
-    if (updateError) throw new Error('Failed to bind device');
+    if (updateError) {
+      logger.error(`[BIND] Update error: ${JSON.stringify(updateError)}`);
+      throw new Error('Failed to bind device: ' + updateError.message);
+    }
 
     // Clean up activation code cache
     activationCodeCache.delete(deviceCode);
@@ -822,12 +807,9 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
       activationCodeCache.set(activationCode, activationData);
       activationMacCache.set(normalizedMac, activationCode);
 
-      // Persist activation code to DB so it survives server restarts
-      const { error: saveErr } = await supabaseAdmin
-        .from('ai_device')
-        .update({ activation_code: activationCode })
-        .eq('mac_address', normalizedMac);
-      if (saveErr) logger.warn(`Could not persist activation code to DB: ${saveErr.message}`);
+      // NOTE: activation_code column does not exist in DB yet (migration not applied).
+      // Activation codes are stored in-memory only. To persist across restarts,
+      // apply migration: 20260223000002_add_activation_code_to_device.sql
 
       logger.info(`Generated activation code ${activationCode} for device ${normalizedMac}`);
     }
