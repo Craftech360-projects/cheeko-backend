@@ -16,7 +16,7 @@ class StreamingCrypto {
     constructor() {
         this.encryptCipherCache = new Map();
         this.decryptCipherCache = new Map();
-        this.maxCacheSize = 20; // Limit cache size to prevent memory leak
+        this.maxCacheSize = 300; // Limit cache size to prevent memory leak (300 = ~250 devices per instance + headroom)
     }
 
     /**

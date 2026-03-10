@@ -44,6 +44,12 @@ class WorkerPoolManager {
         }
 
         this.startAutoScaling();
+
+        // Disable auto-scaling in multi-instance mode to prevent thread oversubscription
+        if (process.env.DISABLE_WORKER_AUTOSCALE === 'true') {
+            this.stopAutoScaling();
+            this.maxWorkers = this.workerCount; // Lock to configured count
+        }
     }
 
     initializeWorkers() {

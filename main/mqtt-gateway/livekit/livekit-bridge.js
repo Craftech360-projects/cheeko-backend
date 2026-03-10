@@ -576,11 +576,13 @@ class LiveKitBridge extends EventEmitter {
                           finalFrame.data.byteOffset,
                           finalFrame.data.byteLength
                         );
-                        // Add final frames to buffer
-                        this.frameBuffer = Buffer.concat([
-                          this.frameBuffer,
-                          finalBuffer,
-                        ]);
+                        // Add final frames to buffer (cap at 28800 bytes to prevent unbounded growth)
+                        if (this.frameBuffer.length < 28800) {
+                          this.frameBuffer = Buffer.concat([
+                            this.frameBuffer,
+                            finalBuffer,
+                          ]);
+                        }
                       }
 
                       // Process any remaining complete frames in buffer
@@ -655,11 +657,13 @@ class LiveKitBridge extends EventEmitter {
                           continue;
                         }
 
-                        // Append to frame buffer
-                        this.frameBuffer = Buffer.concat([
-                          this.frameBuffer,
-                          resampledBuffer,
-                        ]);
+                        // Append to frame buffer (cap at 28800 bytes to prevent unbounded growth)
+                        if (this.frameBuffer.length < 28800) {
+                          this.frameBuffer = Buffer.concat([
+                            this.frameBuffer,
+                            resampledBuffer,
+                          ]);
+                        }
                         totalBytes += resampledBuffer.length;
                       }
 
@@ -2090,7 +2094,10 @@ class LiveKitBridge extends EventEmitter {
         );
       }
 
-      // Step 2: Disconnect from the room
+      // Step 2: Remove all listeners before disconnect to prevent accumulation
+      this.room.removeAllListeners();
+
+      // Step 3: Disconnect from the room
       try {
         await this.room.disconnect();
         console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
@@ -2100,7 +2107,7 @@ class LiveKitBridge extends EventEmitter {
         );
       }
 
-      // Step 3: Force delete the room from LiveKit server to remove all participants
+      // Step 4: Force delete the room from LiveKit server to remove all participants
       if (this.roomService && this.roomName) {
         try {
           await this.roomService.deleteRoom(this.roomName);
@@ -2120,6 +2127,19 @@ class LiveKitBridge extends EventEmitter {
       }
 
       this.room = null;
+    }
+
+    // Clear pending MCP requests
+    if (this.pendingMcpRequests) {
+      for (const [id, req] of this.pendingMcpRequests) {
+        if (req.reject) req.reject(new Error('Bridge closing'));
+      }
+      this.pendingMcpRequests.clear();
+    }
+
+    // Clear volume adjustment queue
+    if (this.volumeAdjustmentQueue) {
+      this.volumeAdjustmentQueue.length = 0;
     }
 
     // Tell the shared worker pool to cleanup per-session codec state

@@ -380,58 +380,67 @@ class MQTTGateway {
         const rooms = await this.roomService.listRooms();
         logger.info(`🧹 [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
 
-        for (const room of rooms) {
-          try {
-            const roomName = room.name;
-            const numParticipants = room.numParticipants || 0;
-            const creationTime = room.creationTime ? Number(room.creationTime) * 1000 : Date.now();
-            const roomAge = Date.now() - creationTime;
-            const roomAgeMinutes = Math.round(roomAge / 60000);
-
-            // Get detailed participant info
-            let participants = [];
+        // Process rooms in batches of 20 to avoid blocking the event loop
+        const BATCH_SIZE = 20;
+        for (let i = 0; i < rooms.length; i += BATCH_SIZE) {
+          const batch = rooms.slice(i, i + BATCH_SIZE);
+          for (const room of batch) {
             try {
-              participants = await this.roomService.listParticipants(roomName);
-            } catch (err) {
-              // Room might have been deleted already
-              logger.warn(`⚠️ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
-            }
+              const roomName = room.name;
+              const numParticipants = room.numParticipants || 0;
+              const creationTime = room.creationTime ? Number(room.creationTime) * 1000 : Date.now();
+              const roomAge = Date.now() - creationTime;
+              const roomAgeMinutes = Math.round(roomAge / 60000);
 
-            // Check if room should be cleaned up
-            const hasRealDevice = participants.some(p =>
-              p.identity && !p.identity.toLowerCase().includes('agent') && !p.identity.toLowerCase().includes('gateway')
-            );
-            const hasOnlyAgents = participants.length > 0 && !hasRealDevice;
-            const isEmpty = participants.length === 0;
-
-            // Clean up if:
-            // - Room is empty and older than 2 minutes (empty timeout)
-            // - Room only has agents (no device) and older than 5 minutes
-            // - Room is older than 60 minutes (absolute max)
-            const shouldCleanup =
-              (isEmpty && roomAge > 2 * 60 * 1000) ||
-              (hasOnlyAgents && roomAge > 5 * 60 * 1000) ||
-              (roomAge > 60 * 60 * 1000);
-
-            if (shouldCleanup) {
-              const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
-              logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
-
-              // Stop any media bots first
-              if (roomName.includes('_music') || roomName.includes('_story')) {
-                try {
-                  await axios.post(`${MEDIA_API_BASE}/stop-bot`, { room_name: roomName }, mediaAxiosConfig({ timeout: 3000 }));
-                } catch (botErr) {
-                  // Ignore bot stop errors
-                }
+              // Get detailed participant info
+              let participants = [];
+              try {
+                participants = await this.roomService.listParticipants(roomName);
+              } catch (err) {
+                // Room might have been deleted already
+                logger.warn(`⚠️ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
               }
 
-              await this.roomService.deleteRoom(roomName);
-              roomsCleaned++;
-              logger.info(`✅ [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
+              // Check if room should be cleaned up
+              const hasRealDevice = participants.some(p =>
+                p.identity && !p.identity.toLowerCase().includes('agent') && !p.identity.toLowerCase().includes('gateway')
+              );
+              const hasOnlyAgents = participants.length > 0 && !hasRealDevice;
+              const isEmpty = participants.length === 0;
+
+              // Clean up if:
+              // - Room is empty and older than 2 minutes (empty timeout)
+              // - Room only has agents (no device) and older than 5 minutes
+              // - Room is older than 60 minutes (absolute max)
+              const shouldCleanup =
+                (isEmpty && roomAge > 2 * 60 * 1000) ||
+                (hasOnlyAgents && roomAge > 5 * 60 * 1000) ||
+                (roomAge > 60 * 60 * 1000);
+
+              if (shouldCleanup) {
+                const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
+                logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
+
+                // Stop any media bots first
+                if (roomName.includes('_music') || roomName.includes('_story')) {
+                  try {
+                    await axios.post(`${MEDIA_API_BASE}/stop-bot`, { room_name: roomName }, mediaAxiosConfig({ timeout: 3000 }));
+                  } catch (botErr) {
+                    // Ignore bot stop errors
+                  }
+                }
+
+                await this.roomService.deleteRoom(roomName);
+                roomsCleaned++;
+                logger.info(`✅ [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
+              }
+            } catch (roomError) {
+              logger.warn(`⚠️ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
             }
-          } catch (roomError) {
-            logger.warn(`⚠️ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
+          }
+          // Yield event loop between batches
+          if (i + BATCH_SIZE < rooms.length) {
+            await new Promise(r => setTimeout(r, 50));
           }
         }
       } catch (error) {
@@ -561,7 +570,8 @@ class MQTTGateway {
       process.exit(1);
     }
 
-    const clientId = `mqtt-gateway-${Date.now()}-${Math.random()
+    const instanceId = process.env.INSTANCE_ID || '0';
+    const clientId = `mqtt-gateway-${instanceId}-${Date.now()}-${Math.random()
       .toString(36)
       .substr(2, 9)}`;
     const brokerUrl = `${brokerConfig.protocol}://${brokerConfig.host}:${brokerConfig.port}`;
@@ -580,7 +590,7 @@ class MQTTGateway {
       logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
       // Subscribe to the internal topic where EMQX republishes with client info
       // All device messages (hello, data, etc.) come through this single topic via EMQX republish rule
-      this.mqttClient.subscribe(["internal/server-ingest"], (err) => {
+      this.mqttClient.subscribe(["$share/gateway/internal/server-ingest"], (err) => {
         if (err)
           logger.error(
             "Failed to subscribe to MQTT topics:",

@@ -65,7 +65,8 @@ async function main() {
 
   try {
     // Initialize global worker pool (shared across all connections)
-    globalWorkerPool = new WorkerPoolManager(4);
+    const workerCount = parseInt(process.env.WORKER_COUNT) || 4;
+    globalWorkerPool = new WorkerPoolManager(workerCount);
 
     // Initialize and start the gateway with the shared worker pool
     gateway = new MQTTGateway(globalWorkerPool);
