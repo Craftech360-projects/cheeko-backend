@@ -6,6 +6,7 @@
  */
 
 const dgram = require("dgram");
+const http = require("http");
 const mqtt = require("mqtt");
 const axios = require("axios");
 const {
@@ -240,6 +241,7 @@ class MQTTGateway {
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
     this.clientConnections = new Map(); // clientId -> device info (for tracking EMQX clients)
+    this.startTime = Date.now(); // For uptime reporting
 
     // Initialize LiveKit RoomServiceClient for room management
     try {
@@ -317,6 +319,59 @@ class MQTTGateway {
 
     // Start ghost room/session cleanup timer (every 5 minutes)
     this.setupGhostCleanupTimer();
+
+    // Start health endpoint and connection count logging
+    this.setupHealthEndpoint();
+    this.setupConnectionCountLogging();
+  }
+
+  /**
+   * HTTP health endpoint for monitoring (per-instance, ports 9001-9004)
+   */
+  setupHealthEndpoint() {
+    const instanceId = process.env.INSTANCE_ID || '0';
+    const healthPort = 9000 + parseInt(instanceId);
+
+    this.healthServer = http.createServer((req, res) => {
+      if (req.url === '/health' && req.method === 'GET') {
+        const mem = process.memoryUsage();
+        const workerStats = this.workerPool ? this.workerPool.getStats() : {};
+        const body = JSON.stringify({
+          instance: instanceId,
+          uptime: Math.round((Date.now() - this.startTime) / 1000),
+          connections: this.deviceConnections.size,
+          memory: {
+            rss: Math.round(mem.rss / 1024 / 1024),
+            heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+            heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+          },
+          workers: workerStats,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(body);
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+
+    this.healthServer.listen(healthPort, () => {
+      logger.info(`🏥 [HEALTH] Health endpoint listening on port ${healthPort}`);
+    });
+  }
+
+  /**
+   * Log connection counts every 30 seconds, alert if > 300
+   */
+  setupConnectionCountLogging() {
+    this.connectionLogTimer = setInterval(() => {
+      const count = this.deviceConnections.size;
+      const instanceId = process.env.INSTANCE_ID || '0';
+      logger.info(`📊 [CONNECTIONS] Instance ${instanceId}: ${count} active connections`);
+      if (count > 300) {
+        logger.warn(`⚠️ [CONNECTIONS] Instance ${instanceId} exceeds 300 connections (${count}) — rebalance may be needed`);
+      }
+    }, 30000);
   }
 
   /**
