@@ -1,1 +1,7 @@
-{}
+{
+  "livekit": {
+    "url": "wss://cheeko-prod-68ib8ma4.livekit.cloud",
+    "api_key": "APIiA6wPEdDqa9U",
+    "api_secret": "PuevKxhh7jhi2apAWmKziOBmDoHfjCpICBeokRRNCAnB"
+  }
+}
