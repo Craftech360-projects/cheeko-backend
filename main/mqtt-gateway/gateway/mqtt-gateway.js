@@ -355,6 +355,10 @@ class MQTTGateway {
       }
     });
 
+    this.healthServer.on('error', (err) => {
+      logger.warn(`⚠️ [HEALTH] Could not start health endpoint on port ${healthPort}: ${err.message}`);
+    });
+
     this.healthServer.listen(healthPort, () => {
       logger.info(`🏥 [HEALTH] Health endpoint listening on port ${healthPort}`);
     });
