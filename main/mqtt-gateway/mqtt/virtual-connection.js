@@ -998,6 +998,25 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // Handle math game tap answer from device
+    if (json.type === "math_answer") {
+      console.log(`🧮 [MATH-TAP] Answer from ${this.macAddress}: q=${json.question_id} value=${json.value}`);
+      if (this.bridge && this.bridge.room && this.bridge.room.localParticipant) {
+        try {
+          const messageData = new Uint8Array(Buffer.from(JSON.stringify(json), "utf8"));
+          await this.bridge.room.localParticipant.publishData(messageData, {
+            reliable: true,
+          });
+          console.log(`🧮 [MATH-TAP] Forwarded to agent via data channel`);
+        } catch (error) {
+          console.error(`❌ [MATH-TAP] Failed to forward answer:`, error);
+        }
+      } else {
+        console.warn(`⚠️ [MATH-TAP] No LiveKit bridge available to forward answer`);
+      }
+      return;
+    }
+
     // Handle ready_for_greeting message - forward to LiveKit agent via data channel
     if (json.type === "ready_for_greeting") {
       console.log(

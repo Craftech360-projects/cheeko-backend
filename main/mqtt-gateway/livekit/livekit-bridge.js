@@ -471,6 +471,27 @@ class LiveKitBridge extends EventEmitter {
               }
               break;
 
+            case "math_question":
+              // Forward math question to device (question card with options)
+              console.log(`🧮 [MATH] Question registered: ${data.question_id} — ${data.question_text}`);
+              this.connection.sendMqttMessage(JSON.stringify(data));
+              break;
+            case "math_result":
+              // Forward answer result to device (correct/wrong, stars, game state)
+              console.log(`🧮 [MATH] Result: ${data.correct ? "CORRECT" : "WRONG"} — Stars: ${data.progress?.stars}/${data.progress?.total_needed}`);
+              this.connection.sendMqttMessage(JSON.stringify(data));
+              break;
+            case "math_hint":
+              // Forward hint to device (option eliminated)
+              console.log(`🧮 [MATH] Hint: ${data.hint_type} — eliminated ${data.eliminated_value}`);
+              this.connection.sendMqttMessage(JSON.stringify(data));
+              break;
+            case "game_state":
+              // Forward game state changes (started, completed, game_over, restarted)
+              console.log(`🧮 [MATH] Game state: ${data.state} — Level: ${data.progress?.level}`);
+              this.connection.sendMqttMessage(JSON.stringify(data));
+              break;
+
             // case "metrics_collected":
             //   console.log(`Metrics: ${JSON.stringify(data.data)}`);
             //   break;

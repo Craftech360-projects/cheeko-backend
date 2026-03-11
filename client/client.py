@@ -148,6 +148,18 @@ details[open] summary{margin-bottom:12px}
 .uid-chip{padding:3px 10px;background:var(--surface);border:1px solid var(--border);border-radius:20px;font-size:11px;font-family:var(--font-mono);color:var(--text-muted);cursor:pointer;transition:all 0.15s}
 .uid-chip:hover{background:var(--surface-hover);color:var(--text);border-color:rgba(255,255,255,0.15)}
 
+/* Math Game */
+.star{font-size:22px;transition:color 0.3s,transform 0.3s;display:inline-block}
+.star.on{color:#facc15;transform:scale(1.15)}
+.star.off{color:#374151}
+.opt-btn{padding:14px;background:var(--surface);border:2px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-size:18px;font-weight:700;cursor:pointer;transition:all 0.15s;font-family:var(--font-mono)}
+.opt-btn:hover{background:var(--surface-hover);border-color:var(--blue);transform:scale(1.03)}
+.opt-btn:active{transform:scale(0.97)}
+.opt-btn.correct{background:rgba(34,197,94,0.2);border-color:var(--green);color:var(--green)}
+.opt-btn.wrong{background:rgba(239,68,68,0.2);border-color:var(--red);color:var(--red)}
+.opt-btn:disabled{opacity:0.5;cursor:not-allowed;transform:none}
+.badge-amber{background:rgba(245,158,11,0.12);color:var(--amber)}
+
 /* Response Panel */
 .resp-empty{color:var(--text-dim);font-size:13px;text-align:center;padding:40px 20px}
 .resp-empty svg{width:32px;height:32px;margin-bottom:12px;opacity:0.3}
@@ -353,6 +365,34 @@ details[open] summary{margin-bottom:12px}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 12h.01"/></svg>
           <div>No response yet. Scan a card or send a command.</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Math Game Panel -->
+    <div class="card" id="mathGamePanel" style="display:none">
+      <div class="card-header">
+        <span class="card-title">Math Game</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="gameLevel" class="badge badge-amber">Lv.0</span>
+          <span id="gameMode" class="badge badge-purple">Explorer</span>
+        </div>
+      </div>
+      <div id="starRow" style="display:flex;align-items:center;gap:4px;margin-bottom:12px">
+        <span class="star off">★</span><span class="star off">★</span><span class="star off">★</span><span class="star off">★</span><span class="star off">★</span>
+      </div>
+      <div id="livesRow" style="display:none;margin-bottom:12px;font-size:13px">
+        Lives: <span id="livesDisplay"></span>
+      </div>
+      <div id="questionCard" style="background:var(--inset);border-radius:var(--radius-sm);padding:16px;margin-bottom:12px;text-align:center">
+        <div id="storyText" style="font-size:14px;color:var(--text);margin-bottom:8px">Waiting for question...</div>
+        <div id="questionText" style="font-size:20px;font-weight:700;color:var(--blue)">—</div>
+      </div>
+      <div id="optionGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px"></div>
+      <div id="resultBanner" style="display:none;padding:10px;border-radius:var(--radius-sm);text-align:center;font-weight:600;font-size:14px;margin-bottom:8px"></div>
+      <div id="gameOverlay" style="display:none;padding:20px;border-radius:var(--radius-sm);text-align:center;background:rgba(0,0,0,0.6)">
+        <div id="overlayEmoji" style="font-size:48px;margin-bottom:8px">★</div>
+        <div id="overlayTitle" style="font-size:20px;font-weight:700;color:var(--amber);margin-bottom:4px"></div>
+        <div id="overlaySubtitle" style="font-size:13px;color:var(--text-muted)"></div>
       </div>
     </div>
 
@@ -757,8 +797,57 @@ async function poll(){
     else{dot.classList.add('off');txt.textContent='Disconnected'}
     if(d.device_mac)document.getElementById('macDisplay').textContent=d.device_mac;
     if(d.last_response&&d.last_response_time>lastT){lastT=d.last_response_time;render(d.last_response)}
+    if(d.math_game)renderMathGame(d.math_game);
   }catch(e){}
 }
+
+/* --- Math Game --- */
+let lastQId=null;
+function renderMathGame(s){
+  const panel=document.getElementById('mathGamePanel');
+  if(!s||!s.active){panel.style.display='none';return}
+  panel.style.display='block';
+  const p=s.progress||{};
+  document.getElementById('gameLevel').textContent='Lv.'+(p.level||0);
+  document.getElementById('gameMode').textContent=s.game_mode==='commander'?'Commander':'Explorer';
+  // Stars
+  const sr=document.getElementById('starRow');
+  sr.innerHTML=Array.from({length:p.total_needed||5},(_,i)=>'<span class="star '+(i<p.stars?'on':'off')+'">★</span>').join('');
+  // Lives
+  const lr=document.getElementById('livesRow');
+  if(p.lives!==null&&p.max_lives!==null&&p.lives!==undefined){lr.style.display='block';document.getElementById('livesDisplay').textContent='❤️'.repeat(p.lives)+'🖤'.repeat(p.max_lives-p.lives)}
+  else{lr.style.display='none'}
+  // Question
+  const q=s.question;
+  if(q){
+    document.getElementById('storyText').textContent=q.story_text||'';
+    document.getElementById('questionText').textContent=q.question_text||'—';
+    if(q.question_id!==lastQId){lastQId=q.question_id;renderOpts(q.options,q.question_id);hideResult();hideOverlay()}
+    else if(!s.result){renderOpts(q.options,q.question_id)}
+  }
+  if(s.result)showResult(s.result);
+  if(s.game_complete)showOverlay('complete',p.level);
+  else if(s.game_over)showOverlay('game_over',p.level);
+}
+function renderOpts(opts,qid){
+  document.getElementById('optionGrid').innerHTML=(opts||[]).map(o=>'<button class="opt-btn" data-value="'+o.value+'" onclick="sendMathAns(\''+qid+'\','+o.value+')">'+o.label+'</button>').join('');
+}
+async function sendMathAns(qid,val){
+  document.querySelectorAll('.opt-btn').forEach(b=>b.disabled=true);
+  try{await fetch('/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'math_answer',question_id:qid,value:val})})}catch(e){}
+}
+function showResult(r){
+  const b=document.getElementById('resultBanner');b.style.display='block';
+  if(r.correct){b.textContent='✓ Correct!';b.style.background='rgba(34,197,94,0.15)';b.style.color='#22c55e';document.querySelectorAll('.opt-btn').forEach(x=>{if(parseInt(x.dataset.value)===r.correct_answer)x.classList.add('correct')})}
+  else{b.textContent='✗ Wrong! Answer: '+(r.correct_answer||'?');b.style.background='rgba(239,68,68,0.15)';b.style.color='#ef4444';document.querySelectorAll('.opt-btn').forEach(x=>{if(parseInt(x.dataset.value)===r.user_answer)x.classList.add('wrong');if(parseInt(x.dataset.value)===r.correct_answer)x.classList.add('correct')})}
+}
+function hideResult(){document.getElementById('resultBanner').style.display='none'}
+function showOverlay(type,lvl){
+  const o=document.getElementById('gameOverlay');o.style.display='block';
+  if(type==='complete'){document.getElementById('overlayEmoji').textContent='★';document.getElementById('overlayTitle').textContent='LEVEL '+(lvl||0)+' COMPLETE!';document.getElementById('overlayTitle').style.color='#facc15';document.getElementById('overlaySubtitle').textContent='Level '+((lvl||0)+1)+' loading...'}
+  else{document.getElementById('overlayEmoji').textContent='💔';document.getElementById('overlayTitle').textContent='Mission Failed';document.getElementById('overlayTitle').style.color='#ef4444';document.getElementById('overlaySubtitle').textContent='Restarting...'}
+}
+function hideOverlay(){document.getElementById('gameOverlay').style.display='none'}
 
 /* --- Init --- */
 document.getElementById('uid').addEventListener('keydown',e=>{if(e.key==='Enter')sendRfid()});
@@ -791,6 +880,7 @@ class RfidWebHandler(BaseHTTPRequestHandler):
                 "last_response_time": _last_rfid_response_time,
                 "device_mac": _web_ui_client.device_mac_formatted if _web_ui_client else None,
                 "session_id": udp_session_details.get("session_id") if udp_session_details else None,
+                "math_game": _web_ui_client.math_game_state if _web_ui_client else None,
             }
             self.wfile.write(json.dumps(resp).encode())
         elif self.path == '/history':
@@ -852,7 +942,17 @@ class RfidWebHandler(BaseHTTPRequestHandler):
                 "download_request": ("download_request", {"content_type": data.get("content_type", "story")}),
             }
 
-            if action in action_map:
+            # Handle math_answer action specially
+            if action == "math_answer":
+                question_id = data.get("question_id")
+                value = data.get("value")
+                if question_id is not None and value is not None:
+                    _web_ui_client.send_math_answer(question_id, value)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "sent", "action": action}).encode())
+            elif action in action_map:
                 msg_type, extra = action_map[action]
                 _web_ui_client.send_mqtt_action(msg_type, extra)
                 self.send_response(200)
@@ -930,6 +1030,17 @@ class TestClient:
         self.audio_recording_thread = None
         self.udp_local_sequence = 0
         self.audio_playback_queue = Queue()
+
+        # Math game state
+        self.math_game_state = {
+            "active": False,
+            "question": None,
+            "result": None,
+            "progress": {"stars": 0, "total_needed": 5, "level": 0, "lives": None, "max_lives": None, "mission_number": 1},
+            "game_mode": "explorer",
+            "game_complete": False,
+            "game_over": False,
+        }
 
         # --- NEW: Sequence tracking variables ---
         self.expected_sequence = 1  # Expected next sequence number
@@ -1134,6 +1245,51 @@ class TestClient:
                 logger.info("-" * 60)
                 logger.info(f"  Summary: {audio_count} audio files, {image_count} image files")
                 logger.info("=" * 60)
+
+            # Handle math game messages from agent
+            elif payload.get("type") == "math_question":
+                self.math_game_state["active"] = True
+                self.math_game_state["question"] = payload
+                self.math_game_state["result"] = None
+                self.math_game_state["progress"] = payload.get("progress", self.math_game_state["progress"])
+                self.math_game_state["game_mode"] = payload.get("game_mode", "explorer")
+                self.math_game_state["game_complete"] = False
+                self.math_game_state["game_over"] = False
+                logger.info(f"🧮 [MATH] Question: {payload.get('question_text')} | Options: {[o['value'] for o in payload.get('options', [])]}")
+
+            elif payload.get("type") == "math_result":
+                self.math_game_state["result"] = payload
+                self.math_game_state["progress"] = payload.get("progress", self.math_game_state["progress"])
+                if payload.get("game_complete"):
+                    self.math_game_state["game_complete"] = True
+                if payload.get("game_over"):
+                    self.math_game_state["game_over"] = True
+                correct_str = "CORRECT ✓" if payload.get("correct") else "WRONG ✗"
+                logger.info(f"🧮 [MATH] {correct_str} | Stars: {payload['progress']['stars']}/{payload['progress']['total_needed']} | Level: {payload['progress'].get('level', 0)}")
+
+            elif payload.get("type") == "math_hint":
+                if self.math_game_state["question"]:
+                    self.math_game_state["question"]["options"] = payload.get("remaining_options", [])
+                logger.info(f"🧮 [MATH] Hint: eliminated option {payload.get('eliminated_value')}")
+
+            elif payload.get("type") == "game_state":
+                self.math_game_state["progress"] = payload.get("progress", self.math_game_state["progress"])
+                self.math_game_state["game_mode"] = payload.get("game_mode", "explorer")
+                state = payload.get("state")
+                if state == "started":
+                    self.math_game_state["active"] = True
+                    self.math_game_state["game_complete"] = False
+                    self.math_game_state["game_over"] = False
+                elif state == "completed":
+                    self.math_game_state["game_complete"] = True
+                elif state == "game_over":
+                    self.math_game_state["game_over"] = True
+                elif state == "restarted":
+                    self.math_game_state["game_complete"] = False
+                    self.math_game_state["game_over"] = False
+                    self.math_game_state["question"] = None
+                    self.math_game_state["result"] = None
+                logger.info(f"🧮 [MATH] Game state: {state} | Level: {payload['progress'].get('level', 0)}")
 
             else:
                 mqtt_message_queue.put(payload)
@@ -1734,6 +1890,17 @@ class TestClient:
             payload.update(extra_fields)
         self.mqtt_client.publish("device-server", json.dumps(payload))
         logger.info(f"[ACTION] Sent '{action_type}': {json.dumps(payload, indent=2)}")
+
+    def send_math_answer(self, question_id: str, value: int):
+        """Send a math game tap answer via MQTT."""
+        answer_msg = {
+            "type": "math_answer",
+            "question_id": question_id,
+            "value": value,
+            "input_method": "tap",
+        }
+        self.mqtt_client.publish("device-server", json.dumps(answer_msg))
+        logger.info(f"🧮 [MATH] Sent answer: q={question_id} value={value}")
 
     def trigger_conversation(self, rfid_uid=None, rfid_sequence=None):
         """Starts the audio streaming threads and sends initial listen message or RFID greeting.
