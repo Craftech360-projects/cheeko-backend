@@ -15,6 +15,7 @@ _math_game_state = None
 _riddle_game_state = None
 _word_ladder_state = None
 _game_analytics_manager = None
+_publish_callback = None
 
 
 def set_game_analytics_manager(manager):
@@ -22,6 +23,13 @@ def set_game_analytics_manager(manager):
     global _game_analytics_manager
     _game_analytics_manager = manager
     logger.info("📊 Game analytics manager connected to tools")
+
+
+def set_publish_callback(callback):
+    """Set a callback for immediately publishing game data to frontend."""
+    global _publish_callback
+    _publish_callback = callback
+    logger.info("📡 Publish callback connected to tools")
 
 
 def set_math_game_state(state):
@@ -50,16 +58,64 @@ def set_word_ladder_state(state):
 # ============================================================================
 
 @function_tool
-async def check_math_answer(context: RunContext, user_answer: str, expected_answer: str) -> str:
+async def register_math_question(context: RunContext, question_text: str, story_text: str, correct_answer: str) -> str:
     """
-    Validate user's math answer against the expected answer.
+    Register a math question and show it on the child's screen.
+    Call this BEFORE speaking the question aloud. The screen will display
+    the question with answer options for the child to tap.
 
     Args:
-        user_answer: The child's spoken answer (e.g., "eight", "8")
-        expected_answer: The correct answer you invented (e.g., "8", "4")
+        question_text: The math equation (e.g., "5 + 8 = ?")
+        story_text: The story context (e.g., "5 parrots on a tree, 8 more come!")
+        correct_answer: The correct numeric answer (e.g., "13")
 
     Returns:
-        JSON string with result: correct, retry, move_next, streak, game_complete, message
+        JSON confirmation with question_id and options shown on screen.
+    """
+    global _math_game_state
+    import json
+
+    try:
+        parsed_answer = _parse_number_from_text(correct_answer)
+        if parsed_answer is None:
+            logger.error(f"Could not parse correct_answer: {correct_answer}")
+            return json.dumps({"error": "Could not parse answer", "registered": False})
+
+        if not _math_game_state:
+            return json.dumps({"error": "Game state not initialized", "registered": False})
+
+        payload = _math_game_state.register_question(question_text, story_text, parsed_answer)
+        logger.info(f"Registered question {payload['question_id']}: {question_text} = {parsed_answer}")
+
+        # Publish immediately to frontend (don't wait for function_calls_finished)
+        if _publish_callback:
+            popped = _math_game_state.pop_messages()
+            for msg in popped:
+                await _publish_callback(msg)
+            logger.info(f"Published {len(popped)} messages immediately from tool")
+
+        return json.dumps({
+            "registered": True,
+            "question_id": payload["question_id"],
+            "options_shown": len(payload["options"]),
+            "message": "Question displayed on screen. Now speak the question aloud and wait for the child's answer.",
+        })
+
+    except Exception as e:
+        logger.error(f"Error in register_math_question: {e}")
+        return json.dumps({"error": str(e), "registered": False})
+
+
+@function_tool
+async def check_math_answer(context: RunContext, user_answer: str) -> str:
+    """
+    Validate the child's math answer against the current question.
+
+    Args:
+        user_answer: The child's spoken answer (e.g., "eight", "8", "thirteen")
+
+    Returns:
+        JSON string with: correct, retry, move_next, stars, game_complete, game_over, message
     """
     global _math_game_state, _game_analytics_manager
     import json
@@ -68,146 +124,99 @@ async def check_math_answer(context: RunContext, user_answer: str, expected_answ
 
     try:
         logger.info(f"{'=' * 60}")
-        logger.info(f"🧮 [MATH-TOOL] check_math_answer CALLED")
-        logger.info(f"🧮 [MATH-TOOL] INPUT: user_answer='{user_answer}', expected_answer='{expected_answer}'")
-        
-        # Parse user answer to number
+        logger.info(f"[MATH-TOOL] check_math_answer: user_answer='{user_answer}'")
+
         parsed_user = _parse_number_from_text(user_answer)
-        parsed_expected = _parse_number_from_text(expected_answer)
-        
+
         if parsed_user is None:
-            logger.warning(f"⚠️ Could not parse user answer: {user_answer}")
-            result = {
-                'correct': False,
-                'retry': True,
-                'move_next': False,
-                'streak': _math_game_state.streak if _math_game_state else 0,
-                'game_complete': False,
-                'message': "I couldn't understand that number. Try again!"
-            }
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-            logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (parse failed)")
-            return json.dumps(result)
-        
-        if parsed_expected is None:
-            logger.error(f"❌ Could not parse expected answer: {expected_answer}")
-            parsed_expected = 0
-        
-        # Check if correct (allow small float tolerance)
-        is_correct = abs(parsed_user - parsed_expected) < 0.01
-        
-        if _math_game_state:
-            # Use game state to track attempts and streak
-            if is_correct:
-                _math_game_state.streak += 1
-                _math_game_state.current_attempts = 0
+            logger.warning(f"Could not parse user answer: {user_answer}")
+            return json.dumps({
+                "correct": False,
+                "retry": True,
+                "move_next": False,
+                "stars": _math_game_state.stars if _math_game_state else 0,
+                "game_complete": False,
+                "game_over": False,
+                "message": "I couldn't understand that number. Try again!"
+            })
 
-                game_complete = _math_game_state.streak >= 5
-                result = {
-                    'correct': True,
-                    'retry': False,
-                    'move_next': True,
-                    'streak': _math_game_state.streak,
-                    'game_complete': game_complete,
-                    'message': f"Correct! Streak: {_math_game_state.streak}"
-                }
-                elapsed_ms = (time.perf_counter() - start_time) * 1000
+        if not _math_game_state:
+            return json.dumps({
+                "correct": False, "retry": True, "move_next": False,
+                "stars": 0, "game_complete": False, "game_over": False,
+                "message": "Game state not initialized"
+            })
 
-                # Record attempt to analytics manager
-                if _game_analytics_manager:
-                    _game_analytics_manager.record_attempt(
-                        game_type='math_tutor',
-                        is_correct=True,
-                        attempt_number=1,
-                        response_time_ms=int(elapsed_ms)
-                    )
+        if _math_game_state.current_expected_answer is None:
+            return json.dumps({
+                "correct": False, "retry": True, "move_next": False,
+                "stars": _math_game_state.stars, "game_complete": False, "game_over": False,
+                "message": "No question registered. Register a question first."
+            })
 
-                logger.info(f"🧮 [MATH-TOOL] RESULT: correct=True, streak={_math_game_state.streak}, game_complete={game_complete}")
-                logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
-                logger.info(f"{'=' * 60}")
-                return json.dumps(result)
+        result = _math_game_state.check_answer(parsed_user, input_method="voice")
+
+        if result is None:
+            # Answer was locked (duplicate)
+            return json.dumps({
+                "correct": False, "retry": False, "move_next": False,
+                "stars": _math_game_state.stars, "game_complete": False, "game_over": False,
+                "message": "This question was already answered."
+            })
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        # Record analytics
+        if _game_analytics_manager:
+            _game_analytics_manager.record_attempt(
+                game_type="math_tutor",
+                is_correct=result["correct"],
+                attempt_number=_math_game_state.current_attempts or 1,
+                response_time_ms=int(elapsed_ms),
+            )
+
+        # Immediately publish result to frontend (don't wait for function_calls_finished)
+        if _publish_callback:
+            popped = _math_game_state.pop_messages()
+            for msg in popped:
+                await _publish_callback(msg)
+            logger.info(f"Published {len(popped)} messages immediately from check_math_answer")
+
+        # Build tool response for LLM
+        tool_response = {
+            "correct": result["correct"],
+            "retry": result.get("retry", False),
+            "move_next": result.get("move_next", False),
+            "stars": result["progress"]["stars"],
+            "game_complete": result["game_complete"],
+            "game_over": result.get("game_over", False),
+            "consecutive_correct": result.get("consecutive_correct", 0),
+            "bonus_star": result.get("bonus_star", False),
+        }
+
+        if result["correct"]:
+            if result["game_complete"]:
+                tool_response["message"] = f"Correct! Stars: {result['progress']['stars']}/{result['progress']['total_needed']}. MISSION ACCOMPLISHED! Celebrate briefly, then IMMEDIATELY call register_math_question with a NEW question."
             else:
-                _math_game_state.streak = 0
-                _math_game_state.current_attempts += 1
-                logger.info(f"🧮 [MATH-TOOL] WRONG: parsed_user={parsed_user}, parsed_expected={parsed_expected}, attempts={_math_game_state.current_attempts}/{_math_game_state.max_attempts}")
-
-                if _math_game_state.current_attempts < _math_game_state.max_attempts:
-                    result = {
-                        'correct': False,
-                        'retry': True,
-                        'move_next': False,
-                        'streak': 0,
-                        'game_complete': False,
-                        'message': f"Try again! Attempts left: {_math_game_state.max_attempts - _math_game_state.current_attempts}"
-                    }
-                    elapsed_ms = (time.perf_counter() - start_time) * 1000
-
-                    # Record attempt to analytics manager
-                    if _game_analytics_manager:
-                        _game_analytics_manager.record_attempt(
-                            game_type='math_tutor',
-                            is_correct=False,
-                            attempt_number=_math_game_state.current_attempts,
-                            response_time_ms=int(elapsed_ms)
-                        )
-
-                    logger.info(f"🧮 [MATH-TOOL] RESULT: correct=False, retry=True, streak=0")
-                    logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
-                    logger.info(f"{'=' * 60}")
-                    return json.dumps(result)
-                else:
-                    _math_game_state.current_attempts = 0
-                    result = {
-                        'correct': False,
-                        'retry': False,
-                        'move_next': True,
-                        'streak': 0,
-                        'game_complete': False,
-                        'correct_answer': str(parsed_expected),
-                        'message': f"The answer was {parsed_expected}. Let's try a new one!"
-                    }
-                    elapsed_ms = (time.perf_counter() - start_time) * 1000
-
-                    # Record attempt to analytics manager (final attempt before moving on)
-                    if _game_analytics_manager:
-                        _game_analytics_manager.record_attempt(
-                            game_type='math_tutor',
-                            is_correct=False,
-                            attempt_number=_math_game_state.max_attempts,
-                            response_time_ms=int(elapsed_ms)
-                        )
-
-                    logger.info(f"🧮 [MATH-TOOL] RESULT: correct=False, move_next=True, streak=0")
-                    logger.info(f"🧮 [MATH-TOOL] Returning: {result}")
-                    logger.info(f"{'=' * 60}")
-                    return json.dumps(result)
+                tool_response["message"] = f"Correct! Stars: {result['progress']['stars']}/{result['progress']['total_needed']}. Say well done briefly, then IMMEDIATELY call register_math_question with a NEW question."
+        elif result.get("game_over"):
+            tool_response["message"] = "Wrong! All lives lost. Game over. Say 'Mission failed, let's try again!' then IMMEDIATELY call register_math_question with a NEW question."
+        elif result.get("retry"):
+            tool_response["message"] = "Wrong! Let them try again — same question."
         else:
-            # No state, simple check
-            result = {
-                'correct': is_correct,
-                'retry': not is_correct,
-                'move_next': is_correct,
-                'streak': 1 if is_correct else 0,
-                'game_complete': False,
-                'message': "Correct!" if is_correct else "Try again!"
-            }
-            elapsed_ms = (time.perf_counter() - start_time) * 1000
-            logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (no state)")
-            return json.dumps(result)
+            tool_response["message"] = f"Wrong! The answer was {result['correct_answer']}. Tell them the answer, then IMMEDIATELY call register_math_question with a NEW question."
+            tool_response["correct_answer"] = str(result["correct_answer"])
+
+        logger.info(f"[MATH-TOOL] Result: {tool_response}")
+        return json.dumps(tool_response)
 
     except Exception as e:
-        logger.error(f"❌ Error in check_math_answer: {e}")
-        result = {
-            'correct': False,
-            'retry': True,
-            'move_next': False,
-            'streak': 0,
-            'game_complete': False,
-            'message': f"Error checking answer: {str(e)}"
-        }
-        elapsed_ms = (time.perf_counter() - start_time) * 1000
-        logger.info(f"⏱️ check_math_answer completed in {elapsed_ms:.2f}ms (error)")
-        return json.dumps(result)
+        logger.error(f"Error in check_math_answer: {e}")
+        return json.dumps({
+            "correct": False, "retry": True, "move_next": False,
+            "stars": 0, "game_complete": False, "game_over": False,
+            "message": f"Error: {str(e)}"
+        })
 
 
 # ============================================================================
@@ -627,7 +636,7 @@ def _parse_number_from_text(text: str) -> Optional[float]:
 
 def get_math_tools():
     """Get list of math tutor function tools"""
-    return [check_math_answer]
+    return [register_math_question, check_math_answer]
 
 
 def get_riddle_tools():

@@ -37,6 +37,14 @@ AGENT_CONFIGS = {
         "game_state_class": "WordLadderGameState",
         "port": 8086,
     },
+    "Math Commander": {
+        "agent_name": "math-commander-agent",
+        "prompt_file": "src/prompts/math_commander.yaml",
+        "tools": ["register_math_question", "check_math_answer"],
+        "features": ["battery", "volume", "mode_switching"],
+        "game_state_class": "MathGameState",
+        "port": 8087,
+    },
 }
 
 # Reverse mapping: agent_name -> character_name
@@ -48,6 +56,7 @@ CHARACTER_TO_AGENT = {k: v["agent_name"] for k, v in AGENT_CONFIGS.items()}
 # Game prompt file mapping
 GAME_PROMPT_FILES = {
     "Math Tutor": "math_tutor.yaml",
+    "Math Commander": "math_commander.yaml",
     "Riddle Solver": "riddle_solver.yaml",
     "Word Ladder": "word_ladder.yaml",
 }

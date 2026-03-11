@@ -38,7 +38,7 @@ class QuestionGeneratorService:
         """Check if service is ready"""
         return self._initialized and bool(self.groq_api_key)
 
-    async def generate_question_bank(self, count: int = 5, difficulty: str = "easy") -> Dict[str, Any]:
+    async def generate_question_bank(self, count: int = 10, difficulty: str = "easy") -> Dict[str, Any]:
         """
         Generate a bank of math questions with answers
 
