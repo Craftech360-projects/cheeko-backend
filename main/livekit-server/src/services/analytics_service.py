@@ -89,7 +89,7 @@ class AnalyticsService:
 
             payload = {
                 "sessionId": self.session_id,
-                "macAddress": self.device_mac,
+                "mac": self.device_mac,
                 "agentId": self.agent_id,
                 "modeType": normalized_mode,  # Use normalized value
                 "startedAt": self.session_start_time.isoformat(),
@@ -97,7 +97,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/session/start"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            headers = {"X-Service-Key": self.secret, "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -126,7 +126,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/session/end"
-            headers = {"Authorization": f"Bearer {self.secret}"}
+            headers = {"X-Service-Key": self.secret}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, params=params, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -168,7 +168,7 @@ class AnalyticsService:
         try:
             payload = {
                 "sessionId": self.session_id,
-                "macAddress": self.device_mac,
+                "mac": self.device_mac,
                 "gameType": game_type,
                 "questionText": None,  # Deprecated - not saved anymore
                 "correctAnswer": None,  # Deprecated - not saved anymore
@@ -183,7 +183,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/game-attempt"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            headers = {"X-Service-Key": self.secret, "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -224,7 +224,7 @@ class AnalyticsService:
         try:
             payload = {
                 "sessionId": self.session_id,
-                "macAddress": self.device_mac,
+                "mac": self.device_mac,
                 "mediaType": media_type,
                 "mediaId": media_id,
                 "mediaTitle": media_title,
@@ -238,7 +238,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/media-event"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            headers = {"X-Service-Key": self.secret, "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -279,7 +279,7 @@ class AnalyticsService:
 
             payload = {
                 "sessionId": self.session_id,
-                "macAddress": self.device_mac,
+                "mac": self.device_mac,
                 "gameType": game_type,
                 "streakNumber": streak_number,
                 "questionsInStreak": questions_in_streak,
@@ -289,7 +289,7 @@ class AnalyticsService:
             }
 
             url = f"{self.manager_api_url}/analytics/streak"
-            headers = {"Authorization": f"Bearer {self.secret}", "Content-Type": "application/json"}
+            headers = {"X-Service-Key": self.secret, "Content-Type": "application/json"}
 
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -310,7 +310,7 @@ class AnalyticsService:
         """
         try:
             url = f"{self.manager_api_url}/analytics/user/{self.device_mac}/overall"
-            headers = {"Authorization": f"Bearer {self.secret}"}
+            headers = {"X-Service-Key": self.secret}
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
@@ -337,7 +337,7 @@ class AnalyticsService:
         """
         try:
             url = f"{self.manager_api_url}/analytics/user/{self.device_mac}/{game_type}"
-            headers = {"Authorization": f"Bearer {self.secret}"}
+            headers = {"X-Service-Key": self.secret}
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
