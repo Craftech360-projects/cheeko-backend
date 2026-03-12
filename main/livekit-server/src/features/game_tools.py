@@ -6,7 +6,7 @@ Contains function tools for Math Tutor, Riddle Solver, and Word Ladder games
 import logging
 import time
 from typing import Optional
-from livekit.agents import function_tool, RunContext
+from livekit.agents import function_tool, RunContext, StopResponse
 
 logger = logging.getLogger("game_tools")
 
@@ -15,7 +15,6 @@ _math_game_state = None
 _riddle_game_state = None
 _word_ladder_state = None
 _game_analytics_manager = None
-_publish_callback = None
 
 
 def set_game_analytics_manager(manager):
@@ -23,13 +22,6 @@ def set_game_analytics_manager(manager):
     global _game_analytics_manager
     _game_analytics_manager = manager
     logger.info("📊 Game analytics manager connected to tools")
-
-
-def set_publish_callback(callback):
-    """Set a callback for immediately publishing game data to frontend."""
-    global _publish_callback
-    _publish_callback = callback
-    logger.info("📡 Publish callback connected to tools")
 
 
 def set_math_game_state(state):
@@ -84,15 +76,19 @@ async def register_math_question(context: RunContext, question_text: str, story_
         if not _math_game_state:
             return json.dumps({"error": "Game state not initialized", "registered": False})
 
+        # Guard: reject if there's already an active (non-locked) question
+        # StopResponse silently cancels the tool AND suppresses LLM follow-up response
+        if (_math_game_state.current_question_id is not None
+                and not _math_game_state.answer_locked):
+            logger.warning(
+                f"REJECTED register_math_question: active question {_math_game_state.current_question_id} "
+                f"('{_math_game_state.current_question_text}') is not yet answered. "
+                f"LLM tried to register: '{question_text}'"
+            )
+            raise StopResponse()
+
         payload = _math_game_state.register_question(question_text, story_text, parsed_answer)
         logger.info(f"Registered question {payload['question_id']}: {question_text} = {parsed_answer}")
-
-        # Publish immediately to frontend (don't wait for function_calls_finished)
-        if _publish_callback:
-            popped = _math_game_state.pop_messages()
-            for msg in popped:
-                await _publish_callback(msg)
-            logger.info(f"Published {len(popped)} messages immediately from tool")
 
         return json.dumps({
             "registered": True,
@@ -175,13 +171,6 @@ async def check_math_answer(context: RunContext, user_answer: str) -> str:
                 response_time_ms=int(elapsed_ms),
             )
 
-        # Immediately publish result to frontend (don't wait for function_calls_finished)
-        if _publish_callback:
-            popped = _math_game_state.pop_messages()
-            for msg in popped:
-                await _publish_callback(msg)
-            logger.info(f"Published {len(popped)} messages immediately from check_math_answer")
-
         # Build tool response for LLM
         tool_response = {
             "correct": result["correct"],
@@ -196,15 +185,15 @@ async def check_math_answer(context: RunContext, user_answer: str) -> str:
 
         if result["correct"]:
             if result["game_complete"]:
-                tool_response["message"] = f"Correct! Stars: {result['progress']['stars']}/{result['progress']['total_needed']}. MISSION ACCOMPLISHED! Celebrate briefly, then IMMEDIATELY call register_math_question with a NEW question."
+                tool_response["message"] = f"Correct! Stars: {result['progress']['stars']}/{result['progress']['total_needed']}. Level complete!"
             else:
-                tool_response["message"] = f"Correct! Stars: {result['progress']['stars']}/{result['progress']['total_needed']}. Say well done briefly, then IMMEDIATELY call register_math_question with a NEW question."
+                tool_response["message"] = f"Correct! Stars: {result['progress']['stars']}/{result['progress']['total_needed']}."
         elif result.get("game_over"):
-            tool_response["message"] = "Wrong! All lives lost. Game over. Say 'Mission failed, let's try again!' then IMMEDIATELY call register_math_question with a NEW question."
+            tool_response["message"] = "Wrong. Game over - all lives lost."
         elif result.get("retry"):
-            tool_response["message"] = "Wrong! Let them try again — same question."
+            tool_response["message"] = "Wrong. Retry available."
         else:
-            tool_response["message"] = f"Wrong! The answer was {result['correct_answer']}. Tell them the answer, then IMMEDIATELY call register_math_question with a NEW question."
+            tool_response["message"] = f"Wrong. Answer was {result['correct_answer']}."
             tool_response["correct_answer"] = str(result["correct_answer"])
 
         logger.info(f"[MATH-TOOL] Result: {tool_response}")
