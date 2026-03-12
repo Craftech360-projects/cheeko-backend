@@ -79,12 +79,19 @@ def create_pipeline(yaml_config: dict = None):
         logger.error(f"pipeline.init_failed(provider={llm_provider}, error={e})")
         raise
 
-    # --- TTS: ElevenLabs (matching old worker import path exactly) ---
-    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
+    # --- TTS: ElevenLabs ---
+    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID") or os.getenv("ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
+    elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY", "")
+    elevenlabs_model = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 
     try:
-        tts = ElevenLabsTTS(voice_id=elevenlabs_voice_id)
-        logger.info(f"pipeline.tts_initialized(voice_id={elevenlabs_voice_id})")
+        tts_kwargs = {"voice_id": elevenlabs_voice_id}
+        if elevenlabs_api_key:
+            tts_kwargs["api_key"] = elevenlabs_api_key
+        if elevenlabs_model:
+            tts_kwargs["model"] = elevenlabs_model
+        tts = ElevenLabsTTS(**tts_kwargs)
+        logger.info(f"pipeline.tts_initialized(voice_id={elevenlabs_voice_id}, model={elevenlabs_model})")
     except Exception as e:
         logger.error(f"pipeline.init_failed(provider=elevenlabs, error={e})")
         raise
