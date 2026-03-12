@@ -86,7 +86,6 @@ def prewarm(proc: JobProcess):
     import src.games.math_game_pipeline  # noqa: F401
     yaml_config = ConfigLoader.load_yaml_config()
     proc.userdata["yaml_config"] = yaml_config
-    proc.userdata["assemblyai_config"] = ConfigLoader.get_assemblyai_config()
     proc.userdata["tts_config"] = ConfigLoader.get_tts_config()
 
     manager_api_url = os.getenv("MANAGER_API_URL")
