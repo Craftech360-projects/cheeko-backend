@@ -7,7 +7,7 @@ import os
 import logging
 
 from livekit.plugins import assemblyai, openai
-from livekit.plugins.elevenlabs import tts as elevenlabs_tts
+from livekit.plugins.elevenlabs import TTS as ElevenLabsTTS
 
 logger = logging.getLogger("math_game_pipeline")
 
@@ -79,11 +79,10 @@ def create_pipeline(yaml_config: dict = None):
         logger.error(f"pipeline.init_failed(provider={llm_provider}, error={e})")
         raise
 
-    # --- TTS: ElevenLabs ---
-    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID") or os.getenv("ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
+    # --- TTS: ElevenLabs (matching old worker import path exactly) ---
+    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
 
     try:
-        ElevenLabsTTS = elevenlabs_tts.TTS
         tts = ElevenLabsTTS(voice_id=elevenlabs_voice_id)
         logger.info(f"pipeline.tts_initialized(voice_id={elevenlabs_voice_id})")
     except Exception as e:
