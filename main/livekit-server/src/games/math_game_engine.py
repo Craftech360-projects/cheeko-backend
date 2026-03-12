@@ -1,11 +1,10 @@
 """
 Game flow engine for Math Commander.
 Central hub that receives all events and coordinates modules.
+Questions are generated dynamically by the LLM via OpenRouter API.
 """
 
-import random
 import logging
-from typing import Optional
 
 logger = logging.getLogger("math_game_engine")
 
@@ -19,18 +18,21 @@ class MathGameEngine:
 
     Coordinates:
     - MathGameState: answer validation, question registration
-    - Narrator: LLM speech (reactions, questions, hints)
+    - Narrator: LLM speech (reactions, hints)
+    - QuestionGenerator: LLM-generated questions
+    - session.say(): direct TTS for question narration (exact match with screen)
     - HintManager: timer lifecycle
     - DataChannel: frontend messaging
     """
 
-    def __init__(self, game_state, narrator, hint_manager, data_channel, question_pool: list):
+    def __init__(self, game_state, narrator, hint_manager, data_channel, question_generator, session, child_age: int = 5):
         self.state = game_state
         self.narrator = narrator
         self.hints = hint_manager
         self.dc = data_channel
-        self.questions = list(question_pool)  # copy so we can shuffle
-        self._question_index = 0
+        self.qgen = question_generator
+        self.session = session
+        self.child_age = child_age
 
     # ==================== EVENT HANDLERS ====================
 
@@ -38,9 +40,11 @@ class MathGameEngine:
         """Called when game should begin (after greeting or on start control)."""
         logger.info(f"engine.game_start(name={child_name}, age={age}, mode={game_mode})")
 
+        self.child_age = age
         self.state.game_mode = game_mode
         self.state.max_lives = 3 if game_mode == "commander" else None
         self.state.reset()
+        self.qgen.reset()  # Clear question history
 
         await self.narrator.greet(child_name, game_mode)
         await self._present_next_question()
@@ -100,7 +104,6 @@ class MathGameEngine:
         await self._flush_game_messages()
 
         # Build a result dict compatible with _handle_result
-        # The tool returns a simplified dict; map it to what _handle_result expects
         result = {
             "correct": tool_result.get("correct", False),
             "retry": tool_result.get("retry", False),
@@ -119,8 +122,7 @@ class MathGameEngine:
         """Called by HintManager when a timer fires or attempt threshold is hit."""
         logger.info(f"engine.hint_triggered(qid={question_id}, level={level})")
 
-        # Idempotency guard: if hint_level already past requested level, skip.
-        # Prevents double-escalation when attempt hints and silence timers race.
+        # Idempotency guard
         if level < self.state.hint_level:
             logger.warning(
                 f"engine.hint_already_escalated(qid={question_id}, level={level}, "
@@ -165,17 +167,10 @@ class MathGameEngine:
     # ==================== INTERNAL FLOW ====================
 
     async def _present_next_question(self):
-        """Pick next question, register in state, send to frontend, narrate."""
-        q = self._get_next_question()
-        if q is None:
-            # Pool exhausted — shuffle and restart
-            logger.info("engine.questions_exhausted_cycling")
-            random.shuffle(self.questions)
-            self._question_index = 0
-            q = self._get_next_question()
-
-        remaining = len(self.questions) - self._question_index
-        logger.info(f"engine.next_question(index={self._question_index - 1}, remaining={remaining})")
+        """Generate question via LLM, register in state, send to frontend, narrate via TTS."""
+        # Generate question dynamically from LLM
+        q = await self.qgen.generate(self.child_age)
+        logger.info(f"engine.generated_question(q={q['question_text']}, answer={q['correct_answer']})")
 
         # Register in game state (generates options, queues math_question message)
         self.state.register_question(
@@ -185,11 +180,18 @@ class MathGameEngine:
         # Send question to frontend
         await self._flush_game_messages()
 
-        # Start hint timers
-        self.hints.start_timers(self.state.current_question_id)
+        # Narrate using session.say() — speaks the EXACT story + question text
+        # No LLM rewrite = screen and voice always match
+        narration_text = f"{q['story_text']} {q['question_text']}"
+        logger.info(f"engine.narrating(text={narration_text})")
+        try:
+            speech = self.session.say(narration_text, allow_interruptions=False)
+            await speech
+        except Exception as e:
+            logger.error(f"engine.narration_failed(error={e})")
 
-        # Narrate the question
-        await self.narrator.present_question(q["question_text"], q["story_text"])
+        # Start hint timers only after child has heard the question
+        self.hints.start_timers(self.state.current_question_id)
 
     async def _handle_result(self, result: dict):
         """React to correct/wrong/game_over/game_complete."""
@@ -233,11 +235,3 @@ class MathGameEngine:
             logger.info(
                 f"engine.flushed(type={msg.get('type')}, qid={msg.get('question_id', '')})"
             )
-
-    def _get_next_question(self) -> Optional[dict]:
-        """Get next question from pool, or None if exhausted."""
-        if self._question_index >= len(self.questions):
-            return None
-        q = self.questions[self._question_index]
-        self._question_index += 1
-        return q

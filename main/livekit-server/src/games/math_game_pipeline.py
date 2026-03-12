@@ -6,8 +6,8 @@ Creates STT, LLM, and TTS provider instances.
 import os
 import logging
 
-from livekit.plugins import assemblyai, openai
-from livekit.plugins.elevenlabs import TTS as ElevenLabsTTS
+from livekit.plugins import assemblyai, openai, google
+from livekit.agents import inference
 
 logger = logging.getLogger("math_game_pipeline")
 
@@ -47,7 +47,7 @@ def create_pipeline(yaml_config: dict = None):
 
     # --- LLM: Configurable provider ---
     llm_provider = os.getenv("MATH_LLM_PROVIDER", "openrouter")
-    llm_model = os.getenv("MATH_LLM_MODEL", "google/gemini-2.5-flash-lite")
+    llm_model = os.getenv("MATH_LLM_MODEL", "openai/gpt-4o-mini")
     llm_base_url = os.getenv("MATH_LLM_BASE_URL", "")
     llm_temperature = float(os.getenv("MATH_LLM_TEMPERATURE", "0.6"))
 
@@ -65,7 +65,6 @@ def create_pipeline(yaml_config: dict = None):
                 llm_kwargs["base_url"] = llm_base_url
             llm = openai.LLM(**llm_kwargs)
         elif llm_provider == "gemini":
-            from livekit.plugins import google
             llm = google.LLM(model=llm_model, temperature=llm_temperature)
         else:
             from livekit.plugins import groq
@@ -79,21 +78,17 @@ def create_pipeline(yaml_config: dict = None):
         logger.error(f"pipeline.init_failed(provider={llm_provider}, error={e})")
         raise
 
-    # --- TTS: ElevenLabs ---
-    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
-    elevenlabs_api_key = os.getenv("ELEVEN_API_KEY", "") or os.getenv("ELEVENLABS_API_KEY", "")
-    elevenlabs_model = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
-
+    # --- TTS: Deepgram Aura-2 ---
+    dg_voice = os.getenv("MATH_DEEPGRAM_TTS_VOICE", "athena")
     try:
-        tts_kwargs = {"voice_id": elevenlabs_voice_id}
-        if elevenlabs_api_key:
-            tts_kwargs["api_key"] = elevenlabs_api_key
-        if elevenlabs_model:
-            tts_kwargs["model"] = elevenlabs_model
-        tts = ElevenLabsTTS(**tts_kwargs)
-        logger.info(f"pipeline.tts_initialized(voice_id={elevenlabs_voice_id}, model={elevenlabs_model})")
+        tts = inference.TTS(
+            model="deepgram/aura-2",
+            voice=dg_voice,
+            language="en",
+        )
+        logger.info(f"pipeline.tts_initialized(provider=deepgram, voice={dg_voice})")
     except Exception as e:
-        logger.error(f"pipeline.init_failed(provider=elevenlabs, error={e})")
+        logger.error(f"pipeline.init_failed(provider=deepgram_tts, error={e})")
         raise
 
     return stt, llm, tts

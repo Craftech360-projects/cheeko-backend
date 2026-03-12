@@ -1,146 +1,150 @@
 """
 Narrator module for Math Commander game.
-Controls all LLM speech via generate_reply(tool_choice="none").
-The LLM acts as narrator only — no tools during narration.
+Uses session.say() for direct TTS narration — no LLM involved.
+This ensures predictable, exact speech output every time.
 """
 
+import random
 import logging
 
 logger = logging.getLogger("math_game_narrator")
 
-# --- Prompt Templates ---
+# --- Response pools (randomly selected for variety) ---
 
-GREETING_PROMPT = """You are Cheeko, a fun math game buddy for kids.
-The child's name is {name}. Game mode: {mode}.
-Give a warm, brief greeting (2-3 sentences). Introduce the game excitedly.
-Do NOT ask any math questions. Do NOT mention numbers."""
+GREETINGS = [
+    "Hi {name}! I'm Cheeko, your math buddy! Let's play!",
+    "Hey {name}! Ready for some fun math? Let's go!",
+    "Namaste {name}! I'm Cheeko! Let's do some cool math together!",
+    "Hello {name}! Welcome to Math Commander! Let's have fun!",
+]
 
-QUESTION_PROMPT = """Tell this story and ask the question at the end:
-Story: {story}
-Question: {question}
-Keep it engaging (2-3 sentences for story, then ask the question clearly).
-Do NOT give hints. Do NOT mention the answer options."""
+CORRECT_RESPONSES = [
+    "Amazing! You got it right! You now have {stars} out of {total} stars!",
+    "Brilliant! That's correct! {stars} out of {total} stars!",
+    "Wah! Super job! You earned a star! {stars} out of {total} now!",
+    "Correct! You're a math champion! {stars} out of {total} stars!",
+    "Yes! That's right! Keep going! {stars} out of {total} stars!",
+]
 
-CORRECT_PROMPT = """The child answered correctly! They now have {stars}/{total_needed} stars.
-Say a brief, excited celebration (1-2 sentences).
-Do NOT ask a new question. Do NOT mention numbers or math."""
+CORRECT_BONUS_RESPONSES = [
+    "Incredible! 5 in a row! You got a BONUS star! {stars} out of {total} stars!",
+    "What a streak! BONUS star earned! {stars} out of {total} stars! You're on fire!",
+    "Amazing combo! 5 correct in a row! Bonus star! {stars} out of {total} stars!",
+]
 
-CORRECT_BONUS_PROMPT = """The child answered correctly AND got a BONUS STAR for a 5-answer streak!
-They now have {stars}/{total_needed} stars.
-Say an extra excited celebration about the bonus (2 sentences).
-Do NOT ask a new question."""
+WRONG_RETRY_RESPONSES = [
+    "Oops! Not quite. Try again, you can do it!",
+    "Hmm, that's not right. Give it another shot!",
+    "Almost! Think again, I believe in you!",
+    "Not this time. Try once more!",
+]
 
-WRONG_PROMPT_RETRY = """The child answered wrong but gets another try.
-Gently encourage them to try again (1 sentence).
-Do NOT reveal the answer. Do NOT repeat the options."""
+WRONG_MOVE_ON_RESPONSES = [
+    "The answer was {answer}. Don't worry, let's try the next one!",
+    "It was {answer}. No problem, you'll get the next one!",
+    "The correct answer was {answer}. Keep going, you're doing great!",
+]
 
-WRONG_PROMPT_MOVE_ON = """The child answered wrong. The correct answer was {correct_answer}.
-Briefly tell them the right answer and encourage them (1-2 sentences).
-Do NOT ask a new question."""
+HINT_REPEAT_RESPONSES = [
+    "Let me repeat the question. {question}",
+    "Here's the question again. {question}",
+    "Think about this one. {question}",
+]
 
-HINT_REPEAT_PROMPT = """The child hasn't answered yet. Repeat the question:
-{question_text}
-Rephrase it slightly to help them understand. Keep it brief."""
+HINT_ELIMINATE_RESPONSES = [
+    "I removed one wrong option. It's easier now! Try again!",
+    "One wrong answer is gone! You've got better chances now!",
+    "I took away a wrong choice. Give it a try!",
+]
 
-HINT_ELIMINATE_PROMPT = """The child is struggling. One wrong option was removed.
-Encourage them - it's easier now! (1 sentence).
-Do NOT reveal the answer."""
+HINT_REVEAL_RESPONSES = [
+    "Time's up! The answer was {answer}. Let's move to the next one!",
+    "The correct answer was {answer}. No worries, here comes another question!",
+]
 
-HINT_REVEAL_PROMPT = """Time's up. The correct answer was {correct_answer}.
-Gently tell them the answer and encourage them (1-2 sentences).
-Do NOT ask a new question."""
+GAME_OVER_RESPONSES = [
+    "Oh no, all lives used! You earned {stars} stars. Want to try again?",
+    "Game over! You collected {stars} stars. Great effort! Want another round?",
+]
 
-GAME_OVER_PROMPT = """The child lost all lives. They earned {stars} stars.
-Be supportive and encouraging (2-3 sentences). Ask if they want to try again."""
+LEVEL_COMPLETE_RESPONSES = [
+    "Level {level} complete! You're amazing! Get ready for the next level!",
+    "You did it! Level {level} cleared! The next challenge is coming!",
+    "Fantastic! Level {level} done! Ready for more?",
+]
 
-LEVEL_COMPLETE_PROMPT = """The child completed level {level}! Amazing!
-Celebrate enthusiastically (2-3 sentences). Tell them the next level is coming."""
 
-END_PROMPT_TEMPLATE = """{prompt}"""
+def _pick(pool: list, **kwargs) -> str:
+    """Pick a random response from pool and format with kwargs."""
+    return random.choice(pool).format(**kwargs)
 
 
 class Narrator:
     """
-    Controls all LLM narration via session.generate_reply().
-    Every call uses tool_choice="none" — the LLM CANNOT invoke tools during narration.
-    Catches all exceptions — a silent narrator is better than a crashed game.
+    All narration via session.say() — direct TTS, no LLM.
+    Predictable, fast, and always says exactly what we want.
     """
 
     def __init__(self, session):
-        """
-        Args:
-            session: AgentSession instance for generate_reply() calls.
-        """
         self._session = session
 
     async def greet(self, child_name: str, game_mode: str):
         """Initial greeting."""
-        instructions = GREETING_PROMPT.format(name=child_name, mode=game_mode)
-        await self._speak(instructions, tag="greet")
-
-    async def present_question(self, question_text: str, story_text: str):
-        """Narrate the question story."""
-        instructions = QUESTION_PROMPT.format(story=story_text, question=question_text)
-        await self._speak(instructions, tag="present_question")
+        text = _pick(GREETINGS, name=child_name)
+        await self._say(text, tag="greet")
 
     async def react_correct(self, stars: int, total_needed: int, bonus: bool):
         """Celebrate correct answer."""
         if bonus:
-            instructions = CORRECT_BONUS_PROMPT.format(stars=stars, total_needed=total_needed)
+            text = _pick(CORRECT_BONUS_RESPONSES, stars=stars, total=total_needed)
         else:
-            instructions = CORRECT_PROMPT.format(stars=stars, total_needed=total_needed)
-        await self._speak(instructions, tag="react_correct")
+            text = _pick(CORRECT_RESPONSES, stars=stars, total=total_needed)
+        await self._say(text, tag="react_correct")
 
     async def react_wrong(self, retry: bool, correct_answer: float = None):
         """Encourage on wrong answer."""
         if retry:
-            instructions = WRONG_PROMPT_RETRY
+            text = _pick(WRONG_RETRY_RESPONSES)
         else:
-            instructions = WRONG_PROMPT_MOVE_ON.format(correct_answer=int(correct_answer))
-        await self._speak(instructions, tag="react_wrong")
+            text = _pick(WRONG_MOVE_ON_RESPONSES, answer=int(correct_answer))
+        await self._say(text, tag="react_wrong")
 
     async def give_hint(self, hint_type: str, question_text: str = "", correct_answer: float = None):
-        """Narrate a hint based on type."""
+        """Narrate a hint."""
         if hint_type == "repeat":
-            instructions = HINT_REPEAT_PROMPT.format(question_text=question_text)
+            text = _pick(HINT_REPEAT_RESPONSES, question=question_text)
         elif hint_type == "eliminate":
-            instructions = HINT_ELIMINATE_PROMPT
+            text = _pick(HINT_ELIMINATE_RESPONSES)
         elif hint_type == "reveal":
-            instructions = HINT_REVEAL_PROMPT.format(correct_answer=int(correct_answer))
+            text = _pick(HINT_REVEAL_RESPONSES, answer=int(correct_answer))
         else:
             logger.warning(f"narrator.unknown_hint_type(type={hint_type})")
             return
-        await self._speak(instructions, tag=f"hint_{hint_type}")
+        await self._say(text, tag=f"hint_{hint_type}")
 
     async def narrate_game_over(self, stars: int):
         """Game over narration."""
-        instructions = GAME_OVER_PROMPT.format(stars=stars)
-        await self._speak(instructions, tag="game_over")
+        text = _pick(GAME_OVER_RESPONSES, stars=stars)
+        await self._say(text, tag="game_over")
 
     async def narrate_level_complete(self, level: int):
         """Level complete celebration."""
-        instructions = LEVEL_COMPLETE_PROMPT.format(level=level)
-        await self._speak(instructions, tag="level_complete")
+        text = _pick(LEVEL_COMPLETE_RESPONSES, level=level)
+        await self._say(text, tag="level_complete")
 
     async def speak_end_prompt(self, prompt_text: str):
         """Speak a goodbye/end prompt from gateway."""
-        instructions = END_PROMPT_TEMPLATE.format(prompt=prompt_text)
-        await self._speak(instructions, tag="end_prompt")
+        await self._say(prompt_text, tag="end_prompt")
 
-    async def _speak(self, instructions: str, tag: str):
+    async def _say(self, text: str, tag: str):
         """
-        Core speak method. Calls session.generate_reply(tool_choice="none").
+        Speak text directly via session.say() — no LLM involved.
         Does NOT re-raise on failure — game flow continues even if narration fails.
         """
-        logger.info(f"narrator.speaking(tag={tag}, instruction_len={len(instructions)})")
+        logger.info(f"narrator.say(tag={tag}, text={text[:100]})")
         try:
-            speech_handle = self._session.generate_reply(
-                instructions=instructions,
-                tool_choice="none",
-            )
-            await speech_handle
-
-            interrupted = getattr(speech_handle, "interrupted", False)
-            logger.info(f"narrator.spoke(tag={tag}, interrupted={interrupted})")
+            speech = self._session.say(text, allow_interruptions=False)
+            await speech
+            logger.info(f"narrator.spoke(tag={tag})")
         except Exception as e:
-            logger.error(f"narrator.speak_failed(tag={tag}, error={e})")
+            logger.error(f"narrator.say_failed(tag={tag}, error={e})")

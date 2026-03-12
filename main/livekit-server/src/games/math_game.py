@@ -132,8 +132,16 @@ class MathGameState:
             "progress": self._get_progress(),
             "time_limit_seconds": None if self.game_mode == self.EXPLORER else 30,
         }
+        # Safety check: ensure correct answer is in options
+        option_values = [o["value"] for o in self.current_options]
+        if int(correct_answer) not in option_values:
+            logger.error(f"BUG: correct answer {correct_answer} NOT in options {option_values}! Forcing inclusion.")
+            self.current_options[0] = {"label": str(int(correct_answer)), "value": int(correct_answer)}
+            random.shuffle(self.current_options)
+            payload["options"] = self.current_options
+
         self.queue_message(payload)
-        logger.info(f"Registered question {self.current_question_id}: {question_text} = {correct_answer}")
+        logger.info(f"Registered question {self.current_question_id}: {question_text} = {correct_answer}, options={option_values}")
         return payload
 
     # ------------------------------------------------------------------

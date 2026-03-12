@@ -43,7 +43,7 @@ from src.games.math_game_data_channel import DataChannel
 from src.games.math_game_hints import HintManager
 from src.games.math_game_narrator import Narrator
 from src.games.math_game_engine import MathGameEngine
-from src.games.math_game_questions import get_question_pool
+from src.games.math_game_question_generator import QuestionGenerator
 
 logger = logging.getLogger("math_game_worker")
 
@@ -56,8 +56,9 @@ class MathCommanderAgent(Agent):
     """Agent subclass with llm_node override to suppress tool-call text from TTS."""
 
     async def llm_node(self, chat_ctx, tools, model_settings):
-        """Suppress tool-call text from reaching TTS output."""
+        """Suppress tool-call text from reaching TTS output and log generated text."""
         has_tool_calls = False
+        collected_text = []
         async for chunk in super().llm_node(chat_ctx, tools, model_settings):
             if hasattr(chunk, "delta") and chunk.delta:
                 if getattr(chunk.delta, "tool_calls", None):
@@ -68,8 +69,14 @@ class MathCommanderAgent(Agent):
                 if has_tool_calls and getattr(chunk.delta, "content", None):
                     logger.debug(f"agent.llm_text_suppressed(text={chunk.delta.content[:100]})")
                     chunk.delta.content = None
+                elif getattr(chunk.delta, "content", None):
+                    collected_text.append(chunk.delta.content)
 
             yield chunk
+
+        full_text = "".join(collected_text)
+        if full_text:
+            logger.info(f"agent.tts_input: {full_text[:500]}")
 
 
 def prewarm(proc: JobProcess):
@@ -133,43 +140,23 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"worker.child_profile_error(error={e})")
 
     # --- Prompt loading ---
-    agent_prompt = ConfigLoader.get_default_prompt()
-    game_prompt = load_game_prompt(
-        CHARACTER_NAME, child_profile,
-        long_term_memories=dispatch_memories,
-        memory_relations=dispatch_relations,
-        memory_entities=dispatch_entities,
-    )
-    if game_prompt:
-        agent_prompt = game_prompt
+    # Simple, focused prompt. The server controls ALL game flow (questions, hints, progression).
+    # The LLM only: (1) reacts via generate_reply instructions, (2) calls check_math_answer on voice input.
+    child_name_for_prompt = child_profile.get("name", "buddy") if child_profile else "buddy"
+    child_age_for_prompt = child_profile.get("age", 5) if child_profile else 5
 
-    if child_profile:
-        agent_prompt = render_prompt_with_profile(
-            agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
-        )
+    agent_prompt = f"""You are Cheeko, a friendly math game buddy for {child_name_for_prompt} (age {child_age_for_prompt}).
 
-    # Append narrator role instructions — OVERRIDE any conflicting instructions above
-    agent_prompt += """
+You have TWO jobs:
+1. When the child says a number, call check_math_answer with that number.
+2. When you receive instructions (via generate_reply), follow them EXACTLY. Say what the instructions tell you to say. Do not add your own questions or content.
 
-=== CRITICAL OVERRIDE — READ THIS LAST, IT SUPERSEDES EVERYTHING ABOVE ===
-
-You are Cheeko, a fun math game narrator for kids. The server controls ALL game flow.
-
-TOOLS: You have EXACTLY ONE tool: check_math_answer.
-- call check_math_answer ONLY when a child says a number (e.g., "four", "8", "twenty-one")
-- You do NOT have register_math_question. Do NOT attempt to call it. It does not exist.
-- Do NOT call any tool that is not check_math_answer.
-
-GAME FLOW: The server handles everything automatically:
-- Questions appear on screen automatically — do NOT register or ask questions yourself.
-- Hints are managed by the server — do NOT give hints.
-- Next questions appear automatically — do NOT move to the next question.
-
-VOICE RESPONSES:
-- When the child says a number → call check_math_answer with that number.
-- When the child says something that isn't a number → respond briefly and warmly (1 sentence).
-- Do NOT greet, introduce the game, or start the game on your own. Wait for server instructions.
-"""
+RULES:
+- NEVER ask math questions yourself. The server handles all questions.
+- NEVER make up stories, scenarios, or problems.
+- When the child says something that is NOT a number, respond warmly in 1 short sentence.
+- Keep all responses to 1-2 sentences maximum.
+- When instructions say "celebrate" or "react" — do ONLY that. Do NOT ask questions."""
 
     logger.info(f"worker.config_loaded(prompt_len={len(agent_prompt)})")
 
@@ -182,7 +169,7 @@ VOICE RESPONSES:
     # --- Create pipeline ---
     stt, llm, tts = create_pipeline(yaml_config)
     llm_provider = os.getenv("MATH_LLM_PROVIDER", "openrouter")
-    llm_model = os.getenv("MATH_LLM_MODEL", "google/gemini-2.5-flash-lite")
+    llm_model = os.getenv("MATH_LLM_MODEL", "openai/gpt-4o-mini")
     logger.info(f"worker.config_loaded(llm_provider={llm_provider}, model={llm_model})")
 
     # --- Create game state ---
@@ -204,7 +191,7 @@ VOICE RESPONSES:
     # --- Wire modules ---
     dc = DataChannel(ctx.room)
     narrator = Narrator(session)
-    question_pool = get_question_pool(game_mode)
+    qgen = QuestionGenerator()  # Uses OPENROUTER_API_KEY and MATH_LLM_MODEL from env
 
     # Engine needs hint_manager, but hint_manager needs engine.on_hint_triggered
     # Solve with a wrapper
@@ -214,8 +201,9 @@ VOICE RESPONSES:
         if engine:
             await engine.on_hint_triggered(question_id, level)
 
+    child_age = child_profile.get("age", 5) if child_profile else 5
     hint_manager = HintManager(game_state, on_hint=_on_hint)
-    engine = MathGameEngine(game_state, narrator, hint_manager, dc, question_pool)
+    engine = MathGameEngine(game_state, narrator, hint_manager, dc, qgen, session, child_age=child_age)
 
     # --- Register data channel handlers ---
     child_name = child_profile.get("name", "buddy") if child_profile else "buddy"
@@ -223,8 +211,9 @@ VOICE RESPONSES:
     dc.on("math_answer", engine.on_tap_answer)
     dc.on("game_control", engine.on_game_control)
 
+    # ready_for_greeting kept as optional re-trigger (frontend compat)
     async def _on_ready_for_greeting(message: dict):
-        logger.info("worker.greeting_triggered")
+        logger.info("worker.greeting_triggered(source=data_channel)")
         await engine.on_game_start(child_name, child_profile.get("age", 5) if child_profile else 5, game_mode)
 
     dc.on("ready_for_greeting", _on_ready_for_greeting)
@@ -257,8 +246,9 @@ VOICE RESPONSES:
             if fn_name == "check_math_answer":
                 has_check_answer = True
                 try:
-                    check_result = json.loads(output)
-                except (json.JSONDecodeError, TypeError):
+                    raw = output.output if hasattr(output, "output") else str(output)
+                    check_result = json.loads(raw)
+                except (json.JSONDecodeError, TypeError, AttributeError):
                     logger.error(f"worker.tool_output_parse_error(output={str(output)[:200]})")
 
         if has_check_answer and check_result:
@@ -298,6 +288,10 @@ VOICE RESPONSES:
         "game_mode": game_mode,
         "progress": game_state._get_progress(),
     })
+
+    # --- Auto-start game immediately ---
+    logger.info("worker.auto_starting_game")
+    await engine.on_game_start(child_name, child_age, game_mode)
 
     # --- Cleanup ---
     async def cleanup():
