@@ -73,8 +73,10 @@ class MathCommanderAgent(Agent):
 
 
 def prewarm(proc: JobProcess):
-    """Prewarm: cache configs and db_helper."""
+    """Prewarm: cache configs, db_helper, and register plugins on main thread."""
     logger.info("worker.prewarm_start")
+    # Import pipeline module to register LiveKit plugins on the main thread
+    import src.games.math_game_pipeline  # noqa: F401
     yaml_config = ConfigLoader.load_yaml_config()
     proc.userdata["yaml_config"] = yaml_config
     proc.userdata["assemblyai_config"] = ConfigLoader.get_assemblyai_config()

@@ -6,6 +6,9 @@ Creates STT, LLM, and TTS provider instances.
 import os
 import logging
 
+from livekit.plugins import assemblyai, openai
+from livekit.plugins.elevenlabs import tts as elevenlabs_tts
+
 logger = logging.getLogger("math_game_pipeline")
 
 
@@ -22,8 +25,6 @@ def create_pipeline(yaml_config: dict = None):
     Raises:
         ValueError: If required API keys are missing.
     """
-    from livekit.plugins import assemblyai, openai
-    from livekit.plugins.elevenlabs import tts as elevenlabs_tts
 
     # --- STT: AssemblyAI ---
     aai_config = {}
