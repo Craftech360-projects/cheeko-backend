@@ -80,7 +80,7 @@ def create_pipeline(yaml_config: dict = None):
         raise
 
     # --- TTS: ElevenLabs ---
-    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
+    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID") or os.getenv("ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
 
     try:
         ElevenLabsTTS = elevenlabs_tts.TTS
