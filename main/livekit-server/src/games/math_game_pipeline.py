@@ -80,8 +80,8 @@ def create_pipeline(yaml_config: dict = None):
         raise
 
     # --- TTS: ElevenLabs ---
-    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID") or os.getenv("ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
-    elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY", "")
+    elevenlabs_voice_id = os.getenv("MATH_ELEVENLABS_VOICE_ID", "Xb7hH8MSUJpSbSDYk0k2")
+    elevenlabs_api_key = os.getenv("ELEVEN_API_KEY", "") or os.getenv("ELEVENLABS_API_KEY", "")
     elevenlabs_model = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5")
 
     try:
