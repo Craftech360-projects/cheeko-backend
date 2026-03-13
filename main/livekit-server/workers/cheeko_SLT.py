@@ -52,7 +52,7 @@ from src.shared.entrypoint_utils import (
 from src.features.mode_switching import update_agent_mode
 
 # Agent configuration
-AGENT_NAME = "cheeko-agent"
+AGENT_NAME = "cheeko-agent2"
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
@@ -66,6 +66,7 @@ class FishSpeechChunkedStream(ChunkedStream):
         super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
 
     async def _run(self, output_emitter) -> None:
+        import time
         tts: FishSpeechTTS = self._tts
         request_id = shortuuid()
         output_emitter.initialize(
@@ -80,6 +81,7 @@ class FishSpeechChunkedStream(ChunkedStream):
         headers = {
             "Authorization": f"Bearer {tts._api_key}",
             "Content-Type": "application/json",
+            "Accept-Encoding": "gzip, deflate",
         }
         payload = {
             "input": {
@@ -93,10 +95,15 @@ class FishSpeechChunkedStream(ChunkedStream):
             payload["input"]["reference_audio"] = tts._reference_audio
             payload["input"]["reference_text"] = tts._reference_text or ""
 
+        t0 = time.perf_counter()
+        logger.info(f"[TTS] FishSpeech request started (text_len={len(self._input_text)}, text='{self._input_text[:80]}...')")
+
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
+
+        api_time = time.perf_counter() - t0
 
         output = data.get("output", {})
         if "error" in output:
@@ -105,6 +112,10 @@ class FishSpeechChunkedStream(ChunkedStream):
 
         audio_b64 = output.get("audio_base64", "")
         audio_bytes = base64.b64decode(audio_b64)
+        decode_time = time.perf_counter() - t0
+
+        logger.info(f"[TTS] FishSpeech done — api={api_time:.2f}s, total={decode_time:.2f}s, audio_size={len(audio_bytes)} bytes")
+
         output_emitter.push(audio_bytes)
         output_emitter.flush()
 
@@ -164,7 +175,7 @@ def prewarm(proc: JobProcess):
     # COMMENTED OUT - Music service disabled (saves ~11s startup time)
     # from src.utils import start_preloading
     # start_preloading()  # Only runs in worker process, not watcher
-    logger.info("[PREWARM] Ready for STT/LLM/TTS pipeline (Deepgram + Groq + ElevenLabs)")
+    logger.info("[PREWARM] Ready for STT/LLM/TTS pipeline (Deepgram + Groq + FishSpeech)")
     proc.userdata["ready"] = True
 
 
@@ -187,7 +198,7 @@ async def entrypoint(ctx: JobContext):
     stt_model = stt_config.get('model', 'nova-3')
     llm_model = llm_config.get('model', 'llama-3.3-70b-versatile')
     llm_temperature = llm_config.get('temperature', 0.8)
-    tts_voice = tts_config.get('voice', 'Rachel')  # ElevenLabs voice name
+    tts_voice = tts_config.get('voice', 'Rachel')  # Voice config (unused with FishSpeech)
 
     # Parse room name
     room_name = ctx.room.name
@@ -332,7 +343,7 @@ async def entrypoint(ctx: JobContext):
     # TTS: Fish Speech via RunPod
     tts = FishSpeechTTS(
         endpoint_id=os.getenv("RUNPOD_ENDPOINT_ID", "d4twkzby42jxr7"),
-        api_key=os.getenv("RUNPOD_API_KEY"),
+        api_key=os.getenv("RUNPOD_API_KEY", "rpa_MOXVVGTAC4NPNAAFSU1ITKP5EWUWQ8WK9KEK2BGUi4qzws"),
     )
     logger.info(f"Fish Speech TTS created (RunPod endpoint: {tts._endpoint_id})")
 
