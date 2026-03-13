@@ -19,9 +19,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "157.245.108.139"
+SERVER_IP = "192.168.1.98"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "157.245.108.139"
+MQTT_BROKER_HOST = "192.168.1.98"
 
 
 MQTT_BROKER_PORT = 1883
@@ -576,8 +576,8 @@ class TestClient:
                     if self.audio_playback_queue.qsize() < PLAYBACK_BUFFER_START_FRAMES:
                         # Check for timeout
                         if time.time() - buffer_timeout_start > BUFFER_TIMEOUT_SECONDS:
-                            logger.warning(
-                                f"[TIME] Buffer timeout after {BUFFER_TIMEOUT_SECONDS}s. Queue size: {self.audio_playback_queue.qsize()}")
+                            # logger.warning(
+                            #     f"[TIME] Buffer timeout after {BUFFER_TIMEOUT_SECONDS}s. Queue size: {self.audio_playback_queue.qsize()}")
                             if self.tts_active:
                                 logger.warning(
                                     "[PLAY] TTS is active but no audio received. Possible server issue.")
@@ -585,8 +585,8 @@ class TestClient:
 
                         current_time = time.time()
                         if current_time - last_buffer_log_time >= 1.0:
-                            logger.info(
-                                f"[AUDIO] Buffering audio... {self.audio_playback_queue.qsize()}/{PLAYBACK_BUFFER_START_FRAMES}")
+                            # logger.info(
+                            #     f"[AUDIO] Buffering audio... {self.audio_playback_queue.qsize()}/{PLAYBACK_BUFFER_START_FRAMES}")
                             last_buffer_log_time = current_time
                             
                         time.sleep(0.05)
@@ -725,8 +725,8 @@ class TestClient:
                         packets_sent += 1
 
                         if time.time() - last_log_time >= 1.0:
-                            logger.info(
-                                f"[UP]  Sent {packets_sent} audio packets in the last second.")
+                            # logger.info(
+                            #     f"[UP]  Sent {packets_sent} audio packets in the last second.")
                             packets_sent = 0
                             last_log_time = time.time()
 
@@ -777,7 +777,7 @@ class TestClient:
             "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
         self.mqtt_client.publish("device-server", json.dumps(listen_payload))
         logger.info(
-            "[WAIT] Test running. Press Spacebar to abort TTS or Ctrl+C to stop.")
+            "[WAIT] Test running. Press Spacebar to abort TTS | R to tap RFID card | Ctrl+C to stop.")
 
         # Start a thread to monitor spacebar press
         def monitor_spacebar():
@@ -800,6 +800,50 @@ class TestClient:
         spacebar_thread = threading.Thread(
             target=monitor_spacebar, daemon=True)
         spacebar_thread.start()
+
+        # Start RFID input thread
+        def rfid_input_loop():
+            while not stop_threads.is_set() and self.session_active:
+                if keyboard.is_pressed('r'):
+                    # Wait for key release
+                    while keyboard.is_pressed('r') and not stop_threads.is_set():
+                        time.sleep(0.01)
+
+                    # Suppress logging while taking input
+                    logging.disable(logging.CRITICAL)
+                    try:
+                        print("\n" + "=" * 50)
+                        print("  RFID CARD TAP SIMULATOR")
+                        print("=" * 50)
+                        print("  Enter RFID UID (e.g. 7AF0CBAD)")
+                        print("  Or press Enter to cancel")
+                        print("=" * 50)
+                        rfid_uid = input("  UID > ").strip()
+                        if rfid_uid:
+                            seq_input = input("  Sequence (default 1) > ").strip()
+                            sequence = int(seq_input) if seq_input.isdigit() else 1
+                        else:
+                            sequence = None
+                        print("=" * 50 + "\n")
+                    finally:
+                        # Re-enable logging
+                        logging.disable(logging.NOTSET)
+
+                    if rfid_uid and sequence is not None:
+                        card_lookup = {
+                            "type": "card_lookup",
+                            "rfid_uid": rfid_uid,
+                            "sequence": sequence,
+                            "session_id": udp_session_details.get("session_id", "")
+                        }
+                        self.mqtt_client.publish("device-server", json.dumps(card_lookup))
+                        logger.info(f"[RFID] Sent card_lookup: uid={rfid_uid}, seq={sequence}")
+                    else:
+                        print("  Cancelled.\n")
+                time.sleep(0.05)
+
+        rfid_thread = threading.Thread(target=rfid_input_loop, daemon=True)
+        rfid_thread.start()
 
         try:
             # Keep running with better timeout handling

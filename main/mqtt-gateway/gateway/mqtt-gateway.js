@@ -890,6 +890,38 @@ class MQTTGateway {
           return;
         }
 
+        // ====== BRANCH D: INTERACTIVE CARD — send card_interactive directly via MQTT ======
+        // Check interactive BEFORE textToSend validation, since interactive cards have no text content
+        if (rfidContent.contentType === 'interactive') {
+          // Resolve kid age from VirtualConnection's childProfile
+          let ageGroup = 4; // default floor
+          const devInfo = this.deviceConnections.get(deviceId);
+          if (devInfo && devInfo.connection && devInfo.connection.childProfile) {
+            const kidAge = devInfo.connection.childProfile.age;
+            ageGroup = (typeof kidAge === 'number' && kidAge >= 4) ? kidAge : 4;
+          }
+
+          const interactivePayload = {
+            type: 'card_interactive',
+            rfid_uid: rfidUid,
+            template: rfidContent.template,
+            display_name: rfidContent.displayName,
+            params: {
+              difficulty: 'easy',
+              age_group: ageGroup,
+            },
+            assets: rfidContent.assets || {},
+          };
+
+          logger.info(
+            `🎮 [RFID-ROUTING] Interactive card detected: template="${rfidContent.template}", ` +
+            `age_group=${ageGroup}. Sending card_interactive to device ${deviceId}`
+          );
+
+          this.mqttPublish(`devices/p2p/${clientId}`, interactivePayload);
+          return;
+        }
+
         // Determine text for agent path (content packs use title as placeholder)
         let textToSend;
         if (rfidContent.items && rfidContent.items.length > 0) {
@@ -949,37 +981,6 @@ class MQTTGateway {
           );
 
           this.mqttPublish(`devices/p2p/${clientId}`, manifest);
-          return;
-        }
-
-        // ====== BRANCH D: INTERACTIVE CARD — send card_interactive directly via MQTT ======
-        if (rfidContent.contentType === 'interactive') {
-          // Resolve kid age from VirtualConnection's childProfile
-          let ageGroup = 4; // default floor
-          const devInfo = this.deviceConnections.get(deviceId);
-          if (devInfo && devInfo.connection && devInfo.connection.childProfile) {
-            const kidAge = devInfo.connection.childProfile.age;
-            ageGroup = (typeof kidAge === 'number' && kidAge >= 4) ? kidAge : 4;
-          }
-
-          const interactivePayload = {
-            type: 'card_interactive',
-            rfid_uid: rfidUid,
-            template: rfidContent.template,
-            display_name: rfidContent.displayName,
-            params: {
-              difficulty: 'easy',
-              age_group: ageGroup,
-            },
-            assets: rfidContent.assets || {},
-          };
-
-          logger.info(
-            `🎮 [RFID-ROUTING] Interactive card detected: template="${rfidContent.template}", ` +
-            `age_group=${ageGroup}. Sending card_interactive to device ${deviceId}`
-          );
-
-          this.mqttPublish(`devices/p2p/${clientId}`, interactivePayload);
           return;
         }
 
