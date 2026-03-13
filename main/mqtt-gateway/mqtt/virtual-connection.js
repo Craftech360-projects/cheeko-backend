@@ -291,7 +291,7 @@ class VirtualMQTTConnection {
   sendUdpMessage(payload, timestamp) {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
-      // console.log(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
+      console.log(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
       return;
     }
 
@@ -530,6 +530,13 @@ class VirtualMQTTConnection {
       } catch (err) {
         console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err.message);
       }
+    }
+
+    // Guard: if miniapp session took over during deferred setup, skip bridge creation
+    if (this.roomType === 'miniapp') {
+      console.log(`⏭️ [DEFERRED] Skipping bridge creation — roomType changed to miniapp during deferred setup`);
+      this.deferredSetupInProgress = false;
+      return;
     }
 
     // Create bridge
@@ -1444,6 +1451,37 @@ class VirtualMQTTConnection {
   onUdpMessage(rinfo, message, payloadLength, timestamp, sequence) {
     // UDP messages do not reset inactivity timer - only MQTT messages do
 
+    // Always save remoteAddress first — ping's whole purpose is to establish the return path
+    if (rinfo && this.udp.remoteAddress !== rinfo) {
+      this.udp.remoteAddress = rinfo;
+    }
+
+    // Decrypt and check for ping before bridge/agent checks — pings must work
+    // even before bridge is connected or agent has joined
+    const header = message.slice(0, 16);
+    const encryptedPayload = message.slice(16, 16 + payloadLength);
+    let payload;
+    try {
+      payload = streamingCrypto.decrypt(
+        encryptedPayload,
+        this.udp.encryption,
+        this.udp.key,
+        header
+      );
+    } catch (err) {
+      console.warn(`⚠️ [UDP] Decrypt failed for device ${this.deviceId}: ${err.message}`);
+      return;
+    }
+
+    const payloadStr = payload.toString();
+    if (payloadStr.startsWith("ping:")) {
+      console.log(
+        `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
+      );
+      return;
+    }
+
+    // From here on it's audio data — needs bridge + agent
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
         // Buffer audio during deferred setup — replay once bridge is ready
@@ -1466,34 +1504,7 @@ class VirtualMQTTConnection {
       return;
     }
 
-    if (!rinfo) {
-      return;
-    }
-
-    if (this.udp.remoteAddress !== rinfo) {
-      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
-      this.udp.remoteAddress = rinfo;
-    }
-
     if (sequence < this.udp.remoteSequence) {
-      return;
-    }
-
-    // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
-    const header = message.slice(0, 16);
-    const encryptedPayload = message.slice(16, 16 + payloadLength);
-    const payload = streamingCrypto.decrypt(
-      encryptedPayload,
-      this.udp.encryption,
-      this.udp.key,
-      header
-    );
-
-    const payloadStr = payload.toString();
-    if (payloadStr.startsWith("ping:")) {
-      console.log(
-        `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
-      );
       return;
     }
 

@@ -29,7 +29,10 @@ from livekit.agents import (
 )
 from livekit import rtc, api
 from livekit.plugins import deepgram, groq
-from livekit.plugins.elevenlabs import TTS as ElevenLabsTTS
+import aiohttp
+import base64
+from livekit.agents.tts import TTS as BaseTTS, ChunkedStream, TTSCapabilities
+from livekit.agents.utils import shortuuid
 
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
@@ -54,6 +57,95 @@ CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
+
+
+class FishSpeechChunkedStream(ChunkedStream):
+    """ChunkedStream that calls RunPod Fish Speech API"""
+
+    def __init__(self, *, tts: "FishSpeechTTS", input_text: str, conn_options):
+        super().__init__(tts=tts, input_text=input_text, conn_options=conn_options)
+
+    async def _run(self, output_emitter) -> None:
+        tts: FishSpeechTTS = self._tts
+        request_id = shortuuid()
+        output_emitter.initialize(
+            request_id=request_id,
+            sample_rate=tts.sample_rate,
+            num_channels=tts.num_channels,
+            mime_type="audio/wav",
+            stream=False,
+        )
+
+        url = f"https://api.runpod.ai/v2/{tts._endpoint_id}/runsync"
+        headers = {
+            "Authorization": f"Bearer {tts._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "input": {
+                "text": self._input_text,
+                "format": "wav",
+                "temperature": 0.8,
+                "top_p": 0.8,
+            }
+        }
+        if tts._reference_audio:
+            payload["input"]["reference_audio"] = tts._reference_audio
+            payload["input"]["reference_text"] = tts._reference_text or ""
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+
+        output = data.get("output", {})
+        if "error" in output:
+            from livekit.agents._exceptions import APIError
+            raise APIError(f"Fish Speech error: {output['error']}")
+
+        audio_b64 = output.get("audio_base64", "")
+        audio_bytes = base64.b64decode(audio_b64)
+        output_emitter.push(audio_bytes)
+        output_emitter.flush()
+
+
+class FishSpeechTTS(BaseTTS):
+    """Fish Speech TTS via RunPod serverless"""
+
+    def __init__(
+        self,
+        *,
+        endpoint_id: str,
+        api_key: str,
+        reference_audio: str | None = None,
+        reference_text: str | None = None,
+    ) -> None:
+        super().__init__(
+            capabilities=TTSCapabilities(streaming=False),
+            sample_rate=44100,
+            num_channels=1,
+        )
+        self._endpoint_id = endpoint_id
+        self._api_key = api_key
+        self._reference_audio = reference_audio
+        self._reference_text = reference_text
+
+    @property
+    def model(self) -> str:
+        return "fish-speech-1.5"
+
+    @property
+    def provider(self) -> str:
+        return "runpod"
+
+    def synthesize(self, text: str, *, conn_options=None):
+        from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
+        if conn_options is None:
+            conn_options = DEFAULT_API_CONNECT_OPTIONS
+        return FishSpeechChunkedStream(tts=self, input_text=text, conn_options=conn_options)
+
+    async def aclose(self) -> None:
+        pass
 
 
 class CheekoAssistant(BaseAssistant):
@@ -237,9 +329,12 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info(f"Groq LLM created (model: {llm_model}, temp: {llm_temperature})")
     
-    # TTS: ElevenLabs
-    tts = ElevenLabsTTS()
-    logger.info(f"ElevenLabs TTS created")
+    # TTS: Fish Speech via RunPod
+    tts = FishSpeechTTS(
+        endpoint_id=os.getenv("RUNPOD_ENDPOINT_ID", "d4twkzby42jxr7"),
+        api_key=os.getenv("RUNPOD_API_KEY"),
+    )
+    logger.info(f"Fish Speech TTS created (RunPod endpoint: {tts._endpoint_id})")
 
     # Create AgentSession with traditional pipeline
     session = AgentSession(

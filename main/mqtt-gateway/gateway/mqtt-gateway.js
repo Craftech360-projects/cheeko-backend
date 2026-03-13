@@ -35,6 +35,11 @@ const CHARACTER_AGENT_MAP = {
   "Word Ladder": "word-ladder-agent",
 };
 
+const MINIAPP_AGENT_MAP = {
+  "math_quiz": "math-game-agent",
+  // Future templates: "yes_no_quiz": "yes-no-quiz-agent", etc.
+};
+
 // Global config manager and debug reference (injected by app.js)
 let configManager = null;
 let debug = null;
@@ -796,6 +801,63 @@ class MQTTGateway {
             requestId
           );
         }
+      }
+
+      // ====== MINIAPP SESSION ======
+      if (originalPayload.type === 'miniapp_session') {
+        logger.info(`🎮 [MINIAPP] Received miniapp_session: action=${originalPayload.action}, template=${originalPayload.template}, device=${deviceId}`);
+        await this.handleMiniappSession(deviceId, originalPayload, clientId);
+        return;
+      }
+
+      // ====== MINIAPP EVENT (game input from device → agent) ======
+      if (originalPayload.type === 'miniapp_event') {
+        logger.info(`🎮 [MINIAPP-EVENT] ${originalPayload.event} from device ${deviceId}`);
+        const devInfo = this.deviceConnections.get(deviceId);
+        // Reset inactivity timer — miniapp events count as activity
+        if (devInfo && devInfo.connection) {
+          devInfo.connection.updateActivityTime('miniapp_event');
+        }
+        if (devInfo && devInfo.connection && devInfo.connection.bridge && devInfo.connection.bridge.room) {
+          try {
+            // Forward the event to the agent via LiveKit data channel
+            // Map miniapp_event types to the data channel types the math agent expects
+            let agentMessage;
+            if (originalPayload.event === 'voice_result') {
+              // Voice answer → math_answer (tap format)
+              agentMessage = {
+                type: 'math_answer',
+                answer: originalPayload.data?.text,
+                source: 'voice',
+              };
+            } else if (originalPayload.event === 'tap_answer') {
+              // Direct tap answer from client UI
+              agentMessage = {
+                type: 'math_answer',
+                value: originalPayload.data?.value,
+                question_id: originalPayload.data?.question_id,
+                input_method: 'tap',
+              };
+            } else if (originalPayload.event === 'game_control') {
+              agentMessage = {
+                type: 'game_control',
+                action: originalPayload.data?.action,
+              };
+            } else {
+              // Forward as-is for other event types
+              agentMessage = originalPayload;
+            }
+
+            const messageData = Buffer.from(JSON.stringify(agentMessage));
+            await devInfo.connection.bridge.room.localParticipant.publishData(messageData, { reliable: true });
+            logger.info(`📤 [MINIAPP-EVENT] Forwarded ${originalPayload.event} → agent as ${agentMessage.type}`);
+          } catch (e) {
+            logger.error(`❌ [MINIAPP-EVENT] Failed to forward: ${e.message}`);
+          }
+        } else {
+          logger.warn(`⚠️ [MINIAPP-EVENT] No active bridge for device ${deviceId}`);
+        }
+        return;
       }
 
       if (originalPayload.type === "hello") {
@@ -1707,6 +1769,212 @@ class MQTTGateway {
 
     } catch (error) {
       logger.error(`❌ [MODE-CHANGE] Error: ${error.message}`, { stack: error.stack });
+    }
+  }
+
+  /**
+   * Handle miniapp_session start/end from device.
+   * On start: create LiveKit room, connect bridge, dispatch game agent.
+   * On end: tear down the session.
+   */
+  async handleMiniappSession(deviceId, payload, clientId) {
+    const { action, template, params, session_id } = payload;
+
+    if (action === 'start') {
+      const agentName = MINIAPP_AGENT_MAP[template];
+      if (!agentName) {
+        logger.error(`❌ [MINIAPP] Unknown template: ${template}`);
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: 'miniapp_error',
+          session_id,
+          error: `Unknown template: ${template}`,
+        });
+        return;
+      }
+
+      logger.info(`🎮 [MINIAPP] Starting miniapp session: template=${template}, agent=${agentName}`);
+
+      // Require existing connection (client must send 'hello' first, like conversation mode)
+      const devInfo = this.deviceConnections.get(deviceId);
+      if (!devInfo || !devInfo.connection) {
+        logger.error(`❌ [MINIAPP] No active connection for device ${deviceId}. Client must send 'hello' first.`);
+        return;
+      }
+
+      const connection = devInfo.connection;
+      const macAddress = deviceId.replace(/:/g, '');
+
+      // Fetch child profile from API (same pattern as conversation mode)
+      let childProfile = null;
+      try {
+        const profileResponse = await axios.post(
+          `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`,
+          { macAddress },
+          { timeout: 5000, headers: { 'secret': process.env.MANAGER_API_SECRET } }
+        );
+        if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
+          childProfile = profileResponse.data.data;
+          logger.info(`🎮 [MINIAPP] Child profile: name=${childProfile.name}, age=${childProfile.age}`);
+        }
+      } catch (fetchError) {
+        logger.warn(`⚠️ [MINIAPP] Failed to fetch child profile: ${fetchError.message}`);
+        // Fall back to connection's cached profile if available
+        childProfile = connection.childProfile || null;
+      }
+
+      // Store the miniapp metadata on the connection for the dispatch step
+      connection.miniappTemplate = template;
+      connection.miniappParams = params || {};
+      connection.miniappSessionId = session_id;
+
+      try {
+        // If there's an existing bridge, close it first (like mode change does)
+        if (connection.bridge) {
+          logger.info(`🔄 [MINIAPP] Closing existing bridge for mode switch to miniapp`);
+          await this.performRobustAgentCleanup(connection, 'miniapp_start');
+          connection.bridge = null;
+        }
+
+        // Set room type to miniapp
+        connection.roomType = 'miniapp';
+
+        // Create new room name
+        const crypto = require("crypto");
+        const newSessionUuid = crypto.randomUUID();
+        const macForRoom = macAddress.replace(/:/g, '');
+        const newRoomName = `${newSessionUuid}_${macForRoom}_miniapp`;
+
+        logger.info(`🎮 [MINIAPP] Creating room: ${newRoomName}`);
+
+        // Generate fresh UDP keys for this miniapp session (like hello does)
+        connection.udp = {
+          ...connection.udp,
+          key: crypto.randomBytes(16),
+          encryption: "aes-128-ctr",
+          remoteSequence: 0,
+          localSequence: 0,
+          startTime: Date.now(),
+          session_id: newRoomName,
+          remoteAddress: null, // Reset — client must send UDP ping
+        };
+        devInfo.currentMode = 'miniapp';
+
+        // Create and connect LiveKit bridge (reusing existing pattern)
+        const newBridge = new LiveKitBridge(
+          connection,
+          connection.protocolVersion || 1,
+          deviceId,                      // macAddress
+          newSessionUuid,                // uuid
+          connection.userData || {},     // userData
+          this.workerPool                // workerPool for audio encoding/decoding
+        );
+
+        try {
+          await newBridge.connect();
+          connection.bridge = newBridge;
+          logger.info(`✅ [MINIAPP] Bridge connected to room: ${newRoomName}`);
+        } catch (bridgeError) {
+          logger.error(`❌ [MINIAPP] Failed to connect bridge: ${bridgeError.message}`);
+          return;
+        }
+
+        // Dispatch the game agent
+        if (this.agentDispatchClient) {
+          try {
+            // Include child_profile in metadata — the math agent uses it
+            // to set game_mode (explorer for age<7, commander for age>=7)
+            // and to personalize greetings. See math_game_worker.py:106-120
+            const metadata = {
+              device_mac: deviceId,
+              child_profile: childProfile,
+              miniapp_template: template,
+              miniapp_params: params || {},
+              miniapp_session_id: session_id,
+              timestamp: Date.now(),
+            };
+
+            newBridge.agentDeployed = true;
+
+            await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
+              metadata: JSON.stringify(metadata),
+            });
+
+            logger.info(`✅ [MINIAPP] Agent ${agentName} dispatched to ${newRoomName}`);
+
+            // Confirm session started to device — include UDP details for audio
+            this.mqttPublish(`devices/p2p/${clientId}`, {
+              type: 'miniapp_session_ack',
+              session_id,
+              template,
+              status: 'started',
+              // UDP details so client can establish audio channel (like hello response)
+              transport: 'udp',
+              udp: {
+                server: this.publicIp,
+                port: this.udpPort,
+                encryption: connection.udp.encryption,
+                key: connection.udp.key.toString('hex'),
+                nonce: connection.generateUdpHeader(0, 0, 0).toString('hex'),
+                connection_id: connection.connectionId,
+                cookie: connection.connectionId,
+              },
+              audio_params: {
+                sample_rate: 24000,
+                channels: 1,
+                frame_duration: 60,
+                format: 'opus',
+              },
+            });
+          } catch (dispatchError) {
+            newBridge.agentDeployed = false;
+            logger.error(`❌ [MINIAPP] Failed to dispatch agent: ${dispatchError.message}`);
+          }
+        } else {
+          logger.error(`❌ [MINIAPP] AgentDispatchClient not initialized`);
+        }
+      } catch (error) {
+        logger.error(`❌ [MINIAPP] Session start error: ${error.message}`);
+      }
+
+    } else if (action === 'end') {
+      logger.info(`🎮 [MINIAPP] Ending miniapp session: session_id=${session_id}, reason=${payload.reason}`);
+
+      const devInfo = this.deviceConnections.get(deviceId);
+      if (devInfo && devInfo.connection) {
+        const connection = devInfo.connection;
+
+        // Send shutdown to agent via data channel before closing
+        if (connection.bridge && connection.bridge.room) {
+          try {
+            const shutdownMsg = JSON.stringify({
+              type: 'shutdown_request',
+              session_id,
+              reason: payload.reason || 'card_removed',
+              require_ack: false,
+            });
+            await connection.bridge.room.localParticipant.publishData(
+              Buffer.from(shutdownMsg),
+              { reliable: true }
+            );
+            logger.info(`📤 [MINIAPP] Sent shutdown_request to agent`);
+          } catch (e) {
+            logger.warn(`⚠️ [MINIAPP] Failed to send shutdown: ${e.message}`);
+          }
+        }
+
+        // Close bridge
+        if (connection.bridge) {
+          await this.performRobustAgentCleanup(connection, 'miniapp_end');
+          connection.bridge = null;
+        }
+
+        // Clear miniapp state
+        connection.miniappTemplate = null;
+        connection.miniappParams = null;
+        connection.miniappSessionId = null;
+        connection.roomType = 'conversation'; // Reset to default
+        devInfo.currentMode = 'conversation';
+      }
     }
   }
 
@@ -3083,7 +3351,10 @@ class MQTTGateway {
 
       const connectionId = message.readUInt32BE(4);
       const connection = this.connections.get(connectionId);
-      if (!connection) return;
+      if (!connection) {
+        logger.warn(`📡 [UDP] No connection found for connectionId: ${connectionId}`);
+        return;
+      }
 
       const timestamp = message.readUInt32BE(8);
       const sequence = message.readUInt32BE(12);

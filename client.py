@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from queue import Queue, Empty
 import opuslib
+from math_quiz_ui import MathQuizUI
 
 # --- Configuration ---
 
@@ -130,6 +131,13 @@ class TestClient:
         self.session_active = True
         self.conversation_count = 0
 
+        # Miniapp state
+        self.miniapp_active = False
+        self.miniapp_template = None
+        self.miniapp_session_id = None
+        self.current_question = None  # Current math question data
+        self.math_quiz_ui = None  # Tkinter UI for math quiz
+
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
 
@@ -198,6 +206,26 @@ class TestClient:
                     "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
                 stop_recording_event.set()  # This will cause the recording thread loop to exit
 
+            # Handle card_interactive (interactive RFID card detected)
+            elif payload.get("type") == "card_interactive":
+                template = payload.get("template", "unknown")
+                display_name = payload.get("display_name", "Unknown")
+                logger.info(f"🎮 [CARD] Interactive card detected: {display_name} (template={template})")
+                if template == "math_quiz":
+                    self.start_miniapp_session(payload)
+                else:
+                    logger.warning(f"⚠️ [CARD] Unsupported template: {template}")
+
+            # Handle miniapp messages from gateway (game data from agent)
+            elif payload.get("type") == "miniapp":
+                self.handle_miniapp_message(payload)
+
+            # Handle miniapp session acknowledgement — send UDP ping for audio channel
+            elif payload.get("type") == "miniapp_session_ack":
+                logger.info(f"🎮 [MINIAPP] Session started: template={payload.get('template')}")
+                if payload.get("udp"):
+                    self._setup_miniapp_udp(payload)
+
             else:
                 mqtt_message_queue.put(payload)
         except (json.JSONDecodeError, Exception) as e:
@@ -224,6 +252,69 @@ class TestClient:
                 logger.error(
                     "[ERROR] Too many retry attempts. There may be a server issue.")
                 self.session_active = False
+
+    def start_miniapp_session(self, card_data):
+        """Start a miniapp session after receiving card_interactive.
+        Uses existing connection (from initial hello at startup).
+        Sends miniapp_session/start to switch to miniapp mode and dispatch agent.
+        """
+        self.miniapp_active = True
+        self.miniapp_template = card_data.get("template")
+        self.miniapp_session_id = f"sess_{uuid.uuid4().hex[:8]}"
+
+        logger.info(f"🎮 [MINIAPP] Starting session: template={self.miniapp_template}, session_id={self.miniapp_session_id}")
+
+        # Send miniapp_session/start — gateway uses existing connection (from initial hello)
+        session_start = {
+            "type": "miniapp_session",
+            "action": "start",
+            "template": self.miniapp_template,
+            "params": card_data.get("params", {}),
+            "session_id": self.miniapp_session_id,
+        }
+        self.mqtt_client.publish("device-server", json.dumps(session_start))
+        logger.info(f"📤 [MINIAPP] Sent miniapp_session/start")
+
+    def _setup_miniapp_udp(self, payload):
+        """Set up UDP audio channel for miniapp session using details from miniapp_session_ack."""
+        global udp_session_details
+        udp_info = payload["udp"]
+        udp_session_details = payload
+        udp_session_details["session_id"] = payload.get("session_id", "")
+        server_addr = (udp_info["server"], udp_info["port"])
+        # Send UDP ping to establish remoteAddress on gateway
+        ping_payload = f"ping:{udp_session_details['session_id']}".encode()
+        encrypted_ping = self.encrypt_packet(ping_payload)
+        if self.udp_socket:
+            self.udp_socket.sendto(encrypted_ping, server_addr)
+            logger.info(f"📤 [MINIAPP-UDP] Sent UDP ping to {server_addr}")
+
+    def handle_miniapp_message(self, payload):
+        """Handle miniapp messages from agent (via gateway bridge)."""
+        action = payload.get("action")
+        data = payload.get("data", {})
+
+        # Launch Tkinter UI on first miniapp message if not already open
+        if not self.math_quiz_ui:
+            self.math_quiz_ui = MathQuizUI(
+                on_answer_callback=self.send_miniapp_answer,
+                on_close_callback=lambda: self.end_miniapp_session("ui_closed"),
+            )
+            self.math_quiz_ui.start()
+
+        if action == "math_question":
+            self.current_question = data
+            self.math_quiz_ui.show_question(data)
+        elif action == "math_result":
+            self.math_quiz_ui.show_result(data)
+        elif action == "game_state":
+            self.math_quiz_ui.show_game_state(data)
+            if data.get("state") == "game_over":
+                self.miniapp_active = False
+        elif action == "math_hint":
+            self.math_quiz_ui.show_hint(data)
+        else:
+            logger.info(f"🎮 [MINIAPP] {action}: {json.dumps(data)[:200]}")
 
     def reset_sequence_tracking(self):
         """Reset sequence tracking statistics for a new TTS stream."""
@@ -327,6 +418,50 @@ class TestClient:
         if self.total_packets_received % (LOG_SEQUENCE_EVERY_N_PACKETS * 4) == 0:
             logger.info(
                 f"[SEQ] Packet #{self.total_packets_received}: seq={sequence}, expected={self.expected_sequence}")
+
+    # Math quiz rendering is handled by MathQuizUI (Tkinter)
+
+    def send_miniapp_answer(self, question_id, value):
+        """Send a tap answer to the gateway as miniapp_event."""
+        event = {
+            "type": "miniapp_event",
+            "session_id": self.miniapp_session_id,
+            "event": "tap_answer",
+            "data": {
+                "question_id": question_id,
+                "value": value,
+            },
+        }
+        self.mqtt_client.publish("device-server", json.dumps(event))
+        logger.info(f"📤 [ANSWER] Sent tap_answer: question_id={question_id}, value={value}")
+
+    # render_math_result and render_game_state removed — handled by MathQuizUI
+
+    def end_miniapp_session(self, reason="card_removed"):
+        """End the current miniapp session."""
+        if not self.miniapp_active:
+            return
+
+        logger.info(f"🎮 [MINIAPP] Ending session: reason={reason}")
+
+        session_end = {
+            "type": "miniapp_session",
+            "action": "end",
+            "session_id": self.miniapp_session_id,
+            "reason": reason,
+        }
+        self.mqtt_client.publish("device-server", json.dumps(session_end))
+
+        self.miniapp_active = False
+        self.miniapp_template = None
+        self.miniapp_session_id = None
+        self.current_question = None
+
+        if self.math_quiz_ui:
+            self.math_quiz_ui.stop()
+            self.math_quiz_ui = None
+
+        print("\n🎮 MiniApp session ended.")
 
     def encrypt_packet(self, payload: bytes) -> bytes:
         """Encrypts the audio payload using AES-CTR with header as nonce."""
@@ -623,7 +758,9 @@ class TestClient:
         """Thread to listen for incoming UDP audio from the server with sequence tracking."""
         logger.info(
             f"[AUDIO] UDP Listener started on local socket {self.udp_socket.getsockname()}")
-        aes_key = bytes.fromhex(udp_session_details["udp"]["key"])
+        # Read key fresh each packet — miniapp session swaps the key at runtime
+        current_key_hex = udp_session_details["udp"]["key"]
+        aes_key = bytes.fromhex(current_key_hex)
         audio_params = udp_session_details["audio_params"]
 
         # Initialize the decoder with the sample rate provided by the server
@@ -641,6 +778,16 @@ class TestClient:
                 if data and len(data) > 16:
                     header, encrypted = data[:16], data[16:]
 
+                    # Check if the key changed (miniapp session swap)
+                    live_key_hex = udp_session_details["udp"]["key"]
+                    if live_key_hex != current_key_hex:
+                        current_key_hex = live_key_hex
+                        aes_key = bytes.fromhex(current_key_hex)
+                        # Reset decoder — new session means new opus stream
+                        decoder = opuslib.Decoder(
+                            audio_params["sample_rate"], audio_params["channels"])
+                        logger.info(f"🔑 [UDP] Encryption key changed — decoder reset")
+
                     # --- Parse header to extract sequence number (optimized) ---
                     if ENABLE_SEQUENCE_LOGGING:
                         header_info = self.parse_packet_header(header)
@@ -648,7 +795,7 @@ class TestClient:
                             sequence = header_info.get('sequence', 0)
                             # Track sequence for analysis (minimal processing)
                             self.track_sequence(sequence)
-                            
+
                             # Only log details for first few packets to reduce overhead
                             if self.total_packets_received <= 5:
                                 timestamp = header_info.get('timestamp', 0)
@@ -777,7 +924,7 @@ class TestClient:
             "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
         self.mqtt_client.publish("device-server", json.dumps(listen_payload))
         logger.info(
-            "[WAIT] Test running. Press Spacebar to abort TTS | R to tap RFID card | Ctrl+C to stop.")
+            "[WAIT] Test running. Press Spacebar to abort TTS | R to tap RFID card | M to end miniapp | Ctrl+C to stop.")
 
         # Start a thread to monitor spacebar press
         def monitor_spacebar():
@@ -804,6 +951,11 @@ class TestClient:
         # Start RFID input thread
         def rfid_input_loop():
             while not stop_threads.is_set() and self.session_active:
+                # Press 'M' to end miniapp session (simulate card removal)
+                if keyboard.is_pressed('m') and self.miniapp_active:
+                    self.end_miniapp_session("card_removed")
+                    time.sleep(0.5)  # Debounce
+
                 if keyboard.is_pressed('r'):
                     # Wait for key release
                     while keyboard.is_pressed('r') and not stop_threads.is_set():

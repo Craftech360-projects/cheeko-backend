@@ -473,6 +473,26 @@ class LiveKitBridge extends EventEmitter {
               }
               break;
 
+            // ====== MINIAPP GAME DATA (agent → device) ======
+            case "math_question":
+            case "math_result":
+            case "game_state":
+            case "math_hint":
+            case "child_profile":
+              // Forward game data channel messages to device via MQTT
+              // Wrap in miniapp envelope per spec
+              if (this.connection) {
+                const miniappMsg = {
+                  type: 'miniapp',
+                  session_id: this.connection.miniappSessionId || this.connection.udp?.session_id,
+                  action: data.type,  // math_question, math_result, etc.
+                  data: data,         // Full payload from agent
+                };
+                console.log(`🎮 [MINIAPP-OUT] Forwarding ${data.type} to device ${this.macAddress}`);
+                this.connection.sendMqttMessage(JSON.stringify(miniappMsg));
+              }
+              break;
+
             // case "metrics_collected":
             //   console.log(`Metrics: ${JSON.stringify(data.data)}`);
             //   break;

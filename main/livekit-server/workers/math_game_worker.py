@@ -49,7 +49,7 @@ logger = logging.getLogger("math_game_worker")
 
 AGENT_NAME = "math-game-agent"
 CHARACTER_NAME = "Math Commander"
-DEFAULT_PORT = 8088
+DEFAULT_PORT = 8089
 
 
 class MathCommanderAgent(Agent):
@@ -289,8 +289,9 @@ RULES:
     })
 
     # --- Auto-start game immediately ---
-    logger.info("worker.auto_starting_game")
-    await engine.on_game_start(child_name, child_age, game_mode)
+    # COMMENTED OUT - relies on ready_for_greeting from gateway to avoid duplicate start
+    # logger.info("worker.auto_starting_game")
+    # await engine.on_game_start(child_name, child_age, game_mode)
 
     # --- Cleanup ---
     async def cleanup():
