@@ -124,6 +124,17 @@ function httpHandlerError(info, failCallback, networkFailCallback) {
             return true
         }
     }
+
+    // For HTTP 4xx client errors, try to extract and show the actual API error message
+    // instead of treating them as network failures (e.g. 400 "Card mapping already exists")
+    if (info.status >= 400 && info.status < 500) {
+        const responseData = info.response && info.response.data || info.data
+        if (responseData && responseData.msg) {
+            showDanger(responseData.msg)
+            return true
+        }
+    }
+
     if (networkFailCallback) {
         networkFailCallback(info)
     } else {

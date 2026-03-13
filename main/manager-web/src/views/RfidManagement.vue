@@ -49,6 +49,20 @@
                     <div class="stat-label">AI Cards</div>
                 </div>
             </div>
+            <div class="stat-item" @click="switchTab('interactiveCards')">
+                <div class="stat-icon" style="background: rgba(230, 126, 34, 0.1); color: #e67e22;"><i class="el-icon-star-on"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalInteractiveCards }}</div>
+                    <div class="stat-label">Interactive Cards</div>
+                </div>
+            </div>
+            <div class="stat-item" @click="switchTab('interactiveTemplates')">
+                <div class="stat-icon" style="background: rgba(46, 204, 113, 0.1); color: #2ecc71;"><i class="el-icon-magic-stick"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalInteractiveTemplates }}</div>
+                    <div class="stat-label">Interactive Packs</div>
+                </div>
+            </div>
             <div class="stat-item" @click="switchTab('series')">
                 <div class="stat-icon series"><i class="el-icon-s-operation"></i></div>
                 <div class="stat-content">
@@ -76,6 +90,12 @@
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'aiCards' }" @click="switchTab('aiCards')">
                     <i class="el-icon-cpu"></i> AI Cards
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'interactiveCards' }" @click="switchTab('interactiveCards')">
+                    <i class="el-icon-star-on"></i> Interactive Cards
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'interactiveTemplates' }" @click="switchTab('interactiveTemplates')">
+                    <i class="el-icon-magic-stick"></i> Interactive Packs
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     <i class="el-icon-s-operation"></i> Bulk Ranges
@@ -204,6 +224,9 @@
                                         <el-tag v-else-if="(scope.row.questionIds && scope.row.questionIds.length) || scope.row.questionId" size="small" class="content-badge">
                                             <i class="el-icon-chat-line-round"></i> AI Prompt
                                         </el-tag>
+                                        <el-tag v-else-if="scope.row.interactiveTemplateId" type="primary" size="small" class="content-badge">
+                                            <i class="el-icon-magic-stick"></i> Interactive
+                                        </el-tag>
                                         <el-tag v-else type="info" size="small" class="content-badge">
                                             Unmapped
                                         </el-tag>
@@ -226,6 +249,12 @@
                                 <el-table-column label="Content Pack" align="center" width="160" show-overflow-tooltip>
                                     <template slot-scope="scope">
                                         <el-tag v-if="scope.row.contentPackId" type="warning" size="small">{{ getContentPackLabel(scope.row.contentPackId) }}</el-tag>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Interactive Pack" align="center" width="160" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.interactiveTemplateId" type="primary" size="small">{{ getInteractivePackLabel(scope.row.interactiveTemplateId) }}</el-tag>
                                         <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
@@ -518,6 +547,178 @@
                             </div>
                         </template>
 
+                        <!-- Interactive Cards Tab -->
+                        <template v-if="activeTab === 'interactiveCards'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-star-on"></i> Interactive Cards
+                                        <el-tag size="mini" type="info" class="section-count">{{ interactiveCardsTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Cards linked to interactive packs — launches a game/activity when tapped.
+                                        <el-tooltip content="Interactive cards have an associated interactive pack. When tapped, the device downloads the bundle and launches the activity." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
+                            <el-table ref="interactiveCardsTable" :data="interactiveCardsList" class="transparent-table" v-loading="interactiveCardsLoading"
+                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)"
+                                :header-cell-class-name="headerCellClassName">
+                                <el-table-column label="Select" align="center" width="60">
+                                    <template slot-scope="scope">
+                                        <el-checkbox v-model="scope.row.selected"></el-checkbox>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="RFID UID" align="center" width="150">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.rfidUid }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Content Type" align="center" width="150">
+                                    <template slot-scope="scope">
+                                        <el-tag type="warning" size="small" class="content-badge">
+                                            <i class="el-icon-star-on"></i> Interactive
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Interactive Pack" align="center" width="180">
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.interactiveTemplateId" type="success" size="small">{{ getInteractivePackLabel(scope.row.interactiveTemplateId) }}</el-tag>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Notes" prop="notes" align="center" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Product SKU" align="center" width="140">
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="scope.row.packId" type="success" size="small">{{ getPackLabel(scope.row.packId) }}</el-tag>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Active" align="center" width="70">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="scope.row.active ? 'success' : 'info'" size="small">
+                                            {{ scope.row.active ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" align="center" width="120">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" type="text" @click="editCard(scope.row)">Edit</el-button>
+                                        <el-button size="mini" type="text" @click="deleteInteractiveCard(scope.row)">Delete</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn">
+                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllInteractiveCards">
+                                        {{ isAllInteractiveCardsSelected ? 'Deselect All' : 'Select All' }}
+                                    </el-button>
+                                    <el-button size="mini" type="success" @click="showAddInteractiveCardDialog">Add</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedInteractiveCards">Delete</el-button>
+                                </div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="interactiveCardsPageSize" @change="handleInteractiveCardsPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="interactiveCardsCurrentPage === 1" @click="goFirstInteractiveCards">First</button>
+                                    <button class="pagination-btn" :disabled="interactiveCardsCurrentPage === 1" @click="goPrevInteractiveCards">Previous</button>
+                                    <button v-for="page in interactiveCardsVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === interactiveCardsCurrentPage }" @click="goToInteractiveCardsPage(page)">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="interactiveCardsCurrentPage === interactiveCardsPageCount" @click="goNextInteractiveCards">Next</button>
+                                    <span class="total-text">Total {{ interactiveCardsTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Interactive Templates Tab -->
+                        <template v-if="activeTab === 'interactiveTemplates'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-magic-stick"></i> Interactive Packs
+                                        <el-tag size="mini" type="info" class="section-count">{{ interactiveTemplatesTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Interactive game/activity packs that can be linked to RFID cards.
+                                        <el-tooltip content="Interactive packs define bundled activities (e.g., math quiz, word game) that are downloaded to the device and launched when the card is tapped." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
+                                <div>
+                                    <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllInteractiveTemplates">
+                                        {{ isAllInteractiveTemplatesSelected ? 'Deselect All' : 'Select All' }}
+                                    </el-button>
+                                    <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddInteractiveTemplateDialog">Create Pack</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedInteractiveTemplates">Delete Selected</el-button>
+                                </div>
+                            </div>
+
+                            <div v-loading="interactiveTemplatesLoading" class="pack-grid-container" element-loading-background="rgba(255, 255, 255, 0.5)">
+                                <div v-if="interactiveTemplatesList.length === 0 && !interactiveTemplatesLoading" class="empty-state">
+                                    <i class="el-icon-magic-stick empty-icon" style="font-size: 48px; color: #ddd; margin-bottom: 10px;"></i>
+                                    <p style="color: #909399;">No Interactive Packs found</p>
+                                    <el-button type="text" @click="showAddInteractiveTemplateDialog">Create your first pack</el-button>
+                                </div>
+
+                                <div v-else class="pack-grid">
+                                    <div v-for="pack in interactiveTemplatesList" :key="pack.id" class="pack-card" :class="{ selected: pack.selected }" @click="editInteractiveTemplate(pack)">
+                                        <div class="pack-card-selection" @click.stop="">
+                                            <el-checkbox v-model="pack.selected"></el-checkbox>
+                                        </div>
+                                        <div class="pack-card-header">
+                                            <div class="pack-title-row">
+                                                <span class="pack-title" :title="pack.displayName">{{ pack.displayName }}</span>
+                                                <el-tag size="mini" :type="pack.active ? 'success' : 'info'" effect="dark">{{ pack.active ? 'Active' : 'Draft' }}</el-tag>
+                                            </div>
+                                            <div class="pack-code">{{ pack.templateCode }}</div>
+                                        </div>
+                                        <div class="pack-card-body">
+                                            <div class="pack-desc">{{ pack.description || 'No description provided.' }}</div>
+                                            <div class="pack-metrics">
+                                                <el-tag size="mini" type="warning" effect="plain"><i class="el-icon-download"></i> v{{ pack.bundleVersion }}</el-tag>
+                                                <el-tag size="mini" type="primary" effect="plain"><i class="el-icon-document"></i> {{ pack.bundleSize > 0 ? (Number(pack.bundleSize) / 1024).toFixed(1) + ' KB' : 'No bundle' }}</el-tag>
+                                            </div>
+                                        </div>
+                                        <div class="pack-card-footer">
+                                            <div class="pack-version">
+                                                <el-tooltip v-if="pack.bundleUrl" :content="pack.bundleUrl" placement="top">
+                                                    <span style="color: #409EFF; cursor: pointer;"><i class="el-icon-link"></i> Bundle</span>
+                                                </el-tooltip>
+                                                <span v-else style="color: #C0C4CC;">No bundle URL</span>
+                                            </div>
+                                            <div class="pack-actions">
+                                                <el-button size="mini" icon="el-icon-edit" circle type="primary" plain @click.stop="editInteractiveTemplate(pack)"></el-button>
+                                                <el-button size="mini" icon="el-icon-delete" circle type="danger" plain @click.stop="deleteInteractiveTemplate(pack)"></el-button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn"></div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="interactiveTemplatesPageSize" @change="handleInteractiveTemplatesPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="interactiveTemplatesCurrentPage === 1" @click="goFirstInteractiveTemplates">First</button>
+                                    <button class="pagination-btn" :disabled="interactiveTemplatesCurrentPage === 1" @click="goPrevInteractiveTemplates">Previous</button>
+                                    <button v-for="page in interactiveTemplatesVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === interactiveTemplatesCurrentPage }" @click="goToInteractiveTemplatesPage(page)">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="interactiveTemplatesCurrentPage === interactiveTemplatesPageCount" @click="goNextInteractiveTemplates">Next</button>
+                                    <span class="total-text">Total {{ interactiveTemplatesTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
                         <!-- Bulk Ranges Tab -->
                         <template v-if="activeTab === 'series'">
                             <div class="section-header">
@@ -723,6 +924,7 @@
             :question-packs="questionPacksDropdown"
             :packs="packsDropdown"
             :content-packs="contentPacksDropdown"
+            :interactive-templates="interactiveTemplatesDropdown"
             @submit="handleCardSubmit"
             @cancel="cardDialogVisible = false"
         />
@@ -754,6 +956,14 @@
             @cancel="questionPackDialogVisible = false"
         />
 
+        <RfidInteractiveTemplateDialog
+            :title="interactiveTemplateDialogTitle"
+            :visible.sync="interactiveTemplateDialogVisible"
+            :form="interactiveTemplateForm"
+            @submit="handleInteractiveTemplateSubmit"
+            @cancel="interactiveTemplateDialogVisible = false"
+        />
+
         <el-footer>
             <version-footer />
         </el-footer>
@@ -770,9 +980,10 @@ import RfidCardDialog from "@/components/RfidCardDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
 import RfidQuestionPackDialog from "@/components/RfidQuestionPackDialog.vue";
+import RfidInteractiveTemplateDialog from "@/components/RfidInteractiveTemplateDialog.vue";
 
 export default {
-    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog },
+    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog, RfidInteractiveTemplateDialog },
     data() {
         return {
             activeTab: 'questionPacks',
@@ -810,7 +1021,7 @@ export default {
             isAllCardsSelected: false,
             cardDialogVisible: false,
             cardDialogTitle: 'Add Card Mapping',
-            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', notes: '', active: true },
+            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, interactiveTemplateId: null, packCode: '', packId: null, actionType: 'content', notes: '', active: true },
 
             // AI Cards
             aiCardsList: [],
@@ -819,6 +1030,14 @@ export default {
             aiCardsPageSize: 10,
             aiCardsTotal: 0,
             isAllAiCardsSelected: false,
+
+            // Interactive Cards
+            interactiveCardsList: [],
+            interactiveCardsLoading: false,
+            interactiveCardsCurrentPage: 1,
+            interactiveCardsPageSize: 10,
+            interactiveCardsTotal: 0,
+            isAllInteractiveCardsSelected: false,
 
             // Series
             seriesList: [],
@@ -853,11 +1072,23 @@ export default {
             questionPackDialogTitle: 'Add Q&A Pack',
             questionPackForm: { id: null, packCode: '', name: '', description: '', questionIds: [], language: 'en', category: '', status: 'draft', version: 1, active: true },
 
+            // Interactive Templates
+            interactiveTemplatesList: [],
+            interactiveTemplatesLoading: false,
+            interactiveTemplatesCurrentPage: 1,
+            interactiveTemplatesPageSize: 10,
+            interactiveTemplatesTotal: 0,
+            isAllInteractiveTemplatesSelected: false,
+            interactiveTemplateDialogVisible: false,
+            interactiveTemplateDialogTitle: 'Add Interactive Pack',
+            interactiveTemplateForm: { id: null, templateCode: '', displayName: '', description: '', bundleUrl: '', bundleVersion: 1, bundleSize: 0, active: true },
+
             // Dropdown data
             questionsDropdown: [],
             packsDropdown: [],
             contentPacksDropdown: [],
             questionPacksDropdown: [],
+            interactiveTemplatesDropdown: [],
 
             // Console
             consoleLookupUid: '',
@@ -876,7 +1107,9 @@ export default {
                 totalCards: 0,
                 totalAiCards: 0,
                 totalSeries: 0,
-                totalQuestionPacks: 0
+                totalQuestionPacks: 0,
+                totalInteractiveCards: 0,
+                totalInteractiveTemplates: 0
             },
             statsLoading: false
         };
@@ -936,6 +1169,19 @@ export default {
         },
         questionPacksVisiblePages() {
             return this.getVisiblePages(this.questionPacksCurrentPage, this.questionPacksPageCount);
+        },
+        // Interactive Templates pagination
+        interactiveCardsPageCount() {
+            return Math.ceil(this.interactiveCardsTotal / this.interactiveCardsPageSize);
+        },
+        interactiveCardsVisiblePages() {
+            return this.getVisiblePages(this.interactiveCardsCurrentPage, this.interactiveCardsPageCount);
+        },
+        interactiveTemplatesPageCount() {
+            return Math.ceil(this.interactiveTemplatesTotal / this.interactiveTemplatesPageSize);
+        },
+        interactiveTemplatesVisiblePages() {
+            return this.getVisiblePages(this.interactiveTemplatesCurrentPage, this.interactiveTemplatesPageCount);
         }
     },
     methods: {
@@ -967,6 +1213,8 @@ export default {
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'questionPacks') this.fetchQuestionPacks();
             else if (tab === 'aiCards') this.fetchAiCards();
+            else if (tab === 'interactiveCards') this.fetchInteractiveCards();
+            else if (tab === 'interactiveTemplates') this.fetchInteractiveTemplates();
         },
 
         handleSearch() {
@@ -991,6 +1239,12 @@ export default {
             } else if (this.activeTab === 'aiCards') {
                 this.aiCardsCurrentPage = 1;
                 this.fetchAiCards();
+            } else if (this.activeTab === 'interactiveCards') {
+                this.interactiveCardsCurrentPage = 1;
+                this.fetchInteractiveCards();
+            } else if (this.activeTab === 'interactiveTemplates') {
+                this.interactiveTemplatesCurrentPage = 1;
+                this.fetchInteractiveTemplates();
             }
         },
 
@@ -1015,6 +1269,11 @@ export default {
                     this.questionPacksDropdown = data.data || [];
                 }
             });
+            Api.rfid.getActiveInteractiveTemplates(({ data }) => {
+                if (data.code === 0) {
+                    this.interactiveTemplatesDropdown = data.data || [];
+                }
+            });
         },
 
         loadStats() {
@@ -1022,7 +1281,7 @@ export default {
             let completed = 0;
             const checkDone = () => {
                 completed++;
-                if (completed >= 6) this.statsLoading = false;
+                if (completed >= 7) this.statsLoading = false;
             };
             Api.rfid.getQuestionPackPage({ page: 1, limit: 1 }, ({ data }) => {
                 if (data.code === 0) this.stats.totalQuestionPacks = data.data.total || 0;
@@ -1046,6 +1305,14 @@ export default {
             });
             Api.rfid.getCardPage({ page: 1, limit: 1, cardType: 'ai' }, ({ data }) => {
                 if (data.code === 0) this.stats.totalAiCards = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getCardPage({ page: 1, limit: 1, cardType: 'interactive' }, ({ data }) => {
+                if (data.code === 0) this.stats.totalInteractiveCards = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getInteractiveTemplatePage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalInteractiveTemplates = data.data.total || 0;
                 checkDone();
             });
         },
@@ -1310,7 +1577,7 @@ export default {
 
         showAddCardDialog() {
             this.cardDialogTitle = 'Add Card Mapping';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'content', notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, interactiveTemplateId: null, actionType: 'content', notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1325,13 +1592,22 @@ export default {
                 form.questionIds = [];
             }
             if (!form.actionType) {
-                form.actionType = form.cardType === 'ai' ? 'ai' : (form.questionPackId ? 'qna' : 'content');
+                if (form.interactiveTemplateId) {
+                    form.actionType = 'interactive';
+                } else {
+                    form.actionType = form.cardType === 'ai' ? 'ai' : (form.questionPackId ? 'qna' : 'content');
+                }
             }
             this.cardForm = form;
             this.cardDialogVisible = true;
         },
 
         handleCardSubmit({ form, done }) {
+            // Auto-set cardType based on actionType
+            if (form.actionType === 'ai') form.cardType = 'ai';
+            else if (form.actionType === 'interactive') form.cardType = 'interactive';
+            else form.cardType = 'content';
+
             const api = form.id ? Api.rfid.updateCard : Api.rfid.addCard;
             api(form, ({ data }) => {
                 done && done();
@@ -1340,6 +1616,7 @@ export default {
                     this.cardDialogVisible = false;
                     this.fetchCards();
                     if (this.activeTab === 'aiCards') this.fetchAiCards();
+                    if (this.activeTab === 'interactiveCards') this.fetchInteractiveCards();
                     this.loadStats();
                 } else {
                     this.$message.error(data.msg || 'Operation failed');
@@ -1412,7 +1689,7 @@ export default {
 
         showAddAiCardDialog() {
             this.cardDialogTitle = 'Add AI Card';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, interactiveTemplateId: null, actionType: 'ai', cardType: 'ai', notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1443,6 +1720,76 @@ export default {
                 return;
             }
             this.deleteAiCard(selected);
+        },
+
+        // ==================== INTERACTIVE CARDS ====================
+        fetchInteractiveCards() {
+            this.interactiveCardsLoading = true;
+            Api.rfid.getCardPage({
+                page: this.interactiveCardsCurrentPage,
+                limit: this.interactiveCardsPageSize,
+                rfidUid: this.searchKeyword,
+                cardType: 'interactive'
+            }, ({ data }) => {
+                this.interactiveCardsLoading = false;
+                if (data.code === 0) {
+                    this.interactiveCardsList = (data.data.list || []).map(item => ({ ...item, selected: false }));
+                    this.interactiveCardsTotal = data.data.total || 0;
+                } else {
+                    this.$message.error(data.msg || 'Failed to load interactive cards');
+                }
+            });
+        },
+
+        handleInteractiveCardsPageSizeChange(val) {
+            this.interactiveCardsPageSize = val;
+            this.interactiveCardsCurrentPage = 1;
+            this.fetchInteractiveCards();
+        },
+        goFirstInteractiveCards() { this.interactiveCardsCurrentPage = 1; this.fetchInteractiveCards(); },
+        goPrevInteractiveCards() { if (this.interactiveCardsCurrentPage > 1) { this.interactiveCardsCurrentPage--; this.fetchInteractiveCards(); } },
+        goNextInteractiveCards() { if (this.interactiveCardsCurrentPage < this.interactiveCardsPageCount) { this.interactiveCardsCurrentPage++; this.fetchInteractiveCards(); } },
+        goToInteractiveCardsPage(page) { this.interactiveCardsCurrentPage = page; this.fetchInteractiveCards(); },
+
+        handleSelectAllInteractiveCards() {
+            this.isAllInteractiveCardsSelected = !this.isAllInteractiveCardsSelected;
+            this.interactiveCardsList.forEach(row => { row.selected = this.isAllInteractiveCardsSelected; });
+        },
+
+        showAddInteractiveCardDialog() {
+            this.cardDialogTitle = 'Add Interactive Card';
+            this.cardForm = { id: null, rfidUid: '', interactiveTemplateId: null, packId: null, actionType: 'interactive', notes: '', active: true };
+            this.cardDialogVisible = true;
+        },
+
+        deleteInteractiveCard(rows) {
+            const items = Array.isArray(rows) ? rows : [rows];
+            const ids = items.map(r => r.id);
+            this.$confirm(`Delete ${ids.length} interactive card(s)?`, 'Confirm', { type: 'warning' }).then(() => {
+                Api.rfid.deleteCard(ids, ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchInteractiveCards();
+                        this.loadStats();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        deleteSelectedInteractiveCards() {
+            const selected = this.interactiveCardsList.filter(r => r.selected);
+            if (selected.length === 0) {
+                this.$message.warning('Please select items to delete');
+                return;
+            }
+            this.deleteInteractiveCard(selected);
+        },
+
+        getInteractivePackLabel(templateId) {
+            const tmpl = this.interactiveTemplatesDropdown.find(t => String(t.id) === String(templateId));
+            return tmpl ? tmpl.displayName : `Pack #${templateId}`;
         },
 
         // ==================== CONTENT PACKS ====================
@@ -1801,6 +2148,95 @@ export default {
                 return;
             }
             this.deleteQuestionPack(selected);
+        },
+
+        // ==================== INTERACTIVE TEMPLATES ====================
+        fetchInteractiveTemplates() {
+            this.interactiveTemplatesLoading = true;
+            Api.rfid.getInteractiveTemplatePage({
+                page: this.interactiveTemplatesCurrentPage,
+                limit: this.interactiveTemplatesPageSize,
+                templateCode: this.searchKeyword
+            }, ({ data }) => {
+                this.interactiveTemplatesLoading = false;
+                if (data.code === 0) {
+                    this.interactiveTemplatesList = (data.data.list || []).map(item => ({ ...item, selected: false }));
+                    this.interactiveTemplatesTotal = data.data.total || 0;
+                } else {
+                    this.$message.error(data.msg || 'Failed to load interactive templates');
+                }
+            });
+        },
+
+        handleInteractiveTemplatesPageSizeChange(val) {
+            this.interactiveTemplatesPageSize = val;
+            this.interactiveTemplatesCurrentPage = 1;
+            this.fetchInteractiveTemplates();
+        },
+        goFirstInteractiveTemplates() { this.interactiveTemplatesCurrentPage = 1; this.fetchInteractiveTemplates(); },
+        goPrevInteractiveTemplates() { if (this.interactiveTemplatesCurrentPage > 1) { this.interactiveTemplatesCurrentPage--; this.fetchInteractiveTemplates(); } },
+        goNextInteractiveTemplates() { if (this.interactiveTemplatesCurrentPage < this.interactiveTemplatesPageCount) { this.interactiveTemplatesCurrentPage++; this.fetchInteractiveTemplates(); } },
+        goToInteractiveTemplatesPage(page) { this.interactiveTemplatesCurrentPage = page; this.fetchInteractiveTemplates(); },
+
+        handleSelectAllInteractiveTemplates() {
+            this.isAllInteractiveTemplatesSelected = !this.isAllInteractiveTemplatesSelected;
+            this.interactiveTemplatesList.forEach(row => { row.selected = this.isAllInteractiveTemplatesSelected; });
+        },
+
+        showAddInteractiveTemplateDialog() {
+            this.interactiveTemplateDialogTitle = 'Add Interactive Pack';
+            this.interactiveTemplateForm = { id: null, templateCode: '', displayName: '', description: '', bundleUrl: '', bundleVersion: 1, bundleSize: 0, active: true };
+            this.interactiveTemplateDialogVisible = true;
+        },
+
+        editInteractiveTemplate(row) {
+            this.interactiveTemplateDialogTitle = 'Edit Interactive Pack';
+            this.interactiveTemplateForm = { ...row };
+            this.interactiveTemplateDialogVisible = true;
+        },
+
+        handleInteractiveTemplateSubmit({ form, done }) {
+            const api = form.id ? Api.rfid.updateInteractiveTemplate : Api.rfid.addInteractiveTemplate;
+            api(form, ({ data }) => {
+                done && done();
+                if (data.code === 0) {
+                    this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
+                    this.interactiveTemplateDialogVisible = false;
+                    this.fetchInteractiveTemplates();
+                    this.loadStats();
+                } else {
+                    this.$message.error(data.msg || 'Operation failed');
+                }
+            });
+        },
+
+        deleteInteractiveTemplate(row) {
+            const items = Array.isArray(row) ? row : [row];
+            if (items.length === 0) return;
+            this.$confirm(`Delete ${items.length} interactive template(s)?`, 'Warning', {
+                confirmButtonText: 'Confirm',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                Api.rfid.deleteInteractiveTemplate(items.map(i => i.id), ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchInteractiveTemplates();
+                        this.loadStats();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        deleteSelectedInteractiveTemplates() {
+            const selected = this.interactiveTemplatesList.filter(r => r.selected);
+            if (selected.length === 0) {
+                this.$message.warning('Please select items to delete');
+                return;
+            }
+            this.deleteInteractiveTemplate(selected);
         },
 
         // ==================== CONSOLE ====================

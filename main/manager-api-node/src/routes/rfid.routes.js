@@ -3796,4 +3796,65 @@ router.get('/question-pack/:id',
   })
 );
 
+// =============================================
+// Interactive Template Routes
+// =============================================
+
+router.get('/interactive-template/page', requireAdmin, asyncHandler(async (req, res) => {
+  const { page = 1, limit = 10, templateCode, active } = req.query;
+  const result = await rfidService.getInteractiveTemplatePage(
+    parseInt(page), parseInt(limit), { templateCode, active }
+  );
+  return success(res, result);
+}));
+
+router.get('/interactive-template/list', requireAdmin, asyncHandler(async (req, res) => {
+  const list = await rfidService.getInteractiveTemplateList();
+  return success(res, list);
+}));
+
+router.get('/interactive-template/active', asyncHandler(async (req, res) => {
+  const list = await rfidService.getActiveInteractiveTemplates();
+  return success(res, list);
+}));
+
+router.get('/interactive-template/code/:code', requireAdmin, asyncHandler(async (req, res) => {
+  const template = await rfidService.getInteractiveTemplateByCode(req.params.code);
+  if (!template) return notFound(res, 'Template not found');
+  return success(res, template);
+}));
+
+router.get('/interactive-template/:id', requireAdmin, asyncHandler(async (req, res) => {
+  const template = await rfidService.getInteractiveTemplateById(req.params.id);
+  if (!template) return notFound(res, 'Template not found');
+  return success(res, template);
+}));
+
+router.post('/interactive-template', requireAdmin, asyncHandler(async (req, res) => {
+  const { templateCode, displayName } = req.body;
+  if (!templateCode || !displayName) return badRequest(res, 'templateCode and displayName are required');
+  await rfidService.createInteractiveTemplate(req.body);
+  return success(res, null);
+}));
+
+router.put('/interactive-template', requireAdmin, asyncHandler(async (req, res) => {
+  if (!req.body.id) return badRequest(res, 'id is required');
+  await rfidService.updateInteractiveTemplate(req.body);
+  return success(res, null);
+}));
+
+router.delete('/interactive-template', requireAdmin, asyncHandler(async (req, res) => {
+  const ids = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return badRequest(res, 'Array of IDs required');
+  await rfidService.deleteInteractiveTemplates(ids);
+  return success(res, null);
+}));
+
+router.post('/interactive-template/delete', requireAdmin, asyncHandler(async (req, res) => {
+  const ids = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return badRequest(res, 'Array of IDs required');
+  await rfidService.deleteInteractiveTemplates(ids);
+  return success(res, null);
+}));
+
 module.exports = router;

@@ -780,6 +780,139 @@ export default {
             }).send()
     },
 
+    // ==================== INTERACTIVE TEMPLATES ====================
+
+    // Get interactive template page list
+    getInteractiveTemplatePage(params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page || 1,
+            limit: params.limit || 10,
+            templateCode: params.templateCode || '',
+            active: params.active !== undefined ? params.active : ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template/page?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get interactive template list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getInteractiveTemplatePage(params, callback)
+                })
+            }).send()
+    },
+
+    // Get all interactive templates list
+    getInteractiveTemplateList(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template/list`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get interactive template list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getInteractiveTemplateList(callback)
+                })
+            }).send()
+    },
+
+    // Get active interactive templates
+    getActiveInteractiveTemplates(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template/active`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get active interactive templates:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getActiveInteractiveTemplates(callback)
+                })
+            }).send()
+    },
+
+    // Get interactive template by ID
+    getInteractiveTemplateById(id, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template/${id}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get interactive template detail:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getInteractiveTemplateById(id, callback)
+                })
+            }).send()
+    },
+
+    // Add interactive template
+    addInteractiveTemplate(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template`)
+            .method('POST')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to add interactive template:', err)
+                RequestService.reAjaxFun(() => {
+                    this.addInteractiveTemplate(data, callback)
+                })
+            }).send()
+    },
+
+    // Update interactive template
+    updateInteractiveTemplate(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template`)
+            .method('PUT')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to update interactive template:', err)
+                RequestService.reAjaxFun(() => {
+                    this.updateInteractiveTemplate(data, callback)
+                })
+            }).send()
+    },
+
+    // Delete interactive templates
+    deleteInteractiveTemplate(ids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/interactive-template/delete`)
+            .method('POST')
+            .data(ids)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete interactive template:', err)
+                RequestService.reAjaxFun(() => {
+                    this.deleteInteractiveTemplate(ids, callback)
+                })
+            }).send()
+    },
+
+    // ==================== LOOKUP (Console) ====================
+
     // Get content download manifest
     getContentDownload(rfidUid, callback) {
         RequestService.sendRequest()

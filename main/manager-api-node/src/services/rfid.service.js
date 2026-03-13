@@ -83,6 +83,7 @@ const transformCardMappingToCamelCase = (card) => {
     actionType: card.action_type,
     actionData: card.action_data || {},
     cardType: card.card_type || null,
+    interactiveTemplateId: card.interactive_template_id ? String(card.interactive_template_id) : null,
     notes: card.notes,
     active: card.active,
     status: card.status,
@@ -422,6 +423,35 @@ const lookupCardByUid = async (rfidUid) => {
     }
   }
 
+  // Track 5: Interactive Template
+  if (mapping.interactive_template_id) {
+    logger.info(`[RFID-LOOKUP] Track 5: Interactive Template lookup, template_id=${mapping.interactive_template_id}`);
+    try {
+      const template = await prisma.rfid_interactive_template.findFirst({
+        where: { id: mapping.interactive_template_id, active: true },
+      });
+
+      if (template) {
+        logger.info(`[RFID-LOOKUP] Interactive Template resolved: code="${template.template_code}", name="${template.display_name}"`);
+        return {
+          rfid_uid: normalizedUid,
+          contentType: 'interactive',
+          template: template.template_code,
+          displayName: template.display_name,
+          assets: {
+            bundle_url: template.bundle_url,
+            bundle_version: template.bundle_version,
+            bundle_size: Number(template.bundle_size || 0),
+          },
+        };
+      } else {
+        logger.warn(`[RFID-LOOKUP] Interactive template id=${mapping.interactive_template_id} not found or inactive`);
+      }
+    } catch (tplErr) {
+      logger.error('[RFID-LOOKUP] Interactive template query error:', tplErr);
+    }
+  }
+
   // AI Card: Only treat as AI if card_type is 'ai' AND no content_pack_id is linked above.
   // This guard prevents misconfigured content cards from accidentally firing AI flow.
   if (mapping.card_type === 'ai') {
@@ -583,6 +613,7 @@ const createCardMapping = async (data, _userId) => {
         action_data: data.actionData || {},
         card_type: data.cardType || 'content',
         notes: data.notes || null,
+        interactive_template_id: data.interactiveTemplateId ? BigInt(data.interactiveTemplateId) : null,
         active: data.active !== false,
         status: 1
       }
@@ -640,6 +671,9 @@ const updateCardMapping = async (data, _userId) => {
   if (data.cardType !== undefined) updateData.card_type = data.cardType;
   if (data.notes !== undefined) updateData.notes = data.notes;
   if (data.active !== undefined) updateData.active = data.active;
+  if (data.interactiveTemplateId !== undefined) {
+    updateData.interactive_template_id = data.interactiveTemplateId ? BigInt(data.interactiveTemplateId) : null;
+  }
 
   try {
     await prisma.rfid_card_mapping.updateMany({
@@ -3253,7 +3287,7 @@ const deleteQuestionPacks = async (ids) => {
  */
 const getRfidMappingOptions = async () => {
   try {
-    const [questions, packs, contentPacks, questionPacks] = await Promise.all([
+    const [questions, packs, contentPacks, questionPacks, interactiveTemplates] = await Promise.all([
       prisma.rfid_question.findMany({
         where: { active: true },
         select: { id: true, code: true, title: true },
@@ -3273,6 +3307,11 @@ const getRfidMappingOptions = async () => {
         where: { active: true },
         select: { id: true, pack_code: true, name: true },
         orderBy: { name: 'asc' }
+      }),
+      prisma.rfid_interactive_template.findMany({
+        where: { active: true },
+        select: { id: true, template_code: true, display_name: true },
+        orderBy: { display_name: 'asc' },
       })
     ]);
 
@@ -3280,13 +3319,127 @@ const getRfidMappingOptions = async () => {
       questions: questions.map(q => ({ id: Number(q.id), name: q.title, code: q.code })),
       packs: packs.map(p => ({ id: Number(p.id), name: p.pack_name, code: p.pack_code })),
       contentPacks: contentPacks.map(cp => ({ id: Number(cp.id), name: cp.name, code: cp.pack_code })),
-      questionPacks: questionPacks.map(qp => ({ id: Number(qp.id), name: qp.name, code: qp.pack_code }))
+      questionPacks: questionPacks.map(qp => ({ id: Number(qp.id), name: qp.name, code: qp.pack_code })),
+      interactiveTemplates: interactiveTemplates.map(t => ({
+        id: String(t.id),
+        templateCode: t.template_code,
+        displayName: t.display_name,
+      })),
     };
   } catch (error) {
     logger.error('Failed to fetch RFID mapping options:', error);
     throw new Error('Failed to fetch RFID mapping options');
   }
 };
+
+// =============================================
+// Interactive Template Methods
+// =============================================
+
+const getInteractiveTemplatePage = async (page = 1, limit = 10, filters = {}) => {
+  const where = {};
+  if (filters.templateCode) where.template_code = { contains: filters.templateCode, mode: 'insensitive' };
+  if (filters.active !== undefined && filters.active !== null && filters.active !== '') where.active = filters.active === 'true' || filters.active === true;
+
+  const skip = (page - 1) * limit;
+  const [list, total] = await Promise.all([
+    prisma.rfid_interactive_template.findMany({ where, skip, take: limit, orderBy: { create_date: 'desc' } }),
+    prisma.rfid_interactive_template.count({ where }),
+  ]);
+
+  return {
+    list: list.map(transformInteractiveTemplateToCamelCase),
+    total,
+    page,
+    limit,
+    pages: Math.ceil(total / limit),
+  };
+};
+
+const getInteractiveTemplateList = async () => {
+  const list = await prisma.rfid_interactive_template.findMany({ orderBy: { create_date: 'desc' } });
+  return list.map(transformInteractiveTemplateToCamelCase);
+};
+
+const getActiveInteractiveTemplates = async () => {
+  const list = await prisma.rfid_interactive_template.findMany({
+    where: { active: true },
+    orderBy: { display_name: 'asc' },
+  });
+  return list.map(transformInteractiveTemplateToCamelCase);
+};
+
+const getInteractiveTemplateById = async (id) => {
+  const template = await prisma.rfid_interactive_template.findFirst({ where: { id: BigInt(id) } });
+  return template ? transformInteractiveTemplateToCamelCase(template) : null;
+};
+
+const getInteractiveTemplateByCode = async (code) => {
+  const template = await prisma.rfid_interactive_template.findFirst({ where: { template_code: code } });
+  return template ? transformInteractiveTemplateToCamelCase(template) : null;
+};
+
+const createInteractiveTemplate = async (data) => {
+  const existing = await prisma.rfid_interactive_template.findFirst({
+    where: { template_code: data.templateCode },
+  });
+  if (existing) throw new Error('Template code already exists');
+
+  await prisma.rfid_interactive_template.create({
+    data: {
+      template_code: data.templateCode,
+      display_name: data.displayName,
+      description: data.description || null,
+      bundle_url: data.bundleUrl || null,
+      bundle_version: data.bundleVersion || 1,
+      bundle_size: data.bundleSize ? BigInt(data.bundleSize) : BigInt(0),
+      active: data.active !== false,
+    },
+  });
+  return null;
+};
+
+const updateInteractiveTemplate = async (data) => {
+  if (!data.id) throw new Error('Template ID is required');
+
+  const updateData = { update_date: new Date() };
+  if (data.templateCode !== undefined) updateData.template_code = data.templateCode;
+  if (data.displayName !== undefined) updateData.display_name = data.displayName;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.bundleUrl !== undefined) updateData.bundle_url = data.bundleUrl;
+  if (data.bundleVersion !== undefined) updateData.bundle_version = data.bundleVersion;
+  if (data.bundleSize !== undefined) updateData.bundle_size = BigInt(data.bundleSize);
+  if (data.active !== undefined) updateData.active = data.active;
+
+  await prisma.rfid_interactive_template.update({
+    where: { id: BigInt(data.id) },
+    data: updateData,
+  });
+  return null;
+};
+
+const deleteInteractiveTemplates = async (ids) => {
+  const bigIds = ids.map((id) => BigInt(id));
+  await prisma.rfid_card_mapping.updateMany({
+    where: { interactive_template_id: { in: bigIds } },
+    data: { interactive_template_id: null },
+  });
+  await prisma.rfid_interactive_template.deleteMany({ where: { id: { in: bigIds } } });
+  return null;
+};
+
+const transformInteractiveTemplateToCamelCase = (t) => ({
+  id: String(t.id),
+  templateCode: t.template_code,
+  displayName: t.display_name,
+  description: t.description,
+  bundleUrl: t.bundle_url,
+  bundleVersion: t.bundle_version,
+  bundleSize: String(t.bundle_size || 0),
+  active: t.active,
+  createDate: t.create_date,
+  updateDate: t.update_date,
+});
 
 module.exports = {
   // PRD-specified card mapping methods
@@ -3399,4 +3552,14 @@ module.exports = {
   deleteQuestionPacks,
   transformQuestionPackToCamelCase,
   getRfidMappingOptions,
+
+  // Interactive Template CRUD
+  getInteractiveTemplatePage,
+  getInteractiveTemplateList,
+  getActiveInteractiveTemplates,
+  getInteractiveTemplateById,
+  getInteractiveTemplateByCode,
+  createInteractiveTemplate,
+  updateInteractiveTemplate,
+  deleteInteractiveTemplates,
 };

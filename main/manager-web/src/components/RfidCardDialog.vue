@@ -38,6 +38,10 @@
                     <i class="el-icon-cpu"></i>
                     <span>AI Card</span>
                 </div>
+                <div class="type-option" :class="{ active: form.actionType === 'interactive' }" @click="setActionType('interactive')">
+                    <i class="el-icon-magic-stick"></i>
+                    <span>Interactive</span>
+                </div>
             </div>
         </el-form-item>
 
@@ -61,6 +65,20 @@
               :key="cp.id"
               :label="`${cp.packCode} - ${cp.name}`"
               :value="cp.id"/>
+          </el-select>
+        </el-form-item>
+
+        <!-- Interactive Template Selector -->
+        <el-form-item v-if="form.actionType === 'interactive'" label="Template" class="form-item">
+          <el-select v-model="form.interactiveTemplateId" placeholder="Select interactive template" class="custom-select" filterable clearable>
+            <el-option
+              v-for="t in interactiveTemplates"
+              :key="t.id"
+              :label="t.displayName"
+              :value="t.id">
+              <span>{{ t.displayName }}</span>
+              <span style="float: right; color: #909399; font-size: 12px;">{{ t.templateCode }}</span>
+            </el-option>
           </el-select>
         </el-form-item>
 
@@ -118,8 +136,9 @@ export default {
         rfidUid: '',
         questionPackId: null,
         contentPackId: null,
+        interactiveTemplateId: null,
         packId: null, // Product SKU
-        actionType: 'content', // 'content' or 'qna'
+        actionType: 'content', // 'content', 'qna', 'ai', or 'interactive'
         notes: '',
         active: true
       })
@@ -133,6 +152,10 @@ export default {
       default: () => []
     },
     contentPacks: {
+      type: Array,
+      default: () => []
+    },
+    interactiveTemplates: {
       type: Array,
       default: () => []
     }
@@ -182,14 +205,21 @@ export default {
     'form.actionType'(newVal) {
       if (newVal === 'qna') {
         this.form.contentPackId = null;
+        this.form.interactiveTemplateId = null;
         this.form.cardType = null;
       } else if (newVal === 'content') {
         this.form.questionPackId = null;
+        this.form.interactiveTemplateId = null;
         this.form.cardType = null;
       } else if (newVal === 'ai') {
         this.form.questionPackId = null;
         this.form.contentPackId = null;
+        this.form.interactiveTemplateId = null;
         this.form.cardType = 'ai';
+      } else if (newVal === 'interactive') {
+        this.form.questionPackId = null;
+        this.form.contentPackId = null;
+        this.form.cardType = null;
       }
     }
   }

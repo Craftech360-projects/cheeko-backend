@@ -116,6 +116,20 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     const promptText = (data.promptText || "").trim();
     const hasPack = Array.isArray(data.items) && data.items.length > 0;
 
+    // Interactive cards don't need text content validation
+    if (contentType === 'interactive') {
+      logger.info(
+        `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} -> contentType=interactive, template="${data.template}"`
+      );
+      return {
+        contentType,
+        title: data.displayName || '',
+        template: data.template || null,
+        displayName: data.displayName || null,
+        assets: data.assets || null,
+      };
+    }
+
     // Validation: only enforce text requirements for non-pack types
     if (!hasPack) {
       if (contentType === "read_only" && !contentText) {
@@ -152,6 +166,10 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       items: data.items || null,
       audioUrl: data.audioUrl || null,
       allowCaching: data.allowCaching,
+      // Interactive template fields (passed through if present)
+      template: data.template || null,
+      displayName: data.displayName || null,
+      assets: data.assets || null,
     };
   } catch (error) {
     logger.error(
@@ -931,6 +949,37 @@ class MQTTGateway {
           );
 
           this.mqttPublish(`devices/p2p/${clientId}`, manifest);
+          return;
+        }
+
+        // ====== BRANCH D: INTERACTIVE CARD — send card_interactive directly via MQTT ======
+        if (rfidContent.contentType === 'interactive') {
+          // Resolve kid age from VirtualConnection's childProfile
+          let ageGroup = 4; // default floor
+          const devInfo = this.deviceConnections.get(deviceId);
+          if (devInfo && devInfo.connection && devInfo.connection.childProfile) {
+            const kidAge = devInfo.connection.childProfile.age;
+            ageGroup = (typeof kidAge === 'number' && kidAge >= 4) ? kidAge : 4;
+          }
+
+          const interactivePayload = {
+            type: 'card_interactive',
+            rfid_uid: rfidUid,
+            template: rfidContent.template,
+            display_name: rfidContent.displayName,
+            params: {
+              difficulty: 'easy',
+              age_group: ageGroup,
+            },
+            assets: rfidContent.assets || {},
+          };
+
+          logger.info(
+            `🎮 [RFID-ROUTING] Interactive card detected: template="${rfidContent.template}", ` +
+            `age_group=${ageGroup}. Sending card_interactive to device ${deviceId}`
+          );
+
+          this.mqttPublish(`devices/p2p/${clientId}`, interactivePayload);
           return;
         }
 
