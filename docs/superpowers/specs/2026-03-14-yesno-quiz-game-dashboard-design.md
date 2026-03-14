@@ -53,18 +53,20 @@ The dashboard renders BEFORE any LiveKit connection. The child picks a game, the
 | `src/games/yesno_quiz_hints.py` | Verbal hint manager (LLM clue after timeout) |
 | `src/games/yesno_quiz_state.py` | Game state (stars, lives, current question, streak) |
 
+| `src/games/yesno_quiz_narrator.py` | Narrator with yes/no-specific response pools and fun fact narration |
+| `src/games/yesno_quiz_pipeline.py` | STT/LLM/TTS pipeline with YESNO_LLM_* env vars and yes/no keyterms |
+| `src/features/yesno_game_tools.py` | `check_yesno_answer` tool + `set_yesno_game_state()` setter |
+
 ### Reused Modules (no changes needed)
 
 - `src/games/math_game_data_channel.py` — DataChannel class (event emitter for room data)
-- `src/games/math_game_narrator.py` — Narrator class (speaks via agent session)
-- `src/games/math_game_pipeline.py` — STT/LLM/TTS pipeline creation
 
 ### Worker Configuration
 
 - **Agent name:** `yesno-quiz-agent`
-- **Port:** `8088`
+- **Port:** `8090` (8087=math-game, 8088=math-game-worker alt, 8089=reserved)
 - **Character name:** `Fact Finder` (or reuse `Cheeko`)
-- **LLM provider:** Same as math game (OpenRouter, configurable via env)
+- **LLM provider:** OpenRouter, configurable via `YESNO_LLM_PROVIDER` and `YESNO_LLM_MODEL` env vars
 
 ### Game State (`yesno_quiz_state.py`)
 
@@ -140,10 +142,20 @@ async def check_yesno_answer(answer: str) -> str:
     Args:
         answer: The child's answer - "yes" or "no"
     """
-    # Normalize: "yeah", "yep", "sure" → "yes"; "nah", "nope" → "no"
+    # Full normalization table:
+    # YES: "yes", "yeah", "yep", "yup", "sure", "correct", "true", "right",
+    #      "uh huh", "mm hmm", "yah", "ya", "si",
+    #      Hindi: "haan", "ha", "haji", "sahi", "bilkul"
+    # NO:  "no", "nah", "nope", "naw", "nuh", "false", "wrong", "never",
+    #      "uh uh", "mm mm", "nay",
+    #      Hindi: "nahi", "nahin", "naa", "galat", "bilkul nahi"
+    # AMBIGUOUS: "I think yes/no", "maybe" → extract yes/no keyword
+    # UNKNOWN: "I don't know" → prompt child to try ("Take a guess!")
     # Compare against game_state.current_question["correct_answer"]
     # Return JSON result
 ```
+
+**No retries:** Since there are only 2 options, wrong answers always move to the next question. Allowing retry on a binary choice would guarantee eventual success.
 
 ### Game Engine (`yesno_quiz_engine.py`)
 
@@ -160,7 +172,7 @@ async def check_yesno_answer(answer: str) -> str:
 **Scoring:**
 - Correct answer → +1 star
 - Wrong answer → -1 life (commander mode only), no effect in explorer mode
-- 3+ consecutive correct → bonus star
+- 5+ consecutive correct → bonus star (matches math game threshold; 0.5^5 = 3.1% chance by guessing)
 - 5 stars → level complete
 - 0 lives → game over (commander mode)
 
@@ -172,7 +184,29 @@ Mirrors `math_game_worker.py` structure:
 2. `entrypoint(ctx)` — Parse room name, load child profile, create pipeline, wire modules
 3. Register data channel handlers: `yesno_answer`, `game_control`, `ready_for_greeting`, `end_prompt`, `shutdown_request`
 4. Register `function_tools_executed` event for voice answer processing
-5. Connect, start session, publish initial state
+5. Connect, start session, publish initial state (including `{ type: "game_state", state: "playing" }`)
+
+### Fallback Questions
+
+Hardcoded fallback bank for when LLM API is unavailable:
+
+```python
+FALLBACK_QUESTIONS = [
+    {"question": "Do fish live in water?", "correct_answer": True, "fun_fact": "Fish breathe using gills!", "category": "animals"},
+    {"question": "Is the sun a star?", "correct_answer": True, "fun_fact": "The sun is the closest star to Earth!", "category": "space"},
+    {"question": "Do penguins fly?", "correct_answer": False, "fun_fact": "Penguins are great swimmers instead!", "category": "animals"},
+    {"question": "Is ice cream hot?", "correct_answer": False, "fun_fact": "Ice cream is frozen and usually around -15°C!", "category": "food"},
+    {"question": "Does the Earth go around the Sun?", "correct_answer": True, "fun_fact": "It takes 365 days to go all the way around!", "category": "space"},
+    {"question": "Do elephants have wings?", "correct_answer": False, "fun_fact": "Elephants are the largest land animals!", "category": "animals"},
+    {"question": "Is water wet?", "correct_answer": True, "fun_fact": "Water covers about 71% of Earth's surface!", "category": "science"},
+    {"question": "Do trees make oxygen?", "correct_answer": True, "fun_fact": "One big tree can make enough oxygen for 4 people!", "category": "nature"},
+]
+```
+
+### Analytics Integration
+
+The engine records each question attempt via `GameAnalyticsManager` (same pattern as math game):
+- question_id, question_text, correct_answer, user_answer, input_method, response_time_ms, hint_used
 
 ### PM2 Config Addition
 
@@ -184,7 +218,7 @@ Mirrors `math_game_worker.py` structure:
   args: "workers/yesno_quiz_worker.py dev",
   cwd: "./main/livekit-server",
   env: {
-    PORT: 8088,
+    PORT: 8090,
     YESNO_LLM_PROVIDER: "openrouter",
     YESNO_LLM_MODEL: "openai/gpt-4o-mini",
   }
@@ -244,7 +278,7 @@ Mirrors `math_game_worker.py` structure:
 ```typescript
 {
   type: "game_state",
-  state: "started" | "completed" | "game_over" | "restarted",
+  state: "playing" | "started" | "completed" | "game_over" | "restarted",
   game_mode: "explorer" | "commander",
   progress: GameProgress,
 }
@@ -431,10 +465,12 @@ playFactRevealSfx() // NEW: gentle "ding" for fun fact reveal
 ### Timing Constants
 
 ```typescript
-const RESULT_DISPLAY_MS = 2000;     // Show correct/wrong + fun fact
-const FUN_FACT_DISPLAY_MS = 3000;   // Fun fact toast duration
+const RESULT_DISPLAY_MS = 3000;     // Show correct/wrong feedback (buttons stay colored)
+const FUN_FACT_DISPLAY_MS = 3000;   // Fun fact toast appears WITH result, same duration
 const TAP_COOLDOWN_MS = 500;        // Debounce between taps
 const GAME_END_OVERLAY_MS = 4000;   // Level complete / game over overlay
+// Timing: result + fun fact display together for 3s, then both clear, next question loads.
+// No overlap issue: fun fact toast is part of the result display phase, not separate.
 ```
 
 ### Animations
@@ -491,22 +527,9 @@ export const GAMES: GameDefinition[] = [
     description: "True or false?",
     color: "#1f6feb",
   },
-  {
-    id: "riddles",
-    name: "Riddles",
-    icon: "🔮",
-    agent_name: "riddle-solver-agent",
-    description: "Can you solve it?",
-    color: "#8b5cf6",
-  },
-  {
-    id: "word_ladder",
-    name: "Word Ladder",
-    icon: "🔤",
-    agent_name: "word-ladder-agent",
-    description: "Build words!",
-    color: "#f59e0b",
-  },
+  // Riddles and Word Ladder are voice-only agents (no visual HUD).
+  // They can be added to the dashboard later when HUDs are built.
+  // For now, only games with visual HUDs are listed.
 ];
 ```
 
@@ -527,16 +550,12 @@ export const GAMES: GameDefinition[] = [
 │   │  puzzles!" │ │            │ │
 │   └────────────┘ └────────────┘ │
 │                                  │
-│   ┌────────────┐ ┌────────────┐ │
-│   │    🔮      │ │    🔤      │ │
-│   │  Riddles   │ │   Word     │ │
-│   │            │ │  Ladder    │ │
-│   │ "Can you   │ │ "Build     │ │
-│   │  solve it?"│ │  words!"   │ │
-│   └────────────┘ └────────────┘ │
-│                                  │
 └──────────────────────────────────┘
 ```
+
+### Back Navigation
+
+When a game session ends (level complete overlay dismissed, or game over), the app disconnects from LiveKit and returns to the dashboard by setting `selectedGame = null`. A "Back to Games" button is also available in the control bar during an active session — it disconnects and returns to dashboard.
 
 ### GameCard Component
 
@@ -572,6 +591,14 @@ if (!selectedGame) {
 
 // Otherwise, connect with selected agent
 // Pass selectedGame as agentName to useSession() and roomConfig
+
+// Key: tokenSource and useSession must be reconstructed when selectedGame changes.
+// Since selectedGame is React state, wrap the token fetch in a useMemo keyed on selectedGame:
+const tokenSource = useMemo(() => {
+  const agentName = selectedGame; // from state, not env
+  return createTokenSource(agentName);
+}, [selectedGame]);
+// This ensures a new JWT is fetched with the correct agent_name in RoomConfiguration.
 ```
 
 **Changes to `agent-session-block.tsx`:**
