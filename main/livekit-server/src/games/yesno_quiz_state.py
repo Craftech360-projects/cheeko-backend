@@ -71,6 +71,7 @@ class YesNoQuizState:
         self.mission_number += 1
         self.stars = 0
         self.consecutive_correct = 0
+        self.questions_asked = 0
         self.used_categories = []
         if self.game_mode == "commander":
             self.lives = self.max_lives
