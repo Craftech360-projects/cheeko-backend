@@ -1,6 +1,6 @@
 """
 Narrator module for Yes/No Quiz game.
-Uses session.generate_reply(instructions=text) to speak — LLM-driven narration.
+Uses session.say() for direct TTS narration — no LLM involved.
 Response pools provide variety while fun_fact and answer placeholders add context.
 """
 
@@ -79,7 +79,7 @@ def _pick(pool: list, **kwargs) -> str:
 
 class YesNoNarrator:
     """
-    All narration via session.generate_reply(instructions=text).
+    All narration via session.say() — direct TTS, no LLM.
     Provides fun, fact-filled responses that educate while entertaining.
     """
 
@@ -144,12 +144,13 @@ class YesNoNarrator:
 
     async def _speak(self, text: str, tag: str):
         """
-        Speak text via session.generate_reply(instructions=text).
+        Speak text directly via session.say() — no LLM involved.
         Does NOT re-raise on failure — game flow continues even if narration fails.
         """
         logger.info(f"narrator.speak(tag={tag}, text={text[:100]})")
         try:
-            await self._session.generate_reply(instructions=text)
+            speech = self._session.say(text, allow_interruptions=False)
+            await speech
             logger.info(f"narrator.spoke(tag={tag})")
         except Exception as e:
             logger.error(f"narrator.speak_failed(tag={tag}, error={e})")
