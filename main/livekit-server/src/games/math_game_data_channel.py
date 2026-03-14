@@ -58,15 +58,24 @@ class DataChannel:
             logger.info(f"dc.queue_flushed(count={count})")
 
     async def _publish(self, payload: dict):
-        """Publish a single JSON payload via local_participant."""
+        """Publish a single JSON payload via local_participant (non-blocking)."""
+        import asyncio
         msg_type = payload.get("type", "unknown")
         qid = payload.get("question_id", "")
         try:
             data_bytes = json.dumps(payload).encode("utf-8")
+            # Fire-and-forget: don't await publish_data to avoid blocking on congestion
+            asyncio.create_task(self._publish_with_log(data_bytes, msg_type, qid))
+        except Exception as e:
+            logger.error(f"dc.send_failed(type={msg_type}, error={e})")
+
+    async def _publish_with_log(self, data_bytes: bytes, msg_type: str, qid: str):
+        """Background task that actually publishes data and logs."""
+        try:
             await self._room.local_participant.publish_data(data_bytes, reliable=True)
             logger.info(f"dc.send(type={msg_type}, question_id={qid})")
         except Exception as e:
-            logger.error(f"dc.send_failed(type={msg_type}, error={e})")
+            logger.error(f"dc.send_bg_failed(type={msg_type}, error={e})")
 
     def _on_data_received(self, data_packet):
         """Parse incoming JSON and route to registered handler."""

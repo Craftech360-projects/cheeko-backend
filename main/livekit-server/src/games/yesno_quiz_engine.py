@@ -187,7 +187,16 @@ class YesNoQuizEngine:
         self._answered_question_id = question_id
         self.hints.cancel_timers()
 
-        # Process timeout as a wrong answer — reuse _process_answer with "timeout" input
+        # Schedule timeout processing on the main event loop (NOT in hint task)
+        # The hint manager's asyncio.create_task context causes session.say() to hang.
+        import asyncio
+        asyncio.get_event_loop().call_soon(
+            lambda: asyncio.ensure_future(self._handle_timeout_result(question_id))
+        )
+
+    async def _handle_timeout_result(self, question_id: str):
+        """Handle timeout answer — runs on main event loop, not hint task."""
+        logger.info(f"engine.timeout_processing(qid={question_id})")
         await self._process_answer(None, "timeout")
 
     async def on_game_control(self, message: dict):
@@ -313,32 +322,37 @@ class YesNoQuizEngine:
         Send yesno_result DC message, narrate the outcome, check for
         game_complete / game_over, else generate next question.
         """
-        # Send result to frontend
-        await self.dc.send({
-            "type": "yesno_result",
-            "question_id": result.get("question_id", self.state.current_question_id),
-            "correct": result.get("correct", False),
-            "user_answer": result.get("user_answer", ""),
-            "correct_answer": result.get("correct_answer", True),
-            "fun_fact": result.get("fun_fact", ""),
-            "input_method": result.get("input_method", "tap"),
-            "progress": result.get("progress", self.state._get_progress()),
-            "game_complete": result.get("game_complete", False),
-            "game_over": result.get("game_over", False),
-            "consecutive_correct": result.get("consecutive_correct", 0),
-            "bonus_star": result.get("bonus_star", False),
-        })
-
-        logger.info(
-            f"engine.result_sent(correct={result.get('correct')}, "
-            f"game_complete={result.get('game_complete')}, "
-            f"game_over={result.get('game_over')})"
-        )
-
-        # Narrate the result (non-blocking — game continues even if narration fails)
         try:
-            input_method = result.get("input_method", "tap")
+            # Send result to frontend
+            logger.info(f"engine.sending_result(qid={result.get('question_id')}, input={result.get('input_method')})")
+            await self.dc.send({
+                "type": "yesno_result",
+                "question_id": result.get("question_id", self.state.current_question_id),
+                "correct": result.get("correct", False),
+                "user_answer": result.get("user_answer"),
+                "correct_answer": result.get("correct_answer", True),
+                "fun_fact": result.get("fun_fact", ""),
+                "input_method": result.get("input_method", "tap"),
+                "progress": result.get("progress", self.state._get_progress()),
+                "game_complete": result.get("game_complete", False),
+                "game_over": result.get("game_over", False),
+                "consecutive_correct": result.get("consecutive_correct", 0),
+                "bonus_star": result.get("bonus_star", False),
+            })
+
+            logger.info(
+                f"engine.result_sent(correct={result.get('correct')}, "
+                f"game_complete={result.get('game_complete')}, "
+                f"game_over={result.get('game_over')})"
+            )
+        except Exception as e:
+            logger.error(f"engine.dc_send_error(error={e})", exc_info=True)
+
+        # Narrate the result — await narration so child hears answer before next question
+        input_method = result.get("input_method", "tap")
+        try:
             if input_method == "timeout":
+                # Timeout: narrate correct answer, WAIT for it to finish, THEN advance
                 await self.narrator.react_timeout(
                     correct_answer=result.get("correct_answer", True),
                     fun_fact=result.get("fun_fact", ""),
@@ -353,16 +367,20 @@ class YesNoQuizEngine:
         except Exception as e:
             logger.error(f"engine.narration_error(error={e})")
 
-        # Check end conditions
-        if result.get("game_over"):
-            await self._handle_game_over()
-            return
-        if result.get("game_complete"):
-            await self._handle_level_complete()
-            return
+        # Check end conditions and advance
+        try:
+            if result.get("game_over"):
+                await self._handle_game_over()
+                return
+            if result.get("game_complete"):
+                await self._handle_level_complete()
+                return
 
-        # Next question (no retry on wrong in yes/no quiz)
-        await self._generate_and_send_question()
+            # Next question
+            logger.info("engine.advancing_to_next_question")
+            await self._generate_and_send_question()
+        except Exception as e:
+            logger.error(f"engine.advance_error(error={e})", exc_info=True)
 
     async def _handle_level_complete(self):
         """Announce level complete, send game_state 'completed', advance level."""

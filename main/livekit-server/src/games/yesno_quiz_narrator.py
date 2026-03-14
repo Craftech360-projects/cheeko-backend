@@ -85,6 +85,7 @@ class YesNoNarrator:
 
     def __init__(self, session):
         self._session = session
+        self._current_speech = None  # Track current speech for interruption
 
     async def greet(self, child_name: str):
         """Initial greeting."""
@@ -142,6 +143,25 @@ class YesNoNarrator:
         """Speak a goodbye/end prompt from gateway."""
         await self._speak(prompt_text, tag="end_prompt")
 
+    async def _speak_fire_and_wait(self, text: str, tag: str):
+        """
+        Fire session.say() WITHOUT awaiting the SpeechHandle (which hangs in
+        hint manager's task context). Instead, estimate audio duration from text
+        length and sleep for that long. The next session.say() call will
+        interrupt this one if it's still playing (allow_interruptions=True).
+        """
+        import asyncio
+        logger.info(f"narrator.speak(tag={tag}, text={text[:100]})")
+        try:
+            self._session.say(text, allow_interruptions=True)
+            # Estimate: ~15 chars per second of audio (Deepgram TTS rate)
+            estimated_seconds = max(3.0, len(text) / 15.0)
+            logger.info(f"narrator.fire_and_wait(tag={tag}, wait={estimated_seconds:.1f}s)")
+            await asyncio.sleep(estimated_seconds)
+            logger.info(f"narrator.spoke(tag={tag})")
+        except Exception as e:
+            logger.error(f"narrator.speak_failed(tag={tag}, error={e})")
+
     async def _speak(self, text: str, tag: str):
         """
         Speak text directly via session.say() — no LLM involved.
@@ -151,7 +171,7 @@ class YesNoNarrator:
         import asyncio
         logger.info(f"narrator.speak(tag={tag}, text={text[:100]})")
         try:
-            speech = self._session.say(text, allow_interruptions=False)
+            speech = self._session.say(text, allow_interruptions=True)
             await asyncio.wait_for(speech, timeout=15.0)
             logger.info(f"narrator.spoke(tag={tag})")
         except asyncio.TimeoutError:
