@@ -14,6 +14,13 @@
         <!-- Stats Overview Bar -->
         <div class="stats-bar" v-loading="statsLoading" element-loading-background="transparent">
 
+            <div class="stat-item" @click="switchTab('categories')">
+                <div class="stat-icon categories" style="background: rgba(46, 204, 113, 0.1); color: #2ecc71;"><i class="el-icon-folder"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalCategories }}</div>
+                    <div class="stat-label">Categories</div>
+                </div>
+            </div>
             <div class="stat-item" @click="switchTab('questionPacks')">
                 <div class="stat-icon qa-packs" style="background: rgba(155, 89, 182, 0.1); color: #9b59b6;"><i class="el-icon-chat-square"></i></div>
                 <div class="stat-content">
@@ -62,6 +69,9 @@
             <!-- Tab Navigation -->
             <div class="tab-navigation">
 
+                <div class="tab-btn" :class="{ active: activeTab === 'categories' }" @click="switchTab('categories')">
+                    <i class="el-icon-folder"></i> Categories
+                </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'questionPacks' }" @click="switchTab('questionPacks')">
                     <i class="el-icon-chat-square"></i> Q&A Packs
                 </div>
@@ -88,6 +98,66 @@
             <div class="content-panel">
                 <div class="content-area">
                     <el-card class="rfid-card" shadow="never">
+                        <!-- Categories Tab -->
+                        <template v-if="activeTab === 'categories'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-folder"></i> Categories
+                                        <el-tag size="mini" type="info" class="section-count">{{ categoriesTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">Group content packs into categories (e.g., "Explore Cards", "Forest Tales").</p>
+                                </div>
+                            </div>
+
+                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; justify-content: space-between;">
+                                <div>
+                                    <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddCategoryDialog">Create Category</el-button>
+                                    <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedCategories">Delete Selected</el-button>
+                                </div>
+                            </div>
+
+                            <el-table :data="categoriesList" v-loading="categoriesLoading" stripe border size="small"
+                                @selection-change="handleCategorySelectionChange" style="width: 100%">
+                                <el-table-column type="selection" width="40"></el-table-column>
+                                <el-table-column prop="code" label="Code" width="150"></el-table-column>
+                                <el-table-column prop="name" label="Name" min-width="180"></el-table-column>
+                                <el-table-column prop="iconUrl" label="Icon" width="80">
+                                    <template slot-scope="scope">
+                                        <img v-if="scope.row.iconUrl" :src="scope.row.iconUrl" style="width: 32px; height: 32px; border-radius: 4px;" />
+                                        <span v-else>-</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="displayOrder" label="Order" width="80"></el-table-column>
+                                <el-table-column prop="active" label="Active" width="80">
+                                    <template slot-scope="scope">
+                                        <el-tag size="mini" :type="scope.row.active ? 'success' : 'info'">{{ scope.row.active ? 'Yes' : 'No' }}</el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" width="120" fixed="right">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" icon="el-icon-edit" circle type="primary" plain @click="editCategory(scope.row)"></el-button>
+                                        <el-button size="mini" icon="el-icon-delete" circle type="danger" plain @click="deleteCategoryRow(scope.row)"></el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn"></div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="categoriesPageSize" @change="handleCategoriesPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="categoriesCurrentPage === 1" @click="categoriesCurrentPage = 1; fetchCategories()">First</button>
+                                    <button class="pagination-btn" :disabled="categoriesCurrentPage === 1" @click="categoriesCurrentPage--; fetchCategories()">Previous</button>
+                                    <button v-for="page in categoriesVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === categoriesCurrentPage }" @click="categoriesCurrentPage = page; fetchCategories()">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="categoriesCurrentPage === categoriesPageCount" @click="categoriesCurrentPage++; fetchCategories()">Next</button>
+                                    <span class="total-text">Total {{ categoriesTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
                         <!-- AI Prompts Tab -->
 
 
@@ -456,6 +526,9 @@
                                     <el-button size="mini" type="primary" class="select-all-btn" @click="handleSelectAllContentPacks(true)">
                                         Select All
                                     </el-button>
+                                    <el-select v-model="contentPacksCategoryFilter" placeholder="All Categories" clearable size="mini" style="width: 160px; margin-right: 8px;" @change="fetchContentPacks">
+                                        <el-option v-for="cat in categoriesDropdown" :key="cat.id" :label="cat.name" :value="cat.id"></el-option>
+                                    </el-select>
                                     <el-button size="mini" type="success" icon="el-icon-plus" @click="showAddContentPackDialog">Create Pack</el-button>
                                     <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedContentPacks">Delete Selected</el-button>
                                 </div>
@@ -488,6 +561,7 @@
                                                     {{ pack.contentType === 'prompt' ? 'AI' : 'TTS' }}
                                                 </el-tag>
                                                 <el-tag size="mini" type="info" effect="plain"><i class="el-icon-document"></i> {{ pack.totalItems || 0 }} Items</el-tag>
+                                                <el-tag v-if="pack.categoryName" size="mini" type="success" effect="plain"><i class="el-icon-folder"></i> {{ pack.categoryName }}</el-tag>
                                                 <el-tag size="mini" type="success" effect="plain"><i class="el-icon-flag"></i> {{ pack.language }}</el-tag>
                                             </div>
                                         </div>
@@ -727,10 +801,19 @@
             @cancel="cardDialogVisible = false"
         />
 
+        <RfidCategoryDialog
+            :title="categoryDialogTitle"
+            :visible.sync="categoryDialogVisible"
+            :form="categoryForm"
+            @submit="handleCategorySubmit"
+            @cancel="categoryDialogVisible = false"
+        />
+
         <RfidContentPackDialog
             :title="contentPackDialogTitle"
             :visible.sync="contentPackDialogVisible"
             :form="contentPackForm"
+            :categories="categoriesDropdown"
             @submit="handleContentPackSubmit"
             @cancel="contentPackDialogVisible = false"
         />
@@ -767,12 +850,13 @@ import VersionFooter from "@/components/VersionFooter.vue";
 import RfidQuestionDialog from "@/components/RfidQuestionDialog.vue";
 import RfidPackDialog from "@/components/RfidPackDialog.vue";
 import RfidCardDialog from "@/components/RfidCardDialog.vue";
+import RfidCategoryDialog from "@/components/RfidCategoryDialog.vue";
 import RfidContentPackDialog from "@/components/RfidContentPackDialog.vue";
 import RfidSeriesDialog from "@/components/RfidSeriesDialog.vue";
 import RfidQuestionPackDialog from "@/components/RfidQuestionPackDialog.vue";
 
 export default {
-    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog },
+    components: { HeaderBar, VersionFooter, RfidQuestionDialog, RfidPackDialog, RfidCardDialog, RfidCategoryDialog, RfidContentPackDialog, RfidSeriesDialog, RfidQuestionPackDialog },
     data() {
         return {
             activeTab: 'questionPacks',
@@ -841,6 +925,19 @@ export default {
             contentPackDialogVisible: false,
             contentPackDialogTitle: 'Add Content Pack',
             contentPackForm: { id: null, packCode: '', name: '', description: '', contentType: 'story_pack', language: 'en', status: 'draft', version: 1, items: [], active: true },
+            contentPacksCategoryFilter: null,
+
+            // Categories
+            categoriesList: [],
+            categoriesLoading: false,
+            categoriesCurrentPage: 1,
+            categoriesPageSize: 10,
+            categoriesTotal: 0,
+            selectedCategories: [],
+            categoryDialogVisible: false,
+            categoryDialogTitle: 'Add Category',
+            categoryForm: { id: null, code: '', name: '', description: '', iconUrl: '', displayOrder: 0, active: true },
+            categoriesDropdown: [],
 
             // Question Packs (NEW)
             questionPacksList: [],
@@ -870,6 +967,7 @@ export default {
 
             // Stats
             stats: {
+                totalCategories: 0,
                 totalPrompts: 0,
                 totalContentPacks: 0,
                 totalProductSkus: 0,
@@ -883,6 +981,7 @@ export default {
     },
     created() {
 
+        this.fetchCategories();
         this.fetchQuestionPacks();
         this.loadDropdownData();
         this.loadStats();
@@ -908,6 +1007,13 @@ export default {
         },
         contentPacksVisiblePages() {
             return this.getVisiblePages(this.contentPacksCurrentPage, this.contentPacksPageCount);
+        },
+        // Categories pagination
+        categoriesPageCount() {
+            return Math.ceil(this.categoriesTotal / this.categoriesPageSize);
+        },
+        categoriesVisiblePages() {
+            return this.getVisiblePages(this.categoriesCurrentPage, this.categoriesPageCount);
         },
         // Cards pagination
         cardsPageCount() {
@@ -961,6 +1067,7 @@ export default {
             this.activeTab = tab;
             this.searchKeyword = '';
             if (tab === 'questions') this.fetchQuestions();
+            else if (tab === 'categories') this.fetchCategories();
             else if (tab === 'packs') this.fetchPacks();
             else if (tab === 'cards') this.fetchCards();
             else if (tab === 'contentPacks') this.fetchContentPacks();
@@ -991,6 +1098,9 @@ export default {
             } else if (this.activeTab === 'aiCards') {
                 this.aiCardsCurrentPage = 1;
                 this.fetchAiCards();
+            } else if (this.activeTab === 'categories') {
+                this.categoriesCurrentPage = 1;
+                this.fetchCategories();
             }
         },
 
@@ -1015,6 +1125,11 @@ export default {
                     this.questionPacksDropdown = data.data || [];
                 }
             });
+            Api.rfid.getCategoryList(({ data }) => {
+                if (data.code === 0) {
+                    this.categoriesDropdown = data.data || [];
+                }
+            });
         },
 
         loadStats() {
@@ -1022,7 +1137,7 @@ export default {
             let completed = 0;
             const checkDone = () => {
                 completed++;
-                if (completed >= 6) this.statsLoading = false;
+                if (completed >= 7) this.statsLoading = false;
             };
             Api.rfid.getQuestionPackPage({ page: 1, limit: 1 }, ({ data }) => {
                 if (data.code === 0) this.stats.totalQuestionPacks = data.data.total || 0;
@@ -1046,6 +1161,10 @@ export default {
             });
             Api.rfid.getCardPage({ page: 1, limit: 1, cardType: 'ai' }, ({ data }) => {
                 if (data.code === 0) this.stats.totalAiCards = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getCategoryPage({ page: 1, limit: 1 }, ({ data }) => {
+                if (data.code === 0) this.stats.totalCategories = data.data.total || 0;
                 checkDone();
             });
         },
@@ -1445,13 +1564,99 @@ export default {
             this.deleteAiCard(selected);
         },
 
+        // ==================== CATEGORIES ====================
+        fetchCategories() {
+            this.categoriesLoading = true;
+            Api.rfid.getCategoryPage({
+                page: this.categoriesCurrentPage,
+                limit: this.categoriesPageSize,
+                name: this.searchKeyword
+            }, ({ data }) => {
+                this.categoriesLoading = false;
+                if (data.code === 0) {
+                    this.categoriesList = data.data.list || [];
+                    this.categoriesTotal = data.data.total || 0;
+                } else {
+                    this.$message.error(data.msg || 'Failed to load categories');
+                }
+            });
+        },
+
+        handleCategoriesPageSizeChange(val) {
+            this.categoriesPageSize = val;
+            this.categoriesCurrentPage = 1;
+            this.fetchCategories();
+        },
+
+        handleCategorySelectionChange(val) {
+            this.selectedCategories = val;
+        },
+
+        showAddCategoryDialog() {
+            this.categoryDialogTitle = 'Add Category';
+            this.categoryForm = { id: null, code: '', name: '', description: '', iconUrl: '', displayOrder: 0, active: true };
+            this.categoryDialogVisible = true;
+        },
+
+        editCategory(row) {
+            this.categoryDialogTitle = 'Edit Category';
+            this.categoryForm = { ...row };
+            this.categoryDialogVisible = true;
+        },
+
+        handleCategorySubmit({ form, done }) {
+            const api = form.id ? Api.rfid.updateCategory : Api.rfid.addCategory;
+            api(form, ({ data }) => {
+                done && done();
+                if (data.code === 0) {
+                    this.$message.success(form.id ? 'Updated successfully' : 'Added successfully');
+                    this.categoryDialogVisible = false;
+                    this.fetchCategories();
+                    this.loadDropdownData();
+                    this.loadStats();
+                } else {
+                    this.$message.error(data.msg || 'Operation failed');
+                }
+            });
+        },
+
+        deleteCategoryRow(row) {
+            const items = Array.isArray(row) ? row : [row];
+            if (items.length === 0) return;
+            this.$confirm(`Delete ${items.length} category(ies)?`, 'Warning', {
+                confirmButtonText: 'Confirm',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                Api.rfid.deleteCategory(items.map(i => i.id), ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted successfully');
+                        this.fetchCategories();
+                        this.loadDropdownData();
+                        this.loadStats();
+                    } else {
+                        this.$message.error(data.msg || 'Delete failed');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        deleteSelectedCategories() {
+            if (this.selectedCategories.length === 0) {
+                this.$message.warning('Please select items to delete');
+                return;
+            }
+            this.deleteCategoryRow(this.selectedCategories);
+        },
+
         // ==================== CONTENT PACKS ====================
         fetchContentPacks() {
             this.contentPacksLoading = true;
             Api.rfid.getContentPackPage({
                 page: this.contentPacksCurrentPage,
                 limit: this.contentPacksPageSize,
-                packCode: this.searchKeyword
+                packCode: this.searchKeyword,
+                categoryId: this.contentPacksCategoryFilter || ''
             }, ({ data }) => {
                 this.contentPacksLoading = false;
                 if (data.code === 0) {

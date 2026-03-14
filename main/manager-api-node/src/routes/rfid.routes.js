@@ -3273,7 +3273,7 @@ router.get('/card/lookup-legacy/:rfidUid',
 router.get('/content-pack/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, packCode, name, contentType, language, active } = req.query;
+    const { page, limit, packCode, name, contentType, language, active, categoryId } = req.query;
     const result = await rfidService.getContentPackPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
@@ -3282,6 +3282,7 @@ router.get('/content-pack/page',
       contentType,
       language,
       active,
+      categoryId: categoryId ? parseInt(categoryId) : undefined,
     });
     success(res, result);
   })
@@ -3793,6 +3794,121 @@ router.get('/question-pack/:id',
     // I'll skip this specific GET /:id for now to avoid errors if service method is missing.
     // But I'll leave the block commented out just in case.
     return notFound(res, 'Not implemented yet');
+  })
+);
+
+// =============================================
+// Category Routes
+// =============================================
+
+router.get('/category/page',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, code, name, active } = req.query;
+    const result = await rfidService.getCategoryPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      code,
+      name,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+router.get('/category/list',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { active } = req.query;
+    const result = await rfidService.getCategoryList({
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+router.get('/category/code/:code',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { code } = req.params;
+    const cat = await rfidService.getCategoryByCode(code);
+    if (!cat) return notFound(res, 'Category not found');
+    success(res, cat);
+  })
+);
+
+router.get('/category/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const cat = await rfidService.getCategoryById(parseInt(id));
+    if (!cat) return notFound(res, 'Category not found');
+    success(res, cat);
+  })
+);
+
+router.post('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { code, name } = req.body;
+    if (!code || !name) return badRequest(res, 'Code and name are required');
+    try {
+      await rfidService.createCategory(req.body, req.user?.id);
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.put('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    if (!req.body.id) return badRequest(res, 'Category ID is required');
+    try {
+      await rfidService.updateCategory(req.body, req.user?.id);
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.delete('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Category IDs are required');
+    }
+    try {
+      await rfidService.deleteCategories(ids.map(id => parseInt(id)));
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.post('/category/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body.ids || (req.body.id ? [req.body.id] : null);
+    }
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Category IDs are required');
+    }
+    try {
+      await rfidService.deleteCategories(ids.map(id => parseInt(id)));
+      success(res, null);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
   })
 );
 

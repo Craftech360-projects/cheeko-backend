@@ -732,6 +732,104 @@ export default {
             }).send()
     },
 
+    // ==================== CATEGORIES ====================
+
+    // Get category page list
+    getCategoryPage(params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page || 1,
+            limit: params.limit || 10,
+            code: params.code || '',
+            name: params.name || '',
+            active: params.active !== undefined ? params.active : ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/category/page?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get category list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getCategoryPage(params, callback)
+                })
+            }).send()
+    },
+
+    // Get all categories list
+    getCategoryList(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/category/list`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get category list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getCategoryList(callback)
+                })
+            }).send()
+    },
+
+    // Add category
+    addCategory(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/category`)
+            .method('POST')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to add category:', err)
+                RequestService.reAjaxFun(() => {
+                    this.addCategory(data, callback)
+                })
+            }).send()
+    },
+
+    // Update category
+    updateCategory(data, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/category`)
+            .method('PUT')
+            .data(data)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to update category:', err)
+                RequestService.reAjaxFun(() => {
+                    this.updateCategory(data, callback)
+                })
+            }).send()
+    },
+
+    // Delete categories
+    deleteCategory(ids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/category/delete`)
+            .method('POST')
+            .data(ids)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete categories:', err)
+                RequestService.reAjaxFun(() => {
+                    this.deleteCategory(ids, callback)
+                })
+            }).send()
+    },
+
     // ==================== LOOKUP (Console) ====================
 
     // Lookup card by RFID UID

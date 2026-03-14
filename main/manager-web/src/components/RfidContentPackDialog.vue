@@ -40,6 +40,12 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="Category" prop="categoryId" class="form-item">
+          <el-select v-model="form.categoryId" placeholder="Select category (optional)" clearable class="custom-select">
+            <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id"></el-option>
+          </el-select>
+        </el-form-item>
+
         <el-form-item label="Language" prop="language" class="form-item">
           <el-select v-model="form.language" placeholder="Select language" class="custom-select">
             <el-option label="English" value="en"/>
@@ -61,7 +67,7 @@
         <!-- Dynamic Items Table -->
         <div class="items-section">
            <div class="items-header">
-              <span class="items-title">Pack Items (Max 10)</span>
+              <span class="items-title">Pack Items / Story Pages (Max 10)</span>
               <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
            </div>
            
@@ -72,6 +78,10 @@
                   </div>
                   <div class="item-col main-col">
                       <div class="inputs-wrapper" style="flex: 1; min-width: 0;">
+                          <div style="display: flex; gap: 8px; margin-bottom: 4px;">
+                              <el-input-number v-model="item.storyNumber" :min="1" size="small" placeholder="Story #" style="width: 120px;" controls-position="right"></el-input-number>
+                              <el-input v-model="item.storyTitle" placeholder="Story title (e.g., The Lost Fox)" size="small" style="flex: 1;"></el-input>
+                          </div>
                           <el-input v-model="item.title" placeholder="Title" size="small" class="mb-1"></el-input>
                           <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
                               <template slot="prepend"><i class="el-icon-headset"></i></template>
@@ -155,6 +165,10 @@ export default {
         active: true,
         items: [] // Structured Items
       })
+    },
+    categories: {
+      type: Array,
+      default: () => []
     }
   },
   data() {
@@ -182,10 +196,12 @@ export default {
         if (this.form.items.length < 10) {
             this.form.items.push({
                 sequence: this.form.items.length + 1,
+                storyNumber: 1,
+                storyTitle: '',
                 title: '',
                 audioUrl: '',
                 imageUrl: '',
-                text: ''  // Voice script / lyrics text
+                text: ''
             });
         }
     },

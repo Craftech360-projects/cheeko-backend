@@ -902,32 +902,17 @@ class MQTTGateway {
             `Sending card_content directly to device, bypassing Agent.`
           );
 
-          // Build Phase 9 format arrays
-          const audio = [];
-          const images = [];
-          for (const item of rfidContent.items) {
-            const seq = item.sequence;
-            if (item.audioUrl) {
-              audio.push({ index: seq, url: encodeUrlPath(item.audioUrl) });
-            }
-            if (item.imageUrl) {
-              images.push({ index: seq, url: item.imageUrl });
-            }
-          }
-
           const manifest = {
             type: "card_content",
             rfid_uid: rfidUid,
-            skill_id: rfidContent.packCode,
-            skill_name: rfidContent.title || rfidContent.packName,
+            category: rfidContent.categoryName || null,
             version: parseInt(rfidContent.version) || 1,
-            audio: audio,
-            images: images,
+            stories: rfidContent.stories || [],
           };
 
           logger.info(
-            `📦 [RFID-ROUTING] Sending card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
-            `audio=${audio.length}, images=${images.length} to device ${deviceId}`
+            `📦 [RFID-ROUTING] Sending card_content: v=${manifest.version}, ` +
+            `category=${manifest.category || 'none'}, stories=${manifest.stories.length} to device ${deviceId}`
           );
 
           this.mqttPublish(`devices/p2p/${clientId}`, manifest);

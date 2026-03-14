@@ -24,6 +24,24 @@ const formatDate = (date) => {
 };
 
 // =============================================
+// Helper: Transform RFID Category to camelCase (RfidCategoryDTO)
+// =============================================
+const transformCategoryToCamelCase = (cat) => {
+  if (!cat) return null;
+  return {
+    id: cat.id ? Number(cat.id) : null,
+    code: cat.code,
+    name: cat.name,
+    description: cat.description,
+    iconUrl: cat.icon_url,
+    displayOrder: cat.display_order,
+    active: cat.active,
+    createDate: formatDate(cat.create_date),
+    updateDate: formatDate(cat.update_date)
+  };
+};
+
+// =============================================
 // Helper: Transform RFID Question to camelCase (RfidQuestionDTO)
 // =============================================
 const transformQuestionToCamelCase = (question) => {
@@ -80,6 +98,7 @@ const transformCardMappingToCamelCase = (card) => {
     packCode: card.pack_code,
     packId: card.pack_id ? Number(card.pack_id) : null,
     contentPackId: card.content_pack_id ? Number(card.content_pack_id) : null,
+    categoryId: card.category_id ? Number(card.category_id) : null,
     actionType: card.action_type,
     actionData: card.action_data || {},
     cardType: card.card_type || null,
@@ -373,16 +392,87 @@ const lookupCardByUid = async (rfidUid) => {
   logger.info(`[RFID-LOOKUP] Found mapping: id=${mapping.id}, card_type=${mapping.card_type}, content_pack_id=${mapping.content_pack_id || 'null'}, question_id=${mapping.question_id || 'null'}`);
 
   // ✅ PRIORITY ORDER: Content data always wins over card_type label.
-  // Check content_pack_id FIRST so that cards with a pack linked are never
-  // misrouted to AI even if their card_type was accidentally set to 'ai'.
+  // Check category_id FIRST, then content_pack_id, then AI, then Q&A.
 
-  // Track 1: Content Pack (Story/Rhyme) — highest priority
+  // Track 0: Category — one card maps to ALL content packs in a category
+  if (mapping.category_id) {
+    logger.info(`[RFID-LOOKUP] Track 0: Category lookup, category_id=${mapping.category_id}`);
+    try {
+      const category = await prisma.rfid_category.findFirst({
+        where: { id: mapping.category_id }
+      });
+
+      const packs = await prisma.rfid_content_pack.findMany({
+        where: { category_id: mapping.category_id, active: true },
+        orderBy: { name: 'asc' }
+      });
+
+      if (packs.length > 0) {
+        const allStories = [];
+        const allItems = [];
+        let storyCounter = 0;
+
+        for (const pack of packs) {
+          storyCounter++;
+          const items = await prisma.content_item.findMany({
+            where: { content_pack_id: pack.id },
+            orderBy: [{ story_number: 'asc' }, { item_number: 'asc' }]
+          });
+
+          allStories.push({
+            storyNumber: storyCounter,
+            storyTitle: pack.name,
+            pages: items.map(item => ({
+              page: item.item_number,
+              audioUrl: item.audio_url,
+              imageUrl: item.image_url || null
+            }))
+          });
+
+          for (const item of items) {
+            allItems.push({
+              sequence: allItems.length + 1,
+              title: item.title,
+              audioUrl: item.audio_url,
+              imageUrl: item.image_url || null,
+              promptText: item.lyrics_text || null,
+              storyNumber: storyCounter,
+              storyTitle: pack.name
+            });
+          }
+        }
+
+        const categoryName = category ? category.name : null;
+        const categoryCode = category ? category.code : null;
+
+        logger.info(`[RFID-LOOKUP] Category resolved: name="${categoryName}", packs=${packs.length}, stories=${allStories.length}, totalPages=${allItems.length}`);
+
+        return {
+          rfid_uid: normalizedUid,
+          contentType: 'story_pack',
+          title: categoryName || 'Category Pack',
+          packCode: categoryCode,
+          version: '1',
+          categoryName,
+          categoryCode,
+          stories: allStories,
+          items: allItems
+        };
+      }
+      logger.warn(`[RFID-LOOKUP] Category id=${mapping.category_id} has no active content packs`);
+    } catch (catErr) {
+      logger.error('[RFID-LOOKUP] Category lookup error:', catErr);
+    }
+  }
+
+  // Track 1: Content Pack (Story/Rhyme) — single pack, highest priority after category
   if (mapping.content_pack_id) {
     logger.info(`[RFID-LOOKUP] Track 1: Content Pack lookup, pack_id=${mapping.content_pack_id}`);
     let pack = null;
     try {
       pack = await prisma.rfid_content_pack.findFirst({
-        where: { id: mapping.content_pack_id }
+        where: { id: mapping.content_pack_id },
+        include: { rfid_category: true }
       });
     } catch (packErr) {
       logger.error('[RFID-LOOKUP] Content pack query error:', packErr);
@@ -393,7 +483,7 @@ const lookupCardByUid = async (rfidUid) => {
       try {
         items = await prisma.content_item.findMany({
           where: { content_pack_id: pack.id },
-          orderBy: { item_number: 'asc' }
+          orderBy: [{ story_number: 'asc' }, { item_number: 'asc' }]
         });
       } catch (itemsErr) {
         logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
@@ -404,10 +494,31 @@ const lookupCardByUid = async (rfidUid) => {
         title: item.title,
         audioUrl: item.audio_url,
         imageUrl: item.image_url || null,
-        promptText: item.lyrics_text || null // Optional read-along
+        promptText: item.lyrics_text || null,
+        storyNumber: item.story_number || 1,
+        storyTitle: item.story_title || null
       }));
 
-      logger.info(`[RFID-LOOKUP] Content Pack resolved: name="${pack.name}", type=${pack.content_type}, items=${mappedItems.length}, audioUrls=${mappedItems.filter(i => i.audioUrl).length}`);
+      // Build nested stories structure grouped by story_number
+      const storyMap = new Map();
+      for (const item of items) {
+        const sn = item.story_number || 1;
+        if (!storyMap.has(sn)) {
+          storyMap.set(sn, { storyNumber: sn, storyTitle: item.story_title || null, pages: [] });
+        }
+        storyMap.get(sn).pages.push({
+          page: item.item_number,
+          audioUrl: item.audio_url,
+          imageUrl: item.image_url || null
+        });
+      }
+      const stories = Array.from(storyMap.values()).sort((a, b) => a.storyNumber - b.storyNumber);
+
+      // Get category info
+      const categoryName = pack.rfid_category ? pack.rfid_category.name : null;
+      const categoryCode = pack.rfid_category ? pack.rfid_category.code : null;
+
+      logger.info(`[RFID-LOOKUP] Content Pack resolved: name="${pack.name}", type=${pack.content_type}, items=${mappedItems.length}, stories=${stories.length}, category=${categoryName || 'none'}`);
 
       return {
         rfid_uid: normalizedUid,
@@ -415,6 +526,9 @@ const lookupCardByUid = async (rfidUid) => {
         title: pack.name,
         packCode: pack.pack_code,
         version: pack.version,
+        categoryName,
+        categoryCode,
+        stories,
         items: mappedItems
       };
     } else {
@@ -579,6 +693,7 @@ const createCardMapping = async (data, _userId) => {
         pack_code: data.packCode || null,
         pack_id: data.packId ? BigInt(data.packId) : null,
         content_pack_id: data.contentPackId ? BigInt(data.contentPackId) : null,
+        category_id: data.categoryId ? BigInt(data.categoryId) : null,
         action_type: data.actionType || null,
         action_data: data.actionData || {},
         card_type: data.cardType || 'content',
@@ -635,6 +750,7 @@ const updateCardMapping = async (data, _userId) => {
       updateData.question_pack_id = null;
     }
   }
+  if (data.categoryId !== undefined) updateData.category_id = data.categoryId ? BigInt(data.categoryId) : null;
   if (data.actionType !== undefined) updateData.action_type = data.actionType;
   if (data.actionData !== undefined) updateData.action_data = data.actionData;
   if (data.cardType !== undefined) updateData.card_type = data.cardType;
@@ -2669,6 +2785,8 @@ const transformContentPackToCamelCase = (pack) => {
     name: pack.name,
     description: pack.description,
     contentType: pack.content_type,
+    categoryId: pack.category_id ? Number(pack.category_id) : null,
+    categoryName: pack.rfid_category ? pack.rfid_category.name : null,
     contentMd: pack.content_md,
     totalItems: pack.total_items,
     language: pack.language,
@@ -2686,7 +2804,7 @@ const transformContentPackToCamelCase = (pack) => {
  * @param {Object} params - Pagination and filter options
  * @returns {Promise<Object>} Paginated content pack list
  */
-const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, contentType, language, active } = {}) => {
+const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, contentType, language, active, categoryId } = {}) => {
   const offset = (page - 1) * limit;
 
   const where = {};
@@ -2698,6 +2816,7 @@ const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, conten
   if (active !== undefined && active !== null && active !== '') {
     where.active = active === true || active === 'true' || active === '1';
   }
+  if (categoryId) where.category_id = BigInt(categoryId);
 
   try {
     const [total, packs] = await Promise.all([
@@ -2706,7 +2825,8 @@ const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, conten
         where,
         orderBy: { name: 'asc' },
         skip: offset,
-        take: limit
+        take: limit,
+        include: { rfid_category: true }
       })
     ]);
 
@@ -2726,7 +2846,7 @@ const getContentPackPage = async ({ page = 1, limit = 10, packCode, name, conten
 /**
  * Get all content packs (no pagination)
  */
-const getContentPackList = async ({ packCode, name, contentType, language, active } = {}) => {
+const getContentPackList = async ({ packCode, name, contentType, language, active, categoryId } = {}) => {
   const where = {};
 
   if (packCode) where.pack_code = { contains: packCode, mode: 'insensitive' };
@@ -2736,11 +2856,13 @@ const getContentPackList = async ({ packCode, name, contentType, language, activ
   if (active !== undefined && active !== null && active !== '') {
     where.active = active === true || active === 'true' || active === '1';
   }
+  if (categoryId) where.category_id = BigInt(categoryId);
 
   try {
     const packs = await prisma.rfid_content_pack.findMany({
       where,
-      orderBy: { name: 'asc' }
+      orderBy: { name: 'asc' },
+      include: { rfid_category: true }
     });
     return packs.map(transformContentPackToCamelCase);
   } catch (error) {
@@ -2868,6 +2990,7 @@ const createContentPack = async (data, userId) => {
     cached_audio_urls: data.cachedAudioUrls || null,
     version: data.version || null,
     content_hash: data.contentHash || null,
+    category_id: data.categoryId ? BigInt(data.categoryId) : null,
     creator: userId ? BigInt(userId) : null,
   };
 
@@ -2892,6 +3015,8 @@ const createContentPack = async (data, userId) => {
       title: item.title,
       audio_url: item.audioUrl || null,
       image_url: item.imageUrl || null,
+      story_number: item.storyNumber || 1,
+      story_title: item.storyTitle || null,
       lyrics_text: item.text || item.lyricsText || null,
       creator: userId ? BigInt(userId) : null,
       active: true
@@ -2945,6 +3070,7 @@ const updateContentPack = async (data, userId) => {
   if (data.cachedAudioUrls !== undefined) updateData.cached_audio_urls = data.cachedAudioUrls;
   if (data.version !== undefined) updateData.version = data.version;
   if (data.contentHash !== undefined) updateData.content_hash = data.contentHash;
+  if (data.categoryId !== undefined) updateData.category_id = data.categoryId ? BigInt(data.categoryId) : null;
 
   try {
     await prisma.rfid_content_pack.updateMany({
@@ -2978,6 +3104,8 @@ const updateContentPack = async (data, userId) => {
         title: item.title,
         audio_url: item.audioUrl || null,
         image_url: item.imageUrl || null,
+        story_number: item.storyNumber || 1,
+        story_title: item.storyTitle || null,
         lyrics_text: item.text || item.lyricsText || null,
         updater: userId ? BigInt(userId) : null,
         active: true
@@ -3288,6 +3416,170 @@ const getRfidMappingOptions = async () => {
   }
 };
 
+// =============================================
+// Category CRUD Methods
+// =============================================
+
+/**
+ * Get categories with pagination
+ */
+const getCategoryPage = async ({ page = 1, limit = 10, code, name, active } = {}) => {
+  const offset = (page - 1) * limit;
+  const where = {};
+  if (code) where.code = { contains: code, mode: 'insensitive' };
+  if (name) where.name = { contains: name, mode: 'insensitive' };
+  if (active !== undefined && active !== null && active !== '') {
+    where.active = active === true || active === 'true' || active === '1';
+  }
+
+  try {
+    const [total, categories] = await Promise.all([
+      prisma.rfid_category.count({ where }),
+      prisma.rfid_category.findMany({
+        where,
+        orderBy: { display_order: 'asc' },
+        skip: offset,
+        take: limit
+      })
+    ]);
+    return {
+      list: categories.map(transformCategoryToCamelCase),
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+    };
+  } catch (error) {
+    logger.error('Failed to fetch categories:', error);
+    throw new Error('Failed to fetch categories');
+  }
+};
+
+/**
+ * Get all categories (no pagination)
+ */
+const getCategoryList = async ({ active } = {}) => {
+  const where = {};
+  if (active !== undefined && active !== null && active !== '') {
+    where.active = active === true || active === 'true' || active === '1';
+  }
+  try {
+    const categories = await prisma.rfid_category.findMany({
+      where,
+      orderBy: { display_order: 'asc' }
+    });
+    return categories.map(transformCategoryToCamelCase);
+  } catch (error) {
+    logger.error('Failed to fetch categories:', error);
+    throw new Error('Failed to fetch categories');
+  }
+};
+
+/**
+ * Get category by ID
+ */
+const getCategoryById = async (id) => {
+  try {
+    const cat = await prisma.rfid_category.findFirst({ where: { id: BigInt(id) } });
+    return transformCategoryToCamelCase(cat);
+  } catch (error) {
+    logger.error('Failed to fetch category:', error);
+    throw new Error('Failed to fetch category');
+  }
+};
+
+/**
+ * Get category by code
+ */
+const getCategoryByCode = async (code) => {
+  try {
+    const cat = await prisma.rfid_category.findFirst({ where: { code } });
+    return transformCategoryToCamelCase(cat);
+  } catch (error) {
+    logger.error('Failed to fetch category:', error);
+    throw new Error('Failed to fetch category');
+  }
+};
+
+/**
+ * Create category
+ */
+const createCategory = async (data, userId) => {
+  const existing = await getCategoryByCode(data.code);
+  if (existing) {
+    throw new Error('Category with this code already exists');
+  }
+  try {
+    await prisma.rfid_category.create({
+      data: {
+        code: data.code,
+        name: data.name,
+        description: data.description || null,
+        icon_url: data.iconUrl || null,
+        display_order: data.displayOrder || 0,
+        active: data.active !== false,
+        creator: userId ? BigInt(userId) : null,
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to create category:', error);
+    if (error.code === 'P2002') {
+      throw new Error('Category with this code already exists');
+    }
+    throw new Error('Failed to create category');
+  }
+  return null;
+};
+
+/**
+ * Update category
+ */
+const updateCategory = async (data, userId) => {
+  if (!data.id) throw new Error('Category ID is required');
+  const updateData = {
+    updater: userId ? BigInt(userId) : null,
+    update_date: new Date(),
+  };
+  if (data.code !== undefined) updateData.code = data.code;
+  if (data.name !== undefined) updateData.name = data.name;
+  if (data.description !== undefined) updateData.description = data.description;
+  if (data.iconUrl !== undefined) updateData.icon_url = data.iconUrl;
+  if (data.displayOrder !== undefined) updateData.display_order = data.displayOrder;
+  if (data.active !== undefined) updateData.active = data.active;
+
+  try {
+    await prisma.rfid_category.updateMany({
+      where: { id: BigInt(data.id) },
+      data: updateData
+    });
+  } catch (error) {
+    logger.error('Failed to update category:', error);
+    if (error.code === 'P2002') {
+      throw new Error('Category with this code already exists');
+    }
+    throw new Error('Failed to update category');
+  }
+  return null;
+};
+
+/**
+ * Delete categories by IDs
+ */
+const deleteCategories = async (ids) => {
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Category IDs are required');
+  }
+  try {
+    await prisma.rfid_category.deleteMany({
+      where: { id: { in: ids.map(id => BigInt(id)) } }
+    });
+  } catch (error) {
+    logger.error('Failed to delete categories:', error);
+    throw new Error('Failed to delete categories');
+  }
+  return null;
+};
+
 module.exports = {
   // PRD-specified card mapping methods
   getCardMappingPage,
@@ -3399,4 +3691,14 @@ module.exports = {
   deleteQuestionPacks,
   transformQuestionPackToCamelCase,
   getRfidMappingOptions,
+
+  // Category CRUD
+  getCategoryPage,
+  getCategoryList,
+  getCategoryById,
+  getCategoryByCode,
+  createCategory,
+  updateCategory,
+  deleteCategories,
+  transformCategoryToCamelCase,
 };
