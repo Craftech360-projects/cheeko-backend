@@ -403,7 +403,7 @@ const lookupCardByUid = async (rfidUid) => {
         sequence: item.item_number,
         title: item.title,
         audioUrl: item.audio_url,
-        imageUrl: null, // content_item has no image_url column
+        imageUrl: item.image_url || null,
         promptText: item.lyrics_text || null // Optional read-along
       }));
 
@@ -2784,7 +2784,7 @@ const getContentPackByCode = async (packCode) => {
         title: item.title,
         text: item.lyrics_text || '',  // lyrics_text is the text field in schema
         audioUrl: item.audio_url,
-        imageUrl: null, // content_item has no image_url column
+        imageUrl: item.image_url || null,
         active: item.active
       }));
     } else {
@@ -2883,7 +2883,6 @@ const createContentPack = async (data, userId) => {
   }
 
   // Insert Items (if any)
-  // Note: content_item has no image_url or content_text columns; map accordingly
   if (data.items && Array.isArray(data.items) && data.items.length > 0) {
     logger.info(`[createContentPack] Inserting ${data.items.length} items for pack ID ${newPack.id}`);
 
@@ -2891,8 +2890,9 @@ const createContentPack = async (data, userId) => {
       content_pack_id: newPack.id,
       item_number: index + 1, // Ensure sequence is correct
       title: item.title,
-      audio_url: item.audioUrl,
-      lyrics_text: item.text || item.lyricsText || null, // lyrics_text is the text column
+      audio_url: item.audioUrl || null,
+      image_url: item.imageUrl || null,
+      lyrics_text: item.text || item.lyricsText || null,
       creator: userId ? BigInt(userId) : null,
       active: true
     }));
@@ -2972,13 +2972,13 @@ const updateContentPack = async (data, userId) => {
 
     // Insert new
     if (data.items.length > 0) {
-      // Note: content_item has no image_url or content_text columns
       const itemsData = data.items.map((item, index) => ({
         content_pack_id: BigInt(data.id),
         item_number: index + 1,
         title: item.title,
-        audio_url: item.audioUrl,
-        lyrics_text: item.text || item.lyricsText || null, // lyrics_text is the text column
+        audio_url: item.audioUrl || null,
+        image_url: item.imageUrl || null,
+        lyrics_text: item.text || item.lyricsText || null,
         updater: userId ? BigInt(userId) : null,
         active: true
       }));

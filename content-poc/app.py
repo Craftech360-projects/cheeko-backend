@@ -8,74 +8,205 @@ from crewai import Crew, Process
 
 from agents import ContentAgents
 from tasks import ContentTasks
-from generators import generate_audio, generate_image, init_clients
+from generators import generate_audio, generate_audio_fish, generate_image, init_clients
+from categories import CATEGORIES, get_category_names, get_card_categories, get_general_categories
 
 # Load env variables
 load_dotenv()
 
+def sanitize_dirname(name):
+    """Remove characters invalid in Windows folder names."""
+    return re.sub(r'[<>:"/\\|?*]', '', name).replace(" ", "_").strip()
+
 st.set_page_config(page_title="Cheeko Content Factory", layout="wide")
 
+# Fox reference image path
+FOX_REF_PATH = os.path.join(os.path.dirname(__file__), "assets", "fox_reference.png")
+
+# ---- Custom CSS ----
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;500;600;700&family=Comic+Neue:wght@300;400;700&display=swap');
+
+/* Global font */
+html, body, [class*="css"] {
+    font-family: 'Comic Neue', cursive, sans-serif;
+}
+h1, h2, h3, h4 {
+    font-family: 'Baloo 2', cursive, sans-serif !important;
+}
+
+/* Category card grid */
+.category-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 10px 0;
+}
+.category-card {
+    border: 2px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    background: white;
+}
+.category-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.category-card.selected {
+    border-width: 3px;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+}
+.category-card h4 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+}
+.category-card p {
+    margin: 0;
+    font-size: 11px;
+    color: #64748B;
+}
+.category-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    color: white;
+    margin-top: 6px;
+}
+
+/* Step cards */
+.step-card {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #E2E8F0;
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+/* Fox preview */
+.fox-preview {
+    border: 2px dashed #C7D2FE;
+    border-radius: 12px;
+    padding: 8px;
+    text-align: center;
+    background: #F5F3FF;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+def render_category_info(category_name):
+    """Show selected category details."""
+    cat = CATEGORIES.get(category_name)
+    if not cat:
+        return
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown(f"**{cat['cognitive_goal']}**")
+        st.caption(cat['description'])
+    with col2:
+        st.metric("Steps", cat['step_count'])
+
+
 def main():
-    st.title("🧸 Cheeko Content Factory")
-    st.markdown("Generate 10-step audio guides with Multi-Agent AI.")
+    st.title("Cheeko Content Factory")
+    st.markdown("Generate audio stories & guides with AI - featuring Cheeko the Fox!")
 
-    # ---------------- Sidebar Config ----------------
+    # ---- Sidebar ----
     with st.sidebar:
-        st.header("Configuration")
-        api_key_status = "✅ Set" if os.getenv("GEMINI_API_KEY") else "❌ Missing"
-        st.write(f"Gemini API: {api_key_status}")
-        
-        eleven_status = "✅ Set" if os.getenv("ELEVENLABS_API_KEY") else "❌ Missing"
-        st.write(f"ElevenLabs API: {eleven_status}")
-        
-        # Content Type Selector
-        content_type = st.selectbox(
-            "Content Type", 
-            [ "Routine", "Learning","Story",  "Meditation","Song/Rhyme"]
-        )
-        
-        eleven_model = st.selectbox(
-            "Voice Model",
-            ["eleven_turbo_v2_5", "eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_flash_v2"]
-        )
-        
-        # Voice Map
-        voices = {
-            "Mimi (Child - Australian)": "zrHiDhphv9ZnVXBqCLjz",
-            "Cheeko (Default - Kid Friendly)": "mHX7OoPk2G45VMAuinIt",
-            "Gigi (Child - American)": "jBpfuIE2acCO8z3wKNLl",
-            "Rachel": "21m00Tcm4TlvDq8ikWAM",
-            "Nicole (Soft & Calm)": "piTKgcLEGmPE4e6mEKli",
-            "Bella (Soft)": "EXAVITQu4vr4xnSDxMaL"
-        }
-        
-        selected_voice_name = st.selectbox("Voice Character", list(voices.keys()), index=0)
-        selected_voice_id = voices[selected_voice_name]
-        
-        with st.expander("🗣️ Audio Expression Settings"):
-            stability = st.slider("Stability (Lower = More Expressive)", 0.0, 1.0, 0.5, 0.05)
-            style = st.slider("Style Exaggeration", 0.0, 1.0, 0.5, 0.05)
-            similarity = st.slider("Similarity Boost (Voice Cloning)", 0.0, 1.0, 0.8, 0.05)
-            
-            voice_settings = {
-                "stability": stability,
-                "similarity_boost": similarity,
-                "style": style,
-                "use_speaker_boost": True
-            }
+        st.header("Settings")
 
-        # Display Mode Config
-        st.markdown("### 🖥️ Display Settings")
-        esp32_mode = st.checkbox("Optimize for ESP32 Display (240x296 px, Pixel Art + .bin)", value=True)
+        # API status
+        api_ok = os.getenv("GEMINI_API_KEY")
+        eleven_ok = os.getenv("ELEVENLABS_API_KEY")
+        col_a, col_b = st.columns(2)
+        with col_a:
+            st.write(f"Gemini: {'Set' if api_ok else 'Missing'}")
+        with col_b:
+            st.write(f"ElevenLabs: {'Set' if eleven_ok else 'Missing'}")
 
-        # History / Load Previous
         st.markdown("---")
-        st.subheader("📂 History")
+
+        # Fox Preview
+        st.subheader("Cheeko the Fox")
+        if os.path.exists(FOX_REF_PATH):
+            st.image(FOX_REF_PATH, width='stretch')
+            st.caption("Reference character for all images")
+        else:
+            st.markdown('<div class="fox-preview">No fox image yet.<br>Add <code>assets/fox_reference.png</code></div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # Voice Settings
+        st.subheader("Voice")
+        tts_provider = st.selectbox(
+            "TTS Provider",
+            ["Fish Audio", "ElevenLabs"],
+            help="Fish Audio: cheaper, supports (emotion) tags. ElevenLabs: [emotion] tags on v3."
+        )
+
+        if tts_provider == "Fish Audio":
+            fish_ok = os.getenv("FISH_AUDIO_API_KEY")
+            st.write(f"Fish Audio: {'Set' if fish_ok else 'Missing API Key'}")
+
+            fish_voices = {
+                "Paula (Professional Female)": "c2623f0c075b4492ac367989aee1576f",
+            }
+            selected_fish_voice_name = st.selectbox("Fish Voice", list(fish_voices.keys()), index=0)
+            selected_fish_voice_id = fish_voices[selected_fish_voice_name]
+
+            # Placeholders for ElevenLabs vars (not used but needed by code)
+            eleven_model = None
+            selected_voice_id = None
+            voice_settings = None
+        else:
+            eleven_model = st.selectbox(
+                "Voice Model",
+                ["eleven_v3", "eleven_turbo_v2_5", "eleven_multilingual_v2", "eleven_flash_v2_5", "eleven_flash_v2"],
+                help="v3 supports emotion tags like [whispers], [excited], [laughs]. v2 models use SSML breaks."
+            )
+
+            voices = {
+                "Mimi (Child - Australian)": "zrHiDhphv9ZnVXBqCLjz",
+                "Cheeko (Default - Kid Friendly)": "mHX7OoPk2G45VMAuinIt",
+                "Gigi (Child - American)": "jBpfuIE2acCO8z3wKNLl",
+                "Rachel": "21m00Tcm4TlvDq8ikWAM",
+                "Nicole (Soft & Calm)": "piTKgcLEGmPE4e6mEKli",
+                "Bella (Soft)": "EXAVITQu4vr4xnSDxMaL"
+            }
+            selected_voice_name = st.selectbox("Voice Character", list(voices.keys()), index=0)
+            selected_voice_id = voices[selected_voice_name]
+            selected_fish_voice_id = None
+
+            with st.expander("Expression Settings"):
+                stability = st.slider("Stability", 0.0, 1.0, 0.5, 0.05)
+                style = st.slider("Style Exaggeration", 0.0, 1.0, 0.5, 0.05)
+                similarity = st.slider("Similarity Boost", 0.0, 1.0, 0.8, 0.05)
+                voice_settings = {
+                    "stability": stability,
+                    "similarity_boost": similarity,
+                    "style": style,
+                    "use_speaker_boost": True
+                }
+
+        st.markdown("---")
+
+        # Display Settings
+        st.subheader("Display")
+        esp32_mode = st.checkbox("ESP32 Mode (240x296 px, Pixel Art + .bin)", value=True)
+
+        st.markdown("---")
+
+        # History
+        st.subheader("History")
         output_root = "output"
         os.makedirs(output_root, exist_ok=True)
         previous_projects = [d for d in os.listdir(output_root) if os.path.isdir(os.path.join(output_root, d))]
-        
-        # Use a callback to handle history loading explicitly
+
         def on_history_change():
             current_selection = st.session_state.history_selector
             if current_selection != "(New Generation)":
@@ -84,107 +215,140 @@ def main():
                 if os.path.exists(plan_path):
                     with open(plan_path, "r") as f:
                         st.session_state['raw_result'] = f.read()
-                    # Update active topic
                     st.session_state['topic'] = current_selection.replace("_", " ")
                 else:
-                    st.toast("No plan.json found in this folder.", icon="⚠️")
-            else:
-                # Optional: Reset only if you want "New" to be blank? 
-                # Or keep the last topic. Let's keep it safe and not auto-clear 
-                # unless we want a fresh start.
-                pass
+                    st.toast("No plan.json found in this folder.")
 
         selected_history = st.selectbox(
-            "Load Previous Project", 
+            "Load Previous Project",
             ["(New Generation)"] + previous_projects,
             key="history_selector",
             on_change=on_history_change
         )
-        
-        # Add Delete Button for selected history
+
         if selected_history != "(New Generation)":
-            if st.button(f"🗑️ Delete '{selected_history}'", type="primary"):
+            if st.button(f"Delete '{selected_history}'", type="primary"):
                 import shutil
                 del_path = os.path.join("output", selected_history)
                 try:
                     shutil.rmtree(del_path)
-                    st.toast(f"Deleted {selected_history}", icon="✅")
-                    # Clear session state related to this content to avoid errors
-                    if 'raw_result' in st.session_state: del st.session_state['raw_result']
-                    
-                    # Do not modify history_selector manually; rerun will reset it as the option disappears
+                    st.toast(f"Deleted {selected_history}")
+                    if 'raw_result' in st.session_state:
+                        del st.session_state['raw_result']
                     time.sleep(0.5)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error deleting: {e}")
-    
-    # Ensure topic is initialized
+
+    # ---- Main Content ----
+    st.markdown("---")
+
+    # Category Selector - Visual Cards
+    st.subheader("Select Category")
+
+    # Card categories row
+    card_cats = get_card_categories()
+    general_cats = get_general_categories()
+    all_cats = card_cats + general_cats
+
+    # Initialize category in session state
+    if 'selected_category' not in st.session_state:
+        st.session_state['selected_category'] = "Story Cards"
+
+    # Card Categories
+    st.markdown("**Card Categories**")
+    cols = st.columns(len(card_cats))
+    for i, cat_name in enumerate(card_cats):
+        cat = CATEGORIES[cat_name]
+        with cols[i]:
+            is_selected = st.session_state['selected_category'] == cat_name
+            btn_type = "primary" if is_selected else "secondary"
+            if st.button(
+                cat_name,
+                key=f"cat_{cat_name}",
+                type=btn_type,
+                width='stretch'
+            ):
+                st.session_state['selected_category'] = cat_name
+                st.rerun()
+
+    # General Types
+    st.markdown("**General Types**")
+    cols2 = st.columns(len(general_cats))
+    for i, cat_name in enumerate(general_cats):
+        cat = CATEGORIES[cat_name]
+        with cols2[i]:
+            is_selected = st.session_state['selected_category'] == cat_name
+            btn_type = "primary" if is_selected else "secondary"
+            if st.button(
+                cat_name,
+                key=f"cat_{cat_name}",
+                type=btn_type,
+                width='stretch'
+            ):
+                st.session_state['selected_category'] = cat_name
+                st.rerun()
+
+    # Show selected category info
+    content_type = st.session_state['selected_category']
+    render_category_info(content_type)
+
+    st.markdown("---")
+
+    # Topic Input
     if 'topic' not in st.session_state:
         st.session_state['topic'] = "Bedtime Routine"
 
-    # ---------------- Main Content Area ----------------
-    st.markdown("---")
-    
-    # Topic Input (bound to session state)
-    topic = st.text_input("Topic", key="topic") # Direct binding to session_state['topic']
-    
+    topic = st.text_input("Topic", key="topic")
+
     col_gen, col_redo = st.columns(2)
     with col_gen:
-        generate_btn = st.button("🚀 Generate New Plan")
+        generate_btn = st.button("Generate New Plan", type="primary")
     with col_redo:
         if 'raw_result' in st.session_state:
-            redo_btn = st.button("🔄 Redo Plan")
+            redo_btn = st.button("Redo Plan")
         else:
             redo_btn = False
 
-    # ---------------- Handle Plan Generation ----------------
-    # ---------------- Handle Plan Generation ----------------
-    # Initialize confirmation state
+    # ---- Handle Plan Generation ----
     if 'confirm_gen' not in st.session_state:
         st.session_state.confirm_gen = False
-    
-    # Trigger confirmation on button click
+
     if generate_btn:
         st.session_state.confirm_gen = True
-        
+
     start_generation = False
-    
-    # Show Confirmation Dialog
+
     if st.session_state.confirm_gen:
         st.markdown("---")
-        # Calc target dir
-        target_dir_name = topic.replace(" ", "_").strip()
-        if not target_dir_name: target_dir_name = "Untitled_Project"
+        target_dir_name = sanitize_dirname(topic)
+        if not target_dir_name:
+            target_dir_name = "Untitled_Project"
         target_path = os.path.join("output", target_dir_name)
-        
+
         st.write(f"**Target Folder:** `{target_path}`")
-        
+
         if os.path.exists(target_path):
-            # Check if it has content
             files = os.listdir(target_path)
             num_files = len(files)
-            
             if num_files > 0:
-                st.warning(f"⚠️ Folder **`{target_dir_name}`** already exists and contains `{num_files}` files!")
-                st.write("Generating a new plan will replace the contents of this folder.")
-                confirm_label = "✅ Yes, Overwrite & Generate"
+                st.warning(f"Folder **`{target_dir_name}`** already exists with `{num_files}` files. Will overwrite.")
+                confirm_label = "Yes, Overwrite & Generate"
             else:
-                st.info(f"ℹ️ Folder **`{target_dir_name}`** exists but is empty.")
-                confirm_label = "✅ Use Empty Folder & Generate"
+                st.info(f"Folder **`{target_dir_name}`** exists but is empty.")
+                confirm_label = "Use Empty Folder & Generate"
         else:
-            st.success(f"✨ Ready to create new project: **`{target_dir_name}`**")
-            confirm_label = "✅ Create & Generate"
-            
-        c1, c2 = st.columns([1,2])
+            st.success(f"Ready to create new project: **`{target_dir_name}`**")
+            confirm_label = "Create & Generate"
+
+        c1, c2 = st.columns([1, 2])
         if c1.button(confirm_label, key="confirm_btn"):
             st.session_state.confirm_gen = False
             start_generation = True
-        if c2.button("❌ Cancel", key="cancel_btn"):
+        if c2.button("Cancel", key="cancel_btn"):
             st.session_state.confirm_gen = False
             st.rerun()
 
-    # Redo skips confirmation (user already viewing it) or we can enable it. 
-    # Let's say Redo is "Try again on same topic", so just run it.
     if redo_btn:
         start_generation = True
 
@@ -193,8 +357,9 @@ def main():
             st.error("Please set GEMINI_API_KEY in .env")
             return
 
-        with st.spinner(f"🤖 Agents working on your {content_type}..."):
-            # Init Agents & Tasks
+        cat = CATEGORIES.get(content_type, CATEGORIES["Story Cards"])
+
+        with st.spinner(f"Agents working on your {content_type}: {topic}..."):
             agents = ContentAgents()
             tasks = ContentTasks()
 
@@ -202,14 +367,11 @@ def main():
             writer = agents.writer_agent()
             visualizer = agents.visualizer_agent()
 
-            # Determine Visual Style
             visual_style = "Pixel Art" if esp32_mode else "Watercolor"
 
-            # Pass content_type to the plan task for variety
             plan_task = tasks.plan_task(planner, topic, content_type)
             write_task = tasks.write_task(writer, plan_task, content_type)
-            # Pass visual style
-            visualize_task = tasks.visualize_task(visualizer, write_task, visual_style)
+            visualize_task = tasks.visualize_task(visualizer, write_task, visual_style, content_type)
 
             crew = Crew(
                 agents=[planner, writer, visualizer],
@@ -220,21 +382,19 @@ def main():
 
             result = crew.kickoff()
             st.session_state['raw_result'] = result
-            # Rerun to refresh view immediately
             st.rerun()
 
-    # ---------------- Display Results & Asset Gen ----------------
+    # ---- Display Results & Asset Gen ----
     if 'raw_result' in st.session_state:
-        # Use session state topic as source of truth for display
         display_topic = st.session_state.get('topic', 'Unknown Topic')
-        st.subheader(f"📝 Plan Output: {display_topic}")
-        
+        st.subheader(f"Plan: {display_topic}")
+
         content_data = None
         raw_text = st.session_state['raw_result']
-        
-        # Parsing Logic
-        if hasattr(raw_text, 'raw'): raw_text = raw_text.raw  # CrewAI output object
-        
+
+        if hasattr(raw_text, 'raw'):
+            raw_text = raw_text.raw
+
         json_match = re.search(r'\[.*\]', str(raw_text), re.DOTALL)
         if json_match:
             try:
@@ -244,191 +404,225 @@ def main():
                 st.text(raw_text)
         else:
             try:
-                 content_data = json.loads(str(raw_text))
-            except:
-                 st.text(raw_text)
+                content_data = json.loads(str(raw_text))
+            except Exception:
+                st.text(raw_text)
 
         if content_data:
-            # Setup Output Directory
-            # CRITICAL FIX: ALWAYS derive directory from current TOPIC. 
-            # If we loaded history, 'topic' was updated to history name.
-            # If user typed new topic, 'topic' is the new topic.
-            # We NEVER rely on the dropdown value directly here, only the active topic variable.
-            
-            dir_name = display_topic.replace(" ", "_").strip()
-            if not dir_name: dir_name = "Untitled_Project"
-                
+            dir_name = sanitize_dirname(display_topic)
+            if not dir_name:
+                dir_name = "Untitled_Project"
+
             output_dir = os.path.join("output", dir_name)
             os.makedirs(output_dir, exist_ok=True)
-            
+
             # Auto-Save Plan
             with open(os.path.join(output_dir, "plan.json"), "w") as f:
                 json.dump(content_data, f, indent=2)
 
-            # Global Actions
-            st.info(f"✅ Previewing {len(content_data)} steps. Output Folder: `{output_dir}`")
-            
-            # --- EDITABLE PLAN SECTION ---
-            st.subheader("✏️ Edit Plan Before Generation")
-            st.caption("You can edit the Text, Image Prompts, and Sound Effects below. Changes are auto-saved to plan.json.")
-            
-            # Use data_editor to allow editing
-            edited_data = st.data_editor(
-                content_data,
-                column_config={
-                    "step": st.column_config.NumberColumn("Step", width="small", disabled=True),
-                    "text": st.column_config.TextColumn("Voice Script", width="large"),
-                    "image_prompt": st.column_config.TextColumn("Image Prompt", width="large"),
-                    "sound_effect": st.column_config.TextColumn("SFX Instructions", width="small"),
-                },
-                use_container_width=True, 
-                num_rows="dynamic",
-                key="plan_editor"
-            )
-            
-            # Update content_data reference to the edited version
-            content_data = edited_data
-            
-            # Auto-Save Plan (Overwriting the previous save with edited version)
+            st.info(f"Previewing {len(content_data)} steps. Output: `{output_dir}`")
+
+            # Editable Plan
+            st.subheader("Edit Plan Before Generation")
+            st.caption("Edit the script, image prompts, and sound effects below. Click 'Save Edits' when done.")
+
+            # Store edits in session state
+            if 'edited_plan' not in st.session_state:
+                st.session_state['edited_plan'] = content_data
+
+            # Reset edited plan if content_data changed (new generation)
+            if len(st.session_state['edited_plan']) != len(content_data):
+                st.session_state['edited_plan'] = content_data
+
+            for idx, item in enumerate(content_data):
+                step = item.get('step', idx + 1)
+                with st.expander(f"Step {step}", expanded=False):
+                    new_text = st.text_area(
+                        "Voice Script",
+                        value=item.get('text', ''),
+                        height=80,
+                        key=f"edit_text_{step}"
+                    )
+                    new_prompt = st.text_area(
+                        "Image Prompt",
+                        value=item.get('image_prompt', ''),
+                        height=80,
+                        key=f"edit_prompt_{step}"
+                    )
+                    new_sfx = st.text_input(
+                        "Sound Effect",
+                        value=item.get('sound_effect', ''),
+                        key=f"edit_sfx_{step}"
+                    )
+                    # Update in-memory
+                    content_data[idx]['text'] = new_text
+                    content_data[idx]['image_prompt'] = new_prompt
+                    content_data[idx]['sound_effect'] = new_sfx
+
+            if st.button("Save Edits", type="primary"):
+                with open(os.path.join(output_dir, "plan.json"), "w") as f:
+                    json.dump(content_data, f, indent=2)
+                st.session_state['edited_plan'] = content_data
+                st.toast("Plan saved!")
+
+            # Always keep plan.json in sync
             with open(os.path.join(output_dir, "plan.json"), "w") as f:
                 json.dump(content_data, f, indent=2)
 
-            if st.button("✨ Generate ALL Assets (Audio + Images)"):
+            # Asset generation buttons
+            btn_col1, btn_col2, btn_col3 = st.columns(3)
+            with btn_col1:
+                gen_all_btn = st.button("Generate ALL Assets", type="primary")
+            with btn_col2:
+                gen_images_btn = st.button("Generate Images Only")
+            with btn_col3:
+                gen_audio_btn = st.button("Generate Audio Only")
+
+            if gen_all_btn or gen_images_btn or gen_audio_btn:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
-                
+
+                fox_ref = FOX_REF_PATH if os.path.exists(FOX_REF_PATH) else None
+
                 for i, item in enumerate(content_data):
-                    # Progress bar logic existing...
                     step = item.get('step')
                     text = item.get('text')
                     prompt = item.get('image_prompt')
-                    sound_effect = item.get('sound_effect')  # Get sound effect description
-                    
+                    sound_effect = item.get('sound_effect')
+
                     status_text.text(f"Processing Step {step}/{len(content_data)}...")
-                    
-                    # Generate Both (with sound effects)
-                    generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
-                    generate_image(prompt, step, output_dir, esp32_mode)
-                    
+
+                    if gen_all_btn or gen_audio_btn:
+                        if tts_provider == "Fish Audio":
+                            generate_audio_fish(text, step, output_dir, selected_fish_voice_id)
+                        else:
+                            generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
+                    if gen_all_btn or gen_images_btn:
+                        generate_image(prompt, step, output_dir, esp32_mode, fox_reference_path=fox_ref)
+
                     progress_bar.progress((i + 1) / len(content_data))
-                
-                status_text.success("🎉 All assets generated!")
-                st.success("Assets Saved. Refreshing view...")
+
+                label = "All assets" if gen_all_btn else ("Images" if gen_images_btn else "Audio")
+                status_text.success(f"{label} generated!")
+                st.success("Assets saved. Refreshing...")
                 time.sleep(1)
-                st.rerun() # Refresh to show the new files
-            
+                st.rerun()
+
             st.markdown("---")
 
-            # Display Table of Steps
+            # Display Steps
+            fox_ref = FOX_REF_PATH if os.path.exists(FOX_REF_PATH) else None
+
             for item in content_data:
                 step = item.get('step')
                 text = item.get('text')
                 prompt = item.get('image_prompt')
-                sound_effect = item.get('sound_effect', '')  # Get sound effect, default to empty
-                
-                # Check for existing generated files
+                sound_effect = item.get('sound_effect', '')
+
                 audio_file = os.path.join(output_dir, f"step_{step}_audio.mp3")
-                
-                # Check for pixel or normal image based on current mode preference, OR fallback to whatever exists
+
                 img_suffix = "_pixel" if esp32_mode else ""
-                
-                # Priority search list (PNG for preview, .bin also generated for ESP32)
                 possible_images = [
-                    f"step_{step}_image{img_suffix}.png", # Exact match for current mode (png - for preview)
-                    f"step_{step}_image{img_suffix}.jpg", # Exact match for current mode (jpg)
-                    f"step_{step}_image_pixel.png",       # Pixel fallback
+                    f"step_{step}_image{img_suffix}.png",
+                    f"step_{step}_image{img_suffix}.jpg",
+                    f"step_{step}_image_pixel.png",
                     f"step_{step}_image_pixel.jpg",
-                    f"step_{step}_image.png",             # Standard fallback
+                    f"step_{step}_image.png",
                     f"step_{step}_image.jpg"
                 ]
-                
+
                 found_image = None
                 for img_name in possible_images:
                     p = os.path.join(output_dir, img_name)
                     if os.path.exists(p):
                         found_image = p
                         break
-                
-                with st.expander(f"Step {step}: {text[:60]}...", expanded=True):
+
+                with st.expander(f"Step {step}: {text[:60]}..." if text and len(text) > 60 else f"Step {step}: {text}", expanded=True):
                     col1, col2 = st.columns([2, 1])
                     with col1:
-                        st.markdown(f"**Text:**\n{text}")
-                        st.caption(f"**Visual Prompt:** {prompt}")
-                    
+                        st.markdown(f"**Script:**\n{text}")
+                        if prompt:
+                            st.caption(f"**Image Prompt:** {prompt}")
+                        if sound_effect:
+                            st.caption(f"**SFX:** {sound_effect}")
+
                     with col2:
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if os.path.exists(audio_file):
-                                st.audio(audio_file)
-                                if st.button("🔄 Regen Audio", key=f"aud_{step}"):
-                                    path = generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
+                        # Audio
+                        def _gen_audio_step(t, s, d):
+                            if tts_provider == "Fish Audio":
+                                return generate_audio_fish(t, s, d, selected_fish_voice_id)
+                            else:
+                                return generate_audio(t, s, d, eleven_model, selected_voice_id, voice_settings, sound_effect)
+
+                        if os.path.exists(audio_file):
+                            st.audio(audio_file)
+                            if st.button("Regen Audio", key=f"aud_{step}"):
+                                _gen_audio_step(text, step, output_dir)
+                                st.rerun()
+                        else:
+                            if st.button(f"Generate Audio", key=f"aud_{step}"):
+                                path = _gen_audio_step(text, step, output_dir)
+                                if path:
                                     st.rerun()
-                            else:
-                                if st.button(f"🔊 Audio", key=f"aud_{step}"):
-                                    path = generate_audio(text, step, output_dir, eleven_model, selected_voice_id, voice_settings, sound_effect)
-                                    if path: st.rerun()
-                        with c2:
-                            if found_image:
-                                st.image(found_image)
-                                if st.button("🔄 Regen Image", key=f"img_{step}"):
-                                    with st.spinner("Drawing..."):
-                                        img_path = generate_image(prompt, step, output_dir, esp32_mode)
+
+                        # Image
+                        if found_image:
+                            st.image(found_image)
+                            if st.button("Regen Image", key=f"img_{step}"):
+                                with st.spinner("Drawing..."):
+                                    generate_image(prompt, step, output_dir, esp32_mode, fox_reference_path=fox_ref)
+                                    st.rerun()
+                        else:
+                            if st.button(f"Generate Image", key=f"img_{step}"):
+                                with st.spinner("Drawing..."):
+                                    img_path = generate_image(prompt, step, output_dir, esp32_mode, fox_reference_path=fox_ref)
+                                    if img_path:
                                         st.rerun()
-                            else:
-                                if st.button(f"🖼️ Image", key=f"img_{step}"):
-                                    with st.spinner("Drawing..."):
-                                        img_path = generate_image(prompt, step, output_dir, esp32_mode)
-                                        if img_path: 
-                                            st.rerun()
-                                        else:
-                                            st.error("Failed")
+                                    else:
+                                        st.error("Failed to generate image")
 
-    # ---------------- Export to Cloud ----------------
+    # ---- Export to Cloud ----
     st.sidebar.markdown("---")
-    st.sidebar.subheader("☁️ Cloud Upload")
-    
-    # Check for secrets
-    api_secret = os.getenv("MANAGER_API_SECRET", "da11d988-f105-4e71-b095-da62ada82189")
-    api_url = os.getenv("MANAGER_API_URL", "http://localhost:8002/toy") # Use actual backend port/context
+    st.sidebar.subheader("Cloud Upload")
 
-    # Determine default pack name from topic
+    api_secret = os.getenv("MANAGER_API_SECRET", "da11d988-f105-4e71-b095-da62ada82189")
+    api_url = os.getenv("MANAGER_API_URL", "http://localhost:8002/toy")
+
     display_topic = st.session_state.get('topic', 'Unknown Topic')
     pack_name_input = st.sidebar.text_input("Content Pack Name", value=display_topic)
 
-    if st.sidebar.button("📤 Upload to Cheeko Cloud"):
-        # Determine output dir again
-        dir_name = display_topic.replace(" ", "_").strip()
-        if not dir_name: dir_name = "Untitled_Project"
+    if st.sidebar.button("Upload to Cheeko Cloud"):
+        dir_name = sanitize_dirname(display_topic)
+        if not dir_name:
+            dir_name = "Untitled_Project"
         export_dir = os.path.join("output", dir_name)
-        
+
         if not os.path.exists(export_dir):
             st.sidebar.error("Project folder not found!")
         else:
             with st.sidebar.status("Uploading content...", expanded=True) as status:
-                st.write("🔌 Connecting to Manager API...")
+                st.write("Connecting to Manager API...")
                 from exporters import ManagerAPIClient
                 client = ManagerAPIClient(api_url, api_secret)
-                
-                # Map generic types to API types
-                api_content_type = 'rfidcontent' # Default to new bucket
-                
+
+                api_content_type = 'rfidcontent'
                 if content_type in ["Song/Rhyme"]:
                     api_content_type = 'music'
-                elif content_type in ["Story"]:
+                elif content_type in ["Story Cards", "Granny Stories"]:
                     api_content_type = 'story'
-                
-                # Routine, Learning, Meditation -> 'rfidcontent'
-                
-                st.write(f"📂 Processing: {display_topic} (Type: {api_content_type})")
+
+                st.write(f"Processing: {display_topic} (Type: {api_content_type})")
                 pack_code = client.export_project(export_dir, display_topic, api_content_type, pack_name=pack_name_input)
-                
+
                 if pack_code:
-                    status.update(label="✅ Upload Complete!", state="complete", expanded=True)
+                    status.update(label="Upload Complete!", state="complete", expanded=True)
                     st.sidebar.success(f"Pack Created: **{pack_code}**")
                     st.sidebar.info("You can now assign this card in the Admin Panel.")
                 else:
-                    status.update(label="❌ Upload Failed", state="error")
+                    status.update(label="Upload Failed", state="error")
                     st.sidebar.error("Check console logs for details.")
+
 
 if __name__ == "__main__":
     init_clients()

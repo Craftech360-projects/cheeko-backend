@@ -164,18 +164,20 @@ class ManagerAPIClient:
         sorted_steps = sorted(sys_files.keys())
         for step_num in sorted_steps:
             assets = sys_files[step_num]
-            if 'audio' not in assets:
-                print(f"⚠️ Skipping Step {step_num}: Missing audio.")
+            if 'audio' not in assets and 'image' not in assets:
+                print(f"⚠️ Skipping Step {step_num}: No assets found.")
                 continue
 
             print(f"--- Processing Step {step_num} ---")
 
             # Generate simple filenames: 01.mp3, 01.bin, 02.mp3, 02.bin, etc.
             step_prefix = f"{step_num:02d}"  # Zero-padded: 01, 02, 03...
-            audio_filename = f"{step_prefix}.mp3"
 
-            # PASS pack_code AS CATEGORY to force subfolder isolation
-            audio_url = self.upload_file(assets['audio'], content_type, category=pack_code, custom_filename=audio_filename)
+            audio_url = None
+            if 'audio' in assets:
+                audio_filename = f"{step_prefix}.mp3"
+                # PASS pack_code AS CATEGORY to force subfolder isolation
+                audio_url = self.upload_file(assets['audio'], content_type, category=pack_code, custom_filename=audio_filename)
 
             image_url = None
             if 'image' in assets:
@@ -184,7 +186,7 @@ class ManagerAPIClient:
                 image_filename = f"{step_prefix}{img_ext}"
                 image_url = self.upload_file(assets['image'], content_type, category=pack_code, custom_filename=image_filename)
             
-            if audio_url:
+            if audio_url or image_url:
                 # Get text from plan.json if available
                 step_info = plan_data.get(step_num, {})
                 step_text = step_info.get('text', '')
@@ -193,8 +195,8 @@ class ManagerAPIClient:
                 pack_items.append({
                     "title": step_title if step_title else f"Step {step_num}",
                     "audioUrl": audio_url,
-                    "imageUrl": image_url,  # API handles null
-                    "text": step_text  # Voice script text
+                    "imageUrl": image_url,
+                    "text": step_text
                 })
         
         if not pack_items:

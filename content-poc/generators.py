@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 from elevenlabs.client import ElevenLabs
 from elevenlabs import save
@@ -8,6 +9,27 @@ from datetime import datetime
 from PIL import Image
 import io
 from image_to_bin_converter import ImageToBinConverter, ColorFormat
+from categories import FOX_BASE_PROMPT
+
+
+def convert_tags_to_fish(text):
+    """Convert ElevenLabs [tag] format to Fish Audio (tag) format."""
+    tag_map = {
+        'whispers': 'whispering',
+        'excited': 'excited',
+        'curious': 'curious',
+        'sighs': 'sighing',
+        'laughs': 'laughing',
+        'gasps': 'gasping',
+        'pause': 'break',
+        'short pause': 'break',
+        'sings': 'happy',
+    }
+    def replace_tag(match):
+        tag = match.group(1).strip().lower()
+        fish_tag = tag_map.get(tag, tag)
+        return f'({fish_tag})'
+    return re.sub(r'\[([^\]]+)\]', replace_tag, text)
 
 # Initialize clients
 def init_clients():
@@ -45,6 +67,76 @@ def generate_sound_effect(description, step_number, output_dir):
         print(f"Error generating sound effect for step {step_number}: {e}")
         print("Continuing without sound effect...")
         return None
+
+FISH_REFERENCE_AUDIO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "02.mp3")
+
+def generate_audio_fish(text, step_number, output_dir, voice_id=None):
+    """
+    Generate audio using Fish Audio S2 Pro via HuggingFace Space.
+    Uses [tag] emotion tags directly (same format as ElevenLabs).
+    Clones voice from reference audio (02.mp3) for consistent kid-friendly voice.
+    """
+    try:
+        from gradio_client import Client as GradioClient, handle_file
+        import shutil
+
+        print(f"Fish S2 Pro Step {step_number}: {text[:80]}...")
+
+        hf_token = os.getenv("HF_TOKEN")
+        space_id = "fguilleme/fish-s2-pro-zero"
+
+        print(f"Connecting to HuggingFace Space: {space_id}...")
+        gc = GradioClient(space_id, token=hf_token) if hf_token else GradioClient(space_id)
+
+        # Use reference audio for voice cloning
+        ref_audio = None
+        ref_text = ""
+        if os.path.exists(FISH_REFERENCE_AUDIO):
+            ref_audio = handle_file(FISH_REFERENCE_AUDIO)
+            ref_text = "Once upon a time, in a bright, sunny meadow, lived two very different friends. There was Speedy the Rabbit, who was SO fast and a little bit proud, and then there was Slowpoke the Tortoise, who was quiet and steady."
+            print(f"Using reference voice: {FISH_REFERENCE_AUDIO}")
+
+        # Fish S2 Pro uses [tag] format natively - no conversion needed
+        result = gc.predict(
+            text,                    # text to synthesize
+            ref_audio,               # reference audio for voice cloning
+            ref_text,                # ref audio transcription
+            1024,                    # max_new_tokens
+            200,                     # chunk_length
+            0.7,                     # top_p
+            1.2,                     # repetition_penalty
+            0.7,                     # temperature
+            api_name="/tts_inference",
+        )
+
+        # Result is a filepath to the generated audio file
+        filename = f"step_{step_number}_audio.mp3"
+        filepath = os.path.join(output_dir, filename)
+
+        # Copy the returned audio file to our output directory
+        if result and os.path.exists(result):
+            if result.endswith(".wav"):
+                try:
+                    from pydub import AudioSegment
+                    audio_seg = AudioSegment.from_wav(result)
+                    audio_seg.export(filepath, format="mp3")
+                    print(f"Fish S2 Pro: saved {filepath}")
+                except Exception:
+                    filepath = os.path.join(output_dir, f"step_{step_number}_audio.wav")
+                    shutil.copy2(result, filepath)
+                    print(f"Fish S2 Pro: saved as WAV {filepath}")
+            else:
+                shutil.copy2(result, filepath)
+                print(f"Fish S2 Pro: saved {filepath}")
+
+        return filepath
+    except ImportError:
+        print("gradio_client not installed. Run: pip install gradio_client")
+        return None
+    except Exception as e:
+        print(f"Error generating Fish S2 Pro audio for step {step_number}: {e}")
+        return None
+
 
 def generate_audio(text, step_number, output_dir, model_id="eleven_turbo_v2_5", voice_id="mHX7OoPk2G45VMAuinIt", settings=None, sound_effect_description=None):
     """
@@ -144,9 +236,10 @@ def generate_audio(text, step_number, output_dir, model_id="eleven_turbo_v2_5", 
         print(f"Error generating audio for step {step_number}: {e}")
         return None
 
-def generate_image(prompt, step_number, output_dir, esp32_mode=False):
+def generate_image(prompt, step_number, output_dir, esp32_mode=False, fox_reference_path=None):
     """
-    Generate image using Gemini (Nano Banana / Imagen 3) or Pollinations fallback.
+    Generate image using Gemini with fox character consistency.
+    fox_reference_path: Optional path to fox reference image for visual consistency.
     If esp32_mode is True:
     - Appends 'pixel art' to prompt
     - Resizes to 240x296 (ESP32 display resolution)
@@ -157,8 +250,11 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
         # Use new Google GenAI SDK
         client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
+        # Prepend fox character description to every prompt
+        prompt = f"{FOX_BASE_PROMPT}, {prompt}"
+
         if esp32_mode:
-            prompt = f"{prompt}, pixel art, 8-bit style, simple, high contrast, cartoon"
+            prompt = f"{prompt}, 16-bit pixel art style, vibrant colors, detailed shading, expressive character, full scene with complete background environment filling the entire canvas, no transparency, no empty space"
             filename_suffix = "_pixel"
         else:
             filename_suffix = ""
@@ -173,7 +269,7 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
 
             if esp32_mode:
                 # Resize to 240x296 (ESP32 display resolution)
-                img = img.resize((240, 296), Image.Resampling.NEAREST)
+                img = img.resize((296, 240), Image.Resampling.NEAREST)
 
                 # Ensure path ends in .png for preview file
                 if path.endswith(".jpg") or path.endswith(".jpeg"):
@@ -205,16 +301,24 @@ def generate_image(prompt, step_number, output_dir, esp32_mode=False):
 
             return path
 
-        print(f"Generating image with Gemini 2.5... (ESP32 Mode: {esp32_mode})")
-        
-        target_model = "gemini-2.5-flash-image" 
-        
+        print(f"Generating image with Gemini... (ESP32 Mode: {esp32_mode})")
+
+        target_model = "gemini-3.1-flash-image-preview"
+
         try:
-            # User's suggested pattern:
+            # Build contents with optional fox reference image
+            contents = []
+            if fox_reference_path and os.path.exists(fox_reference_path):
+                ref_img = Image.open(fox_reference_path)
+                contents.append(prompt)
+                contents.append("Use this image ONLY as a reference for the fox character's appearance and art style. The fox in the generated image must match this character design, but place it in the scene described above. Do NOT copy the background from this reference. The scene and environment from the prompt above is what matters most.")
+                contents.append(ref_img)
+            else:
+                contents.append(prompt)
+
             response = client.models.generate_content(
                 model=target_model,
-                contents=[prompt],
-                # config removed as it caused 400 error for image gen
+                contents=contents,
             )
             
             # Parse response parts

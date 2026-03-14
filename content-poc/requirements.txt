@@ -1,6 +1,7 @@
 crewai
 google-genai
 elevenlabs
+gradio_client
 streamlit
 python-dotenv
 pydub
