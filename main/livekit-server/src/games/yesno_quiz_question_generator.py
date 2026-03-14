@@ -39,6 +39,9 @@ Requirements:
 - The question MUST have a definitive true or false answer
 - Make the question fun and engaging for children
 - Use DIFFERENT topics and facts each time
+- The audience is primarily Indian children — prefer universal or India-relevant topics
+- Avoid US/UK-specific cultural references (e.g., "Declaration of Independence")
+- When asking about geography/history, prefer global or Indian context
 
 {avoid_section}
 Return ONLY valid JSON, no markdown, no explanation:
