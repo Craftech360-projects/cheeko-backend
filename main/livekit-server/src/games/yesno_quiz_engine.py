@@ -422,8 +422,10 @@ class YesNoQuizEngine:
 
         await self.narrator.announce_level_complete(self.state.level)
 
-        # Advance level and continue
+        # Advance level and start next question
         self.state.advance_level()
+        self._answered_question_id = None  # Reset for new level
+        await self._generate_and_send_question()
 
     async def _handle_game_over(self):
         """Announce game over, send game_state 'game_over'."""
