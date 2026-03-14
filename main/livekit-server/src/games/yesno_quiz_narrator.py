@@ -171,7 +171,7 @@ class YesNoNarrator:
         import asyncio
         logger.info(f"narrator.speak(tag={tag}, text={text[:100]})")
         try:
-            speech = self._session.say(text, allow_interruptions=True)
+            speech = self._session.say(text, allow_interruptions=False)
             await asyncio.wait_for(speech, timeout=15.0)
             logger.info(f"narrator.spoke(tag={tag})")
         except asyncio.TimeoutError:
