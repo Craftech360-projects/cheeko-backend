@@ -146,11 +146,15 @@ class YesNoNarrator:
         """
         Speak text directly via session.say() — no LLM involved.
         Does NOT re-raise on failure — game flow continues even if narration fails.
+        Times out after 15s to prevent game from hanging.
         """
+        import asyncio
         logger.info(f"narrator.speak(tag={tag}, text={text[:100]})")
         try:
             speech = self._session.say(text, allow_interruptions=False)
-            await speech
+            await asyncio.wait_for(speech, timeout=15.0)
             logger.info(f"narrator.spoke(tag={tag})")
+        except asyncio.TimeoutError:
+            logger.warning(f"narrator.speak_timeout(tag={tag}, text={text[:60]})")
         except Exception as e:
             logger.error(f"narrator.speak_failed(tag={tag}, error={e})")
