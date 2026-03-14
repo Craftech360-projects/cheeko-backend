@@ -299,6 +299,7 @@ class YesNoQuizEngine:
 
         # Register in game state (assigns question_id, tracks history)
         self.state.set_question(q)
+        self._answered_question_id = None  # Reset for new question
 
         # Progress snapshot
         progress = self.state._get_progress()
