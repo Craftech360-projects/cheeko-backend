@@ -413,6 +413,10 @@ async def entrypoint(ctx: JobContext):
     usage_manager.setup_metrics_collection(session)
     logger.info("Usage tracking initialized - subscribed to metrics_collected event")
 
+    # Start background time tracker for time-based quota plans
+    # This runs a 30s tick loop that reports elapsed seconds to the server
+    quota_manager.start_time_tracker()
+
     # ============================================================================
     # DEBUG: Track user speech and function calls
     # ============================================================================
@@ -504,13 +508,20 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("user_input_transcribed")
     def on_user_speech_quota(ev):
-        """Consume a question from quota on each final user speech turn"""
+        """Consume quota on each final user speech turn (question or token based)"""
         if not ev.is_final or _quota_session_ending:
             return
         async def _check_quota():
             nonlocal _quota_session_ending
             try:
-                allowed, remaining = await quota_manager.consume_question()
+                # Pass cumulative token counts from UsageManager to QuotaManager
+                # QuotaManager dispatches by quota_type (question or token)
+                allowed, remaining = await quota_manager.consume(
+                    audio_input=usage_manager.input_audio_tokens,
+                    audio_output=usage_manager.output_audio_tokens,
+                    text_input=usage_manager.input_text_tokens,
+                    text_output=usage_manager.output_text_tokens,
+                )
                 if not allowed:
                     _quota_session_ending = True
                     logger.warning(f"[QUOTA] Exhausted mid-session for {device_mac}")
@@ -828,6 +839,14 @@ async def entrypoint(ctx: JobContext):
             _cancel_watchdog()
             cancel_idle_timer()
 
+            # Stop time tracker and report final seconds
+            try:
+                await asyncio.wait_for(quota_manager.stop_time_tracker(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Time tracker stop timed out after 5s")
+            except Exception as e:
+                logger.warning(f"Failed to stop time tracker: {e}")
+
             # Log usage summary before closing session (sends to Manager API)
             try:
                 if usage_manager:
@@ -945,52 +964,6 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"👋 [END-PROMPT] Error in goodbye handler: {e}")
 
-    async def _deliver_quota_limit_and_disconnect():
-        """Deliver quota limit message using the same session.generate_reply() as greeting,
-        then disconnect. Called from ready_for_greeting when quota is exhausted."""
-        nonlocal _quota_session_ending
-        _quota_session_ending = True
-        limit_msg = quota_manager.get_limit_message()
-
-        # Try to import RealtimeError, fallback to Exception if not available
-        try:
-            from livekit.agents.llm.realtime import RealtimeError
-        except ImportError:
-            RealtimeError = Exception
-
-        # Retry logic matching play_greeting() pattern in base_assistant.py
-        max_retries = 3
-        delivered = False
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"[QUOTA] Delivering limit message via session.generate_reply() (attempt {attempt + 1}/{max_retries})")
-                await session.generate_reply(
-                    instructions=f"Say exactly this to the child: '{limit_msg}'"
-                )
-                delivered = True
-                logger.info("[QUOTA] Limit message delivered successfully")
-                # Wait for Gemini to finish speaking
-                await asyncio.sleep(10)
-                break  # Success, exit retry loop
-            except RealtimeError as e:
-                logger.warning(f"[QUOTA] Attempt {attempt + 1} encountered RealtimeError: {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5)
-            except Exception as e:
-                logger.warning(f"[QUOTA] Attempt {attempt + 1} failed: {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1.0)
-                else:
-                    logger.error(f"[QUOTA] Failed to deliver limit message after {max_retries} attempts")
-
-        # Clean up
-        try:
-            await session.aclose()
-        except Exception:
-            pass
-        await asyncio.sleep(1)
-        await delete_livekit_room(room_name)
-
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):
         """Handle data channel messages from gateway"""
@@ -1000,10 +973,6 @@ async def entrypoint(ctx: JobContext):
 
             # Handle greeting trigger from device
             if msg_type == 'ready_for_greeting':
-                if quota_manager.is_exhausted:
-                    logger.info("🎤 Device ready but quota exhausted - delivering limit message")
-                    asyncio.create_task(_deliver_quota_limit_and_disconnect())
-                    return
                 logger.info("🎤 Device ready for greeting - triggering greeting now")
                 asyncio.create_task(assistant.play_greeting())
                 return

@@ -72,9 +72,20 @@ const getFreeMonthlyLimit = async () => {
 const getQuotaByMac = async (mac) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const userId = await resolveUserIdFromMac(mac);
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) {
+    return {
+      remaining: -1,
+      isExhausted: false,
+      questionsUsed: 0,
+      freeLimit: -1,
+      extraPurchased: 0,
+      isUnbound: true
+    };
+  }
 
-  // Unbound devices (no user_id) get unlimited - they're test devices
+  // Check if device is bound to a user (unbound = unlimited)
+  const userId = await resolveUserIdFromMac(mac);
   if (!userId) {
     return {
       remaining: -1,
@@ -92,19 +103,18 @@ const getQuotaByMac = async (mac) => {
   const { data: quota, error } = await supabaseAdmin
     .from('user_question_quota')
     .select('*')
-    .eq('user_id', userId)
+    .eq('mac_address', normalizedMac)
     .eq('month_key', monthKey)
     .single();
 
   if (error || !quota) {
-    // No row yet = no questions used this month
     return {
       remaining: freeLimit,
       isExhausted: false,
       questionsUsed: 0,
       freeLimit,
       extraPurchased: 0,
-      userId,
+      macAddress: normalizedMac,
       monthKey
     };
   }
@@ -118,7 +128,7 @@ const getQuotaByMac = async (mac) => {
     questionsUsed: quota.questions_used,
     freeLimit,
     extraPurchased: quota.extra_purchased,
-    userId,
+    macAddress: normalizedMac,
     monthKey
   };
 };
@@ -134,28 +144,26 @@ const getQuotaByMac = async (mac) => {
 const incrementByMac = async (mac, clientMonthKey) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const userId = await resolveUserIdFromMac(mac);
-
-  // Unbound devices - no tracking needed
-  if (!userId) {
-    return {
-      remaining: -1,
-      isExhausted: false,
-      questionsUsed: 0,
-      isUnbound: true
-    };
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) {
+    return { remaining: -1, isExhausted: false, questionsUsed: 0, isUnbound: true };
   }
 
-  // Use client month key if valid, otherwise server's current month
+  // Unbound devices - no tracking needed
+  const userId = await resolveUserIdFromMac(mac);
+  if (!userId) {
+    return { remaining: -1, isExhausted: false, questionsUsed: 0, isUnbound: true };
+  }
+
   const monthKey = (clientMonthKey && isValidMonthKey(clientMonthKey))
     ? clientMonthKey
     : getCurrentMonthKey();
   const freeLimit = await getFreeMonthlyLimit();
 
-  // Atomic upsert via RPC - no race window, no UNIQUE violation
+  // Atomic upsert via RPC - keyed by mac_address
   const { data, error } = await supabaseAdmin
     .rpc('increment_question_quota', {
-      p_user_id: userId,
+      p_mac_address: normalizedMac,
       p_month_key: monthKey,
       p_free_limit: freeLimit
     })
@@ -172,33 +180,33 @@ const incrementByMac = async (mac, clientMonthKey) => {
     questionsUsed: data.out_questions_used,
     freeLimit,
     extraPurchased: data.out_extra_purchased,
-    userId,
+    macAddress: normalizedMac,
     monthKey: data.out_month_key
   };
 };
 
 /**
- * Grant extra questions to a user for the current month
+ * Grant extra questions to a device for the current month
  * Uses atomic RPC function to avoid race conditions
  *
- * @param {number} userId - User ID
+ * @param {string} mac - Device MAC address
  * @param {number} amount - Number of extra questions to grant
  * @returns {Promise<Object>} Updated quota status
  */
-const grantExtra = async (userId, amount) => {
+const grantExtra = async (mac, amount) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  if (!amount || amount <= 0) {
-    throw new Error('Amount must be a positive number');
-  }
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address');
+  if (!amount || amount <= 0) throw new Error('Amount must be a positive number');
 
   const monthKey = getCurrentMonthKey();
   const freeLimit = await getFreeMonthlyLimit();
 
-  // Atomic upsert via RPC - no race window, no UNIQUE violation
+  // Atomic upsert via RPC - keyed by mac_address
   const { data, error } = await supabaseAdmin
     .rpc('grant_extra_quota', {
-      p_user_id: userId,
+      p_mac_address: normalizedMac,
       p_month_key: monthKey,
       p_amount: amount,
       p_free_limit: freeLimit
@@ -216,7 +224,7 @@ const grantExtra = async (userId, amount) => {
     questionsUsed: data.out_questions_used,
     freeLimit,
     extraPurchased: data.out_extra_purchased,
-    userId,
+    macAddress: normalizedMac,
     monthKey: data.out_month_key
   };
 };
@@ -234,14 +242,15 @@ const getQuotaForUser = async (userId, monthKey) => {
   const targetMonth = monthKey || getCurrentMonthKey();
   const freeLimit = await getFreeMonthlyLimit();
 
-  const { data: quota, error } = await supabaseAdmin
-    .from('user_question_quota')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('month_key', targetMonth)
-    .single();
+  // Find all devices for this user
+  const { data: devices } = await supabaseAdmin
+    .from('ai_device')
+    .select('mac_address')
+    .eq('user_id', userId);
 
-  if (error || !quota) {
+  const macs = (devices || []).map(d => d.mac_address);
+
+  if (macs.length === 0) {
     return {
       remaining: freeLimit,
       isExhausted: false,
@@ -249,20 +258,54 @@ const getQuotaForUser = async (userId, monthKey) => {
       freeLimit,
       extraPurchased: 0,
       userId,
+      devices: [],
       monthKey: targetMonth
     };
   }
 
-  const totalAllowed = freeLimit + quota.extra_purchased;
-  const remaining = totalAllowed - quota.questions_used;
+  // Get quota rows for all user's devices
+  const { data: quotas, error } = await supabaseAdmin
+    .from('user_question_quota')
+    .select('*')
+    .in('mac_address', macs)
+    .eq('month_key', targetMonth);
+
+  if (error || !quotas || quotas.length === 0) {
+    return {
+      remaining: freeLimit,
+      isExhausted: false,
+      questionsUsed: 0,
+      freeLimit,
+      extraPurchased: 0,
+      userId,
+      devices: macs.map(m => ({ macAddress: m, questionsUsed: 0, remaining: freeLimit })),
+      monthKey: targetMonth
+    };
+  }
+
+  // Return per-device breakdown
+  const deviceQuotas = macs.map(m => {
+    const q = quotas.find(q => q.mac_address === m);
+    const used = q ? q.questions_used : 0;
+    const extra = q ? q.extra_purchased : 0;
+    const total = freeLimit + extra;
+    return {
+      macAddress: m,
+      questionsUsed: used,
+      extraPurchased: extra,
+      remaining: Math.max(0, total - used),
+      isExhausted: total - used <= 0
+    };
+  });
+
+  // Aggregate totals across devices
+  const totalUsed = deviceQuotas.reduce((sum, d) => sum + d.questionsUsed, 0);
 
   return {
-    remaining: Math.max(0, remaining),
-    isExhausted: remaining <= 0,
-    questionsUsed: quota.questions_used,
+    questionsUsed: totalUsed,
     freeLimit,
-    extraPurchased: quota.extra_purchased,
     userId,
+    devices: deviceQuotas,
     monthKey: targetMonth
   };
 };
@@ -332,25 +375,22 @@ const listQuotas = async ({ page = 1, limit = 20, monthKey } = {}) => {
 const startGameSession = async (mac, agentType, sessionId) => {
   if (!supabaseAdmin) throw new Error('Database not configured');
 
-  const userId = await resolveUserIdFromMac(mac);
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) {
+    return { allowed: true, reason: 'invalid_mac', sessionId, remaining: -1, isExhausted: false };
+  }
 
-  // Unbound devices (no user_id) get unlimited - allow immediately
+  // Unbound devices get unlimited - allow immediately
+  const userId = await resolveUserIdFromMac(mac);
   if (!userId) {
-    return {
-      allowed: true,
-      reason: 'unbound_device',
-      sessionId,
-      remaining: -1,
-      isExhausted: false
-    };
+    return { allowed: true, reason: 'unbound_device', sessionId, remaining: -1, isExhausted: false };
   }
 
   const freeLimit = await getFreeMonthlyLimit();
 
   const { data, error } = await supabaseAdmin
     .rpc('start_game_session', {
-      p_user_id: userId,
-      p_mac_address: normalizeMacAddress(mac),
+      p_mac_address: normalizedMac,
       p_agent_type: agentType,
       p_session_id: sessionId,
       p_free_limit: freeLimit,

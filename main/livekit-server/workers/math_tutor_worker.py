@@ -219,6 +219,9 @@ async def entrypoint(ctx: JobContext):
     usage_manager.setup_metrics_collection(session)
     logger.info("Usage tracking initialized - subscribed to metrics_collected event")
 
+    # Start background time tracker for time-based quota plans
+    quota_manager.start_time_tracker()
+
     # ============================================================================
     # GAME ANALYTICS: Track game attempts and send on session close
     # ============================================================================
@@ -535,6 +538,14 @@ async def entrypoint(ctx: JobContext):
             logger.info("Initiating cleanup")
             _cancel_watchdog()
             cancel_idle_timer()  # Stop any pending idle reminders
+
+            # Stop time tracker and report final seconds
+            try:
+                await asyncio.wait_for(quota_manager.stop_time_tracker(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Time tracker stop timed out after 5s")
+            except Exception as e:
+                logger.warning(f"Failed to stop time tracker: {e}")
 
             # Log usage summary FIRST (before chat history which takes longer)
             try:

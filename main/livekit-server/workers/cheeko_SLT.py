@@ -28,8 +28,8 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-from livekit.plugins import deepgram, groq
-from livekit.plugins.elevenlabs import TTS as ElevenLabsTTS
+from livekit.plugins import groq, silero
+from src.services.edge_tts_plugin import EdgeTTS
 
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
@@ -72,7 +72,7 @@ def prewarm(proc: JobProcess):
     # COMMENTED OUT - Music service disabled (saves ~11s startup time)
     # from src.utils import start_preloading
     # start_preloading()  # Only runs in worker process, not watcher
-    logger.info("[PREWARM] Ready for STT/LLM/TTS pipeline (Deepgram + Groq + ElevenLabs)")
+    logger.info("[PREWARM] Ready for STT/LLM/TTS pipeline (Groq Whisper + Groq LLM + Edge TTS)")
     proc.userdata["ready"] = True
 
 
@@ -92,10 +92,10 @@ async def entrypoint(ctx: JobContext):
     llm_config = yaml_config.get('llm', {})
     tts_config = yaml_config.get('tts', {})
     
-    stt_model = stt_config.get('model', 'nova-3')
+    stt_model = stt_config.get('model', 'whisper-large-v3')
     llm_model = llm_config.get('model', 'llama-3.3-70b-versatile')
     llm_temperature = llm_config.get('temperature', 0.8)
-    tts_voice = tts_config.get('voice', 'Rachel')  # ElevenLabs voice name
+    tts_voice = tts_config.get('voice', 'en-US-AnaNeural')  # Edge TTS voice name
 
     # Parse room name
     room_name = ctx.room.name
@@ -222,27 +222,27 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
     # Create traditional pipeline components
-    # STT: Deepgram
-    stt = deepgram.STT(
+    # STT: Groq (Whisper)
+    stt = groq.STT(
         model=stt_model,
-        language="en-US"
+        language="en"
     )
-    logger.info(f"Deepgram STT created (model: {stt_model})")
-    
+    logger.info(f"Groq STT created (model: {stt_model})")
+
     # LLM: Groq
-    # Note: System prompt will be handled through the agent's first interaction
     llm = groq.LLM(
         model=llm_model,
         temperature=llm_temperature
     )
     logger.info(f"Groq LLM created (model: {llm_model}, temp: {llm_temperature})")
-    
-    # TTS: ElevenLabs
-    tts = ElevenLabsTTS()
-    logger.info(f"ElevenLabs TTS created")
+
+    # TTS: Edge TTS
+    tts = EdgeTTS(voice=tts_voice)
+    logger.info(f"Edge TTS created (voice: {tts_voice})")
 
     # Create AgentSession with traditional pipeline
     session = AgentSession(
+        vad=silero.VAD.load(),
         stt=stt,
         llm=llm,
         tts=tts,
