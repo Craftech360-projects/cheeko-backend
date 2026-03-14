@@ -187,53 +187,8 @@ class YesNoQuizEngine:
         self._answered_question_id = question_id
         self.hints.cancel_timers()
 
-        # Record a wrong answer for timeout
-        try:
-            current_q = self.state.current_question
-            if not current_q:
-                logger.warning("engine.timeout_no_question")
-                return
-
-            correct_answer = current_q.get("correct_answer", True)
-            fun_fact = current_q.get("fun_fact", "")
-            result_meta = self.state.record_answer(False)
-
-            result = {
-                "correct": False,
-                "user_answer": None,
-                "correct_answer": correct_answer,
-                "fun_fact": fun_fact,
-                "question_id": question_id,
-                "input_method": "timeout",
-                "game_complete": result_meta.get("game_complete", False),
-                "game_over": result_meta.get("game_over", False),
-                "bonus_star": False,
-                "consecutive_correct": self.state.consecutive_correct,
-                "progress": self.state._get_progress(),
-            }
-
-            # Send result to frontend
-            await self.dc.send({
-                "type": "yesno_result",
-                **result,
-            })
-            logger.info(f"engine.timeout_result_sent(qid={question_id})")
-
-            # Narrator: timeout reaction
-            await self.narrator.react_timeout(correct_answer, fun_fact)
-
-            # Check end conditions
-            if result.get("game_over"):
-                await self._handle_game_over()
-                return
-            if result.get("game_complete"):
-                await self._handle_level_complete()
-                return
-
-            # Next question
-            await self._generate_and_send_question()
-        except Exception as e:
-            logger.error(f"engine.timeout_error(qid={question_id}, error={e})", exc_info=True)
+        # Process timeout as a wrong answer — reuse _process_answer with "timeout" input
+        await self._process_answer(None, "timeout")
 
     async def on_game_control(self, message: dict):
         """Called by DataChannel when game_control message received."""
@@ -326,9 +281,14 @@ class YesNoQuizEngine:
         self._answered_question_id = self.state.current_question_id
 
         correct_answer_bool = current_q.get("correct_answer", True)
-        user_said_yes = (answer == "yes")
-        is_correct = (user_said_yes == correct_answer_bool)
         fun_fact = current_q.get("fun_fact", "")
+
+        # Timeout is always wrong; tap/voice compare answer
+        if answer is None:  # timeout
+            is_correct = False
+        else:
+            user_said_yes = (answer == "yes")
+            is_correct = (user_said_yes == correct_answer_bool)
 
         result_meta = self.state.record_answer(is_correct)
 
@@ -375,14 +335,23 @@ class YesNoQuizEngine:
             f"game_over={result.get('game_over')})"
         )
 
-        # Narrate the result
-        if result.get("correct"):
-            await self.narrator.react_correct(result.get("fun_fact", ""))
-        else:
-            await self.narrator.react_wrong(
-                correct_answer=result.get("correct_answer", True),
-                fun_fact=result.get("fun_fact", ""),
-            )
+        # Narrate the result (non-blocking — game continues even if narration fails)
+        try:
+            input_method = result.get("input_method", "tap")
+            if input_method == "timeout":
+                await self.narrator.react_timeout(
+                    correct_answer=result.get("correct_answer", True),
+                    fun_fact=result.get("fun_fact", ""),
+                )
+            elif result.get("correct"):
+                await self.narrator.react_correct(result.get("fun_fact", ""))
+            else:
+                await self.narrator.react_wrong(
+                    correct_answer=result.get("correct_answer", True),
+                    fun_fact=result.get("fun_fact", ""),
+                )
+        except Exception as e:
+            logger.error(f"engine.narration_error(error={e})")
 
         # Check end conditions
         if result.get("game_over"):
