@@ -138,28 +138,9 @@ class YesNoQuizEngine:
         self._answered_question_id = question_id
         self.hints.cancel_timers()
 
-        # Build a result dict for _send_result_and_advance
-        correct = tool_result.get("correct", False)
+        # Score the answer in the engine (tool no longer modifies state)
         user_answer = tool_result.get("user_answer", "")
-        correct_answer = tool_result.get("correct_answer", True)
-        fun_fact = tool_result.get("fun_fact", "")
-        question_id = tool_result.get("question_id", self.state.current_question_id)
-
-        result = {
-            "correct": correct,
-            "user_answer": user_answer,
-            "correct_answer": correct_answer,
-            "fun_fact": fun_fact,
-            "question_id": question_id,
-            "input_method": "voice",
-            "game_complete": tool_result.get("game_complete", False),
-            "game_over": tool_result.get("game_over", False),
-            "bonus_star": tool_result.get("bonus_star", False),
-            "consecutive_correct": tool_result.get("consecutive_correct", 0),
-            "progress": tool_result.get("progress", self.state._get_progress()),
-        }
-
-        await self._send_result_and_advance(result)
+        await self._process_answer(user_answer, "voice")
 
     async def on_hint_triggered(self, question_id: str, hint_text: str):
         """

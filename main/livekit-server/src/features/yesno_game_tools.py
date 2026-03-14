@@ -62,25 +62,15 @@ async def check_yesno_answer(answer: str) -> str:
             "original_text": answer,
         })
 
-    correct_answer = state.current_question.get("correct_answer", True)
-    user_said_yes = (normalized == "yes")
-    is_correct = (user_said_yes == correct_answer)
-
-    result_meta = state.record_answer(is_correct)
-
+    # Do NOT modify state here — the engine handles scoring.
+    # Just return the normalized answer for the engine to process.
     result = {
         "action": "answer_checked",
-        "correct": is_correct,
         "user_answer": normalized,
-        "correct_answer": correct_answer,
-        "fun_fact": state.current_question.get("fun_fact", ""),
         "question_id": state.current_question_id,
         "input_method": "voice",
-        "progress": state._get_progress(),
-        **result_meta,
     }
 
-    logger.info(f"tool.check_yesno(answer={normalized}, correct={is_correct}, "
-                f"stars={state.stars}, streak={state.consecutive_correct})")
+    logger.info(f"tool.check_yesno(answer={normalized}, qid={state.current_question_id})")
 
     return json.dumps(result)
