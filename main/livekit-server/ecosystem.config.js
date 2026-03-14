@@ -70,6 +70,20 @@ module.exports = {
       max_memory_restart: "2G",
     },
     {
+      name: "math-game-agent",
+      script: "env/bin/python",
+      args: "workers/math_game_worker.py dev",
+      cwd: __dirname,
+      interpreter: "none",
+      env: {
+        PORT: "8087",
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "2G",
+    },
+    {
       name: "livekit-media-api",
       script: "env/bin/python",
       args: "-m uvicorn media_api:app --host 0.0.0.0 --port 8003",

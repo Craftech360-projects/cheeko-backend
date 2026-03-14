@@ -106,6 +106,19 @@ class ConfigLoader:
         return config
 
     @staticmethod
+    def get_assemblyai_config():
+        """Get AssemblyAI STT configuration from config.yaml and environment variables"""
+        yaml_config = ConfigLoader.load_yaml_config()
+        aai_config = yaml_config.get('assemblyai', {})
+
+        return {
+            'model': os.getenv('ASSEMBLYAI_MODEL', aai_config.get('model', 'u3-rt-pro')),
+            'min_turn_silence': int(os.getenv('ASSEMBLYAI_MIN_TURN_SILENCE', aai_config.get('min_turn_silence', 300))),
+            'max_turn_silence': int(os.getenv('ASSEMBLYAI_MAX_TURN_SILENCE', aai_config.get('max_turn_silence', 1500))),
+            'vad_threshold': float(os.getenv('ASSEMBLYAI_VAD_THRESHOLD', aai_config.get('vad_threshold', 0.3))),
+        }
+
+    @staticmethod
     def get_livekit_config():
         """Get LiveKit configuration from environment variables"""
         return {
