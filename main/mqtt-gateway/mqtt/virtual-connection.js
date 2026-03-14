@@ -537,6 +537,32 @@ class VirtualMQTTConnection {
       }
     }
 
+    // ── Quota gate: check quota before creating LiveKit room ──
+    if (this.roomType === "conversation") {
+      try {
+        const quotaUrl = `${process.env.MANAGER_API_URL}/subscription/quota/${this.macAddress}`;
+        console.log(`🔍 [QUOTA-GATE] Checking quota for device ${this.deviceId}...`);
+        const quotaResponse = await axios.get(quotaUrl, {
+          headers: { "X-Service-Key": process.env.MANAGER_API_SECRET || "" },
+          timeout: 5000,
+        });
+
+        const quotaData = quotaResponse.data?.data;
+        if (quotaData && quotaData.isExhausted) {
+          console.log(`🚫 [QUOTA-GATE] Quota exhausted for ${this.deviceId}`);
+          this.sendMqttMessage(JSON.stringify({
+            type: "quota_exhausted",
+            mac_address: this.macAddress,
+            timestamp: Date.now(),
+          }));
+          return;
+        }
+        console.log(`✅ [QUOTA-GATE] Quota OK for ${this.deviceId} (remaining: ${quotaData?.remaining})`);
+      } catch (error) {
+        console.warn(`⚠️ [QUOTA-GATE] Quota check failed (fail-open): ${error.message}`);
+      }
+    }
+
     this.udp = {
       ...this.udp,
       key: crypto.randomBytes(16),

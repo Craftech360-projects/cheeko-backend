@@ -9,6 +9,7 @@
 const express = require('express');
 const router = express.Router();
 const quotaService = require('../services/quota.service');
+const subscriptionService = require('../services/subscription.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireServiceKey, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -90,6 +91,121 @@ router.post('/increment/:mac',
       success(res, quota, 'Quota incremented');
     } catch (error) {
       logger.error('Error incrementing quota:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==================== TOKEN CONSUMPTION (Service Key) ====================
+
+/**
+ * @swagger
+ * /quota/consume/token/{mac}:
+ *   post:
+ *     tags: [Quota]
+ *     summary: Consume weighted tokens for a device
+ *     description: Called by agent workers on each turn for token-based plans.
+ *     security:
+ *       - serviceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [weightedTokens, rawInput, rawOutput]
+ *             properties:
+ *               weightedTokens:
+ *                 type: number
+ *               rawInput:
+ *                 type: integer
+ *               rawOutput:
+ *                 type: integer
+ *               monthKey:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Updated token quota status
+ */
+router.post('/consume/token/:mac',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { weightedTokens, rawInput, rawOutput, monthKey } = req.body || {};
+
+    if (!mac) return badRequest(res, 'MAC address is required');
+    if (weightedTokens == null || rawInput == null || rawOutput == null) {
+      return badRequest(res, 'weightedTokens, rawInput, and rawOutput are required');
+    }
+
+    try {
+      const result = await subscriptionService.consumeTokenByMac(mac, {
+        weightedTokens, rawInput, rawOutput, monthKey
+      });
+      success(res, result, 'Token quota consumed');
+    } catch (error) {
+      logger.error('Error consuming token quota:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// ==================== TIME CONSUMPTION (Service Key) ====================
+
+/**
+ * @swagger
+ * /quota/consume/time/{mac}:
+ *   post:
+ *     tags: [Quota]
+ *     summary: Consume session time for a device
+ *     description: Called by agent workers periodically during a session for time-based plans.
+ *     security:
+ *       - serviceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [seconds]
+ *             properties:
+ *               seconds:
+ *                 type: integer
+ *                 description: Seconds to consume
+ *               monthKey:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Updated time quota status
+ */
+router.post('/consume/time/:mac',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { seconds, monthKey } = req.body || {};
+
+    if (!mac) return badRequest(res, 'MAC address is required');
+    if (seconds == null || seconds < 0) {
+      return badRequest(res, 'seconds is required and must be non-negative');
+    }
+
+    try {
+      const result = await subscriptionService.consumeTimeByMac(mac, { seconds, monthKey });
+      success(res, result, 'Time quota consumed');
+    } catch (error) {
+      logger.error('Error consuming time quota:', error);
       badRequest(res, error.message);
     }
   })
@@ -262,14 +378,21 @@ router.get('/user/:userId',
 
 /**
  * @swagger
- * /quota/user/{userId}/grant:
+ * /quota/device/{mac}/grant:
  *   post:
  *     tags: [Quota]
- *     summary: Grant extra questions to a user
+ *     summary: Grant extra questions to a device
  *     description: Admin grants additional questions for the current month
  *     security:
  *       - bearerAuth: []
  *       - serviceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
  *     requestBody:
  *       required: true
  *       content:
@@ -287,19 +410,20 @@ router.get('/user/:userId',
  *       200:
  *         description: Updated quota after granting extras
  */
-router.post('/user/:userId/grant',
+router.post('/device/:mac/grant',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { userId } = req.params;
+    const { mac } = req.params;
     const { amount } = req.body;
 
+    if (!mac) return badRequest(res, 'MAC address is required');
     if (!amount || amount <= 0) {
       return badRequest(res, 'Amount must be a positive number');
     }
 
     try {
-      const quota = await quotaService.grantExtra(Number(userId), Number(amount));
-      logger.info(`Admin granted ${amount} extra questions to user ${userId}`);
+      const quota = await quotaService.grantExtra(mac, Number(amount));
+      logger.info(`Admin granted ${amount} extra questions to device ${mac}`);
       success(res, quota, `Granted ${amount} extra questions`);
     } catch (error) {
       logger.error('Error granting extra quota:', error);

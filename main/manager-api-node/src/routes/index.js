@@ -29,6 +29,7 @@ const dictRoutes = require('./dict.routes');
 const ttsVoiceRoutes = require('./ttsVoice.routes');
 const emailReportRoutes = require('./emailReport.routes');
 const quotaRoutes = require('./quota.routes');
+const subscriptionRoutes = require('./subscription.routes');
 
 /**
  * @swagger
@@ -205,5 +206,6 @@ router.use('/admin/dict', dictRoutes);
 router.use('/ttsVoice', ttsVoiceRoutes);
 router.use('/admin/email-reports', emailReportRoutes);
 router.use('/quota', quotaRoutes);
+router.use('/subscription', subscriptionRoutes);
 
 module.exports = router;
