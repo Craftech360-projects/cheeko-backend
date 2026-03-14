@@ -45,7 +45,7 @@ class YesNoQuizState:
         if correct:
             self.stars += 1
             self.consecutive_correct += 1
-            if self.consecutive_correct >= 5:
+            if self.consecutive_correct > 0 and self.consecutive_correct % 5 == 0:
                 self.stars += 1
                 bonus_star = True
                 logger.info(f"state.bonus_star(streak={self.consecutive_correct})")

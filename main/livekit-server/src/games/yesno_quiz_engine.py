@@ -93,6 +93,9 @@ class YesNoQuizEngine:
             )
             return
 
+        # Mark as answered before processing to close the race window with voice
+        self._answered_question_id = question_id
+
         # Cancel hint timers — child is responding
         self.hints.cancel_timers()
 
@@ -190,7 +193,7 @@ class YesNoQuizEngine:
         # Schedule timeout processing on the main event loop (NOT in hint task)
         # The hint manager's asyncio.create_task context causes session.say() to hang.
         import asyncio
-        asyncio.get_event_loop().call_soon(
+        asyncio.get_running_loop().call_soon(
             lambda: asyncio.ensure_future(self._handle_timeout_result(question_id))
         )
 
