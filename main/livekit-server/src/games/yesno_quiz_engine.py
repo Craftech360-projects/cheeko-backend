@@ -44,6 +44,7 @@ class YesNoQuizEngine:
         self.session = session
         self.child_name = child_name
         self.child_age = child_age
+        self._answered_question_id = None  # Guard against double-answering
 
     # ==================== EVENT HANDLERS ====================
 
@@ -79,6 +80,11 @@ class YesNoQuizEngine:
         input_method = message.get("input_method", "tap")
 
         logger.info(f"engine.tap_answer(qid={question_id}, value={value})")
+
+        # Guard: already answered this question
+        if question_id == self._answered_question_id:
+            logger.warning(f"engine.tap_already_answered(qid={question_id})")
+            return
 
         # Guard: stale question
         if question_id != self.state.current_question_id:
@@ -122,7 +128,14 @@ class YesNoQuizEngine:
             logger.warning(f"engine.voice_unknown_action(action={action})")
             return
 
-        # Cancel hint timers
+        # Guard: already answered this question (tap may have beaten voice)
+        question_id = tool_result.get("question_id", self.state.current_question_id)
+        if question_id == self._answered_question_id:
+            logger.warning(f"engine.voice_already_answered(qid={question_id})")
+            return
+
+        # Mark as answered and cancel hint timers
+        self._answered_question_id = question_id
         self.hints.cancel_timers()
 
         # Build a result dict for _send_result_and_advance
@@ -179,14 +192,18 @@ class YesNoQuizEngine:
         """
         logger.info(f"engine.timeout(qid={question_id})")
 
-        # Guard: stale question
+        # Guard: stale question or already answered
         if question_id != self.state.current_question_id:
             logger.warning(
                 f"engine.timeout_stale(expected={self.state.current_question_id}, got={question_id})"
             )
             return
+        if question_id == self._answered_question_id:
+            logger.warning(f"engine.timeout_already_answered(qid={question_id})")
+            return
 
-        # Cancel any remaining timers
+        # Mark as answered and cancel any remaining timers
+        self._answered_question_id = question_id
         self.hints.cancel_timers()
 
         # Record a wrong answer for timeout
@@ -318,6 +335,9 @@ class YesNoQuizEngine:
         if not current_q:
             logger.warning("engine.process_answer_no_question")
             return
+
+        # Mark this question as answered to prevent voice/tap race
+        self._answered_question_id = self.state.current_question_id
 
         correct_answer_bool = current_q.get("correct_answer", True)
         user_said_yes = (answer == "yes")
