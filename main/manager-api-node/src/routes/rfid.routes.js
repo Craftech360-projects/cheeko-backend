@@ -93,7 +93,7 @@ const logger = require('../utils/logger');
 router.get('/card/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, cardType, active } = req.query;
+    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, categoryId, cardType, active } = req.query;
     const result = await rfidService.getCardMappingPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
@@ -102,6 +102,7 @@ router.get('/card/page',
       questionId: questionId ? parseInt(questionId) : undefined,
       questionPackId: questionPackId ? parseInt(questionPackId) : undefined,
       contentPackId: contentPackId ? parseInt(contentPackId) : undefined,
+      categoryId: categoryId ? parseInt(categoryId) : undefined,
       cardType,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
@@ -3793,6 +3794,77 @@ router.get('/question-pack/:id',
     // I'll skip this specific GET /:id for now to avoid errors if service method is missing.
     // But I'll leave the block commented out just in case.
     return notFound(res, 'Not implemented yet');
+  })
+);
+
+// =============================================
+// Category Routes
+// =============================================
+
+router.get('/category/page',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, code, name, active } = req.query;
+    const result = await rfidService.getCategoryPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      code, name,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+router.get('/category/list',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { active } = req.query;
+    const result = await rfidService.getCategoryList({
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+router.get('/category/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const cat = await rfidService.getCategoryById(parseInt(req.params.id));
+    success(res, cat);
+  })
+);
+
+router.get('/category/code/:code',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const cat = await rfidService.getCategoryByCode(req.params.code);
+    success(res, cat);
+  })
+);
+
+router.post('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await rfidService.createCategory(req.body, req.userId);
+    success(res, null);
+  })
+);
+
+router.put('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await rfidService.updateCategory(req.body, req.userId);
+    success(res, null);
+  })
+);
+
+router.post('/category/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    let ids = req.body;
+    if (!Array.isArray(ids)) ids = req.body.ids || [];
+    await rfidService.deleteCategories(ids.map(id => parseInt(id)));
+    success(res, null);
   })
 );
 

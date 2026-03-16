@@ -53,6 +53,21 @@
           <div class="field-hint">Select a pre-defined Q&A pack (managed in Q&A Packs tab).</div>
         </el-form-item>
 
+        <!-- AI Card Type Selector -->
+        <el-form-item v-if="form.actionType === 'ai'" label="AI Card Type" class="form-item">
+          <el-select v-model="form.aiCardType" placeholder="Select card type" class="custom-select">
+            <el-option label="Cheeko" value="cheeko">
+              <span><i class="el-icon-chat-dot-round" style="margin-right: 6px;"></i>Cheeko</span>
+            </el-option>
+            <el-option label="Magic Card" value="magic_card">
+              <span><i class="el-icon-magic-stick" style="margin-right: 6px;"></i>Magic Card</span>
+            </el-option>
+            <el-option label="Astronaut Card" value="astronaut_card">
+              <span><i class="el-icon-discover" style="margin-right: 6px;"></i>Astronaut Card</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+
         <!-- Content Pack Selector -->
         <el-form-item v-if="form.actionType === 'content'" label="Content Pack" prop="contentPackId" class="form-item">
           <el-select v-model="form.contentPackId" placeholder="Select content pack" class="custom-select" filterable clearable>
@@ -167,6 +182,9 @@ export default {
     },
     setActionType(type) {
       this.form.actionType = type;
+      if (type === 'ai' && !this.form.aiCardType) {
+        this.form.aiCardType = 'cheeko';
+      }
     },
     cancel() {
       this.saving = false;

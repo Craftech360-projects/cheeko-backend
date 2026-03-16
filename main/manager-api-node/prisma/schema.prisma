@@ -660,6 +660,8 @@ model content_item {
   image_url         String?            @db.VarChar(500)
   lyrics_text       String?
   content_text      String?
+  story_number      Int?
+  story_title       String?            @db.VarChar(255)
   active            Boolean?           @default(true)
   creator           BigInt?
   create_date       DateTime?          @default(now()) @db.Timestamptz(6)

@@ -19,6 +19,8 @@ CHARACTER_ALIASES = {
     "Math Tutor": ["math tutor", "math", "maths", "math mode", "tutor", "math teacher", "mathematics"],
     "Riddle Solver": ["riddle solver", "riddle", "riddles", "riddle mode", "riddle game", "puzzle", "puzzles"],
     "Word Ladder": ["word ladder", "word game", "word", "words", "ladder", "word ladder game"],
+    "Cheeko Magic": ["cheeko magic", "magic", "magic mode", "wizard", "magician", "sorcerer", "magical"],
+    "Cheeko Astronaut": ["cheeko astronaut", "astronaut", "astronaut mode", "space", "space mode", "spaceman", "rocket"],
 }
 
 

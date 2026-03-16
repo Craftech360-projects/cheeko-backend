@@ -243,6 +243,8 @@ export default {
             rfidUid: params.rfidUid || '',
             packCode: params.packCode || '',
             questionId: params.questionId || '',
+            contentPackId: params.contentPackId || '',
+            categoryId: params.categoryId || '',
             cardType: params.cardType || '',
             active: params.active !== undefined ? params.active : ''
         }).toString();

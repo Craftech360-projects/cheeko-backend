@@ -37,6 +37,7 @@
             <el-option label="Story Pack" value="story_pack"/>
             <el-option label="Rhyme Pack" value="rhyme_pack"/>
             <el-option label="Habit Pack" value="habit_pack"/>
+            <el-option label="RFID Content" value="rfidcontent"/>
           </el-select>
         </el-form-item>
 
@@ -58,13 +59,19 @@
            <el-input-number v-model="form.version" :min="1" size="small"></el-input-number>
         </el-form-item>
 
-        <!-- Dynamic Items Table -->
-        <div class="items-section">
+        <!-- Story Grouping Toggle -->
+        <el-form-item label="Group by Stories" class="form-item">
+          <el-switch v-model="storyMode" active-text="Grouped" inactive-text="Flat" @change="onStoryModeChange"></el-switch>
+          <span class="story-mode-hint">{{ storyMode ? 'Items grouped into stories. Encoder rotates between stories.' : 'Flat list. Encoder rotates between individual tracks.' }}</span>
+        </el-form-item>
+
+        <!-- ========== FLAT MODE (existing) ========== -->
+        <div class="items-section" v-if="!storyMode">
            <div class="items-header">
               <span class="items-title">Pack Items (Max 10)</span>
               <el-button size="mini" type="primary" icon="el-icon-plus" @click="addItem" :disabled="form.items.length >= 10">Add Item</el-button>
            </div>
-           
+
            <div class="items-list">
               <div v-for="(item, index) in form.items" :key="index" class="item-row">
                   <div class="item-col seq-col">
@@ -84,19 +91,15 @@
                           </el-input>
                       </div>
                       <div v-if="item.imageUrl" class="img-preview-box">
-                           <!-- Canvas for .bin files (LVGL RGB565 format) -->
                            <canvas v-if="isBinFile(item.imageUrl)"
                                    :ref="'canvas-' + index"
                                    class="bin-preview-canvas"
                                    @load="loadBinPreview(item.imageUrl, index)">
                            </canvas>
-                           <!-- Regular image for png/jpg -->
                            <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
-                           <!-- Loading indicator for .bin -->
                            <div v-if="isBinFile(item.imageUrl) && binLoading[index]" class="bin-loading">
                              <i class="el-icon-loading"></i>
                            </div>
-                           <!-- Error state for .bin -->
                            <div v-if="isBinFile(item.imageUrl) && binError[index]" class="bin-error">
                              <i class="el-icon-picture-outline"></i>
                              <span>.bin</span>
@@ -109,6 +112,65 @@
               </div>
               <div v-if="form.items.length === 0" class="empty-items">
                   No items added. Click "Add Item" to start.
+              </div>
+           </div>
+        </div>
+
+        <!-- ========== STORY MODE (grouped) ========== -->
+        <div class="items-section" v-if="storyMode">
+           <div class="items-header">
+              <span class="items-title">Stories</span>
+              <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStory">Add Story</el-button>
+           </div>
+
+           <div v-if="stories.length === 0" class="empty-items">
+              No stories added. Click "Add Story" to start.
+           </div>
+
+           <div v-for="(story, sIndex) in stories" :key="'story-' + sIndex" class="story-block">
+              <div class="story-header">
+                <div class="story-header-left">
+                  <span class="story-badge">Story {{ sIndex + 1 }}</span>
+                  <el-input v-model="story.title" placeholder="Story title (e.g., The Lion King)" size="small" class="story-title-input"></el-input>
+                </div>
+                <div class="story-header-right">
+                  <el-button size="mini" type="primary" icon="el-icon-plus" @click="addStoryItem(sIndex)" plain>Add Track</el-button>
+                  <el-button size="mini" type="danger" icon="el-icon-delete" @click="removeStory(sIndex)" plain circle></el-button>
+                </div>
+              </div>
+
+              <div class="story-items">
+                <div v-for="(item, iIndex) in story.items" :key="'si-' + sIndex + '-' + iIndex" class="item-row">
+                  <div class="item-col seq-col">
+                    <span class="seq-badge">{{ iIndex + 1 }}</span>
+                  </div>
+                  <div class="item-col main-col">
+                    <div class="inputs-wrapper" style="flex: 1; min-width: 0;">
+                      <el-input v-model="item.title" placeholder="Track title" size="small" class="mb-1"></el-input>
+                      <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
+                        <template slot="prepend"><i class="el-icon-headset"></i></template>
+                        <el-button slot="append" :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(item.audioUrl)" v-if="item.audioUrl"></el-button>
+                      </el-input>
+                      <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small" class="mb-1">
+                        <template slot="prepend"><i class="el-icon-picture"></i></template>
+                      </el-input>
+                      <el-input type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input"></el-input>
+                    </div>
+                    <div v-if="item.imageUrl" class="img-preview-box">
+                      <canvas v-if="isBinFile(item.imageUrl)"
+                              :ref="'canvas-s' + sIndex + '-' + iIndex"
+                              class="bin-preview-canvas">
+                      </canvas>
+                      <img v-else :src="item.imageUrl" alt="Preview" @error="handleImageError($event)"/>
+                    </div>
+                  </div>
+                  <div class="item-col action-col">
+                    <el-button type="text" icon="el-icon-delete" class="text-danger" @click="removeStoryItem(sIndex, iIndex)"></el-button>
+                  </div>
+                </div>
+                <div v-if="story.items.length === 0" class="empty-items" style="padding: 10px;">
+                  No tracks. Click "Add Track" above.
+                </div>
               </div>
            </div>
         </div>
@@ -163,9 +225,11 @@ export default {
       saving: false,
       currentAudio: null,
       playingUrl: null,
-      binLoading: {},  // Track loading state per item index
-      binError: {},    // Track error state per item index
-      binCache: {},    // Cache decoded .bin previews
+      storyMode: false,
+      stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
+      binLoading: {},
+      binError: {},
+      binCache: {},
       rules: {
         packCode: [
           { required: true, message: "Please enter pack code", trigger: "blur" },
@@ -195,6 +259,35 @@ export default {
         this.form.items.forEach((item, idx) => {
             item.sequence = idx + 1;
         });
+    },
+    // ---- Story Mode Methods ----
+    onStoryModeChange(val) {
+      if (val) {
+        // Switching to story mode — convert flat items to a single story if any exist
+        if (this.form.items.length > 0 && this.stories.length === 0) {
+          this.stories = [{
+            title: '',
+            items: this.form.items.map(i => ({ ...i }))
+          }];
+        }
+        if (this.stories.length === 0) {
+          this.stories = [{ title: '', items: [] }];
+        }
+      }
+    },
+    addStory() {
+      this.stories.push({ title: '', items: [] });
+    },
+    removeStory(sIndex) {
+      this.stories.splice(sIndex, 1);
+    },
+    addStoryItem(sIndex) {
+      this.stories[sIndex].items.push({
+        title: '', audioUrl: '', imageUrl: '', text: ''
+      });
+    },
+    removeStoryItem(sIndex, iIndex) {
+      this.stories[sIndex].items.splice(iIndex, 1);
     },
     toggleAudio(url) {
       if (!url) return;
@@ -349,15 +442,45 @@ export default {
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {
-          // Validate Items
-          if (this.form.items.length === 0) {
+          // Build the final form to submit
+          const submitForm = { ...this.form };
+
+          if (this.storyMode) {
+            // Flatten stories into items with storyNumber/storyTitle
+            if (this.stories.length === 0 || this.stories.every(s => s.items.length === 0)) {
+              this.$message.warning("Please add at least one track to a story.");
+              return;
+            }
+            const flatItems = [];
+            this.stories.forEach((story, sIdx) => {
+              const storyNum = sIdx + 1;
+              story.items.forEach((item, iIdx) => {
+                flatItems.push({
+                  ...item,
+                  itemNumber: iIdx + 1,
+                  storyNumber: storyNum,
+                  storyTitle: story.title || `Story ${storyNum}`
+                });
+              });
+            });
+            submitForm.items = flatItems;
+          } else {
+            // Flat mode — ensure no story fields
+            if (this.form.items.length === 0) {
               this.$message.warning("Please add at least one item to the pack.");
               return;
+            }
+            submitForm.items = this.form.items.map((item, idx) => ({
+              ...item,
+              itemNumber: idx + 1,
+              storyNumber: null,
+              storyTitle: null
+            }));
           }
 
           this.saving = true;
           this.$emit('submit', {
-            form: this.form,
+            form: submitForm,
             done: () => {
               this.saving = false;
             }
@@ -378,6 +501,33 @@ export default {
     visible(newVal) {
       if (newVal) {
         this.dialogKey = Date.now();
+
+        // Detect story mode from existing items (when editing)
+        const hasStoryItems = this.form.items && this.form.items.some(i => i.storyNumber > 0);
+        if (hasStoryItems) {
+          this.storyMode = true;
+          // Group items by storyNumber into stories[]
+          const storyMap = {};
+          for (const item of this.form.items) {
+            const sn = item.storyNumber || 1;
+            if (!storyMap[sn]) {
+              storyMap[sn] = { title: item.storyTitle || '', items: [] };
+            }
+            storyMap[sn].items.push({
+              title: item.title || '',
+              audioUrl: item.audioUrl || '',
+              imageUrl: item.imageUrl || '',
+              text: item.text || ''
+            });
+          }
+          this.stories = Object.keys(storyMap)
+            .sort((a, b) => Number(a) - Number(b))
+            .map(k => storyMap[k]);
+        } else {
+          this.storyMode = false;
+          this.stories = [];
+        }
+
         // Load bin previews for existing items
         this.$nextTick(() => {
           this.form.items.forEach((item, index) => {
@@ -388,9 +538,10 @@ export default {
         });
       } else {
         this.stopAudio();
-        // Clear bin states
         this.binLoading = {};
         this.binError = {};
+        this.stories = [];
+        this.storyMode = false;
       }
     },
     'form.items': {
@@ -690,6 +841,64 @@ export default {
         color: #94a3b8;
         font-size: 13px;
         font-style: italic;
+    }
+
+    .story-mode-hint {
+        margin-left: 12px;
+        font-size: 12px;
+        color: #94a3b8;
+    }
+
+    .story-block {
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        background: #f8fafc;
+        overflow: hidden;
+    }
+
+    .story-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 12px;
+        background: #eef2ff;
+        border-bottom: 1px solid #e2e8f0;
+        gap: 10px;
+    }
+
+    .story-header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex: 1;
+        min-width: 0;
+    }
+
+    .story-header-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .story-badge {
+        background: #6366f1;
+        color: white;
+        padding: 2px 10px;
+        border-radius: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+
+    .story-title-input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .story-items {
+        padding: 8px 4px;
     }
   }
 

@@ -302,10 +302,10 @@
                                         <span class="uid-mono">{{ scope.row.rfidUid }}</span>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="Content Type" align="center" width="130">
+                                <el-table-column label="Card Type" align="center" width="160">
                                     <template slot-scope="scope">
-                                        <el-tag type="danger" size="small" class="content-badge">
-                                            <i class="el-icon-cpu"></i> AI Card
+                                        <el-tag :type="getAiCardTypeStyle(scope.row.notes)" size="small" class="content-badge">
+                                            <i :class="getAiCardTypeIcon(scope.row.notes)"></i> {{ getAiCardTypeLabel(scope.row.notes) }}
                                         </el-tag>
                                     </template>
                                 </el-table-column>
@@ -620,84 +620,145 @@
                                     </div>
                                 </div>
 
-                                <div class="console-input-section">
-                                    <el-input
-                                        v-model="consoleLookupUid"
-                                        placeholder="Enter RFID UID (e.g., 04A1B2C3D4E5F6)"
-                                        class="console-input"
-                                        clearable
-                                        @keyup.enter.native="handleConsoleLookup"
-                                    >
-                                        <template slot="prepend">RFID UID</template>
-                                    </el-input>
-                                    <div class="sequence-group">
-                                        <label class="sequence-label">Item #
-                                            <el-tooltip content="Which numbered item in a Content Pack to retrieve (e.g., item 3 of a rhymes pack)" placement="top">
-                                                <i class="el-icon-question"></i>
-                                            </el-tooltip>
-                                        </label>
-                                        <el-input-number v-model="consoleSequence" :min="1" :max="99" class="console-sequence" controls-position="right"></el-input-number>
+                                <!-- NFC Live Reader Panel -->
+                                <div class="nfc-live-panel" :class="{ connected: nfcConnected, scanning: nfcScanning }">
+                                    <div class="nfc-status-row">
+                                        <div class="nfc-indicator">
+                                            <span class="nfc-dot" :class="{ active: nfcConnected, pulse: nfcScanning }"></span>
+                                            <span class="nfc-label">{{ nfcConnected ? 'NFC Reader Connected' : 'NFC Reader Offline' }}</span>
+                                        </div>
+                                        <el-button size="mini" :type="nfcConnected ? 'danger' : 'success'" plain @click="toggleNfcConnection">
+                                            {{ nfcConnected ? 'Disconnect' : 'Connect Reader' }}
+                                        </el-button>
+                                    </div>
+                                    <div v-if="nfcConnected" class="nfc-tap-hint">
+                                        <i class="el-icon-mobile-phone"></i> Tap a card on the reader to auto-lookup
+                                    </div>
+                                    <div v-if="nfcLastTap" class="nfc-last-tap">
+                                        <span class="nfc-tap-label">Last tap:</span>
+                                        <el-tag type="primary" effect="dark" size="small" class="nfc-uid-tag">{{ nfcLastTap.uid }}</el-tag>
+                                        <span class="nfc-tap-time">{{ nfcLastTap.timeAgo }}</span>
+                                    </div>
+                                    <!-- NFC Tap History -->
+                                    <div v-if="nfcTapHistory.length > 0" class="nfc-history">
+                                        <div class="nfc-history-header">
+                                            <span class="nfc-history-title">Recent Taps</span>
+                                            <el-button size="mini" type="text" @click="nfcTapHistory = []">Clear</el-button>
+                                        </div>
+                                        <div class="nfc-history-list">
+                                            <div v-for="(tap, idx) in nfcTapHistory" :key="idx" class="nfc-history-item" @click="lookupHistoryTap(tap)">
+                                                <el-tag size="mini" :type="tap.found ? 'success' : 'danger'" effect="plain" class="nfc-history-status">
+                                                    {{ tap.found ? 'Mapped' : 'Unknown' }}
+                                                </el-tag>
+                                                <span class="nfc-history-uid">{{ tap.uid }}</span>
+                                                <span class="nfc-history-content" v-if="tap.title">{{ tap.title }}</span>
+                                                <span class="nfc-history-time">{{ tap.timeAgo }}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div class="console-actions">
-                                    <el-tooltip content="Find the exact card mapping for this UID" placement="top">
-                                        <el-button type="primary" :loading="consoleLookupLoading" @click="handleConsoleLookup">
-                                            <i class="el-icon-search"></i> Find Card Mapping
-                                        </el-button>
-                                    </el-tooltip>
-                                    <el-tooltip content="Check if this UID falls within any bulk range" placement="top">
-                                        <el-button type="info" :loading="consoleSeriesLoading" @click="handleSeriesLookup">
-                                            <i class="el-icon-s-operation"></i> Find Bulk Range
-                                        </el-button>
-                                    </el-tooltip>
-                                    <el-tooltip content="Get the final content (AI prompt text or story item) for this UID + sequence" placement="top">
-                                        <el-button type="success" :loading="consoleContentLoading" @click="handleContentLookup">
-                                            <i class="el-icon-document"></i> Resolve Content
-                                        </el-button>
-                                    </el-tooltip>
-                                    <el-tooltip content="Get audio download URLs for device offline playback" placement="top">
-                                        <el-button type="warning" :loading="consoleDownloadLoading" @click="handleDownloadLookup">
-                                            <i class="el-icon-download"></i> Download Manifest
-                                        </el-button>
-                                    </el-tooltip>
-                                </div>
+                                <!-- NFC Detail Dialog -->
+                                <el-dialog
+                                    :visible.sync="nfcDetailVisible"
+                                    :title="nfcDetailData ? nfcDetailData.title || nfcDetailData.rfid_uid || 'Card Details' : 'Card Details'"
+                                    width="600px"
+                                    :append-to-body="true"
+                                    custom-class="nfc-detail-dialog"
+                                >
+                                    <div v-if="nfcDetailData" class="nfc-detail-content">
+                                        <div class="nfc-detail-summary">
+                                            <div class="nfc-detail-row">
+                                                <span class="nfc-detail-label">UID</span>
+                                                <el-tag effect="dark" size="small" class="nfc-uid-tag">{{ nfcDetailData.rfid_uid || nfcDetailUid }}</el-tag>
+                                            </div>
+                                            <div class="nfc-detail-row" v-if="nfcDetailData.contentType">
+                                                <span class="nfc-detail-label">Type</span>
+                                                <el-tag size="small" type="info">{{ nfcDetailData.contentType }}</el-tag>
+                                            </div>
+                                            <div class="nfc-detail-row" v-if="nfcDetailData.title">
+                                                <span class="nfc-detail-label">Title</span>
+                                                <span class="nfc-detail-value">{{ nfcDetailData.title }}</span>
+                                            </div>
+                                            <div class="nfc-detail-row" v-if="nfcDetailData.packCode">
+                                                <span class="nfc-detail-label">Pack Code</span>
+                                                <span class="nfc-detail-value" style="font-family: monospace;">{{ nfcDetailData.packCode }}</span>
+                                            </div>
+                                            <div class="nfc-detail-row" v-if="nfcDetailData.categoryName">
+                                                <span class="nfc-detail-label">Category</span>
+                                                <el-tag size="small" type="success">{{ nfcDetailData.categoryName }}</el-tag>
+                                            </div>
+                                            <div class="nfc-detail-row" v-if="nfcDetailData.version">
+                                                <span class="nfc-detail-label">Version</span>
+                                                <span class="nfc-detail-value">{{ nfcDetailData.version }}</span>
+                                            </div>
+                                        </div>
 
-                                <div class="console-result" v-if="consoleLookupResult">
-                                    <div class="result-header">
-                                        <span class="result-label">
-                                            <i :class="consoleLookupResult.success ? 'el-icon-success' : 'el-icon-error'"></i>
-                                            {{ getResultTitle(consoleLookupResult) }}
-                                        </span>
-                                        <el-tag :type="consoleLookupResult.success ? 'success' : 'danger'" size="small">
-                                            {{ consoleLookupResult.type || 'card' }}
-                                        </el-tag>
-                                    </div>
-                                    <pre class="result-json">{{ JSON.stringify(consoleLookupResult.data, null, 2) }}</pre>
-                                </div>
+                                        <!-- Cards with same content -->
+                                        <div v-if="nfcDetailData.packCode || nfcDetailData.contentType === 'prompt'" class="nfc-linked-cards">
+                                            <div class="nfc-linked-header">
+                                                <h4 class="nfc-detail-section-title">Cards with same content
+                                                    <el-tag size="mini" type="info" effect="plain" style="margin-left: 6px;">{{ nfcDetailData.packCode || nfcDetailData.title }}</el-tag>
+                                                </h4>
+                                                <el-button size="mini" icon="el-icon-refresh" circle @click="loadLinkedCards" :loading="nfcLinkedLoading"></el-button>
+                                            </div>
 
-                                <div class="console-empty" v-else>
-                                    <i class="el-icon-search" style="font-size: 48px; margin-bottom: 16px; color: #c0c4cc;"></i>
-                                    <p style="font-size: 15px; margin-bottom: 20px;">Enter an RFID UID above and use the buttons to test different lookups</p>
-                                    <div class="lookup-guide">
-                                        <div class="guide-item">
-                                            <el-tag size="small">Find Card Mapping</el-tag>
-                                            <span>Exact UID match in Card Mappings</span>
+                                            <div v-if="nfcLinkedLoading" class="nfc-linked-loading">
+                                                <i class="el-icon-loading"></i> Loading...
+                                            </div>
+
+                                            <div v-else-if="nfcLinkedCards.length > 0" class="nfc-linked-list">
+                                                <div v-for="(card, ci) in nfcLinkedCards" :key="ci" class="nfc-linked-item">
+                                                    <el-tag size="small" :type="card.rfidUid === (nfcDetailData.rfid_uid || nfcDetailUid) ? 'primary' : ''" effect="dark" class="nfc-uid-tag">
+                                                        {{ card.rfidUid }}
+                                                    </el-tag>
+                                                    <span class="nfc-linked-notes" v-if="card.notes">{{ card.notes }}</span>
+                                                    <el-tag size="mini" :type="card.active ? 'success' : 'info'" effect="plain">{{ card.active ? 'Active' : 'Inactive' }}</el-tag>
+                                                    <el-button
+                                                        size="mini" type="danger" icon="el-icon-delete" circle plain
+                                                        @click="removeLinkedCard(card)"
+                                                        :loading="card._deleting"
+                                                    ></el-button>
+                                                    <el-tag v-if="card.rfidUid === (nfcDetailData.rfid_uid || nfcDetailUid)" size="mini" type="warning" effect="plain">current</el-tag>
+                                                </div>
+                                            </div>
+
+                                            <div v-else class="nfc-linked-empty">
+                                                No other cards mapped to this content.
+                                            </div>
+
+                                            <!-- Add new card -->
+                                            <div class="nfc-add-card">
+                                                <el-input
+                                                    v-model="nfcNewCardUid"
+                                                    placeholder="Tap or type new card UID"
+                                                    size="small"
+                                                    class="nfc-add-input"
+                                                    @keyup.enter.native="addLinkedCard"
+                                                >
+                                                    <template slot="prepend"><i class="el-icon-postcard"></i></template>
+                                                </el-input>
+                                                <el-button size="small" type="primary" icon="el-icon-plus" @click="addLinkedCard" :loading="nfcAddingCard" :disabled="!nfcNewCardUid.trim()">
+                                                    Add Card
+                                                </el-button>
+                                            </div>
                                         </div>
-                                        <div class="guide-item">
-                                            <el-tag size="small" type="info">Find Bulk Range</el-tag>
-                                            <span>Check if UID falls in any start-end range</span>
+
+                                        <!-- Raw JSON toggle -->
+                                        <div class="nfc-detail-raw-toggle">
+                                            <el-button size="mini" type="text" @click="nfcShowRawJson = !nfcShowRawJson">
+                                                {{ nfcShowRawJson ? 'Hide' : 'Show' }} Raw JSON
+                                            </el-button>
                                         </div>
-                                        <div class="guide-item">
-                                            <el-tag size="small" type="success">Resolve Content</el-tag>
-                                            <span>Get final content (prompt text or story item)</span>
-                                        </div>
-                                        <div class="guide-item">
-                                            <el-tag size="small" type="warning">Download Manifest</el-tag>
-                                            <span>Get audio URLs for device offline playback</span>
-                                        </div>
+                                        <pre v-if="nfcShowRawJson" class="nfc-detail-json">{{ JSON.stringify(nfcDetailData, null, 2) }}</pre>
                                     </div>
-                                </div>
+
+                                    <div v-else class="nfc-detail-not-found">
+                                        <i class="el-icon-warning-outline" style="font-size: 40px; color: #e6a23c; margin-bottom: 12px;"></i>
+                                        <p>No mapping found for <strong>{{ nfcDetailUid }}</strong></p>
+                                        <p style="color: #909399; font-size: 13px;">This card is not mapped to any content yet.</p>
+                                    </div>
+                                </el-dialog>
                             </div>
                         </template>
                     </el-card>
@@ -859,6 +920,23 @@ export default {
             contentPacksDropdown: [],
             questionPacksDropdown: [],
 
+            // NFC Live Reader
+            nfcConnected: false,
+            nfcScanning: false,
+            nfcSocket: null,
+            nfcLastTap: null,
+            nfcTapHistory: [],
+            nfcReconnectTimer: null,
+            nfcTimeAgoTimer: null,
+            nfcDetailVisible: false,
+            nfcDetailData: null,
+            nfcDetailUid: '',
+            nfcShowRawJson: false,
+            nfcLinkedCards: [],
+            nfcLinkedLoading: false,
+            nfcNewCardUid: '',
+            nfcAddingCard: false,
+
             // Console
             consoleLookupUid: '',
             consoleLookupLoading: false,
@@ -880,6 +958,9 @@ export default {
             },
             statsLoading: false
         };
+    },
+    beforeDestroy() {
+        this.disconnectNfc();
     },
     created() {
 
@@ -1048,6 +1129,31 @@ export default {
                 if (data.code === 0) this.stats.totalAiCards = data.data.total || 0;
                 checkDone();
             });
+        },
+
+        getAiCardTypeLabel(notes) {
+            if (!notes) return 'AI Card';
+            const n = notes.toLowerCase();
+            if (n.includes('cheeko')) return 'Cheeko';
+            if (n.includes('magic')) return 'Magic Card';
+            if (n.includes('astro')) return 'Astronaut Card';
+            return 'AI Card';
+        },
+        getAiCardTypeIcon(notes) {
+            if (!notes) return 'el-icon-cpu';
+            const n = notes.toLowerCase();
+            if (n.includes('cheeko')) return 'el-icon-chat-dot-round';
+            if (n.includes('magic')) return 'el-icon-magic-stick';
+            if (n.includes('astro')) return 'el-icon-discover';
+            return 'el-icon-cpu';
+        },
+        getAiCardTypeStyle(notes) {
+            if (!notes) return 'danger';
+            const n = notes.toLowerCase();
+            if (n.includes('cheeko')) return 'primary';
+            if (n.includes('magic')) return 'warning';
+            if (n.includes('astro')) return 'success';
+            return 'danger';
         },
 
         getResultTitle(result) {
@@ -1332,6 +1438,11 @@ export default {
         },
 
         handleCardSubmit({ form, done }) {
+            // Store aiCardType in notes for AI cards
+            if (form.cardType === 'ai' && form.aiCardType) {
+                const typeLabels = { cheeko: 'Cheeko Conversation card', magic_card: 'Magic Card', astronaut_card: 'Astronaut Card' };
+                form.notes = typeLabels[form.aiCardType] || form.notes;
+            }
             const api = form.id ? Api.rfid.updateCard : Api.rfid.addCard;
             api(form, ({ data }) => {
                 done && done();
@@ -1412,7 +1523,7 @@ export default {
 
         showAddAiCardDialog() {
             this.cardDialogTitle = 'Add AI Card';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', aiCardType: 'cheeko', notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1804,6 +1915,311 @@ export default {
         },
 
         // ==================== CONSOLE ====================
+        // ==================== NFC LIVE READER ====================
+        toggleNfcConnection() {
+            if (this.nfcConnected) {
+                this.disconnectNfc();
+            } else {
+                this.connectNfc();
+            }
+        },
+
+        connectNfc() {
+            if (this.nfcSocket) {
+                this.nfcSocket.close();
+            }
+
+            const wsUrl = 'ws://localhost:8765';
+            try {
+                this.nfcSocket = new WebSocket(wsUrl);
+            } catch (e) {
+                this.$message.error('Failed to connect to NFC bridge');
+                return;
+            }
+
+            this.nfcSocket.onopen = () => {
+                this.nfcConnected = true;
+                this.nfcScanning = true;
+                this.$message.success('NFC Reader connected');
+                if (this.nfcReconnectTimer) {
+                    clearTimeout(this.nfcReconnectTimer);
+                    this.nfcReconnectTimer = null;
+                }
+                // Start time-ago updater
+                this.nfcTimeAgoTimer = setInterval(() => this.updateTimeAgos(), 10000);
+            };
+
+            this.nfcSocket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'nfc_tap') {
+                        this.handleNfcTap(data.uid);
+                    }
+                } catch (e) { /* ignore parse errors */ }
+            };
+
+            this.nfcSocket.onclose = () => {
+                this.nfcConnected = false;
+                this.nfcScanning = false;
+                if (this.nfcTimeAgoTimer) {
+                    clearInterval(this.nfcTimeAgoTimer);
+                    this.nfcTimeAgoTimer = null;
+                }
+            };
+
+            this.nfcSocket.onerror = () => {
+                this.nfcConnected = false;
+                this.nfcScanning = false;
+                this.$message.error('NFC bridge not running. Start it with: python nfc_bridge.py');
+            };
+        },
+
+        disconnectNfc() {
+            if (this.nfcSocket) {
+                this.nfcSocket.close();
+                this.nfcSocket = null;
+            }
+            this.nfcConnected = false;
+            this.nfcScanning = false;
+            if (this.nfcTimeAgoTimer) {
+                clearInterval(this.nfcTimeAgoTimer);
+                this.nfcTimeAgoTimer = null;
+            }
+        },
+
+        handleNfcTap(uid) {
+            const now = Date.now();
+            this.nfcScanning = false;
+            setTimeout(() => { if (this.nfcConnected) this.nfcScanning = true; }, 300);
+
+            this.consoleLookupUid = uid;
+            this.nfcLastTap = { uid, timestamp: now, timeAgo: 'just now' };
+
+            // If detail dialog is open, fill the "Add Card" input instead
+            if (this.nfcDetailVisible && this.nfcDetailData) {
+                // Check if this card is already in the linked list
+                if (this.nfcLinkedCards.some(c => c.rfidUid === uid)) {
+                    this.$message.warning(`Card ${uid} is already mapped to this content`);
+                    return;
+                }
+                this.nfcNewCardUid = uid;
+                this.$message.info(`Card ${uid} ready to add`);
+                return;
+            }
+
+            // Auto-lookup and show dialog
+            Api.rfid.lookupCard(uid, ({ data }) => {
+                const found = data.code === 0 && data.data;
+                const title = found ? (data.data.title || data.data.packName || data.data.contentType || 'Mapped') : null;
+                const responseData = found ? data.data : null;
+
+                // Add to history with stored data
+                const historyEntry = { uid, timestamp: now, timeAgo: 'just now', found: !!found, title, data: responseData };
+                this.nfcTapHistory.unshift(historyEntry);
+                if (this.nfcTapHistory.length > 10) this.nfcTapHistory.pop();
+
+                // Auto-open detail dialog
+                this.nfcDetailUid = uid;
+                this.nfcDetailData = responseData;
+                this.nfcShowRawJson = false;
+                this.nfcNewCardUid = '';
+                this.nfcDetailVisible = true;
+                if (responseData) {
+                    this.loadLinkedCards();
+                } else {
+                    this.nfcLinkedCards = [];
+                }
+            });
+        },
+
+        lookupHistoryTap(tap) {
+            const openDialog = (responseData) => {
+                this.nfcDetailUid = tap.uid;
+                this.nfcDetailData = responseData;
+                this.nfcShowRawJson = false;
+                this.nfcNewCardUid = '';
+                this.nfcDetailVisible = true;
+                if (responseData) {
+                    this.loadLinkedCards();
+                } else {
+                    this.nfcLinkedCards = [];
+                }
+            };
+            if (tap.data) {
+                openDialog(tap.data);
+            } else {
+                Api.rfid.lookupCard(tap.uid, ({ data }) => {
+                    openDialog(data.code === 0 && data.data ? data.data : null);
+                });
+            }
+        },
+
+        loadLinkedCards() {
+            if (!this.nfcDetailData) return;
+            this.nfcLinkedLoading = true;
+            const uid = this.nfcDetailData.rfid_uid || this.nfcDetailUid;
+
+            // First get the card mapping to find contentPackId/categoryId
+            Api.rfid.getCardByUid(uid, ({ data }) => {
+                if (data.code === 0 && data.data) {
+                    const mapping = data.data;
+
+                    // Store for addLinkedCard
+                    this.nfcDetailData._contentPackId = mapping.contentPackId;
+                    this.nfcDetailData._categoryId = mapping.categoryId;
+                    this.nfcDetailData._cardType = mapping.cardType;
+                    this.nfcDetailData._notes = mapping.notes;
+
+                    let searchBy;
+                    if (mapping.contentPackId) {
+                        searchBy = { contentPackId: mapping.contentPackId };
+                    } else if (mapping.categoryId) {
+                        searchBy = { categoryId: mapping.categoryId };
+                    } else if (mapping.cardType === 'ai') {
+                        // AI cards — search all AI cards, then filter by same notes (card type)
+                        searchBy = { cardType: 'ai' };
+                    } else {
+                        searchBy = { packCode: this.nfcDetailData.packCode };
+                    }
+
+                    Api.rfid.getCardPage({ page: 1, limit: 50, ...searchBy }, ({ data: d2 }) => {
+                        this.nfcLinkedLoading = false;
+                        if (d2.code === 0 && d2.data && d2.data.list) {
+                            let cards = d2.data.list;
+                            // For AI cards, filter by same notes (card type label)
+                            if (mapping.cardType === 'ai' && mapping.notes) {
+                                cards = cards.filter(c => c.notes === mapping.notes);
+                            }
+                            this.nfcLinkedCards = cards.map(c => ({ ...c, _deleting: false }));
+                        } else {
+                            this.nfcLinkedCards = [];
+                        }
+                    });
+                } else {
+                    this.nfcLinkedLoading = false;
+                    this.nfcLinkedCards = [];
+                }
+            });
+        },
+
+        addLinkedCard() {
+            const newUid = this.nfcNewCardUid.trim().toUpperCase().replace(/[:-]/g, '');
+            if (!newUid) return;
+            if (!this.nfcDetailData) return;
+
+            this.nfcAddingCard = true;
+
+            const isAiCard = this.nfcDetailData._cardType === 'ai' || this.nfcDetailData.contentType === 'prompt';
+            const contentPackId = this.nfcDetailData._contentPackId
+                || (this.nfcLinkedCards.find(c => c.contentPackId) || {}).contentPackId
+                || null;
+            const categoryId = this.nfcDetailData._categoryId
+                || (this.nfcLinkedCards.find(c => c.categoryId) || {}).categoryId
+                || null;
+
+            const cardData = isAiCard ? {
+                rfidUid: newUid,
+                cardType: 'ai',
+                actionType: 'ai',
+                active: true,
+                notes: this.nfcDetailData._notes || this.nfcDetailData.title || 'AI Card'
+            } : {
+                rfidUid: newUid,
+                packCode: this.nfcDetailData.packCode || null,
+                contentPackId: contentPackId,
+                categoryId: categoryId,
+                cardType: 'content',
+                active: true,
+                notes: `Linked to ${this.nfcDetailData.title || this.nfcDetailData.packCode}`
+            };
+
+            // Check if card already exists — update it instead of creating
+            const existing = this.nfcLinkedCards.find(c => c.rfidUid === newUid);
+            if (existing) {
+                // Update existing card to point to this content
+                Api.rfid.updateCard({ ...cardData, id: existing.id }, ({ data }) => {
+                    this.nfcAddingCard = false;
+                    if (data.code === 0) {
+                        this.$message.success(`Card ${newUid} updated to this content`);
+                        this.nfcNewCardUid = '';
+                        this.loadLinkedCards();
+                    } else {
+                        this.$message.error(data.msg || 'Failed to update card');
+                    }
+                });
+                return;
+            }
+
+            // Try to add — if it already exists elsewhere, fetch its ID and update
+            Api.rfid.addCard(cardData, ({ data }) => {
+                if (data.code === 0) {
+                    this.nfcAddingCard = false;
+                    this.$message.success(`Card ${newUid} mapped successfully`);
+                    this.nfcNewCardUid = '';
+                    this.loadLinkedCards();
+                    this.loadStats();
+                } else if (data.msg && data.msg.includes('already exists')) {
+                    // Card exists with different content — update it
+                    Api.rfid.getCardByUid(newUid, ({ data: uidData }) => {
+                        if (uidData.code === 0 && uidData.data) {
+                            Api.rfid.updateCard({ ...cardData, id: uidData.data.id }, ({ data: upData }) => {
+                                this.nfcAddingCard = false;
+                                if (upData.code === 0) {
+                                    this.$message.success(`Card ${newUid} remapped to this content`);
+                                    this.nfcNewCardUid = '';
+                                    this.loadLinkedCards();
+                                    this.loadStats();
+                                } else {
+                                    this.$message.error(upData.msg || 'Failed to update card');
+                                }
+                            });
+                        } else {
+                            this.nfcAddingCard = false;
+                            this.$message.error('Failed to find existing card for update');
+                        }
+                    });
+                } else {
+                    this.nfcAddingCard = false;
+                    this.$message.error(data.msg || 'Failed to add card');
+                }
+            });
+        },
+
+        removeLinkedCard(card) {
+            this.$confirm(`Remove card ${card.rfidUid} from this content?`, 'Confirm', {
+                confirmButtonText: 'Remove',
+                cancelButtonText: 'Cancel',
+                type: 'warning'
+            }).then(() => {
+                card._deleting = true;
+                Api.rfid.deleteCard([card.id], ({ data }) => {
+                    card._deleting = false;
+                    if (data.code === 0) {
+                        this.$message.success('Card removed');
+                        this.loadLinkedCards();
+                        this.loadStats();
+                    } else {
+                        this.$message.error(data.msg || 'Failed to remove card');
+                    }
+                });
+            }).catch(() => {});
+        },
+
+        updateTimeAgos() {
+            const now = Date.now();
+            const fmt = (ts) => {
+                const diff = Math.floor((now - ts) / 1000);
+                if (diff < 10) return 'just now';
+                if (diff < 60) return `${diff}s ago`;
+                if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+                return `${Math.floor(diff / 3600)}h ago`;
+            };
+            if (this.nfcLastTap) {
+                this.nfcLastTap = { ...this.nfcLastTap, timeAgo: fmt(this.nfcLastTap.timestamp) };
+            }
+            this.nfcTapHistory = this.nfcTapHistory.map(t => ({ ...t, timeAgo: fmt(t.timestamp) }));
+        },
+
         handleConsoleLookup() {
             if (!this.consoleLookupUid.trim()) {
                 this.$message.warning('Please enter an RFID UID');
@@ -2335,6 +2751,365 @@ export default {
 }
 
 /* Console Tab Styles */
+/* NFC Live Reader Panel */
+.nfc-live-panel {
+    margin: 0 0 16px;
+    padding: 14px 18px;
+    border-radius: 10px;
+    border: 1.5px dashed #dcdfe6;
+    background: #fafbfc;
+    transition: all 0.3s ease;
+
+    &.connected {
+        border-color: #67c23a;
+        background: linear-gradient(135deg, #f0f9eb, #fafbfc);
+    }
+}
+
+.nfc-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.nfc-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.nfc-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #c0c4cc;
+    display: inline-block;
+    transition: background 0.3s;
+
+    &.active {
+        background: #67c23a;
+    }
+
+    &.pulse {
+        animation: nfc-pulse 2s infinite;
+    }
+}
+
+@keyframes nfc-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(103, 194, 58, 0.5); }
+    50% { box-shadow: 0 0 0 6px rgba(103, 194, 58, 0); }
+}
+
+.nfc-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #606266;
+}
+
+.nfc-tap-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #909399;
+
+    i {
+        animation: nfc-tap-bounce 1.5s infinite;
+    }
+}
+
+@keyframes nfc-tap-bounce {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+}
+
+.nfc-last-tap {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+}
+
+.nfc-tap-label {
+    color: #909399;
+    font-weight: 500;
+}
+
+.nfc-uid-tag {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    letter-spacing: 0.5px;
+}
+
+.nfc-tap-time {
+    color: #c0c4cc;
+    font-size: 11px;
+}
+
+.nfc-history {
+    margin-top: 10px;
+    border-top: 1px solid #ebeef5;
+    padding-top: 8px;
+}
+
+.nfc-history-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.nfc-history-title {
+    font-size: 12px;
+    font-weight: 500;
+    color: #909399;
+}
+
+.nfc-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.nfc-history-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+
+    &:hover {
+        background: #f5f7fa;
+    }
+}
+
+.nfc-history-uid {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-weight: 500;
+    color: #303133;
+    min-width: 100px;
+}
+
+.nfc-history-content {
+    color: #606266;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nfc-history-time {
+    color: #c0c4cc;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+/* NFC Detail Dialog */
+.nfc-detail-content {
+    max-height: 65vh;
+    overflow-y: auto;
+}
+
+.nfc-detail-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #ebeef5;
+}
+
+.nfc-detail-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.nfc-detail-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: #909399;
+    min-width: 80px;
+}
+
+.nfc-detail-value {
+    font-size: 13px;
+    color: #303133;
+}
+
+.nfc-detail-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #303133;
+    margin: 16px 0 10px;
+}
+
+.nfc-detail-stories {
+    margin-top: 4px;
+}
+
+.nfc-detail-story {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    background: #f8f9fb;
+    border-radius: 8px;
+    border: 1px solid #ebeef5;
+}
+
+.nfc-story-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.nfc-story-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: #303133;
+}
+
+.nfc-story-tracks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.nfc-story-track {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    padding: 4px 0;
+}
+
+.nfc-track-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #e8f0fe;
+    color: #409eff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.nfc-track-title {
+    font-weight: 500;
+    color: #606266;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nfc-track-url {
+    color: #909399;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    font-family: monospace;
+    font-size: 11px;
+}
+
+/* NFC Linked Cards */
+.nfc-linked-cards {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #ebeef5;
+}
+
+.nfc-linked-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+
+    .nfc-detail-section-title {
+        margin: 0;
+    }
+}
+
+.nfc-linked-loading {
+    text-align: center;
+    padding: 16px;
+    color: #909399;
+    font-size: 13px;
+}
+
+.nfc-linked-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.nfc-linked-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #f8f9fb;
+    border-radius: 6px;
+    border: 1px solid #ebeef5;
+}
+
+.nfc-linked-notes {
+    flex: 1;
+    font-size: 12px;
+    color: #909399;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.nfc-linked-empty {
+    text-align: center;
+    padding: 12px;
+    color: #c0c4cc;
+    font-size: 13px;
+}
+
+.nfc-add-card {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    align-items: center;
+}
+
+.nfc-add-input {
+    flex: 1;
+}
+
+.nfc-detail-raw-toggle {
+    margin-top: 12px;
+    text-align: center;
+}
+
+.nfc-detail-json {
+    background: #1e1e2e;
+    color: #a6e3a1;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 11px;
+    line-height: 1.5;
+    max-height: 300px;
+    overflow: auto;
+    margin-top: 8px;
+}
+
+.nfc-detail-not-found {
+    text-align: center;
+    padding: 30px 0;
+}
+
 .console-container {
     padding: 20px;
     height: 100%;

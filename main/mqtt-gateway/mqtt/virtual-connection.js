@@ -25,6 +25,8 @@ const CHARACTER_AGENT_MAP = {
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
+  "Cheeko Magic": "cheeko-magic-agent",
+  "Cheeko Astronaut": "cheeko-astronaut-agent",
 };
 
 // MAC address regex
@@ -472,6 +474,31 @@ class VirtualMQTTConnection {
     this.currentCharacter = character.status === "fulfilled" ? character.value : "Cheeko";
     this.childProfile = childProfile.status === "fulfilled" ? childProfile.value : null;
     this.mem0Memories = memoryData.status === "fulfilled" ? memoryData.value : null;
+
+    // ── AI Card agent override ──
+    // If the firmware hello includes rfid_uid (from a card tap that triggered the session),
+    // look up the card in the DB to check if it maps to a specific agent.
+    const helloRfidUid = json.rfid_uid || null;
+    if (helloRfidUid) {
+      try {
+        const lookupUrl = `${process.env.MANAGER_API_URL}/admin/rfid/card/lookup/${encodeURIComponent(helloRfidUid)}`;
+        logger.info(`🎴 [AI-CARD] Hello contains rfid_uid=${helloRfidUid}, looking up agent mapping...`);
+        const rfidResponse = await axios.get(lookupUrl, { timeout: 5000 });
+
+        if (rfidResponse.data?.code === 0 && rfidResponse.data?.data?.agentName) {
+          const cardAgentName = rfidResponse.data.data.agentName;
+          const overrideCharacter = Object.entries(CHARACTER_AGENT_MAP)
+            .find(([, agentName]) => agentName === cardAgentName)?.[0]
+            || cardAgentName;
+          logger.info(`🎴 [AI-CARD] Card maps to agent: "${this.currentCharacter}" → "${overrideCharacter}" (agent: ${cardAgentName})`);
+          this.currentCharacter = overrideCharacter;
+        } else {
+          logger.info(`🎴 [AI-CARD] Card ${helloRfidUid} has no agent mapping, using default character`);
+        }
+      } catch (rfidErr) {
+        logger.warn(`🎴 [AI-CARD] Failed to lookup rfid_uid=${helloRfidUid}: ${rfidErr.message}`);
+      }
+    }
 
     // Validate
     if (!["conversation", "music", "story"].includes(this.roomType)) {
