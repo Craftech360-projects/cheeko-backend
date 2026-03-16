@@ -53,6 +53,14 @@ AGENT_CONFIGS = {
         "game_state_class": None,
         "port": 8088,
     },
+    "Cheeko German": {
+        "agent_name": "cheeko-german-agent",
+        "prompt_file": None,  # Uses database prompt
+        "tools": [],
+        "features": ["mode_switching"],
+        "game_state_class": None,
+        "port": 8089,
+    },
 }
 
 # Reverse mapping: agent_name -> character_name

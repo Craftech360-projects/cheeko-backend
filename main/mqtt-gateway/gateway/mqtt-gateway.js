@@ -35,6 +35,7 @@ const CHARACTER_AGENT_MAP = {
   "Word Ladder": "word-ladder-agent",
   "Cheeko Magic": "cheeko-magic-agent",
   "Cheeko Astronaut": "cheeko-astronaut-agent",
+  "Cheeko German": "cheeko-german-agent",
 };
 
 // Global config manager and debug reference (injected by app.js)

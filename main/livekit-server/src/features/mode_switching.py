@@ -21,6 +21,7 @@ CHARACTER_ALIASES = {
     "Word Ladder": ["word ladder", "word game", "word", "words", "ladder", "word ladder game"],
     "Cheeko Magic": ["cheeko magic", "magic", "magic mode", "wizard", "magician", "sorcerer", "magical"],
     "Cheeko Astronaut": ["cheeko astronaut", "astronaut", "astronaut mode", "space", "space mode", "spaceman", "rocket"],
+    "Cheeko German": ["cheeko german", "german", "german mode", "deutsch", "auf deutsch"],
 }
 
 

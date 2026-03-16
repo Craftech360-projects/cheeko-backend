@@ -27,6 +27,7 @@ const CHARACTER_AGENT_MAP = {
   "Word Ladder": "word-ladder-agent",
   "Cheeko Magic": "cheeko-magic-agent",
   "Cheeko Astronaut": "cheeko-astronaut-agent",
+  "Cheeko German": "cheeko-german-agent",
 };
 
 // MAC address regex

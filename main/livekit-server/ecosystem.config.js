@@ -98,6 +98,20 @@ module.exports = {
       max_memory_restart: "2G",
     },
     {
+      name: "cheeko-german-agent",
+      script: "env/bin/python",
+      args: "workers/cheeko_german_worker.py dev",
+      cwd: __dirname,
+      interpreter: "none",
+      env: {
+        PORT: "8089",
+      },
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "2G",
+    },
+    {
       name: "livekit-media-api",
       script: "env/bin/python",
       args: "-m uvicorn media_api:app --host 0.0.0.0 --port 8003",
