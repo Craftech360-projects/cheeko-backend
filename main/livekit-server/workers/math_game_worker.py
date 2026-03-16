@@ -210,8 +210,15 @@ RULES:
     dc.on("math_answer", engine.on_tap_answer)
     dc.on("game_control", engine.on_game_control)
 
-    # ready_for_greeting kept as optional re-trigger (frontend compat)
+    # ready_for_greeting kept as fallback (game auto-starts after session.start)
+    game_started = False
+
     async def _on_ready_for_greeting(message: dict):
+        nonlocal game_started
+        if game_started:
+            logger.info("worker.greeting_skipped(reason=already_started)")
+            return
+        game_started = True
         logger.info("worker.greeting_triggered(source=data_channel)")
         await engine.on_game_start(child_name, child_profile.get("age", 5) if child_profile else 5, game_mode)
 
@@ -289,9 +296,11 @@ RULES:
     })
 
     # --- Auto-start game immediately ---
-    # COMMENTED OUT - relies on ready_for_greeting from gateway to avoid duplicate start
-    # logger.info("worker.auto_starting_game")
-    # await engine.on_game_start(child_name, child_age, game_mode)
+    # Gateway's ready_for_greeting arrives before agent handlers are registered,
+    # so we auto-start here. The ready_for_greeting handler is kept as a fallback.
+    game_started = True
+    logger.info("worker.auto_starting_game")
+    await engine.on_game_start(child_name, child_age, game_mode)
 
     # --- Cleanup ---
     async def cleanup():
