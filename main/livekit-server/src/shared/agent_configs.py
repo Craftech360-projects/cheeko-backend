@@ -37,6 +37,14 @@ AGENT_CONFIGS = {
         "game_state_class": "WordLadderGameState",
         "port": 8086,
     },
+    "Odd One Out": {
+        "agent_name": "oddoneout-agent",
+        "prompt_file": None,  # Uses inline agentic prompt
+        "tools": ["check_oddoneout_answer"],
+        "features": ["battery", "volume"],
+        "game_state_class": "OddOneOutState",
+        "port": 8091,
+    },
 }
 
 # Reverse mapping: agent_name -> character_name
@@ -68,4 +76,4 @@ def get_agent_name_for_character(character: str) -> str:
 
 def is_game_mode(character: str) -> bool:
     """Check if character is a game mode"""
-    return character in ["Math Tutor", "Riddle Solver", "Word Ladder"]
+    return character in ["Math Tutor", "Riddle Solver", "Word Ladder", "Odd One Out"]
