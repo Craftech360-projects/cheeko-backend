@@ -183,7 +183,7 @@ class OddOneOutEngine:
             return
         self._total_hints_used += 1
         await self.dc.send({
-            "type": "oddoneout_hint",
+            "type": "game_hint", "game_type": "oddoneout",
             "question_id": question_id,
             "hint_text": clue,
         })
@@ -249,7 +249,7 @@ class OddOneOutEngine:
         options = [{"label": item, "value": item, "id": chr(ord("a") + i)} for i, item in enumerate(items)]
 
         await self.dc.send({
-            "type": "oddoneout_question",
+            "type": "game_question", "game_type": "oddoneout",
             "question_id": self.state.current_question_id,
             "question_text": "Which one doesn't belong?",
             "question_type": q.get("question_type", "category"),
@@ -295,7 +295,7 @@ class OddOneOutEngine:
 
         # Send result to frontend IMMEDIATELY (instant visual feedback)
         result = {
-            "type": "oddoneout_result",
+            "type": "game_result", "game_type": "oddoneout",
             "question_id": self.state.current_question_id,
             "correct": is_correct,
             "user_answer": selected_item,

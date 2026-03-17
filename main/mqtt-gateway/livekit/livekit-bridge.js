@@ -474,10 +474,11 @@ class LiveKitBridge extends EventEmitter {
               break;
 
             // ====== MINIAPP GAME DATA (agent → device) ======
-            case "math_question":
-            case "math_result":
+            // Unified game message types (new)
+            case "game_question":
+            case "game_result":
+            case "game_hint":
             case "game_state":
-            case "math_hint":
             case "child_profile":
               // Forward game data channel messages to device via MQTT
               // Wrap in miniapp envelope per spec

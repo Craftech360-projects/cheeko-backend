@@ -122,7 +122,7 @@ class MathGameState:
         self.current_options = self._generate_options(correct_answer, num_options)
 
         payload = {
-            "type": "math_question",
+            "type": "game_question", "game_type": "math_quiz",
             "question_id": self.current_question_id,
             "question_text": question_text,
             "story_text": story_text,
@@ -188,7 +188,7 @@ class MathGameState:
                 self.voice_needs_next = True
 
             result = {
-                "type": "math_result",
+                "type": "game_result", "game_type": "math_quiz",
                 "question_id": self.current_question_id,
                 "correct": True,
                 "user_answer": user_answer,
@@ -240,7 +240,7 @@ class MathGameState:
             self.voice_needs_next = True
 
         result = {
-            "type": "math_result",
+            "type": "game_result", "game_type": "math_quiz",
             "question_id": self.current_question_id,
             "correct": False,
             "user_answer": user_answer,
@@ -284,7 +284,7 @@ class MathGameState:
             eliminated = self._eliminate_one_option()
             if eliminated:
                 payload = {
-                    "type": "math_hint",
+                    "type": "game_hint", "game_type": "math_quiz",
                     "question_id": self.current_question_id,
                     "hint_type": "eliminate",
                     "eliminated_value": eliminated["value"],
@@ -302,7 +302,7 @@ class MathGameState:
             self.current_attempts = 0
 
             result = {
-                "type": "math_result",
+                "type": "game_result", "game_type": "math_quiz",
                 "question_id": self.current_question_id,
                 "correct": False,
                 "user_answer": None,

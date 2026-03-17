@@ -17,12 +17,14 @@ from cryptography.hazmat.backends import default_backend
 from queue import Queue, Empty
 import opuslib
 from math_quiz_ui import MathQuizUI
+from yesno_quiz_ui import YesNoQuizUI
+from oddoneout_ui import OddOneOutUI
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.1.98"
+SERVER_IP = "127.0.0.1"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "192.168.1.98"
+MQTT_BROKER_HOST = "127.0.0.1"
 
 
 MQTT_BROKER_PORT = 1883
@@ -137,6 +139,9 @@ class TestClient:
         self.miniapp_session_id = None
         self.current_question = None  # Current math question data
         self.math_quiz_ui = None  # Tkinter UI for math quiz
+        self.yesno_quiz_ui = None  # Tkinter UI for yesno quiz
+        self.oddoneout_ui = None  # Tkinter UI for odd one out
+        self.active_game_ui = None  # Points to whichever UI is active
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
@@ -211,7 +216,7 @@ class TestClient:
                 template = payload.get("template", "unknown")
                 display_name = payload.get("display_name", "Unknown")
                 logger.info(f"🎮 [CARD] Interactive card detected: {display_name} (template={template})")
-                if template == "math_quiz":
+                if template in ("math_quiz", "yesno_quiz", "oddoneout"):
                     self.start_miniapp_session(payload)
                 else:
                     logger.warning(f"⚠️ [CARD] Unsupported template: {template}")
@@ -294,25 +299,41 @@ class TestClient:
         action = payload.get("action")
         data = payload.get("data", {})
 
-        # Launch Tkinter UI on first miniapp message if not already open
-        if not self.math_quiz_ui:
-            self.math_quiz_ui = MathQuizUI(
-                on_answer_callback=self.send_miniapp_answer,
-                on_close_callback=lambda: self.end_miniapp_session("ui_closed"),
-            )
-            self.math_quiz_ui.start()
+        # Launch the right Tkinter UI based on template
+        if not self.active_game_ui:
+            template = self.miniapp_template or "math_quiz"
+            close_cb = lambda: self.end_miniapp_session("ui_closed")
+            answer_cb = self.send_miniapp_answer
 
-        if action == "math_question":
+            if template == "yesno_quiz":
+                self.yesno_quiz_ui = YesNoQuizUI(on_answer_callback=answer_cb, on_close_callback=close_cb)
+                self.yesno_quiz_ui.start()
+                self.active_game_ui = self.yesno_quiz_ui
+            elif template == "oddoneout":
+                self.oddoneout_ui = OddOneOutUI(on_answer_callback=answer_cb, on_close_callback=close_cb)
+                self.oddoneout_ui.start()
+                self.active_game_ui = self.oddoneout_ui
+            else:
+                self.math_quiz_ui = MathQuizUI(on_answer_callback=answer_cb, on_close_callback=close_cb)
+                self.math_quiz_ui.start()
+                self.active_game_ui = self.math_quiz_ui
+
+        ui = self.active_game_ui
+
+        # Route by unified action types
+        if action == "game_question":
             self.current_question = data
-            self.math_quiz_ui.show_question(data)
-        elif action == "math_result":
-            self.math_quiz_ui.show_result(data)
+            ui.show_question(data)
+        elif action == "game_result":
+            ui.show_result(data)
         elif action == "game_state":
-            self.math_quiz_ui.show_game_state(data)
+            ui.show_game_state(data)
             if data.get("state") == "game_over":
                 self.miniapp_active = False
-        elif action == "math_hint":
-            self.math_quiz_ui.show_hint(data)
+        elif action == "game_hint":
+            ui.show_hint(data)
+        elif action == "child_profile":
+            logger.info(f"🎮 [MINIAPP] Child profile: {data.get('name', 'unknown')}")
         else:
             logger.info(f"🎮 [MINIAPP] {action}: {json.dumps(data)[:200]}")
 
@@ -457,9 +478,13 @@ class TestClient:
         self.miniapp_session_id = None
         self.current_question = None
 
-        if self.math_quiz_ui:
-            self.math_quiz_ui.stop()
-            self.math_quiz_ui = None
+        # Stop whichever UI is active
+        if self.active_game_ui:
+            self.active_game_ui.stop()
+            self.active_game_ui = None
+        self.math_quiz_ui = None
+        self.yesno_quiz_ui = None
+        self.oddoneout_ui = None
 
         print("\n🎮 MiniApp session ended.")
 

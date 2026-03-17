@@ -231,7 +231,7 @@ CRITICAL RULES:
     )
 
     # --- Register data channel handlers ---
-    dc.on("yesno_answer", engine.on_tap_answer)
+    dc.on("game_answer", engine.on_tap_answer)
     dc.on("game_control", engine.on_game_control)
 
     # ready_for_greeting: optional re-trigger for frontend compatibility

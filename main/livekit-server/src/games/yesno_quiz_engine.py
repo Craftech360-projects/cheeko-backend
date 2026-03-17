@@ -182,7 +182,7 @@ class YesNoQuizEngine:
 
         # Send hint to frontend
         await self.dc.send({
-            "type": "yesno_hint",
+            "type": "game_hint", "game_type": "yesno_quiz",
             "question_id": question_id,
             "hint_text": hint_text,
         })
@@ -278,7 +278,7 @@ class YesNoQuizEngine:
 
         # Send question to frontend
         await self.dc.send({
-            "type": "yesno_question",
+            "type": "game_question", "game_type": "yesno_quiz",
             "question_id": self.state.current_question_id,
             "question_text": q["question"],
             "category": q.get("category", ""),
@@ -352,7 +352,7 @@ class YesNoQuizEngine:
             # Send result to frontend
             logger.info(f"engine.sending_result(qid={result.get('question_id')}, input={result.get('input_method')})")
             await self.dc.send({
-                "type": "yesno_result",
+                "type": "game_result", "game_type": "yesno_quiz",
                 "question_id": result.get("question_id", self.state.current_question_id),
                 "correct": result.get("correct", False),
                 "user_answer": result.get("user_answer"),

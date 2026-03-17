@@ -207,7 +207,7 @@ RULES:
     # --- Register data channel handlers ---
     child_name = child_profile.get("name", "buddy") if child_profile else "buddy"
 
-    dc.on("math_answer", engine.on_tap_answer)
+    dc.on("game_answer", engine.on_tap_answer)
     dc.on("game_control", engine.on_game_control)
 
     # ready_for_greeting kept as fallback (game auto-starts after session.start)

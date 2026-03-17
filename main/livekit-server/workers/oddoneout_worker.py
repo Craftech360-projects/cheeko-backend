@@ -193,7 +193,7 @@ Accept answers in any language: English, Hindi, or mixed."""
     )
 
     # DC handlers
-    dc.on("oddoneout_answer", engine.on_tap_answer)
+    dc.on("game_answer", engine.on_tap_answer)
     dc.on("game_control", engine.on_game_control)
 
     async def _on_ready(msg):

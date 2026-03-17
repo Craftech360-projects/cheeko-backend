@@ -37,7 +37,8 @@ const CHARACTER_AGENT_MAP = {
 
 const MINIAPP_AGENT_MAP = {
   "math_quiz": "math-game-agent",
-  // Future templates: "yes_no_quiz": "yes-no-quiz-agent", etc.
+  "yesno_quiz": "yesno-quiz-agent",
+  "oddoneout": "oddoneout-agent",
 };
 
 // Global config manager and debug reference (injected by app.js)
@@ -821,19 +822,17 @@ class MQTTGateway {
         if (devInfo && devInfo.connection && devInfo.connection.bridge && devInfo.connection.bridge.room) {
           try {
             // Forward the event to the agent via LiveKit data channel
-            // Map miniapp_event types to the data channel types the math agent expects
+            // Unified game_answer for all game types
             let agentMessage;
             if (originalPayload.event === 'voice_result') {
-              // Voice answer → math_answer (tap format)
               agentMessage = {
-                type: 'math_answer',
+                type: 'game_answer',
                 answer: originalPayload.data?.text,
                 source: 'voice',
               };
             } else if (originalPayload.event === 'tap_answer') {
-              // Direct tap answer from client UI
               agentMessage = {
-                type: 'math_answer',
+                type: 'game_answer',
                 value: originalPayload.data?.value,
                 question_id: originalPayload.data?.question_id,
                 input_method: 'tap',
