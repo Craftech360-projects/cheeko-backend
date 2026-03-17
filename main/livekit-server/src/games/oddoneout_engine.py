@@ -7,6 +7,9 @@ Engine controls scoring/flow. LLM agent controls voice/personality.
 import asyncio
 import logging
 import random
+import time
+
+from src.shared.progress_client import ProgressClient
 
 logger = logging.getLogger("oddoneout_engine")
 
@@ -50,6 +53,11 @@ class OddOneOutEngine:
         self.child_age = child_age
         self._answered_question_id = None
         self._next_action = NEXT_ACTION_NONE  # What to do when TTS finishes
+        self._progress_client = ProgressClient()
+        self._child_id = ""
+        self._session_start_time = 0.0
+        self._total_hints_used = 0
+        self._answers = []  # bool list for sliding window
 
         # Central event listener: when agent stops speaking, do the next thing
         @session.on("agent_state_changed")
@@ -88,13 +96,26 @@ class OddOneOutEngine:
 
     # ==================== EVENT HANDLERS ====================
 
-    async def on_game_start(self, child_name: str, age: int, game_mode: str):
+    async def on_game_start(self, child_name: str, age: int, game_mode: str, child_id: str = ""):
         logger.info(f"engine.game_start(name={child_name}, age={age}, mode={game_mode})")
         self.child_name = child_name
         self.child_age = age
+        self._child_id = child_id or child_name
+        self._session_start_time = time.time()
+        self._total_hints_used = 0
+        self._answers = []
         self.state.game_mode = game_mode
         self.state.reset()
         self.qgen.reset()
+
+        # Load persisted progress
+        try:
+            progress = await self._progress_client.get_progress(self._child_id, "oddoneout")
+            if progress and progress.get("level"):
+                self.state.level = progress["level"]
+                logger.info(f"engine.progress_loaded(level={self.state.level}, stars={progress.get('total_stars', 0)})")
+        except Exception as e:
+            logger.warning(f"engine.progress_load_failed(error={e})")
 
         await self.dc.send({
             "type": "game_state",
@@ -160,6 +181,7 @@ class OddOneOutEngine:
         logger.info(f"engine.hint(qid={question_id})")
         if question_id != self.state.current_question_id:
             return
+        self._total_hints_used += 1
         await self.dc.send({
             "type": "oddoneout_hint",
             "question_id": question_id,
@@ -267,6 +289,7 @@ class OddOneOutEngine:
         else:
             is_correct = selected_item.lower().strip() == odd_one_out.lower().strip()
 
+        self._answers.append(is_correct)
         result_meta = self.state.record_answer(is_correct)
 
         # Send result to frontend IMMEDIATELY (instant visual feedback)
@@ -316,12 +339,16 @@ class OddOneOutEngine:
             logger.error(f"engine.advance_error(error={e})", exc_info=True)
 
     async def _do_level_complete(self):
-        """Handle level complete: send DC, narrate, advance."""
+        """Handle level complete: save progress, send DC, narrate, advance."""
         logger.info(f"engine.level_complete(level={self.state.level})")
+        result = await self._save_session(completed=True)
+        progress_data = self.state._get_progress()
+        if result:
+            progress_data["api_result"] = result.get("progress", {})
         await self.dc.send({
             "type": "game_state", "state": "completed",
             "game_mode": self.state.game_mode,
-            "progress": self.state._get_progress(),
+            "progress": progress_data,
         })
         self.state.advance_level()
         self._answered_question_id = None
@@ -331,11 +358,44 @@ class OddOneOutEngine:
         await self.narrator.announce_level_complete(self.state.level - 1)
 
     async def _handle_game_over(self):
-        """Send game over DC message and narrate."""
+        """Send game over DC message, save progress, narrate."""
         logger.info(f"engine.game_over(stars={self.state.stars})")
+        result = await self._save_session(completed=True)
+        progress_data = self.state._get_progress()
+        if result:
+            progress_data["api_result"] = result.get("progress", {})
         await self.dc.send({
             "type": "game_state", "state": "game_over",
             "game_mode": self.state.game_mode,
-            "progress": self.state._get_progress(),
+            "progress": progress_data,
         })
         await self.narrator.announce_game_over(self.state.stars, self.state.total_needed)
+
+    async def _save_session(self, completed: bool = True) -> dict:
+        """Save game session to progression API."""
+        try:
+            duration = int(time.time() - self._session_start_time)
+            result = await self._progress_client.end_session({
+                "childId": self._child_id,
+                "gameType": "oddoneout",
+                "ageBand": self.state.game_mode,
+                "level": self.state.level,
+                "starsEarned": self.state.stars,
+                "questionsAsked": self.state.questions_asked,
+                "correctAnswers": sum(1 for a in self._answers if a),
+                "bestStreak": self.state.consecutive_correct,
+                "hintsUsed": self._total_hints_used,
+                "durationSecs": duration,
+                "completed": completed,
+                "answers": self._answers,
+            })
+            if result:
+                prog = result.get("progress", {})
+                if prog.get("levelAdvanced"):
+                    logger.info(f"engine.level_up(new={prog.get('levelAfter')}, milestone={prog.get('milestone')})")
+                for ach in result.get("achievements", []):
+                    logger.info(f"engine.achievement(code={ach['code']})")
+            return result
+        except Exception as e:
+            logger.error(f"engine.save_session_error(error={e})")
+            return {}

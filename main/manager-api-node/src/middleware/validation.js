@@ -201,6 +201,23 @@ const schemas = {
     startedAt: Joi.date().iso().required()
   }),
 
+  // Game progression session end
+  sessionEnd: Joi.object({
+    childId: Joi.string().required(),
+    gameType: Joi.string().valid('math_quiz', 'yesno_quiz', 'oddoneout').required(),
+    ageBand: Joi.string().valid('seedling', 'explorer', 'ranger', 'commander'),
+    level: Joi.number().integer().min(1),
+    starsEarned: Joi.number().integer().min(0).required(),
+    questionsAsked: Joi.number().integer().min(0).required(),
+    correctAnswers: Joi.number().integer().min(0).required(),
+    bestStreak: Joi.number().integer().min(0).default(0),
+    hintsUsed: Joi.number().integer().min(0).default(0),
+    avgResponseMs: Joi.number().integer().min(0).default(0),
+    durationSecs: Joi.number().integer().min(0).required(),
+    completed: Joi.boolean().default(true),
+    answers: Joi.array().items(Joi.boolean()).default([]),
+  }),
+
   // Analytics game attempt
   gameAttempt: Joi.object({
     sessionId: Joi.string().max(100).required(),
