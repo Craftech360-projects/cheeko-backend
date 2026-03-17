@@ -134,6 +134,17 @@ class YesNoNarrator:
         text = _pick(STREAK_RESPONSES, streak=streak)
         await self._speak(text, tag="streak")
 
+    async def announce_achievement(self, name: str):
+        """Announce a newly unlocked achievement."""
+        await self._speak(f"Achievement unlocked! {name}! You earned it!", tag="achievement")
+
+    async def announce_level_up(self, level: int, milestone_name: str = None):
+        """Announce level advancement with optional milestone."""
+        if milestone_name:
+            await self._speak(f"Level {level}! You're now a {milestone_name}!", tag="level_up")
+        else:
+            await self._speak(f"You reached level {level}! Nice work!", tag="level_up")
+
     async def transition_to_next(self):
         """Bridge phrase between questions."""
         text = _pick(NEXT_QUESTION_TRANSITIONS)

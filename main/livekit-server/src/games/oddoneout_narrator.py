@@ -98,6 +98,28 @@ class OddOneOutNarrator:
             tag="game_over",
         )
 
+    async def announce_streak(self, streak_count: int):
+        await self._inject_and_speak(
+            f"[STREAK] The child has a {streak_count}-day streak! Celebrate briefly. 1 sentence.",
+            fallback=f"Day {streak_count} streak! Amazing!",
+            tag="streak",
+        )
+
+    async def announce_achievement(self, achievement_name: str):
+        await self._inject_and_speak(
+            f"[ACHIEVEMENT] Child unlocked: '{achievement_name}'! Celebrate with excitement. 1-2 sentences.",
+            fallback=f"Achievement unlocked! {achievement_name}!",
+            tag="achievement",
+        )
+
+    async def announce_level_up(self, new_level: int, milestone_name: str = None):
+        milestone_text = f" Milestone: '{milestone_name}'!" if milestone_name else ""
+        await self._inject_and_speak(
+            f"[LEVEL UP] Child reached Level {new_level}!{milestone_text} Celebrate! 1-2 sentences.",
+            fallback=f"Level {new_level}!{' ' + milestone_name + '!' if milestone_name else ''} Amazing!",
+            tag="level_up",
+        )
+
     async def speak_end_prompt(self, prompt_text: str):
         await self._speak_direct(prompt_text, tag="end_prompt")
 
