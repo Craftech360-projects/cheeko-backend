@@ -10,7 +10,7 @@ import aiohttp
 logger = logging.getLogger("progress_client")
 
 DEFAULT_BASE_URL = os.getenv("MANAGER_API_URL", "http://localhost:8002/toy")
-DEFAULT_SERVICE_KEY = os.getenv("SERVICE_SECRET_KEY", "")
+DEFAULT_SERVICE_KEY = os.getenv("MANAGER_API_SECRET", os.getenv("SERVICE_SECRET_KEY", ""))
 
 
 class ProgressClient:

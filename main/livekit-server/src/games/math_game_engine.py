@@ -224,7 +224,7 @@ class MathGameEngine:
                 "ageBand": self.state.game_mode,
                 "level": self.state.level,
                 "starsEarned": self.state.stars,
-                "questionsAsked": self.state.questions_asked,
+                "questionsAsked": self.state.total_questions,
                 "correctAnswers": sum(1 for a in self._answers if a),
                 "bestStreak": getattr(self.state, 'consecutive_correct', 0),
                 "durationSecs": duration,
@@ -258,6 +258,9 @@ class MathGameEngine:
 
         if result.get("game_complete"):
             await self._save_session(completed=True)
+            # Reset tracking for next level
+            self._answers = []
+            self._session_start_time = time.time()
             await self.narrator.narrate_level_complete(self.state.level)
             await self._present_next_question()
             return
