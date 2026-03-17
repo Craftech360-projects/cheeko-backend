@@ -14,6 +14,15 @@ logger = logging.getLogger("oddoneout_qgen")
 EXPLORER_TYPES = ["category", "color", "size"]
 COMMANDER_TYPES = ["category", "function", "abstract", "wordplay", "tricky"]
 
+# Difficulty tier config: controls options count and available question types
+TIER_CONFIG = {
+    1: {"num_options": 3, "types": ["category"]},
+    2: {"num_options": 3, "types": ["category", "color"]},
+    3: {"num_options": 3, "types": ["category", "color", "size"]},
+    4: {"num_options": 4, "types": ["category", "color", "size", "function"]},
+    5: {"num_options": 4, "types": ["category", "function", "abstract", "wordplay", "tricky"]},
+}
+
 QUESTION_GEN_PROMPT = """You are a question generator for a kids game called "Odd One Out".
 Generate ONE question for a {age}-year-old child. Question type: {question_type}.
 
@@ -81,9 +90,16 @@ class OddOneOutQuestionGenerator:
         self._type_index += 1
         return qt
 
-    async def generate(self, age: int) -> dict:
-        question_type = self._pick_type(age)
-        num_options = 4 if age >= 9 else 3
+    async def generate(self, age: int, difficulty_tier: int = 0) -> dict:
+        if difficulty_tier > 0 and difficulty_tier in TIER_CONFIG:
+            config = TIER_CONFIG[difficulty_tier]
+            num_options = config["num_options"]
+            types = config["types"]
+            question_type = types[self._type_index % len(types)]
+            self._type_index += 1
+        else:
+            question_type = self._pick_type(age)
+            num_options = 4 if age >= 9 else 3
         try:
             question = await self._call_llm(age, question_type, num_options)
             if question and self._validate(question, num_options):

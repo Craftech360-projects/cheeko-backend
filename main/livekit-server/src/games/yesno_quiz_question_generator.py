@@ -23,6 +23,15 @@ CATEGORIES = [
     "history",
 ]
 
+# Difficulty tier: controls category pool and complexity
+YESNO_TIER_CONFIG = {
+    1: {"categories": ["animals", "food"], "complexity": "very simple, obvious"},
+    2: {"categories": ["animals", "food", "nature", "human body"], "complexity": "simple"},
+    3: {"categories": CATEGORIES, "complexity": "moderate, school-level"},
+    4: {"categories": CATEGORIES, "complexity": "challenging, requires thinking"},
+    5: {"categories": CATEGORIES, "complexity": "tricky, counterintuitive facts"},
+}
+
 QUESTION_GEN_PROMPT = """You are a yes/no trivia question generator for a kids game called Yes/No Quiz.
 Generate ONE yes/no trivia question for a {age}-year-old child about the category: {category}.
 
@@ -88,9 +97,15 @@ class QuestionGenerator:
         self._recent_categories.append(category)
         return category
 
-    async def generate(self, age: int) -> dict:
+    async def generate(self, age: int, difficulty_tier: int = 0) -> dict:
         """Generate a question via LLM. Falls back to hardcoded on failure."""
-        category = self._pick_category()
+        if difficulty_tier > 0 and difficulty_tier in YESNO_TIER_CONFIG:
+            config = YESNO_TIER_CONFIG[difficulty_tier]
+            available = [c for c in config["categories"] if c not in self._recent_categories[-3:]]
+            category = random.choice(available) if available else random.choice(config["categories"])
+            self._recent_categories.append(category)
+        else:
+            category = self._pick_category()
         try:
             question = await self._call_llm(age, category)
             if question and self._validate(question):

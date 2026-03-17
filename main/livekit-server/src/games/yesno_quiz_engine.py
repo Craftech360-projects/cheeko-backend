@@ -260,7 +260,8 @@ class YesNoQuizEngine:
         Generate a question via LLM, register in state, send yesno_question via DC,
         start hint timers, then narrate via narrator.announce_question().
         """
-        q = await self.qgen.generate(self.child_age)
+        difficulty_tier = min(5, max(1, (self.state.level + 4) // 5))
+        q = await self.qgen.generate(self.child_age, difficulty_tier=difficulty_tier)
         logger.info(
             f"engine.generated_question(q={q['question']}, "
             f"answer={q['correct_answer']}, category={q.get('category')})"

@@ -236,7 +236,8 @@ class OddOneOutEngine:
 
     async def _generate_and_send_question(self):
         """Generate question, register in state, send DC, narrate via LLM agent."""
-        q = await self.qgen.generate(self.child_age)
+        difficulty_tier = min(5, max(1, (self.state.level + 4) // 5))  # level 1-5→tier1, 6-10→tier2, etc
+        q = await self.qgen.generate(self.child_age, difficulty_tier=difficulty_tier)
         logger.info(f"engine.question(type={q['question_type']}, odd={q['odd_one_out']})")
 
         self.state.set_question(q)
