@@ -418,7 +418,7 @@ class YesNoQuizEngine:
                 "ageBand": self.state.game_mode,
                 "level": self.state.level,
                 "starsEarned": self.state.stars,
-                "questionsAsked": self.state.questions_asked,
+                "questionsAsked": len(self._answers),
                 "correctAnswers": sum(1 for a in self._answers if a),
                 "bestStreak": self.state.consecutive_correct,
                 "hintsUsed": self._total_hints_used,
@@ -441,6 +441,9 @@ class YesNoQuizEngine:
         """Announce level complete, save progress, advance level."""
         logger.info(f"engine.level_complete(level={self.state.level})")
         await self._save_session(completed=True)
+        # Reset tracking for next level
+        self._answers = []
+        self._session_start_time = time.time()
 
         await self.dc.send({
             "type": "game_state",

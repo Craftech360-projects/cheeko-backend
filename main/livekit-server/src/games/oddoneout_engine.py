@@ -343,6 +343,9 @@ class OddOneOutEngine:
         """Handle level complete: save progress, send DC, narrate, advance."""
         logger.info(f"engine.level_complete(level={self.state.level})")
         result = await self._save_session(completed=True)
+        # Reset tracking for next level
+        self._answers = []
+        self._session_start_time = time.time()
         progress_data = self.state._get_progress()
         if result:
             progress_data["api_result"] = result.get("progress", {})
@@ -382,7 +385,7 @@ class OddOneOutEngine:
                 "ageBand": self.state.game_mode,
                 "level": self.state.level,
                 "starsEarned": self.state.stars,
-                "questionsAsked": self.state.questions_asked,
+                "questionsAsked": len(self._answers),
                 "correctAnswers": sum(1 for a in self._answers if a),
                 "bestStreak": self.state.consecutive_correct,
                 "hintsUsed": self._total_hints_used,
