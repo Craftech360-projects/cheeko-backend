@@ -376,7 +376,7 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 /* ═══ Game Cards + Progress Rings ═══ */
 .game-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 14px;
   margin-bottom: 22px;
 }
@@ -387,8 +387,9 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   gap: 16px;
   background: $surface;
   border-radius: 14px;
-  padding: 16px;
+  padding: 18px 20px;
   border: 1px solid rgba(255, 255, 255, 0.05);
+  overflow: hidden;
   transition: transform 0.2s, box-shadow 0.2s;
   &:hover {
     transform: translateY(-2px);
@@ -443,12 +444,14 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 
 .game-stats {
   display: flex;
-  gap: 16px;
+  gap: 14px;
+  flex-wrap: wrap;
 }
 
 .mini-stat {
-  .mini-val { display: block; font-size: 16px; font-weight: 700; color: $gold; }
-  .mini-lbl { font-size: 10px; color: $text-muted; text-transform: uppercase; letter-spacing: 0.5px; }
+  min-width: 45px;
+  .mini-val { display: block; font-size: 15px; font-weight: 700; color: $gold; white-space: nowrap; }
+  .mini-lbl { font-size: 9px; color: $text-muted; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
 }
 
 /* ═══ Achievement Showcase ═══ */
