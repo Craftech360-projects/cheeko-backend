@@ -710,6 +710,23 @@ model rfid_series {
   @@index([question_pack_id], map: "idx_rfid_series_question_pack")
 }
 
+model rfid_category {
+  id            BigInt    @id @default(autoincrement())
+  code          String    @db.VarChar(100)
+  name          String    @db.VarChar(255)
+  description   String?
+  icon_url      String?   @db.VarChar(500)
+  display_order Int?      @default(0)
+  active        Boolean?  @default(true)
+  creator       BigInt?
+  create_date   DateTime? @default(now()) @db.Timestamptz(6)
+  updater       BigInt?
+  update_date   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([code], map: "idx_rfid_category_code")
+  @@index([active], map: "idx_rfid_category_active")
+}
+
 model rfid_tags {
   id           BigInt    @id @default(autoincrement())
   uid          String    @unique @db.VarChar(100)
