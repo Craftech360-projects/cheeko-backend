@@ -104,14 +104,24 @@ const endSession = async (sessionData) => {
   const currentWindow = Array.isArray(progress.recent_window) ? progress.recent_window : [];
   const updatedWindow = [...currentWindow, ...answers].slice(-WINDOW_SIZE);
 
-  // 3. Evaluate advancement
-  const advancement = evaluateAdvancement(updatedWindow);
-  let newLevel = progress.level;
-  if (advancement === 'ADVANCE') newLevel = progress.level + 1;
-  else if (advancement === 'DROP') newLevel = Math.max(1, progress.level - 1);
-
-  const levelAdvanced = newLevel > progress.level;
+  // 3. Determine level: trust game engine's level if provided, else use heuristic
   const levelBefore = progress.level;
+  let newLevel;
+  let advancement;
+
+  if (sessionLevel && sessionLevel > 0) {
+    // Game engine already advanced — trust it
+    newLevel = sessionLevel;
+    advancement = newLevel > levelBefore ? 'ADVANCE' : newLevel < levelBefore ? 'DROP' : 'STAY';
+  } else {
+    // No level from engine — use sliding window heuristic
+    advancement = evaluateAdvancement(updatedWindow);
+    newLevel = progress.level;
+    if (advancement === 'ADVANCE') newLevel = progress.level + 1;
+    else if (advancement === 'DROP') newLevel = Math.max(1, progress.level - 1);
+  }
+
+  const levelAdvanced = newLevel > levelBefore;
   const levelAfter = newLevel;
 
   // 4. Check milestone
