@@ -6,9 +6,42 @@ const express = require('express');
 const router = express.Router();
 const gameProgressService = require('../services/game-progress.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireServiceKey } = require('../middleware/auth');
+const { requireServiceKey, requireAdmin, requireDualAuth } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest } = require('../utils/response');
+const { prisma } = require('../config/database');
+
+// ── Admin-proxied endpoints (for manager-web dashboard) ──────
+
+// GET /game/admin/progress/:kidId - All game progress for a kid
+router.get('/admin/progress/:kidId', requireDualAuth, asyncHandler(async (req, res) => {
+  const progress = await gameProgressService.getAllProgress(req.params.kidId);
+  success(res, progress);
+}));
+
+// GET /game/admin/streak/:kidId
+router.get('/admin/streak/:kidId', requireDualAuth, asyncHandler(async (req, res) => {
+  const streak = await gameProgressService.getStreak(req.params.kidId);
+  success(res, streak);
+}));
+
+// GET /game/admin/achievements/:kidId
+router.get('/admin/achievements/:kidId', requireDualAuth, asyncHandler(async (req, res) => {
+  const achievements = await gameProgressService.getAchievements(req.params.kidId);
+  success(res, achievements);
+}));
+
+// GET /game/admin/sessions/:kidId - Recent session logs
+router.get('/admin/sessions/:kidId', requireDualAuth, asyncHandler(async (req, res) => {
+  const limit = parseInt(req.query.limit) || 20;
+  const sessions = await prisma.$queryRawUnsafe(
+    `SELECT * FROM game_session_logs WHERE child_id = $1 ORDER BY ended_at DESC LIMIT $2`,
+    req.params.kidId, limit
+  );
+  success(res, sessions);
+}));
+
+// ── Service key endpoints (backend-to-backend) ──────────────
 
 // GET /game/progress/:childId/:gameType
 router.get('/progress/:childId/:gameType', requireServiceKey, asyncHandler(async (req, res) => {

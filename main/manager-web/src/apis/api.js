@@ -12,6 +12,7 @@ import user from './module/user.js'
 import rfid from './module/rfid.js'
 import profile from './module/profile.js'
 import emailReport from './module/emailReport.js'
+import game from './module/game.js'
 
 /**
  * API URL
@@ -50,5 +51,6 @@ export default {
     dict,
     rfid,
     profile,
-    emailReport
+    emailReport,
+    game
 }

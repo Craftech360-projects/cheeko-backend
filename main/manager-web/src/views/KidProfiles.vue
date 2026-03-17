@@ -20,6 +20,11 @@
       </div>
 
       <el-table :data="kidProfiles" v-loading="loading" style="width: 100%">
+        <el-table-column type="expand">
+          <template slot-scope="scope">
+            <kid-game-progress :kid-id="scope.row.name" />
+          </template>
+        </el-table-column>
         <el-table-column prop="name" label="Name" min-width="150" />
         <el-table-column prop="nickname" label="Nickname" min-width="120" />
         <el-table-column label="Age" min-width="80">
@@ -124,10 +129,11 @@
 import Api from '@/apis/api'
 import HeaderBar from '@/components/HeaderBar.vue'
 import VersionFooter from '@/components/VersionFooter.vue'
+import KidGameProgress from './KidGameProgress.vue'
 
 export default {
   name: 'KidProfiles',
-  components: { HeaderBar, VersionFooter },
+  components: { HeaderBar, VersionFooter, KidGameProgress },
   data() {
     return {
       loading: false,
