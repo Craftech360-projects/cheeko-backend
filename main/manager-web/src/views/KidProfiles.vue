@@ -19,49 +19,57 @@
         </el-button>
       </div>
 
-      <el-table :data="kidProfiles" v-loading="loading" style="width: 100%">
-        <el-table-column type="expand">
-          <template slot-scope="scope">
-            <kid-game-progress :kid-id="scope.row.name" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="name" label="Name" min-width="150" />
-        <el-table-column prop="nickname" label="Nickname" min-width="120" />
-        <el-table-column label="Age" min-width="80">
-          <template slot-scope="scope">
-            {{ calculateAge(scope.row.birth_date || scope.row.birthDate) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="gender" label="Gender" min-width="80" />
-        <el-table-column label="Interests" min-width="200">
-          <template slot-scope="scope">
-            <el-tag v-for="interest in (scope.row.interests || [])" :key="interest" size="small" style="margin-right: 5px;">
-              {{ interest }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="language" label="Language" min-width="100" />
-        <el-table-column label="Assigned" min-width="100">
-          <template slot-scope="scope">
-            <el-tag :type="isAssigned(scope.row.id) ? 'success' : 'info'" size="small">
-              {{ isAssigned(scope.row.id) ? 'Yes' : 'No' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Actions" min-width="200" align="center">
-          <template slot-scope="scope">
-            <el-button type="text" size="small" @click="handleEdit(scope.row)">
-              Edit
-            </el-button>
-            <el-button type="text" size="small" @click="handleAssign(scope.row)" v-if="deviceId">
-              {{ isAssigned(scope.row.id) ? 'Unassign' : 'Assign' }}
-            </el-button>
-            <el-button type="text" size="small" class="delete-btn" @click="handleDelete(scope.row)">
-              Delete
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <!-- Kid Profile Cards -->
+      <div class="kid-cards" v-loading="loading">
+        <div v-for="kid in kidProfiles" :key="kid.id" class="kid-card"
+          :class="{ 'kid-card--expanded': expandedKid === kid.id, 'kid-card--assigned': isAssigned(kid.id) }">
+
+          <!-- Card Header (always visible) -->
+          <div class="kid-card-header" @click="toggleExpand(kid.id)">
+            <div class="kid-avatar">
+              {{ (kid.name || '?')[0].toUpperCase() }}
+            </div>
+            <div class="kid-info">
+              <div class="kid-name">
+                {{ kid.name }}
+                <span class="kid-nickname" v-if="kid.nickname">({{ kid.nickname }})</span>
+              </div>
+              <div class="kid-meta">
+                <span v-if="calculateAge(kid.birth_date || kid.birthDate) !== '-'">
+                  {{ calculateAge(kid.birth_date || kid.birthDate) }} yrs
+                </span>
+                <span v-if="kid.gender">· {{ kid.gender }}</span>
+                <span v-if="kid.language">· {{ kid.language }}</span>
+              </div>
+              <div class="kid-interests" v-if="kid.interests && kid.interests.length">
+                <span v-for="interest in kid.interests.slice(0, 4)" :key="interest" class="interest-chip">
+                  {{ interest }}
+                </span>
+                <span v-if="kid.interests.length > 4" class="interest-chip interest-more">
+                  +{{ kid.interests.length - 4 }}
+                </span>
+              </div>
+            </div>
+            <div class="kid-actions">
+              <el-tag v-if="isAssigned(kid.id)" type="success" size="mini" effect="dark">Assigned</el-tag>
+              <el-button size="mini" @click.stop="handleEdit(kid)">Edit</el-button>
+              <el-button size="mini" @click.stop="handleAssign(kid)" v-if="deviceId">
+                {{ isAssigned(kid.id) ? 'Unassign' : 'Assign' }}
+              </el-button>
+              <el-button size="mini" type="danger" plain @click.stop="handleDelete(kid)">Delete</el-button>
+              <i :class="expandedKid === kid.id ? 'el-icon-arrow-up' : 'el-icon-arrow-down'"
+                class="expand-arrow"></i>
+            </div>
+          </div>
+
+          <!-- Expandable Game Progress (trophy room) -->
+          <transition name="slide">
+            <div v-if="expandedKid === kid.id" class="kid-card-body">
+              <kid-game-progress :kid-id="kid.name" />
+            </div>
+          </transition>
+        </div>
+      </div>
 
       <div v-if="kidProfiles.length === 0 && !loading" class="empty-state">
         <i class="el-icon-user"></i>
@@ -145,6 +153,7 @@ export default {
       deviceId: null,
       macAddress: '',
       assignedKidId: null,
+      expandedKid: null,
       userId: null, // If set, we're viewing another user's profiles (admin mode)
       form: {
         name: '',
@@ -362,6 +371,10 @@ export default {
       }).catch(() => {})
     },
 
+    toggleExpand(kidId) {
+      this.expandedKid = this.expandedKid === kidId ? null : kidId
+    },
+
     goBack() {
       this.$router.go(-1)
     }
@@ -370,40 +383,32 @@ export default {
 </script>
 
 <style scoped lang="scss">
+$bg: #F0EBF5;
+$surface: #FFFFFF;
+$dark: #1A1624;
+$warm: #FF9100;
+$gold: #FFD54F;
+$text: #2C2538;
+$text-muted: #8A7FA8;
+$accent-blue: #4AA9FF;
+$radius: 16px;
+
 .kid-profiles-container {
   min-height: 100vh;
-  background: #f5f7fa;
+  background: $bg;
 }
 
 .main-content {
-  max-width: 1200px;
+  max-width: 900px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 24px 20px;
 }
 
 .page-header {
-  margin-bottom: 20px;
-
-  h2 {
-    margin: 0 0 5px 0;
-    color: #303133;
-  }
-
-  .subtitle {
-    margin: 0;
-    color: #909399;
-    font-size: 14px;
-  }
-
-  .admin-notice {
-    margin-top: 8px;
-    color: #409eff;
-    font-weight: 500;
-
-    i {
-      margin-right: 4px;
-    }
-  }
+  margin-bottom: 24px;
+  h2 { margin: 0 0 4px; color: $text; font-size: 22px; font-weight: 700; }
+  .subtitle { margin: 0; color: $text-muted; font-size: 13px; }
+  .admin-notice { margin-top: 6px; color: $accent-blue; font-weight: 600; font-size: 13px; i { margin-right: 4px; } }
 }
 
 .toolbar {
@@ -412,22 +417,124 @@ export default {
   gap: 10px;
 }
 
+/* ═══ Kid Cards ═══ */
+.kid-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kid-card {
+  background: $surface;
+  border-radius: $radius;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: border-color 0.3s, box-shadow 0.3s;
+  &:hover { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06); }
+  &--assigned { border-color: rgba($warm, 0.3); }
+  &--expanded { box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1); }
+}
+
+.kid-card-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+  &:hover { background: rgba(0, 0, 0, 0.015); }
+}
+
+.kid-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, $warm, $gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  color: #fff;
+  flex-shrink: 0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.kid-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.kid-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: $text;
+  .kid-nickname { font-weight: 400; color: $text-muted; font-size: 13px; }
+}
+
+.kid-meta {
+  font-size: 12px;
+  color: $text-muted;
+  margin-top: 2px;
+}
+
+.kid-interests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.interest-chip {
+  background: rgba($warm, 0.1);
+  color: darken($warm, 10%);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: capitalize;
+}
+
+.interest-more {
+  background: rgba(0, 0, 0, 0.05);
+  color: $text-muted;
+}
+
+.kid-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.expand-arrow {
+  font-size: 14px;
+  color: $text-muted;
+  margin-left: 4px;
+  transition: transform 0.3s;
+}
+
+/* ═══ Expand Animation ═══ */
+.kid-card-body {
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.slide-enter-active, .slide-leave-active {
+  transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  max-height: 1200px;
+  overflow: hidden;
+}
+.slide-enter, .slide-leave-to {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* ═══ Empty State ═══ */
 .empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: #909399;
-
-  i {
-    font-size: 48px;
-    margin-bottom: 15px;
-  }
-
-  p {
-    margin: 0;
-  }
-}
-
-.delete-btn {
-  color: #f56c6c !important;
+  color: $text-muted;
+  i { font-size: 48px; margin-bottom: 15px; }
+  p { margin: 0; }
 }
 </style>
