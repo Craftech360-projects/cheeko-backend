@@ -169,8 +169,9 @@ class MathGameEngine:
             correct_answer=self.state.current_expected_answer,
         )
 
-        # If reveal: answer was shown, move to next question
+        # If reveal: answer was shown, track as wrong, move to next question
         if action == "reveal":
+            self._answers.append(False)
             await self._present_next_question()
 
     async def on_game_control(self, message: dict):
