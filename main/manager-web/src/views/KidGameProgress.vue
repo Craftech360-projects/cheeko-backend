@@ -87,37 +87,44 @@
       </div>
     </div>
 
-    <!-- ═══ Level Journey ═══ -->
-    <div class="level-journey" v-if="levelHistory.length > 0">
+    <!-- ═══ Level Journey (grouped by game) ═══ -->
+    <div class="level-journey" v-if="levelHistoryGrouped.length > 0">
       <div class="section-header">
         <span class="section-icon">📊</span>
         <h4>Level Journey</h4>
       </div>
-      <div class="journey-track">
-        <div v-for="lh in levelHistory" :key="lh.game_type + '_' + lh.level"
-          class="journey-node" :class="{ 'journey-node--cleared': lh.cleared }">
-          <div class="node-dot">
-            <span v-if="lh.cleared">✓</span>
-            <span v-else>{{ lh.level }}</span>
-          </div>
-          <div class="node-info">
-            <span class="node-game">{{ gameName(lh.game_type) }} · Lvl {{ lh.level }}</span>
-            <span class="node-detail">
-              {{ lh.attempts }} {{ lh.attempts === 1 ? 'try' : 'tries' }} · {{ lh.accuracy }}%
-            </span>
+      <div v-for="group in levelHistoryGrouped" :key="group.game_type" class="journey-game-group">
+        <div class="journey-game-label">
+          <span>{{ gameIcon(group.game_type) }}</span>
+          <span>{{ gameName(group.game_type) }}</span>
+        </div>
+        <div class="journey-track">
+          <div v-for="lh in group.levels" :key="lh.level"
+            class="journey-node" :class="{ 'journey-node--cleared': lh.cleared }">
+            <div class="node-dot">
+              <span v-if="lh.cleared">✓</span>
+              <span v-else>{{ lh.level }}</span>
+            </div>
+            <div class="node-info">
+              <span class="node-level">Level {{ lh.level }}</span>
+              <span class="node-detail">
+                {{ lh.attempts }} {{ lh.attempts === 1 ? 'try' : 'tries' }} · {{ lh.accuracy }}%
+              </span>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ═══ Recent Sessions ═══ -->
+    <!-- ═══ Recent Sessions (collapsible) ═══ -->
     <div class="session-log" v-if="sessions.length > 0">
       <div class="section-header">
         <span class="section-icon">📝</span>
         <h4>Recent Sessions</h4>
+        <span class="session-count">{{ sessions.length }} total</span>
       </div>
       <div class="session-list">
-        <div v-for="(s, i) in sessions" :key="i" class="session-row">
+        <div v-for="(s, i) in visibleSessions" :key="i" class="session-row">
           <span class="session-game">{{ gameIcon(s.game_type) }} {{ gameName(s.game_type) }}</span>
           <span class="session-level">
             Lvl {{ s.level_before }}
@@ -131,6 +138,9 @@
           <span class="session-time">{{ formatDuration(s.duration_secs) }}</span>
           <span class="session-date">{{ formatRelativeDate(s.ended_at) }}</span>
         </div>
+      </div>
+      <div v-if="sessions.length > 5" class="show-more" @click="showAllSessions = !showAllSessions">
+        {{ showAllSessions ? 'Show less' : 'Show all ' + sessions.length + ' sessions' }}
       </div>
     </div>
   </div>
@@ -200,7 +210,8 @@ export default {
       progressList: [],
       streak: null,
       achievements: [],
-      sessions: []
+      sessions: [],
+      showAllSessions: false
     }
   },
   computed: {
@@ -224,6 +235,17 @@ export default {
       return Object.values(groups)
         .map(g => ({ ...g, accuracy: g.totalQuestions > 0 ? Math.round((g.totalCorrect / g.totalQuestions) * 100) : 0 }))
         .sort((a, b) => a.game_type.localeCompare(b.game_type) || a.level - b.level)
+    },
+    levelHistoryGrouped() {
+      const gameMap = {}
+      this.levelHistory.forEach(lh => {
+        if (!gameMap[lh.game_type]) gameMap[lh.game_type] = { game_type: lh.game_type, levels: [] }
+        gameMap[lh.game_type].levels.push(lh)
+      })
+      return Object.values(gameMap).sort((a, b) => a.game_type.localeCompare(b.game_type))
+    },
+    visibleSessions() {
+      return this.showAllSessions ? this.sessions : this.sessions.slice(0, 5)
     }
   },
   watch: {
@@ -376,9 +398,12 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 /* ═══ Game Cards + Progress Rings ═══ */
 .game-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
   margin-bottom: 22px;
+  @media (max-width: 800px) {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
 }
 
 .game-card {
@@ -536,6 +561,9 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
   .upcoming-label {
     font-size: 11px;
     color: $text-muted;
@@ -547,6 +575,24 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 
 /* ═══ Level Journey ═══ */
 .level-journey { margin-bottom: 22px; }
+
+.journey-game-group {
+  margin-bottom: 14px;
+  &:last-child { margin-bottom: 0; }
+}
+
+.journey-game-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: $text-muted;
+  margin-bottom: 8px;
+  padding-left: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 
 .journey-track {
   display: flex;
@@ -600,11 +646,26 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
   gap: 1px;
-  .node-game { font-size: 12px; font-weight: 700; color: $text; }
+  .node-level { font-size: 12px; font-weight: 700; color: $text; }
   .node-detail { font-size: 11px; color: $text-muted; }
 }
 
 /* ═══ Session Log ═══ */
+.session-count { font-size: 12px; color: $text-muted; margin-left: auto; }
+
+.show-more {
+  text-align: center;
+  padding: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: $warm;
+  cursor: pointer;
+  border-radius: 8px;
+  margin-top: 4px;
+  transition: background 0.2s;
+  &:hover { background: rgba($warm, 0.08); }
+}
+
 .session-log { margin-bottom: 8px; }
 
 .session-list {
