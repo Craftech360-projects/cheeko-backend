@@ -5,6 +5,9 @@ Questions are generated dynamically by the LLM via OpenRouter API.
 """
 
 import logging
+import time
+
+from src.shared.progress_client import ProgressClient
 
 logger = logging.getLogger("math_game_engine")
 
@@ -33,18 +36,36 @@ class MathGameEngine:
         self.qgen = question_generator
         self.session = session
         self.child_age = child_age
+        self._progress_client = ProgressClient()
+        self._child_id = ""
+        self._child_name = ""
+        self._session_start_time = 0.0
+        self._answers = []
 
     # ==================== EVENT HANDLERS ====================
 
-    async def on_game_start(self, child_name: str, age: int, game_mode: str):
+    async def on_game_start(self, child_name: str, age: int, game_mode: str, child_id: str = ""):
         """Called when game should begin (after greeting or on start control)."""
         logger.info(f"engine.game_start(name={child_name}, age={age}, mode={game_mode})")
 
         self.child_age = age
+        self._child_id = child_id or child_name
+        self._child_name = child_name
+        self._session_start_time = time.time()
+        self._answers = []
         self.state.game_mode = game_mode
         self.state.max_lives = 3 if game_mode == "commander" else None
         self.state.reset()
         self.qgen.reset()  # Clear question history
+
+        # Load persisted progress
+        try:
+            progress = await self._progress_client.get_progress(self._child_id, "math_quiz")
+            if progress and progress.get("level"):
+                self.state.level = progress["level"]
+                logger.info(f"engine.progress_loaded(level={self.state.level})")
+        except Exception as e:
+            logger.warning(f"engine.progress_load_failed(error={e})")
 
         await self.narrator.greet(child_name, game_mode)
         await self._present_next_question()
@@ -193,17 +214,50 @@ class MathGameEngine:
         # Start hint timers only after child has heard the question
         self.hints.start_timers(self.state.current_question_id)
 
+    async def _save_session(self, completed: bool = True) -> dict:
+        """Save game session to progression API."""
+        try:
+            duration = int(time.time() - self._session_start_time)
+            result = await self._progress_client.end_session({
+                "childId": self._child_id,
+                "gameType": "math_quiz",
+                "ageBand": self.state.game_mode,
+                "level": self.state.level,
+                "starsEarned": self.state.stars,
+                "questionsAsked": self.state.questions_asked,
+                "correctAnswers": sum(1 for a in self._answers if a),
+                "bestStreak": getattr(self.state, 'consecutive_correct', 0),
+                "durationSecs": duration,
+                "completed": completed,
+                "answers": self._answers,
+            })
+            if result:
+                prog = result.get("progress", {})
+                if prog.get("levelAdvanced"):
+                    logger.info(f"engine.level_up(new={prog.get('levelAfter')})")
+                for ach in result.get("achievements", []):
+                    logger.info(f"engine.achievement(code={ach['code']})")
+            return result
+        except Exception as e:
+            logger.error(f"engine.save_session_error(error={e})")
+            return {}
+
     async def _handle_result(self, result: dict):
         """React to correct/wrong/game_over/game_complete."""
         progress = result.get("progress", {})
         stars = progress.get("stars", self.state.stars)
         total_needed = progress.get("total_needed", self.state.stars_to_win)
 
+        # Track answers
+        self._answers.append(result.get("correct", False))
+
         if result.get("game_over"):
+            await self._save_session(completed=True)
             await self.narrator.narrate_game_over(stars)
             return
 
         if result.get("game_complete"):
+            await self._save_session(completed=True)
             await self.narrator.narrate_level_complete(self.state.level)
             await self._present_next_question()
             return

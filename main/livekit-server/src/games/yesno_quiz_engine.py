@@ -5,6 +5,9 @@ Questions are generated dynamically by the LLM via OpenRouter API.
 """
 
 import logging
+import time
+
+from src.shared.progress_client import ProgressClient
 
 logger = logging.getLogger("yesno_quiz_engine")
 
@@ -45,18 +48,36 @@ class YesNoQuizEngine:
         self.child_name = child_name
         self.child_age = child_age
         self._answered_question_id = None  # Guard against double-answering
+        self._progress_client = ProgressClient()
+        self._child_id = ""
+        self._session_start_time = 0.0
+        self._total_hints_used = 0
+        self._answers = []
 
     # ==================== EVENT HANDLERS ====================
 
-    async def on_game_start(self, child_name: str, age: int, game_mode: str):
+    async def on_game_start(self, child_name: str, age: int, game_mode: str, child_id: str = ""):
         """Called when game should begin (after greeting or on start control)."""
         logger.info(f"engine.game_start(name={child_name}, age={age}, mode={game_mode})")
 
         self.child_name = child_name
         self.child_age = age
+        self._child_id = child_id or child_name
+        self._session_start_time = time.time()
+        self._total_hints_used = 0
+        self._answers = []
         self.state.game_mode = game_mode
         self.state.reset()
         self.qgen.reset()  # Clear question history
+
+        # Load persisted progress
+        try:
+            progress = await self._progress_client.get_progress(self._child_id, "yesno_quiz")
+            if progress and progress.get("level"):
+                self.state.level = progress["level"]
+                logger.info(f"engine.progress_loaded(level={self.state.level})")
+        except Exception as e:
+            logger.warning(f"engine.progress_load_failed(error={e})")
 
         # Send game_state "started" to frontend
         await self.dc.send({
@@ -302,6 +323,7 @@ class YesNoQuizEngine:
             user_said_yes = (answer == "yes")
             is_correct = (user_said_yes == correct_answer_bool)
 
+        self._answers.append(is_correct)
         result_meta = self.state.record_answer(is_correct)
 
         result = {
@@ -385,9 +407,39 @@ class YesNoQuizEngine:
         except Exception as e:
             logger.error(f"engine.advance_error(error={e})", exc_info=True)
 
+    async def _save_session(self, completed: bool = True) -> dict:
+        """Save game session to progression API."""
+        try:
+            duration = int(time.time() - self._session_start_time)
+            result = await self._progress_client.end_session({
+                "childId": self._child_id,
+                "gameType": "yesno_quiz",
+                "ageBand": self.state.game_mode,
+                "level": self.state.level,
+                "starsEarned": self.state.stars,
+                "questionsAsked": self.state.questions_asked,
+                "correctAnswers": sum(1 for a in self._answers if a),
+                "bestStreak": self.state.consecutive_correct,
+                "hintsUsed": self._total_hints_used,
+                "durationSecs": duration,
+                "completed": completed,
+                "answers": self._answers,
+            })
+            if result:
+                prog = result.get("progress", {})
+                if prog.get("levelAdvanced"):
+                    logger.info(f"engine.level_up(new={prog.get('levelAfter')})")
+                for ach in result.get("achievements", []):
+                    logger.info(f"engine.achievement(code={ach['code']})")
+            return result
+        except Exception as e:
+            logger.error(f"engine.save_session_error(error={e})")
+            return {}
+
     async def _handle_level_complete(self):
-        """Announce level complete, send game_state 'completed', advance level."""
+        """Announce level complete, save progress, advance level."""
         logger.info(f"engine.level_complete(level={self.state.level})")
+        await self._save_session(completed=True)
 
         await self.dc.send({
             "type": "game_state",
@@ -404,8 +456,9 @@ class YesNoQuizEngine:
         await self._generate_and_send_question()
 
     async def _handle_game_over(self):
-        """Announce game over, send game_state 'game_over'."""
+        """Announce game over, save progress, send game_state 'game_over'."""
         logger.info(f"engine.game_over(stars={self.state.stars})")
+        await self._save_session(completed=True)
 
         await self.dc.send({
             "type": "game_state",
