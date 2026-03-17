@@ -224,7 +224,7 @@ class MathGameEngine:
                 "ageBand": self.state.game_mode,
                 "level": self.state.level,
                 "starsEarned": self.state.stars,
-                "questionsAsked": self.state.total_questions,
+                "questionsAsked": len(self._answers),
                 "correctAnswers": sum(1 for a in self._answers if a),
                 "bestStreak": getattr(self.state, 'consecutive_correct', 0),
                 "durationSecs": duration,
