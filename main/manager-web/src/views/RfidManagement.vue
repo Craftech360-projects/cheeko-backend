@@ -890,7 +890,7 @@ export default {
             isAllSeriesSelected: false,
             seriesDialogVisible: false,
             seriesDialogTitle: 'Add Bulk Range',
-            seriesForm: { id: null, startUid: '', endUid: '', questionPackId: null, contentPackId: null, priority: 0, notes: '', active: true },
+            seriesForm: { id: null, startUid: '', endUid: '', questionPackId: null, contentPackId: null, cardType: null, actionData: {}, priority: 0, notes: '', active: true },
 
             // Content Packs
             contentPacksList: [],

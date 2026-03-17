@@ -138,11 +138,14 @@ export default {
     handlePackTypeChange(type) {
       if (type === 'qa') {
         this.form.contentPackId = null;
+        this.form.cardType = null;
       } else if (type === 'content') {
         this.form.questionPackId = null;
+        this.form.cardType = null;
       } else if (type === 'ai') {
         this.form.questionPackId = null;
         this.form.contentPackId = null;
+        this.form.cardType = 'ai';
       }
     },
     submit() {
@@ -170,8 +173,10 @@ export default {
         this.packType = 'qa';
       } else if (this.form.contentPackId) {
         this.packType = 'content';
-      } else {
+      } else if (this.form.cardType === 'ai') {
         this.packType = 'ai';
+      } else {
+        this.packType = 'content';
       }
     }
   },

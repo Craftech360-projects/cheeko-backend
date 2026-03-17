@@ -691,6 +691,8 @@ model rfid_series {
   question_id      BigInt?
   content_ref_id   BigInt?
   question_pack_id BigInt?
+  card_type        String?             @default("content") @db.VarChar(20)
+  action_data      Json?               @default("{}")
   priority         Int?                @default(0)
   notes            String?             @db.VarChar(500)
   status           Int?                @default(1)

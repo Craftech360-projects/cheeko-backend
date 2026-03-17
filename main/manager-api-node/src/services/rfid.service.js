@@ -351,6 +351,24 @@ const lookupCardByUid = async (rfidUid) => {
     }
 
     if (series) {
+      // AI Card series — no content, triggers AI conversation mode
+      if (series.card_type === 'ai') {
+        const actionData = series.action_data || {};
+        const agentName = actionData.agent_name || null;
+        logger.info(`[RFID-LOOKUP] Series AI card: series_id=${series.id}, agent=${agentName || 'default'}`);
+        return {
+          rfid_uid: normalizedUid,
+          source: 'bulk_range',
+          series_id: Number(series.id),
+          contentType: 'prompt',
+          title: series.notes || 'AI Card',
+          promptText: series.notes || 'The child tapped an AI card. Engage them in a fun, interactive conversation.',
+          actionType: agentName ? 'agent' : null,
+          actionData: actionData,
+          agentName: agentName,
+        };
+      }
+
       // Series links to rfid_question (prompt) and rfid_pack (physical SKU)
       if (series.rfid_question) {
         const question = series.rfid_question;
@@ -1456,6 +1474,8 @@ const createSeries = async (data, _userId) => {
     content_ref_id: data.contentPackId ? BigInt(data.contentPackId) : null,
     question_pack_id: data.questionPackId ? BigInt(data.questionPackId) : null,
     question_id: data.questionId ? BigInt(data.questionId) : null,
+    card_type: data.cardType || 'content',
+    action_data: data.actionData || {},
     notes: data.notes || null,
     priority: data.priority || 0,
     status: data.active !== false ? 1 : 0
@@ -1521,6 +1541,8 @@ const updateSeries = async (data, _userId) => {
   }
 
   if (data.questionId !== undefined) updateData.question_id = data.questionId ? BigInt(data.questionId) : null;
+  if (data.cardType !== undefined) updateData.card_type = data.cardType;
+  if (data.actionData !== undefined) updateData.action_data = data.actionData;
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.active !== undefined) updateData.status = data.active ? 1 : 0;
 

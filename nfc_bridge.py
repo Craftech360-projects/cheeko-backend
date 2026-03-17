@@ -133,7 +133,7 @@ async def main(port):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="NFC-to-WebSocket Bridge")
-    parser.add_argument("--port", type=int, default=8765, help="WebSocket port (default: 8765)")
+    parser.add_argument("--port", type=int, default=8766, help="WebSocket port (default: 8766)")
     args = parser.parse_args()
 
     try:
