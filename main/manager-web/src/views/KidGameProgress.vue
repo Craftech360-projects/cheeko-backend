@@ -125,9 +125,11 @@
               → {{ s.level_after }} ⬆
             </span>
           </span>
-          <span class="session-score">{{ s.correct_answers }}/{{ s.questions_asked }}</span>
+          <span class="session-score" :class="scoreClass(s)">
+            {{ s.correct_answers }}/{{ s.questions_asked }} <small>correct</small>
+          </span>
           <span class="session-time">{{ formatDuration(s.duration_secs) }}</span>
-          <span class="session-date">{{ formatDate(s.ended_at) }}</span>
+          <span class="session-date">{{ formatRelativeDate(s.ended_at) }}</span>
         </div>
       </div>
     </div>
@@ -250,6 +252,13 @@ export default {
     achievementDesc(code) { return (ACHIEVEMENT_MAP[code] || {}).desc || code },
     badgeTier(code) { return (ACHIEVEMENT_MAP[code] || {}).tier || 'bronze' },
     badgeEmoji(code) { return (ACHIEVEMENT_MAP[code] || {}).emoji || '🏅' },
+    scoreClass(s) {
+      if (!s.questions_asked) return ''
+      const pct = s.correct_answers / s.questions_asked
+      if (pct >= 0.8) return 'session-score-good'
+      if (pct >= 0.5) return 'session-score-ok'
+      return 'session-score-low'
+    },
     formatDuration(secs) {
       if (!secs) return '-'
       const m = Math.floor(secs / 60), s = secs % 60
@@ -258,6 +267,17 @@ export default {
     formatDate(dt) {
       if (!dt) return '-'
       return new Date(dt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    },
+    formatRelativeDate(dt) {
+      if (!dt) return '-'
+      const d = new Date(dt)
+      const now = new Date()
+      const today = now.toDateString()
+      const yesterday = new Date(now - 86400000).toDateString()
+      const time = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
+      if (d.toDateString() === today) return `Today, ${time}`
+      if (d.toDateString() === yesterday) return `Yesterday, ${time}`
+      return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + `, ${time}`
     }
   }
 }
@@ -287,6 +307,43 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   font-family: 'Segoe UI', system-ui, sans-serif;
 }
 
+/* ═══ Entry Animations ═══ */
+.game-card { animation: fadeSlideUp 0.5s ease-out both; }
+.game-card:nth-child(1) { animation-delay: 0.05s; }
+.game-card:nth-child(2) { animation-delay: 0.15s; }
+.game-card:nth-child(3) { animation-delay: 0.25s; }
+
+.badge { animation: popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.badge:nth-child(1) { animation-delay: 0.1s; }
+.badge:nth-child(2) { animation-delay: 0.2s; }
+.badge:nth-child(3) { animation-delay: 0.3s; }
+.badge:nth-child(4) { animation-delay: 0.4s; }
+.badge:nth-child(5) { animation-delay: 0.5s; }
+
+.journey-node { animation: fadeSlideRight 0.4s ease-out both; }
+.journey-node:nth-child(1) { animation-delay: 0.1s; }
+.journey-node:nth-child(2) { animation-delay: 0.2s; }
+.journey-node:nth-child(3) { animation-delay: 0.3s; }
+.journey-node:nth-child(4) { animation-delay: 0.4s; }
+
+.session-row { animation: fadeSlideUp 0.3s ease-out both; }
+.session-row:nth-child(1) { animation-delay: 0.05s; }
+.session-row:nth-child(2) { animation-delay: 0.1s; }
+.session-row:nth-child(3) { animation-delay: 0.15s; }
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeSlideRight {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1); }
+}
+
 /* ═══ Streak Banner ═══ */
 .streak-banner {
   display: flex;
@@ -295,8 +352,9 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   background: linear-gradient(135deg, rgba(255, 145, 0, 0.15), rgba(255, 213, 79, 0.08));
   border: 1px solid rgba(255, 145, 0, 0.25);
   border-radius: 10px;
-  padding: 10px 16px;
+  padding: 12px 18px;
   margin-bottom: 20px;
+  animation: streakPulse 3s ease-in-out infinite;
   .streak-fire {
     font-size: 22px;
     animation: fireGlow 1.5s ease-in-out infinite alternate;
@@ -309,6 +367,10 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 @keyframes fireGlow {
   0% { filter: brightness(1); transform: scale(1); }
   100% { filter: brightness(1.4); transform: scale(1.15); }
+}
+@keyframes streakPulse {
+  0%, 100% { border-color: rgba(255, 145, 0, 0.25); }
+  50% { border-color: rgba(255, 145, 0, 0.5); }
 }
 
 /* ═══ Game Cards + Progress Rings ═══ */
@@ -336,21 +398,22 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 
 .ring-container {
   position: relative;
-  width: 80px;
-  height: 80px;
+  width: 90px;
+  height: 90px;
   flex-shrink: 0;
 }
 
 .progress-ring {
-  width: 80px;
-  height: 80px;
+  width: 90px;
+  height: 90px;
   transform: rotate(-90deg);
-  circle { fill: none; stroke-width: 6; stroke-linecap: round; }
-  .ring-bg { stroke: $ring-bg; }
+  circle { fill: none; stroke-width: 8; stroke-linecap: round; }
+  .ring-bg { stroke: $ring-bg; stroke-width: 8; }
   .ring-fill {
     stroke: $warm;
     stroke-dasharray: 326.73;
-    transition: stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+    filter: drop-shadow(0 0 4px currentColor);
   }
 }
 
@@ -365,8 +428,8 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  .ring-level { font-size: 22px; font-weight: 800; line-height: 1; color: $text; }
-  .ring-label { font-size: 9px; font-weight: 600; letter-spacing: 2px; color: $text-muted; text-transform: uppercase; }
+  .ring-level { font-size: 26px; font-weight: 900; line-height: 1; color: #fff; }
+  .ring-label { font-size: 9px; font-weight: 700; letter-spacing: 2px; color: $text-muted; text-transform: uppercase; }
 }
 
 .game-info { flex: 1; min-width: 0; }
@@ -426,12 +489,16 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 }
 
 .badge--bronze {
-  border-color: rgba($bronze, 0.4);
-  &:hover { box-shadow: 0 0 12px rgba($bronze, 0.3); }
+  border-color: rgba($bronze, 0.5);
+  box-shadow: 0 0 6px rgba($bronze, 0.15);
+  .badge-icon { filter: drop-shadow(0 0 2px rgba($bronze, 0.5)); }
+  &:hover { box-shadow: 0 0 14px rgba($bronze, 0.4); }
 }
 .badge--silver {
-  border-color: rgba($silver, 0.4);
-  &:hover { box-shadow: 0 0 12px rgba($silver, 0.3); }
+  border-color: rgba($silver, 0.5);
+  box-shadow: 0 0 6px rgba($silver, 0.15);
+  .badge-icon { filter: drop-shadow(0 0 2px rgba($silver, 0.5)); }
+  &:hover { box-shadow: 0 0 14px rgba($silver, 0.4); }
 }
 .badge--gold {
   border-color: rgba($gold, 0.5);
@@ -481,45 +548,56 @@ $ring-bg: rgba(255, 255, 255, 0.08);
 .journey-track {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  position: relative;
 }
 
 .journey-node {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   background: $surface;
-  border-radius: 10px;
-  padding: 8px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  min-width: 180px;
+  border-radius: 12px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  min-width: 200px;
+  position: relative;
+  transition: transform 0.2s, border-color 0.3s;
+  &:hover { transform: translateY(-1px); }
 }
 
 .node-dot {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: $surface-light;
-  border: 2px solid $text-muted;
+  border: 2.5px solid $text-muted;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   color: $text-muted;
   flex-shrink: 0;
+  transition: all 0.3s;
 }
 
-.journey-node--cleared .node-dot {
-  background: rgba($green, 0.2);
-  border-color: $green;
-  color: $green;
+.journey-node--cleared {
+  border-color: rgba($green, 0.2);
+  .node-dot {
+    background: rgba($green, 0.15);
+    border-color: $green;
+    color: $green;
+    box-shadow: 0 0 8px rgba($green, 0.25);
+    font-size: 15px;
+  }
 }
 
 .node-info {
   display: flex;
   flex-direction: column;
-  .node-game { font-size: 12px; font-weight: 600; color: $text; }
+  gap: 1px;
+  .node-game { font-size: 12px; font-weight: 700; color: $text; }
   .node-detail { font-size: 11px; color: $text-muted; }
 }
 
@@ -543,9 +621,15 @@ $ring-bg: rgba(255, 255, 255, 0.08);
   &:nth-child(even) { background: $surface-light; }
   .session-game { width: 140px; font-weight: 600; }
   .session-level { width: 100px; color: $text-muted; }
-  .session-score { width: 60px; font-weight: 700; color: $gold; }
-  .session-time { width: 70px; color: $text-muted; }
-  .session-date { color: $text-muted; font-size: 12px; }
+  .session-score {
+    width: 100px; font-weight: 700; color: $gold;
+    small { font-weight: 400; color: $text-muted; font-size: 10px; margin-left: 2px; }
+  }
+  .session-score-good { color: $green; }
+  .session-score-ok { color: $gold; }
+  .session-score-low { color: #FF7043; }
+  .session-time { width: 70px; color: $text-muted; font-size: 12px; }
+  .session-date { color: $text-muted; font-size: 12px; min-width: 120px; }
 }
 
 .level-up-badge {
