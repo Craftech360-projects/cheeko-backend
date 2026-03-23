@@ -65,11 +65,11 @@
           Content Library
         </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
-          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' }"
+          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' || $route.path === '/quota-settings' }"
           @visible-change="handleParamDropdownVisibleChange">
           <span class="el-dropdown-link">
             <img loading="lazy" alt="" src="@/assets/header/param_management.png"
-              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' ? 'brightness(0) invert(1)' : 'None' }" />
+              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' || $route.path === '/quota-settings' ? 'brightness(0) invert(1)' : 'None' }" />
             Parameter Dictionary
             <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': paramDropdownVisible }"></i>
           </span>
@@ -88,6 +88,9 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="goEmailReports">
               Email Reports
+            </el-dropdown-item>
+            <el-dropdown-item @click.native="goQuotaSettings">
+              Quota Settings
             </el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown>
@@ -189,6 +192,9 @@ export default {
     },
     goGameAnalytics() {
       this.$router.push('/game-analytics')
+    },
+    goQuotaSettings() {
+      this.$router.push('/quota-settings')
     },
     goAllDevices() {
       this.$router.push('/all-devices')

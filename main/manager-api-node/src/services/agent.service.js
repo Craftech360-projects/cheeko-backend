@@ -1790,13 +1790,10 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
   // Build query for agents with pagination
   let query;
   if (isSuperAdmin) {
-    // Admin sees all agents with owner information
+    // Admin sees all agents
     query = supabaseAdmin
       .from('ai_agent')
-      .select(`
-        id, agent_name, mem_model_id, system_prompt, summary_memory, created_at, user_id,
-        sys_user:user_id (username)
-      `)
+      .select('id, agent_name, mem_model_id, system_prompt, summary_memory, created_at, user_id')
       .order('sort', { ascending: true })
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1);
