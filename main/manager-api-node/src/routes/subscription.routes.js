@@ -115,6 +115,128 @@ router.post('/consume/token/:mac',
   })
 );
 
+// ==================== QUOTA SETTINGS (Admin) ====================
+
+const { getParamValue, getParamByCode, createParam, updateParam } = require('../services/system.service');
+
+/**
+ * @swagger
+ * /subscription/quota-settings:
+ *   get:
+ *     tags: [Subscription]
+ *     summary: Get current quota system settings
+ *     description: Returns the default quota type and free-tier limits for users without a subscription
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get('/quota-settings',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      const defaultQuotaType = await getParamValue('default_quota_type', 'question');
+      const freeQuestionLimit = Number(await getParamValue('free_monthly_quota', 20));
+      const freeTokenLimit = Number(await getParamValue('default_free_token_limit', 10000));
+      const freeTimeLimit = Number(await getParamValue('default_free_time_limit', 1800));
+
+      success(res, {
+        defaultQuotaType,
+        freeQuestionLimit,
+        freeTokenLimit,
+        freeTimeLimit
+      }, 'Quota settings retrieved');
+    } catch (error) {
+      logger.error('Error getting quota settings:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /subscription/quota-settings:
+ *   put:
+ *     tags: [Subscription]
+ *     summary: Update quota system settings
+ *     description: Change the default quota type and/or free-tier limits
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               defaultQuotaType:
+ *                 type: string
+ *                 enum: [question, token, time]
+ *               freeQuestionLimit:
+ *                 type: integer
+ *               freeTokenLimit:
+ *                 type: integer
+ *               freeTimeLimit:
+ *                 type: integer
+ *                 description: Free time limit in seconds
+ */
+router.put('/quota-settings',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { defaultQuotaType, freeQuestionLimit, freeTokenLimit, freeTimeLimit } = req.body || {};
+
+    try {
+      const updates = [];
+
+      if (defaultQuotaType !== undefined) {
+        const valid = ['question', 'token', 'time'];
+        if (!valid.includes(defaultQuotaType)) {
+          return badRequest(res, `defaultQuotaType must be one of: ${valid.join(', ')}`);
+        }
+        updates.push(upsertParam('default_quota_type', defaultQuotaType, 'string', 'Default quota system for free users'));
+      }
+
+      if (freeQuestionLimit !== undefined) {
+        updates.push(upsertParam('free_monthly_quota', String(freeQuestionLimit), 'number', 'Free monthly question limit per device'));
+      }
+
+      if (freeTokenLimit !== undefined) {
+        updates.push(upsertParam('default_free_token_limit', String(freeTokenLimit), 'number', 'Free monthly token limit per device'));
+      }
+
+      if (freeTimeLimit !== undefined) {
+        updates.push(upsertParam('default_free_time_limit', String(freeTimeLimit), 'number', 'Free monthly time limit in seconds per device'));
+      }
+
+      await Promise.all(updates);
+
+      // Return updated settings
+      const result = {
+        defaultQuotaType: defaultQuotaType || await getParamValue('default_quota_type', 'question'),
+        freeQuestionLimit: freeQuestionLimit || Number(await getParamValue('free_monthly_quota', 20)),
+        freeTokenLimit: freeTokenLimit || Number(await getParamValue('default_free_token_limit', 10000)),
+        freeTimeLimit: freeTimeLimit || Number(await getParamValue('default_free_time_limit', 1800))
+      };
+
+      logger.info(`Admin updated quota settings: ${JSON.stringify(result)}`);
+      success(res, result, 'Quota settings updated');
+    } catch (error) {
+      logger.error('Error updating quota settings:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * Helper: Create or update a sys_param by code
+ */
+async function upsertParam(code, value, valueType, remark) {
+  const existing = await getParamByCode(code);
+  if (existing) {
+    await updateParam(existing.id, { paramValue: value });
+  } else {
+    await createParam(null, { paramCode: code, paramValue: value, valueType, remark });
+  }
+}
+
 // ==================== ADMIN ENDPOINTS ====================
 
 /**

@@ -104,8 +104,69 @@ const getUnifiedQuota = async (mac) => {
 
   const normalizedMac = normalizeMacAddress(mac);
 
-  // No subscription → fall back to free question quota
+  // No subscription → fall back to default free quota system (configurable via sys_params)
   if (!subscription) {
+    const defaultQuotaType = await getParamValue('default_quota_type', 'question');
+
+    if (defaultQuotaType === 'token') {
+      const freeTokenLimit = Number(await getParamValue('default_free_token_limit', 10000));
+      const { data: quota } = await supabaseAdmin
+        .from('user_token_quota')
+        .select('*')
+        .eq('mac_address', normalizedMac)
+        .eq('month_key', monthKey)
+        .single();
+
+      const tokensUsed = quota ? quota.tokens_used : 0;
+      const extraPurchased = quota ? quota.extra_purchased : 0;
+      const totalAllowed = freeTokenLimit + extraPurchased;
+      const remaining = Math.max(0, totalAllowed - tokensUsed);
+
+      return {
+        quotaType: 'token',
+        remaining,
+        isExhausted: remaining <= 0,
+        limit: totalAllowed,
+        used: tokensUsed,
+        extraPurchased,
+        audioTokenWeight: 1.5,
+        textTokenWeight: 1.0,
+        macAddress: normalizedMac,
+        monthKey,
+        planName: 'Free'
+      };
+    }
+
+    if (defaultQuotaType === 'time') {
+      const freeTimeLimit = Number(await getParamValue('default_free_time_limit', 1800));
+      const { data: quota } = await supabaseAdmin
+        .from('user_time_quota')
+        .select('*')
+        .eq('mac_address', normalizedMac)
+        .eq('month_key', monthKey)
+        .single();
+
+      const secondsUsed = quota ? quota.seconds_used : 0;
+      const extraPurchased = quota ? quota.extra_purchased : 0;
+      const totalAllowed = freeTimeLimit + extraPurchased;
+      const remaining = Math.max(0, totalAllowed - secondsUsed);
+
+      return {
+        quotaType: 'time',
+        remaining,
+        isExhausted: remaining <= 0,
+        limit: totalAllowed,
+        used: secondsUsed,
+        extraPurchased,
+        audioTokenWeight: 1.0,
+        textTokenWeight: 1.0,
+        macAddress: normalizedMac,
+        monthKey,
+        planName: 'Free'
+      };
+    }
+
+    // Default: question-based
     const freeLimit = await getParamValue('free_monthly_quota', DEFAULT_FREE_QUOTA);
     const { data: quota } = await supabaseAdmin
       .from('user_question_quota')

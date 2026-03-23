@@ -145,3 +145,13 @@ VALUES
     ('basic_time',  'Basic Time Plan',   'time', 0, 0, 7200,   1.0, 1.0, 29900, 499,  'monthly'),
     ('pro_time',    'Pro Time Plan',     'time', 0, 0, 21600,  1.0, 1.0, 59900, 999,  'monthly')
 ON CONFLICT (plan_code) DO NOTHING;
+
+-- =============================================
+-- Seed default quota system parameters
+-- =============================================
+INSERT INTO sys_params (param_code, param_value, value_type, remark)
+VALUES
+    ('default_quota_type', 'question', 'string', 'Default quota system for free users (question/token/time)'),
+    ('default_free_token_limit', '10000', 'number', 'Free monthly token limit per device'),
+    ('default_free_time_limit', '1800', 'number', 'Free monthly time limit in seconds per device (1800 = 30 minutes)')
+ON CONFLICT (param_code) DO NOTHING;

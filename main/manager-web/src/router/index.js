@@ -198,6 +198,17 @@ const routes = [
       title: 'Game Analytics'
     }
   },
+  {
+    path: '/quota-settings',
+    name: 'QuotaSettings',
+    component: function () {
+      return import('../views/QuotaSettings.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Quota Settings'
+    }
+  },
 ]
 const router = new VueRouter({
   base: process.env.VUE_APP_PUBLIC_PATH || '/',
@@ -219,7 +230,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics', 'QuotaSettings']
 
 // Route guard
 router.beforeEach((to, from, next) => {
