@@ -16,6 +16,8 @@ const sidebars = {
       type: 'category',
       label: 'Backend',
       items: [
+        'backend/database-schema',
+        'backend/mcp-protocol',
         {
           type: 'category',
           label: 'Manager API (Node.js)',
@@ -44,6 +46,7 @@ const sidebars = {
             'backend/livekit-server/overview',
             'backend/livekit-server/cheeko-agent',
             'backend/livekit-server/game-workers',
+            'backend/livekit-server/function-tools',
           ],
         },
       ],
