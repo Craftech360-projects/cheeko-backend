@@ -66,7 +66,7 @@ const sidebars = {
     {
       type: 'category',
       label: 'Deployment',
-      items: ['deployment/environment', 'deployment/pm2'],
+      items: ['deployment/environment', 'deployment/pm2', 'deployment/scaling'],
     },
   ],
 };
