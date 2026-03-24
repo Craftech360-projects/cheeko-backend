@@ -5,6 +5,8 @@ sidebar_position: 1
 
 # Admin Dashboard (Manager Web)
 
+![Admin Dashboard](/img/admin-header.jpeg)
+
 The Manager Web is the Cheeko admin dashboard, a single-page application used to manage devices, users, content, and system configuration.
 
 ## Tech Stack

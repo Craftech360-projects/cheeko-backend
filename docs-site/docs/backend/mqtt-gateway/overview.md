@@ -5,6 +5,8 @@ sidebar_position: 1
 
 # MQTT Gateway Overview
 
+![MQTT Gateway](/img/gateway-header.jpeg)
+
 The MQTT Gateway is a Node.js protocol bridge that sits between ESP32 Cheeko devices and the LiveKit WebRTC cloud. Devices communicate using MQTT over TCP and raw UDP; the gateway translates those into LiveKit room connections and WebRTC audio tracks so the AI agents running in `livekit-server` can talk to children in real time.
 
 **MQTT (control messages)**

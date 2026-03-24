@@ -5,6 +5,10 @@ sidebar_position: 1
 
 # RFID Cards
 
+![RFID Cards](/img/rfid-heade.jpeg)
+
+![RFID Card Scan Flow](/img/RFID_card_scan.jpeg)
+
 RFID cards are physical NFC/RFID cards that children tap on the Cheeko device to instantly trigger AI interactions or content playback. A card tap is the primary non-voice interaction on the device — it replaces typing or menu navigation with a simple physical action a 3-year-old can perform.
 
 Cards fall into three categories:

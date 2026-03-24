@@ -5,6 +5,10 @@ sidebar_position: 1
 
 # Parent App
 
+![Parent App](/img/parent-app-header.jpeg)
+
+![Parent App Flow](/img/Cheeko_Parent_App.jpeg)
+
 Flutter app for parents to set up and manage Cheeko devices, create child profiles, browse content, and monitor usage. It is the primary control surface for the Cheeko ecosystem — every device must be provisioned and bound to a kid profile through this app before it can be used.
 
 ## Tech Stack

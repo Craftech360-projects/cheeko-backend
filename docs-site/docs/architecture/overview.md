@@ -5,6 +5,8 @@ sidebar_position: 1
 
 # Architecture Overview
 
+![Architecture](/img/architecture-header.jpeg)
+
 ## System Diagram
 
 ```

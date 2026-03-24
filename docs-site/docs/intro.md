@@ -6,7 +6,11 @@ sidebar_position: 1
 
 # Cheeko Backend Overview
 
+![Cheeko Hero](/img/cheeko-hero.png.jpeg)
+
 Cheeko is an AI companion for children (ages 3–16) running on ESP32 devices. This documentation covers all five backend and firmware components and their integration.
+
+![Boot-to-Conversation Flow](/img/Boot-to-Conversation%20flow.jpeg)
 
 ## System Components
 

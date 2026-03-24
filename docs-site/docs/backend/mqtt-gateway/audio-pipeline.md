@@ -5,6 +5,8 @@ sidebar_position: 3
 
 # Audio Pipeline
 
+![Audio Pipeline Flow](/img/Audio_pipeline_flow.jpeg)
+
 The gateway handles two parallel audio flows: uplink (device microphone → LiveKit) and downlink (LiveKit agent voice → device speaker). All audio is Opus-encoded and transmitted over UDP with AES-128-CTR encryption.
 
 ---

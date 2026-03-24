@@ -5,6 +5,8 @@ sidebar_position: 1
 
 # LiveKit Server Overview
 
+![AI Agent](/img/ai-agent-header.jpeg)
+
 The livekit-server component contains Python AI agent workers that run inside LiveKit rooms. Each worker is an autonomous process that handles voice input from an ESP32 device, runs it through an LLM, and streams TTS audio back — all in real time. Workers are dispatched by the MQTT gateway when a device connects or switches mode.
 
 ## Workers

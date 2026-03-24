@@ -5,6 +5,8 @@ sidebar_position: 1
 
 # Firmware Integration Guide
 
+![Firmware](/img/firmware-header.jpeg)
+
 **Audience:** Firmware engineers implementing the Cheeko protocol on ESP32 devices.
 
 **Covers:** Every HTTP API call, every MQTT message (both directions), every UDP packet contract, all state machine transitions, all RFID flows.

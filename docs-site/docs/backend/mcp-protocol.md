@@ -5,6 +5,8 @@ sidebar_position: 1
 
 # MCP (Model Control Protocol)
 
+![MCP Device Control Flow](/img/MCP_device_control.jpeg)
+
 MCP is the internal JSON-RPC-based protocol that allows AI agents running in `livekit-server` (Python) to control ESP32 hardware functions — volume, LED lighting, and battery status — through the MQTT gateway. Commands travel from the AI agent over a LiveKit data channel to the gateway, which reformats them as MQTT messages and forwards them to the ESP32 device. Responses travel the reverse path.
 
 ## Flow Diagram
