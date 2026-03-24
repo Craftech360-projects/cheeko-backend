@@ -28,6 +28,7 @@ const startSession = async ({ mac, agentId, modeType, metadata = {} }) => {
   try {
     const session = await prisma.analytics_game_sessions.create({
       data: {
+
         session_id: sessionId,
         mac_address: normalizedMac,
         agent_id: agentId || null,
@@ -176,6 +177,7 @@ const logGameAttempt = async ({
   try {
     const attempt = await prisma.analytics_game_attempts.create({
       data: {
+
         session_id: sessionId,
         mac_address: normalizedMac,
         game_type: gameType,
@@ -310,6 +312,7 @@ const logMediaEvent = async ({
   try {
     const playback = await prisma.analytics_media_playback.create({
       data: {
+
         mac_address: normalizedMac,
         content_id: mediaId ? BigInt(mediaId) : null,
         content_type: mediaType,

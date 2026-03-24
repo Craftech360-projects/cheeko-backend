@@ -1,1 +1,17 @@
-{}
+{
+  "debug": false,
+  "mqtt_broker": {
+    "host": "10.50.163.132",
+    "port": 1883,
+    "protocol": "mqtt",
+    "keepalive": 60,
+    "clean": true,
+    "reconnectPeriod": 1000,
+    "connectTimeout": 30000
+  },
+  "livekit": {
+    "url": "ws://localhost:7880",
+    "api_key": "devkey",
+    "api_secret": "secret"
+  }
+}

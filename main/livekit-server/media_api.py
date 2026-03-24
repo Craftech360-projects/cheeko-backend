@@ -21,15 +21,15 @@ from src.services.analytics_service import AnalyticsService
 from src.utils.model_cache import model_cache
 from src.utils.loki_bot_logger import logger
 
-load_dotenv(".env")
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 # LiveKit configuration
 LIVEKIT_URL = os.getenv("LIVEKIT_URL")
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET")
 
-# Manager API configuration (for analytics)
-MANAGER_API_URL = os.getenv("MANAGER_API_URL", "http://localhost:8002")
+# Manager API configuration (for analytics) - reads from .env file
+MANAGER_API_URL = os.getenv("MANAGER_API_URL", "http://localhost:8002/toy")
 MANAGER_API_SECRET = os.getenv("MANAGER_API_SECRET", "")
 
 app = FastAPI(title="Cheeko Media API")
@@ -1961,8 +1961,7 @@ async def start_music_bot(req: StartMusicBotRequest):
                     manager_api_url=MANAGER_API_URL,
                     secret=MANAGER_API_SECRET,
                     device_mac=format_mac_address(mac_address),
-                    session_id=req.room_name,
-                    agent_id="music-agent-bot"
+                    session_id=req.room_name
                 )
                 logger.info(f"📊 Analytics service created for Music bot - MAC: {mac_address}")
             except Exception as e:
@@ -2024,8 +2023,7 @@ async def start_story_bot(req: StartStoryBotRequest):
                     manager_api_url=MANAGER_API_URL,
                     secret=MANAGER_API_SECRET,
                     device_mac=format_mac_address(mac_address),
-                    session_id=req.room_name,
-                    agent_id="story-agent-bot"
+                    session_id=req.room_name
                 )
                 logger.info(f"📊 Analytics service created for Story bot - MAC: {mac_address}")
             except Exception as e:

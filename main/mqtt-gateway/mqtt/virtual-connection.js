@@ -291,7 +291,10 @@ class VirtualMQTTConnection {
   sendUdpMessage(payload, timestamp) {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
-      // console.log(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
+      if (!this._udpDropWarned) {
+        console.warn(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null — device hasn't sent a UDP packet yet. Audio will be dropped until device sends UDP ping.`);
+        this._udpDropWarned = true;
+      }
       return;
     }
 

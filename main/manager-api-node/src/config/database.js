@@ -36,9 +36,28 @@ pgPool.on('error', (err) => {
 });
 
 const adapter = new PrismaPg(pgPool);
-const prisma = new PrismaClient({
+
+// Auto-generate BigInt IDs for tables that lack BIGSERIAL sequences in the DB.
+// Without this, Prisma throws "Null constraint violation" on insert because
+// the DB column is NOT NULL with no default.
+const basePrisma = new PrismaClient({
   adapter,
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
+});
+
+const prisma = basePrisma.$extends({
+  query: {
+    $allModels: {
+      async create({ args, query }) {
+        if (args.data && (args.data.id === undefined || args.data.id === null)) {
+          const ts = BigInt(Date.now()) * 1000n;
+          const rand = BigInt(Math.floor(Math.random() * 1000));
+          args.data.id = ts + rand;
+        }
+        return query(args);
+      },
+    },
+  },
 });
 
 /**
