@@ -270,6 +270,94 @@ Shows the configuration for a single agent and allows editing. Displays bound de
 
 ---
 
+### Device Remote Control (MQTT Commands)
+
+The app acts as a remote control for Cheeko devices via direct MQTT connections. On app launch, `DeviceInitializationService` fetches OTA/MQTT credentials for each registered device and connects to the EMQX broker using `mqtt_client`. All commands are sent as `function_call` MQTT messages.
+
+#### MQTT Connection Setup
+
+1. App fetches MQTT credentials from `POST /toy/ota/` (broker host, port, client ID, username, password, publish topic)
+2. Connects to EMQX broker using MQTT v3.1.1 with clean session
+3. Subscribes to `app/p2p/{macAddress}` for status updates from the device
+4. Does **not** send a `hello` message — the app is a remote control, not a device
+
+#### Available Commands
+
+| Command | Function name | MQTT topic | Payload |
+|---------|--------------|------------|---------|
+| Volume Up | `self_volume_up` | `devices/{mac}/data` | `{"type":"function_call","function_call":{"name":"self_volume_up","arguments":{"step":10}},"source":"mobile_app"}` |
+| Volume Down | `self_volume_down` | `devices/{mac}/data` | `{"type":"function_call","function_call":{"name":"self_volume_down","arguments":{"step":10}},"source":"mobile_app"}` |
+| Play Music | `play_music` | `device-server` | `{"type":"function_call","function_call":{"name":"play_music","arguments":{"song_name":"...","language":"...","loop_enabled":false}},"source":"mobile_app"}` |
+| Play Story | `play_story` | `device-server` | `{"type":"function_call","function_call":{"name":"play_story","arguments":{"story_name":"...","category":"...","loop_enabled":false}},"source":"mobile_app"}` |
+| Stop Audio | `stop_audio` | `device-server` | `{"type":"function_call","function_call":{"name":"stop_audio","arguments":{}},"source":"mobile_app"}` |
+| Battery Status | `self_get_battery_status` | `devices/{mac}/data` | `{"type":"function_call","function_call":{"name":"self_get_battery_status","arguments":{}},"source":"mobile_app","request_id":"req_battery_..."}` |
+
+**Topic routing:**
+- `devices/{mac}/data` — sent directly to the device (volume, battery). These are MCP commands the device handles locally.
+- `device-server` — sent to the gateway, which routes to the active LiveKit session (play music/story, stop audio).
+
+#### Incoming Status Messages
+
+The app listens on `app/p2p/{macAddress}` for status updates:
+
+| Message type | Fields | Description |
+|-------------|--------|-------------|
+| `playback_status` | `status`, `title`, `timestamp` | Playback started/stopped/error |
+| `mcp_response` | `result`, `requestId`, `timestamp` | Response to battery status request |
+| `device_status` | `status`, `message` | Device online/offline/error |
+
+**Service file:** `device_command_service.dart`
+
+---
+
+### Child Profile Management
+
+Child profiles determine which kid is using a specific Cheeko device, enabling age-appropriate AI responses and personalized content.
+
+#### Creating a Kid Profile
+
+The first kid profile is created during onboarding via `InteractiveKidsOnboardingScreen` (see [Onboarding](#onboarding)). Additional kids can be added from the app.
+
+#### Kid Selection Dialog (`kid_selection_dialog.dart`)
+
+When binding a device or switching kids, a dialog loads all kid profiles via `KidsService.getKids()` and displays them as selectable cards showing name, gender icon, and age. If only one kid exists, it is auto-selected.
+
+#### Assigning a Kid to a Device
+
+After selecting a kid profile, the app calls `PUT /toy/device/assign-kid/{deviceId}` or `PUT /toy/device/assign-kid-by-mac` to bind the kid to a specific device. This tells the AI agent which age group and interests to use.
+
+#### Managing Kid Profiles
+
+The `KidsService` and `KidsApiService` support full CRUD:
+
+| Operation | Method | Endpoint |
+|-----------|--------|----------|
+| List all kids | `getKids()` | `GET /toy/api/mobile/kids` |
+| Get active kid | `getActiveKid()` | `GET /toy/api/mobile/active-kid` |
+| Create kid | `createKid(...)` | `POST /toy/api/mobile/kids` |
+| Update kid | `updateKid(...)` | `PUT /toy/api/mobile/kids/{id}` |
+| Switch active kid | `switchActiveKid(id)` | `POST /toy/api/mobile/switch-active-kid` |
+| Delete kid | `deleteKid(id)` | `DELETE /toy/api/mobile/kids/{id}` |
+
+#### Kid Model Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | Unique ID |
+| `parentId` | string | Firebase UID of parent |
+| `name` | string | Kid's name |
+| `dateOfBirth` | date | Birthday (used to compute age and age group) |
+| `gender` | string | `male` or `female` |
+| `interests` | list | Selected from: Animals, Space, Dinosaurs, Fairy Tales, Superheroes, Music, Science, Art, Sports, Nature, Vehicles, Cooking |
+| `primaryLanguage` | string | English, Hindi, Kannada, or Malayalam |
+| `additionalNotes` | string | Optional parent notes |
+| `avatarUrl` | string | Profile image URL |
+| `isActive` | bool | Currently active kid for this parent |
+
+**Computed fields:** `age` (from date of birth) and `ageGroup` (Toddler 0–2, Preschool 3–5, Early Elementary 6–8, Late Elementary 9–11, Early Teen 12–13, Teen 14–16).
+
+---
+
 ### Content Library
 
 Both content screens share the same architecture: a search bar with 500 ms debounce, category filter chips, a tab bar (`All` / `Favorites`), paginated list (page size 20), and a favorites system via `FavoriteProvider`.
@@ -465,7 +553,15 @@ Full provisioning sequence performed by `ToyActivationScreen`, `WiFiConnectionSe
 | Analytics sessions | `analytics_api_service.dart` | `GET /toy/analytics/sessions/{mac}` |
 | Analytics progress | `analytics_api_service.dart` | `GET /toy/analytics/progress/{mac}` |
 
-All requests to Manager API endpoints require `Authorization: Bearer <Firebase ID token>` except the OTA endpoint (`/toy/ota/`), which uses the device MAC address in the `device-id` header.
+| Volume up | `device_command_service.dart` | MQTT → `devices/{mac}/data` (function_call: `self_volume_up`) |
+| Volume down | `device_command_service.dart` | MQTT → `devices/{mac}/data` (function_call: `self_volume_down`) |
+| Battery status | `device_command_service.dart` | MQTT → `devices/{mac}/data` (function_call: `self_get_battery_status`) |
+| Play music on device | `device_command_service.dart` | MQTT → `device-server` (function_call: `play_music`) |
+| Play story on device | `device_command_service.dart` | MQTT → `device-server` (function_call: `play_story`) |
+| Stop audio on device | `device_command_service.dart` | MQTT → `device-server` (function_call: `stop_audio`) |
+| Assign kid to device | `kids_service.dart` | `PUT /toy/device/assign-kid/{deviceId}` |
+
+All requests to Manager API endpoints require `Authorization: Bearer <Firebase ID token>` except the OTA endpoint (`/toy/ota/`), which uses the device MAC address in the `device-id` header. MQTT commands use the OTA-provided broker credentials.
 
 ---
 

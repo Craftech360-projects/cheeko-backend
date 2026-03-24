@@ -10,8 +10,8 @@ const config = {
   url: 'https://docs.cheeko.ai',
   baseUrl: '/',
 
-  organizationName: 'cheeko',
-  projectName: 'cheeko-docs',
+  organizationName: 'Craftech360-projects',
+  projectName: 'cheeko-backend',
 
   onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
@@ -45,7 +45,8 @@ const config = {
         title: 'Cheeko Docs',
         items: [
           { type: 'docSidebar', sidebarId: 'mainSidebar', position: 'left', label: 'Docs' },
-          { href: 'https://github.com/cheeko', label: 'GitHub', position: 'right' },
+          { href: 'https://github.com/Craftech360-projects/cheeko-backend', label: 'Backend Repo', position: 'right' },
+          { href: 'https://github.com/Craftech360-projects/CheekoAI-Parent-App', label: 'Parent App Repo', position: 'right' },
         ],
       },
       footer: {
