@@ -136,7 +136,7 @@ Removes the association between a device and the authenticated user.
 
 `{ "code": 0, "msg": "success", "data": null }` on success.
 
-Error response uses `code: 500` in the body (HTTP status remains 200) to match Spring Boot format.
+Error response uses `code: 500` in the body (HTTP status remains 200).
 
 ---
 

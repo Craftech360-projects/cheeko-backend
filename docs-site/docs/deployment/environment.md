@@ -17,7 +17,7 @@ File: `main/manager-api-node/.env`
 |---|---|---|---|
 | `PORT` | No | `8002` | HTTP server port |
 | `NODE_ENV` | No | `development` | Runtime environment (`development` / `production`) |
-| `CONTEXT_PATH` | No | `/toy` | URL context path prefix (must match Spring Boot API for drop-in compatibility) |
+| `CONTEXT_PATH` | No | `/toy` | URL context path prefix |
 | `DATABASE_URL` | **Yes** | — | PostgreSQL connection pooler URL (pgbouncer/transaction mode, port 6543). **Sensitive.** |
 | `DIRECT_URL` | **Yes** | — | Direct PostgreSQL URL for Prisma migrations (port 5432). **Sensitive.** |
 | `SUPABASE_URL` | **Yes** | — | Supabase project URL — used for legacy admin dashboard token auth only. |

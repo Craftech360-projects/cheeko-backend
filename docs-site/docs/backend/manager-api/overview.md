@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Manager API Overview
 
-The `manager-api-node` is the primary backend REST API for the Cheeko platform. It is a Node.js/Express drop-in replacement for the original Spring Boot Java API, sharing the same base path (`/toy`) and response format.
+The `manager-api-node` is the backend REST API for the Cheeko platform, built with Node.js/Express. All endpoints share the base path `/toy`.
 
 ## Tech Stack
 
@@ -85,7 +85,7 @@ All routes are mounted under the `/toy` context path.
 | `/toy/admin` | `admin.routes.js` | Admin utilities |
 | `/toy/config` | `config.routes.js` | Runtime configuration |
 | `/toy/usage` | `usage.routes.js` | Usage tracking |
-| `/toy/ota` | `ota.routes.js` | Spring Boot-compatible OTA firmware check (device-facing) |
+| `/toy/ota` | `ota.routes.js` | OTA firmware check (device-facing) |
 | `/toy/otaMag` | `otaMag.routes.js` | OTA firmware management (admin) |
 | `/toy/admin/server` | `server.routes.js` | Server management |
 | `/toy/admin/params` | `params.routes.js` | System parameters |

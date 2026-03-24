@@ -5,7 +5,7 @@ sidebar_position: 2
 
 # OTA Endpoints
 
-Over-the-Air (OTA) firmware update endpoints for ESP32 devices. These endpoints live at `/toy/ota/` and are Spring Boot-compatible — they replicate the original Java API's request/response shapes exactly so that existing firmware does not need changes.
+Over-the-Air (OTA) firmware update endpoints for ESP32 devices. These endpoints live at `/toy/ota/`.
 
 There is a second set of OTA endpoints at `/toy/device/ota/` (documented in [Device Endpoints](./device.md)) that are used by the admin dashboard.
 
@@ -25,7 +25,7 @@ Called by the ESP32 on every boot. Registers or updates the device record and re
 
 ### Request
 
-MAC address is read from the `Device-Id` header first (Spring Boot compatibility), falling back to `mac` or `mac_address` in the body.
+MAC address is read from the `Device-Id` header first, falling back to `mac` or `mac_address` in the body.
 
 **Headers:**
 
@@ -64,7 +64,7 @@ MAC address is read from the `Device-Id` header first (Spring Boot compatibility
 
 ### Response
 
-Note: this endpoint returns the raw payload without the standard `{ code, msg, data }` envelope to maintain Spring Boot wire compatibility.
+Note: this endpoint returns the raw payload without the standard `{ code, msg, data }` envelope.
 
 ```json
 {
@@ -115,13 +115,13 @@ Note: this endpoint returns the raw payload without the standard `{ code, msg, d
 |---|---|
 | Missing MAC | `400` with `{ "code": 400, "msg": "Device ID is required..." }` |
 | Invalid MAC format | `400` with `{ "code": 400, "msg": "Invalid device ID format" }` |
-| Internal error | `200` with `{ "error": "<message>" }` (Spring Boot style) |
+| Internal error | `200` with `{ "error": "<message>" }` |
 
 ---
 
 ## POST `/toy/ota/activate`
 
-Quick activation check. Returns HTTP `200` with body `success` for registered devices; returns HTTP `202` (empty body) for unregistered devices or when the MAC is missing. This matches Spring Boot behavior exactly.
+Quick activation check. Returns HTTP `200` with body `success` for registered devices; returns HTTP `202` (empty body) for unregistered devices or when the MAC is missing.
 
 ### Request
 

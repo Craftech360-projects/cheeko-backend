@@ -42,7 +42,6 @@ All device-to-server communication starts with the Manager API (OTA check and ac
 | Service | Port | Base Path |
 |---------|------|-----------|
 | manager-api-node | 8002 | `/toy` |
-| manager-api (Java, legacy) | 8002 | `/toy` |
 | MQTT broker (EMQX) | 1883 | — |
 | UDP audio channel | dynamic | — |
 
@@ -52,5 +51,5 @@ All device-to-server communication starts with the Manager API (OTA check and ac
 - For MQTT and UDP message contracts, see the [Protocol Reference](./architecture/protocols.md).
 
 :::note
-`manager-api-node` (Node.js/Express) is the current active API implementation. `manager-api` (Java/Spring Boot) is the legacy implementation. Both expose the same `/toy` endpoints and are drop-in replacements for each other.
+`manager-api-node` (Node.js/Express) is the backend API implementation, exposing all endpoints under `/toy`.
 :::

@@ -49,7 +49,6 @@ All device-to-server communication starts with the Manager API (OTA), then shift
 | Service | Language | Port | Base Path | Notes |
 |---------|----------|------|-----------|-------|
 | manager-api-node | Node.js / Express | 8002 | `/toy` | Active implementation |
-| manager-api | Java / Spring Boot | 8002 | `/toy` | Legacy; drop-in compatible |
 | mqtt-gateway | Node.js | — | — | MQTT + UDP bridge |
 | livekit-server | Python | — | — | LiveKit agent workers |
 | manager-web | Vue.js | — | — | Admin dashboard |
