@@ -156,6 +156,48 @@ node app.js
 
 ---
 
+## Configuration File (`config/mqtt.json`)
+
+The gateway reads MQTT broker and LiveKit credentials from `config/mqtt.json`. The `ConfigManager` watches this file for live-reload — changes take effect without restarting the process.
+
+```json
+{
+  "debug": false,
+  "mqtt_broker": {
+    "host": "YOUR_EMQX_HOST",
+    "port": 1883,
+    "protocol": "mqtt",
+    "keepalive": 60,
+    "clean": true,
+    "reconnectPeriod": 1000,
+    "connectTimeout": 30000
+  },
+  "livekit": {
+    "url": "wss://your-project.livekit.cloud",
+    "api_key": "YOUR_LIVEKIT_API_KEY",
+    "api_secret": "YOUR_LIVEKIT_API_SECRET"
+  }
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `debug` | Enable verbose debug logging |
+| `mqtt_broker.host` | EMQX broker hostname or IP |
+| `mqtt_broker.port` | EMQX broker port (default 1883) |
+| `mqtt_broker.protocol` | `mqtt` (plain) or `mqtts` (TLS) |
+| `mqtt_broker.keepalive` | MQTT keepalive interval in seconds |
+| `mqtt_broker.clean` | Start with a clean MQTT session |
+| `mqtt_broker.reconnectPeriod` | Auto-reconnect interval in ms |
+| `mqtt_broker.connectTimeout` | Connection timeout in ms |
+| `livekit.url` | LiveKit Cloud WebSocket URL |
+| `livekit.api_key` | LiveKit API key |
+| `livekit.api_secret` | LiveKit API secret |
+
+Environment variables (`EMQX_HOST`, `LIVEKIT_URL`, etc.) override the corresponding `mqtt.json` values when set.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
