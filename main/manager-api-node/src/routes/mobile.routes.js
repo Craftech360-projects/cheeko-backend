@@ -75,6 +75,11 @@ router.put('/kids/:id', asyncHandler(async (req, res) => {
     res.json(kid);
 }));
 
+router.delete('/kids/:id', asyncHandler(async (req, res) => {
+    await mobileService.deleteKid(req.firebaseUser.uid, req.params.id);
+    success(res, null, 'Kid profile deleted');
+}));
+
 // ─── RPC Replacements ───────────────────────────────────────────────────────
 
 router.get('/check-email', asyncHandler(async (req, res) => {
