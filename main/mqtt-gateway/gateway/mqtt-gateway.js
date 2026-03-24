@@ -580,13 +580,13 @@ class MQTTGateway {
       logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
       // Subscribe to the internal topic where EMQX republishes with client info
       // All device messages (hello, data, etc.) come through this single topic via EMQX republish rule
-      this.mqttClient.subscribe(["internal/server-ingest"], (err) => {
+      this.mqttClient.subscribe(["internal/server-ingest", "devices/+/data"], (err) => {
         if (err)
           logger.error(
             "Failed to subscribe to MQTT topics:",
             err
           );
-        else logger.info("📡 Subscribed to internal/server-ingest");
+        else logger.info("📡 Subscribed to internal/server-ingest, devices/+/data");
       });
     });
 
@@ -610,6 +610,20 @@ class MQTTGateway {
   async handleMqttMessage(topic, message) {
     try {
       const payload = JSON.parse(message.toString());
+
+      // Handle devices/{macAddress}/data topic
+      if (topic.startsWith("devices/") && topic.endsWith("/data")) {
+        const topicParts = topic.split("/");
+        const macAddress = topicParts[1]; // e.g. D0:CF:13:04:15:58
+        logger.info(`📨 [MQTT-IN] ${macAddress}: data (direct topic)`);
+        const deviceInfo = this.deviceConnections.get(macAddress);
+        if (deviceInfo && deviceInfo.connection) {
+          deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
+        } else {
+          logger.warn(`⚠️ [MQTT-IN] Received data for unknown device: ${macAddress}`);
+        }
+        return;
+      }
 
       // All device messages come through internal/server-ingest via EMQX republish rule
       if (topic === "internal/server-ingest") {
