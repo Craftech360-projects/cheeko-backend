@@ -19,9 +19,8 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-from livekit.plugins import google
-
 from src.config.config_loader import ConfigLoader
+from src.shared.realtime_model_factory import create_realtime_model
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # NOTE: MusicService is imported lazily inside create_entrypoint() to avoid
@@ -615,10 +614,7 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
         init_start_time = asyncio.get_event_loop().time()
 
         # Load configuration
-        realtime_config = ConfigLoader.get_gemini_realtime_config()
-        gemini_model = realtime_config.get('model', 'gemini-live-2.5-flash-native-audio')
-        gemini_voice = realtime_config.get('voice', 'Zephyr')
-        gemini_temperature = realtime_config.get('temperature', 0.8)
+        realtime_config = ConfigLoader.get_realtime_config()
 
         # Parse room name
         room_name = ctx.room.name
@@ -732,21 +728,12 @@ def create_entrypoint(character_name: str, assistant_class: Type, game_tools: Li
         # Log prompt info
         logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
-        # Create Gemini Realtime model
-        realtime_model = google.realtime.RealtimeModel(
-            model=gemini_model,
-            voice=gemini_voice,
-            instructions=agent_prompt,
-            temperature=gemini_temperature,
-            modalities=["AUDIO"],
-        )
-        logger.info("Gemini Realtime model created")
+        realtime_model, provider_tools = create_realtime_model(realtime_config, instructions=agent_prompt)
 
-        # Create AgentSession with game tools if applicable
         session_kwargs = {"llm": realtime_model}
-        if game_tools:
-            session_kwargs["tools"] = game_tools
-            logger.info(f"Creating AgentSession with {len(game_tools)} game tools")
+        if game_tools or provider_tools:
+            session_kwargs["tools"] = [*(game_tools or []), *provider_tools]
+            logger.info(f"Creating AgentSession with {len(session_kwargs['tools'])} tools")
 
         session = AgentSession(**session_kwargs)
 

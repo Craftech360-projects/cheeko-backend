@@ -29,7 +29,8 @@ from livekit.agents import (
     # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
 from livekit import rtc, api
-from livekit.plugins import google, elevenlabs
+from livekit.plugins import elevenlabs
+from src.shared.realtime_model_factory import create_realtime_model
 import io
 from pydub import AudioSegment
 
@@ -211,6 +212,12 @@ async def entrypoint(ctx: JobContext):
     if 'google' in api_keys and not os.getenv('GOOGLE_API_KEY'):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
         logger.info("Loaded GOOGLE_API_KEY from config.yaml")
+    if 'openai' in api_keys and not os.getenv('OPENAI_API_KEY'):
+        os.environ['OPENAI_API_KEY'] = api_keys['openai']
+        logger.info("Loaded OPENAI_API_KEY from config.yaml")
+    if 'xai' in api_keys and not os.getenv('XAI_API_KEY'):
+        os.environ['XAI_API_KEY'] = api_keys['xai']
+        logger.info("Loaded XAI_API_KEY from config.yaml")
 
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
@@ -218,10 +225,7 @@ async def entrypoint(ctx: JobContext):
     init_start_time = asyncio.get_event_loop().time()
 
     # Load configuration
-    realtime_config = ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
-    gemini_voice = realtime_config.get('voice', 'Zephyr')
-    gemini_temperature = realtime_config.get('temperature', 0.8)
+    realtime_config = ConfigLoader.get_realtime_config()
 
     # Parse room name
     room_name = ctx.room.name
@@ -347,16 +351,7 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model
-    realtime_model = google.realtime.RealtimeModel(
-        model=gemini_model,
-        voice=gemini_voice,
-        instructions=agent_prompt,
-        temperature=gemini_temperature,
-        modalities=["AUDIO"],
-    )
-    google_search_tool = google.tools.GoogleSearch()
-    logger.info("Gemini Realtime model created")
+    realtime_model, provider_tools = create_realtime_model(realtime_config, instructions=agent_prompt)
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio
     # This is needed because realtime models don't have built-in TTS for session.say()
@@ -364,9 +359,10 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching tools, Google Search, and TTS for session.say()
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=[*MODE_SWITCH_TOOLS, google_search_tool])
-    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + Google Search + ElevenLabs TTS")
+    # Create AgentSession with mode switching tools, provider tools, and TTS for session.say()
+    all_tools = [*MODE_SWITCH_TOOLS, *provider_tools]
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=all_tools)
+    logger.info(f"AgentSession created with {len(all_tools)} tools ({realtime_config['provider']} provider) + ElevenLabs TTS")
 
     # Initialize animal audio service
     animal_audio_service = AnimalAudioService()

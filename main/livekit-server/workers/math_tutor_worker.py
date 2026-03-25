@@ -27,9 +27,8 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-from livekit.plugins import google
-
 from src.config.config_loader import ConfigLoader
+from src.shared.realtime_model_factory import create_realtime_model
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 from src.utils.loki_agent_logger import logger
@@ -80,7 +79,7 @@ def prewarm(proc: JobProcess):
     """Prewarm for Gemini Realtime - cache configs and db_helper"""
     # Cache config once at worker startup (avoids re-parsing YAML per job)
     yaml_config = ConfigLoader.load_yaml_config()
-    realtime_config = ConfigLoader.get_gemini_realtime_config()
+    realtime_config = ConfigLoader.get_realtime_config()
     proc.userdata["yaml_config"] = yaml_config
     proc.userdata["realtime_config"] = realtime_config
 
@@ -90,7 +89,7 @@ def prewarm(proc: JobProcess):
     if manager_api_url and manager_api_secret:
         proc.userdata["db_helper"] = DatabaseHelper(manager_api_url, manager_api_secret)
 
-    logger.info("[PREWARM] Ready for Gemini Realtime")
+    logger.info(f"[PREWARM] Ready for {realtime_config.get('provider', 'gemini')} realtime model")
     proc.userdata["ready"] = True
 
 
@@ -109,11 +108,7 @@ async def entrypoint(ctx: JobContext):
     init_start_time = asyncio.get_event_loop().time()
 
     # Use cached realtime config from prewarm
-    realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
-    gemini_voice = realtime_config.get('voice', 'Zephyr')
-    # Lower temperature for more consistent game behavior (was 0.8)
-    gemini_temperature = realtime_config.get('temperature', 0.6)
+    realtime_config = ctx.proc.userdata.get("realtime_config") or ConfigLoader.get_realtime_config()
 
     room_name = ctx.room.name
     device_mac, room_type = parse_room_name(room_name)
@@ -196,15 +191,9 @@ async def entrypoint(ctx: JobContext):
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
-    realtime_model = google.realtime.RealtimeModel(
-        model=gemini_model,
-        voice=gemini_voice,
-        instructions=agent_prompt,
-        temperature=gemini_temperature,
-        modalities=["AUDIO"],
-    )
+    realtime_model, provider_tools = create_realtime_model(realtime_config, instructions=agent_prompt)
 
-    session = AgentSession(llm=realtime_model, tools=GAME_TOOLS)
+    session = AgentSession(llm=realtime_model, tools=[*GAME_TOOLS, *provider_tools])
     logger.info(f"AgentSession created with {len(GAME_TOOLS)} game tools")
 
     # ============================================================================

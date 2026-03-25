@@ -173,28 +173,49 @@ class ConfigLoader:
         return config.get('manager_api', {})
 
     @staticmethod
-    def get_gemini_realtime_config():
-        """Get Gemini Realtime configuration from config.yaml and environment variables"""
-        # Load from config.yaml first
+    def get_realtime_config():
+        """Get realtime model configuration from config.yaml and environment variables.
+        Supports providers: gemini (default), openai, xai
+        """
         yaml_config = ConfigLoader.load_yaml_config()
         gemini_config = yaml_config.get('gemini_realtime', {})
 
-        # Environment variables can override yaml config
         return {
-            'provider': os.getenv('REALTIME_PROVIDER', 'gemini').lower(),  # gemini or openai
-            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')),
-            'voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
+            # Provider selection
+            'provider': os.getenv('REALTIME_PROVIDER', gemini_config.get('provider', 'gemini')).lower(),
+
+            # Google Gemini settings
+            'gemini_model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')),
+            'gemini_voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
+
+            # OpenAI settings
+            'openai_model': os.getenv('OPENAI_REALTIME_MODEL', gemini_config.get('openai_model', 'gpt-realtime')),
+            'openai_voice': os.getenv('OPENAI_REALTIME_VOICE', gemini_config.get('openai_voice', 'marin')),
+
+            # xAI Grok settings (uses OpenAI plugin with custom base_url)
+            'xai_model': os.getenv('XAI_REALTIME_MODEL', gemini_config.get('xai_model', 'grok-3-fast')),
+            'xai_voice': os.getenv('XAI_REALTIME_VOICE', gemini_config.get('xai_voice', 'sage')),
+            'xai_api_key': os.getenv('XAI_API_KEY', gemini_config.get('xai_api_key', '')),
+            'xai_base_url': os.getenv('XAI_BASE_URL', gemini_config.get('xai_base_url', 'https://api.x.ai/v1')),
+
+            # Shared settings
             'temperature': float(os.getenv('GEMINI_REALTIME_TEMPERATURE', gemini_config.get('temperature', 0.6))),
             'prompt': gemini_config.get('prompt', 'You are a helpful voice assistant.'),
-            # VAD configuration for Gemini Realtime
-            'vad_disabled': os.getenv('GEMINI_VAD_DISABLED', 'true').lower() == 'true',  # Default to disabled for PTT mode
-            'start_sensitivity': os.getenv('GEMINI_START_SENSITIVITY', 'high').lower(),  # high, medium, low
+
+            # VAD configuration
+            'vad_disabled': os.getenv('GEMINI_VAD_DISABLED', 'true').lower() == 'true',
+            'start_sensitivity': os.getenv('GEMINI_START_SENSITIVITY', 'high').lower(),
             'end_sensitivity': os.getenv('GEMINI_END_SENSITIVITY', 'high').lower(),
             'prefix_padding_ms': int(os.getenv('GEMINI_PREFIX_PADDING_MS', '10')),
             'silence_duration_ms': int(os.getenv('GEMINI_SILENCE_DURATION_MS', '200')),
-            # Google Search integration
+
+            # Google Search integration (Gemini only)
             'enable_google_search': os.getenv('GEMINI_ENABLE_GOOGLE_SEARCH', 'true').lower() == 'true',
-            # OpenAI Realtime settings (if using OpenAI provider)
-            'openai_model': os.getenv('OPENAI_REALTIME_MODEL', 'gpt-4o-realtime-preview'),
-            'openai_voice': os.getenv('OPENAI_REALTIME_VOICE', 'alloy'),
+
+            # Backward compat: keep old key names so any code reading config['model'] still works
+            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')),
+            'voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
         }
+
+    # Backward compatibility alias
+    get_gemini_realtime_config = get_realtime_config

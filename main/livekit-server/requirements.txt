@@ -4,6 +4,8 @@ livekit-plugins-elevenlabs
 livekit-plugins-deepgram
 livekit-plugins-inworld
 livekit-plugins-google
+livekit-plugins-openai
+livekit-plugins-xai
 google-genai
 python-dotenv
 pydub
