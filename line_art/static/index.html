@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Line Art Generator</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; background: #fafafa; color: #333; }
+        h1 { margin-bottom: 24px; font-size: 1.5rem; }
+        .input-group { display: flex; gap: 8px; margin-bottom: 16px; }
+        input[type="text"] { flex: 1; padding: 10px 14px; border: 1px solid #ccc; border-radius: 6px; font-size: 1rem; }
+        button { padding: 10px 20px; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; background: #333; color: #fff; }
+        button:hover { background: #555; }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        #recordBtn.recording { background: #c00; }
+        #log { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-bottom: 16px; min-height: 60px; font-size: 0.9rem; white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto; }
+        #result { text-align: center; }
+        #result img { max-width: 100%; border: 1px solid #ddd; border-radius: 6px; margin-top: 12px; }
+        .section { margin-bottom: 16px; }
+        .label { font-weight: 600; margin-bottom: 6px; font-size: 0.85rem; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Line Art Generator</h1>
+
+    <div class="section">
+        <div class="label">Text Input</div>
+        <div class="input-group">
+            <input type="text" id="textInput" placeholder="Describe a subject (e.g. tree, cat, house)" />
+            <button id="sendBtn" onclick="sendText()">Send</button>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="label">Voice Input</div>
+        <button id="recordBtn" onclick="toggleRecording()">Record</button>
+    </div>
+
+    <div class="section">
+        <div class="label">Log</div>
+        <div id="log"></div>
+    </div>
+
+    <div id="result"></div>
+
+    <script>
+        const wsUrl = `ws://${location.host}/ws`;
+        let ws = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+
+        function connect() {
+            ws = new WebSocket(wsUrl);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => log('Connected to server.');
+            ws.onclose = () => { log('Disconnected. Reconnecting in 2s...'); setTimeout(connect, 2000); };
+            ws.onerror = () => log('WebSocket error.');
+
+            ws.onmessage = (event) => {
+                let msg;
+                try { msg = JSON.parse(event.data); } catch { return; }
+                switch (msg.type) {
+                    case 'progress':
+                        log(`[${msg.stage}] ${msg.message}`);
+                        break;
+                    case 'transcription':
+                        log(`Transcribed: "${msg.text}"`);
+                        break;
+                    case 'result':
+                        log(`Image received! Raw mono: ${msg.width}x${msg.height}, ${atob(msg.raw_mono).length} bytes`);
+                        document.getElementById('result').innerHTML = `<img src="${msg.image}" alt="Line art" /><p style="margin-top:8px;font-size:0.85rem;color:#666;">${msg.prompt_used}</p><p style="font-size:0.85rem;color:#666;">${msg.width}x${msg.height} | 1-bit mono | ${atob(msg.raw_mono).length} bytes</p><button onclick="downloadRaw()" style="margin-top:12px;">Download .raw</button>`;
+                        window._rawData = msg.raw_mono;
+                        enableUI();
+                        break;
+                    case 'error':
+                        log(`ERROR [${msg.stage}]: ${msg.message}`);
+                        enableUI();
+                        break;
+                }
+            };
+        }
+
+        function log(text) {
+            const el = document.getElementById('log');
+            el.textContent += text + '\n';
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function disableUI() {
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('recordBtn').disabled = true;
+        }
+
+        function enableUI() {
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('recordBtn').disabled = false;
+        }
+
+        function downloadRaw() {
+            if (!window._rawData) return;
+            const bytes = atob(window._rawData);
+            const arr = new Uint8Array(bytes.length);
+            for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+            const blob = new Blob([arr], { type: 'application/octet-stream' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'line_art.raw';
+            a.click();
+        }
+
+        function sendText() {
+            const input = document.getElementById('textInput');
+            const text = input.value.trim();
+            if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+            ws.send(JSON.stringify({ type: 'text_input', text }));
+            log(`Sent: "${text}"`);
+            input.value = '';
+            disableUI();
+        }
+
+        document.getElementById('textInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendText();
+        });
+
+        async function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+
+            if (isRecording) {
+                mediaRecorder.stop();
+                btn.textContent = 'Record';
+                btn.classList.remove('recording');
+                isRecording = false;
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioChunks = [];
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+
+                mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+
+                mediaRecorder.onstop = async () => {
+                    stream.getTracks().forEach(t => t.stop());
+                    const blob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const buffer = await blob.arrayBuffer();
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.send(buffer);
+                        log('Audio sent for transcription...');
+                        disableUI();
+                    }
+                };
+
+                mediaRecorder.start();
+                btn.textContent = 'Stop';
+                btn.classList.add('recording');
+                isRecording = true;
+                log('Recording...');
+            } catch (err) {
+                log('Microphone access denied: ' + err.message);
+            }
+        }
+
+        connect();
+    </script>
+</body>
+</html>

@@ -26,6 +26,7 @@ const {
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
+const { LineArtClient } = require("../core/line-art-client");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
@@ -284,6 +285,9 @@ class MQTTGateway {
       this.roomService = null;
       this.agentDispatchClient = null;
     }
+
+    // Initialize Line Art client for ai_printer devices
+    this.lineArtClient = new LineArtClient(process.env.LINE_ART_URL);
   }
 
   generateNewConnectionId() {
