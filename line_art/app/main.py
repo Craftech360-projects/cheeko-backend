@@ -4,7 +4,17 @@ import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load .env before any module that reads env vars
+env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+loaded = load_dotenv(env_path)
+logger.info(f".env path: {env_path}, loaded: {loaded}")
+logger.info(f"GROQ_API_KEY set: {bool(os.environ.get('GROQ_API_KEY'))}")
+logger.info(f"GROQ_API_KEY value (first 8 chars): {os.environ.get('GROQ_API_KEY', 'NOT SET')[:8]}...")
+logger.info(f"HF_TOKEN set: {bool(os.environ.get('HF_TOKEN'))}")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, Form, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -12,9 +22,6 @@ from fastapi.staticfiles import StaticFiles
 from app.models import ProgressMessage, TranscriptionMessage, ResultMessage, ErrorMessage, TextInput
 from app.image_gen import generate_line_art
 from app.stt import transcribe
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 

@@ -15,7 +15,7 @@ class LineArtClient {
    * @param {string} [baseUrl] - Base URL of the line_art service
    */
   constructor(baseUrl) {
-    this.baseUrl = baseUrl || process.env.LINE_ART_URL || 'http://localhost:8000';
+    this.baseUrl = baseUrl || process.env.LINE_ART_URL || 'http://localhost:8003';
     logger.info(`[LINE-ART] Client initialized: ${this.baseUrl}`);
   }
 

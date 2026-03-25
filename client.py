@@ -19,9 +19,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "157.245.108.139"
+SERVER_IP = "64.227.170.31"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "157.245.108.139"
+MQTT_BROKER_HOST = "64.227.170.31"
 
 
 MQTT_BROKER_PORT = 1883
@@ -95,7 +95,8 @@ def generate_unique_mac() -> str:
 
 
 class TestClient:
-    def __init__(self):
+    def __init__(self, board_type="cheeko"):
+        self.board_type = board_type  # "cheeko" or "ai_printer"
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
         self.device_mac_formatted = "00:16:3e:ac:b5:38"
@@ -197,6 +198,10 @@ class TestClient:
                 logger.info(
                     "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
                 stop_recording_event.set()  # This will cause the recording thread loop to exit
+
+            # AI Printer responses
+            elif payload.get("type") in ("ready", "draw_result", "error", "line_art", "line_art_result", "line_art_error", "line_art_progress"):
+                mqtt_message_queue.put(payload)
 
             else:
                 mqtt_message_queue.put(payload)
@@ -510,12 +515,13 @@ class TestClient:
 
     def send_hello_and_get_session(self) -> bool:
         """Sends 'hello' message and waits for session details."""
-        logger.info("[STEP] STEP 3: Sending 'hello' and pinging UDP...")
+        logger.info(f"[STEP] STEP 3: Sending 'hello' (board_type={self.board_type}) and pinging UDP...")
         # Use the client_id from our generated MQTT credentials
         hello_message = {
             "type": "hello",
             "version": 3,
             "transport": "mqtt",
+            "board_type": self.board_type,
             "audio_params": {
                 "sample_rate": 16000,
                 "channels": 1,
@@ -526,9 +532,41 @@ class TestClient:
         }
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
+            global udp_session_details
+
+            if self.board_type == "ai_printer":
+                # For ai_printer, gateway sends: hello(udp) -> mode_update -> ready
+                # We need the hello for session_id, then wait for ready to confirm printer mode
+                deadline = time.time() + 30
+                session_id = None
+                while time.time() < deadline:
+                    remaining = max(0.1, deadline - time.time())
+                    try:
+                        response = mqtt_message_queue.get(timeout=remaining)
+                    except Empty:
+                        break
+                    msg_type = response.get("type")
+                    logger.info(f"[PRINTER] Got message: {msg_type}")
+
+                    if msg_type == "hello" and "udp" in response:
+                        # Store session_id from the initial hello
+                        session_id = response.get("session_id")
+                        udp_session_details = response
+
+                    elif msg_type == "ready":
+                        # Use session_id from ready if available, else from hello
+                        if not session_id:
+                            session_id = response.get("session_id")
+                        udp_session_details["session_id"] = response.get("session_id", session_id)
+                        logger.info(f"[OK] AI Printer ready. Session ID: {udp_session_details['session_id']}")
+                        return True
+
+                logger.error("[ERROR] Timed out waiting for 'ready' message from gateway.")
+                return False
+
+            # Cheeko mode: expect hello with UDP
             response = mqtt_message_queue.get(timeout=30)
             if response.get("type") == "hello" and "udp" in response:
-                global udp_session_details
                 udp_session_details = response
                 self.udp_socket = socket.socket(
                     socket.AF_INET, socket.SOCK_DGRAM)
@@ -868,14 +906,211 @@ class TestClient:
             logger.info("[DISC] MQTT Disconnected.")
         logger.info("[OK] Test finished.")
 
+    def _save_and_preview(self, raw_mono_b64, width, height):
+        """Decode raw_mono bitmap, save as PNG, and open preview."""
+        import base64
+        if not raw_mono_b64 or not height:
+            logger.warning("[PRINTER] No image data to preview.")
+            return
+
+        try:
+            from PIL import Image
+        except ImportError:
+            logger.warning("[PRINTER] Pillow not installed — saving raw base64 to line_art_output.txt")
+            with open("line_art_output.txt", "w") as f:
+                f.write(raw_mono_b64)
+            return
+
+        raw_bytes = base64.b64decode(raw_mono_b64)
+        # raw_mono: 1-bit, MSB first, 1=black 0=white, 48 bytes/row (384px)
+        img = Image.new("1", (width, height), 1)  # white background
+        pixels = img.load()
+        for y in range(height):
+            for x_byte in range(width // 8):
+                byte = raw_bytes[y * (width // 8) + x_byte]
+                for bit in range(8):
+                    x = x_byte * 8 + bit
+                    if byte & (0x80 >> bit):
+                        pixels[x, y] = 0  # black
+
+        filename = f"line_art_{int(time.time())}.png"
+        img.save(filename)
+        logger.info(f"[PRINTER] Saved to {filename}")
+
+        # Try to open the image
+        try:
+            import os
+            import platform
+            if platform.system() == "Windows":
+                os.startfile(filename)
+            elif platform.system() == "Darwin":
+                os.system(f"open {filename}")
+            else:
+                os.system(f"xdg-open {filename} 2>/dev/null &")
+        except Exception:
+            logger.info(f"[PRINTER] Open the file manually: {filename}")
+
+    def _printer_record_audio(self):
+        """Record mic audio and send via UDP while spacebar is held."""
+        if "udp" not in udp_session_details:
+            logger.error("[PRINTER] No UDP session — cannot send audio.")
+            return False
+
+        p = pyaudio.PyAudio()
+        RATE = 16000
+        CHANNELS = 1
+        FRAME_DURATION_MS = 20
+        SAMPLES_PER_FRAME = int(RATE * FRAME_DURATION_MS / 1000)
+
+        try:
+            encoder = opuslib.Encoder(RATE, CHANNELS, opuslib.APPLICATION_VOIP)
+        except Exception as e:
+            logger.error(f"[PRINTER] Failed to create Opus encoder: {e}")
+            return False
+
+        stream = p.open(format=pyaudio.paInt16, channels=CHANNELS, rate=RATE,
+                        input=True, frames_per_buffer=SAMPLES_PER_FRAME)
+        server_udp_addr = (
+            udp_session_details['udp']['server'], udp_session_details['udp']['port'])
+
+        packets_sent = 0
+        logger.info("[PRINTER] Recording... Release spacebar to stop.")
+
+        try:
+            while keyboard.is_pressed('space') and self.session_active:
+                pcm_data = stream.read(SAMPLES_PER_FRAME, exception_on_overflow=False)
+                opus_data = encoder.encode(pcm_data, SAMPLES_PER_FRAME)
+                encrypted_packet = self.encrypt_packet(opus_data)
+                if encrypted_packet:
+                    self.udp_socket.sendto(encrypted_packet, server_udp_addr)
+                    packets_sent += 1
+        except Exception as e:
+            logger.error(f"[PRINTER] Recording error: {e}")
+
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+        logger.info(f"[PRINTER] Sent {packets_sent} audio packets.")
+
+        # Signal the gateway that audio is done — triggers immediate processing
+        audio_end_payload = {
+            "type": "audio_end",
+            "session_id": udp_session_details.get("session_id")
+        }
+        self.mqtt_client.publish("device-server", json.dumps(audio_end_payload))
+        return packets_sent > 0
+
+    def _printer_wait_for_result(self):
+        """Wait for line art result messages from the gateway."""
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            try:
+                response = mqtt_message_queue.get(timeout=remaining)
+            except Empty:
+                logger.warning("[PRINTER] Timed out waiting for result.")
+                return
+
+            msg_type = response.get("type")
+            if msg_type in ("line_art_result", "line_art"):
+                width = response.get('width', 384)
+                height = response.get('height', 0)
+                logger.info(f"[PRINTER] Line art generated! Prompt: {response.get('prompt_used', 'N/A')}")
+                logger.info(f"[PRINTER] Image size: {width}x{height}")
+                self._save_and_preview(response.get('raw_mono', ''), width, height)
+                return
+            elif msg_type == "line_art_error":
+                logger.error(f"[PRINTER] Error: {response.get('message', 'Unknown error')}")
+                return
+            elif msg_type == "line_art_progress":
+                logger.info(f"[PRINTER] {response.get('message', '')}")
+            else:
+                logger.info(f"[PRINTER] Received: {msg_type}")
+
+    def _printer_text_input_thread(self):
+        """Background thread to read text input without blocking spacebar detection."""
+        while self.session_active:
+            try:
+                subject = input()
+                if subject.strip():
+                    self._text_input_queue.put(subject.strip())
+            except EOFError:
+                break
+
+    def run_printer_mode(self):
+        """Runs the AI Printer loop — hold spacebar to record audio, or type text."""
+        # Setup UDP socket for sending audio
+        if "udp" in udp_session_details:
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024)
+            self.udp_socket.settimeout(1.0)
+
+            # Send UDP ping to establish connection
+            ping_payload = f"ping:{udp_session_details['session_id']}".encode()
+            encrypted_ping = self.encrypt_packet(ping_payload)
+            server_udp_addr = (udp_session_details['udp']['server'], udp_session_details['udp']['port'])
+            if encrypted_ping:
+                self.udp_socket.sendto(encrypted_ping, server_udp_addr)
+                logger.info(f"[PRINTER] UDP ping sent to {server_udp_addr}")
+
+        logger.info("=" * 50)
+        logger.info("[PRINTER] AI Printer mode active.")
+        logger.info("[PRINTER] Hold SPACEBAR to record voice")
+        logger.info("[PRINTER] Or type text and press Enter")
+        logger.info("[PRINTER] Type 'quit' to exit.")
+        logger.info("=" * 50)
+
+        # Start background thread for text input (avoids Windows select issue)
+        self._text_input_queue = Queue()
+        text_thread = threading.Thread(target=self._printer_text_input_thread, daemon=True)
+        text_thread.start()
+
+        try:
+            while self.session_active:
+                print("\n[PRINTER] Hold SPACEBAR to speak, or type subject: ", end="", flush=True)
+
+                # Poll for spacebar or text input
+                while self.session_active:
+                    if keyboard.is_pressed('space'):
+                        print()  # newline after prompt
+                        if self._printer_record_audio():
+                            self._printer_wait_for_result()
+                        break
+
+                    # Check for text input from background thread
+                    try:
+                        subject = self._text_input_queue.get_nowait()
+                    except Empty:
+                        time.sleep(0.05)
+                        continue
+
+                    if subject.lower() in ("quit", "exit", "q"):
+                        self.session_active = False
+                        break
+
+                    draw_payload = {
+                        "type": "draw",
+                        "session_id": udp_session_details.get("session_id"),
+                        "text": subject
+                    }
+                    self.mqtt_client.publish("device-server", json.dumps(draw_payload))
+                    logger.info(f"[PRINTER] Sent text draw request: '{subject}'")
+                    self._printer_wait_for_result()
+                    break
+
+        except KeyboardInterrupt:
+            logger.info("[PRINTER] Interrupted.")
+            self.session_active = False
+
     def run_test(self):
         """Runs the full test sequence."""
-        if ENABLE_SEQUENCE_LOGGING:
+        logger.info(f"[MODE] Board type: {self.board_type}")
+
+        if self.board_type == "cheeko" and ENABLE_SEQUENCE_LOGGING:
             logger.info("[SEQ] Sequence tracking is ENABLED")
             logger.info(
                 f"[STATS] Will log sequence info every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
-        else:
-            logger.info("[SEQ] Sequence tracking is DISABLED")
 
         if not self.get_ota_config():
             return
@@ -885,17 +1120,31 @@ class TestClient:
         if not self.send_hello_and_get_session():
             self.cleanup()
             return
-        self.trigger_conversation()
+
+        if self.board_type == "ai_printer":
+            self.run_printer_mode()
+        else:
+            self.trigger_conversation()
         self.cleanup()
 
 
 if __name__ == "__main__":
+    print("=" * 50)
+    print("  Select Device Mode:")
+    print("  1. Cheeko (Voice AI companion)")
+    print("  2. AI Printer (Line art generator)")
+    print("=" * 50)
+
+    choice = input("Enter choice [1/2] (default: 1): ").strip()
+    board_type = "ai_printer" if choice == "2" else "cheeko"
+    print(f"[MODE] Running as: {board_type}")
+
     # You can control sequence logging from here
     print(
         f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
     print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
 
-    client = TestClient()
+    client = TestClient(board_type=board_type)
     try:
         client.run_test()
     except KeyboardInterrupt:
