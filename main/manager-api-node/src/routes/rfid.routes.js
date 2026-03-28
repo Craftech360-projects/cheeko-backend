@@ -18,11 +18,30 @@
 
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
 const rfidService = require('../services/rfid.service');
+const bulkImportService = require('../services/bulkImport.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
+
+// Multer config for xlsx uploads (memory storage, 10MB max)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'application/vnd.ms-excel',
+    ];
+    if (allowed.includes(file.mimetype) || file.originalname.endsWith('.xlsx') || file.originalname.endsWith('.xls')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only .xlsx and .xls files are allowed'));
+    }
+  },
+});
 
 // =============================================
 // Card Mapping Routes (PRD-specified)
@@ -93,7 +112,7 @@ const logger = require('../utils/logger');
 router.get('/card/page',
   requireAdmin,
   asyncHandler(async (req, res) => {
-    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, cardType, active } = req.query;
+    const { page, limit, rfidUid, packCode, questionId, questionPackId, contentPackId, categoryId, cardType, active } = req.query;
     const result = await rfidService.getCardMappingPage({
       page: parseInt(page) || 1,
       limit: parseInt(limit) || 10,
@@ -102,6 +121,7 @@ router.get('/card/page',
       questionId: questionId ? parseInt(questionId) : undefined,
       questionPackId: questionPackId ? parseInt(questionPackId) : undefined,
       contentPackId: contentPackId ? parseInt(contentPackId) : undefined,
+      categoryId: categoryId ? parseInt(categoryId) : undefined,
       cardType,
       active: active === 'true' ? true : active === 'false' ? false : undefined
     });
@@ -3793,6 +3813,182 @@ router.get('/question-pack/:id',
     // I'll skip this specific GET /:id for now to avoid errors if service method is missing.
     // But I'll leave the block commented out just in case.
     return notFound(res, 'Not implemented yet');
+  })
+);
+
+// =============================================
+// Category Routes
+// =============================================
+
+router.get('/category/page',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, code, name, active } = req.query;
+    const result = await rfidService.getCategoryPage({
+      page: parseInt(page) || 1,
+      limit: parseInt(limit) || 10,
+      code, name,
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+router.get('/category/list',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { active } = req.query;
+    const result = await rfidService.getCategoryList({
+      active: active === 'true' ? true : active === 'false' ? false : undefined
+    });
+    success(res, result);
+  })
+);
+
+router.get('/category/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const cat = await rfidService.getCategoryById(parseInt(req.params.id));
+    success(res, cat);
+  })
+);
+
+router.get('/category/code/:code',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const cat = await rfidService.getCategoryByCode(req.params.code);
+    success(res, cat);
+  })
+);
+
+router.post('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await rfidService.createCategory(req.body, req.userId);
+    success(res, null);
+  })
+);
+
+router.put('/category',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await rfidService.updateCategory(req.body, req.userId);
+    success(res, null);
+  })
+);
+
+router.post('/category/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    let ids = req.body;
+    if (!Array.isArray(ids)) ids = req.body.ids || [];
+    await rfidService.deleteCategories(ids.map(id => parseInt(id)));
+    success(res, null);
+  })
+);
+
+// =============================================
+// Bulk Import Routes
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/bulk-import/preview:
+ *   post:
+ *     tags: [RFID Bulk Import]
+ *     summary: Upload xlsx and preview import
+ *     description: Parses the uploaded Excel file and returns a preview of what will be imported
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Import preview with status per row
+ */
+router.post('/bulk-import/preview',
+  requireAdmin,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return badRequest(res, 'No file uploaded. Please upload an .xlsx file.');
+    }
+    logger.info(`[BULK-IMPORT] Preview requested: ${req.file.originalname} (${req.file.size} bytes)`);
+    const preview = await bulkImportService.previewImport(req.file.buffer);
+    success(res, preview);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/bulk-import/execute:
+ *   post:
+ *     tags: [RFID Bulk Import]
+ *     summary: Upload xlsx and execute import
+ *     description: Parses the uploaded Excel file and creates/updates all packs and card mappings
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Import results with created/updated/failed counts
+ */
+router.post('/bulk-import/execute',
+  requireAdmin,
+  upload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return badRequest(res, 'No file uploaded. Please upload an .xlsx file.');
+    }
+    logger.info(`[BULK-IMPORT] Execute requested: ${req.file.originalname} (${req.file.size} bytes)`);
+    const userId = req.user?.id || null;
+    const result = await bulkImportService.executeBulkImport(req.file.buffer, userId);
+    success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/bulk-import/export:
+ *   get:
+ *     tags: [RFID Bulk Import]
+ *     summary: Export current card mappings as xlsx
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: XLSX file download
+ *         content:
+ *           application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+ *             schema:
+ *               type: string
+ *               format: binary
+ */
+router.get('/bulk-import/export',
+  requireAdmin,
+  asyncHandler(async (_req, res) => {
+    const rows = await bulkImportService.exportMappings();
+    const xlsxBuffer = bulkImportService.generateExcel(rows);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename=rfid_card_mappings.xlsx');
+    res.send(Buffer.from(xlsxBuffer));
   })
 );
 

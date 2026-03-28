@@ -144,6 +144,17 @@ const routes = [
     }
   },
   {
+    path: '/bulk-import',
+    name: 'BulkImport',
+    component: function () {
+      return import('../views/BulkImport.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'RFID Bulk Import'
+    }
+  },
+  {
     path: '/kid-profiles',
     name: 'KidProfiles',
     component: function () {
@@ -219,7 +230,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
 
 // Route guard
 router.beforeEach((to, from, next) => {

@@ -37,6 +37,30 @@ AGENT_CONFIGS = {
         "game_state_class": "WordLadderGameState",
         "port": 8086,
     },
+    "Cheeko Magic": {
+        "agent_name": "cheeko-magic-agent",
+        "prompt_file": None,  # Uses database prompt
+        "tools": [],
+        "features": ["mode_switching"],
+        "game_state_class": None,
+        "port": 8087,
+    },
+    "Cheeko Astronaut": {
+        "agent_name": "cheeko-astronaut-agent",
+        "prompt_file": None,  # Uses database prompt
+        "tools": [],
+        "features": ["mode_switching"],
+        "game_state_class": None,
+        "port": 8088,
+    },
+    "Cheeko German": {
+        "agent_name": "cheeko-german-agent",
+        "prompt_file": None,  # Uses database prompt
+        "tools": [],
+        "features": ["mode_switching"],
+        "game_state_class": None,
+        "port": 8089,
+    },
 }
 
 # Reverse mapping: agent_name -> character_name

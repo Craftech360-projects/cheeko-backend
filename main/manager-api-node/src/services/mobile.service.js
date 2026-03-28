@@ -103,16 +103,20 @@ async function getKids(firebaseUid) {
     });
     if (!user) return [];
 
-    // Map to the format the mobile app expects (supbase kids table format)
+    // Map to the format the mobile app expects
     return user.kid_profile.map(k => ({
         id: k.id.toString(),
         parent_id: user.firebase_uid,
         name: k.name,
         nickname: k.nickname,
         avatar_url: k.avatar_url,
+        date_of_birth: k.birth_date,
         birth_date: k.birth_date,
         gender: k.gender,
+        interests: k.interests || [],
         language: k.language,
+        created_at: k.created_at,
+        updated_at: k.updated_at,
     }));
 }
 
@@ -127,8 +131,9 @@ async function createKid(firebaseUid, data) {
             user_id: user.id,
             name: data.name,
             nickname: data.nickname,
-            birth_date: data.birth_date ? new Date(data.birth_date) : null,
+            birth_date: (data.date_of_birth || data.birth_date) ? new Date(data.date_of_birth || data.birth_date) : null,
             gender: data.gender,
+            interests: data.interests || [],
             language: data.language || 'en',
         },
     });
@@ -138,8 +143,10 @@ async function createKid(firebaseUid, data) {
         parent_id: user.firebase_uid,
         name: kid.name,
         nickname: kid.nickname,
+        date_of_birth: kid.birth_date,
         birth_date: kid.birth_date,
         gender: kid.gender,
+        interests: kid.interests || [],
     };
 }
 
@@ -147,8 +154,9 @@ async function updateKid(kidId, data) {
     const updates = {};
     if (data.name) updates.name = data.name;
     if (data.nickname) updates.nickname = data.nickname;
-    if (data.birth_date) updates.birth_date = new Date(data.birth_date);
+    if (data.date_of_birth || data.birth_date) updates.birth_date = new Date(data.date_of_birth || data.birth_date);
     if (data.gender) updates.gender = data.gender;
+    if (data.interests) updates.interests = data.interests;
     if (data.language) updates.language = data.language;
     if (data.avatar_url) updates.avatar_url = data.avatar_url;
 
@@ -157,7 +165,30 @@ async function updateKid(kidId, data) {
         data: updates,
     });
 
-    return { id: kid.id.toString(), name: kid.name };
+    return {
+        id: kid.id.toString(),
+        name: kid.name,
+        date_of_birth: kid.birth_date,
+        birth_date: kid.birth_date,
+        gender: kid.gender,
+        interests: kid.interests || [],
+    };
+}
+
+async function deleteKid(firebaseUid, kidId) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+    });
+    if (!user) throw new Error('User not found');
+
+    // Verify kid belongs to this user
+    const kid = await prisma.kid_profile.findFirst({
+        where: { id: BigInt(kidId), user_id: user.id },
+    });
+    if (!kid) throw new Error('Kid profile not found');
+
+    await prisma.kid_profile.delete({ where: { id: BigInt(kidId) } });
+    return { success: true };
 }
 
 // ─── RPC Replacements ───────────────────────────────────────────────────────
@@ -195,6 +226,7 @@ module.exports = {
     getKids,
     createKid,
     updateKid,
+    deleteKid,
     checkEmailExists,
     deleteUserAccount,
 };

@@ -193,6 +193,7 @@ main/manager-api/src/main/resources/application-prod.yml
 
 # LiveKit server configuration (contains API keys)
 main/livekit-server/config.yaml
+livekit.yaml
 nul
 main/manager-api/src/main/resources/application-dev.yml
 backups/railway_backup_20260103_193209.sql
@@ -203,3 +204,6 @@ venv
 node_modules
 CLAUDE.md
 clerk-nextjs-guide
+
+# Excel / binary data files
+*.xlsx

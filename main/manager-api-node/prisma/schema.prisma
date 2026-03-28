@@ -660,6 +660,8 @@ model content_item {
   image_url         String?            @db.VarChar(500)
   lyrics_text       String?
   content_text      String?
+  story_number      Int?
+  story_title       String?            @db.VarChar(255)
   active            Boolean?           @default(true)
   creator           BigInt?
   create_date       DateTime?          @default(now()) @db.Timestamptz(6)
@@ -689,6 +691,8 @@ model rfid_series {
   question_id      BigInt?
   content_ref_id   BigInt?
   question_pack_id BigInt?
+  card_type        String?             @default("content") @db.VarChar(20)
+  action_data      Json?               @default("{}")
   priority         Int?                @default(0)
   notes            String?             @db.VarChar(500)
   status           Int?                @default(1)
@@ -704,6 +708,23 @@ model rfid_series {
   @@index([content_pack_id], map: "idx_rfid_series_pack")
   @@index([content_ref_id], map: "idx_rfid_series_content_ref")
   @@index([question_pack_id], map: "idx_rfid_series_question_pack")
+}
+
+model rfid_category {
+  id            BigInt    @id @default(autoincrement())
+  code          String    @db.VarChar(100)
+  name          String    @db.VarChar(255)
+  description   String?
+  icon_url      String?   @db.VarChar(500)
+  display_order Int?      @default(0)
+  active        Boolean?  @default(true)
+  creator       BigInt?
+  create_date   DateTime? @default(now()) @db.Timestamptz(6)
+  updater       BigInt?
+  update_date   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([code], map: "idx_rfid_category_code")
+  @@index([active], map: "idx_rfid_category_active")
 }
 
 model rfid_tags {

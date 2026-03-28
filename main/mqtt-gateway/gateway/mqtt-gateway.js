@@ -33,6 +33,9 @@ const CHARACTER_AGENT_MAP = {
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
+  "Cheeko Magic": "cheeko-magic-agent",
+  "Cheeko Astronaut": "cheeko-astronaut-agent",
+  "Cheeko German": "cheeko-german-agent",
 };
 
 // Global config manager and debug reference (injected by app.js)
@@ -115,9 +118,11 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     const contentText = (data.contentText || "").trim();
     const promptText = (data.promptText || "").trim();
     const hasPack = Array.isArray(data.items) && data.items.length > 0;
+    const hasStories = Array.isArray(data.stories) && data.stories.length > 0;
+    const hasContent = hasPack || hasStories;
 
     // Validation: only enforce text requirements for non-pack types
-    if (!hasPack) {
+    if (!hasContent) {
       if (contentType === "read_only" && !contentText) {
         logger.warn(
           `⚠️ [RFID-LOOKUP] read_only mode but no contentText for UID ${trimmedUid}, sequence=${sequence}`
@@ -132,9 +137,10 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       }
     }
 
+    const itemCount = hasPack ? data.items.length : (hasStories ? data.stories.length + ' stories' : 0);
     const displayText = contentType === "read_only" ? contentText : (promptText || title);
     logger.info(
-      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", items=${hasPack ? data.items.length : 0}, text="${displayText.slice(
+      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", items=${itemCount}, text="${displayText.slice(
         0,
         80
       )}${displayText.length > 80 ? "..." : ""}"`
@@ -150,6 +156,7 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       language: data.language,
       version: data.version,
       items: data.items || null,
+      stories: data.stories || null,
       audioUrl: data.audioUrl || null,
       allowCaching: data.allowCaching,
     };
@@ -580,13 +587,13 @@ class MQTTGateway {
       logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
       // Subscribe to the internal topic where EMQX republishes with client info
       // All device messages (hello, data, etc.) come through this single topic via EMQX republish rule
-      this.mqttClient.subscribe(["internal/server-ingest"], (err) => {
+      this.mqttClient.subscribe(["internal/server-ingest", "devices/+/data"], (err) => {
         if (err)
           logger.error(
             "Failed to subscribe to MQTT topics:",
             err
           );
-        else logger.info("📡 Subscribed to internal/server-ingest");
+        else logger.info("📡 Subscribed to internal/server-ingest, devices/+/data");
       });
     });
 
@@ -610,6 +617,20 @@ class MQTTGateway {
   async handleMqttMessage(topic, message) {
     try {
       const payload = JSON.parse(message.toString());
+
+      // Handle devices/{macAddress}/data topic
+      if (topic.startsWith("devices/") && topic.endsWith("/data")) {
+        const topicParts = topic.split("/");
+        const macAddress = topicParts[1]; // e.g. D0:CF:13:04:15:58
+        logger.info(`📨 [MQTT-IN] ${macAddress}: data (direct topic)`);
+        const deviceInfo = this.deviceConnections.get(macAddress);
+        if (deviceInfo && deviceInfo.connection) {
+          deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
+        } else {
+          logger.warn(`⚠️ [MQTT-IN] Received data for unknown device: ${macAddress}`);
+        }
+        return;
+      }
 
       // All device messages come through internal/server-ingest via EMQX republish rule
       if (topic === "internal/server-ingest") {
@@ -874,7 +895,9 @@ class MQTTGateway {
 
         // Determine text for agent path (content packs use title as placeholder)
         let textToSend;
-        if (rfidContent.items && rfidContent.items.length > 0) {
+        const hasItemsArr = rfidContent.items && rfidContent.items.length > 0;
+        const hasStoriesArr = rfidContent.stories && rfidContent.stories.length > 0;
+        if (hasItemsArr || hasStoriesArr) {
           textToSend = rfidContent.title || "pack content";
         } else {
           textToSend = rfidContent.promptText || rfidContent.contentText;
@@ -889,20 +912,54 @@ class MQTTGateway {
         // Classify card type by DATA SHAPE, not contentType string.
         // This handles any content_type value (tts, story_pack, rhyme, habit, etc.)
         const hasItems = rfidContent && Array.isArray(rfidContent.items) && rfidContent.items.length > 0;
+        const hasStories = rfidContent && Array.isArray(rfidContent.stories) && rfidContent.stories.length > 0;
 
-        // Branch A: Content Pack — items with audioUrl => send manifest to device
-        const isContentPack = hasItems && rfidContent.items.some(item => item.audioUrl);
+        // Branch A: Content Pack — items with audioUrl OR grouped stories => send manifest to device
+        const isContentPack = hasStories || (hasItems && rfidContent.items.some(item => item.audioUrl));
         // Branch B: Q&A Pack — items with promptText => send prompt to agent
         const isQaPack = hasItems && !isContentPack && rfidContent.items.some(item => item.promptText);
 
         // ====== BRANCH A: CONTENT PACK — send card_content directly via MQTT (no LiveKit needed) ======
         if (isContentPack) {
+          // Grouped content — stories[] present from API
+          if (hasStories) {
+            logger.info(
+              `📦 [RFID-ROUTING] Grouped Content Pack detected (${rfidContent.contentType}, ${rfidContent.stories.length} stories). ` +
+              `Sending card_content with stories[] to device, bypassing Agent.`
+            );
+
+            const stories = rfidContent.stories.map(story => ({
+              index: story.index,
+              title: story.title,
+              audio: (story.audio || []).map(a => ({ index: a.index, url: encodeUrlPath(a.url) })),
+              images: (story.images || []).map(i => ({ index: i.index, url: i.url })),
+            }));
+
+            const manifest = {
+              type: "card_content",
+              rfid_uid: rfidUid,
+              skill_id: rfidContent.packCode,
+              skill_name: rfidContent.title || rfidContent.packName,
+              version: parseInt(rfidContent.version) || 1,
+              content_type: rfidContent.contentType || null,
+              stories: stories,
+            };
+
+            logger.info(
+              `📦 [RFID-ROUTING] Sending grouped card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
+              `stories=${stories.length} to device ${deviceId}`
+            );
+
+            this.mqttPublish(`devices/p2p/${clientId}`, manifest);
+            return;
+          }
+
+          // Flat content — existing behavior
           logger.info(
-            `📦 [RFID-ROUTING] Content Pack detected (${rfidContent.contentType}, ${rfidContent.items.length} items). ` +
+            `📦 [RFID-ROUTING] Flat Content Pack detected (${rfidContent.contentType}, ${rfidContent.items.length} items). ` +
             `Sending card_content directly to device, bypassing Agent.`
           );
 
-          // Build Phase 9 format arrays
           const audio = [];
           const images = [];
           for (const item of rfidContent.items) {
@@ -921,6 +978,7 @@ class MQTTGateway {
             skill_id: rfidContent.packCode,
             skill_name: rfidContent.title || rfidContent.packName,
             version: parseInt(rfidContent.version) || 1,
+            content_type: rfidContent.contentType || null,
             audio: audio,
             images: images,
           };
@@ -941,19 +999,38 @@ class MQTTGateway {
           const hasConnection = deviceInfo && deviceInfo.connection && deviceInfo.connection.bridge;
 
           if (hasConnection && deviceInfo.connection.roomType === "conversation") {
-            // If there IS an active connection, route to agent for AI response
+            // If there IS an active connection, check if this card maps to a different agent
+            const cardAgentName = rfidContent.agentName || null;
+            const currentCharacter = deviceInfo.connection.currentCharacter || "Cheeko";
+            const targetCharacter = cardAgentName
+              ? (Object.entries(CHARACTER_AGENT_MAP).find(([, a]) => a === cardAgentName)?.[0] || null)
+              : null;
+
+            if (targetCharacter && targetCharacter !== currentCharacter) {
+              // Card maps to a different agent — trigger character switch
+              logger.info(
+                `🎴 [RFID-ROUTING] AI card wants agent "${targetCharacter}" but current is "${currentCharacter}" — switching`
+              );
+              await this.handleDeviceCharacterChange(deviceId, { characterName: targetCharacter });
+              return;
+            }
+
+            // Same agent or no agent mapped — route prompt to current agent
             logger.info(
               `🤖 [RFID-ROUTING] AI Prompt card with active connection, routing to agent for device ${deviceId}`
             );
           } else {
             // No active connection — send card_ai to set device into conversation mode
+            // Include agent_name so firmware can pass it back during session creation
+            const cardAgentName = rfidContent.agentName || null;
             logger.info(
-              `🤖 [RFID-ROUTING] AI Prompt card (no active connection). Sending card_ai to device ${deviceId}`
+              `🤖 [RFID-ROUTING] AI Prompt card (no active connection). Sending card_ai to device ${deviceId}, agent=${cardAgentName || 'default'}`
             );
 
             this.mqttPublish(`devices/p2p/${clientId}`, {
               type: "card_ai",
               rfid_uid: rfidUid,
+              ...(cardAgentName ? { agent_name: cardAgentName } : {}),
             });
             return;
           }
@@ -1425,34 +1502,69 @@ class MQTTGateway {
         return;
       }
 
-      // Build files object (unified format for all content types)
-      const files = {};
-      for (const item of manifest.items || []) {
-        const itemNum = item.itemNumber;
+      // Check if grouped content (stories[] present)
+      if (Array.isArray(manifest.stories) && manifest.stories.length > 0) {
+        // Grouped download — build per-story file maps
+        const stories = manifest.stories.map(story => {
+          const storyFiles = {};
+          for (const item of story.items || []) {
+            const itemNum = item.itemNumber;
+            if (item.audio && item.audio.url) {
+              storyFiles[`audio_${itemNum}`] = encodeUrlPath(item.audio.url);
+            }
+            if (item.images && item.images.length > 0 && item.images[0].url) {
+              storyFiles[`image_${itemNum}`] = item.images[0].url;
+            }
+          }
+          return {
+            index: story.index,
+            title: story.title,
+            files: storyFiles
+          };
+        });
 
-        // Add audio URL (URL-encoded for proper HTTP requests)
-        if (item.audio && item.audio.url) {
-          files[`audio_${itemNum}`] = encodeUrlPath(item.audio.url);
+        const totalFiles = stories.reduce((sum, s) => sum + Object.keys(s.files).length, 0);
+        logger.info(`📦 [CONTENT-DOWNLOAD] Sending grouped ${contentType} download links for ${manifest.packCode} v${manifest.version} (${stories.length} stories, ${totalFiles} files)`);
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: "download_response",
+          status: "download_required",
+          rfid_uid: rfidUid,
+          pack_code: manifest.packCode,
+          pack_name: manifest.packName,
+          version: manifest.version,
+          total_items: manifest.totalItems,
+          stories: stories
+        });
+      } else {
+        // Flat download — existing behavior
+        const files = {};
+        for (const item of manifest.items || []) {
+          const itemNum = item.itemNumber;
+
+          // Add audio URL (URL-encoded for proper HTTP requests)
+          if (item.audio && item.audio.url) {
+            files[`audio_${itemNum}`] = encodeUrlPath(item.audio.url);
+          }
+
+          // Add image URL if present (for habits)
+          if (item.images && item.images.length > 0 && item.images[0].url) {
+            files[`image_${itemNum}`] = item.images[0].url;
+          }
         }
 
-        // Add image URL if present (for habits)
-        if (item.images && item.images.length > 0 && item.images[0].url) {
-          files[`image_${itemNum}`] = item.images[0].url;
-        }
+        // Send unified download response with content_type
+        logger.info(`📦 [CONTENT-DOWNLOAD] Sending ${contentType} download links for ${manifest.packCode} v${manifest.version} (${Object.keys(files).length} files)`);
+        this.mqttPublish(`devices/p2p/${clientId}`, {
+          type: "download_response",
+          status: "download_required",
+          rfid_uid: rfidUid,
+          pack_code: manifest.packCode,
+          pack_name: manifest.packName,
+          version: manifest.version,
+          total_items: manifest.totalItems,
+          files: files
+        });
       }
-
-      // Send unified download response with content_type
-      logger.info(`📦 [CONTENT-DOWNLOAD] Sending ${contentType} download links for ${manifest.packCode} v${manifest.version} (${Object.keys(files).length} files)`);
-      this.mqttPublish(`devices/p2p/${clientId}`, {
-        type: "download_response",
-        status: "download_required",
-        rfid_uid: rfidUid,
-        pack_code: manifest.packCode,
-        pack_name: manifest.packName,
-        version: manifest.version,
-        total_items: manifest.totalItems,
-        files: files
-      });
 
     } catch (error) {
       logger.error(`❌ [CONTENT-DOWNLOAD] Error handling request: ${error.message}`);

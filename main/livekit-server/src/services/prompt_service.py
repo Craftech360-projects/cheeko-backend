@@ -90,10 +90,16 @@ class PromptService:
                     if response.status == 200:
                         data = await response.json()
 
-                        # Expected response format: {"code": 0, "data": "prompt_text"}
+                        # Response format: {"code": 0, "data": "prompt_text"}
+                        # or: {"code": 0, "data": {"systemPrompt": "...", "agentName": "..."}}
                         if data.get('code') == 0 and 'data' in data:
-                            prompt = data['data']
-                            if prompt and prompt.strip():
+                            raw = data['data']
+                            # Handle both string and object response formats
+                            if isinstance(raw, dict):
+                                prompt = raw.get('systemPrompt') or raw.get('system_prompt') or ''
+                            else:
+                                prompt = raw
+                            if prompt and isinstance(prompt, str) and prompt.strip():
                                 logger.info(f"Successfully fetched prompt from API for MAC: {mac_address}")
                                 return prompt.strip()
                             else:

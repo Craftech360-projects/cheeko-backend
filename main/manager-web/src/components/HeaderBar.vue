@@ -53,6 +53,12 @@
           RFID Management
         </div>
         <div v-if="isSuperAdmin" class="equipment-management"
+          :class="{ 'active-tab': $route.path === '/bulk-import' }" @click="goBulkImport">
+          <i class="el-icon-upload2"
+            :style="{ fontSize: '15px', color: $route.path === '/bulk-import' ? '#fff' : '#3d4566' }"></i>
+          Bulk Import
+        </div>
+        <div v-if="isSuperAdmin" class="equipment-management"
           :class="{ 'active-tab': $route.path === '/content-library' }" @click="goContentLibrary">
           <i class="el-icon-folder-opened"
             :style="{ fontSize: '15px', color: $route.path === '/content-library' ? '#fff' : '#3d4566' }"></i>
@@ -174,6 +180,9 @@ export default {
     },
     goRfidManagement() {
       this.$router.push('/rfid-management')
+    },
+    goBulkImport() {
+      this.$router.push('/bulk-import')
     },
     goTokenAnalytics() {
       this.$router.push('/token-analytics')
