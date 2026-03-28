@@ -101,6 +101,12 @@ async def entrypoint(ctx: JobContext):
     api_keys = yaml_config.get('api_keys', {})
     if 'google' in api_keys and not os.getenv('GOOGLE_API_KEY'):
         os.environ['GOOGLE_API_KEY'] = api_keys['google']
+    if 'openai' in api_keys and not os.getenv('OPENAI_API_KEY'):
+        os.environ['OPENAI_API_KEY'] = api_keys['openai']
+        logger.info("Loaded OPENAI_API_KEY from config.yaml")
+    if 'xai' in api_keys and not os.getenv('XAI_API_KEY'):
+        os.environ['XAI_API_KEY'] = api_keys['xai']
+        logger.info("Loaded XAI_API_KEY from config.yaml")
 
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
