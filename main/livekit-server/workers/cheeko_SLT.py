@@ -54,7 +54,7 @@ from src.features.weather_tools import get_weather
 # Agent configuration
 AGENT_NAME = "cheeko-agent-slt"
 CHARACTER_NAME = "Cheeko"
-DEFAULT_PORT = 8081
+DEFAULT_PORT = 8085
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
 
