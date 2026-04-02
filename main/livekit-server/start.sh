@@ -19,10 +19,13 @@ python -m uvicorn media_api:app --host 0.0.0.0 --port 8080 &
 # Give media_api time to bind to port 8080
 sleep 2
 
-# Workers use their DEFAULT_PORT values (8081-8084) defined in each worker file
+# Workers use their DEFAULT_PORT values unless overridden below.
 # They ignore the global PORT env var set by Cerebrium
 echo "Starting Cheeko Agent Worker on port 8081..."
 python workers/cheeko_worker.py dev &
+
+echo "Starting Cheeko SLT Agent Worker on port 8085..."
+CHEEKO_PORT=8085 python workers/cheeko_SLT.py dev &
 
 echo "Starting Math Tutor Agent Worker on port 8082..."
 python workers/math_tutor_worker.py dev &

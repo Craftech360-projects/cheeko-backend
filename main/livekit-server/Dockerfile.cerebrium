@@ -91,7 +91,7 @@ RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTr
 RUN python main.py download-files || echo "No download-files command available"
 
 # Expose health check, agent workers, and media_api ports
-EXPOSE 8080 8081 8082 8083 8084 8003
+EXPOSE 8080 8081 8082 8083 8084 8085 8003
 
 # Run the start script which launches both main.py and media_api
 CMD ["bash", "start.sh"]
