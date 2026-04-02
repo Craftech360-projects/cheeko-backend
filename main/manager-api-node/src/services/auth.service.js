@@ -95,19 +95,38 @@ const login = async (username, password) => {
   const expireSeconds = 3600 * 24 * 7; // 7 days in seconds
   expireDate.setSeconds(expireDate.getSeconds() + expireSeconds);
 
-  // Store token
+  // Store token — delete any existing tokens for this user first, then create
+  // This prevents duplicate tokens accumulating on re-login
   try {
-    await prisma.sys_user_token.create({
-      data: {
-        user_id: user.id,
-        token,
-        expire_date: expireDate,
-      },
+    await prisma.sys_user_token.deleteMany({
+      where: { user_id: user.id },
     });
+
+    // Use raw SQL INSERT — the PrismaPg adapter doesn't handle autoincrement()
+    // on BigInt columns, and the DB column lacks a SERIAL/sequence default.
+    // Generate id manually via COALESCE(MAX(id),0)+1.
+    await prisma.$executeRaw`
+      INSERT INTO sys_user_token (id, user_id, token, expire_date, created_at, updated_at)
+      VALUES (
+        (SELECT COALESCE(MAX(id), 0) + 1 FROM sys_user_token),
+        ${user.id}, ${token}, ${expireDate}, NOW(), NOW()
+      )
+    `;
   } catch (error) {
-    logger.error('Failed to store token:', error);
+    logger.error('Failed to store token:', {
+      message: error.message,
+      code: error.code,
+      meta: error.meta,
+      userId: user.id?.toString(),
+    });
     throw new Error('Failed to create session');
   }
+
+  // Update last login timestamp (non-blocking)
+  prisma.sys_user.updateMany({
+    where: { id: user.id },
+    data: { last_login_at: new Date() },
+  }).catch(err => logger.warn('Failed to update last_login_at:', err.message));
 
   // Return token info matching Spring Boot TokenDTO format
   // Spring Boot returns: {token, expire (int seconds), clientHash}

@@ -75,8 +75,9 @@ async def delete_livekit_room(room_name: str):
 # PROMPT LOADING
 # ============================================================================
 
-def load_game_prompt(
-    agent_name: str,
+def load_prompt_template(
+    prompt_filename: str,
+    label: str,
     child_profile: dict = None,
     extra_vars: dict = None,
     long_term_memories: list = None,
@@ -84,10 +85,11 @@ def load_game_prompt(
     memory_entities: list = None
 ) -> Optional[str]:
     """
-    Load game-specific prompt from YAML file and render with child profile.
+    Load a YAML prompt template and render with child profile and memories.
 
     Args:
-        agent_name: The game name ("Math Tutor", "Riddle Solver", "Word Ladder")
+        prompt_filename: YAML filename under src/prompts
+        label: Human-readable label for logs
         child_profile: Optional child profile for personalization
         extra_vars: Optional extra template variables (e.g., start_word, target_word)
         long_term_memories: List of memory strings from Mem0
@@ -100,20 +102,15 @@ def load_game_prompt(
     import yaml
     from jinja2 import Template
 
-    if agent_name not in GAME_PROMPT_FILES:
-        logger.warning(f"Unknown game: {agent_name}")
-        return None
-
-    # Get the prompt file path (relative to livekit-server root)
     prompt_file = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
         "src", "prompts",
-        GAME_PROMPT_FILES[agent_name]
+        prompt_filename
     )
 
     try:
         if not os.path.exists(prompt_file):
-            logger.error(f"Game prompt file not found: {prompt_file}")
+            logger.error(f"Prompt file not found: {prompt_file}")
             return None
 
         with open(prompt_file, 'r', encoding='utf-8') as f:
@@ -171,14 +168,40 @@ def load_game_prompt(
 
             prompt_template = template.render(**template_vars)
 
-        logger.info(f"Loaded game prompt: {agent_name} ({len(prompt_template)} chars)")
+        logger.info(f"Loaded prompt template: {label} ({len(prompt_template)} chars)")
         return prompt_template
 
     except Exception as e:
-        logger.error(f"Error loading game prompt: {e}")
+        logger.error(f"Error loading prompt template: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return None
+
+
+def load_game_prompt(
+    agent_name: str,
+    child_profile: dict = None,
+    extra_vars: dict = None,
+    long_term_memories: list = None,
+    memory_relations: list = None,
+    memory_entities: list = None
+) -> Optional[str]:
+    """
+    Load game-specific prompt from YAML file and render with child profile.
+    """
+    if agent_name not in GAME_PROMPT_FILES:
+        logger.warning(f"Unknown game: {agent_name}")
+        return None
+
+    return load_prompt_template(
+        prompt_filename=GAME_PROMPT_FILES[agent_name],
+        label=agent_name,
+        child_profile=child_profile,
+        extra_vars=extra_vars,
+        long_term_memories=long_term_memories,
+        memory_relations=memory_relations,
+        memory_entities=memory_entities,
+    )
 
 
 def render_prompt_with_profile(
@@ -186,7 +209,8 @@ def render_prompt_with_profile(
     child_profile: dict,
     long_term_memories: list = None,
     memory_relations: list = None,
-    memory_entities: list = None
+    memory_entities: list = None,
+    extra_vars: dict = None
 ) -> str:
     """
     Render prompt template with child profile and long-term memories using Jinja2
@@ -201,7 +225,7 @@ def render_prompt_with_profile(
     Returns:
         str: Rendered prompt
     """
-    if not child_profile:
+    if not child_profile and not extra_vars:
         return agent_prompt
 
     if '{{' not in agent_prompt and '{%' not in agent_prompt:
@@ -221,29 +245,34 @@ def render_prompt_with_profile(
         template = _jinja_template_cache[template_cache_key]
 
         # Parse interests if JSON string
-        interests = child_profile.get('interests', '')
-        if isinstance(interests, str) and interests.startswith('['):
-            try:
-                interests_list = json.loads(interests)
-                interests = ', '.join(interests_list)
-            except json.JSONDecodeError:
-                pass
+        interests = ''
+        if child_profile:
+            interests = child_profile.get('interests', '')
+            if isinstance(interests, str) and interests.startswith('['):
+                try:
+                    interests_list = json.loads(interests)
+                    interests = ', '.join(interests_list)
+                except json.JSONDecodeError:
+                    pass
 
         template_vars = {
-            'child_name': child_profile.get('name', ''),
-            'child_age': child_profile.get('age', ''),
-            'age_group': child_profile.get('ageGroup', ''),
-            'child_gender': child_profile.get('gender', ''),
+            'child_name': child_profile.get('name', '') if child_profile else '',
+            'child_age': child_profile.get('age', '') if child_profile else '',
+            'age_group': child_profile.get('ageGroup', '') if child_profile else '',
+            'child_gender': child_profile.get('gender', '') if child_profile else '',
             'child_interests': interests,
-            'primary_language': child_profile.get('primaryLanguage', 'English'),
-            'additional_notes': child_profile.get('additionalNotes', ''),
+            'primary_language': child_profile.get('primaryLanguage', 'English') if child_profile else 'English',
+            'additional_notes': child_profile.get('additionalNotes', '') if child_profile else '',
             'long_term_memories': long_term_memories or [],  # Mem0 memories
             'memory_relations': memory_relations or [],  # Mem0 graph relations
             'memory_entities': memory_entities or [],  # Mem0 graph entities
         }
 
+        if extra_vars:
+            template_vars.update(extra_vars)
+
         rendered = template.render(**template_vars)
-        logger.info(f"Rendered template for: {child_profile.get('name')}")
+        logger.info(f"Rendered template for: {child_profile.get('name') if child_profile else 'session'}")
         if long_term_memories:
             logger.info(f"Injected {len(long_term_memories)} long-term memories into prompt")
         return rendered

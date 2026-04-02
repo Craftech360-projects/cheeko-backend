@@ -304,9 +304,17 @@
                                 </el-table-column>
                                 <el-table-column label="Card Type" align="center" width="160">
                                     <template slot-scope="scope">
-                                        <el-tag :type="getAiCardTypeStyle(scope.row.notes)" size="small" class="content-badge">
-                                            <i :class="getAiCardTypeIcon(scope.row.notes)"></i> {{ getAiCardTypeLabel(scope.row.notes) }}
+                                        <el-tag :type="getAiCardTypeStyle(scope.row)" size="small" class="content-badge">
+                                            <i :class="getAiCardTypeIcon(scope.row)"></i> {{ getAiCardTypeLabel(scope.row) }}
                                         </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Language" align="center" width="120">
+                                    <template slot-scope="scope">
+                                        <el-tag v-if="getAiCardLanguageLabel(scope.row)" type="info" size="small">
+                                            {{ getAiCardLanguageLabel(scope.row) }}
+                                        </el-tag>
+                                        <span v-else class="text-muted">-</span>
                                     </template>
                                 </el-table-column>
                                 <el-table-column label="Notes" prop="notes" align="center" show-overflow-tooltip></el-table-column>
@@ -871,7 +879,7 @@ export default {
             isAllCardsSelected: false,
             cardDialogVisible: false,
             cardDialogTitle: 'Add Card Mapping',
-            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', notes: '', active: true },
+            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', actionData: {}, notes: '', active: true },
 
             // AI Cards
             aiCardsList: [],
@@ -1131,29 +1139,57 @@ export default {
             });
         },
 
-        getAiCardTypeLabel(notes) {
+        getLanguageNameFromCode(code) {
+            const languageMap = {
+                en: 'English',
+                hi: 'Hindi',
+                te: 'Telugu',
+                kn: 'Kannada',
+                ta: 'Tamil',
+                ml: 'Malayalam',
+                de: 'German'
+            };
+            return languageMap[code] || code || '';
+        },
+
+        getAiCardTypeLabel(card) {
+            const agentName = card?.actionData?.agent_name || card?.aiAgentName || '';
+            if (agentName) return agentName;
+            const notes = card?.notes || '';
             if (!notes) return 'AI Card';
             const n = notes.toLowerCase();
             if (n.includes('cheeko')) return 'Cheeko';
-            if (n.includes('magic')) return 'Magic Card';
-            if (n.includes('astro')) return 'Astronaut Card';
+            if (n.includes('magic')) return 'Cheeko Magic';
+            if (n.includes('astro')) return 'Cheeko Astronaut';
             return 'AI Card';
         },
-        getAiCardTypeIcon(notes) {
+        getAiCardTypeIcon(card) {
+            const agentName = (card?.actionData?.agent_name || card?.aiAgentName || '').toLowerCase();
+            if (agentName.includes('cheeko magic')) return 'el-icon-magic-stick';
+            if (agentName.includes('astronaut')) return 'el-icon-discover';
+            if (agentName.includes('cheeko')) return 'el-icon-chat-dot-round';
+            const notes = card?.notes || '';
             if (!notes) return 'el-icon-cpu';
             const n = notes.toLowerCase();
-            if (n.includes('cheeko')) return 'el-icon-chat-dot-round';
             if (n.includes('magic')) return 'el-icon-magic-stick';
             if (n.includes('astro')) return 'el-icon-discover';
             return 'el-icon-cpu';
         },
-        getAiCardTypeStyle(notes) {
+        getAiCardTypeStyle(card) {
+            const agentName = (card?.actionData?.agent_name || card?.aiAgentName || '').toLowerCase();
+            if (agentName.includes('cheeko magic')) return 'warning';
+            if (agentName.includes('astronaut')) return 'success';
+            if (agentName.includes('cheeko')) return 'primary';
+            const notes = card?.notes || '';
             if (!notes) return 'danger';
             const n = notes.toLowerCase();
             if (n.includes('cheeko')) return 'primary';
             if (n.includes('magic')) return 'warning';
             if (n.includes('astro')) return 'success';
             return 'danger';
+        },
+        getAiCardLanguageLabel(card) {
+            return card?.actionData?.language_name || card?.aiLanguageName || card?.actionData?.language_code || card?.aiLanguageCode || '';
         },
 
         getResultTitle(result) {
@@ -1416,7 +1452,7 @@ export default {
 
         showAddCardDialog() {
             this.cardDialogTitle = 'Add Card Mapping';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'content', notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'content', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', actionData: {}, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1433,15 +1469,31 @@ export default {
             if (!form.actionType) {
                 form.actionType = form.cardType === 'ai' ? 'ai' : (form.questionPackId ? 'qna' : 'content');
             }
+            const actionData = form.actionData || {};
+            form.aiAgentName = actionData.agent_name || form.aiAgentName || 'Cheeko';
+            form.aiLanguageCode = actionData.language_code || form.aiLanguageCode || 'en';
+            form.aiLanguageName = actionData.language_name || form.aiLanguageName || this.getLanguageNameFromCode(actionData.language_code || form.aiLanguageCode || 'en');
+            form.aiVoiceId = actionData.voice_id || form.aiVoiceId || '';
             this.cardForm = form;
             this.cardDialogVisible = true;
         },
 
         handleCardSubmit({ form, done }) {
-            // Store aiCardType in notes for AI cards
-            if (form.cardType === 'ai' && form.aiCardType) {
-                const typeLabels = { cheeko: 'Cheeko Conversation card', magic_card: 'Magic Card', astronaut_card: 'Astronaut Card' };
-                form.notes = typeLabels[form.aiCardType] || form.notes;
+            if (form.cardType === 'ai' || form.actionType === 'ai') {
+                const actionData = {
+                    ...(form.actionData || {}),
+                    agent_name: form.aiAgentName || 'Cheeko',
+                    language_code: form.aiLanguageCode || 'en',
+                    language_name: form.aiLanguageName || this.getLanguageNameFromCode(form.aiLanguageCode || 'en')
+                };
+                if (form.aiVoiceId) {
+                    actionData.voice_id = form.aiVoiceId;
+                } else {
+                    delete actionData.voice_id;
+                }
+                form.cardType = 'ai';
+                form.actionType = 'ai';
+                form.actionData = actionData;
             }
             const api = form.id ? Api.rfid.updateCard : Api.rfid.addCard;
             api(form, ({ data }) => {
@@ -1523,7 +1575,7 @@ export default {
 
         showAddAiCardDialog() {
             this.cardDialogTitle = 'Add AI Card';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', aiCardType: 'cheeko', notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', actionData: {}, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 

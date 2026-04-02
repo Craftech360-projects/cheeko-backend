@@ -83,6 +83,31 @@ DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
 
+
+def build_session_prompt_vars(dispatch_metadata: dict) -> dict:
+    """Extract session-level prompt variables from dispatch metadata."""
+    return {
+        'session_language_code': dispatch_metadata.get('session_language_code', '') or '',
+        'session_language_name': dispatch_metadata.get('session_language_name', '') or '',
+    }
+
+
+def build_language_lock(language_name: str) -> str:
+    """Append a strict session language directive."""
+    if not language_name:
+        return ""
+
+    return f"""
+
+<session_language_override>
+This session language is fixed by the RFID AI card.
+- You must speak only in {language_name}.
+- Do not answer in any other language.
+- Use natural, child-friendly {language_name}.
+- Use native script by default unless the child explicitly asks for transliteration.
+</session_language_override>
+"""
+
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
     Play ElevenLabs MP3 audio via session.say() with pre-synthesized audio frames.
@@ -238,6 +263,8 @@ async def entrypoint(ctx: JobContext):
     dispatch_memories = []
     dispatch_relations = []
     dispatch_entities = []
+    dispatch_metadata = {}
+    session_prompt_vars = {}
     try:
         if hasattr(ctx, 'job') and ctx.job and ctx.job.metadata:
             dispatch_metadata = json.loads(ctx.job.metadata)
@@ -245,6 +272,7 @@ async def entrypoint(ctx: JobContext):
             dispatch_memories = dispatch_metadata.get('long_term_memories', [])
             dispatch_relations = dispatch_metadata.get('memory_relations', [])
             dispatch_entities = dispatch_metadata.get('memory_entities', [])
+            session_prompt_vars = build_session_prompt_vars(dispatch_metadata)
             if dispatch_child_profile:
                 logger.info(f"👶 Using child profile from dispatch metadata: {dispatch_child_profile.get('name')}, age: {dispatch_child_profile.get('age')}")
             if dispatch_memories:
@@ -320,10 +348,17 @@ async def entrypoint(ctx: JobContext):
     has_child_name = 'child_name' in agent_prompt
     logger.info(f"Template analysis - Has Jinja: {has_placeholder}, Has child_name: {has_child_name}")
     
-    if child_profile:
-        agent_prompt = render_prompt_with_profile(
-            agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
-        )
+    agent_prompt = render_prompt_with_profile(
+        agent_prompt,
+        child_profile,
+        dispatch_memories,
+        dispatch_relations,
+        dispatch_entities,
+        extra_vars=session_prompt_vars,
+    )
+
+    if session_prompt_vars.get('session_language_name'):
+        agent_prompt += build_language_lock(session_prompt_vars['session_language_name'])
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 

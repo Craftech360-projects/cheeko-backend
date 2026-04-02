@@ -27,7 +27,11 @@
     "prisma:studio": "prisma studio",
     "prisma:seed": "node prisma/seed.js",
     "migrate:mysql": "node scripts/migrate-mysql-to-supabase.js",
-    "migrate:mysql:dry": "node scripts/migrate-mysql-to-supabase.js --dry-run"
+    "migrate:mysql:dry": "node scripts/migrate-mysql-to-supabase.js --dry-run",
+    "seed:rfid-pack": "node scripts/seed-rfid-pack-from-files.js",
+    "seed:rfid-packs:fixed": "node scripts/seed-rfid-packs-fixed-ids.js",
+    "update:rfid-pack-images": "node scripts/update-rfid-pack-images.js",
+    "seed:rfid-card-mappings": "node scripts/seed-rfid-card-mappings.js"
   },
   "keywords": [
     "cheeko",

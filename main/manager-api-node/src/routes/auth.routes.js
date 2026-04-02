@@ -125,6 +125,7 @@ router.post('/login',
     const isValidCaptcha = authService.validateCaptcha(captchaId, captcha);
     if (!isValidCaptcha) {
       // Spring Boot returns code 500 for invalid captcha
+      logger.debug(`Captcha validation failed for uuid=${captchaId}`);
       return res.status(200).json({
         code: 500,
         msg: 'Invalid captcha, please try again',
@@ -136,7 +137,7 @@ router.post('/login',
       const result = await authService.login(username, password);
       success(res, result, 'Login successful');
     } catch (error) {
-      logger.warn('Login failed for user:', username);
+      logger.warn(`Login failed for user: ${username} — ${error.message}`);
       badRequest(res, error.message || 'Invalid username or password');
     }
   })

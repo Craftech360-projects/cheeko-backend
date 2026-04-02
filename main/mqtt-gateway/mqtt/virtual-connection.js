@@ -30,6 +30,19 @@ const CHARACTER_AGENT_MAP = {
   "Cheeko German": "cheeko-german-agent",
 };
 
+function resolveCharacterFromCardAgent(agentOrCharacterName) {
+  if (!agentOrCharacterName) {
+    return null;
+  }
+
+  if (CHARACTER_AGENT_MAP[agentOrCharacterName]) {
+    return agentOrCharacterName;
+  }
+
+  return Object.entries(CHARACTER_AGENT_MAP)
+    .find(([, agentName]) => agentName === agentOrCharacterName)?.[0] || agentOrCharacterName;
+}
+
 // MAC address regex
 const MacAddressRegex = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i;
 
@@ -57,6 +70,12 @@ class VirtualMQTTConnection {
     this.bridge = null;
     this.roomType = null; // ADD: Track room type (conversation, music, story)
     this.language = null; // ADD: Track language for music/story filtering
+    this.sessionConfig = {
+      languageCode: null,
+      languageName: null,
+      voiceId: null,
+      agentName: null,
+    };
     this.udp = {
       remoteAddress: null,
       cookie: null,
@@ -483,19 +502,30 @@ class VirtualMQTTConnection {
     if (helloRfidUid) {
       try {
         const lookupUrl = `${process.env.MANAGER_API_URL}/admin/rfid/card/lookup/${encodeURIComponent(helloRfidUid)}`;
+        this.sessionConfig = {
+          languageCode: null,
+          languageName: null,
+          voiceId: null,
+          agentName: null,
+        };
         logger.info(`🎴 [AI-CARD] Hello contains rfid_uid=${helloRfidUid}, looking up agent mapping...`);
         const rfidResponse = await axios.get(lookupUrl, { timeout: 5000 });
 
-        if (rfidResponse.data?.code === 0 && rfidResponse.data?.data?.agentName) {
-          const cardAgentName = rfidResponse.data.data.agentName;
-          const overrideCharacter = Object.entries(CHARACTER_AGENT_MAP)
-            .find(([, agentName]) => agentName === cardAgentName)?.[0]
-            || cardAgentName;
+        if (rfidResponse.data?.code === 0 && rfidResponse.data?.data) {
+          const cardData = rfidResponse.data.data;
+          this.sessionConfig.languageCode = cardData.languageCode || null;
+          this.sessionConfig.languageName = cardData.languageName || null;
+          this.sessionConfig.voiceId = cardData.voiceId || null;
+          this.sessionConfig.agentName = cardData.agentName || null;
+          const cardAgentName = cardData.agentName;
+          if (cardAgentName) {
+            const overrideCharacter = resolveCharacterFromCardAgent(cardAgentName);
           logger.info(`🎴 [AI-CARD] Card maps to agent: "${this.currentCharacter}" → "${overrideCharacter}" (agent: ${cardAgentName})`);
-          this.currentCharacter = overrideCharacter;
+            this.currentCharacter = overrideCharacter;
         } else {
           logger.info(`🎴 [AI-CARD] Card ${helloRfidUid} has no agent mapping, using default character`);
         }
+      }
       } catch (rfidErr) {
         logger.warn(`🎴 [AI-CARD] Failed to lookup rfid_uid=${helloRfidUid}: ${rfidErr.message}`);
       }
@@ -633,7 +663,8 @@ class VirtualMQTTConnection {
               deviceId: this.deviceId,
               character: this.currentCharacter,
               childProfile: this.childProfile,
-              memoryData: this.mem0Memories
+              memoryData: this.mem0Memories,
+              sessionConfig: this.sessionConfig,
             }),
           }
         );
@@ -1365,11 +1396,18 @@ class VirtualMQTTConnection {
             `✅ [RFID] Card found: contentType=${cardData.contentType}, title="${cardData.title || cardData.packName || ""}"`
           );
 
-          // Determine response type based on card data
-          let responseType = "card_content";
-          if (cardData.contentType === "ai" || cardData.type === "ai") {
-            responseType = "card_ai";
-          }
+          // Treat AI session-config cards as card_ai even though the lookup
+          // payload uses contentType="prompt" for conversational flows.
+          const isAiCard =
+            cardData.contentType === "ai" ||
+            cardData.type === "ai" ||
+            Boolean(cardData.agentName) ||
+            Boolean(cardData.languageCode) ||
+            Boolean(cardData.languageName) ||
+            cardData.actionType === "agent" ||
+            cardData.actionType === "ai";
+
+          const responseType = isAiCard ? "card_ai" : "card_content";
 
           // Send card response back to device
           this.sendMqttMessage(

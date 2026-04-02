@@ -5,6 +5,13 @@
  * Context path: /toy (matches Spring Boot API)
  */
 
+// BigInt JSON serialization — Prisma returns BigInt for id columns.
+// Without this, JSON.stringify() throws "Do not know how to serialize a BigInt".
+BigInt.prototype.toJSON = function () {
+  const int = Number(this);
+  return int <= Number.MAX_SAFE_INTEGER ? int : this.toString();
+};
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');

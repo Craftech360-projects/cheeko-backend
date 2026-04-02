@@ -53,19 +53,36 @@
           <div class="field-hint">Select a pre-defined Q&A pack (managed in Q&A Packs tab).</div>
         </el-form-item>
 
-        <!-- AI Card Type Selector -->
-        <el-form-item v-if="form.actionType === 'ai'" label="AI Card Type" class="form-item">
-          <el-select v-model="form.aiCardType" placeholder="Select card type" class="custom-select">
-            <el-option label="Cheeko" value="cheeko">
-              <span><i class="el-icon-chat-dot-round" style="margin-right: 6px;"></i>Cheeko</span>
-            </el-option>
-            <el-option label="Magic Card" value="magic_card">
-              <span><i class="el-icon-magic-stick" style="margin-right: 6px;"></i>Magic Card</span>
-            </el-option>
-            <el-option label="Astronaut Card" value="astronaut_card">
-              <span><i class="el-icon-discover" style="margin-right: 6px;"></i>Astronaut Card</span>
-            </el-option>
+        <!-- AI Card Session Config -->
+        <el-form-item v-if="form.actionType === 'ai'" label="Agent" class="form-item">
+          <el-select v-model="form.aiAgentName" placeholder="Select agent" class="custom-select">
+            <el-option label="Cheeko" value="Cheeko" />
+            <el-option label="Cheeko Magic" value="Cheeko Magic" />
+            <el-option label="Cheeko Astronaut" value="Cheeko Astronaut" />
+            <el-option label="Cheeko German" value="Cheeko German" />
+            <el-option label="Math Tutor" value="Math Tutor" />
+            <el-option label="Riddle Solver" value="Riddle Solver" />
+            <el-option label="Word Ladder" value="Word Ladder" />
           </el-select>
+          <div class="field-hint">This becomes <code>actionData.agent_name</code> for the AI card.</div>
+        </el-form-item>
+
+        <el-form-item v-if="form.actionType === 'ai'" label="Language" class="form-item">
+          <el-select v-model="form.aiLanguageCode" placeholder="Select language" class="custom-select" @change="handleLanguageChange">
+            <el-option label="English" value="en" />
+            <el-option label="Hindi" value="hi" />
+            <el-option label="Telugu" value="te" />
+            <el-option label="Kannada" value="kn" />
+            <el-option label="Tamil" value="ta" />
+            <el-option label="Malayalam" value="ml" />
+            <el-option label="German" value="de" />
+          </el-select>
+          <div class="field-hint">The session language will be injected into the Cheeko prompt for this card.</div>
+        </el-form-item>
+
+        <el-form-item v-if="form.actionType === 'ai'" label="Voice ID" class="form-item">
+          <el-input v-model="form.aiVoiceId" placeholder="Optional voice override" class="custom-input"></el-input>
+          <div class="field-hint">Optional. Saved as <code>actionData.voice_id</code>.</div>
         </el-form-item>
 
         <!-- Content Pack Selector -->
@@ -135,6 +152,11 @@ export default {
         contentPackId: null,
         packId: null, // Product SKU
         actionType: 'content', // 'content' or 'qna'
+        aiAgentName: 'Cheeko',
+        aiLanguageCode: 'en',
+        aiLanguageName: 'English',
+        aiVoiceId: '',
+        actionData: {},
         notes: '',
         active: true
       })
@@ -182,9 +204,30 @@ export default {
     },
     setActionType(type) {
       this.form.actionType = type;
-      if (type === 'ai' && !this.form.aiCardType) {
-        this.form.aiCardType = 'cheeko';
+      if (type === 'ai') {
+        if (!this.form.actionData) {
+          this.form.actionData = {};
+        }
+        if (!this.form.aiAgentName) {
+          this.form.aiAgentName = 'Cheeko';
+        }
+        if (!this.form.aiLanguageCode) {
+          this.form.aiLanguageCode = 'en';
+          this.form.aiLanguageName = 'English';
+        }
       }
+    },
+    handleLanguageChange(languageCode) {
+      const languageMap = {
+        en: 'English',
+        hi: 'Hindi',
+        te: 'Telugu',
+        kn: 'Kannada',
+        ta: 'Tamil',
+        ml: 'Malayalam',
+        de: 'German'
+      };
+      this.form.aiLanguageName = languageMap[languageCode] || languageCode || '';
     },
     cancel() {
       this.saving = false;
@@ -208,6 +251,16 @@ export default {
         this.form.questionPackId = null;
         this.form.contentPackId = null;
         this.form.cardType = 'ai';
+        if (!this.form.actionData) {
+          this.form.actionData = {};
+        }
+        if (!this.form.aiAgentName) {
+          this.form.aiAgentName = 'Cheeko';
+        }
+        if (!this.form.aiLanguageCode) {
+          this.form.aiLanguageCode = 'en';
+          this.form.aiLanguageName = 'English';
+        }
       }
     }
   }

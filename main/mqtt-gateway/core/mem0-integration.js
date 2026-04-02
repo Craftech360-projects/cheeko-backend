@@ -85,7 +85,7 @@ async function buildEnhancedContext(deviceId, childProfile) {
  * @param {object} params - Parameters for metadata
  * @returns {string} JSON string for dispatch metadata
  */
-function buildDispatchMetadata({ macAddress, deviceId, character, childProfile, memoryData }) {
+function buildDispatchMetadata({ macAddress, deviceId, character, childProfile, memoryData, sessionConfig = {} }) {
   // Handle both old format (array) and new format (object)
   let memories = [];
   let relations = [];
@@ -104,6 +104,10 @@ function buildDispatchMetadata({ macAddress, deviceId, character, childProfile, 
     device_uuid: deviceId,
     character: character || "Cheeko",
     child_profile: childProfile || null,
+    session_language_code: sessionConfig.languageCode || null,
+    session_language_name: sessionConfig.languageName || null,
+    session_voice_id: sessionConfig.voiceId || null,
+    session_agent_name: sessionConfig.agentName || null,
     long_term_memories: memories,
     memory_relations: relations,
     memory_entities: entities,

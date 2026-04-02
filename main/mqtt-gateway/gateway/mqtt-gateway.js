@@ -1693,6 +1693,10 @@ class MQTTGateway {
                 device_mac: deviceId,
                 character: characterName,
                 child_profile: childProfile,
+                session_language_code: connection?.sessionConfig?.languageCode || null,
+                session_language_name: connection?.sessionConfig?.languageName || null,
+                session_voice_id: connection?.sessionConfig?.voiceId || null,
+                session_agent_name: connection?.sessionConfig?.agentName || null,
                 timestamp: Date.now(),
               }),
             });
@@ -1928,6 +1932,10 @@ class MQTTGateway {
                           device_uuid: deviceId,
                           character: characterName,
                           child_profile: childProfile,
+                          session_language_code: connection?.sessionConfig?.languageCode || null,
+                          session_language_name: connection?.sessionConfig?.languageName || null,
+                          session_voice_id: connection?.sessionConfig?.voiceId || null,
+                          session_agent_name: connection?.sessionConfig?.agentName || null,
                           timestamp: Date.now(),
                         }),
                       }
@@ -2555,6 +2563,10 @@ class MQTTGateway {
                 device_mac: deviceId,
                 character: newModeName,
                 child_profile: childProfile,
+                session_language_code: connection?.sessionConfig?.languageCode || null,
+                session_language_name: connection?.sessionConfig?.languageName || null,
+                session_voice_id: connection?.sessionConfig?.voiceId || null,
+                session_agent_name: connection?.sessionConfig?.agentName || null,
                 timestamp: Date.now(),
               }),
             });
@@ -2949,6 +2961,10 @@ class MQTTGateway {
                     device_uuid: deviceId,
                     character: currentCharacter || "Cheeko",
                     child_profile: childProfile,
+                    session_language_code: connection?.sessionConfig?.languageCode || null,
+                    session_language_name: connection?.sessionConfig?.languageName || null,
+                    session_voice_id: connection?.sessionConfig?.voiceId || null,
+                    session_agent_name: connection?.sessionConfig?.agentName || null,
                     timestamp: Date.now(),
                   }),
                 }

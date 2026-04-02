@@ -23,6 +23,23 @@ const formatDate = (date) => {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 };
 
+const LANGUAGE_NAME_MAP = {
+  en: 'English',
+  hi: 'Hindi',
+  te: 'Telugu',
+  kn: 'Kannada',
+  ta: 'Tamil',
+  ml: 'Malayalam',
+  de: 'German'
+};
+
+const getLanguageName = (languageCode, fallback = null) => {
+  if (!languageCode || typeof languageCode !== 'string') {
+    return fallback;
+  }
+  return LANGUAGE_NAME_MAP[languageCode.toLowerCase()] || fallback || languageCode;
+};
+
 // =============================================
 // Helper: Transform RFID Question to camelCase (RfidQuestionDTO)
 // =============================================
@@ -500,8 +517,11 @@ const lookupCardByUid = async (rfidUid) => {
   // This guard prevents misconfigured content cards from accidentally firing AI flow.
   if (mapping.card_type === 'ai') {
     const actionData = mapping.action_data || {};
-    const agentName = actionData.agent_name || null;
-    logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}`);
+    const agentName = actionData.agent_name || actionData.character_name || null;
+    const languageCode = actionData.language_code || actionData.languageCode || null;
+    const languageName = actionData.language_name || actionData.languageName || getLanguageName(languageCode);
+    const voiceId = actionData.voice_id || actionData.voiceId || null;
+    logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}, language=${languageCode || 'default'}`);
     return {
       rfid_uid: normalizedUid,
       contentType: 'prompt',
@@ -510,6 +530,9 @@ const lookupCardByUid = async (rfidUid) => {
       actionType: mapping.action_type || null,
       actionData: actionData,
       agentName: agentName,
+      languageCode: languageCode,
+      languageName: languageName,
+      voiceId: voiceId,
     };
   }
 
