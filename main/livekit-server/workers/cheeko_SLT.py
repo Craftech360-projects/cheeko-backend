@@ -11,6 +11,7 @@ import sys
 import json
 import asyncio
 import time
+import re
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,7 +29,7 @@ from livekit.agents import (
     RoomInputOptions,
 )
 from livekit import rtc, api
-from livekit.plugins import deepgram, groq
+from livekit.plugins import deepgram, google, groq
 from livekit.plugins.elevenlabs import TTS as ElevenLabsTTS
 
 from src.config.config_loader import ConfigLoader
@@ -47,13 +48,111 @@ from src.shared.entrypoint_utils import (
 )
 # from src.features.music_tools import play_music, stop_music, next_song, previous_song  # COMMENTED OUT - Music service disabled
 from src.features.mode_switching import update_agent_mode
+from src.features.search_tools import search_web
+from src.features.weather_tools import get_weather
 
 # Agent configuration
-AGENT_NAME = "cheeko-agent"
+AGENT_NAME = "cheeko-agent-slt"
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8081
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled
 MODE_SWITCH_TOOLS = [update_agent_mode]
+
+DEFAULT_ELEVENLABS_VOICE_ID = "YIXhzp6l2M0ddzOGIbJ3"
+
+
+def _clean_env(value: str | None) -> str:
+    """Normalize env/config string values before passing them to providers."""
+    return (value or "").strip()
+
+
+def _get_elevenlabs_tts_config(yaml_config: dict) -> tuple[str, str, str]:
+    """Resolve ElevenLabs credentials from env first, then config defaults."""
+    elevenlabs_config = yaml_config.get("elevenlabs", {}) if yaml_config else {}
+
+    api_key = _clean_env(os.getenv("ELEVEN_API_KEY")) or _clean_env(os.getenv("ELEVENLABS_API_KEY"))
+    voice_id = DEFAULT_ELEVENLABS_VOICE_ID
+    model_id = (
+        _clean_env(os.getenv("ELEVENLABS_TTS_MODEL"))
+        or _clean_env(os.getenv("ELEVENLABS_MODEL_ID"))
+        or _clean_env(elevenlabs_config.get("tts_model"))
+        or "eleven_turbo_v2_5"
+    )
+
+    return api_key, voice_id, model_id
+
+
+def _get_llm_config(yaml_config: dict) -> tuple[str, str, float]:
+    """Resolve text LLM config, supporting both legacy and nested YAML shapes."""
+    llm_config = yaml_config.get("llm", {})
+    if not llm_config:
+        llm_config = yaml_config.get("models", {}).get("llm", {})
+
+    provider = _clean_env(llm_config.get("provider")).lower() or "google"
+    model = _clean_env(llm_config.get("model")) or "google/gemini-2.5-flash"
+    temperature = llm_config.get("temperature", 0.8)
+    return provider, model, temperature
+
+
+def _sanitize_prompt_for_slt_tools(prompt: str) -> str:
+    """Strip unsupported tool instructions from the SLT prompt and replace them with safe guidance."""
+    updated_prompt = prompt
+
+    section_patterns = [
+        r"\*\*MUSIC PLAYBACK.*?(?=\n\s*\*\*|\Z)",
+        r"\*\*STORY PLAYBACK \(use play_story tool\):\*\*.*?(?=\n\s*\*\*|\Z)",
+        r"\*\*STORY PLAYBACK.*?(?=\n\s*\*\*|\Z)",
+        r"\*\*STOP AUDIO.*?(?=\n\s*\*\*|\Z)",
+        r"\*\*VOLUME CONTROL.*?(?=\n\s*\*\*|\Z)",
+        r"\[CRITICAL_AUDIO_TOOLS\].*?(?=\n\s*⚠️|\n\s*\*\*|\Z)",
+    ]
+    for pattern in section_patterns:
+        updated_prompt = re.sub(pattern, "", updated_prompt, flags=re.DOTALL)
+
+    line_patterns = [
+        r"^.*play_music.*$\n?",
+        r"^.*play_story.*$\n?",
+        r"^.*stop_audio.*$\n?",
+        r"^.*adjust_device_volume.*$\n?",
+        r"^.*set_device_volume.*$\n?",
+        r"^.*After play_music returns.*$\n?",
+        r"^.*story time.*Call play_story.*$\n?",
+        r"^.*After play_story returns.*$\n?",
+        r"^.*play_music/play_story.*$\n?",
+        r"^.*AUDIO TOOL SILENCE RULE.*$\n?",
+    ]
+    for pattern in line_patterns:
+        updated_prompt = re.sub(pattern, "", updated_prompt, flags=re.MULTILINE)
+
+    replacement = """
+
+    **MUSIC RESPONSES (NO TOOL):**
+    - Never call play_music in this worker.
+    - If the user asks for music, reply briefly that you cannot play music here, then offer a short sing-along line, rhyme, or story instead.
+
+    **STORY RESPONSES (NO TOOL):**
+    - If the user asks for a story, tell a short engaging story directly in your voice response.
+    - Never call play_story in this worker.
+    - Keep spoken stories short, fun, and age-appropriate.
+
+    **DEVICE CONTROLS (NO TOOL):**
+    - Never call stop_audio, adjust_device_volume, or set_device_volume in this worker.
+    - If asked to stop audio or change volume, explain briefly that those controls are not available in this mode.
+    """
+    return updated_prompt.strip() + replacement
+
+
+def _add_web_search_guidance(prompt: str) -> str:
+    """Encourage the model to use the weather tool and web search appropriately."""
+    guidance = """
+
+    <tool_selection_rules>
+    - Use get_weather for weather, temperature, rain, humidity, or current conditions in a city.
+    - Use search_web for other real-time or changing information like news, sports scores, current events, or anything the user asks "right now", "today", or "currently".
+    - If a tool can answer the question, use the tool instead of guessing from memory.
+    </tool_selection_rules>
+    """
+    return prompt.strip() + guidance
 
 
 class CheekoAssistant(BaseAssistant):
@@ -81,6 +180,10 @@ async def entrypoint(ctx: JobContext):
 
     # Load configuration (API keys already loaded from .env via load_dotenv)
     yaml_config = ConfigLoader.load_yaml_config()
+    api_keys = yaml_config.get("api_keys", {})
+    if "google" in api_keys and not os.getenv("GOOGLE_API_KEY"):
+        os.environ["GOOGLE_API_KEY"] = api_keys["google"]
+        logger.info("Loaded GOOGLE_API_KEY from config.yaml")
 
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
@@ -89,13 +192,12 @@ async def entrypoint(ctx: JobContext):
 
     # Load pipeline configuration
     stt_config = yaml_config.get('stt', {})
-    llm_config = yaml_config.get('llm', {})
     tts_config = yaml_config.get('tts', {})
     
     stt_model = stt_config.get('model', 'nova-3')
-    llm_model = llm_config.get('model', 'llama-3.3-70b-versatile')
-    llm_temperature = llm_config.get('temperature', 0.8)
+    llm_provider, llm_model, llm_temperature = _get_llm_config(yaml_config)
     tts_voice = tts_config.get('voice', 'Rachel')  # ElevenLabs voice name
+    elevenlabs_api_key, elevenlabs_voice_id, elevenlabs_model_id = _get_elevenlabs_tts_config(yaml_config)
 
     # Parse room name
     room_name = ctx.room.name
@@ -199,6 +301,10 @@ async def entrypoint(ctx: JobContext):
             agent_prompt, child_profile, dispatch_memories, dispatch_relations, dispatch_entities
         )
 
+    agent_prompt = _sanitize_prompt_for_slt_tools(agent_prompt)
+    agent_prompt = _add_web_search_guidance(agent_prompt)
+    logger.info("Updated SLT prompt with tool restrictions and web search guidance")
+
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 
     # COMMENTED OUT - Music service disabled
@@ -229,26 +335,52 @@ async def entrypoint(ctx: JobContext):
     )
     logger.info(f"Deepgram STT created (model: {stt_model})")
     
-    # LLM: Groq
+    # LLM
     # Note: System prompt will be handled through the agent's first interaction
-    llm = groq.LLM(
-        model=llm_model,
-        temperature=llm_temperature
-    )
-    logger.info(f"Groq LLM created (model: {llm_model}, temp: {llm_temperature})")
+    if llm_provider == "google":
+        google_model = llm_model.removeprefix("google/")
+        llm = google.LLM(
+            model=google_model,
+            temperature=llm_temperature,
+        )
+        logger.info(f"Google LLM created (model: {google_model}, temp: {llm_temperature})")
+    elif llm_provider == "groq":
+        llm = groq.LLM(
+            model=llm_model,
+            temperature=llm_temperature
+        )
+        logger.info(f"Groq LLM created (model: {llm_model}, temp: {llm_temperature})")
+    else:
+        raise ValueError(f"Unsupported llm provider for cheeko_SLT: {llm_provider}")
     
     # TTS: ElevenLabs
-    tts = ElevenLabsTTS()
-    logger.info(f"ElevenLabs TTS created")
+    if not elevenlabs_api_key:
+        raise RuntimeError(
+            "ElevenLabs API key is not configured. Set ELEVEN_API_KEY or ELEVENLABS_API_KEY."
+        )
+
+    tts = ElevenLabsTTS(
+        api_key=elevenlabs_api_key,
+        voice_id=elevenlabs_voice_id,
+        model=elevenlabs_model_id,
+    )
+    logger.info(
+        f"ElevenLabs TTS created with voice_id={elevenlabs_voice_id} model={elevenlabs_model_id}"
+    )
+
+    # google_search_tool = google.tools.GoogleSearch() # Removed due to conflict with function tools
+    logger.info("Weather and custom Web Search tools added")
 
     # Create AgentSession with traditional pipeline
     session = AgentSession(
         stt=stt,
         llm=llm,
         tts=tts,
-        tools=MODE_SWITCH_TOOLS
+        tools=[*MODE_SWITCH_TOOLS, get_weather, search_web]
     )
-    logger.info(f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools")
+    logger.info(
+        f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + weather + custom Web Search tools"
+    )
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)

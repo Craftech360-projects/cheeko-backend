@@ -23,8 +23,8 @@ qdrant-client
 sentence-transformers
 
 # EdgeTTS support (uses Microsoft servers but can work offline)
-edge-tts==7.0.2
-
+edge-tts>=7.0.2
+duckduckgo-search
 # Room management and JWT for API calls
 livekit-api
 PyJWT
