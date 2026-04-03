@@ -291,29 +291,34 @@ router.get('/download/:uuid',
 
     // Look up firmware ID from cache
     const cacheEntry = otaDownloadCache.get(uuid);
+    let firmwareId;
     if (!cacheEntry) {
-      return res.status(404).send();
-    }
+      // Backward compatibility: OTA check currently returns firmware ID directly,
+      // while this endpoint originally expects a cached UUID token.
+      firmwareId = uuid;
+      logger.warn(`OTA download cache miss for key=${uuid}; falling back to direct firmware id lookup`);
+    } else {
+      // Check download count (max 3 times like Spring Boot)
+      if (cacheEntry.downloadCount >= 3) {
+        otaDownloadCache.delete(uuid);
+        return res.status(404).send();
+      }
 
-    // Check download count (max 3 times like Spring Boot)
-    if (cacheEntry.downloadCount >= 3) {
-      otaDownloadCache.delete(uuid);
-      return res.status(404).send();
+      // Increment download count
+      cacheEntry.downloadCount++;
+      firmwareId = cacheEntry.id;
     }
-
-    // Increment download count
-    cacheEntry.downloadCount++;
 
     try {
       // Get firmware information
-      const firmware = await deviceService.getFirmwareById(cacheEntry.id);
-      logger.info(`Download firmware lookup: id=${cacheEntry.id}, firmware=${JSON.stringify(firmware)}`);
+      const firmware = await deviceService.getFirmwareById(firmwareId);
+      logger.info(`Download firmware lookup: id=${firmwareId}, firmware=${JSON.stringify(firmware)}`);
       if (!firmware) {
-        logger.error(`Firmware not found in database: ${cacheEntry.id}`);
+        logger.error(`Firmware not found in database: ${firmwareId}`);
         return res.status(404).send();
       }
       if (!firmware.firmware_path) {
-        logger.error(`Firmware has no firmware_path: id=${cacheEntry.id}, record=${JSON.stringify(firmware)}`);
+        logger.error(`Firmware has no firmware_path: id=${firmwareId}, record=${JSON.stringify(firmware)}`);
         return res.status(404).send();
       }
 

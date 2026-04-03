@@ -29,6 +29,45 @@ setInterval(() => {
 }, 60 * 60 * 1000); // Clean up every hour
 
 /**
+ * Normalize OTA base URL so firmware download links are always valid.
+ * Supports:
+ * - Host only: http://host -> http://host/<contextPath>
+ * - Legacy Java style: http://host/<contextPath>/ota/ -> http://host/<contextPath>
+ * - Current style: http://host/<contextPath>
+ * @param {string|null} rawOtaUrl
+ * @returns {string|null}
+ */
+const normalizeOtaBaseUrl = (rawOtaUrl) => {
+  if (!rawOtaUrl || rawOtaUrl === 'null') return null;
+
+  const contextPath = (process.env.CONTEXT_PATH || '/toy').replace(/\/+$/, '') || '/toy';
+  let otaUrl = String(rawOtaUrl).trim().replace(/\/+$/, '');
+
+  // Backward compatibility with Java config style ending in /ota or /ota/
+  if (otaUrl.endsWith('/ota')) {
+    otaUrl = otaUrl.slice(0, -4);
+  }
+
+  try {
+    const parsed = new URL(otaUrl);
+    const path = parsed.pathname.replace(/\/+$/, '');
+
+    // If only host/root is configured, append API context path.
+    if (!path || path === '/') {
+      parsed.pathname = contextPath;
+    }
+
+    return parsed.toString().replace(/\/+$/, '');
+  } catch (_) {
+    // Non-URL input fallback: keep behavior safe and deterministic.
+    if (!otaUrl.endsWith(contextPath)) {
+      otaUrl = `${otaUrl}${contextPath}`;
+    }
+    return otaUrl.replace(/\/+$/, '');
+  }
+};
+
+/**
  * Register a new device
  * @param {Object} data - Device data
  * @returns {Promise<Object>} Created device
@@ -428,26 +467,33 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
     const firmwareType = board || 'esp32';
     const forceUpdateFirmware = await getForceUpdateFirmware(firmwareType);
     const latestFirmware = await getLatestFirmware(firmwareType);
+    const otaBaseUrl = normalizeOtaBaseUrl(await getSystemParam('server.ota'));
 
     // Include firmware if:
     // 1. Force update is enabled (regardless of version), OR
     // 2. There's a newer version available
     if (forceUpdateFirmware) {
       // Force update - always include, version doesn't matter
-      const otaUrl = await getSystemParam('server.ota');
-      response.firmware = {
-        version: forceUpdateFirmware.version,
-        url: `${otaUrl}/otaMag/download/${forceUpdateFirmware.id}`,
-        force: 1
-      };
+      if (otaBaseUrl) {
+        response.firmware = {
+          version: forceUpdateFirmware.version,
+          url: `${otaBaseUrl}/otaMag/download/${forceUpdateFirmware.id}`,
+          force: 1
+        };
+      } else {
+        logger.warn('Missing or invalid server.ota system param; skipping firmware URL in OTA response');
+      }
     } else if (latestFirmware && latestFirmware.version !== currentVersion) {
       // New version available (no force)
-      const otaUrl = await getSystemParam('server.ota');
-      response.firmware = {
-        version: latestFirmware.version,
-        url: `${otaUrl}/otaMag/download/${latestFirmware.id}`,
-        force: 0
-      };
+      if (otaBaseUrl) {
+        response.firmware = {
+          version: latestFirmware.version,
+          url: `${otaBaseUrl}/otaMag/download/${latestFirmware.id}`,
+          force: 0
+        };
+      } else {
+        logger.warn('Missing or invalid server.ota system param; skipping firmware URL in OTA response');
+      }
     }
   }
 
