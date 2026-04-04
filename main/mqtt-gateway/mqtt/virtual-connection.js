@@ -1384,7 +1384,7 @@ class VirtualMQTTConnection {
       const rfidUid = json.rfid_uid;
 
       try {
-        const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/toy\/?$/, "");
+        const baseUrl = process.env.MANAGER_API_URL;
         const tapUrl = `${baseUrl}/admin/rfid/card/tap`;
 
         const payload = {
@@ -1450,9 +1450,32 @@ class VirtualMQTTConnection {
       );
 
       try {
-        const cleanMac = this.macAddress.replace(/:/g, "").toLowerCase();
         const rfidUid = json.rfid_uid;
         const baseUrl = process.env.MANAGER_API_URL;
+        const sessionId = json.session_id || this.udp?.session_id || null;
+
+        // Backward compatibility:
+        // legacy firmware may only send card_lookup (no card_tap_event),
+        // so log a best-effort tap event here as well.
+        const fallbackEventId = json.event_id
+          || `lookup_${sessionId || "nosession"}_${rfidUid}_${json.tap_ts || Date.now()}`;
+        axios.post(
+          `${baseUrl}/admin/rfid/card/tap`,
+          {
+            event_id: fallbackEventId,
+            session_id: sessionId,
+            mac_address: json.mac_address || this.macAddress,
+            rfid_uid: rfidUid,
+            local_skill_id: json.local_skill_id || null,
+            local_version: json.local_version || null,
+            local_content_hash: json.local_content_hash || null,
+            tap_ts: json.tap_ts || new Date().toISOString(),
+            source: "gateway_card_lookup",
+          },
+          { timeout: 3000 }
+        ).catch((tapErr) => {
+          logger.warn(`⚠️ [RFID-TAP] Failed to log lookup tap for uid=${rfidUid}: ${tapErr.message}`);
+        });
 
         // Call Manager API RFID lookup endpoint
         const lookupUrl = `${baseUrl}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}`;

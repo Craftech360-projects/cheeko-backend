@@ -2505,10 +2505,43 @@ const recordCardTap = async (payload = {}) => {
     })
   ]);
 
-  const cardType = determineTapCardType(mapping);
-  const recognized = Boolean(mapping);
-  const contentPack = mapping?.rfid_content_pack || null;
-  const latestVersion = normalizeVersion(contentPack?.version);
+  let lookupResolved = null;
+  if (!mapping) {
+    try {
+      lookupResolved = await lookupCardByUid(normalizedUid);
+    } catch (lookupErr) {
+      logger.warn(`[RFID-TAP] Fallback lookup failed for uid=${normalizedUid}: ${lookupErr.message}`);
+    }
+  }
+
+  const resolvedCardTypeFromLookup = (() => {
+    if (!lookupResolved) return 'unknown';
+    if (lookupResolved.agentName || lookupResolved.actionType === 'agent' || lookupResolved.actionType === 'ai') {
+      return 'ai';
+    }
+    if (lookupResolved.contentType === 'prompt_pack') {
+      return 'qna';
+    }
+    if (lookupResolved.contentType && lookupResolved.contentType !== 'prompt') {
+      return 'content';
+    }
+    return 'prompt';
+  })();
+
+  const cardType = mapping ? determineTapCardType(mapping) : resolvedCardTypeFromLookup;
+  const recognized = Boolean(mapping || lookupResolved);
+  let contentPack = mapping?.rfid_content_pack || null;
+  if (!contentPack && lookupResolved?.packCode) {
+    try {
+      contentPack = await prisma.rfid_content_pack.findFirst({
+        where: { pack_code: lookupResolved.packCode },
+        select: { id: true, pack_code: true, name: true, version: true, content_hash: true }
+      });
+    } catch (packLookupErr) {
+      logger.warn(`[RFID-TAP] Failed to resolve content pack by packCode=${lookupResolved.packCode}: ${packLookupErr.message}`);
+    }
+  }
+  const latestVersion = normalizeVersion(contentPack?.version || lookupResolved?.version);
   const latestContentHash = normalizeVersion(contentPack?.content_hash);
 
   let updateAvailable = false;
@@ -2585,7 +2618,7 @@ const recordCardTap = async (payload = {}) => {
     contentPackId: contentPack?.id ? Number(contentPack.id) : null,
     contentPackCode: contentPack?.pack_code || null,
     contentPackName: contentPack?.name || null,
-    skillId: contentPack?.pack_code || (contentPack?.id ? String(contentPack.id) : null),
+    skillId: contentPack?.pack_code || lookupResolved?.packCode || (contentPack?.id ? String(contentPack.id) : null),
     clientVersion,
     latestVersion,
     latestContentHash,

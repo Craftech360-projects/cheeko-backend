@@ -879,6 +879,33 @@ class MQTTGateway {
           return;
         }
 
+        // Send tap analytics through the same pipeline used by card_tap_event.
+        // This keeps legacy card_lookup traffic visible in unified analytics.
+        try {
+          const sessionId = originalPayload.session_id || null;
+          const fallbackEventId =
+            originalPayload.event_id ||
+            `lookup_${sessionId || "nosession"}_${rfidUid}_${originalPayload.tap_ts || Date.now()}`;
+          const tapPayload = {
+            event_id: fallbackEventId,
+            session_id: sessionId,
+            mac_address: originalPayload.mac_address || deviceId,
+            rfid_uid: rfidUid,
+            local_skill_id: originalPayload.local_skill_id || null,
+            local_version: originalPayload.local_version || null,
+            local_content_hash: originalPayload.local_content_hash || null,
+            tap_ts: originalPayload.tap_ts || new Date().toISOString(),
+            source: "gateway_card_lookup_router",
+          };
+          axios
+            .post(`${process.env.MANAGER_API_URL}/admin/rfid/card/tap`, tapPayload, { timeout: 3000 })
+            .catch((tapErr) => {
+              logger.warn(`[RFID-TAP] Failed to log card_lookup tap for uid=${rfidUid}: ${tapErr.message}`);
+            });
+        } catch (tapBuildErr) {
+          logger.warn(`[RFID-TAP] Failed to build tap payload for uid=${rfidUid}: ${tapBuildErr.message}`);
+        }
+
         logger.info(`[RFID-SCAN] Card scanned on device ${deviceId}: uid=${rfidUid}, sequence=${sequence}`);
 
         const rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
