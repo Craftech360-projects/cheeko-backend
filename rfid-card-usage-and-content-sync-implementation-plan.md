@@ -2,306 +2,216 @@
 
 ## 1. Objective
 
-Implement a complete tap-to-analytics and content-update handshake across firmware, MQTT gateway, manager API, manager web, and database so that:
+Implement and operate a single RFID tap protocol (`card_lookup`) across device, gateway, API, DB, and web so that:
 
-- Every card tap is recorded with toy/device identity.
-- Content version updates are detected on tap.
-- Devices remain local-first and offline-capable.
-- Admins can view daily usage, top cards, top toys, and version mismatch/update-needed signals.
+- Every tap is recorded with card + toy identity.
+- Content update checks happen on each tap.
+- First-time scans on a toy still get content.
+- Local-first playback remains fast and offline-capable.
+- Admins can view daily analytics and update-needed insights.
 
-## 2. Current Gaps
+## 2. Final Protocol Decision
 
-- If content is updated on server, device may continue playing stale SD content without knowing update exists.
-- Device does not publish a usage event for every tap when card is already in SD cache.
-- Missing reliable daily analytics for:
-  - who used which card
-  - how many times each card was used
-  - which toys/devices used cards
-- No explicit version handshake on each tap.
+- Legacy `card_tap_event` and `card_tap_ack` are not used.
+- Firmware sends only `card_lookup` on every tap (including SD cache hits).
+- Gateway performs tap analytics + version handshake through Manager API:
+  - `POST /admin/rfid/card/tap`
+- Gateway then responds to firmware with one of:
+  - `card_unknown`
+  - `card_ai`
+  - `card_content`
+  - `card_up_to_date`
 
-## 3. Target Behavior (Final Flow)
+## 3. Final End-to-End Flow
 
 1. Card tapped on device.
-2. Device checks local SD cache for fast playback.
-3. Device always sends tap telemetry to gateway (online path), even when local cache is valid.
-4. Gateway calls manager API to:
-   - record usage
-   - resolve latest content version/hash
-   - determine if update is needed
-5. Gateway sends handshake ACK back to firmware.
+2. Device may start local SD playback immediately (local-first path).
+3. Device still publishes `card_lookup` to gateway for analytics + update check.
+4. Gateway calls `POST /admin/rfid/card/tap` (with retry).
+5. Gateway routes response:
+   - Unknown mapping -> `card_unknown`
+   - AI card -> `card_ai`
+   - Content card + same version/hash -> `card_up_to_date`
+   - Content card + new/changed version/hash -> `card_content`
 6. Firmware:
-   - continues immediate local playback
-   - starts safe background update if `update_required = true`.
+   - keeps/starts playback safely
+   - runs background refresh when update is needed
+   - atomically switches only after download completion
 
-## 4. Message and Protocol Design
+## 4. MQTT Message Contracts
 
-### 4.1 Device to Gateway (`card_tap_event`)
+### 4.1 Device -> Gateway (`card_lookup`)
 
-Publish on every tap:
+Minimum payload:
 
 ```json
 {
-  "type": "card_tap_event",
-  "event_id": "uuid-or-unique-id",
-  "session_id": "optional-session",
-  "mac_address": "A1:B2:C3:D4:E5:F6",
+  "type": "card_lookup",
+  "rfid_uid": "04A1B2C3D4"
+}
+```
+
+Recommended payload (production):
+
+```json
+{
+  "type": "card_lookup",
   "rfid_uid": "04A1B2C3D4",
+  "mac_address": "AA:BB:CC:DD:EE:FF",
+  "session_id": "sess_123",
+  "event_id": "lookup_8f3c2f4e",
+  "tap_ts": "2026-04-04T12:34:56.789Z",
   "local_skill_id": "skill_abc123",
-  "local_version": "1",
-  "local_content_hash": "optional-hash",
-  "tap_ts": "2026-04-04T10:00:00Z"
+  "local_version": "3",
+  "local_content_hash": "sha256:abcd1234",
+  "sequence": 1
 }
 ```
 
-### 4.2 Gateway to Device (`card_tap_ack`)
+Notes:
+
+- On first scan for a card on a toy, firmware may not know local fields. That is valid.
+- `local_skill_id`, `local_version`, `local_content_hash`, `sequence` are optional.
+- For best update accuracy, include local fields after first successful download.
+
+### 4.2 Gateway -> Device (`card_unknown`)
 
 ```json
 {
-  "type": "card_tap_ack",
-  "event_id": "same-event-id",
-  "recognized": true,
-  "card_type": "content|ai|unknown",
-  "skill_id": "skill_abc123",
-  "latest_version": "2",
-  "latest_content_hash": "hash",
-  "update_required": true,
-  "download_manifest_url": "https://...",
-  "server_ts": "2026-04-04T10:00:01Z"
+  "type": "card_unknown",
+  "rfid_uid": "04A1B2C3D4"
 }
 ```
 
-### 4.3 Compatibility
+### 4.3 Gateway -> Device (`card_ai`)
 
-- Keep existing `card_lookup` responses for legacy flow.
-- New tap event flow runs for all taps.
-- Use idempotency key (`event_id`) to avoid duplicate analytics rows on retries.
+```json
+{
+  "type": "card_ai",
+  "rfid_uid": "04A1B2C3D4",
+  "agent_name": "cheeko-agent"
+}
+```
 
-## 5. Database Plan
+### 4.4 Gateway -> Device (`card_content`)
 
-## 5.1 Reuse Existing Version Source
+```json
+{
+  "type": "card_content",
+  "rfid_uid": "04A1B2C3D4",
+  "skill_id": "skill_abc123",
+  "skill_name": "The Hungry Fox Story",
+  "version": 4,
+  "audio": [
+    { "index": 1, "url": "https://cdn.cheeko.ai/skills/abc123/audio/track1.mp3" }
+  ],
+  "images": [
+    { "index": 1, "url": "https://cdn.cheeko.ai/skills/abc123/images/page1.jpg" }
+  ],
+  "update_required": true,
+  "latest_version": "4",
+  "latest_content_hash": "sha256:newhash",
+  "download_manifest_path": "/admin/rfid/card/content/download/04A1B2C3D4",
+  "replace_mode": "safe_background_refresh"
+}
+```
 
-- Keep `rfid_content_pack.version` as server-side truth.
+### 4.5 Gateway -> Device (`card_up_to_date`)
 
-## 5.2 Add Dedicated Tap Log Table
+```json
+{
+  "type": "card_up_to_date",
+  "rfid_uid": "04A1B2C3D4",
+  "skill_id": "skill_abc123",
+  "latest_version": "4",
+  "latest_content_hash": "sha256:newhash",
+  "update_required": false,
+  "download_manifest_path": "/admin/rfid/card/content/download/04A1B2C3D4",
+  "server_ts": "2026-04-04T12:35:01.000Z"
+}
+```
 
-Create `rfid_card_tap_log` with fields:
+## 5. Database and API Model
 
-- `id` (PK)
-- `event_id` (unique or indexed for idempotency)
-- `session_id`
-- `mac_address`
-- `device_id` / `toy_id` (resolved via `mac_address`)
-- `rfid_uid`
-- `card_mapping_id`
-- `content_pack_id`
-- `card_type`
-- `client_version`
-- `latest_version`
-- `update_required` (boolean)
-- `source` (`gateway`, etc.)
-- `metadata` (jsonb)
-- `created_at`
+### 5.1 Source of Truth
 
-Indexes:
+- `rfid_content_pack.version`
+- `rfid_content_pack.content_hash` (when available)
 
-- `(created_at)`
-- `(mac_address, created_at)`
-- `(rfid_uid, created_at)`
-- `(card_type, created_at)`
-- `(update_required, created_at)`
-- `(event_id)` unique or strong index
+### 5.2 Tap Analytics Table
 
-Optional for high volume:
+`rfid_card_tap_log` persists:
 
-- daily aggregate/materialized view for dashboard speed.
+- event id (idempotency)
+- mac + resolved device
+- rfid uid + mapping/card type
+- content pack refs
+- client version/hash metadata
+- latest version/hash metadata
+- update required boolean
+- source and timestamps
 
-## 6. Manager API Plan (`manager-api-node`)
-
-## 6.1 New Endpoints
+### 5.3 API Endpoints
 
 - `POST /admin/rfid/card/tap`
-  - validate payload
-  - normalize MAC/UID
-  - resolve device by MAC
-  - resolve card mapping/content pack
-  - compute update status by comparing client vs latest version/hash
-  - insert tap analytics row (idempotent by `event_id`)
-  - return handshake response payload
-
+  - validates and records tap
+  - computes version handshake
+  - returns recognized/cardType/updateRequired/skill/version/hash fields
 - `GET /admin/rfid/card/tap-logs`
-  - paginated logs
-  - filters: date range, uid, mac, card type, update required
-
+  - paginated filterable logs
 - `GET /admin/rfid/card/tap-analytics/summary`
-  - totals
-  - unique cards
-  - unique toys/devices
-  - unknown taps
-  - update-required count
-  - daily trend
-  - top cards
-  - top toys
+  - totals + daily trend + top cards/devices + update-needed insights
 
-## 6.2 Legacy
+## 6. Implementation Status
 
-- Keep existing `/scan` and `/scan-logs` during migration.
-- Mark them as legacy in docs.
+### 6.1 Completed in Backend/Gateway/Web
 
-## 7. Gateway Plan (`mqtt-gateway`)
+- Gateway uses `card_lookup` path only.
+- Tap analytics are logged via `POST /admin/rfid/card/tap` from `card_lookup`.
+- Gateway performs handshake before response routing.
+- `card_up_to_date` is sent for content cards that are already current.
+- `card_content` includes update metadata (`update_required`, `latest_version`, `latest_content_hash`, `download_manifest_path`, `replace_mode`).
+- Manager API summary includes:
+  - `dailyTrend`
+  - `topUpdateRequiredCards`
+  - `topUpdateRequiredDevices`
+- Manager Web analytics tab shows:
+  - KPI totals
+  - daily trend list
+  - top cards needing update
+  - top toys needing update
 
-## 7.1 Tap Processing
+### 6.2 Firmware Pending Responsibilities
 
-- Subscribe for `card_tap_event`.
-- Call manager API `POST /card/tap`.
-- Publish `card_tap_ack` back to device.
+- Always emit `card_lookup` on every tap, including SD cache hit.
+- Include `mac_address`, unique `event_id`, and `tap_ts` on every tap.
+- Include local cache metadata when known (`local_version`, `local_content_hash`, `local_skill_id`).
+- On `card_content` with update required:
+  - download in background staging
+  - write `manifest.jsn` last
+  - atomic swap to active content
+  - do not break current playback
 
-## 7.2 Failure Handling
+## 7. Acceptance Criteria
 
-- If API unavailable:
-  - queue tap events locally
-  - retry with exponential backoff
-  - preserve event order per device where possible
-- Send fallback ACK (non-blocking UX) when strict response unavailable.
+- 100% of taps are eventually recorded, including SD-cache taps.
+- Every tap row is MAC/device attributable.
+- Server content changes are detected through per-tap handshake.
+- First-time scan on a toy still gets content.
+- Safe background refresh updates stale content without playback break.
+- Manager Web shows daily usage and update-needed insights.
 
-## 7.3 Observability
+## 8. Rollout Notes
 
-Track:
+1. Deploy Manager API + DB migration first.
+2. Deploy MQTT gateway updates.
+3. Roll out firmware that always publishes `card_lookup`.
+4. Monitor:
+   - tap ingestion rate
+   - unknown tap rate
+   - update-needed rate
+   - gateway handshake failures/retries
 
-- API latency
-- queue depth
-- retry attempts
-- failed/dropped events
-- ACK success rate
+Critical dependency:
 
-## 8. Firmware Plan (`cheekov2-hardware`)
-
-## 8.1 Local-First Playback
-
-- Keep current SD-first behavior for instant response and offline reliability.
-
-## 8.2 Always Send Tap Telemetry
-
-- Publish `card_tap_event` for every tap in async path.
-- Do not block audio start on network.
-
-## 8.3 Handshake-Driven Update
-
-On `card_tap_ack`:
-
-- if `update_required = false`: continue normal flow.
-- if `update_required = true`: start background content refresh.
-
-## 8.4 Safe Update Strategy
-
-1. Download into staging directory.
-2. Write all audio and images.
-3. Write `manifest.jsn` last (completion marker).
-4. Atomic swap staging to active.
-5. Update `cardmap.jsn` with version/hash + last checked time.
-6. Remove old content only after successful swap.
-
-## 8.5 Resilience
-
-- Retry/resume incomplete downloads.
-- Handle power loss without corrupting active content.
-- Debounce repeated update triggers for same card/version.
-
-## 9. Manager Web Plan (`manager-web`)
-
-## 9.1 New Tab: Card Analytics
-
-Add a tab in RFID management for analytics.
-
-## 9.2 KPI Cards
-
-- total taps
-- unique cards
-- unique toys/devices
-- unknown taps
-- update-required taps
-
-## 9.3 Logs Table
-
-Columns:
-
-- timestamp
-- card UID
-- toy/device MAC
-- toy alias (if available)
-- card type
-- content pack
-- client version
-- latest version
-- update required
-
-Filters:
-
-- date range
-- uid
-- mac
-- card type
-- update required
-
-## 9.4 Charts
-
-- daily taps trend
-- top cards by tap count
-- top toys by tap count
-
-## 10. Rollout Strategy
-
-## Phase 1: Backend and DB
-
-- add migration + API endpoints behind feature flag.
-
-## Phase 2: Gateway
-
-- implement tap event ingestion and ACK publishing.
-
-## Phase 3: Firmware
-
-- publish every tap + process handshake update.
-
-## Phase 4: Manager Web
-
-- analytics UI with filters and summary charts.
-
-## Phase 5: Gradual Production Enablement
-
-- 10% toys -> 50% -> 100%.
-
-## 11. Testing Plan
-
-## 11.1 Unit Tests
-
-- version compare logic
-- idempotency handling
-- payload validation
-
-## 11.2 Integration Tests
-
-- firmware tap -> gateway -> API -> ACK roundtrip
-- known and unknown cards
-- AI and content cards
-
-## 11.3 Failure Scenarios
-
-- gateway offline
-- API timeout
-- duplicate event replay
-- interrupted download
-- power loss during update
-
-## 11.4 Performance Targets
-
-- tap ACK p95 < 500 ms (network path)
-- ingestion success >= 99.9%
-
-## 12. Acceptance Criteria
-
-- 100% of taps are eventually recorded (including SD cache hits).
-- Each tap is attributable to toy/device (MAC-bound).
-- Device detects server content updates via handshake.
-- Safe background refresh replaces stale content without breaking playback.
-- Manager web displays daily card analytics and update-needed insights.
-- Legacy flows continue to function during migration.
+- If firmware does not emit `card_lookup` on every tap, SD-only taps cannot be logged server-side.
