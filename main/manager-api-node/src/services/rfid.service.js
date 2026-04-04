@@ -152,6 +152,136 @@ const buildSummaryDateRange = ({ dateFrom, dateTo, defaultDays = 7, maxDays = 31
   return { startDate, endDate };
 };
 
+let rfidSeriesColumnsPromise = null;
+let rfidCardTapLogTableExistsPromise = null;
+
+const getRfidSeriesColumns = async () => {
+  if (!rfidSeriesColumnsPromise) {
+    rfidSeriesColumnsPromise = prisma.$queryRaw`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'rfid_series'
+    `
+      .then((rows) => new Set((rows || []).map((row) => row.column_name)))
+      .catch((error) => {
+        rfidSeriesColumnsPromise = null;
+        throw error;
+      });
+  }
+
+  return rfidSeriesColumnsPromise;
+};
+
+const buildRfidSeriesSelect = async () => {
+  const columns = await getRfidSeriesColumns();
+
+  return {
+    id: true,
+    start_uid: true,
+    end_uid: true,
+    question_id: true,
+    priority: true,
+    notes: true,
+    ...(columns.has('series_name') ? { series_name: true } : {}),
+    ...(columns.has('content_pack_id') ? { content_pack_id: true } : {}),
+    ...(columns.has('content_ref_id') ? { content_ref_id: true } : {}),
+    ...(columns.has('question_pack_id') ? { question_pack_id: true } : {}),
+    ...(columns.has('card_type') ? { card_type: true } : {}),
+    ...(columns.has('action_data') ? { action_data: true } : {}),
+    ...(columns.has('status') ? { status: true } : {}),
+    ...(columns.has('created_at') ? { created_at: true } : {}),
+    ...(columns.has('updated_at') ? { updated_at: true } : {}),
+    ...(columns.has('content_pack_id')
+      ? { rfid_pack: { select: { id: true, pack_name: true, pack_code: true } } }
+      : {}),
+    rfid_question: { select: { id: true, title: true, code: true } },
+    ...(columns.has('content_ref_id')
+      ? { rfid_content_pack: { select: { id: true, name: true, pack_code: true } } }
+      : {}),
+    ...(columns.has('question_pack_id')
+      ? { rfid_question_pack: { select: { id: true, name: true, pack_code: true } } }
+      : {})
+  };
+};
+
+const applyOptionalRfidSeriesFields = async (target, { cardType, actionData, setDefaults = false } = {}) => {
+  const columns = await getRfidSeriesColumns();
+
+  if (columns.has('card_type')) {
+    if (cardType !== undefined) {
+      target.card_type = cardType;
+    } else if (setDefaults) {
+      target.card_type = 'content';
+    }
+  }
+
+  if (columns.has('action_data')) {
+    if (actionData !== undefined) {
+      target.action_data = actionData;
+    } else if (setDefaults) {
+      target.action_data = {};
+    }
+  }
+
+  return target;
+};
+
+const hasRfidCardTapLogTable = async () => {
+  if (!rfidCardTapLogTableExistsPromise) {
+    rfidCardTapLogTableExistsPromise = prisma.$queryRaw`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = current_schema()
+          AND table_name = 'rfid_card_tap_log'
+      ) AS "exists"
+    `
+      .then((rows) => Boolean(rows?.[0]?.exists))
+      .catch((error) => {
+        rfidCardTapLogTableExistsPromise = null;
+        throw error;
+      });
+  }
+
+  return rfidCardTapLogTableExistsPromise;
+};
+
+const buildTapTrendDays = (startDate, endDate) => {
+  const days = [];
+  const cursor = new Date(startDate);
+  cursor.setHours(0, 0, 0, 0);
+  const endCursor = new Date(endDate);
+  endCursor.setHours(0, 0, 0, 0);
+
+  while (cursor <= endCursor) {
+    days.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return days;
+};
+
+const buildEmptyCardTapAnalyticsSummary = ({ startDate, endDate }) => ({
+  dateRange: {
+    from: startDate.toISOString(),
+    to: endDate.toISOString()
+  },
+  totals: {
+    totalTaps: 0,
+    uniqueCards: 0,
+    uniqueDevices: 0,
+    unknownTaps: 0,
+    updateRequiredTaps: 0
+  },
+  topCards: [],
+  topDevices: [],
+  dailyTrend: buildTapTrendDays(startDate, endDate).map((dayStart) => ({
+    date: dayStart.toISOString().slice(0, 10),
+    taps: 0
+  }))
+});
+
 // =============================================
 // Helper: Transform RFID Question to camelCase (RfidQuestionDTO)
 // =============================================
@@ -463,6 +593,7 @@ const lookupCardByUid = async (rfidUid) => {
     // Fallback to series/bulk-range lookup (matches Java: series → question + pack)
     let series = null;
     try {
+      const seriesSelect = await buildRfidSeriesSelect();
       series = await prisma.rfid_series.findFirst({
         where: {
           start_uid: { lte: normalizedUid },
@@ -470,10 +601,7 @@ const lookupCardByUid = async (rfidUid) => {
           status: 1
         },
         orderBy: { priority: 'desc' },
-        include: {
-          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-          rfid_question: true
-        }
+        select: seriesSelect
       });
     } catch (seriesErr) {
       logger.error('[RFID-LOOKUP] Series lookup DB error:', seriesErr);
@@ -1144,6 +1272,7 @@ const lookupSeriesByUid = async (uid) => {
   const normalizedUid = uid.toUpperCase().replace(/[:-]/g, '');
 
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     // Query series — DB uses 'status' (Int, 1=active)
     const series = await prisma.rfid_series.findFirst({
       where: {
@@ -1151,7 +1280,8 @@ const lookupSeriesByUid = async (uid) => {
         end_uid: { gte: normalizedUid },
         status: 1
       },
-      orderBy: { priority: 'desc' }
+      orderBy: { priority: 'desc' },
+      select: seriesSelect
     });
 
     if (!series) return null;
@@ -1495,6 +1625,7 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
   }
 
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const [total, seriesRows] = await Promise.all([
       prisma.rfid_series.count({ where }),
       prisma.rfid_series.findMany({
@@ -1502,12 +1633,7 @@ const getSeriesList = async ({ page = 1, limit = 10, packId, questionId, active 
         orderBy: { priority: 'desc' },
         skip: offset,
         take: limit,
-        include: {
-          rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-          rfid_question: { select: { id: true, title: true, code: true } },
-          rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-          rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
-        }
+        select: seriesSelect
       })
     ]);
 
@@ -1545,15 +1671,11 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
   }
 
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const seriesRows = await prisma.rfid_series.findMany({
       where,
       orderBy: { priority: 'desc' },
-      include: {
-        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-        rfid_question: { select: { id: true, title: true, code: true } },
-        rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-        rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
-      }
+      select: seriesSelect
     });
     return seriesRows.map(transformSeriesToCamelCase);
   } catch (error) {
@@ -1569,14 +1691,10 @@ const getSeriesAll = async ({ packId, questionId, active } = {}) => {
  */
 const getSeriesById = async (seriesId) => {
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const series = await prisma.rfid_series.findFirst({
       where: { id: BigInt(seriesId) },
-      include: {
-        rfid_pack: { select: { id: true, pack_name: true, pack_code: true } },
-        rfid_question: { select: { id: true, title: true, code: true } },
-        rfid_content_pack: { select: { id: true, name: true, pack_code: true } },
-        rfid_question_pack: { select: { id: true, name: true, pack_code: true } }
-      }
+      select: seriesSelect
     });
     return transformSeriesToCamelCase(series);
   } catch (error) {
@@ -1609,12 +1727,15 @@ const createSeries = async (data, _userId) => {
     content_ref_id: data.contentPackId ? BigInt(data.contentPackId) : null,
     question_pack_id: data.questionPackId ? BigInt(data.questionPackId) : null,
     question_id: data.questionId ? BigInt(data.questionId) : null,
-    card_type: data.cardType || 'content',
-    action_data: data.actionData || {},
     notes: data.notes || null,
     priority: data.priority || 0,
     status: data.active !== false ? 1 : 0
   };
+  await applyOptionalRfidSeriesFields(createData, {
+    cardType: data.cardType,
+    actionData: data.actionData,
+    setDefaults: true
+  });
 
   try {
     await prisma.rfid_series.create({ data: createData });
@@ -1676,10 +1797,12 @@ const updateSeries = async (data, _userId) => {
   }
 
   if (data.questionId !== undefined) updateData.question_id = data.questionId ? BigInt(data.questionId) : null;
-  if (data.cardType !== undefined) updateData.card_type = data.cardType;
-  if (data.actionData !== undefined) updateData.action_data = data.actionData;
   if (data.priority !== undefined) updateData.priority = data.priority;
   if (data.active !== undefined) updateData.status = data.active ? 1 : 0;
+  await applyOptionalRfidSeriesFields(updateData, {
+    cardType: data.cardType,
+    actionData: data.actionData
+  });
 
   // Validate UID order if both are being updated
   if (updateData.start_uid && updateData.end_uid && updateData.start_uid > updateData.end_uid) {
@@ -1746,9 +1869,11 @@ const deleteSeries = async (seriesId) => {
  */
 const getActiveSeries = async () => {
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const seriesRows = await prisma.rfid_series.findMany({
       where: { status: 1 },
-      orderBy: { priority: 'desc' }
+      orderBy: { priority: 'desc' },
+      select: seriesSelect
     });
     return seriesRows.map(transformSeriesToCamelCase);
   } catch (error) {
@@ -1766,12 +1891,14 @@ const findSeriesByUid = async (uid) => {
   const normalizedUid = uid.toUpperCase().replace(/[:-]/g, '');
 
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const seriesRows = await prisma.rfid_series.findMany({
       where: {
         start_uid: { lte: normalizedUid },
         end_uid: { gte: normalizedUid }
       },
-      orderBy: { priority: 'desc' }
+      orderBy: { priority: 'desc' },
+      select: seriesSelect
     });
     return seriesRows.map(transformSeriesToCamelCase);
   } catch (error) {
@@ -1788,9 +1915,11 @@ const findSeriesByUid = async (uid) => {
  */
 const getSeriesByPackId = async (packId) => {
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const seriesRows = await prisma.rfid_series.findMany({
       where: { content_pack_id: BigInt(packId) },
-      orderBy: { priority: 'desc' }
+      orderBy: { priority: 'desc' },
+      select: seriesSelect
     });
     return seriesRows.map(transformSeriesToCamelCase);
   } catch (error) {
@@ -1807,9 +1936,11 @@ const getSeriesByPackId = async (packId) => {
  */
 const getSeriesByQuestionId = async (questionId) => {
   try {
+    const seriesSelect = await buildRfidSeriesSelect();
     const seriesRows = await prisma.rfid_series.findMany({
       where: { question_id: BigInt(questionId) },
-      orderBy: { priority: 'desc' }
+      orderBy: { priority: 'desc' },
+      select: seriesSelect
     });
     return seriesRows.map(transformSeriesToCamelCase);
   } catch (error) {
@@ -2420,18 +2551,23 @@ const recordCardTap = async (payload = {}) => {
     metadata
   };
 
-  const persisted = await prisma.rfid_card_tap_log.upsert({
-    where: { event_id: eventId },
-    create: createData,
-    update: {
-      session_id: sessionId,
-      client_version: clientVersion,
-      latest_version: latestVersion,
-      update_available: updateAvailable,
-      metadata,
-      source
-    }
-  });
+  let persisted = null;
+  if (await hasRfidCardTapLogTable()) {
+    persisted = await prisma.rfid_card_tap_log.upsert({
+      where: { event_id: eventId },
+      create: createData,
+      update: {
+        session_id: sessionId,
+        client_version: clientVersion,
+        latest_version: latestVersion,
+        update_available: updateAvailable,
+        metadata,
+        source
+      }
+    });
+  } else {
+    logger.warn('[RFID-TAP] rfid_card_tap_log table is missing; skipping tap persistence until the migration is applied.');
+  }
 
   const downloadManifestPath = (cardType === 'content' && contentPack)
     ? `/admin/rfid/card/content/download/${encodeURIComponent(normalizedUid)}`
@@ -2469,6 +2605,15 @@ const getCardTapLogs = async ({ page = 1, limit = 50, mac, uid, cardType, update
   const parsedLimit = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
   const offset = (parsedPage - 1) * parsedLimit;
   const where = buildCardTapWhere({ mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo }, true);
+
+  if (!(await hasRfidCardTapLogTable())) {
+    return {
+      list: [],
+      total: 0,
+      page: parsedPage,
+      limit: parsedLimit
+    };
+  }
 
   const [total, logs] = await Promise.all([
     prisma.rfid_card_tap_log.count({ where }),
@@ -2529,6 +2674,10 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
     created_at: { gte: startDate, lte: endDate }
   };
 
+  if (!(await hasRfidCardTapLogTable())) {
+    return buildEmptyCardTapAnalyticsSummary({ startDate, endDate });
+  }
+
   const [
     totalTaps,
     unknownTaps,
@@ -2544,19 +2693,19 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
     prisma.rfid_card_tap_log.groupBy({
       by: ['rfid_uid'],
       where: rangeWhere,
-      _count: { _all: true },
-      orderBy: { _count: { _all: 'desc' } },
+      _count: { rfid_uid: true },
+      orderBy: { _count: { rfid_uid: 'desc' } },
       take: 10
     }),
     prisma.rfid_card_tap_log.groupBy({
       by: ['mac_address'],
       where: rangeWhere,
-      _count: { _all: true },
-      orderBy: { _count: { _all: 'desc' } },
+      _count: { mac_address: true },
+      orderBy: { _count: { mac_address: 'desc' } },
       take: 10
     }),
-    prisma.rfid_card_tap_log.groupBy({ by: ['rfid_uid'], where: rangeWhere, _count: { _all: true } }),
-    prisma.rfid_card_tap_log.groupBy({ by: ['mac_address'], where: rangeWhere, _count: { _all: true } })
+    prisma.rfid_card_tap_log.groupBy({ by: ['rfid_uid'], where: rangeWhere, _count: { rfid_uid: true } }),
+    prisma.rfid_card_tap_log.groupBy({ by: ['mac_address'], where: rangeWhere, _count: { mac_address: true } })
   ]);
 
   const topCardUids = topCardsRaw.map((row) => row.rfid_uid);
@@ -2577,7 +2726,7 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
     const mapping = topMappingByUid.get(row.rfid_uid);
     return {
       rfidUid: row.rfid_uid,
-      taps: row._count._all,
+      taps: row._count.rfid_uid || 0,
       cardType: mapping?.card_type || null,
       contentPackName: mapping?.rfid_content_pack?.name || null,
       contentPackCode: mapping?.rfid_content_pack?.pack_code || null
@@ -2586,19 +2735,10 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
 
   const topDevices = topDevicesRaw.map((row) => ({
     macAddress: row.mac_address,
-    taps: row._count._all
+    taps: row._count.mac_address || 0
   }));
 
-  const dayStarts = [];
-  const cursor = new Date(startDate);
-  cursor.setHours(0, 0, 0, 0);
-  const endCursor = new Date(endDate);
-  endCursor.setHours(0, 0, 0, 0);
-
-  while (cursor <= endCursor) {
-    dayStarts.push(new Date(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
+  const dayStarts = buildTapTrendDays(startDate, endDate);
 
   const dailyTrend = await Promise.all(dayStarts.map(async (dayStart) => {
     const nextDay = new Date(dayStart);
@@ -2928,6 +3068,7 @@ const lookupContentByRfidUid = async (rfidUid, sequence) => {
   // Try series range match if no exact match (series → question, like Java RFID_RAG)
   if (!questionEntity) {
     try {
+      const seriesSelect = await buildRfidSeriesSelect();
       const series = await prisma.rfid_series.findFirst({
         where: {
           start_uid: { lte: normalizedUid },
@@ -2935,9 +3076,7 @@ const lookupContentByRfidUid = async (rfidUid, sequence) => {
           status: 1
         },
         orderBy: { priority: 'desc' },
-        include: {
-          rfid_question: true
-        }
+        select: seriesSelect
       });
 
       if (series?.rfid_question) {

@@ -4,6 +4,7 @@
   "description": "Cheeko Manager API - Node.js/Express backend for AI companion system",
   "main": "server.js",
   "scripts": {
+    "postinstall": "prisma generate",
     "start": "node server.js",
     "dev": "nodemon server.js",
     "dev:no-sync": "set SKIP_DB_SYNC=1 && nodemon server.js",
