@@ -276,6 +276,8 @@ const buildEmptyCardTapAnalyticsSummary = ({ startDate, endDate }) => ({
   },
   topCards: [],
   topDevices: [],
+  topUpdateRequiredCards: [],
+  topUpdateRequiredDevices: [],
   dailyTrend: buildTapTrendDays(startDate, endDate).map((dayStart) => ({
     date: dayStart.toISOString().slice(0, 10),
     taps: 0
@@ -2718,7 +2720,9 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
     topCardsRaw,
     topDevicesRaw,
     uniqueCardsRaw,
-    uniqueDevicesRaw
+    uniqueDevicesRaw,
+    topUpdateRequiredCardsRaw,
+    topUpdateRequiredDevicesRaw
   ] = await Promise.all([
     prisma.rfid_card_tap_log.count({ where: rangeWhere }),
     prisma.rfid_card_tap_log.count({ where: { ...rangeWhere, card_mapping_id: null } }),
@@ -2738,7 +2742,21 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
       take: 10
     }),
     prisma.rfid_card_tap_log.groupBy({ by: ['rfid_uid'], where: rangeWhere, _count: { rfid_uid: true } }),
-    prisma.rfid_card_tap_log.groupBy({ by: ['mac_address'], where: rangeWhere, _count: { mac_address: true } })
+    prisma.rfid_card_tap_log.groupBy({ by: ['mac_address'], where: rangeWhere, _count: { mac_address: true } }),
+    prisma.rfid_card_tap_log.groupBy({
+      by: ['rfid_uid'],
+      where: { ...rangeWhere, update_available: true },
+      _count: { rfid_uid: true },
+      orderBy: { _count: { rfid_uid: 'desc' } },
+      take: 10
+    }),
+    prisma.rfid_card_tap_log.groupBy({
+      by: ['mac_address'],
+      where: { ...rangeWhere, update_available: true },
+      _count: { mac_address: true },
+      orderBy: { _count: { mac_address: 'desc' } },
+      take: 10
+    })
   ]);
 
   const topCardUids = topCardsRaw.map((row) => row.rfid_uid);
@@ -2766,7 +2784,23 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
     };
   });
 
+  const topUpdateRequiredCards = topUpdateRequiredCardsRaw.map((row) => {
+    const mapping = topMappingByUid.get(row.rfid_uid);
+    return {
+      rfidUid: row.rfid_uid,
+      taps: row._count.rfid_uid || 0,
+      cardType: mapping?.card_type || null,
+      contentPackName: mapping?.rfid_content_pack?.name || null,
+      contentPackCode: mapping?.rfid_content_pack?.pack_code || null
+    };
+  });
+
   const topDevices = topDevicesRaw.map((row) => ({
+    macAddress: row.mac_address,
+    taps: row._count.mac_address || 0
+  }));
+
+  const topUpdateRequiredDevices = topUpdateRequiredDevicesRaw.map((row) => ({
     macAddress: row.mac_address,
     taps: row._count.mac_address || 0
   }));
@@ -2805,6 +2839,8 @@ const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, 
     },
     topCards,
     topDevices,
+    topUpdateRequiredCards,
+    topUpdateRequiredDevices,
     dailyTrend
   };
 };

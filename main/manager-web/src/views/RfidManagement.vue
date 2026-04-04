@@ -658,6 +658,39 @@
                                 </div>
                             </div>
 
+                            <div class="analytics-insights" v-loading="cardTapSummaryLoading">
+                                <div class="insight-card">
+                                    <div class="insight-title">Daily Tap Trend</div>
+                                    <div class="insight-list">
+                                        <div class="insight-row" v-for="day in (cardTapSummary.dailyTrend || [])" :key="day.date">
+                                            <span>{{ day.date }}</span>
+                                            <strong>{{ day.taps }}</strong>
+                                        </div>
+                                        <div class="insight-empty" v-if="!(cardTapSummary.dailyTrend || []).length">No tap trend data</div>
+                                    </div>
+                                </div>
+                                <div class="insight-card">
+                                    <div class="insight-title">Top Cards Needing Update</div>
+                                    <div class="insight-list">
+                                        <div class="insight-row" v-for="item in (cardTapSummary.topUpdateRequiredCards || [])" :key="item.rfidUid">
+                                            <span>{{ item.rfidUid }}</span>
+                                            <strong>{{ item.taps }}</strong>
+                                        </div>
+                                        <div class="insight-empty" v-if="!(cardTapSummary.topUpdateRequiredCards || []).length">No update-required card taps</div>
+                                    </div>
+                                </div>
+                                <div class="insight-card">
+                                    <div class="insight-title">Top Toys Needing Update</div>
+                                    <div class="insight-list">
+                                        <div class="insight-row" v-for="item in (cardTapSummary.topUpdateRequiredDevices || [])" :key="item.macAddress">
+                                            <span class="uid-mono">{{ item.macAddress }}</span>
+                                            <strong>{{ item.taps }}</strong>
+                                        </div>
+                                        <div class="insight-empty" v-if="!(cardTapSummary.topUpdateRequiredDevices || []).length">No update-required toy taps</div>
+                                    </div>
+                                </div>
+                            </div>
+
                             <el-table :data="cardTapLogsList" class="transparent-table" v-loading="cardTapLogsLoading"
                                 element-loading-text="Loading analytics..." element-loading-spinner="el-icon-loading"
                                 element-loading-background="rgba(255, 255, 255, 0.7)"
@@ -1052,6 +1085,8 @@ export default {
                 },
                 topCards: [],
                 topDevices: [],
+                topUpdateRequiredCards: [],
+                topUpdateRequiredDevices: [],
                 dailyTrend: []
             },
 
@@ -3014,6 +3049,54 @@ export default {
     font-size: 22px;
     font-weight: 700;
     color: #1e293b;
+}
+
+.analytics-insights {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 10px;
+    margin: 0 0 14px;
+}
+
+.insight-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+
+.insight-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #334155;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.insight-list {
+    max-height: 172px;
+    overflow-y: auto;
+}
+
+.insight-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #475569;
+    padding: 4px 0;
+    border-bottom: 1px dashed #e2e8f0;
+}
+
+.insight-row:last-child {
+    border-bottom: none;
+}
+
+.insight-empty {
+    font-size: 12px;
+    color: #94a3b8;
+    padding: 6px 0;
 }
 
 .content-pack-badge {

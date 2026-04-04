@@ -65,6 +65,37 @@ function encodeUrlPath(url) {
   return url.replace(/ /g, '%20');
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5000 } = {}) {
+  const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/$/, "");
+  if (!baseUrl) {
+    throw new Error("MANAGER_API_URL is not configured");
+  }
+
+  const tapUrl = `${baseUrl}/admin/rfid/card/tap`;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const response = await axios.post(tapUrl, tapPayload, { timeout: timeoutMs });
+      if (response?.data?.code === 0 && response?.data?.data) {
+        return response.data.data;
+      }
+      throw new Error(response?.data?.msg || "Tap handshake failed");
+    } catch (error) {
+      lastError = error;
+      logger.warn(
+        `[RFID-TAP] Tap handshake attempt ${attempt}/${maxAttempts} failed for uid=${tapPayload.rfid_uid}: ${error.message}`
+      );
+      if (attempt < maxAttempts) {
+        await sleep(150 * attempt);
+      }
+    }
+  }
+
+  throw lastError || new Error("Tap handshake failed");
+}
+
 /**
  * Lookup RFID card mapping from Manager API.
  *   GET /toy/admin/rfid/card/lookup/{rfidUid}
@@ -862,7 +893,10 @@ class MQTTGateway {
         if (!greetingSent) {
           // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
         }
-      } else if (originalPayload.type === "start_greeting_text" || originalPayload.type === "card_lookup") {
+      } else if (
+        originalPayload.type === "start_greeting_text" ||
+        originalPayload.type === "card_lookup"
+      ) {
         // RFID Card Scan: look up card mapping and route to Content Pack (device) or Q&A (agent)
         const rfidUid =
           originalPayload.rfid_uid ||
@@ -879,31 +913,50 @@ class MQTTGateway {
           return;
         }
 
-        // Send tap analytics through the same pipeline used by card_tap_event.
-        // This keeps legacy card_lookup traffic visible in unified analytics.
+        const sessionId = originalPayload.session_id || null;
+        const fallbackEventId =
+          originalPayload.event_id ||
+          `lookup_${sessionId || "nosession"}_${rfidUid}_${originalPayload.tap_ts || Date.now()}`;
+        const tapPayload = {
+          event_id: fallbackEventId,
+          session_id: sessionId,
+          mac_address: originalPayload.mac_address || deviceId,
+          rfid_uid: rfidUid,
+          local_skill_id: originalPayload.local_skill_id || null,
+          local_version: originalPayload.local_version || null,
+          local_content_hash: originalPayload.local_content_hash || null,
+          tap_ts: originalPayload.tap_ts || new Date().toISOString(),
+          source: "gateway_card_lookup_router",
+        };
+
+        let tapAck = null;
         try {
-          const sessionId = originalPayload.session_id || null;
-          const fallbackEventId =
-            originalPayload.event_id ||
-            `lookup_${sessionId || "nosession"}_${rfidUid}_${originalPayload.tap_ts || Date.now()}`;
-          const tapPayload = {
-            event_id: fallbackEventId,
-            session_id: sessionId,
-            mac_address: originalPayload.mac_address || deviceId,
+          tapAck = await postCardTapHandshake(tapPayload);
+        } catch (tapErr) {
+          logger.warn(`[RFID-TAP] Failed to persist card_lookup tap for uid=${rfidUid}: ${tapErr.message}`);
+        }
+
+        const isContentUpToDate =
+          tapAck &&
+          tapAck.recognized &&
+          tapAck.cardType === "content" &&
+          tapAck.updateRequired === false;
+
+        if (isContentUpToDate) {
+          this.mqttPublish(`devices/p2p/${clientId}`, {
+            type: "card_up_to_date",
             rfid_uid: rfidUid,
-            local_skill_id: originalPayload.local_skill_id || null,
-            local_version: originalPayload.local_version || null,
-            local_content_hash: originalPayload.local_content_hash || null,
-            tap_ts: originalPayload.tap_ts || new Date().toISOString(),
-            source: "gateway_card_lookup_router",
-          };
-          axios
-            .post(`${process.env.MANAGER_API_URL}/admin/rfid/card/tap`, tapPayload, { timeout: 3000 })
-            .catch((tapErr) => {
-              logger.warn(`[RFID-TAP] Failed to log card_lookup tap for uid=${rfidUid}: ${tapErr.message}`);
-            });
-        } catch (tapBuildErr) {
-          logger.warn(`[RFID-TAP] Failed to build tap payload for uid=${rfidUid}: ${tapBuildErr.message}`);
+            skill_id: tapAck.skillId || tapAck.contentPackCode || null,
+            latest_version: tapAck.latestVersion || null,
+            latest_content_hash: tapAck.latestContentHash || null,
+            update_required: false,
+            download_manifest_path: tapAck.downloadManifestPath || null,
+            server_ts: new Date().toISOString(),
+          });
+          logger.info(
+            `[RFID-ROUTING] Content already up to date for uid=${rfidUid}, sent card_up_to_date to device ${deviceId}`
+          );
+          return;
         }
 
         logger.info(`[RFID-SCAN] Card scanned on device ${deviceId}: uid=${rfidUid}, sequence=${sequence}`);
@@ -970,6 +1023,11 @@ class MQTTGateway {
               version: parseInt(rfidContent.version) || 1,
               content_type: rfidContent.contentType || null,
               stories: stories,
+              update_required: tapAck ? Boolean(tapAck.updateRequired) : true,
+              latest_version: tapAck?.latestVersion || (rfidContent.version != null ? String(rfidContent.version) : null),
+              latest_content_hash: tapAck?.latestContentHash || null,
+              download_manifest_path: tapAck?.downloadManifestPath || null,
+              replace_mode: "safe_background_refresh",
             };
 
             logger.info(
@@ -1008,6 +1066,11 @@ class MQTTGateway {
             content_type: rfidContent.contentType || null,
             audio: audio,
             images: images,
+            update_required: tapAck ? Boolean(tapAck.updateRequired) : true,
+            latest_version: tapAck?.latestVersion || (rfidContent.version != null ? String(rfidContent.version) : null),
+            latest_content_hash: tapAck?.latestContentHash || null,
+            download_manifest_path: tapAck?.downloadManifestPath || null,
+            replace_mode: "safe_background_refresh",
           };
 
           logger.info(
