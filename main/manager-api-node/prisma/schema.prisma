@@ -97,6 +97,7 @@ model ai_device {
   create_date       DateTime? @default(now()) @db.Timestamptz(6)
   updater           BigInt?
   update_date       DateTime? @default(now()) @db.Timestamptz(6)
+  rfid_card_tap_log rfid_card_tap_log[]
   sys_user          sys_user? @relation(fields: [user_id], references: [id], onUpdate: NoAction)
 
   @@index([agent_id], map: "idx_ai_device_agent")
@@ -537,6 +538,7 @@ model rfid_card_mapping {
   updater           BigInt?
   update_date       DateTime           @default(now()) @db.Timestamptz(6)
   card_type         String?            @default("content") @db.VarChar(20)
+  rfid_card_tap_log rfid_card_tap_log[]
   rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onUpdate: NoAction)
   rfid_pack         rfid_pack?         @relation(fields: [pack_id], references: [id], onUpdate: NoAction)
   rfid_question     rfid_question?     @relation(fields: [question_id], references: [id], onUpdate: NoAction)
@@ -635,6 +637,7 @@ model rfid_content_pack {
   updater           BigInt?
   update_date       DateTime?           @default(now()) @db.Timestamptz(6)
   content_item      content_item[]
+  rfid_card_tap_log rfid_card_tap_log[]
   rfid_card_mapping rfid_card_mapping[]
   rfid_series       rfid_series[]
 
@@ -676,6 +679,43 @@ model rfid_scan_log {
   rfid_uid     String    @db.VarChar(100)
   action_taken String?   @db.VarChar(100)
   created_at   DateTime? @default(now()) @db.Timestamptz(6)
+}
+
+model rfid_card_tap_log {
+  id                BigInt             @id @default(autoincrement())
+  event_id          String?            @db.VarChar(120)
+  session_id        String?            @db.VarChar(100)
+  mac_address       String             @db.VarChar(20)
+  device_id         String?            @db.Uuid
+  device_alias      String?            @db.VarChar(255)
+  kid_id            BigInt?
+  user_id           BigInt?
+  rfid_uid          String             @db.VarChar(100)
+  card_mapping_id   BigInt?
+  card_type         String?            @db.VarChar(20)
+  content_pack_id   BigInt?
+  content_pack_code String?            @db.VarChar(100)
+  content_pack_name String?            @db.VarChar(255)
+  latest_version    String?            @db.VarChar(50)
+  client_version    String?            @db.VarChar(50)
+  update_available  Boolean?           @default(false)
+  source            String?            @default("gateway") @db.VarChar(30)
+  metadata          Json?              @default("{}")
+  created_at        DateTime?          @default(now()) @db.Timestamptz(6)
+  ai_device         ai_device?         @relation(fields: [device_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rfid_card_mapping rfid_card_mapping? @relation(fields: [card_mapping_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([mac_address], map: "idx_rfid_card_tap_log_mac")
+  @@index([rfid_uid], map: "idx_rfid_card_tap_log_uid")
+  @@index([event_id], map: "idx_rfid_card_tap_log_event_id")
+  @@index([device_id], map: "idx_rfid_card_tap_log_device")
+  @@index([card_mapping_id], map: "idx_rfid_card_tap_log_mapping")
+  @@index([content_pack_id], map: "idx_rfid_card_tap_log_pack")
+  @@index([card_type], map: "idx_rfid_card_tap_log_card_type")
+  @@index([update_available], map: "idx_rfid_card_tap_log_update_available")
+  @@index([created_at], map: "idx_rfid_card_tap_log_created_at")
+  @@unique([event_id], map: "uq_rfid_card_tap_log_event_id")
 }
 
 model rfid_series {

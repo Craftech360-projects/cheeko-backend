@@ -56,6 +56,13 @@
                     <div class="stat-label">Bulk Ranges</div>
                 </div>
             </div>
+            <div class="stat-item" @click="switchTab('cardAnalytics')">
+                <div class="stat-icon analytics"><i class="el-icon-data-analysis"></i></div>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.totalCardTaps }}</div>
+                    <div class="stat-label">Card Taps (7d)</div>
+                </div>
+            </div>
         </div>
 
         <div class="main-wrapper">
@@ -79,6 +86,9 @@
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     <i class="el-icon-s-operation"></i> Bulk Ranges
+                </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'cardAnalytics' }" @click="switchTab('cardAnalytics')">
+                    <i class="el-icon-data-analysis"></i> Card Analytics
                 </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'console' }" @click="switchTab('console')">
                     <i class="el-icon-search"></i> Lookup &amp; Test
@@ -611,6 +621,108 @@
                             </div>
                         </template>
 
+                        <!-- Card Analytics Tab -->
+                        <template v-if="activeTab === 'cardAnalytics'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-data-analysis"></i> Card Tap Analytics
+                                        <el-tag size="mini" type="info" class="section-count">{{ cardTapTotal }} logs</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Track every card tap with toy MAC binding, usage frequency, and content version update signals.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="analytics-summary" v-loading="cardTapSummaryLoading">
+                                <div class="analytics-kpi">
+                                    <div class="analytics-kpi-label">Total Taps</div>
+                                    <div class="analytics-kpi-value">{{ cardTapSummary.totals.totalTaps || 0 }}</div>
+                                </div>
+                                <div class="analytics-kpi">
+                                    <div class="analytics-kpi-label">Unique Cards</div>
+                                    <div class="analytics-kpi-value">{{ cardTapSummary.totals.uniqueCards || 0 }}</div>
+                                </div>
+                                <div class="analytics-kpi">
+                                    <div class="analytics-kpi-label">Unique Toys</div>
+                                    <div class="analytics-kpi-value">{{ cardTapSummary.totals.uniqueDevices || 0 }}</div>
+                                </div>
+                                <div class="analytics-kpi warning">
+                                    <div class="analytics-kpi-label">Updates Required</div>
+                                    <div class="analytics-kpi-value">{{ cardTapSummary.totals.updateRequiredTaps || 0 }}</div>
+                                </div>
+                                <div class="analytics-kpi danger">
+                                    <div class="analytics-kpi-label">Unknown Taps</div>
+                                    <div class="analytics-kpi-value">{{ cardTapSummary.totals.unknownTaps || 0 }}</div>
+                                </div>
+                            </div>
+
+                            <el-table :data="cardTapLogsList" class="transparent-table" v-loading="cardTapLogsLoading"
+                                element-loading-text="Loading analytics..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)"
+                                :header-cell-class-name="headerCellClassName">
+                                <el-table-column label="Time" prop="createdAt" align="center" width="170"></el-table-column>
+                                <el-table-column label="RFID UID" align="center" width="150">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.rfidUid }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Toy MAC" align="center" width="150">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.macAddress }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Toy Alias" prop="deviceAlias" align="center" width="140" show-overflow-tooltip></el-table-column>
+                                <el-table-column label="Card Type" align="center" width="110">
+                                    <template slot-scope="scope">
+                                        <el-tag size="small" :type="scope.row.cardType === 'content' ? 'warning' : (scope.row.cardType === 'ai' ? 'danger' : 'info')">
+                                            {{ scope.row.cardType || 'unknown' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Content Pack" align="center" min-width="180" show-overflow-tooltip>
+                                    <template slot-scope="scope">
+                                        <span>{{ scope.row.contentPackName || scope.row.contentPackCode || '-' }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Version" align="center" width="130">
+                                    <template slot-scope="scope">
+                                        <span>{{ scope.row.clientVersion || '-' }} → {{ scope.row.latestVersion || '-' }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Update?" align="center" width="95">
+                                    <template slot-scope="scope">
+                                        <el-tag size="small" :type="scope.row.updateRequired ? 'warning' : 'success'">
+                                            {{ scope.row.updateRequired ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Recognized" align="center" width="105">
+                                    <template slot-scope="scope">
+                                        <el-tag size="small" :type="scope.row.recognized ? 'success' : 'info'">
+                                            {{ scope.row.recognized ? 'Yes' : 'No' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn"></div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="cardTapPageSize" @change="handleCardTapPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="cardTapCurrentPage === 1" @click="goFirstCardTap">First</button>
+                                    <button class="pagination-btn" :disabled="cardTapCurrentPage === 1" @click="goPrevCardTap">Previous</button>
+                                    <button v-for="page in cardTapVisiblePages" :key="page" class="pagination-btn"
+                                        :class="{ active: page === cardTapCurrentPage }" @click="goToCardTapPage(page)">{{ page }}</button>
+                                    <button class="pagination-btn" :disabled="cardTapCurrentPage === cardTapPageCount" @click="goNextCardTap">Next</button>
+                                    <span class="total-text">Total {{ cardTapTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
                         <!-- Lookup & Test Tab -->
                         <template v-if="activeTab === 'console'">
                             <div class="console-container">
@@ -922,6 +1034,27 @@ export default {
             questionPackDialogTitle: 'Add Q&A Pack',
             questionPackForm: { id: null, packCode: '', name: '', description: '', questionIds: [], language: 'en', category: '', status: 'draft', version: 1, active: true },
 
+            // Card Tap Analytics
+            cardTapLogsList: [],
+            cardTapLogsLoading: false,
+            cardTapCurrentPage: 1,
+            cardTapPageSize: 10,
+            cardTapTotal: 0,
+            cardTapSummaryLoading: false,
+            cardTapSummary: {
+                dateRange: { from: null, to: null },
+                totals: {
+                    totalTaps: 0,
+                    uniqueCards: 0,
+                    uniqueDevices: 0,
+                    unknownTaps: 0,
+                    updateRequiredTaps: 0
+                },
+                topCards: [],
+                topDevices: [],
+                dailyTrend: []
+            },
+
             // Dropdown data
             questionsDropdown: [],
             packsDropdown: [],
@@ -962,7 +1095,8 @@ export default {
                 totalCards: 0,
                 totalAiCards: 0,
                 totalSeries: 0,
-                totalQuestionPacks: 0
+                totalQuestionPacks: 0,
+                totalCardTaps: 0
             },
             statsLoading: false
         };
@@ -1025,6 +1159,13 @@ export default {
         },
         questionPacksVisiblePages() {
             return this.getVisiblePages(this.questionPacksCurrentPage, this.questionPacksPageCount);
+        },
+        // Card Tap Analytics pagination
+        cardTapPageCount() {
+            return Math.ceil(this.cardTapTotal / this.cardTapPageSize);
+        },
+        cardTapVisiblePages() {
+            return this.getVisiblePages(this.cardTapCurrentPage, this.cardTapPageCount);
         }
     },
     methods: {
@@ -1056,6 +1197,7 @@ export default {
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'questionPacks') this.fetchQuestionPacks();
             else if (tab === 'aiCards') this.fetchAiCards();
+            else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
         },
 
         handleSearch() {
@@ -1080,6 +1222,9 @@ export default {
             } else if (this.activeTab === 'aiCards') {
                 this.aiCardsCurrentPage = 1;
                 this.fetchAiCards();
+            } else if (this.activeTab === 'cardAnalytics') {
+                this.cardTapCurrentPage = 1;
+                this.fetchCardTapAnalytics();
             }
         },
 
@@ -1111,7 +1256,7 @@ export default {
             let completed = 0;
             const checkDone = () => {
                 completed++;
-                if (completed >= 6) this.statsLoading = false;
+                if (completed >= 7) this.statsLoading = false;
             };
             Api.rfid.getQuestionPackPage({ page: 1, limit: 1 }, ({ data }) => {
                 if (data.code === 0) this.stats.totalQuestionPacks = data.data.total || 0;
@@ -1135,6 +1280,10 @@ export default {
             });
             Api.rfid.getCardPage({ page: 1, limit: 1, cardType: 'ai' }, ({ data }) => {
                 if (data.code === 0) this.stats.totalAiCards = data.data.total || 0;
+                checkDone();
+            });
+            Api.rfid.getCardTapSummary({}, ({ data }) => {
+                if (data.code === 0) this.stats.totalCardTaps = data.data?.totals?.totalTaps || 0;
                 checkDone();
             });
         },
@@ -1966,6 +2115,52 @@ export default {
             this.deleteQuestionPack(selected);
         },
 
+        // ==================== CARD TAP ANALYTICS ====================
+        buildCardTapSearchParams() {
+            const keyword = (this.searchKeyword || '').trim();
+            if (!keyword) return {};
+            const isMac = keyword.includes(':') || keyword.includes('-') || /^[0-9a-fA-F]{12}$/.test(keyword);
+            return isMac ? { mac: keyword } : { uid: keyword };
+        },
+
+        fetchCardTapAnalytics() {
+            const searchParams = this.buildCardTapSearchParams();
+
+            this.cardTapLogsLoading = true;
+            Api.rfid.getCardTapLogs({
+                page: this.cardTapCurrentPage,
+                limit: this.cardTapPageSize,
+                ...searchParams
+            }, ({ data }) => {
+                this.cardTapLogsLoading = false;
+                if (data.code === 0) {
+                    this.cardTapLogsList = (data.data.list || []).map(item => ({ ...item }));
+                    this.cardTapTotal = data.data.total || 0;
+                } else {
+                    this.$message.error(data.msg || 'Failed to load card tap logs');
+                }
+            });
+
+            this.cardTapSummaryLoading = true;
+            Api.rfid.getCardTapSummary(searchParams, ({ data }) => {
+                this.cardTapSummaryLoading = false;
+                if (data.code === 0) {
+                    this.cardTapSummary = data.data || this.cardTapSummary;
+                    this.stats.totalCardTaps = data.data?.totals?.totalTaps || 0;
+                }
+            });
+        },
+
+        handleCardTapPageSizeChange(val) {
+            this.cardTapPageSize = val;
+            this.cardTapCurrentPage = 1;
+            this.fetchCardTapAnalytics();
+        },
+        goFirstCardTap() { this.cardTapCurrentPage = 1; this.fetchCardTapAnalytics(); },
+        goPrevCardTap() { if (this.cardTapCurrentPage > 1) { this.cardTapCurrentPage--; this.fetchCardTapAnalytics(); } },
+        goNextCardTap() { if (this.cardTapCurrentPage < this.cardTapPageCount) { this.cardTapCurrentPage++; this.fetchCardTapAnalytics(); } },
+        goToCardTapPage(page) { this.cardTapCurrentPage = page; this.fetchCardTapAnalytics(); },
+
         // ==================== CONSOLE ====================
         // ==================== NFC LIVE READER ====================
         toggleNfcConnection() {
@@ -2700,6 +2895,7 @@ export default {
     &.skus { background: #f0fdf4; color: #22c55e; }
     &.cards { background: #faf5ff; color: #a855f7; }
     &.series { background: #fef2f2; color: #ef4444; }
+    &.analytics { background: #eef2ff; color: #4f46e5; }
 }
 
 .stat-content {
@@ -2780,6 +2976,44 @@ export default {
     i {
         margin-right: 3px;
     }
+}
+
+.analytics-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin: 0 0 14px;
+}
+
+.analytics-kpi {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 12px;
+
+    &.warning {
+        background: #fff7ed;
+        border-color: #fed7aa;
+    }
+
+    &.danger {
+        background: #fef2f2;
+        border-color: #fecaca;
+    }
+}
+
+.analytics-kpi-label {
+    font-size: 11px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.analytics-kpi-value {
+    margin-top: 4px;
+    font-size: 22px;
+    font-weight: 700;
+    color: #1e293b;
 }
 
 .content-pack-badge {

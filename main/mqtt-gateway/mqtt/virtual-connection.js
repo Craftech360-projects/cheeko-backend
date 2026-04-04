@@ -1373,6 +1373,76 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // Handle RFID card tap telemetry + version handshake
+    if (json.type === "card_tap_event") {
+      console.log(
+        `🏷️ [RFID-TAP] Tap event received: uid=${json.rfid_uid} from device ${this.deviceId}`
+      );
+
+      const eventId = json.event_id || `tap_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const sessionId = json.session_id || this.udp?.session_id || null;
+      const rfidUid = json.rfid_uid;
+
+      try {
+        const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/toy\/?$/, "");
+        const tapUrl = `${baseUrl}/admin/rfid/card/tap`;
+
+        const payload = {
+          event_id: eventId,
+          session_id: sessionId,
+          mac_address: json.mac_address || this.macAddress,
+          rfid_uid: rfidUid,
+          local_skill_id: json.local_skill_id || json.localSkillId || null,
+          local_version: json.local_version || json.localVersion || null,
+          local_content_hash: json.local_content_hash || json.localContentHash || null,
+          tap_ts: json.tap_ts || new Date().toISOString(),
+          source: "gateway",
+          metadata: json.metadata || {},
+        };
+
+        const response = await axios.post(tapUrl, payload, { timeout: 5000 });
+        const tapAck = response?.data?.code === 0 ? response.data.data : null;
+
+        this.sendMqttMessage(
+          JSON.stringify({
+            type: "card_tap_ack",
+            event_id: eventId,
+            session_id: sessionId,
+            rfid_uid: rfidUid,
+            mac_address: payload.mac_address,
+            recognized: Boolean(tapAck?.recognized),
+            card_type: tapAck?.cardType || "unknown",
+            skill_id: tapAck?.skillId || null,
+            latest_version: tapAck?.latestVersion || null,
+            latest_content_hash: tapAck?.latestContentHash || null,
+            update_required: Boolean(tapAck?.updateRequired),
+            download_manifest_path: tapAck?.downloadManifestPath || null,
+            server_ts: new Date().toISOString(),
+          })
+        );
+
+        console.log(
+          `📤 [RFID-TAP] Sent card_tap_ack to device ${this.deviceId} (update_required=${Boolean(tapAck?.updateRequired)})`
+        );
+      } catch (error) {
+        console.error(`❌ [RFID-TAP] Tap processing failed: ${error.message}`);
+        this.sendMqttMessage(
+          JSON.stringify({
+            type: "card_tap_ack",
+            event_id: eventId,
+            session_id: sessionId,
+            rfid_uid: rfidUid,
+            recognized: false,
+            card_type: "unknown",
+            update_required: false,
+            error: "tap_processing_failed",
+            server_ts: new Date().toISOString(),
+          })
+        );
+      }
+      return;
+    }
+
     // Handle RFID card_lookup messages - query Manager API and respond to device
     if (json.type === "card_lookup") {
       console.log(

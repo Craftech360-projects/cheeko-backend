@@ -40,6 +40,118 @@ const getLanguageName = (languageCode, fallback = null) => {
   return LANGUAGE_NAME_MAP[languageCode.toLowerCase()] || fallback || languageCode;
 };
 
+const normalizeRfidUid = (uid) => {
+  if (!uid) return null;
+  const normalized = String(uid).toUpperCase().replace(/[^0-9A-F]/g, '');
+  return normalized || null;
+};
+
+const normalizeVersion = (version) => {
+  if (version === undefined || version === null) return null;
+  const normalized = String(version).trim();
+  return normalized || null;
+};
+
+const parseDateInput = (value, endOfDay = false) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  if (endOfDay) {
+    date.setHours(23, 59, 59, 999);
+  } else {
+    date.setHours(0, 0, 0, 0);
+  }
+  return date;
+};
+
+const parseBooleanLike = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  return undefined;
+};
+
+const buildCardTapWhere = ({ mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo } = {}, includeDateRange = true) => {
+  const where = {};
+
+  if (mac) {
+    const normalizedMac = normalizeMacAddress(mac);
+    where.mac_address = normalizedMac || String(mac).toUpperCase();
+  }
+
+  if (uid) {
+    const normalizedUid = normalizeRfidUid(uid);
+    if (normalizedUid) {
+      where.rfid_uid = normalizedUid;
+    }
+  }
+
+  if (cardType) {
+    where.card_type = String(cardType).toLowerCase();
+  }
+
+  const parsedUpdateRequired = parseBooleanLike(updateRequired);
+  if (parsedUpdateRequired !== undefined) {
+    where.update_available = parsedUpdateRequired;
+  }
+
+  const parsedRecognized = parseBooleanLike(recognized);
+  if (parsedRecognized === true) {
+    where.card_mapping_id = { not: null };
+  } else if (parsedRecognized === false) {
+    where.card_mapping_id = null;
+  }
+
+  if (includeDateRange) {
+    const startDate = parseDateInput(dateFrom, false);
+    const endDate = parseDateInput(dateTo, true);
+    if (startDate || endDate) {
+      where.created_at = {};
+      if (startDate) where.created_at.gte = startDate;
+      if (endDate) where.created_at.lte = endDate;
+    }
+  }
+
+  return where;
+};
+
+const buildSummaryDateRange = ({ dateFrom, dateTo, defaultDays = 7, maxDays = 31 } = {}) => {
+  const now = new Date();
+  let startDate = parseDateInput(dateFrom, false);
+  let endDate = parseDateInput(dateTo, true);
+
+  if (!startDate && !endDate) {
+    endDate = new Date(now);
+    startDate = new Date(now);
+    startDate.setDate(startDate.getDate() - (defaultDays - 1));
+    startDate.setHours(0, 0, 0, 0);
+  } else if (startDate && !endDate) {
+    endDate = new Date(now);
+  } else if (!startDate && endDate) {
+    startDate = new Date(endDate);
+    startDate.setDate(startDate.getDate() - (defaultDays - 1));
+    startDate.setHours(0, 0, 0, 0);
+  }
+
+  if (startDate > endDate) {
+    const tmp = startDate;
+    startDate = endDate;
+    endDate = tmp;
+  }
+
+  const maxStart = new Date(endDate);
+  maxStart.setDate(maxStart.getDate() - (maxDays - 1));
+  maxStart.setHours(0, 0, 0, 0);
+  if (startDate < maxStart) {
+    startDate = maxStart;
+  }
+
+  return { startDate, endDate };
+};
+
 // =============================================
 // Helper: Transform RFID Question to camelCase (RfidQuestionDTO)
 // =============================================
@@ -2205,6 +2317,325 @@ const getScanLogs = async ({ page = 1, limit = 50, mac, uid } = {}) => {
   }
 };
 
+const determineTapCardType = (mapping) => {
+  if (!mapping) return 'unknown';
+  const cardType = (mapping.card_type || '').toLowerCase();
+  const actionType = (mapping.action_type || '').toLowerCase();
+
+  if (cardType === 'ai' || actionType === 'ai' || actionType === 'agent') {
+    return 'ai';
+  }
+  if (mapping.content_pack_id) return 'content';
+  if (mapping.question_pack_id) return 'qna';
+  if (mapping.question_id || (Array.isArray(mapping.question_ids) && mapping.question_ids.length > 0)) {
+    return 'prompt';
+  }
+  return cardType || 'unknown';
+};
+
+/**
+ * Record card tap analytics and return version-handshake payload for gateway.
+ * @param {Object} payload - Tap payload from gateway/device
+ * @returns {Promise<Object>} Handshake response
+ */
+const recordCardTap = async (payload = {}) => {
+  const rawMac = payload.macAddress || payload.mac_address;
+  const normalizedMac = normalizeMacAddress(rawMac);
+  if (!normalizedMac) {
+    throw new Error('Valid macAddress/mac_address is required');
+  }
+
+  const rawUid = payload.rfidUid || payload.rfid_uid;
+  const normalizedUid = normalizeRfidUid(rawUid);
+  if (!normalizedUid) {
+    throw new Error('Valid rfidUid/rfid_uid is required');
+  }
+
+  const eventId = normalizeVersion(payload.eventId || payload.event_id)
+    || `tap_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const sessionId = normalizeVersion(payload.sessionId || payload.session_id);
+  const localSkillId = normalizeVersion(payload.localSkillId || payload.local_skill_id);
+  const clientVersion = normalizeVersion(payload.localVersion || payload.local_version || payload.clientVersion || payload.client_version);
+  const clientContentHash = normalizeVersion(payload.localContentHash || payload.local_content_hash || payload.clientContentHash || payload.client_content_hash);
+  const source = normalizeVersion(payload.source) || 'gateway';
+
+  const [device, mapping] = await Promise.all([
+    prisma.ai_device.findFirst({
+      where: { mac_address: normalizedMac },
+      select: { id: true, alias: true, kid_id: true, user_id: true }
+    }),
+    prisma.rfid_card_mapping.findFirst({
+      where: { rfid_uid: normalizedUid, active: true },
+      include: {
+        rfid_content_pack: {
+          select: { id: true, pack_code: true, name: true, version: true, content_hash: true }
+        }
+      }
+    })
+  ]);
+
+  const cardType = determineTapCardType(mapping);
+  const recognized = Boolean(mapping);
+  const contentPack = mapping?.rfid_content_pack || null;
+  const latestVersion = normalizeVersion(contentPack?.version);
+  const latestContentHash = normalizeVersion(contentPack?.content_hash);
+
+  let updateAvailable = false;
+  if (cardType === 'content' && contentPack) {
+    if (latestVersion && !clientVersion) {
+      updateAvailable = true;
+    } else if (latestVersion && clientVersion && latestVersion !== clientVersion) {
+      updateAvailable = true;
+    } else if (latestContentHash && clientContentHash && latestContentHash !== clientContentHash) {
+      updateAvailable = true;
+    }
+  }
+
+  const metadata = {
+    ...(payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
+    local_skill_id: localSkillId,
+    local_content_hash: clientContentHash,
+    latest_content_hash: latestContentHash,
+    tap_ts: payload.tapTs || payload.tap_ts || null
+  };
+
+  const createData = {
+    event_id: eventId,
+    session_id: sessionId,
+    mac_address: normalizedMac,
+    device_id: device?.id || null,
+    device_alias: device?.alias || null,
+    kid_id: device?.kid_id || null,
+    user_id: device?.user_id || null,
+    rfid_uid: normalizedUid,
+    card_mapping_id: mapping?.id || null,
+    card_type: cardType,
+    content_pack_id: contentPack?.id || mapping?.content_pack_id || null,
+    content_pack_code: contentPack?.pack_code || null,
+    content_pack_name: contentPack?.name || null,
+    latest_version: latestVersion,
+    client_version: clientVersion,
+    update_available: updateAvailable,
+    source,
+    metadata
+  };
+
+  const persisted = await prisma.rfid_card_tap_log.upsert({
+    where: { event_id: eventId },
+    create: createData,
+    update: {
+      session_id: sessionId,
+      client_version: clientVersion,
+      latest_version: latestVersion,
+      update_available: updateAvailable,
+      metadata,
+      source
+    }
+  });
+
+  const downloadManifestPath = (cardType === 'content' && contentPack)
+    ? `/admin/rfid/card/content/download/${encodeURIComponent(normalizedUid)}`
+    : null;
+
+  return {
+    type: 'card_tap_ack',
+    eventId,
+    sessionId,
+    recognized,
+    macAddress: normalizedMac,
+    rfidUid: normalizedUid,
+    cardType,
+    cardMappingId: mapping?.id ? Number(mapping.id) : null,
+    contentPackId: contentPack?.id ? Number(contentPack.id) : null,
+    contentPackCode: contentPack?.pack_code || null,
+    contentPackName: contentPack?.name || null,
+    skillId: contentPack?.pack_code || (contentPack?.id ? String(contentPack.id) : null),
+    clientVersion,
+    latestVersion,
+    latestContentHash,
+    updateRequired: updateAvailable,
+    downloadManifestPath,
+    logId: persisted?.id ? Number(persisted.id) : null
+  };
+};
+
+/**
+ * Get card tap logs with filters.
+ * @param {Object} options - filter/pagination options
+ * @returns {Promise<Object>} paginated tap logs
+ */
+const getCardTapLogs = async ({ page = 1, limit = 50, mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo } = {}) => {
+  const parsedPage = Math.max(1, parseInt(page, 10) || 1);
+  const parsedLimit = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
+  const offset = (parsedPage - 1) * parsedLimit;
+  const where = buildCardTapWhere({ mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo }, true);
+
+  const [total, logs] = await Promise.all([
+    prisma.rfid_card_tap_log.count({ where }),
+    prisma.rfid_card_tap_log.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      skip: offset,
+      take: parsedLimit,
+      include: {
+        ai_device: { select: { id: true, alias: true } },
+        rfid_content_pack: { select: { id: true, pack_code: true, name: true } }
+      }
+    })
+  ]);
+
+  const list = (logs || []).map((row) => ({
+    id: row.id ? Number(row.id) : null,
+    eventId: row.event_id || null,
+    sessionId: row.session_id || null,
+    macAddress: row.mac_address,
+    deviceId: row.device_id || null,
+    deviceAlias: row.device_alias || row.ai_device?.alias || null,
+    kidId: row.kid_id ? Number(row.kid_id) : null,
+    userId: row.user_id ? Number(row.user_id) : null,
+    rfidUid: row.rfid_uid,
+    cardMappingId: row.card_mapping_id ? Number(row.card_mapping_id) : null,
+    recognized: Boolean(row.card_mapping_id),
+    cardType: row.card_type || 'unknown',
+    contentPackId: row.content_pack_id ? Number(row.content_pack_id) : null,
+    contentPackCode: row.content_pack_code || row.rfid_content_pack?.pack_code || null,
+    contentPackName: row.content_pack_name || row.rfid_content_pack?.name || null,
+    clientVersion: row.client_version || null,
+    latestVersion: row.latest_version || null,
+    updateRequired: Boolean(row.update_available),
+    source: row.source || null,
+    metadata: row.metadata || {},
+    createdAt: formatDate(row.created_at)
+  }));
+
+  return {
+    list,
+    total,
+    page: parsedPage,
+    limit: parsedLimit
+  };
+};
+
+/**
+ * Get aggregated card tap analytics summary.
+ * @param {Object} filters - summary filters
+ * @returns {Promise<Object>} analytics summary
+ */
+const getCardTapAnalyticsSummary = async ({ mac, uid, cardType, updateRequired, recognized, dateFrom, dateTo } = {}) => {
+  const { startDate, endDate } = buildSummaryDateRange({ dateFrom, dateTo });
+  const baseWhere = buildCardTapWhere({ mac, uid, cardType, updateRequired, recognized }, false);
+  const rangeWhere = {
+    ...baseWhere,
+    created_at: { gte: startDate, lte: endDate }
+  };
+
+  const [
+    totalTaps,
+    unknownTaps,
+    updateRequiredTaps,
+    topCardsRaw,
+    topDevicesRaw,
+    uniqueCardsRaw,
+    uniqueDevicesRaw
+  ] = await Promise.all([
+    prisma.rfid_card_tap_log.count({ where: rangeWhere }),
+    prisma.rfid_card_tap_log.count({ where: { ...rangeWhere, card_mapping_id: null } }),
+    prisma.rfid_card_tap_log.count({ where: { ...rangeWhere, update_available: true } }),
+    prisma.rfid_card_tap_log.groupBy({
+      by: ['rfid_uid'],
+      where: rangeWhere,
+      _count: { _all: true },
+      orderBy: { _count: { _all: 'desc' } },
+      take: 10
+    }),
+    prisma.rfid_card_tap_log.groupBy({
+      by: ['mac_address'],
+      where: rangeWhere,
+      _count: { _all: true },
+      orderBy: { _count: { _all: 'desc' } },
+      take: 10
+    }),
+    prisma.rfid_card_tap_log.groupBy({ by: ['rfid_uid'], where: rangeWhere, _count: { _all: true } }),
+    prisma.rfid_card_tap_log.groupBy({ by: ['mac_address'], where: rangeWhere, _count: { _all: true } })
+  ]);
+
+  const topCardUids = topCardsRaw.map((row) => row.rfid_uid);
+  const topMappings = topCardUids.length > 0
+    ? await prisma.rfid_card_mapping.findMany({
+      where: { rfid_uid: { in: topCardUids } },
+      select: {
+        rfid_uid: true,
+        card_type: true,
+        rfid_content_pack: { select: { name: true, pack_code: true } }
+      }
+    })
+    : [];
+
+  const topMappingByUid = new Map(topMappings.map((m) => [m.rfid_uid, m]));
+
+  const topCards = topCardsRaw.map((row) => {
+    const mapping = topMappingByUid.get(row.rfid_uid);
+    return {
+      rfidUid: row.rfid_uid,
+      taps: row._count._all,
+      cardType: mapping?.card_type || null,
+      contentPackName: mapping?.rfid_content_pack?.name || null,
+      contentPackCode: mapping?.rfid_content_pack?.pack_code || null
+    };
+  });
+
+  const topDevices = topDevicesRaw.map((row) => ({
+    macAddress: row.mac_address,
+    taps: row._count._all
+  }));
+
+  const dayStarts = [];
+  const cursor = new Date(startDate);
+  cursor.setHours(0, 0, 0, 0);
+  const endCursor = new Date(endDate);
+  endCursor.setHours(0, 0, 0, 0);
+
+  while (cursor <= endCursor) {
+    dayStarts.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const dailyTrend = await Promise.all(dayStarts.map(async (dayStart) => {
+    const nextDay = new Date(dayStart);
+    nextDay.setDate(nextDay.getDate() + 1);
+    const count = await prisma.rfid_card_tap_log.count({
+      where: {
+        ...baseWhere,
+        created_at: {
+          gte: dayStart,
+          lt: nextDay
+        }
+      }
+    });
+    return {
+      date: dayStart.toISOString().slice(0, 10),
+      taps: count
+    };
+  }));
+
+  return {
+    dateRange: {
+      from: startDate.toISOString(),
+      to: endDate.toISOString()
+    },
+    totals: {
+      totalTaps,
+      uniqueCards: uniqueCardsRaw.length,
+      uniqueDevices: uniqueDevicesRaw.length,
+      unknownTaps,
+      updateRequiredTaps
+    },
+    topCards,
+    topDevices,
+    dailyTrend
+  };
+};
+
 /**
  * Register device RFID tags (batch) (legacy)
  * @param {string} mac - Device MAC address
@@ -3638,6 +4069,9 @@ module.exports = {
   deleteRfid,
   processScan,
   getScanLogs,
+  recordCardTap,
+  getCardTapLogs,
+  getCardTapAnalyticsSummary,
   registerDeviceTags,
 
   // Content Item methods (Task 3)

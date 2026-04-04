@@ -795,5 +795,63 @@ export default {
                 console.error('Failed to get content download:', err)
                 callback({ data: { code: -1, msg: 'Network error', data: null } })
             }).send()
+    },
+
+    // ==================== CARD TAP ANALYTICS ====================
+
+    // Get card tap logs with filters
+    getCardTapLogs(params, callback) {
+        const queryParams = new URLSearchParams({
+            page: params.page || 1,
+            limit: params.limit || 50,
+            mac: params.mac || '',
+            uid: params.uid || '',
+            cardType: params.cardType || '',
+            updateRequired: params.updateRequired !== undefined && params.updateRequired !== null ? params.updateRequired : '',
+            recognized: params.recognized !== undefined && params.recognized !== null ? params.recognized : '',
+            dateFrom: params.dateFrom || '',
+            dateTo: params.dateTo || ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/card/tap-logs?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get card tap logs:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getCardTapLogs(params, callback)
+                })
+            }).send()
+    },
+
+    // Get card tap analytics summary
+    getCardTapSummary(params, callback) {
+        const queryParams = new URLSearchParams({
+            mac: params.mac || '',
+            uid: params.uid || '',
+            cardType: params.cardType || '',
+            updateRequired: params.updateRequired !== undefined && params.updateRequired !== null ? params.updateRequired : '',
+            recognized: params.recognized !== undefined && params.recognized !== null ? params.recognized : '',
+            dateFrom: params.dateFrom || '',
+            dateTo: params.dateTo || ''
+        }).toString();
+
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/card/tap-analytics/summary?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get card tap analytics summary:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getCardTapSummary(params, callback)
+                })
+            }).send()
     }
 }

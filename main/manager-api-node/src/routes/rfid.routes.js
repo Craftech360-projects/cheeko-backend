@@ -26,6 +26,15 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
 
+const parseBoolQuery = (value) => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  return undefined;
+};
+
 // Multer config for xlsx uploads (memory storage, 10MB max)
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -270,6 +279,80 @@ router.get('/card/lookup/:rfidUid',
     }
     logger.info(`[RFID-LOOKUP] Card found for uid=${rfidUid}: contentType=${card.contentType}, items=${card.items ? card.items.length : 0}, title="${card.title || card.packName || ''}"`);
     success(res, card);
+  })
+);
+
+/**
+ * Record a card tap event and return version-handshake response.
+ * Public endpoint intended for gateway ingestion.
+ */
+router.post('/card/tap',
+  asyncHandler(async (req, res) => {
+    const body = req.body || {};
+    const result = await rfidService.recordCardTap(body);
+    success(res, result);
+  })
+);
+
+/**
+ * Get card tap logs with pagination and filters.
+ */
+router.get('/card/tap-logs',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const {
+      page,
+      limit,
+      mac,
+      uid,
+      cardType,
+      updateRequired,
+      recognized,
+      dateFrom,
+      dateTo
+    } = req.query;
+
+    const result = await rfidService.getCardTapLogs({
+      page: parseInt(page, 10) || 1,
+      limit: parseInt(limit, 10) || 50,
+      mac,
+      uid,
+      cardType,
+      updateRequired: parseBoolQuery(updateRequired),
+      recognized: parseBoolQuery(recognized),
+      dateFrom,
+      dateTo
+    });
+    success(res, result);
+  })
+);
+
+/**
+ * Get aggregated card tap analytics summary.
+ */
+router.get('/card/tap-analytics/summary',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const {
+      mac,
+      uid,
+      cardType,
+      updateRequired,
+      recognized,
+      dateFrom,
+      dateTo
+    } = req.query;
+
+    const result = await rfidService.getCardTapAnalyticsSummary({
+      mac,
+      uid,
+      cardType,
+      updateRequired: parseBoolQuery(updateRequired),
+      recognized: parseBoolQuery(recognized),
+      dateFrom,
+      dateTo
+    });
+    success(res, result);
   })
 );
 
