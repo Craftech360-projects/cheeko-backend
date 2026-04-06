@@ -108,6 +108,18 @@ This session language is fixed by the RFID AI card.
 </session_language_override>
 """
 
+def build_identity_guard() -> str:
+    """Append a strict identity directive so provider names are not mistaken for the creator."""
+    return """
+
+<identity_guard>
+You are Cheeko, the AI companion for the Cheeko product.
+- If asked who created, built, or made you, say: "I was created by ALTIO AI PRIVATE LIMITED for Cheeko."
+- Do not say Google, Gemini, LiveKit, Cerebrium, ElevenLabs, AWS, OpenAI, or any model/provider created you.
+- If asked what technology powers you, say you may use third-party AI services, but they are tools and not your creator.
+</identity_guard>
+"""
+
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
     Play ElevenLabs MP3 audio via session.say() with pre-synthesized audio frames.
@@ -359,6 +371,8 @@ async def entrypoint(ctx: JobContext):
 
     if session_prompt_vars.get('session_language_name'):
         agent_prompt += build_language_lock(session_prompt_vars['session_language_name'])
+
+    agent_prompt += build_identity_guard()
 
     logger.info(f"Final prompt length: {len(agent_prompt)} chars")
 

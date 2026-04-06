@@ -701,10 +701,10 @@ class VirtualMQTTConnection {
         );
         logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
 
-        // Set hard timeout — if agent doesn't join within 15s, notify device
+        // Set hard timeout — if agent doesn't join within 25s, notify device
         this.agentJoinFailsafeTimeout = setTimeout(() => {
           if (this.bridge && !this.bridge.agentJoined && !this.closing) {
-            logger.error(`❌ [AGENT-TIMEOUT] Agent "${agentName}" didn't join within 15s`);
+            logger.error(`❌ [AGENT-TIMEOUT] Agent "${agentName}" didn't join within 25s`);
             this.sendMqttMessage(JSON.stringify({
               type: "goodbye",
               session_id: this.udp?.session_id,
@@ -720,7 +720,7 @@ class VirtualMQTTConnection {
             }));
             this.close();
           }
-        }, 15000);
+        }, 25000);
       } catch (dispatchError) {
         this.bridge.agentDeployed = false;
         logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
