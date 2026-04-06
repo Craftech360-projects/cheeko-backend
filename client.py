@@ -5,6 +5,8 @@ import threading
 import socket
 import struct
 import logging
+import argparse
+import os
 import pyaudio
 import keyboard
 # hjvk
@@ -19,12 +21,14 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "157.245.108.139"
+SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.1.168")
 OTA_PORT = 8002
-MQTT_BROKER_HOST = "157.245.108.139"
+MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", "192.168.1.168")
 
 
-MQTT_BROKER_PORT = 1883
+MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
+MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.1.168:8001/toy")
+MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
 # DEVICE_MAC is now dynamically generated for uniqueness
 # Minimum frames to have in buffer to continue playback
 PLAYBACK_BUFFER_MIN_FRAMES = 3
@@ -72,7 +76,7 @@ def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
     # Create password (HMAC-SHA256) - must match gateway's logic
     # Gateway uses: clientId + '|' + username as content
     # Must match MQTT_SIGNATURE_KEY in gateway's .env
-    secret_key = "test-signature-key-12345"
+    secret_key = MQTT_SIGNATURE_KEY
     content = f"{client_id}|{username}"
     password = base64.b64encode(hmac.new(
         secret_key.encode(), content.encode(), hashlib.sha256).digest()).decode()
@@ -95,10 +99,10 @@ def generate_unique_mac() -> str:
 
 
 class TestClient:
-    def __init__(self):
+    def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = "00:16:3e:ac:b5:38"
+        self.device_mac_formatted = device_mac or "00:16:3e:ac:b5:38"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # MQTT credentials will be set from OTA response
@@ -132,6 +136,23 @@ class TestClient:
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
+
+    def setup_local_test_config(self):
+        """Configure the client for local mqtt-gateway testing without OTA."""
+        self.ota_config = {
+            "mqtt_gateway": {
+                "broker": MQTT_BROKER_HOST,
+                "port": MQTT_BROKER_PORT,
+            }
+        }
+        self.mqtt_credentials = generate_mqtt_credentials(self.device_mac_formatted)
+        self.p2p_topic = f"devices/p2p/{self.mqtt_credentials['client_id']}"
+        logger.info(
+            "[RFID-TEST] Local mode configured with broker=%s:%s client_id=%s",
+            MQTT_BROKER_HOST,
+            MQTT_BROKER_PORT,
+            self.mqtt_credentials["client_id"],
+        )
 
     def on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Callback for MQTT connection."""
@@ -202,6 +223,113 @@ class TestClient:
                 mqtt_message_queue.put(payload)
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Error processing MQTT message: {e}")
+
+    def publish_device_message(self, payload: Dict) -> None:
+        """Publish a raw device message to the gateway."""
+        if not self.mqtt_client:
+            raise RuntimeError("MQTT client is not connected")
+        logger.info("[MQTT->GW] Publishing:\n%s", json.dumps(payload, indent=2))
+        self.mqtt_client.publish("device-server", json.dumps(payload))
+
+    def wait_for_message(self, expected_types, timeout: int = 10) -> Optional[Dict]:
+        """Wait for a message from the gateway matching one of the expected types."""
+        if isinstance(expected_types, str):
+            expected_types = {expected_types}
+        else:
+            expected_types = set(expected_types)
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            remaining = max(0.1, deadline - time.time())
+            try:
+                message = mqtt_message_queue.get(timeout=remaining)
+            except Empty:
+                continue
+
+            msg_type = message.get("type")
+            if msg_type in expected_types:
+                logger.info("[GW->MQTT] Matched message type=%s", msg_type)
+                return message
+
+            logger.info("[GW->MQTT] Ignoring message type=%s while waiting for %s", msg_type, sorted(expected_types))
+
+        return None
+
+    def send_rfid_card_lookup(
+        self,
+        rfid_uid: str,
+        local_version: Optional[str] = None,
+        local_content_hash: Optional[str] = None,
+        local_skill_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Optional[Dict]:
+        """Send a card_lookup payload that exercises tap analytics and version handshake."""
+        payload = {
+            "type": "card_lookup",
+            "event_id": f"lookup_{uuid.uuid4().hex[:12]}",
+            "session_id": session_id,
+            "rfid_uid": rfid_uid,
+            "mac_address": self.device_mac_formatted,
+            "tap_ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        if local_skill_id:
+            payload["local_skill_id"] = local_skill_id
+        if local_version is not None:
+            payload["local_version"] = str(local_version)
+        if local_content_hash is not None:
+            payload["local_content_hash"] = str(local_content_hash)
+
+        self.publish_device_message(payload)
+        return self.wait_for_message(
+            {"card_up_to_date", "card_content", "card_ai", "card_unknown"},
+            timeout=15,
+        )
+
+    def request_content_download(
+        self,
+        rfid_uid: str,
+        current_version: Optional[str] = None,
+    ) -> Optional[Dict]:
+        """Ask the gateway for download links for a content card."""
+        payload = {
+            "type": "download_request",
+            "rfid_uid": rfid_uid,
+            "mac_address": self.device_mac_formatted,
+        }
+        if current_version is not None:
+            payload["current_version"] = str(current_version)
+
+        self.publish_device_message(payload)
+        return self.wait_for_message("download_response", timeout=15)
+
+    def fetch_card_tap_analytics(self, auth_token: str, uid: Optional[str] = None) -> None:
+        """Fetch tap analytics summary/logs from manager-api-node."""
+        headers = {"Authorization": f"Bearer {auth_token}"}
+        summary_params = {"mac": self.device_mac_formatted}
+        log_params = {"mac": self.device_mac_formatted, "limit": 20}
+        if uid:
+            summary_params["uid"] = uid
+            log_params["uid"] = uid
+
+        summary_url = f"{MANAGER_API_BASE}/admin/rfid/card/tap-analytics/summary"
+        logs_url = f"{MANAGER_API_BASE}/admin/rfid/card/tap-logs"
+
+        try:
+            summary_resp = requests.get(summary_url, headers=headers, params=summary_params, timeout=10)
+            logger.info("[ANALYTICS] Summary status=%s", summary_resp.status_code)
+            try:
+                logger.info("[ANALYTICS] Summary body:\n%s", json.dumps(summary_resp.json(), indent=2))
+            except Exception:
+                logger.info("[ANALYTICS] Summary raw body:\n%s", summary_resp.text)
+
+            logs_resp = requests.get(logs_url, headers=headers, params=log_params, timeout=10)
+            logger.info("[ANALYTICS] Logs status=%s", logs_resp.status_code)
+            try:
+                logger.info("[ANALYTICS] Logs body:\n%s", json.dumps(logs_resp.json(), indent=2))
+            except Exception:
+                logger.info("[ANALYTICS] Logs raw body:\n%s", logs_resp.text)
+        except requests.exceptions.RequestException as exc:
+            logger.error("[ANALYTICS] Failed to fetch analytics: %s", exc)
 
     def retry_conversation(self):
         """Retry triggering a conversation if no audio was received."""
@@ -888,16 +1016,84 @@ class TestClient:
         self.trigger_conversation()
         self.cleanup()
 
+    def run_rfid_test(
+        self,
+        rfid_uid: str,
+        local_version: Optional[str] = None,
+        local_content_hash: Optional[str] = None,
+        local_skill_id: Optional[str] = None,
+        request_download: bool = False,
+        download_current_version: Optional[str] = None,
+        analytics_token: Optional[str] = None,
+    ):
+        """Run a focused RFID tap/version test against local services."""
+        self.setup_local_test_config()
+        if not self.connect_mqtt():
+            return
+
+        time.sleep(1)
+        lookup_response = self.send_rfid_card_lookup(
+            rfid_uid=rfid_uid,
+            local_version=local_version,
+            local_content_hash=local_content_hash,
+            local_skill_id=local_skill_id,
+        )
+        if lookup_response is None:
+            logger.error("[RFID-TEST] Timed out waiting for card lookup response")
+        else:
+            logger.info("[RFID-TEST] card_lookup response:\n%s", json.dumps(lookup_response, indent=2))
+
+        if request_download:
+            effective_version = download_current_version if download_current_version is not None else local_version
+            download_response = self.request_content_download(
+                rfid_uid=rfid_uid,
+                current_version=effective_version,
+            )
+            if download_response is None:
+                logger.error("[RFID-TEST] Timed out waiting for download_response")
+            else:
+                logger.info("[RFID-TEST] download_response:\n%s", json.dumps(download_response, indent=2))
+
+        if analytics_token:
+            self.fetch_card_tap_analytics(analytics_token, uid=rfid_uid)
+        else:
+            logger.info("[RFID-TEST] Skipping analytics fetch because no auth token was provided")
+
+        self.cleanup()
+
 
 if __name__ == "__main__":
-    # You can control sequence logging from here
-    print(
-        f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
+    parser = argparse.ArgumentParser(description="Cheeko test client")
+    parser.add_argument("--mode", choices=["voice", "rfid"], default="rfid")
+    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:ac:b5:38"))
+    parser.add_argument("--rfid-uid", default=os.getenv("TEST_RFID_UID"))
+    parser.add_argument("--local-version", default=os.getenv("TEST_LOCAL_VERSION"))
+    parser.add_argument("--local-content-hash", default=os.getenv("TEST_LOCAL_CONTENT_HASH"))
+    parser.add_argument("--local-skill-id", default=os.getenv("TEST_LOCAL_SKILL_ID"))
+    parser.add_argument("--request-download", action="store_true")
+    parser.add_argument("--download-current-version", default=os.getenv("TEST_DOWNLOAD_CURRENT_VERSION"))
+    parser.add_argument("--analytics-token", default=os.getenv("TEST_MANAGER_API_TOKEN"))
+    args = parser.parse_args()
+
+    print(f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
     print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
 
-    client = TestClient()
+    client = TestClient(device_mac=args.device_mac)
     try:
-        client.run_test()
+        if args.mode == "voice":
+            client.run_test()
+        else:
+            if not args.rfid_uid:
+                raise SystemExit("--rfid-uid is required in --mode rfid")
+            client.run_rfid_test(
+                rfid_uid=args.rfid_uid,
+                local_version=args.local_version,
+                local_content_hash=args.local_content_hash,
+                local_skill_id=args.local_skill_id,
+                request_download=args.request_download,
+                download_current_version=args.download_current_version,
+                analytics_token=args.analytics_token,
+            )
     except KeyboardInterrupt:
         logger.info("Manual interruption detected. Cleaning up...")
         client.cleanup()
