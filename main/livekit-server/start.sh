@@ -24,15 +24,6 @@ sleep 2
 echo "Starting Cheeko Agent Worker on port 8081..."
 python workers/cheeko_worker.py dev &
 
-echo "Starting Math Tutor Agent Worker on port 8082..."
-python workers/math_tutor_worker.py dev &
-
-echo "Starting Riddle Solver Agent Worker on port 8083..."
-python workers/riddle_solver_worker.py dev &
-
-echo "Starting Word Ladder Agent Worker on port 8084..."
-python workers/word_ladder_worker.py dev &
-
 # Wait for any process to exit so logs stay visible
 wait -n
 exit $?

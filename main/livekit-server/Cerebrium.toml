@@ -3,7 +3,7 @@ name = "multiagent"
 python_version = "3.11"
 disable_auth = false
 include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*', 'workers/**/*']
-exclude = ['__pycache__/**/*', 'transcripts/**/*', '*.pyc', '.git/**/*', '.vscode/**/*']
+exclude = ['__pycache__/**/*', 'env/**/*', 'transcripts/**/*', '*.pyc', '.git/**/*', '.vscode/**/*']
 
 [cerebrium.hardware]
 region = "eu-west-2"
@@ -27,10 +27,9 @@ dockerfile_path = "./Dockerfile.cerebrium"
 
 [cerebrium.env]
 # LiveKit Cloud Configuration
-LIVEKIT_URL="wss://cheekodev-d6ybig7z.livekit.cloud"
-LIVEKIT_API_KEY="APIpXQA7AoFmUBo"
-LIVEKIT_API_SECRET="LW0KGPa3d1arQGSuOUiln9aVReJAJMqeFyw6C3VrSZU"
-
+LIVEKIT_URL="wss://cheeko-prod-68ib8ma4.livekit.cloud"
+LIVEKIT_API_KEY="APIiA6wPEdDqa9U"
+LIVEKIT_API_SECRET="PuevKxhh7jhi2apAWmKziOBmDoHfjCpICBeokRRNCAnB"
 
 # Google API
 GOOGLE_API_KEY = "AIzaSyDQnuv8reaFvyUO68OE750MwOdGzSptuZw"
