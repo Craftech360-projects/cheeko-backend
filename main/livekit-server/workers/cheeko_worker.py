@@ -41,6 +41,9 @@ from src.config.config_loader import ConfigLoader
 from src.services.elevenlabs_tts_service import get_elevenlabs_service
 from src.services.animal_audio_service import AnimalAudioService
 from src.services.rhyme_cache_service import get_rhyme_cache_service
+from src.services.external_text_response_service import ExternalTextResponseService
+from src.services.model_capabilities import build_gemini_capability_profile
+from src.services.session_action_router import SessionActionRouter
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
@@ -596,6 +599,13 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
+    gemini_capabilities = build_gemini_capability_profile(gemini_model)
+    logger.info(
+        "Gemini capability profile: model=%s mid_session_generate=%s",
+        gemini_capabilities.model_name,
+        gemini_capabilities.supports_mid_session_generate,
+    )
+
     # Create Gemini Realtime model
     realtime_model = NonResumableGeminiRealtimeModel(
         model=gemini_model,
@@ -617,6 +627,16 @@ async def entrypoint(ctx: JobContext):
     session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=session_tools)
     logger.info(
         f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + 1 time/date tool + ElevenLabs TTS"
+    )
+
+    forced_text_service = ExternalTextResponseService(
+        system_prompt=agent_prompt,
+        temperature=min(gemini_temperature, 0.8),
+    )
+    action_router = SessionActionRouter(
+        session=session,
+        capabilities=gemini_capabilities,
+        text_service=forced_text_service,
     )
 
     # Initialize animal audio service
@@ -700,9 +720,7 @@ async def entrypoint(ctx: JobContext):
                 if category in ["story", "remember", "question"]:
                     try:
                         logger.info(f"🧠 [MEM0-INJECT] Injecting memory context for {category} request")
-                        await session.generate_reply(
-                            instructions=f"{memory_context}\n\nRespond to the child's request: '{user_query}'"
-                        )
+                        await action_router.handle_memory_augmented_request(user_query, memory_context)
                         logger.info(f"🧠 [MEM0-INJECT] Memory context injected successfully")
                     except Exception as gen_err:
                         # This is expected if the model is already responding
@@ -748,6 +766,7 @@ async def entrypoint(ctx: JobContext):
     # Create assistant instance
     assistant = CheekoAssistant(instructions=agent_prompt)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
+    assistant.set_action_router(action_router)
     logger.info(f"{CHARACTER_NAME} Assistant initialized")
 
     # COMMENTED OUT - Music service disabled
@@ -878,7 +897,7 @@ async def entrypoint(ctx: JobContext):
             # Add timeout to prevent hanging if session is in bad state
             try:
                 await asyncio.wait_for(
-                    session.generate_reply(instructions=prompt_text),
+                    action_router.speak_end_prompt(prompt_text),
                     timeout=10.0  # 10 second timeout for goodbye
                 )
                 logger.info("👋 [END-PROMPT] Goodbye message completed")
@@ -973,7 +992,7 @@ async def entrypoint(ctx: JobContext):
                                 else:
                                     # Fallback to Gemini if ElevenLabs fails
                                     logger.warning(f"⚠️ [ANIMAL] ElevenLabs failed: {error}, using Gemini")
-                                    await session.generate_reply(instructions=f"Say this: {content_text}")
+                                    await action_router.speak_fallback_text(content_text)
 
                                 # Step 2: Play the animal sound (if audio_file provided)
                                 if audio_filename:
@@ -1053,16 +1072,16 @@ async def entrypoint(ctx: JobContext):
                                     # Fallback to Gemini if ElevenLabs fails
                                     logger.warning(f"[RFID-RAG] ElevenLabs failed: {error}, falling back to Gemini")
                                     read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
-                                    await session.generate_reply(instructions=read_instruction)
+                                    await action_router.speak_fallback_text(read_instruction)
 
                             except Exception as tts_error:
                                 logger.error(f"[RFID-RAG] ElevenLabs error: {tts_error}, falling back to Gemini")
                                 read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
-                                await session.generate_reply(instructions=read_instruction)
+                                await action_router.speak_fallback_text(read_instruction)
                         else:
                             # Prompt mode: Send to Gemini for generation (current behavior)
                             logger.info(f"🤖 [RFID-PROMPT] Sending to Gemini: {text[:100]}...")
-                            await session.generate_reply(instructions=text)
+                            await action_router.handle_gateway_prompt_text(text)
                     except Exception as e:
                         logger.error(f"❌ Error handling user_text: {e}")
 

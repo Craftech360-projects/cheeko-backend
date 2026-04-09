@@ -37,6 +37,7 @@ class BaseAssistant(Agent):
         # Session reference for dynamic updates
         self._agent_session = None
         self._session_context = None
+        self._action_router = None
 
         # Lazy-loaded services
         self._device_control_service = None
@@ -98,14 +99,18 @@ class BaseAssistant(Agent):
         for attempt in range(max_retries):
             try:
                 logger.info(f"{agent_name} sending greeting (attempt {attempt + 1}/{max_retries})")
-                speech_handle = self.session.generate_reply(
-                    instructions=self.GREETING_INSTRUCTION
-                )
-                # Wait for the speech to actually complete
-                await speech_handle
+                speech_handle = None
+                if self._action_router is not None:
+                    await self._action_router.play_greeting(self.GREETING_INSTRUCTION)
+                else:
+                    speech_handle = self.session.generate_reply(
+                        instructions=self.GREETING_INSTRUCTION
+                    )
+                    # Wait for the speech to actually complete
+                    await speech_handle
 
                 # Verify it actually spoke by checking if interrupted or empty
-                if hasattr(speech_handle, 'interrupted') and speech_handle.interrupted:
+                if speech_handle is not None and hasattr(speech_handle, 'interrupted') and speech_handle.interrupted:
                     logger.warning(f"{agent_name} greeting was interrupted, retrying...")
                     if attempt < max_retries - 1:
                         await asyncio.sleep(2.0)
@@ -176,6 +181,10 @@ class BaseAssistant(Agent):
     def set_session_context(self, ctx):
         """Set session context for room operations"""
         self._session_context = ctx
+
+    def set_action_router(self, action_router):
+        """Set action router for model-compatible forced speech behaviors."""
+        self._action_router = action_router
 
     # ============================================================================
     # FEATURE ENABLEMENT (Lazy Loading Pattern)

@@ -32,7 +32,8 @@
     "seed:rfid-pack": "node scripts/seed-rfid-pack-from-files.js",
     "seed:rfid-packs:fixed": "node scripts/seed-rfid-packs-fixed-ids.js",
     "update:rfid-pack-images": "node scripts/update-rfid-pack-images.js",
-    "seed:rfid-card-mappings": "node scripts/seed-rfid-card-mappings.js"
+    "seed:rfid-card-mappings": "node scripts/seed-rfid-card-mappings.js",
+    "seed:rfid-codes-file": "node scripts/seed-rfid-codes-file.js"
   },
   "keywords": [
     "cheeko",
