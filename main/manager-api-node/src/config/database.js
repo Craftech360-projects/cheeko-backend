@@ -10,8 +10,16 @@
 const { createClient } = require('@supabase/supabase-js');
 const { Pool } = require('pg');
 const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
 const logger = require('../utils/logger');
+
+let PrismaPg = null;
+try {
+  ({ PrismaPg } = require('@prisma/adapter-pg'));
+} catch (error) {
+  if (error.code !== 'MODULE_NOT_FOUND') {
+    throw error;
+  }
+}
 
 // ─── Prisma (primary DB — DigitalOcean PostgreSQL) ───────────────────────────
 // Strip sslmode from the URL to prevent pg v8.19 from treating 'require' as
@@ -35,11 +43,17 @@ pgPool.on('error', (err) => {
   logger.error('❌ Unexpected idle pg pool error:', err.message);
 });
 
-const adapter = new PrismaPg(pgPool);
-const prisma = new PrismaClient({
-  adapter,
+const prismaOptions = {
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
-});
+};
+
+if (PrismaPg) {
+  prismaOptions.adapter = new PrismaPg(pgPool);
+} else {
+  logger.warn('@prisma/adapter-pg not installed. Falling back to standard PrismaClient using DATABASE_URL.');
+}
+
+const prisma = new PrismaClient(prismaOptions);
 
 /**
  * Test database connection via Prisma (DigitalOcean PostgreSQL).

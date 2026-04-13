@@ -269,6 +269,18 @@ async def entrypoint(ctx: JobContext):
         secret=manager_api_secret
     )
 
+    # Set up exhaustion callback for mid-session quota timeout
+    async def _on_quota_exhausted():
+        """Called when AI card time quota runs out mid-session."""
+        logger.warning(f"⏰ [QUOTA] Exhaustion callback triggered, disconnecting room")
+        try:
+            if ctx.room and hasattr(ctx.room, 'disconnect'):
+                await ctx.room.disconnect()
+        except Exception as e:
+            logger.warning(f"Failed to disconnect room on quota exhaustion: {e}")
+
+    quota_manager._on_quota_exhausted_callback = _on_quota_exhausted
+
     if device_mac:
         try:
             logger.info("Starting parallel API calls...")
@@ -842,6 +854,11 @@ async def entrypoint(ctx: JobContext):
             # Stop time tracker and report final seconds
             try:
                 await asyncio.wait_for(quota_manager.stop_time_tracker(), timeout=5.0)
+                if quota_manager.rfid_uid:
+                    logger.info(
+                        f"🎴 [AI-CARD] Session ended: rfid={quota_manager.rfid_uid}, "
+                        f"remaining={quota_manager.remaining}s, used={quota_manager.used}s"
+                    )
             except asyncio.TimeoutError:
                 logger.warning("Time tracker stop timed out after 5s")
             except Exception as e:
@@ -1019,6 +1036,7 @@ async def entrypoint(ctx: JobContext):
                 content_text = message.get('content_text', '')
                 sequence = message.get('sequence')
                 rfid_uid = message.get('rfid_uid', '')
+                content_type = message.get('content_type', '')
 
                 # For animal/read_only, content is in content_text; for prompt, it's in text
                 has_content = bool(content_text) if content_type in ('animal', 'read_only') else bool(text)
@@ -1031,6 +1049,19 @@ async def entrypoint(ctx: JobContext):
 
                 async def handle_user_text():
                     try:
+                        # Set up AI card-specific quota tracking
+                        if content_type == 'prompt' and rfid_uid and quota_manager:
+                            logger.info(f"🎴 [USER_TEXT] AI card tap detected: rfid_uid={rfid_uid}")
+                            await quota_manager.set_ai_card_context(rfid_uid)
+
+                            # If quota is exhausted, reject the session
+                            if quota_manager.is_exhausted:
+                                logger.warning(f"⏰ [USER_TEXT] AI card quota exhausted: rfid_uid={rfid_uid}")
+                                await session.generate_reply(
+                                    instructions=quota_manager.get_limit_message()
+                                )
+                                return
+
                         # Mark agent as listening/processing for LED state
                         await emit_agent_state("listening")
 

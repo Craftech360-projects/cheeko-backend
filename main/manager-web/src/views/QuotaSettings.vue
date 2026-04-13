@@ -128,9 +128,259 @@
                         </el-table>
                     </el-card>
 
+                    <!-- AI Card Section Separator -->
+                    <el-divider class="section-divider"><i class="el-icon-cpu"></i> AI Card Time Subscription</el-divider>
+
+                    <!-- AI Card Fail Mode Settings -->
+                    <el-card class="settings-card" shadow="never" style="margin-top: 20px;">
+                        <div slot="header" class="card-header">
+                            <span>AI Card Fail-Safe Mode</span>
+                            <el-tag :type="aiFailMode === 'open' ? 'warning' : 'success'" size="small">
+                                {{ aiFailMode || 'Loading...' }}
+                            </el-tag>
+                        </div>
+                        <p class="description">Configure how AI Cards behave when the Manager API is unreachable. "Open" allows unlimited sessions. "Capped" allows up to 10 minutes locally then hard stops.</p>
+
+                        <el-radio-group v-model="aiFailMode" class="quota-type-selector" @change="onAiFailModeChange">
+                            <el-radio-button label="open">
+                                <i class="el-icon-unlock"></i> Fail-Open (Unlimited)
+                            </el-radio-button>
+                            <el-radio-button label="capped">
+                                <i class="el-icon-lock"></i> Fail-Capped (10 min local)
+                            </el-radio-button>
+                        </el-radio-group>
+                    </el-card>
+
+                    <!-- AI Cards Linked to Users/Devices -->
+                    <el-card class="settings-card" shadow="never" style="margin-top: 20px;">
+                        <div slot="header" class="card-header">
+                            <span>AI Cards — Linked to Users & Devices</span>
+                            <div class="header-actions">
+                                <el-select v-model="linkedCardsMonth" placeholder="Month" size="small" style="margin-right: 10px;" @change="loadLinkedCards">
+                                    <el-option v-for="m in availableMonths" :key="m" :label="m" :value="m"></el-option>
+                                </el-select>
+                                <el-button size="small" @click="loadLinkedCards" icon="el-icon-refresh">Refresh</el-button>
+                            </div>
+                        </div>
+                        <p class="description">AI Cards that have been tapped, showing which user and device they are linked to, with remaining time.</p>
+
+                        <el-table :data="linkedCards" class="transparent-table" :header-cell-class-name="headerCellClassName" v-loading="linkedCardsLoading">
+                            <el-table-column label="Card Name" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.cardName || 'AI Card' }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="RFID UID" prop="rfidUid" align="center" width="140"></el-table-column>
+                            <el-table-column label="User ID" align="center">
+                                <template slot-scope="scope">
+                                    <span v-if="scope.row.userId">{{ scope.row.userId }}</span>
+                                    <span v-else class="text-muted">— Not linked —</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="MAC Address" align="center">
+                                <template slot-scope="scope">
+                                    <span v-if="scope.row.macAddress" class="monospace">{{ scope.row.macAddress }}</span>
+                                    <span v-else class="text-muted">—</span>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Monthly Limit" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.monthlyTimeLimit === 0 ? 'Unconfigured' : scope.row.monthlyTimeLimit === -1 ? 'Unlimited' : formatTime(scope.row.monthlyTimeLimit) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Remaining" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.remainingSeconds !== undefined ? formatTime(scope.row.remainingSeconds) : '—' }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Status" align="center" width="120">
+                                <template slot-scope="scope">
+                                    <el-tag :type="statusTagType(scope.row.status)" size="mini">
+                                        {{ (scope.row.status || 'active').charAt(0).toUpperCase() + (scope.row.status || 'active').slice(1) }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Last Tapped" align="center" width="170">
+                                <template slot-scope="scope">
+                                    {{ scope.row.lastTapped ? formatDate(scope.row.lastTapped) : '—' }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Actions" align="center" width="120">
+                                <template slot-scope="scope">
+                                    <el-button type="text" size="mini" @click="openRechargeDialog(scope.row)" icon="el-icon-coin">Recharge</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+
+                        <div class="pagination-bar">
+                            <el-pagination
+                                background
+                                layout="prev, pager, next, total"
+                                :total="linkedCardsTotal"
+                                :page-size="linkedCardsPageSize"
+                                :current-page="linkedCardsPage"
+                                @current-change="onLinkedCardsPageChange">
+                            </el-pagination>
+                        </div>
+                    </el-card>
+
+                    <!-- AI Card Analytics Summary -->
+                    <el-card class="settings-card" shadow="never" style="margin-top: 20px;">
+                        <div slot="header" class="card-header">
+                            <span>AI Card Usage Analytics</span>
+                            <el-tag type="info" size="small">{{ analyticsMonthKey || 'Current Month' }}</el-tag>
+                        </div>
+                        <p class="description">Overview of AI Card usage this month. Top cards by consumption, near-exhaustion alerts, and total active cards.</p>
+
+                        <el-row :gutter="20" class="analytics-cards" v-loading="analyticsLoading">
+                            <el-col :span="6">
+                                <div class="stat-card">
+                                    <div class="stat-value">{{ aiAnalytics.totalActiveCards || 0 }}</div>
+                                    <div class="stat-label">Active Cards</div>
+                                </div>
+                            </el-col>
+                            <el-col :span="6">
+                                <div class="stat-card stat-danger">
+                                    <div class="stat-value">{{ aiAnalytics.exhaustedCount || 0 }}</div>
+                                    <div class="stat-label">Exhausted</div>
+                                </div>
+                            </el-col>
+                            <el-col :span="6">
+                                <div class="stat-card stat-warning">
+                                    <div class="stat-value">{{ (aiAnalytics.nearExhaustion || []).length }}</div>
+                                    <div class="stat-label">Near Limit (>80%)</div>
+                                </div>
+                            </el-col>
+                            <el-col :span="6">
+                                <div class="stat-card stat-info">
+                                    <div class="stat-value">{{ (aiAnalytics.topCards || []).length }}</div>
+                                    <div class="stat-label">Top Cards Tracked</div>
+                                </div>
+                            </el-col>
+                        </el-row>
+
+                        <!-- Near Exhaustion Alerts -->
+                        <div v-if="aiAnalytics.nearExhaustion && aiAnalytics.nearExhaustion.length > 0" class="alert-section">
+                            <h4><i class="el-icon-warning"></i> Cards Near Exhaustion</h4>
+                            <el-table :data="aiAnalytics.nearExhaustion" class="transparent-table" size="small" :header-cell-class-name="headerCellClassName">
+                                <el-table-column label="Card" prop="cardName" align="center"></el-table-column>
+                                <el-table-column label="RFID UID" prop="rfidUid" align="center"></el-table-column>
+                                <el-table-column label="Used" align="center">
+                                    <template slot-scope="scope">{{ formatTime(scope.row.secondsUsed) }}</template>
+                                </el-table-column>
+                                <el-table-column label="Remaining" align="center">
+                                    <template slot-scope="scope">{{ formatTime(scope.row.remaining) }}</template>
+                                </el-table-column>
+                                <el-table-column label="% Used" align="center">
+                                    <template slot-scope="scope">
+                                        <el-progress :percentage="scope.row.pctUsed" :color="scope.row.pctUsed > 90 ? '#F56C6C' : scope.row.pctUsed > 70 ? '#E6A23C' : '#67C23A'" :show-text="false"></el-progress>
+                                        <span>{{ scope.row.pctUsed }}%</span>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </div>
+                    </el-card>
+
+                    <!-- AI Cards Table -->
+                    <el-card class="settings-card" shadow="never" style="margin-top: 20px;">
+                        <div slot="header" class="card-header">
+                            <span>AI Cards — Time Quota</span>
+                            <div class="header-actions">
+                                <el-select v-model="aiCardsMonth" placeholder="Month" size="small" style="margin-right: 10px;" @change="loadAiCards">
+                                    <el-option v-for="m in availableMonths" :key="m" :label="m" :value="m"></el-option>
+                                </el-select>
+                                <el-button size="small" @click="loadAiCards" icon="el-icon-refresh">Refresh</el-button>
+                            </div>
+                        </div>
+                        <p class="description">All AI Cards with their monthly time quota. Use "Recharge" to add extra time for a specific card.</p>
+
+                        <el-table :data="aiCards" class="transparent-table" :header-cell-class-name="headerCellClassName" v-loading="aiCardsLoading">
+                            <el-table-column label="Card Name" prop="notes" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.notes || scope.row.cardName || 'AI Card' }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="RFID UID" prop="rfidUid" align="center" width="140"></el-table-column>
+                            <el-table-column label="Monthly Limit" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.monthlyTimeLimit === 0 ? 'Unconfigured' : scope.row.monthlyTimeLimit === -1 ? 'Unlimited' : formatTime(scope.row.monthlyTimeLimit) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Used" align="center">
+                                <template slot-scope="scope">
+                                    {{ formatTime(scope.row.secondsUsed) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Extra (Recharged)" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.extraPurchased > 0 ? formatTime(scope.row.extraPurchased) : '—' }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Remaining" align="center">
+                                <template slot-scope="scope">
+                                    {{ scope.row.remainingSeconds !== undefined ? formatTime(scope.row.remainingSeconds) : formatTime(Math.max(0, (scope.row.monthlyTimeLimit || 0) + (scope.row.extraPurchased || 0) - (scope.row.secondsUsed || 0))) }}
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Status" align="center">
+                                <template slot-scope="scope">
+                                    <el-tag :type="statusTagType(scope.row.status)" size="mini">
+                                        {{ (scope.row.status || 'active').charAt(0).toUpperCase() + (scope.row.status || 'active').slice(1) }}
+                                    </el-tag>
+                                </template>
+                            </el-table-column>
+                            <el-table-column label="Actions" align="center" width="120">
+                                <template slot-scope="scope">
+                                    <el-button type="text" size="mini" @click="openRechargeDialog(scope.row)" icon="el-icon-coin">Recharge</el-button>
+                                </template>
+                            </el-table-column>
+                        </el-table>
+
+                        <!-- Pagination -->
+                        <div class="pagination-bar">
+                            <el-pagination
+                                background
+                                layout="prev, pager, next, total"
+                                :total="aiCardsTotal"
+                                :page-size="aiCardsPageSize"
+                                :current-page="aiCardsPage"
+                                @current-change="onAiCardsPageChange">
+                            </el-pagination>
+                        </div>
+                    </el-card>
+
                 </div>
             </div>
         </div>
+
+        <!-- Recharge Dialog -->
+        <el-dialog title="Recharge AI Card" :visible.sync="rechargeDialogVisible" width="420px">
+            <div v-if="rechargeCard" class="recharge-dialog-content">
+                <div class="recharge-card-info">
+                    <strong>{{ rechargeCard.notes || rechargeCard.cardName || 'AI Card' }}</strong>
+                    <span class="recharge-card-uid">{{ rechargeCard.rfidUid }}</span>
+                </div>
+                <div class="recharge-current">
+                    Current remaining: <strong>{{ formatTime(rechargeCard.remainingSeconds || Math.max(0, (rechargeCard.monthlyTimeLimit || 0) + (rechargeCard.extraPurchased || 0) - (rechargeCard.secondsUsed || 0))) }}</strong>
+                </div>
+                <el-form label-position="top" style="margin-top: 16px;">
+                    <el-form-item label="Add Time (minutes)">
+                        <el-input-number v-model="rechargeMinutes" :min="1" :max="1440" :step="5" style="width: 100%;"></el-input-number>
+                    </el-form-item>
+                    <el-form-item label="Quick amounts">
+                        <el-button-group>
+                            <el-button size="small" @click="rechargeMinutes = 30">30 min</el-button>
+                            <el-button size="small" @click="rechargeMinutes = 60">1 hour</el-button>
+                            <el-button size="small" @click="rechargeMinutes = 120">2 hours</el-button>
+                            <el-button size="small" @click="rechargeMinutes = 360">6 hours</el-button>
+                        </el-button-group>
+                    </el-form-item>
+                </el-form>
+            </div>
+            <span slot="footer" class="dialog-footer">
+                <el-button @click="rechargeDialogVisible = false">Cancel</el-button>
+                <el-button type="primary" @click="confirmRecharge" :loading="recharging">Recharge</el-button>
+            </span>
+        </el-dialog>
     </div>
 </template>
 
@@ -152,7 +402,42 @@ export default {
                 freeTokenLimit: 10000,
                 freeTimeLimit: 1800
             },
-            plans: []
+            plans: [],
+
+            // AI Card settings
+            aiFailMode: 'open',
+
+            // Linked cards (card → user → device)
+            linkedCardsLoading: false,
+            linkedCards: [],
+            linkedCardsPage: 1,
+            linkedCardsPageSize: 20,
+            linkedCardsTotal: 0,
+            linkedCardsMonth: '',
+
+            // AI Card analytics
+            analyticsLoading: false,
+            analyticsMonthKey: '',
+            aiAnalytics: {
+                totalActiveCards: 0,
+                exhaustedCount: 0,
+                nearExhaustion: [],
+                topCards: []
+            },
+
+            // AI Cards table
+            aiCardsLoading: false,
+            aiCards: [],
+            aiCardsPage: 1,
+            aiCardsPageSize: 20,
+            aiCardsTotal: 0,
+            aiCardsMonth: '',
+
+            // Recharge dialog
+            rechargeDialogVisible: false,
+            rechargeCard: null,
+            rechargeMinutes: 60,
+            recharging: false
         }
     },
     computed: {
@@ -163,11 +448,24 @@ export default {
             set(val) {
                 this.form.freeTimeLimit = val * 60
             }
+        },
+        availableMonths() {
+            const months = [];
+            const now = new Date();
+            for (let i = 0; i < 6; i++) {
+                const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+            }
+            return months;
         }
     },
     mounted() {
         this.loadSettings()
         this.loadPlans()
+        this.loadAiFailMode()
+        this.loadLinkedCards()
+        this.loadAiAnalytics()
+        this.loadAiCards()
     },
     methods: {
         loadSettings() {
@@ -175,11 +473,11 @@ export default {
             Api.subscription.getQuotaSettings(
                 (res) => {
                     this.loading = false
-                    if (res.data) {
-                        this.form.defaultQuotaType = res.data.defaultQuotaType || 'question'
-                        this.form.freeQuestionLimit = res.data.freeQuestionLimit || 20
-                        this.form.freeTokenLimit = res.data.freeTokenLimit || 10000
-                        this.form.freeTimeLimit = res.data.freeTimeLimit || 1800
+                    if (res.data && res.data.data) {
+                        this.form.defaultQuotaType = res.data.data.defaultQuotaType || 'question'
+                        this.form.freeQuestionLimit = res.data.data.freeQuestionLimit || 20
+                        this.form.freeTokenLimit = res.data.data.freeTokenLimit || 10000
+                        this.form.freeTimeLimit = res.data.data.freeTimeLimit || 1800
                         this.savedType = this.form.defaultQuotaType
                     }
                 },
@@ -193,7 +491,7 @@ export default {
         loadPlans() {
             Api.subscription.getPlans(
                 (res) => {
-                    this.plans = res.data || []
+                    this.plans = (res.data && res.data.data) ? res.data.data : []
                 },
                 () => {
                     this.$message.error('Failed to load subscription plans')
@@ -207,8 +505,8 @@ export default {
                 this.form,
                 (res) => {
                     this.saving = false
-                    if (res.data) {
-                        this.savedType = res.data.defaultQuotaType
+                    if (res.data && res.data.data) {
+                        this.savedType = res.data.data.defaultQuotaType
                         this.$message.success('Quota settings saved successfully')
                     }
                 },
@@ -223,6 +521,133 @@ export default {
             // Visual feedback only
         },
 
+        // ========== AI Card Methods ==========
+
+        loadAiFailMode() {
+            Api.subscription.getAiCardQuotaSettings(
+                (res) => {
+                    if (res.data && res.data.data) {
+                        this.aiFailMode = res.data.data.failMode || 'open'
+                    }
+                },
+                () => {
+                    this.$message.error('Failed to load AI card fail mode settings')
+                }
+            )
+        },
+
+        onAiFailModeChange() {
+            Api.subscription.updateAiCardQuotaSettings(
+                { failMode: this.aiFailMode },
+                (res) => {
+                    if (res.data && res.data.data) {
+                        this.aiFailMode = res.data.data.failMode
+                        this.$message.success(`AI card fail mode set to "${this.aiFailMode}"`)
+                    }
+                },
+                () => {
+                    this.$message.error('Failed to update AI card fail mode')
+                }
+            )
+        },
+
+        loadLinkedCards() {
+            this.linkedCardsLoading = true
+            Api.subscription.getAiCardsLinked(
+                this.linkedCardsPage,
+                this.linkedCardsPageSize,
+                this.linkedCardsMonth || undefined,
+                (res) => {
+                    this.linkedCardsLoading = false
+                    if (res.data && res.data.data) {
+                        this.linkedCards = res.data.data.cards || []
+                        this.linkedCardsTotal = res.data.data.total || 0
+                    }
+                },
+                () => {
+                    this.linkedCardsLoading = false
+                    this.$message.error('Failed to load linked AI cards')
+                }
+            )
+        },
+
+        onLinkedCardsPageChange(page) {
+            this.linkedCardsPage = page
+            this.loadLinkedCards()
+        },
+
+        loadAiAnalytics() {
+            this.analyticsLoading = true
+            Api.subscription.getAiCardAnalytics(
+                this.aiCardsMonth || undefined,
+                (res) => {
+                    this.analyticsLoading = false
+                    if (res.data && res.data.data) {
+                        this.aiAnalytics = res.data.data
+                        this.analyticsMonthKey = res.data.data.monthKey || ''
+                    }
+                },
+                () => {
+                    this.analyticsLoading = false
+                }
+            )
+        },
+
+        loadAiCards() {
+            this.aiCardsLoading = true
+            Api.subscription.getAiCardsSummary(
+                this.aiCardsPage,
+                this.aiCardsPageSize,
+                this.aiCardsMonth || undefined,
+                (res) => {
+                    this.aiCardsLoading = false
+                    if (res.data && res.data.data) {
+                        this.aiCards = res.data.data.cards || []
+                        this.aiCardsTotal = res.data.data.total || 0
+                    }
+                },
+                () => {
+                    this.aiCardsLoading = false
+                    this.$message.error('Failed to load AI cards')
+                }
+            )
+        },
+
+        onAiCardsPageChange(page) {
+            this.aiCardsPage = page
+            this.loadAiCards()
+        },
+
+        openRechargeDialog(card) {
+            this.rechargeCard = card
+            this.rechargeMinutes = 60
+            this.rechargeDialogVisible = true
+        },
+
+        confirmRecharge() {
+            if (!this.rechargeCard || this.rechargeMinutes < 1) return
+
+            this.recharging = true
+            const seconds = this.rechargeMinutes * 60
+            Api.subscription.rechargeAiCard(
+                this.rechargeCard.rfidUid,
+                seconds,
+                (res) => {
+                    this.recharging = false
+                    if (res.data && res.data.data) {
+                        this.$message.success(`Recharged ${this.rechargeMinutes} minutes (${seconds}s) for ${this.rechargeCard.notes || this.rechargeCard.cardName || 'card'}`)
+                        this.rechargeDialogVisible = false
+                        this.loadAiCards()
+                        this.loadAiAnalytics()
+                    }
+                },
+                (err) => {
+                    this.recharging = false
+                    this.$message.error('Failed to recharge card')
+                }
+            )
+        },
+
         formatTime(seconds) {
             if (!seconds || seconds <= 0) return '0m'
             const hours = Math.floor(seconds / 3600)
@@ -231,9 +656,26 @@ export default {
             return `${mins}m`
         },
 
+        formatDate(dateStr) {
+            if (!dateStr) return '—'
+            const d = new Date(dateStr)
+            return d.toLocaleString('en-IN', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            })
+        },
+
         quotaTypeColor(type) {
             const map = { question: '', token: 'warning', time: 'success' }
             return map[type] || 'info'
+        },
+
+        statusTagType(status) {
+            const map = { active: 'success', exhausted: 'danger', not_configured: 'info' }
+            return map[status] || 'info'
         },
 
         headerCellClassName() {
@@ -320,5 +762,111 @@ export default {
 
 .table-header-cell {
     background: #fafafa !important;
+}
+
+/* AI Card Section */
+.section-divider {
+    margin: 32px 0 20px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #303133;
+}
+
+.section-divider i {
+    margin-right: 6px;
+}
+
+.analytics-cards {
+    margin-top: 16px;
+}
+
+.stat-card {
+    background: #f0f9eb;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+}
+
+.stat-card.stat-danger {
+    background: #fef0f0;
+}
+
+.stat-card.stat-warning {
+    background: #fdf6ec;
+}
+
+.stat-card.stat-info {
+    background: #ecf5ff;
+}
+
+.stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: #303133;
+}
+
+.stat-label {
+    font-size: 13px;
+    color: #909399;
+    margin-top: 4px;
+}
+
+.alert-section {
+    margin-top: 20px;
+    padding: 16px;
+    background: #fdf6ec;
+    border-radius: 8px;
+}
+
+.alert-section h4 {
+    margin: 0 0 12px;
+    color: #E6A23C;
+    font-size: 14px;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+}
+
+.pagination-bar {
+    margin-top: 20px;
+    text-align: center;
+}
+
+/* Recharge Dialog */
+.recharge-dialog-content {
+    padding: 8px 0;
+}
+
+.recharge-card-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #f5f7fa;
+    border-radius: 6px;
+}
+
+.recharge-card-uid {
+    font-family: monospace;
+    font-size: 13px;
+    color: #909399;
+}
+
+.recharge-current {
+    margin-top: 12px;
+    font-size: 14px;
+    color: #606266;
+}
+
+.monospace {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+}
+
+.text-muted {
+    color: #C0C4CC;
+    font-style: italic;
 }
 </style>

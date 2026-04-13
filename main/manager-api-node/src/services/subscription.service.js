@@ -6,6 +6,7 @@
  */
 
 const { supabaseAdmin } = require('../config/database');
+const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { getParamValue } = require('./system.service');
 const { getCurrentMonthKey, isValidMonthKey } = require('./quota.service');
@@ -590,6 +591,11 @@ const listPlans = async (activeOnly = true) => {
 
   const { data, error } = await query;
   if (error) {
+    // Table doesn't exist yet — return empty array gracefully
+    if (error.message && error.message.includes('Could not find')) {
+      logger.warn('subscription_plan table not found — returning empty plans. Run migration 20260310000001 to create it.');
+      return [];
+    }
     logger.error('Failed to list plans:', error);
     throw new Error('Failed to list plans');
   }
@@ -879,6 +885,490 @@ const getUserSubscriptionStatus = async (userId) => {
   };
 };
 
+// ============================================================
+// AI Card Time Quota Functions
+// ============================================================
+
+/**
+ * Normalize RFID UID to uppercase, no separators
+ * @param {string} uid - Raw RFID UID
+ * @returns {string} Normalized UID (e.g., "ABCD1234")
+ */
+const normalizeRfidUid = (uid) => {
+  if (!uid) return '';
+  return uid.trim().toUpperCase().replace(/[^0-9A-F]/g, '');
+};
+
+/**
+ * Get AI card time quota for a specific card
+ * @param {string} rfidUid - Normalized RFID UID
+ * @returns {Promise<Object>} Quota status
+ */
+const getAiCardTimeQuota = async (rfidUid) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = normalizeRfidUid(rfidUid);
+  if (!normalizedUid) throw new Error('Invalid RFID UID');
+
+  const monthKey = getCurrentMonthKey();
+
+  // Get card config from Prisma (DigitalOcean DB - primary data source)
+  let card = null;
+  try {
+    card = await prisma.rfid_card_mapping.findFirst({
+      where: { rfid_uid: normalizedUid, active: true },
+      select: { monthly_time_limit_secs: true, notes: true, card_type: true }
+    });
+  } catch (err) {
+    logger.error('[AI-CARD] Card lookup DB error:', err);
+  }
+
+  if (!card) throw new Error('Card not found');
+
+  const timeLimit = card.monthly_time_limit_secs || 0;
+
+  // Get current month usage from Supabase quota table
+  const { data: quota } = await supabaseAdmin
+    .from('ai_card_time_quota')
+    .select('*')
+    .eq('rfid_uid', normalizedUid)
+    .eq('month_key', monthKey)
+    .single();
+
+  const secondsUsed = quota ? quota.seconds_used : 0;
+  const extraPurchased = quota ? quota.extra_purchased : 0;
+  const remainingSeconds = quota ? quota.remaining_seconds : Math.max(0, timeLimit + extraPurchased - secondsUsed);
+  const status = quota ? quota.status : (timeLimit === 0 && extraPurchased === 0 ? 'not_configured' : 'active');
+
+  return {
+    rfidUid: normalizedUid,
+    cardName: card.notes || 'AI Card',
+    cardType: card.card_type,
+    quotaType: 'ai_card_time',
+    remaining: remainingSeconds,
+    remainingSeconds,
+    isExhausted: remainingSeconds <= 0,
+    status,
+    limit: timeLimit + extraPurchased,
+    used: secondsUsed,
+    extraPurchased,
+    monthKey,
+    monthlyTimeLimit: timeLimit
+  };
+};
+
+/**
+ * Consume time for an AI card
+ * @param {string} rfidUid - Normalized RFID UID
+ * @param {Object} params - Time consumption details
+ * @param {number} params.seconds - Seconds to consume
+ * @param {string} [params.monthKey] - Optional month key
+ * @returns {Promise<Object>} Updated quota status
+ */
+const consumeAiCardTime = async (rfidUid, { seconds, monthKey: clientMonthKey }) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = normalizeRfidUid(rfidUid);
+  if (!normalizedUid) throw new Error('Invalid RFID UID');
+
+  const monthKey = (clientMonthKey && isValidMonthKey(clientMonthKey))
+    ? clientMonthKey
+    : getCurrentMonthKey();
+
+  // Get card's time limit from Prisma (DigitalOcean DB)
+  let card = null;
+  try {
+    card = await prisma.rfid_card_mapping.findFirst({
+      where: { rfid_uid: normalizedUid },
+      select: { monthly_time_limit_secs: true }
+    });
+  } catch (err) {
+    logger.error('[AI-CARD] Card lookup error in consume:', err);
+  }
+
+  const timeLimit = card ? card.monthly_time_limit_secs || 0 : 0;
+
+  const { data, error } = await supabaseAdmin
+    .rpc('consume_ai_card_time', {
+      p_rfid_uid: normalizedUid,
+      p_month_key: monthKey,
+      p_seconds: Math.round(seconds),
+      p_time_limit: timeLimit
+    })
+    .single();
+
+  if (error) {
+    logger.error('Failed to consume AI card time via RPC:', error);
+    throw new Error('Failed to consume AI card time quota');
+  }
+
+  return {
+    remaining: data.out_remaining,
+    remainingSeconds: data.out_remaining_seconds,
+    status: data.out_status,
+    isExhausted: data.out_is_exhausted,
+    secondsUsed: data.out_seconds_used,
+    extraPurchased: data.out_extra_purchased,
+    rfidUid: normalizedUid,
+    monthKey: data.out_month_key
+  };
+};
+
+/**
+ * Grant extra time to an AI card (recharge)
+ * @param {string} rfidUid - Normalized RFID UID
+ * @param {number} amount - Extra seconds to grant
+ * @returns {Promise<Object>} Updated quota status
+ */
+const rechargeAiCard = async (rfidUid, amount) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const normalizedUid = normalizeRfidUid(rfidUid);
+  if (!normalizedUid) throw new Error('Invalid RFID UID');
+  if (!amount || amount <= 0) throw new Error('Amount must be positive');
+  if (amount > 86400) throw new Error('Amount must not exceed 86400 seconds (24 hours)');
+
+  const monthKey = getCurrentMonthKey();
+
+  // Get card's time limit from Prisma (DigitalOcean DB)
+  let card = null;
+  try {
+    card = await prisma.rfid_card_mapping.findFirst({
+      where: { rfid_uid: normalizedUid },
+      select: { monthly_time_limit_secs: true }
+    });
+  } catch (err) {
+    logger.error('[AI-CARD] Card lookup error in recharge:', err);
+  }
+
+  const timeLimit = card ? card.monthly_time_limit_secs || 0 : 0;
+
+  const { data, error } = await supabaseAdmin
+    .rpc('grant_ai_card_extra_time', {
+      p_rfid_uid: normalizedUid,
+      p_month_key: monthKey,
+      p_amount: Math.round(amount),
+      p_time_limit: timeLimit
+    })
+    .single();
+
+  if (error) {
+    logger.error('Failed to recharge AI card via RPC:', error);
+    throw new Error('Failed to recharge AI card');
+  }
+
+  return {
+    remaining: data.out_remaining,
+    remainingSeconds: data.out_remaining_seconds,
+    status: data.out_status,
+    isExhausted: data.out_is_exhausted,
+    secondsUsed: data.out_seconds_used,
+    extraPurchased: data.out_extra_purchased,
+    rfidUid: normalizedUid,
+    monthKey: data.out_month_key
+  };
+};
+
+/**
+ * Get AI card status (for parent app)
+ * @param {string} rfidUid - Normalized RFID UID
+ * @returns {Promise<Object>} Card details + quota
+ */
+const getAiCardStatus = async (rfidUid) => {
+  const quotaInfo = await getAiCardTimeQuota(rfidUid);
+
+  return {
+    rfidUid: quotaInfo.rfidUid,
+    cardName: quotaInfo.cardName,
+    notes: quotaInfo.cardType,
+    monthlyTimeLimit: quotaInfo.monthlyTimeLimit,
+    secondsUsed: quotaInfo.used,
+    extraPurchased: quotaInfo.extraPurchased,
+    remaining: quotaInfo.remaining,
+    isExhausted: quotaInfo.isExhausted,
+    monthKey: quotaInfo.monthKey
+  };
+};
+
+/**
+ * List all AI cards discovered by a user (from tap logs)
+ * @param {number} userId - User ID
+ * @returns {Promise<Array>} User's discovered cards with quota
+ */
+const listAiCardsForUser = async (userId) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const monthKey = getCurrentMonthKey();
+
+  // Get distinct cards this user has tapped
+  const { data: tapLogs } = await supabaseAdmin
+    .from('rfid_card_tap_log')
+    .select('rfid_uid, card_type')
+    .eq('user_id', userId)
+    .eq('card_type', 'ai')
+    .order('created_at', { ascending: false });
+
+  if (!tapLogs || tapLogs.length === 0) return [];
+
+  // Get unique cards with last tapped time
+  const uniqueCards = {};
+  for (const log of tapLogs) {
+    if (!uniqueCards[log.rfid_uid]) {
+      uniqueCards[log.rfid_uid] = {
+        rfidUid: log.rfid_uid,
+        lastTapped: log.created_at
+      };
+    }
+  }
+
+  // Get card metadata and quota for each
+  const rfidUids = Object.keys(uniqueCards);
+
+  // Read card metadata from Prisma (DigitalOcean DB)
+  let cards = [];
+  try {
+    cards = await prisma.rfid_card_mapping.findMany({
+      where: { rfid_uid: { in: rfidUids } },
+      select: { rfid_uid: true, notes: true, monthly_time_limit_secs: true }
+    });
+  } catch (err) {
+    logger.error('[AI-CARD] Card lookup error in listAiCardsForUser:', err);
+  }
+
+  const { data: quotas } = await supabaseAdmin
+    .from('ai_card_time_quota')
+    .select('*')
+    .in('rfid_uid', rfidUids)
+    .eq('month_key', monthKey);
+
+  const cardsByUid = {};
+  for (const c of (cards || [])) {
+    cardsByUid[c.rfid_uid] = c;
+  }
+  const quotasByUid = {};
+  for (const q of (quotas || [])) {
+    quotasByUid[q.rfid_uid] = q;
+  }
+
+  const result = rfidUids.map(uid => {
+    const card = cardsByUid[uid] || {};
+    const quota = quotasByUid[uid] || {};
+    const timeLimit = card.monthly_time_limit_secs || 0;
+    const secondsUsed = quota.seconds_used || 0;
+    const extraPurchased = quota.extra_purchased || 0;
+    const remainingSeconds = quota.remaining_seconds !== undefined
+      ? quota.remaining_seconds
+      : Math.max(0, timeLimit + extraPurchased - secondsUsed);
+    const status = quota.status || (timeLimit === 0 && extraPurchased === 0 ? 'not_configured' : 'active');
+
+    return {
+      rfidUid: uid,
+      cardName: card.notes || 'AI Card',
+      monthlyTimeLimit: timeLimit,
+      secondsUsed,
+      extraPurchased,
+      remaining: remainingSeconds,
+      remainingSeconds,
+      status,
+      isExhausted: remainingSeconds <= 0,
+      monthKey,
+      lastTapped: uniqueCards[uid].lastTapped
+    };
+  });
+
+  return result;
+};
+
+/**
+ * List all AI cards with usage (admin view, paginated)
+ * @param {Object} params - Pagination params
+ * @returns {Promise<Object>} Paginated card list
+ */
+const listAiCardsSummary = async ({ page = 1, limit = 20, monthKey: clientMonthKey }) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const monthKey = (clientMonthKey && isValidMonthKey(clientMonthKey))
+    ? clientMonthKey
+    : getCurrentMonthKey();
+
+  // Get all AI cards from Prisma (DigitalOcean DB)
+  let cards = [];
+  let total = 0;
+  try {
+    const result = await prisma.rfid_card_mapping.findMany({
+      where: { card_type: 'ai' },
+      select: {
+        id: true,
+        rfid_uid: true,
+        notes: true,
+        monthly_time_limit_secs: true,
+        card_type: true
+      },
+      skip: (page - 1) * limit,
+      take: limit
+    });
+    cards = result;
+
+    const countResult = await prisma.rfid_card_mapping.count({
+      where: { card_type: 'ai' }
+    });
+    total = countResult;
+  } catch (err) {
+    logger.error('[AI-CARD] Card lookup error in listAiCardsSummary:', err);
+  }
+
+  // Get quota for this month from Supabase
+  const { data: quotas } = await supabaseAdmin
+    .from('ai_card_time_quota')
+    .select('*')
+    .eq('month_key', monthKey);
+
+  const quotasByUid = {};
+  for (const q of (quotas || [])) {
+    quotasByUid[q.rfid_uid] = q;
+  }
+
+  const resultCards = (cards || [])
+    .map(card => {
+      const quota = quotasByUid[card.rfid_uid] || {};
+      const timeLimit = card.monthly_time_limit_secs || 0;
+      const secondsUsed = quota.seconds_used || 0;
+      const extraPurchased = quota.extra_purchased || 0;
+      const remainingSeconds = quota.remaining_seconds !== undefined
+        ? quota.remaining_seconds
+        : Math.max(0, timeLimit + extraPurchased - secondsUsed);
+      const status = quota.status || (timeLimit === 0 && extraPurchased === 0 ? 'not_configured' : 'active');
+
+      return {
+        id: card.id,
+        rfidUid: card.rfid_uid,
+        notes: card.notes || 'AI Card',
+        cardType: card.card_type,
+        monthlyTimeLimit: timeLimit,
+        secondsUsed,
+        extraPurchased,
+        remaining: remainingSeconds,
+        remainingSeconds,
+        status,
+        isExhausted: remainingSeconds <= 0,
+        monthKey
+      };
+    });
+
+  return {
+    cards: resultCards,
+    total,
+    page,
+    limit
+  };
+};
+
+/**
+ * List AI cards linked to users/devices with full mapping
+ * Joins: rfid_card_mapping → rfid_card_tap_log → ai_card_time_quota
+ * Returns: card name, rfid_uid, user_id, mac_address, remaining time, status
+ * @param {Object} params - Pagination params
+ * @returns {Promise<Object>} Linked card-user-device list
+ */
+const listAiCardsLinked = async ({ page = 1, limit = 20, monthKey: clientMonthKey }) => {
+  if (!supabaseAdmin) throw new Error('Database not configured');
+
+  const monthKey = (clientMonthKey && isValidMonthKey(clientMonthKey))
+    ? clientMonthKey
+    : getCurrentMonthKey();
+
+  // Get tap logs from Prisma (DigitalOcean DB)
+  const tapLogs = await prisma.rfid_card_tap_log.findMany({
+    where: { card_type: 'ai' },
+    select: { rfid_uid: true, user_id: true, mac_address: true, created_at: true },
+    orderBy: { created_at: 'desc' }
+  });
+
+  // Deduplicate: keep latest tap per rfid_uid
+  const cardLinks = {};
+  for (const log of (tapLogs || [])) {
+    if (!cardLinks[log.rfid_uid]) {
+      cardLinks[log.rfid_uid] = {
+        userId: log.user_id,
+        macAddress: log.mac_address,
+        lastTapped: log.created_at
+      };
+    }
+  }
+
+  // Get quota for this month
+  const { data: quotas } = await supabaseAdmin
+    .from('ai_card_time_quota')
+    .select('*')
+    .eq('month_key', monthKey);
+
+  const quotasByUid = {};
+  for (const q of (quotas || [])) {
+    quotasByUid[q.rfid_uid] = q;
+  }
+
+  // Build result
+  const rfidUids = Object.keys(cardLinks);
+  const result = [];
+
+  for (const uid of rfidUids) {
+    const link = cardLinks[uid];
+    const quota = quotasByUid[uid] || {};
+
+    // Get card metadata from Prisma
+    let card = null;
+    try {
+      card = await prisma.rfid_card_mapping.findFirst({
+        where: { rfid_uid: uid },
+        select: { notes: true, monthly_time_limit_secs: true }
+      });
+    } catch (err) {
+      logger.error(`[AI-CARD] Card lookup error for ${uid}:`, err);
+    }
+
+    const timeLimit = card ? card.monthly_time_limit_secs || 0 : 0;
+    const secondsUsed = quota.seconds_used || 0;
+    const extraPurchased = quota.extra_purchased || 0;
+    const remainingSeconds = quota.remaining_seconds !== undefined
+      ? quota.remaining_seconds
+      : Math.max(0, timeLimit + extraPurchased - secondsUsed);
+    const status = quota.status || (timeLimit === 0 && extraPurchased === 0 ? 'not_configured' : 'active');
+
+    result.push({
+      rfidUid: uid,
+      cardName: card ? card.notes || 'AI Card' : 'AI Card',
+      userId: link.userId,
+      macAddress: link.macAddress,
+      monthlyTimeLimit: timeLimit,
+      secondsUsed,
+      extraPurchased,
+      remainingSeconds,
+      status,
+      isExhausted: remainingSeconds <= 0,
+      lastTapped: link.lastTapped
+    });
+  }
+
+  // Sort by last tapped (most recent first)
+  result.sort((a, b) => {
+    if (!a.lastTapped) return 1;
+    if (!b.lastTapped) return -1;
+    return new Date(b.lastTapped) - new Date(a.lastTapped);
+  });
+
+  // Paginate in-memory
+  const offset = (page - 1) * limit;
+  const paginated = result.slice(offset, offset + limit);
+
+  return {
+    cards: paginated,
+    total: result.length,
+    page,
+    limit,
+    monthKey
+  };
+};
+
 module.exports = {
   getUnifiedQuota,
   consumeTokenByMac,
@@ -890,5 +1380,14 @@ module.exports = {
   cancelSubscription,
   getActiveSubscription,
   getUserSubscriptionStatus,
-  resolveUserIdFromMac
+  resolveUserIdFromMac,
+  // AI Card time quota functions
+  getAiCardTimeQuota,
+  consumeAiCardTime,
+  rechargeAiCard,
+  getAiCardStatus,
+  listAiCardsForUser,
+  listAiCardsSummary,
+  listAiCardsLinked,
+  normalizeRfidUid
 };

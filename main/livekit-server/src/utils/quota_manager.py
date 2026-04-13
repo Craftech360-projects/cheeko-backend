@@ -94,6 +94,16 @@ class QuotaManager:
         self.api_url = manager_api_url.rstrip("/")
         self.secret = secret
 
+        # AI Card context (set when session is for an AI card)
+        self.rfid_uid: Optional[str] = None  # Normalized uppercase RFID UID
+        self._ai_card_initialized: bool = False
+        self._on_quota_exhausted_callback = None  # Callback for mid-session exhaustion
+
+        # Fail-open configuration
+        self._fail_mode: str = "open"  # "open" or "capped"
+        self._fail_local_cap_seconds: int = 600  # 10 minutes cap for fail-capped mode
+        self._fail_local_seconds_used: int = 0  # Local tracking when API unreachable
+
         # Quota state (populated by initialize)
         self.quota_type: str = "question"  # "question" or "token"
         self.remaining: int = -1           # -1 = unlimited
@@ -168,6 +178,115 @@ class QuotaManager:
         except Exception as e:
             logger.warning(f"[QUOTA] Failed to initialize: {e}, fail-open (unlimited)")
             self._fail_open()
+
+    async def set_ai_card_context(self, rfid_uid: str) -> None:
+        """
+        Set AI card context and fetch quota. Call when an AI card tap is received.
+
+        This switches the QuotaManager from device-level (MAC) quota tracking
+        to per-card quota tracking. The time tracker will report to the
+        AI card endpoint.
+
+        Args:
+            rfid_uid: Normalized RFID UID (uppercase, no separators)
+        """
+        # Normalize UID to uppercase
+        self.rfid_uid = rfid_uid.strip().upper().replace(":", "").replace("-", "")
+
+        if not self.rfid_uid:
+            logger.warning("[QUOTA] Empty rfid_uid passed to set_ai_card_context")
+            return
+
+        if self._ai_card_initialized:
+            logger.debug(f"[QUOTA] AI card context already set for {self.rfid_uid}")
+            return
+
+        self._ai_card_initialized = True
+
+        try:
+            data = await self._api_get(f"/subscription/quota/ai-card/{self.rfid_uid}")
+            if data:
+                self.quota_type = "time"
+                self.remaining = data.get("remaining", 0)
+                self.is_exhausted = data.get("isExhausted", False)
+                self.limit = data.get("limit", 0)
+                self.used = data.get("used", 0)
+                self.extra_purchased = data.get("extraPurchased", 0)
+                self.plan_name = data.get("cardName", "AI Card")
+
+                if not self.is_exhausted:
+                    self.start_time_tracker()
+
+                logger.info(
+                    f"[QUOTA] AI card context set: rfid={self.rfid_uid}, "
+                    f"remaining={self.remaining}s, limit={self.limit}s"
+                )
+            else:
+                logger.warning(f"[QUOTA] No AI card quota data for {self.rfid_uid}, fail-open")
+                self._fail_open()
+        except Exception as e:
+            logger.warning(f"[QUOTA] Failed to fetch AI card quota: {e}, fail-open")
+            self._fail_open()
+
+    def _fail_open(self) -> None:
+        """
+        Handle API unreachable scenario based on fail_mode config.
+
+        - "open": Allow unlimited access (current default behavior)
+        - "capped": Allow up to _fail_local_cap_seconds locally, then hard stop
+        """
+        if self._fail_mode == "capped":
+            # Fail-capped mode: allow limited local time then hard stop
+            self.remaining = self._fail_local_cap_seconds
+            self.is_exhausted = False
+            self._initialized = True
+            logger.info(
+                f"[QUOTA] Fail-capped mode: allowing {self._fail_local_cap_seconds}s "
+                f"local session for {self.rfid_uid or self.mac_address}"
+            )
+            # Start time tracker to count down local cap
+            if not self._time_tracker_running:
+                self._session_start_time = time_module.monotonic()
+                self._time_tracker_running = True
+                self._time_tracker_task = asyncio.create_task(self._fail_capped_tracker_loop())
+        else:
+            # Fail-open mode: unlimited access
+            self.remaining = -1
+            self.is_exhausted = False
+            self.is_unbound = True
+            self._initialized = True
+
+    async def _fail_capped_tracker_loop(self) -> None:
+        """
+        Tracker for fail-capped mode. Counts down local cap seconds
+        and hard stops when exhausted.
+        """
+        try:
+            while self._time_tracker_running:
+                await asyncio.sleep(TIME_REPORT_INTERVAL)
+
+                if not self._time_tracker_running:
+                    break
+
+                # Count elapsed seconds since last tick
+                delta = min(TIME_REPORT_INTERVAL, self.remaining) if self.remaining > 0 else TIME_REPORT_INTERVAL
+                self._fail_local_seconds_used += delta
+                self.remaining = max(0, self._fail_local_cap_seconds - self._fail_local_seconds_used)
+
+                if self.remaining <= 0:
+                    logger.warning(
+                        f"[QUOTA] Fail-capped local cap exhausted: "
+                        f"rfid={self.rfid_uid or 'N/A'}, mac={self.mac_address}"
+                    )
+                    self.is_exhausted = True
+                    # Trigger MQTT exhaust and callback
+                    asyncio.create_task(self._publish_mqtt_exhaust())
+                    if self._on_quota_exhausted_callback:
+                        asyncio.create_task(self._on_quota_exhausted_callback())
+                    break
+
+        except asyncio.CancelledError:
+            pass
 
     def _apply_unified_quota(self, data: dict) -> None:
         """Apply data from unified quota endpoint."""
@@ -400,6 +519,7 @@ class QuotaManager:
                     continue
 
                 # Update local state
+                was_exhausted = self.is_exhausted
                 self._update_local_time(elapsed_total)
                 self._total_seconds_reported = elapsed_total
 
@@ -411,9 +531,17 @@ class QuotaManager:
                     f"remaining={self.remaining}s, exhausted={self.is_exhausted}"
                 )
 
-                # If exhausted, stop the loop — the worker will handle disconnection
-                if self.is_exhausted and not self._in_game_session:
-                    logger.info(f"[QUOTA] Time exhausted for {self.mac_address}")
+                # If just became exhausted, stop the loop and trigger MQTT
+                if self.is_exhausted and not was_exhausted and not self._in_game_session:
+                    logger.info(
+                        f"[QUOTA] Time exhausted in tracker loop: "
+                        f"rfid={self.rfid_uid or 'N/A'}, mac={self.mac_address}"
+                    )
+                    # Trigger MQTT exhaust message
+                    asyncio.create_task(self._publish_mqtt_exhaust())
+                    # Signal worker to disconnect via callback
+                    if self._on_quota_exhausted_callback:
+                        asyncio.create_task(self._on_quota_exhausted_callback())
                     break
 
         except asyncio.CancelledError:
@@ -636,23 +764,49 @@ class QuotaManager:
                     logger.debug(f"[QUOTA] All token consume retries failed: {e}")
 
     async def _fire_and_update_time(self, seconds: int) -> None:
-        """POST time consumption to server with retry."""
+        """POST time consumption to server with retry. Routes to AI card endpoint if applicable."""
+        # Choose endpoint based on session type
+        if self.rfid_uid:
+            endpoint = f"/subscription/consume/ai-card-time/{self.rfid_uid}"
+        else:
+            endpoint = f"/quota/consume/time/{self.mac_address}"
+
         backoff_delays = [0.5, 1.0]
         for attempt in range(3):
             try:
                 data = await self._api_post(
-                    f"/quota/consume/time/{self.mac_address}",
+                    endpoint,
                     body={
                         "seconds": seconds,
                         "monthKey": self._month_key,
                     }
                 )
                 if data:
+                    was_exhausted = self.is_exhausted
                     self.remaining = data.get("remaining", self.remaining)
                     self.is_exhausted = data.get("isExhausted", self.is_exhausted)
                     self.used = data.get("secondsUsed", self.used)
                     self.extra_purchased = data.get("extraPurchased", self.extra_purchased)
                     logger.debug(f"[QUOTA] Server sync (time): remaining={self.remaining}s")
+
+                    # If just became exhausted, trigger MQTT exhaust message to device
+                    if self.is_exhausted and not was_exhausted and self.rfid_uid:
+                        logger.warning(
+                            f"[QUOTA] AI card time just exhausted mid-session: "
+                            f"rfid={self.rfid_uid}, mac={self.mac_address}"
+                        )
+                        # Fire-and-forget: trigger MQTT exhaust without blocking
+                        asyncio.create_task(self._publish_mqtt_exhaust())
+                        # Signal worker to disconnect via callback
+                        if self._on_quota_exhausted_callback:
+                            asyncio.create_task(self._on_quota_exhausted_callback())
+
+                    # If already exhausted, log
+                    if self.is_exhausted:
+                        logger.warning(
+                            f"[QUOTA] Time exhausted: rfid={self.rfid_uid or 'N/A'}, "
+                            f"mac={self.mac_address}"
+                        )
                 return
             except Exception as e:
                 if attempt < len(backoff_delays):
@@ -660,6 +814,21 @@ class QuotaManager:
                     await asyncio.sleep(backoff_delays[attempt])
                 else:
                     logger.debug(f"[QUOTA] All time consume retries failed: {e}")
+
+    async def _publish_mqtt_exhaust(self) -> None:
+        """Trigger MQTT exhaust message to device when quota runs out mid-session."""
+        try:
+            await self._api_post(
+                "/subscription/publish-mqtt-exhaust",
+                body={
+                    "macAddress": self.mac_address.replace(":", "").lower(),
+                    "rfidUid": self.rfid_uid,
+                    "cardName": self.plan_name or "AI Card",
+                }
+            )
+            logger.info(f"[QUOTA] MQTT exhaust message triggered for {self.mac_address}")
+        except Exception as e:
+            logger.warning(f"[QUOTA] Failed to trigger MQTT exhaust: {e}")
 
     async def _resync(self) -> None:
         """Re-fetch quota from server to correct drift. Detects month rollover."""

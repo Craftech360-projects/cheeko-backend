@@ -84,6 +84,9 @@
                 <div class="tab-btn" :class="{ active: activeTab === 'aiCards' }" @click="switchTab('aiCards')">
                     <i class="el-icon-cpu"></i> AI Cards
                 </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'linkedCards' }" @click="switchTab('linkedCards')">
+                    <i class="el-icon-connection"></i> AI Cards Status
+                </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     <i class="el-icon-s-operation"></i> Bulk Ranges
                 </div>
@@ -367,6 +370,98 @@
                                         :class="{ active: page === aiCardsCurrentPage }" @click="goToAiCardsPage(page)">{{ page }}</button>
                                     <button class="pagination-btn" :disabled="aiCardsCurrentPage === aiCardsPageCount" @click="goNextAiCards">Next</button>
                                     <span class="total-text">Total {{ aiCardsTotal }} records</span>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- AI Cards Status Tab (Linked to Users & Devices) -->
+                        <template v-if="activeTab === 'linkedCards'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-connection"></i> AI Cards — Linked to Users &amp; Devices
+                                        <el-tag size="mini" type="info" class="section-count">{{ linkedAiCardsTotal }} total</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        AI Cards that have been tapped, showing which user and device they are linked to, with remaining time.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <el-table :data="linkedAiCards" class="transparent-table" v-loading="linkedAiCardsLoading"
+                                element-loading-text="Loading..." element-loading-spinner="el-icon-loading"
+                                element-loading-background="rgba(255, 255, 255, 0.7)"
+                                :header-cell-class-name="headerCellClassName" stripe>
+                                <el-table-column label="Card Name" align="center" min-width="140">
+                                    <template slot-scope="scope">
+                                        {{ scope.row.cardName || 'AI Card' }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="RFID UID" prop="rfidUid" align="center" width="150">
+                                    <template slot-scope="scope">
+                                        <span class="uid-mono">{{ scope.row.rfidUid }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="User ID" align="center" width="100">
+                                    <template slot-scope="scope">
+                                        <span v-if="scope.row.userId">{{ scope.row.userId }}</span>
+                                        <span v-else class="text-muted">—</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="MAC Address" align="center" width="170">
+                                    <template slot-scope="scope">
+                                        <span v-if="scope.row.macAddress" class="mac-address">{{ scope.row.macAddress }}</span>
+                                        <span v-else class="text-muted">—</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Monthly Limit" align="center" width="110">
+                                    <template slot-scope="scope">
+                                        {{ scope.row.monthlyTimeLimit === 0 ? 'Unconfigured' : scope.row.monthlyTimeLimit === -1 ? 'Unlimited' : formatTime(scope.row.monthlyTimeLimit) }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Remaining" align="center" width="110">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="remainingTagType(scope.row.remainingSeconds)" size="mini" effect="dark">
+                                            {{ scope.row.remainingSeconds !== undefined ? formatTime(scope.row.remainingSeconds) : '—' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Status" align="center" width="120">
+                                    <template slot-scope="scope">
+                                        <el-tag :type="statusTagType(scope.row.status)" size="mini">
+                                            {{ (scope.row.status || 'active').charAt(0).toUpperCase() + (scope.row.status || 'active').slice(1) }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Last Tapped" align="center" width="170">
+                                    <template slot-scope="scope">
+                                        {{ scope.row.lastTapped ? formatDate(scope.row.lastTapped) : '—' }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Actions" align="center" width="120">
+                                    <template slot-scope="scope">
+                                        <el-button type="text" size="mini" @click="openRechargeDialog(scope.row)">
+                                            <i class="el-icon-coin"></i> Recharge
+                                        </el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="table_bottom">
+                                <div class="ctrl_btn">
+                                    <el-button size="mini" type="primary" @click="loadLinkedAiCards">
+                                        <i class="el-icon-refresh"></i> Refresh
+                                    </el-button>
+                                </div>
+                                <div class="custom-pagination">
+                                    <el-select v-model="linkedAiCardsPageSize" @change="onLinkedAiCardsPageSizeChange" class="page-size-select">
+                                        <el-option v-for="item in pageSizeOptions" :key="item" :label="`${item} items/page`" :value="item"></el-option>
+                                    </el-select>
+                                    <button class="pagination-btn" :disabled="linkedAiCardsPage === 1" @click="goFirstLinkedAiCards">First</button>
+                                    <button class="pagination-btn" :disabled="linkedAiCardsPage === 1" @click="goPrevLinkedAiCards">Previous</button>
+                                    <button class="pagination-btn active">{{ linkedAiCardsPage }}</button>
+                                    <button class="pagination-btn" :disabled="linkedAiCardsPage >= linkedAiCardsPageCount" @click="goNextLinkedAiCards">Next</button>
+                                    <span class="total-text">Total {{ linkedAiCardsTotal }} records</span>
                                 </div>
                             </div>
                         </template>
@@ -912,6 +1007,123 @@
                                         <p style="color: #909399; font-size: 13px;">This card is not mapped to any content yet.</p>
                                     </div>
                                 </el-dialog>
+
+                                <!-- AI Cards Linked to Users & Devices -->
+                                <div class="ai-cards-linked-section">
+                                    <div class="section-header">
+                                        <div class="section-info">
+                                            <h3 class="section-title">
+                                                <i class="el-icon-connection"></i> AI Cards — Linked to Users &amp; Devices
+                                            </h3>
+                                            <p class="section-description">
+                                                AI Cards that have been tapped, showing which user and device they are linked to, with remaining time.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <el-table
+                                        :data="linkedAiCards"
+                                        class="transparent-table"
+                                        v-loading="linkedAiCardsLoading"
+                                        size="small"
+                                        stripe
+                                    >
+                                        <el-table-column label="Card Name" align="center" min-width="140">
+                                            <template slot-scope="scope">
+                                                {{ scope.row.cardName || 'AI Card' }}
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="RFID UID" prop="rfidUid" align="center" width="150">
+                                            <template slot-scope="scope">
+                                                <el-tag size="mini" effect="plain">{{ scope.row.rfidUid }}</el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="User ID" align="center" width="100">
+                                            <template slot-scope="scope">
+                                                <span v-if="scope.row.userId">{{ scope.row.userId }}</span>
+                                                <span v-else class="text-muted">—</span>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="MAC Address" align="center" width="160">
+                                            <template slot-scope="scope">
+                                                <span v-if="scope.row.macAddress" class="mac-address">{{ scope.row.macAddress }}</span>
+                                                <span v-else class="text-muted">—</span>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="Limit" align="center" width="100">
+                                            <template slot-scope="scope">
+                                                {{ scope.row.monthlyTimeLimit === 0 ? 'N/A' : scope.row.monthlyTimeLimit === -1 ? '∞' : formatTime(scope.row.monthlyTimeLimit) }}
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="Remaining" align="center" width="100">
+                                            <template slot-scope="scope">
+                                                <el-tag :type="remainingTagType(scope.row.remainingSeconds)" size="mini" effect="dark">
+                                                    {{ scope.row.remainingSeconds !== undefined ? formatTime(scope.row.remainingSeconds) : '—' }}
+                                                </el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="Status" align="center" width="110">
+                                            <template slot-scope="scope">
+                                                <el-tag :type="statusTagType(scope.row.status)" size="mini">
+                                                    {{ (scope.row.status || 'active').charAt(0).toUpperCase() + (scope.row.status || 'active').slice(1) }}
+                                                </el-tag>
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="Last Tapped" align="center" width="160">
+                                            <template slot-scope="scope">
+                                                {{ scope.row.lastTapped ? formatDate(scope.row.lastTapped) : '—' }}
+                                            </template>
+                                        </el-table-column>
+                                        <el-table-column label="Actions" align="center" width="100">
+                                            <template slot-scope="scope">
+                                                <el-button type="text" size="mini" @click="openRechargeDialog(scope.row)">
+                                                    <i class="el-icon-coin"></i> Recharge
+                                                </el-button>
+                                            </template>
+                                        </el-table-column>
+                                    </el-table>
+
+                                    <div class="linked-ai-cards-pagination">
+                                        <el-pagination
+                                            background
+                                            layout="prev, pager, next, total"
+                                            :total="linkedAiCardsTotal"
+                                            :page-size="linkedAiCardsPageSize"
+                                            :current-page="linkedAiCardsPage"
+                                            @current-change="onLinkedAiCardsPageChange">
+                                        </el-pagination>
+                                    </div>
+                                </div>
+
+                                <!-- Recharge Dialog -->
+                                <el-dialog title="Recharge AI Card" :visible.sync="rechargeDialogVisible" width="420px" :append-to-body="true">
+                                    <div v-if="rechargeCard" class="recharge-dialog-content">
+                                        <div class="recharge-card-info">
+                                            <strong>{{ rechargeCard.cardName || 'AI Card' }}</strong>
+                                            <span class="recharge-card-uid">{{ rechargeCard.rfidUid }}</span>
+                                        </div>
+                                        <div class="recharge-current">
+                                            Current remaining: <strong>{{ formatTime(rechargeCard.remainingSeconds || 0) }}</strong>
+                                        </div>
+                                        <el-form label-position="top" style="margin-top: 16px;">
+                                            <el-form-item label="Add Time (minutes)">
+                                                <el-input-number v-model="rechargeMinutes" :min="1" :max="1440" :step="5" style="width: 100%;"></el-input-number>
+                                            </el-form-item>
+                                            <el-form-item label="Quick amounts">
+                                                <el-button-group>
+                                                    <el-button size="small" @click="rechargeMinutes = 30">30 min</el-button>
+                                                    <el-button size="small" @click="rechargeMinutes = 60">1 hour</el-button>
+                                                    <el-button size="small" @click="rechargeMinutes = 120">2 hours</el-button>
+                                                    <el-button size="small" @click="rechargeMinutes = 360">6 hours</el-button>
+                                                </el-button-group>
+                                            </el-form-item>
+                                        </el-form>
+                                    </div>
+                                    <span slot="footer" class="dialog-footer">
+                                        <el-button @click="rechargeDialogVisible = false">Cancel</el-button>
+                                        <el-button type="primary" @click="confirmRecharge" :loading="recharging">Recharge</el-button>
+                                    </span>
+                                </el-dialog>
                             </div>
                         </template>
                     </el-card>
@@ -1090,6 +1302,19 @@ export default {
                 dailyTrend: []
             },
 
+            // AI Cards Linked to Users/Devices
+            linkedAiCards: [],
+            linkedAiCardsLoading: false,
+            linkedAiCardsPage: 1,
+            linkedAiCardsPageSize: 20,
+            linkedAiCardsTotal: 0,
+
+            // Recharge Dialog
+            rechargeDialogVisible: false,
+            rechargeCard: null,
+            rechargeMinutes: 60,
+            recharging: false,
+
             // Dropdown data
             questionsDropdown: [],
             packsDropdown: [],
@@ -1140,10 +1365,10 @@ export default {
         this.disconnectNfc();
     },
     created() {
-
         this.fetchQuestionPacks();
         this.loadDropdownData();
         this.loadStats();
+        this.loadLinkedAiCards();
     },
     computed: {
         // Questions pagination
@@ -1180,6 +1405,10 @@ export default {
         },
         aiCardsVisiblePages() {
             return this.getVisiblePages(this.aiCardsCurrentPage, this.aiCardsPageCount);
+        },
+        // Linked AI Cards pagination
+        linkedAiCardsPageCount() {
+            return Math.ceil(this.linkedAiCardsTotal / this.linkedAiCardsPageSize) || 1;
         },
         // Series pagination
         seriesPageCount() {
@@ -1232,6 +1461,7 @@ export default {
             else if (tab === 'series') this.fetchSeries();
             else if (tab === 'questionPacks') this.fetchQuestionPacks();
             else if (tab === 'aiCards') this.fetchAiCards();
+            else if (tab === 'linkedCards') this.loadLinkedAiCards();
             else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
         },
 
@@ -1260,6 +1490,9 @@ export default {
             } else if (this.activeTab === 'cardAnalytics') {
                 this.cardTapCurrentPage = 1;
                 this.fetchCardTapAnalytics();
+            } else if (this.activeTab === 'linkedCards') {
+                this.linkedAiCardsPage = 1;
+                this.loadLinkedAiCards();
             }
         },
 
@@ -1750,6 +1983,12 @@ export default {
         goFirstAiCards() { this.aiCardsCurrentPage = 1; this.fetchAiCards(); },
         goPrevAiCards() { if (this.aiCardsCurrentPage > 1) { this.aiCardsCurrentPage--; this.fetchAiCards(); } },
         goNextAiCards() { if (this.aiCardsCurrentPage < this.aiCardsPageCount) { this.aiCardsCurrentPage++; this.fetchAiCards(); } },
+
+        // Linked AI Cards Pagination
+        goFirstLinkedAiCards() { this.linkedAiCardsPage = 1; this.loadLinkedAiCards(); },
+        goPrevLinkedAiCards() { if (this.linkedAiCardsPage > 1) { this.linkedAiCardsPage--; this.loadLinkedAiCards(); } },
+        goNextLinkedAiCards() { if (this.linkedAiCardsPage < this.linkedAiCardsPageCount) { this.linkedAiCardsPage++; this.loadLinkedAiCards(); } },
+        onLinkedAiCardsPageSizeChange(size) { this.linkedAiCardsPageSize = size; this.linkedAiCardsPage = 1; this.loadLinkedAiCards(); },
         goToAiCardsPage(page) { this.aiCardsCurrentPage = page; this.fetchAiCards(); },
 
         handleSelectAllAiCards() {
@@ -2604,6 +2843,89 @@ export default {
                     };
                 }
             });
+        },
+
+        // ========== AI Cards Linked to Users/Devices ==========
+
+        loadLinkedAiCards() {
+            this.linkedAiCardsLoading = true;
+            Api.subscription.getAiCardsLinked(
+                this.linkedAiCardsPage,
+                this.linkedAiCardsPageSize,
+                undefined,
+                (res) => {
+                    this.linkedAiCardsLoading = false;
+                    if (res.data && res.data.data) {
+                        this.linkedAiCards = res.data.data.cards || [];
+                        this.linkedAiCardsTotal = res.data.data.total || 0;
+                    }
+                },
+                () => {
+                    this.linkedAiCardsLoading = false;
+                }
+            );
+        },
+
+        onLinkedAiCardsPageChange(page) {
+            this.linkedAiCardsPage = page;
+            this.loadLinkedAiCards();
+        },
+
+        openRechargeDialog(card) {
+            this.rechargeCard = card;
+            this.rechargeMinutes = 60;
+            this.rechargeDialogVisible = true;
+        },
+
+        confirmRecharge() {
+            if (!this.rechargeCard || this.rechargeMinutes < 1) return;
+            this.recharging = true;
+            const seconds = this.rechargeMinutes * 60;
+            Api.subscription.rechargeAiCard(
+                this.rechargeCard.rfidUid,
+                seconds,
+                (res) => {
+                    this.recharging = false;
+                    if (res.data) {
+                        this.$message.success(`Recharged ${this.rechargeMinutes} minutes for ${this.rechargeCard.cardName || 'card'}`);
+                        this.rechargeDialogVisible = false;
+                        this.loadLinkedAiCards();
+                    }
+                },
+                () => {
+                    this.recharging = false;
+                    this.$message.error('Failed to recharge card');
+                }
+            );
+        },
+
+        formatTime(seconds) {
+            if (!seconds || seconds <= 0) return '0m';
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            if (hours > 0) return `${hours}h ${mins}m`;
+            return `${mins}m`;
+        },
+
+        formatDate(dateStr) {
+            if (!dateStr) return '—';
+            const d = new Date(dateStr);
+            return d.toLocaleString('en-IN', {
+                day: '2-digit', month: 'short', year: 'numeric',
+                hour: '2-digit', minute: '2-digit'
+            });
+        },
+
+        statusTagType(status) {
+            const map = { active: 'success', exhausted: 'danger', not_configured: 'info' };
+            return map[status] || 'info';
+        },
+
+        remainingTagType(seconds) {
+            if (seconds === undefined || seconds === null) return 'info';
+            if (seconds <= 0) return 'danger';
+            if (seconds < 300) return 'warning';
+            return 'success';
         }
     }
 };
@@ -3737,5 +4059,75 @@ export default {
 .stat-icon.qa-packs {
     color: #9b59b6;
     background: rgba(155, 89, 182, 0.1);
+}
+
+/* AI Cards Linked Section */
+.ai-cards-linked-section {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 2px solid #EBEEF5;
+}
+
+.ai-cards-linked-section .section-header {
+    margin-bottom: 16px;
+}
+
+.ai-cards-linked-section .section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #303133;
+    margin: 0 0 4px;
+}
+
+.ai-cards-linked-section .section-title i {
+    margin-right: 6px;
+    color: #409EFF;
+}
+
+.ai-cards-linked-section .section-description {
+    margin: 0;
+    font-size: 13px;
+    color: #909399;
+}
+
+.linked-ai-cards-pagination {
+    margin-top: 16px;
+    text-align: center;
+}
+
+.mac-address {
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+}
+
+.text-muted {
+    color: #C0C4CC;
+    font-style: italic;
+}
+
+/* Recharge Dialog */
+.recharge-dialog-content {
+    padding: 8px 0;
+}
+
+.recharge-card-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: #f5f7fa;
+    border-radius: 6px;
+}
+
+.recharge-card-uid {
+    font-family: monospace;
+    font-size: 13px;
+    color: #909399;
+}
+
+.recharge-current {
+    margin-top: 12px;
+    font-size: 14px;
+    color: #606266;
 }
 </style>

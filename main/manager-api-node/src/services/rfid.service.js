@@ -12,6 +12,7 @@ const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { extractBySequence, countItems } = require('../utils/mdParser');
 const qdrantService = require('./integrations/qdrant.service');
+const subscriptionService = require('./subscription.service');
 
 // =============================================
 // Helper: Format date to yyyy-MM-dd HH:mm:ss
@@ -158,7 +159,7 @@ let rfidCardTapLogTableExistsPromise = null;
 const getRfidSeriesColumns = async () => {
   if (!rfidSeriesColumnsPromise) {
     rfidSeriesColumnsPromise = prisma.$queryRaw`
-      SELECT column_name
+      SELECT column_name::text AS column_name
       FROM information_schema.columns
       WHERE table_schema = current_schema()
         AND table_name = 'rfid_series'
@@ -615,6 +616,8 @@ const lookupCardByUid = async (rfidUid) => {
         const actionData = series.action_data || {};
         const agentName = actionData.agent_name || null;
         logger.info(`[RFID-LOOKUP] Series AI card: series_id=${series.id}, agent=${agentName || 'default'}`);
+
+        // Series cards don't have monthly_time_limit_secs — they get unlimited access
         return {
           rfid_uid: normalizedUid,
           source: 'bulk_range',
@@ -625,6 +628,12 @@ const lookupCardByUid = async (rfidUid) => {
           actionType: agentName ? 'agent' : null,
           actionData: actionData,
           agentName: agentName,
+          // Series cards are unlimited (no per-card quota)
+          quotaExhausted: false,
+          monthlyTimeLimit: -1,
+          timeUsed: 0,
+          timeRemaining: -1,
+          extraPurchased: 0,
         };
       }
 
@@ -764,6 +773,33 @@ const lookupCardByUid = async (rfidUid) => {
     const languageName = actionData.language_name || actionData.languageName || getLanguageName(languageCode);
     const voiceId = actionData.voice_id || actionData.voiceId || null;
     logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}, language=${languageCode || 'default'}`);
+
+    // ── AI Card Time Quota Check ──
+    let quotaExhausted = false;
+    let monthlyTimeLimit = 0;
+    let timeUsed = 0;
+    let timeRemaining = 0;
+    let extraPurchased = 0;
+
+    try {
+      const quotaInfo = await subscriptionService.getAiCardTimeQuota(normalizedUid);
+      quotaExhausted = quotaInfo.isExhausted;
+      monthlyTimeLimit = quotaInfo.monthlyTimeLimit;
+      timeUsed = quotaInfo.used;
+      timeRemaining = quotaInfo.remaining;
+      extraPurchased = quotaInfo.extraPurchased;
+
+      if (quotaExhausted) {
+        logger.warn(`[RFID-LOOKUP] AI card quota EXHAUSTED: uid=${normalizedUid}, used=${timeUsed}s, limit=${monthlyTimeLimit}s`);
+      } else {
+        logger.info(`[RFID-LOOKUP] AI card quota OK: uid=${normalizedUid}, remaining=${timeRemaining}s, used=${timeUsed}s`);
+      }
+    } catch (quotaErr) {
+      logger.error(`[RFID-LOOKUP] AI card quota check failed: ${quotaErr.message}. Failing open (allowing session).`);
+      // Fail-open: allow session even if quota check fails
+      quotaExhausted = false;
+    }
+
     return {
       rfid_uid: normalizedUid,
       contentType: 'prompt',
@@ -775,6 +811,12 @@ const lookupCardByUid = async (rfidUid) => {
       languageCode: languageCode,
       languageName: languageName,
       voiceId: voiceId,
+      // Quota metadata
+      quotaExhausted,
+      monthlyTimeLimit,
+      timeUsed,
+      timeRemaining,
+      extraPurchased,
     };
   }
 
@@ -3056,6 +3098,12 @@ const lookupContentByRfidUid = async (rfidUid, sequence) => {
     mapping = await prisma.rfid_card_mapping.findFirst({
       where: { rfid_uid: normalizedUid, active: true }
     });
+
+    // AI prompt cards are not sequence-based. Reuse the standard lookup path so
+    // quota and agent metadata are preserved for the gateway.
+    if (mapping?.card_type === 'ai' && !mapping?.content_pack_id) {
+      return await lookupCardByUid(normalizedUid);
+    }
 
     if (mapping?.content_pack_id) {
       contentPack = await prisma.rfid_content_pack.findFirst({

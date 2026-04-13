@@ -10,11 +10,19 @@
  * (e.g. analytics endpoints).
  */
 
-const admin = require('firebase-admin');
 const { verifyCustomToken } = require('./auth');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { unauthorized } = require('../utils/response');
+
+let admin = null;
+try {
+    admin = require('firebase-admin');
+} catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND') {
+        throw error;
+    }
+}
 
 /**
  * Middleware: accept Firebase ID token OR custom JWT token.
@@ -31,7 +39,7 @@ const requireFlexAuth = async (req, res, next) => {
     const token = authHeader.substring(7);
 
     // ── 1. Try Firebase verification (if SDK is initialised) ──────────────────
-    if (admin.apps.length > 0) {
+    if (admin && admin.apps.length > 0) {
         try {
             const decoded = await admin.auth().verifyIdToken(token);
 

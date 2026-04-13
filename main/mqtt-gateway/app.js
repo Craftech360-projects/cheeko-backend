@@ -48,6 +48,42 @@ const { MQTTGateway, setConfigManager } = require("./gateway/mqtt-gateway");
 // Inject config manager into gateway (which will cascade to LiveKit bridge)
 setConfigManager(configManager);
 
+// ================================
+// HTTP Publish Server (for Manager API / Worker)
+// ================================
+const express = require("express");
+const httpPublishApp = express();
+httpPublishApp.use(express.json());
+
+const HTTP_PUBLISH_PORT = parseInt(process.env.HTTP_PUBLISH_PORT || "3001", 10);
+const HTTP_PUBLISH_SECRET = process.env.HTTP_PUBLISH_SECRET || "";
+
+httpPublishApp.post("/publish", async (req, res) => {
+  // Validate secret key
+  const secret = req.headers["x-service-key"];
+  if (HTTP_PUBLISH_SECRET && secret !== HTTP_PUBLISH_SECRET) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
+  const { topic, payload, macAddress } = req.body || {};
+  if (!topic || !payload) {
+    return res.status(400).json({ success: false, message: "topic and payload required" });
+  }
+
+  try {
+    if (!gateway || !gateway.mqttClient || !gateway.mqttClient.connected) {
+      return res.status(503).json({ success: false, message: "MQTT client not connected" });
+    }
+
+    gateway.mqttPublish(topic, payload);
+    logger.info(`📤 [HTTP-PUBLISH] Published to ${topic} for device ${macAddress || "unknown"}`);
+    res.json({ success: true, topic, macAddress });
+  } catch (error) {
+    logger.error(`❌ [HTTP-PUBLISH] Failed to publish to ${topic}:`, error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // logger.info("✅ [CONFIG] ConfigManager injected into all modules");
 
 // ================================
@@ -70,6 +106,11 @@ async function main() {
     // Initialize and start the gateway with the shared worker pool
     gateway = new MQTTGateway(globalWorkerPool);
     await gateway.start();
+
+    // Start HTTP publish server
+    httpPublishApp.listen(HTTP_PUBLISH_PORT, () => {
+      logger.info(`✅ [HTTP-PUBLISH] Server listening on port ${HTTP_PUBLISH_PORT}`);
+    });
 
     logger.info("✅ [MAIN] MQTT Gateway started successfully");
     // logger.info("🎯 [READY] System ready to accept device connections");

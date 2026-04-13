@@ -11,15 +11,27 @@
  *   → look up sys_user by firebase_uid → attach to req.firebaseUser
  */
 
-const admin = require('firebase-admin');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { unauthorized } = require('../utils/response');
+
+let admin = null;
+try {
+    admin = require('firebase-admin');
+} catch (error) {
+    if (error.code !== 'MODULE_NOT_FOUND') {
+        throw error;
+    }
+}
 
 // ─── Firebase Admin SDK initialisation (lazy singleton) ───────────────────────
 let firebaseInitialized = false;
 
 function ensureFirebaseInit() {
+    if (!admin) {
+        logger.warn('firebase-admin not installed — Firebase auth unavailable');
+        return false;
+    }
     if (firebaseInitialized || admin.apps.length) {
         firebaseInitialized = true;
         return true;

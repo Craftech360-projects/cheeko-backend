@@ -1145,6 +1145,39 @@ class MQTTGateway {
         // ====== BRANCH C: AI PROMPT CARD — send prompt text directly via MQTT (no LiveKit needed) ======
         const isAiPromptCard = !hasItems && rfidContent.contentType === "prompt";
         if (isAiPromptCard) {
+          // ── AI Card Time Quota Check ──
+          const quotaExhausted = rfidContent.quotaExhausted === true;
+          const monthlyTimeLimit = rfidContent.monthlyTimeLimit || 0;
+
+          if (quotaExhausted) {
+            logger.warn(
+              `⏰ [RFID-QUOTA] AI card EXHAUSTED: uid=${rfidUid}, limit=${monthlyTimeLimit}s. Sending time_quota_exhausted to device ${deviceId}`
+            );
+            this.mqttPublish(`devices/p2p/${clientId}`, {
+              type: "time_quota_exhausted",
+              rfid_uid: rfidUid,
+              card_name: rfidContent.title || "AI Card",
+              message: "Time quota exhausted for this month. Please recharge.",
+              audio_prompt: "recharge_required",
+            });
+            return;
+          }
+
+          if (monthlyTimeLimit === 0 && rfidContent.source !== 'bulk_range') {
+            // Individual card not configured (series cards are unlimited)
+            logger.warn(
+              `⚠️ [RFID-QUOTA] AI card NOT CONFIGURED: uid=${rfidUid}. Sending card_not_configured to device ${deviceId}`
+            );
+            this.mqttPublish(`devices/p2p/${clientId}`, {
+              type: "card_not_configured",
+              rfid_uid: rfidUid,
+              card_name: rfidContent.title || "AI Card",
+              message: "This card is not yet configured. Please contact support.",
+              audio_prompt: "card_not_configured",
+            });
+            return;
+          }
+
           const deviceInfo = this.deviceConnections.get(deviceId);
           const hasConnection = deviceInfo && deviceInfo.connection && deviceInfo.connection.bridge;
 
@@ -1237,6 +1270,10 @@ class MQTTGateway {
           // Add RFID-specific fields
           if (rfidUid) {
             userTextMsg.rfid_uid = rfidUid;
+          }
+          // Add content_type from RFID lookup (e.g., "prompt", "story_pack", "rhyme_pack")
+          if (rfidContent && rfidContent.contentType) {
+            userTextMsg.content_type = rfidContent.contentType;
           }
           if (sequence !== null && sequence !== undefined) {
             userTextMsg.sequence = sequence;
