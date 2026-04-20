@@ -193,6 +193,33 @@ class WorkerPoolManager {
         }
     }
 
+    /**
+     * Decode a missing Opus frame using Packet Loss Concealment (PLC).
+     * Tells the decoder a frame was lost so it can interpolate/extrapolate
+     * and keep its internal state in sync.
+     */
+    async decodeOpusPLC(sessionId) {
+        const { worker, index } = this.getNextWorker();
+        this.workerPendingCount[index]++;
+
+        try {
+            const result = await this.sendMessage(
+                worker,
+                {
+                    type: "decode_plc",
+                    data: { sessionId },
+                },
+                150
+            );
+            return result.data;
+        } catch (error) {
+            this.performanceMonitor.recordError();
+            throw error;
+        } finally {
+            this.workerPendingCount[index]--;
+        }
+    }
+
     getNextWorker() {
         // JITTER FIX: Use least-loaded worker instead of round-robin
         // Find worker with minimum pending requests

@@ -1,6 +1,6 @@
-# Line Art Generator API
+# Doodle Art Generator API
 
-WebSocket API that accepts audio or text input, generates a line art image using AI, and returns a raw 1-bit monochrome bitmap ready for embedded displays.
+WebSocket API that accepts audio or text input, generates a doodle/coloring-book style image using AI, and returns a raw 1-bit monochrome bitmap ready for embedded displays.
 
 ## How It Works
 
@@ -11,7 +11,7 @@ Device/Browser                          Server (this project)
      |                                       |
      |── audio (binary frame) ─────────────>|── Groq Whisper API (STT)
      |   OR text (JSON frame)                |── HuggingFace FLUX.1 (image gen)
-     |                                       |── Pillow (resize + 1-bit convert)
+     |                                       |── Pillow (resize + threshold conversion)
      |                                       |
      |<──── JSON: transcription + image ─────|
      |                                       |

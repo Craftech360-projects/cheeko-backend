@@ -50,7 +50,7 @@ async def handle_text_input(ws: WebSocket, subject: str):
         return
 
     logger.info("Text input received: '%s'", subject)
-    await send_json(ws, ProgressMessage(stage="generating", message=f"Generating line art for '{subject}'..."))
+    await send_json(ws, ProgressMessage(stage="generating", message=f"Generating doodle art for '{subject}'..."))
 
     try:
         image_data_uri, prompt_used, raw_mono, height = await generate_line_art(subject, HF_TOKEN)
@@ -118,6 +118,16 @@ async def generate_endpoint(
             raise HTTPException(status_code=413, detail="Audio too large. Keep recordings under 10 seconds.")
 
         logger.info("HTTP /generate: audio received (%d bytes)", len(audio_bytes))
+
+        # Save incoming audio for debugging
+        audio_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "saved_audio")
+        os.makedirs(audio_dir, exist_ok=True)
+        import time as _time
+        wav_path = os.path.join(audio_dir, f"input_{int(_time.time())}.wav")
+        with open(wav_path, "wb") as f:
+            f.write(audio_bytes)
+        logger.info("Saved audio to %s", wav_path)
+
         try:
             transcription = await transcribe(audio_bytes)
         except Exception as e:

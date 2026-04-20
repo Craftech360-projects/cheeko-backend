@@ -348,7 +348,10 @@ class VirtualMQTTConnection {
 
     // Extract language and board_type from hello message
     this.language = json.language || null;
-    this.boardType = json.board_type || "cheeko";
+    const rawBoardType = json.board_type || "cheeko";
+    // Normalize: any board_type containing "printer" is treated as "ai_printer"
+    this.boardType = rawBoardType.includes("printer") ? "ai_printer" : rawBoardType;
+    console.log(`🔧 [BOARD-TYPE] Raw: "${rawBoardType}" → Normalized: "${this.boardType}"`);
 
     // Use defaults — DB queries happen in background
     this.roomType = "conversation"; // Default, updated by deferred DB query
@@ -1531,10 +1534,6 @@ class VirtualMQTTConnection {
       this.udp.remoteAddress = rinfo;
     }
 
-    if (sequence < this.udp.remoteSequence) {
-      return;
-    }
-
     // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
     const header = message.slice(0, 16);
     const encryptedPayload = message.slice(16, 16 + payloadLength);
@@ -1553,13 +1552,14 @@ class VirtualMQTTConnection {
       return;
     }
 
-    // ── board_type fork: ai_printer accumulates audio instead of streaming to LiveKit ──
+    // ── board_type fork: ai_printer accumulates audio with sequence numbers for PLC ──
     if (this.boardType === "ai_printer") {
       if (!this.printerBuffer || this.printerBuffer.processing) return;
 
+      // Accept out-of-order packets (don't drop) — we sort by sequence before decoding
       // Cap at 250 frames (~5s audio) to prevent memory issues
       if (this.printerBuffer.frames.length < 250) {
-        this.printerBuffer.frames.push(Buffer.from(payload));
+        this.printerBuffer.frames.push({ seq: sequence, data: Buffer.from(payload) });
       }
 
       // Reset silence timer — 1.5s of no audio triggers processing
@@ -1573,6 +1573,11 @@ class VirtualMQTTConnection {
       this.udp.remoteSequence = sequence;
       this.audioStats.packetCount++;
       this.audioStats.totalBytes += payload.length;
+      return;
+    }
+
+    // For non-printer paths, drop out-of-order packets
+    if (sequence < this.udp.remoteSequence) {
       return;
     }
 
@@ -1619,15 +1624,44 @@ class VirtualMQTTConnection {
         message: "Processing audio...",
       }));
 
-      // Decode all Opus frames to PCM using existing worker pool
+      // Sort frames by sequence number to handle UDP reordering
+      frames.sort((a, b) => a.seq - b.seq);
+
+      // Detect gaps and log stats
+      let totalGaps = 0;
+      for (let i = 1; i < frames.length; i++) {
+        const gap = frames[i].seq - frames[i - 1].seq - 1;
+        if (gap > 0) totalGaps += gap;
+      }
+      if (totalGaps > 0) {
+        console.log(`⚠️ [AI-PRINTER] Detected ${totalGaps} missing frames (packet loss) in ${frames.length} received frames`);
+      }
+
+      // Decode Opus frames with PLC (Packet Loss Concealment) for missing packets
       const pcmChunks = [];
+      let expectedSeq = frames[0].seq;
+
       for (const frame of frames) {
+        // Insert PLC frames for any gaps (missing packets)
+        while (expectedSeq < frame.seq) {
+          try {
+            const plcPcm = await this.workerPool.decodeOpusPLC(this.udp.session_id);
+            if (plcPcm) pcmChunks.push(plcPcm);
+          } catch (plcErr) {
+            // PLC failure is non-fatal — decoder state still advances
+            console.warn(`⚠️ [AI-PRINTER] PLC decode error: ${plcErr.message}`);
+          }
+          expectedSeq++;
+        }
+
+        // Decode the actual frame
         try {
-          const pcm = await this.workerPool.decodeOpus(this.udp.session_id, frame);
+          const pcm = await this.workerPool.decodeOpus(this.udp.session_id, frame.data);
           if (pcm) pcmChunks.push(pcm);
         } catch (decodeErr) {
           console.warn(`⚠️ [AI-PRINTER] Opus decode error (skipping frame): ${decodeErr.message}`);
         }
+        expectedSeq = frame.seq + 1;
       }
 
       if (pcmChunks.length === 0) {

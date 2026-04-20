@@ -3,17 +3,23 @@ import io
 import logging
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageFilter
 
 logger = logging.getLogger(__name__)
 
 PROMPT_TEMPLATE = (
-    "simple black and white line art drawing of {subject}, "
-    "minimal style, clean lines, white background, no shading, outline only"
+    "children's coloring book page of {subject}, "
+    "bold thick black outlines, large simple shapes easy to color in, "
+    "doodle art style, playful hand-drawn look, "
+    "white background, no shading, no fill, no color, no gray, "
+    "black and white only, clean empty spaces inside outlines"
 )
 
 HF_API_URL = "https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell"
 TARGET_WIDTH = 384
+MONO_THRESHOLD = 128  # Hard threshold for 1-bit conversion (0-255)
+DILATE_LINES = True   # Thicken outlines for easier coloring
+DILATE_SIZE = 3       # MaxFilter kernel size (3 = slight thickening)
 
 
 def build_prompt(subject: str) -> str:
@@ -33,6 +39,10 @@ async def generate_with_huggingface(prompt: str, api_token: str | None = None) -
 def to_raw_mono(image_bytes: bytes) -> tuple[bytes, bytes]:
     """Convert image to 384px wide 1-bit monochrome raw bitmap.
 
+    Uses a hard threshold instead of dithering to produce clean
+    coloring-book outlines without dot artifacts. Optionally dilates
+    (thickens) lines so they are easier for kids to see and color.
+
     Returns (png_bytes_for_preview, raw_mono_bytes).
 
     Raw format:
@@ -49,8 +59,16 @@ def to_raw_mono(image_bytes: bytes) -> tuple[bytes, bytes]:
     new_h = int(h * TARGET_WIDTH / w)
     img = img.resize((TARGET_WIDTH, new_h), Image.LANCZOS)
 
-    # Convert to 1-bit monochrome (Pillow "1" mode uses 0=black, 255=white)
-    img_mono = img.convert("1")
+    # Convert to grayscale first
+    img_gray = img.convert("L")
+
+    # Optional: thicken dark lines via morphological dilation (MinFilter
+    # darkens because it picks the minimum/darkest neighbour pixel)
+    if DILATE_LINES:
+        img_gray = img_gray.filter(ImageFilter.MinFilter(DILATE_SIZE))
+
+    # Hard threshold → clean black-or-white, no dither dots
+    img_mono = img_gray.point(lambda p: 255 if p > MONO_THRESHOLD else 0, "1")
 
     # Generate PNG preview
     png_buf = io.BytesIO()

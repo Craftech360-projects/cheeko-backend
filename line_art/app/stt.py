@@ -20,7 +20,7 @@ async def transcribe(audio_bytes: bytes) -> str:
     logger.info(f"[STT] Using key: {api_key[:8]}... (len={len(api_key)})")
     headers = {"Authorization": f"Bearer {api_key}"}
     files = {"file": ("audio.wav", audio_bytes, "audio/wav")}
-    data = {"model": "whisper-large-v3", "response_format": "json"}
+    data = {"model": "whisper-large-v3", "response_format": "json", "language": "en"}
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(GROQ_API_URL, headers=headers, files=files, data=data)
