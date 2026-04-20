@@ -861,8 +861,78 @@ model sys_user {
   kid_profile          kid_profile[]
   openclaw_pair_tokens openclaw_pair_tokens[]
   parent_profile       parent_profile?
+  creator_content      creator_content[]      @relation("creator_content_creator")
+  creator_content_reviewed creator_content[]  @relation("creator_content_reviewer")
   sys_user_token       sys_user_token[]
   user_question_quota  user_question_quota[]
+}
+
+model creator_content {
+  id                 BigInt                  @id @default(autoincrement())
+  title              String                  @db.VarChar(255)
+  description        String?
+  content_type       String                  @default("music") @db.VarChar(50)
+  source_type        String                  @default("upload") @db.VarChar(50)
+  language           String?                 @default("en") @db.VarChar(50)
+  category           String?                 @db.VarChar(100)
+  status             String                  @default("draft") @db.VarChar(50)
+  creator_id         BigInt
+  reviewer_id        BigInt?
+  review_notes       String?
+  aws_uploaded_at    DateTime?               @db.Timestamptz(6)
+  published_ref_type String?                 @db.VarChar(50)
+  published_ref_id   String?                 @db.VarChar(100)
+  metadata           Json?                   @default("{}")
+  created_at         DateTime?               @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?               @default(now()) @db.Timestamptz(6)
+  creator            sys_user                @relation("creator_content_creator", fields: [creator_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  reviewer           sys_user?               @relation("creator_content_reviewer", fields: [reviewer_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  assets             creator_content_asset[]
+  generation_jobs    generation_job[]
+
+  @@index([creator_id], map: "idx_creator_content_creator")
+  @@index([reviewer_id], map: "idx_creator_content_reviewer")
+  @@index([status], map: "idx_creator_content_status")
+  @@index([content_type], map: "idx_creator_content_type")
+}
+
+model creator_content_asset {
+  id                 BigInt           @id @default(autoincrement())
+  creator_content_id BigInt
+  asset_type         String           @db.VarChar(50)
+  storage_type       String           @default("draft") @db.VarChar(50)
+  original_filename  String?          @db.VarChar(255)
+  mime_type          String?          @db.VarChar(100)
+  local_path         String?          @db.VarChar(1000)
+  aws_url            String?          @db.VarChar(1000)
+  created_at         DateTime?        @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?        @default(now()) @db.Timestamptz(6)
+  creator_content    creator_content  @relation(fields: [creator_content_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([creator_content_id, asset_type], map: "uq_creator_content_asset_type")
+  @@index([creator_content_id], map: "idx_creator_content_asset_content")
+}
+
+model generation_job {
+  id                 BigInt            @id @default(autoincrement())
+  creator_content_id BigInt
+  topic              String            @db.VarChar(255)
+  requested_by       BigInt
+  job_status         String            @default("queued") @db.VarChar(50)
+  generation_mode    String?           @db.VarChar(100)
+  language           String?           @default("en") @db.VarChar(50)
+  job_payload        Json?             @default("{}")
+  result_summary     Json?             @default("{}")
+  error_message      String?
+  started_at         DateTime?         @db.Timestamptz(6)
+  completed_at       DateTime?         @db.Timestamptz(6)
+  created_at         DateTime?         @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime?         @default(now()) @db.Timestamptz(6)
+  creator_content    creator_content   @relation(fields: [creator_content_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([creator_content_id], map: "idx_generation_job_content")
+  @@index([job_status], map: "idx_generation_job_status")
+  @@index([requested_by], map: "idx_generation_job_requested_by")
 }
 
 model sys_user_token {

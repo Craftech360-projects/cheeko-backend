@@ -30,6 +30,7 @@ const ttsVoiceRoutes = require('./ttsVoice.routes');
 const emailReportRoutes = require('./emailReport.routes');
 const quotaRoutes = require('./quota.routes');
 const subscriptionRoutes = require('./subscription.routes');
+const creatorContentRoutes = require('./creatorContent.routes');
 
 /**
  * @swagger
@@ -198,5 +199,6 @@ router.use('/ttsVoice', ttsVoiceRoutes);
 router.use('/admin/email-reports', emailReportRoutes);
 router.use('/quota', quotaRoutes);
 router.use('/subscription', subscriptionRoutes);
+router.use('/creator', creatorContentRoutes);
 
 module.exports = router;

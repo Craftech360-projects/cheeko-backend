@@ -17,6 +17,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
+const path = require('path');
 
 const logger = require('./utils/logger');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
@@ -40,7 +41,16 @@ app.use(helmet({
 const corsOptions = {
   origin: process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:8080', 'http://localhost:3000'],
+    : [
+      'http://localhost:8080',
+      'http://localhost:3000',
+      'http://localhost:4173',
+      'http://127.0.0.1:4173',
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'http://localhost:5500',
+      'http://127.0.0.1:5500'
+    ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Service-Key', 'X-Requested-With']
@@ -109,6 +119,9 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+
+// Draft asset preview for internal tools like the creator portal.
+app.use('/storage', express.static(path.resolve(__dirname, '../storage')));
 
 // ===========================================
 // API Routes (under /toy context path)

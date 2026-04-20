@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cheeko Creator Portal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="ambient-grid" aria-hidden="true"></div>
+
+  <div class="portal">
+    <header class="topbar">
+      <a class="brand" href="#uploadTab" aria-label="Cheeko Creator Portal home">
+        <span class="brand-symbol" aria-hidden="true">
+          <svg viewBox="0 0 28 28">
+            <path d="M14 2.25c6.49 0 11.75 5.26 11.75 11.75S20.49 25.75 14 25.75 2.25 20.49 2.25 14 7.51 2.25 14 2.25Zm-4.2 9.1a1.95 1.95 0 1 0 0-3.9 1.95 1.95 0 0 0 0 3.9Zm8.4 0a1.95 1.95 0 1 0 0-3.9 1.95 1.95 0 0 0 0 3.9Zm-8.05 5.36c1.02 2.07 2.34 3.04 3.85 3.04s2.83-.97 3.85-3.04a1 1 0 0 0-1.8-.88c-.72 1.47-1.4 1.92-2.05 1.92s-1.33-.45-2.05-1.92a1 1 0 1 0-1.8.88Z" />
+          </svg>
+        </span>
+        <span>
+          <strong>Cheeko</strong>
+          <small>Creator Portal</small>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Portal sections">
+        <button class="nav-link active" type="button" data-tab="uploadTab">Upload</button>
+        <button class="nav-link" type="button" data-tab="generateTab">Generate</button>
+        <button class="nav-link" type="button" data-tab="myContentTab">My Content</button>
+      </nav>
+    </header>
+
+    <main class="workspace">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Creator operations</p>
+          <h1>Create Cheeko content without an account.</h1>
+          <p>Upload finished assets or generate story cards immediately. Every submission still goes through human review before AWS publishing.</p>
+        </div>
+
+      </section>
+
+      <section class="workflow-strip" aria-label="Portal workflow">
+        <div class="workflow-item">
+          <span>01</span>
+          <strong>Create draft</strong>
+          <p>Upload audio and art, or generate a structured content pack.</p>
+        </div>
+        <div class="workflow-item">
+          <span>02</span>
+          <strong>Submit for review</strong>
+          <p>Reviewers inspect files, notes, generated steps, and metadata.</p>
+        </div>
+        <div class="workflow-item">
+          <span>03</span>
+          <strong>Publish deliberately</strong>
+          <p>Cheeko reviewers manually approve and upload to AWS.</p>
+        </div>
+      </section>
+
+      <section id="messages" class="message-stack" aria-live="polite" aria-label="Portal messages"></section>
+
+      <section id="uploadTab" class="tab active">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Upload draft</p>
+            <h2>Start with finished audio and cover art.</h2>
+          </div>
+          <p>Use this flow when creators already have production-ready files.</p>
+        </div>
+
+        <div class="creation-layout">
+          <section class="form-card">
+            <div class="card-title">
+              <span class="title-index">A</span>
+              <div>
+                <h3>Content details</h3>
+                <p>These fields help reviewers understand the submission quickly.</p>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>Title <em>required</em></span>
+                <input id="title" placeholder="Bedtime Ocean Story" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Content Type</span>
+                <select id="contentType">
+                  <option value="music">Music</option>
+                  <option value="story">Story</option>
+                  <option value="rfidcontent">RFID Content</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Language</span>
+                <input id="language" value="en" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Category</span>
+                <input id="category" placeholder="CreatorPortal" autocomplete="off" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Description for reviewer</span>
+              <textarea id="description" rows="4" placeholder="Audience age, tone, safety notes, theme, or any publishing context."></textarea>
+            </label>
+          </section>
+
+          <aside class="asset-card">
+            <div class="card-title">
+              <span class="title-index">B</span>
+              <div>
+                <h3>Assets</h3>
+                <p>Both files are required before review submission.</p>
+              </div>
+            </div>
+
+            <label class="file-row">
+              <span class="file-row-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0-6 6v4a4 4 0 0 0 4 4h1v-2h-1a2 2 0 0 1-2-2V9a4 4 0 1 1 8 0v4a2 2 0 0 1-2 2h-1v2h1a4 4 0 0 0 4-4V9a6 6 0 0 0-6-6Zm-1 9.41-1.3 1.3a1 1 0 0 1-1.4-1.42l3-3a1 1 0 0 1 1.4 0l3 3a1 1 0 1 1-1.4 1.42L13 12.41V21a1 1 0 1 1-2 0v-8.59Z" /></svg>
+              </span>
+              <span>
+                <strong>Audio file</strong>
+                <small>MP3, WAV, or supported audio format</small>
+                <input id="audioFile" type="file" accept="audio/*" />
+              </span>
+            </label>
+
+            <label class="file-row">
+              <span class="file-row-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm0 2v10.59l3.3-3.3a1 1 0 0 1 1.4 0l2.3 2.3 4.3-4.3a1 1 0 0 1 1.4 0L19 11.59V5H5Zm0 13v1h14v-4.59l-2-2-4.3 4.3a1 1 0 0 1-1.4 0L9 14.41 5 18Zm4-8a2 2 0 1 1 0-4 2 2 0 0 1 0 4Z" /></svg>
+              </span>
+              <span>
+                <strong>Cover image</strong>
+                <small>PNG, JPG, or WebP artwork</small>
+                <input id="coverFile" type="file" accept="image/*" />
+              </span>
+            </label>
+
+            <div class="action-panel">
+              <button id="createDraftBtn" type="button" class="btn primary">Create Draft</button>
+              <button id="submitReviewBtn" type="button" class="btn secondary">Submit Latest Draft</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="generateTab" class="tab">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Generated draft</p>
+            <h2>Convert a topic into a reviewable content pack.</h2>
+          </div>
+          <p>Generated output remains internal until review and manual publish.</p>
+        </div>
+
+        <div class="creation-layout">
+          <section class="form-card">
+            <div class="card-title">
+              <span class="title-index">A</span>
+              <div>
+                <h3>Generation brief</h3>
+                <p>Give the generator a tight creative direction.</p>
+              </div>
+            </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span>Title <em>required</em></span>
+                <input id="genTitle" placeholder="Cheeko Learns About Rainbows" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Topic <em>required</em></span>
+                <input id="genTopic" placeholder="Rainbows and colors" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Content Type</span>
+                <select id="genContentType">
+                  <option value="story">Story</option>
+                  <option value="music">Music</option>
+                  <option value="rfidcontent">RFID Content</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Generation Mode</span>
+                <select id="genMode">
+                  <option value="Story Cards">Story Cards</option>
+                  <option value="Song/Rhyme">Song/Rhyme</option>
+                  <option value="Learning">Learning</option>
+                  <option value="Routine">Routine</option>
+                  <option value="Meditation">Meditation</option>
+                  <option value="Granny Stories">Granny Stories</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Language</span>
+                <input id="genLanguage" value="en" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Category</span>
+                <input id="genCategory" placeholder="CreatorPortal" autocomplete="off" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Creative guidance</span>
+              <textarea id="genDescription" rows="4" placeholder="Target age, tone, lesson, story style, character notes, or safety boundaries."></textarea>
+            </label>
+          </section>
+
+          <aside class="asset-card">
+            <div class="card-title">
+              <span class="title-index">B</span>
+              <div>
+                <h3>Output settings</h3>
+                <p>Choose pack size and device-friendly output.</p>
+              </div>
+            </div>
+
+            <label class="field">
+              <span>Step Count</span>
+              <input id="genStepCount" type="number" value="10" min="3" max="20" inputmode="numeric" />
+            </label>
+
+            <label class="switch-row">
+              <input id="genEsp32" type="checkbox" checked />
+              <span>
+                <strong>ESP32-friendly assets</strong>
+                <small>Prefer smaller files and device-safe formats.</small>
+              </span>
+            </label>
+
+            <div class="notice-card">
+              <strong>Review stays mandatory.</strong>
+              <p>Generated assets are drafts. Submit them only after checking the content cards.</p>
+            </div>
+
+            <div class="action-panel">
+              <button id="startGenerationBtn" type="button" class="btn primary">Start Generation</button>
+              <button id="submitGeneratedBtn" type="button" class="btn secondary">Submit Latest Draft</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="myContentTab" class="tab">
+        <div class="section-heading with-action">
+          <div>
+            <p class="eyebrow">Library</p>
+            <h2>My Content</h2>
+          </div>
+          <button id="refreshMineBtn" type="button" class="btn quiet">Refresh</button>
+        </div>
+        <div id="myContentList" class="content-list"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>
