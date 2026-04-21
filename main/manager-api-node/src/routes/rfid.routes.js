@@ -277,7 +277,9 @@ router.get('/card/lookup/:rfidUid',
       logger.warn(`[RFID-LOOKUP] No card mapping found for uid=${rfidUid}`);
       return notFound(res, 'Card mapping not found');
     }
-    logger.info(`[RFID-LOOKUP] Card found for uid=${rfidUid}: contentType=${card.contentType}, items=${card.items ? card.items.length : 0}, title="${card.title || card.packName || ''}"`);
+    logger.info(
+      `[RFID-LOOKUP] Card found for uid=${rfidUid}: contentType=${card.contentType}, packCode=${card.packCode || 'none'}, packName="${card.packName || card.title || 'none'}", version=${card.version || 'none'}, items=${card.items ? card.items.length : 0}, stories=${card.stories ? card.stories.length : 0}`
+    );
     success(res, card);
   })
 );

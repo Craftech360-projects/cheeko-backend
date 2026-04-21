@@ -52,6 +52,31 @@ const normalizeVersion = (version) => {
   return normalized || null;
 };
 
+const normalizeComparableVersion = (version) => {
+  const normalized = normalizeVersion(version);
+  if (!normalized || !/^\d+(?:\.\d+)*$/.test(normalized)) return normalized;
+
+  const parts = normalized.split('.');
+  while (parts.length > 1 && parts[parts.length - 1] === '0') {
+    parts.pop();
+  }
+  return parts.join('.');
+};
+
+const versionsMatch = (left, right) => {
+  const normalizedLeft = normalizeVersion(left);
+  const normalizedRight = normalizeVersion(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return normalizedLeft === normalizedRight ||
+    normalizeComparableVersion(normalizedLeft) === normalizeComparableVersion(normalizedRight);
+};
+
+const toLoggableId = (value) => {
+  if (value === undefined || value === null) return null;
+  const numericValue = Number(value);
+  return Number.isSafeInteger(numericValue) ? numericValue : String(value);
+};
+
 const parseDateInput = (value, endOfDay = false) => {
   if (!value) return null;
   const date = new Date(value);
@@ -719,7 +744,9 @@ const lookupCardByUid = async (rfidUid) => {
         }
         const stories = Object.values(storyMap).sort((a, b) => a.index - b.index);
 
-        logger.info(`[RFID-LOOKUP] Grouped Content Pack resolved: name="${pack.name}", type=${pack.content_type}, stories=${stories.length}`);
+        logger.info(
+          `[RFID-LOOKUP] Grouped Content Pack resolved: uid=${normalizedUid}, packCode=${pack.pack_code || 'none'}, name="${pack.name}", type=${pack.content_type}, version=${pack.version || 'none'}, contentHash=${pack.content_hash || 'none'}, stories=${stories.length}`
+        );
 
         return {
           rfid_uid: normalizedUid,
@@ -740,7 +767,9 @@ const lookupCardByUid = async (rfidUid) => {
         promptText: item.lyrics_text || null // Optional read-along
       }));
 
-      logger.info(`[RFID-LOOKUP] Content Pack resolved: name="${pack.name}", type=${pack.content_type}, items=${mappedItems.length}, audioUrls=${mappedItems.filter(i => i.audioUrl).length}`);
+      logger.info(
+        `[RFID-LOOKUP] Content Pack resolved: uid=${normalizedUid}, packCode=${pack.pack_code || 'none'}, name="${pack.name}", type=${pack.content_type}, version=${pack.version || 'none'}, contentHash=${pack.content_hash || 'none'}, items=${mappedItems.length}, audioUrls=${mappedItems.filter(i => i.audioUrl).length}`
+      );
 
       return {
         rfid_uid: normalizedUid,
@@ -2543,17 +2572,35 @@ const recordCardTap = async (payload = {}) => {
       logger.warn(`[RFID-TAP] Failed to resolve content pack by packCode=${lookupResolved.packCode}: ${packLookupErr.message}`);
     }
   }
-  const latestVersion = normalizeVersion(contentPack?.version || lookupResolved?.version);
+  const serverVersion = normalizeVersion(contentPack?.version || lookupResolved?.version);
+  const latestVersion = serverVersion || (contentPack ? '1' : null);
   const latestContentHash = normalizeVersion(contentPack?.content_hash);
 
   let updateAvailable = false;
+  let updateReason = null;
   if (cardType === 'content' && contentPack) {
-    if (latestVersion && !clientVersion) {
+    if (latestContentHash) {
+      if (!clientContentHash) {
+        updateAvailable = true;
+        updateReason = 'missing_client_content_hash';
+      } else if (latestContentHash !== clientContentHash) {
+        updateAvailable = true;
+        updateReason = 'content_hash_mismatch';
+      } else if (latestVersion && clientVersion && !versionsMatch(latestVersion, clientVersion)) {
+        updateAvailable = true;
+        updateReason = 'version_mismatch';
+      }
+    } else if (latestVersion) {
+      if (!clientVersion) {
+        updateAvailable = true;
+        updateReason = 'missing_client_version';
+      } else if (!versionsMatch(latestVersion, clientVersion)) {
+        updateAvailable = true;
+        updateReason = 'version_mismatch';
+      }
+    } else {
       updateAvailable = true;
-    } else if (latestVersion && clientVersion && latestVersion !== clientVersion) {
-      updateAvailable = true;
-    } else if (latestContentHash && clientContentHash && latestContentHash !== clientContentHash) {
-      updateAvailable = true;
+      updateReason = 'missing_server_version_hash';
     }
   }
 
@@ -2561,7 +2608,9 @@ const recordCardTap = async (payload = {}) => {
     ...(payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {}),
     local_skill_id: localSkillId,
     local_content_hash: clientContentHash,
+    server_version: serverVersion,
     latest_content_hash: latestContentHash,
+    update_reason: updateReason,
     tap_ts: payload.tapTs || payload.tap_ts || null
   };
 
@@ -2608,6 +2657,48 @@ const recordCardTap = async (payload = {}) => {
     ? `/admin/rfid/card/content/download/${encodeURIComponent(normalizedUid)}`
     : null;
 
+  if (cardType === 'content') {
+    const status = contentPack
+      ? (updateAvailable ? 'download_required' : 'up_to_date')
+      : 'content_pack_missing';
+
+    logger.info(
+      `[RFID-TAP] Content pack version check: uid=${normalizedUid}, mac=${normalizedMac}, status=${status}, reason=${updateReason || 'matched'}, packCode=${contentPack?.pack_code || lookupResolved?.packCode || 'none'}, packName="${contentPack?.name || lookupResolved?.packName || lookupResolved?.title || 'none'}", serverVersion=${serverVersion || 'none'}, latestVersion=${latestVersion || 'none'}, clientVersion=${clientVersion || 'none'}, latestHash=${latestContentHash || 'none'}, clientHash=${clientContentHash || 'none'}`,
+      {
+        eventId,
+        sessionId,
+        source,
+        recognized,
+        cardType,
+        cardMappingId: toLoggableId(mapping?.id),
+        contentPackId: toLoggableId(contentPack?.id || mapping?.content_pack_id),
+        contentPackCode: contentPack?.pack_code || lookupResolved?.packCode || null,
+        contentPackName: contentPack?.name || lookupResolved?.packName || lookupResolved?.title || null,
+        localSkillId,
+        serverVersion,
+        clientVersion,
+        latestVersion,
+        clientContentHash,
+        latestContentHash,
+        updateReason,
+        updateRequired: updateAvailable,
+        downloadManifestPath,
+        logId: toLoggableId(persisted?.id)
+      }
+    );
+  } else {
+    logger.info(
+      `[RFID-TAP] Card tap resolved: uid=${normalizedUid}, mac=${normalizedMac}, recognized=${recognized}, cardType=${cardType}, updateRequired=${updateAvailable}`,
+      {
+        eventId,
+        sessionId,
+        source,
+        cardMappingId: toLoggableId(mapping?.id),
+        logId: toLoggableId(persisted?.id)
+      }
+    );
+  }
+
   return {
     type: 'card_tap_ack',
     eventId,
@@ -2625,6 +2716,7 @@ const recordCardTap = async (payload = {}) => {
     latestVersion,
     latestContentHash,
     updateRequired: updateAvailable,
+    updateReason,
     downloadManifestPath,
     logId: persisted?.id ? Number(persisted.id) : null
   };
@@ -3292,6 +3384,10 @@ const getContentDownloadManifestByPackId = async (contentPackId, rfidUid) => {
     logger.info('Returning grouped download manifest:', {
       contentType: contentPack.content_type,
       rfidUid,
+      packCode: contentPack.pack_code,
+      packName: contentPack.name,
+      version: dto.version,
+      contentHash: dto.contentHash,
       storyCount: dto.stories.length,
     });
   } else {
@@ -3301,6 +3397,10 @@ const getContentDownloadManifestByPackId = async (contentPackId, rfidUid) => {
     logger.info('Returning download manifest:', {
       contentType: contentPack.content_type,
       rfidUid,
+      packCode: contentPack.pack_code,
+      packName: contentPack.name,
+      version: dto.version,
+      contentHash: dto.contentHash,
       itemCount: dto.items.length,
     });
   }
