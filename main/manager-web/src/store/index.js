@@ -22,8 +22,9 @@ export default new Vuex.Store({
   },
   getters: {
     getToken(state) {
-      if (!state.token) {
-        state.token = localStorage.getItem('token')
+      const storedToken = localStorage.getItem('token') || ''
+      if (storedToken !== state.token) {
+        state.token = storedToken
       }
       return state.token
     },

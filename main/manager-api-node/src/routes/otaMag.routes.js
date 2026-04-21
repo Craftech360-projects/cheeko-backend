@@ -262,18 +262,18 @@ router.get('/getDownloadUrl/:id',
 
 /**
  * @swagger
- * /otaMag/download/{uuid}:
+ * /otaMag/download/{token}:
  *   get:
  *     tags: [OTA Management]
  *     summary: Download firmware file
- *     description: Download a firmware file by UUID. Public endpoint for device OTA updates.
+ *     description: Download a firmware file by temporary UUID or direct firmware ID. Public endpoint for device OTA updates.
  *     parameters:
  *       - in: path
- *         name: uuid
+ *         name: token
  *         required: true
  *         schema:
  *           type: string
- *         description: Download UUID from getDownloadUrl
+ *         description: Download UUID from getDownloadUrl or a firmware ID from device OTA response
  *     responses:
  *       200:
  *         description: Firmware binary file
@@ -285,35 +285,34 @@ router.get('/getDownloadUrl/:id',
  *       404:
  *         description: Firmware file not found
  */
-router.get('/download/:uuid',
+router.get('/download/:token',
   asyncHandler(async (req, res) => {
-    const { uuid } = req.params;
+    const { token } = req.params;
 
-    // Look up firmware ID from cache
-    const cacheEntry = otaDownloadCache.get(uuid);
-    if (!cacheEntry) {
-      return res.status(404).send();
+    // Support both admin-generated temporary UUIDs and direct firmware IDs
+    const cacheEntry = otaDownloadCache.get(token);
+    if (cacheEntry) {
+      // Check download count (max 3 times like Spring Boot)
+      if (cacheEntry.downloadCount >= 3) {
+        otaDownloadCache.delete(token);
+        return res.status(404).send();
+      }
+
+      // Increment download count
+      cacheEntry.downloadCount++;
     }
-
-    // Check download count (max 3 times like Spring Boot)
-    if (cacheEntry.downloadCount >= 3) {
-      otaDownloadCache.delete(uuid);
-      return res.status(404).send();
-    }
-
-    // Increment download count
-    cacheEntry.downloadCount++;
 
     try {
       // Get firmware information
-      const firmware = await deviceService.getFirmwareById(cacheEntry.id);
-      logger.info(`Download firmware lookup: id=${cacheEntry.id}, firmware=${JSON.stringify(firmware)}`);
+      const firmwareId = cacheEntry ? cacheEntry.id : token;
+      const firmware = await deviceService.getFirmwareById(firmwareId);
+      logger.info(`Download firmware lookup: token=${token}, id=${firmwareId}, firmware=${JSON.stringify(firmware)}`);
       if (!firmware) {
-        logger.error(`Firmware not found in database: ${cacheEntry.id}`);
+        logger.error(`Firmware not found in database: ${firmwareId}`);
         return res.status(404).send();
       }
       if (!firmware.firmware_path) {
-        logger.error(`Firmware has no firmware_path: id=${cacheEntry.id}, record=${JSON.stringify(firmware)}`);
+        logger.error(`Firmware has no firmware_path: id=${firmwareId}, record=${JSON.stringify(firmware)}`);
         return res.status(404).send();
       }
 

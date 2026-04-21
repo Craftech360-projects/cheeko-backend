@@ -19,11 +19,11 @@ export default {
             }).send();
     },
     // Unbind device
-    unbindDevice(device_id, callback) {
+    unbindDevice(device_id, callback, options = {}) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/device/unbind`)
             .method('POST')
-            .data({ deviceId: device_id })
+            .data({ deviceId: device_id, ...options })
             .success((res) => {
                 RequestService.clearRequestTime();
                 callback(res);
@@ -31,7 +31,7 @@ export default {
             .networkFail((err) => {
                 console.error('Failed to unbind device:', err);
                 RequestService.reAjaxFun(() => {
-                    this.unbindDevice(device_id, callback);
+                    this.unbindDevice(device_id, callback, options);
                 });
             }).send();
     },

@@ -16,6 +16,30 @@ export default {
     clearRequestTime
 }
 
+function getLatestAuthToken() {
+    const storedToken = localStorage.getItem('token');
+    const rawToken = storedToken || store.state.token;
+
+    if (!rawToken) {
+        return null;
+    }
+
+    if (storedToken && storedToken !== store.state.token) {
+        store.commit('setToken', storedToken);
+    }
+
+    try {
+        const parsed = JSON.parse(rawToken);
+        if (parsed && typeof parsed === 'object' && parsed.token) {
+            return parsed.token;
+        }
+    } catch (error) {
+        // Fall back to raw token format for backward compatibility.
+    }
+
+    return rawToken;
+}
+
 function sendRequest() {
     return {
         _sucCallback: null,
@@ -27,8 +51,14 @@ function sendRequest() {
         _url: '',
         _responseType: undefined, // Response type field
         'send'() {
-            if (isNotNull(store.getters.getToken)) {
-                this._header.Authorization = 'Bearer ' + (JSON.parse(store.getters.getToken)).token
+            const authToken = getLatestAuthToken();
+            if (isNotNull(authToken)) {
+                this._header.Authorization = 'Bearer ' + authToken
+            }
+
+            if (typeof FormData !== 'undefined' && this._data instanceof FormData) {
+                delete this._header['content-type']
+                delete this._header['Content-Type']
             }
 
             // Send request
@@ -105,13 +135,15 @@ function sendRequest() {
  */
 // Add logging in error handling function
 function httpHandlerError(info, failCallback, networkFailCallback) {
+    const status = info?.status || info?.response?.status || 0
+    const responseData = info?.data || info?.response?.data || null
 
     /** Request successful, exit this function. Can be adjusted based on project requirements. Here status 200 means success */
     let networkError = false
-    if (info.status === 200) {
-        if (info.data.code === 'success' || info.data.code === 0 || info.data.code === undefined) {
+    if (status === 200) {
+        if (responseData?.code === 'success' || responseData?.code === 0 || responseData?.code === undefined) {
             return networkError
-        } else if (info.data.code === 401) {
+        } else if (responseData?.code === 401 || responseData?.code === 403) {
             store.commit('clearAuth');
             goToPage(Constant.PAGE.LOGIN, true);
             return true
@@ -119,15 +151,28 @@ function httpHandlerError(info, failCallback, networkFailCallback) {
             if (failCallback) {
                 failCallback(info)
             } else {
-                showDanger(info.data.msg)
+                showDanger(responseData?.msg)
             }
             return true
         }
     }
+    if (status === 401 || status === 403) {
+        store.commit('clearAuth');
+        goToPage(Constant.PAGE.LOGIN, true);
+        return true
+    }
+    if (status >= 400 && status < 500) {
+        if (failCallback) {
+            failCallback(info)
+        } else {
+            showDanger(responseData?.msg || `Request failed [${status}]`)
+        }
+        return true
+    }
     if (networkFailCallback) {
         networkFailCallback(info)
     } else {
-        showDanger(`Network request error [${info.status}]`)
+        showDanger(`Network request error [${status || 'unknown'}]`)
     }
     return true
 }

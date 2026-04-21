@@ -152,8 +152,11 @@ const getDevicesByAgent = async (userId, agentId, isSuperAdmin = false) => {
  * Unbind device from user
  * @param {number} userId - User ID
  * @param {string} deviceId - Device ID
+ * @param {Object} options - unbind options
+ * @param {boolean} options.hardDelete - delete the device row instead of only clearing bindings
  */
-const unbindDevice = async (userId, deviceId, isSuperAdmin = false) => {
+const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}) => {
+  const { hardDelete = false } = options;
   const device = await prisma.ai_device.findUnique({
     where: { id: deviceId },
     select: { id: true, user_id: true },
@@ -163,6 +166,13 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false) => {
 
   if (!isSuperAdmin && device.user_id !== BigInt(userId)) {
     throw new Error("You don't have permission to unbind this device");
+  }
+
+  if (hardDelete) {
+    await prisma.ai_device.delete({
+      where: { id: deviceId },
+    });
+    return;
   }
 
   await prisma.ai_device.update({
@@ -394,20 +404,113 @@ const getForceUpdateFirmware = async (type) => {
 };
 
 /**
+ * Build OTA firmware type candidates from board/chip identifiers.
+ * Prefers exact board types like "doit-ai-01-kit", then falls back to
+ * canonical ESP32 family identifiers for broader firmware targeting.
+ * @param {string|Object|null|undefined} boardValue
+ * @param {string|null|undefined} chipModelName
+ * @returns {string[]}
+ */
+const getFirmwareTypeCandidates = (boardValue, chipModelName) => {
+  const rawBoardType =
+    typeof boardValue === 'string'
+      ? boardValue
+      : boardValue && typeof boardValue.type === 'string'
+        ? boardValue.type
+        : '';
+
+  const addCandidate = (list, value) => {
+    if (!value || list.includes(value)) {
+      return;
+    }
+    list.push(value);
+  };
+
+  const canonicalizeEspType = (value) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) {
+      return '';
+    }
+
+    const compact = value.replace(/[\s_-]/g, '');
+    if (compact.includes('esp32s3')) return 'esp32s3';
+    if (compact.includes('esp32c3')) return 'esp32c3';
+    if (compact.includes('esp32c2')) return 'esp32c2';
+    if (compact.includes('esp32')) return 'esp32';
+    return normalized;
+  };
+
+  const candidates = [];
+  const normalizedBoardType = rawBoardType ? String(rawBoardType).trim().toLowerCase() : '';
+  const normalizedChipType = chipModelName ? String(chipModelName).trim().toLowerCase() : '';
+
+  addCandidate(candidates, normalizedBoardType);
+  addCandidate(candidates, canonicalizeEspType(normalizedBoardType));
+  addCandidate(candidates, canonicalizeEspType(normalizedChipType));
+
+  if (candidates.length === 0) {
+    candidates.push('esp32');
+  }
+
+  return candidates;
+};
+
+/**
+ * Normalize the public OTA base URL stored in system params.
+ * Fixes malformed values like "http://host/:8002/path/" to "http://host:8002/path".
+ * @param {string|null|undefined} otaUrl
+ * @returns {string}
+ */
+const normalizeOtaBaseUrl = (otaUrl) => {
+  const trimmed = String(otaUrl || '').trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  return trimmed
+    .replace(/\/:(\d+)(?=\/|$)/, ':$1')
+    .replace(/\/+$/, '');
+};
+
+/**
+ * Build the public firmware download URL returned to devices.
+ * Uses direct firmware IDs because device OTA checks are unauthenticated.
+ * @param {string} firmwareId
+ * @returns {Promise<string>}
+ */
+const buildFirmwareDownloadUrl = async (firmwareId) => {
+  const otaUrl = (await getSystemParam('server.ota')) || '';
+  const baseUrl = normalizeOtaBaseUrl(otaUrl);
+  return `${baseUrl}/otaMag/download/${firmwareId}`;
+};
+
+/**
  * Check OTA version for a device
  * @param {string} mac - Device MAC address
- * @param {string} currentVersion - Device's current firmware version
- * @param {string} board - Device board type
+ * @param {string|null|Object} clientIdOrVersion - Client ID or legacy version string
+ * @param {Object|string|null} deviceReportOrBoard - Device report object or legacy board string
  * @returns {Promise<Object>} OTA check response
  */
-const checkOtaVersion = async (mac, clientId, deviceReport) => {
+const checkOtaVersion = async (mac, clientIdOrVersion, deviceReportOrBoard) => {
 
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  // Support both current OTA route payloads and the legacy /device/ota/check shape.
+  let deviceReport = null;
+  if (deviceReportOrBoard && typeof deviceReportOrBoard === 'object' && !Array.isArray(deviceReportOrBoard)) {
+    deviceReport = deviceReportOrBoard;
+  } else {
+    deviceReport = {
+      version: clientIdOrVersion || null,
+      board: deviceReportOrBoard || null,
+    };
+  }
+
   // Extract device info from report (Spring Boot DeviceReportReqDTO format)
-  const currentVersion = deviceReport?.application?.version || deviceReport?.version;
-  const board = deviceReport?.board?.type || deviceReport?.chipModelName;
+  const currentVersion = deviceReport?.application?.version || deviceReport?.version || null;
+  const firmwareTypes = getFirmwareTypeCandidates(deviceReport?.board, deviceReport?.chipModelName);
+  const reportedFirmwareType = firmwareTypes[0] || 'esp32';
 
   // Build server_time (matches Spring Boot ServerTime)
   const now = new Date();
@@ -425,27 +528,32 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
 
   // Only include firmware section if there's an actual update available
   if (device && device.auto_update !== 0) {
-    const firmwareType = board || 'esp32';
-    const forceUpdateFirmware = await getForceUpdateFirmware(firmwareType);
-    const latestFirmware = await getLatestFirmware(firmwareType);
+    let forceUpdateFirmware = null;
+    let latestFirmware = null;
+
+    for (const candidateType of firmwareTypes) {
+      forceUpdateFirmware = await getForceUpdateFirmware(candidateType);
+      latestFirmware = await getLatestFirmware(candidateType);
+      if (forceUpdateFirmware || latestFirmware) {
+        break;
+      }
+    }
 
     // Include firmware if:
     // 1. Force update is enabled (regardless of version), OR
     // 2. There's a newer version available
     if (forceUpdateFirmware) {
       // Force update - always include, version doesn't matter
-      const otaUrl = await getSystemParam('server.ota');
       response.firmware = {
         version: forceUpdateFirmware.version,
-        url: `${otaUrl}/otaMag/download/${forceUpdateFirmware.id}`,
+        url: await buildFirmwareDownloadUrl(forceUpdateFirmware.id),
         force: 1
       };
     } else if (latestFirmware && latestFirmware.version !== currentVersion) {
       // New version available (no force)
-      const otaUrl = await getSystemParam('server.ota');
       response.firmware = {
         version: latestFirmware.version,
-        url: `${otaUrl}/otaMag/download/${latestFirmware.id}`,
+        url: await buildFirmwareDownloadUrl(latestFirmware.id),
         force: 0
       };
     }
@@ -458,7 +566,7 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
       data: {
         last_connected_at: new Date(),
         app_version: currentVersion || device.app_version,
-        board: board || device.board,
+        board: reportedFirmwareType || device.board,
       },
     });
   }
@@ -492,7 +600,7 @@ const checkOtaVersion = async (mac, clientId, deviceReport) => {
       // Store in cache
       const activationData = {
         macAddress: normalizedMac,
-        board: board || 'unknown',
+        board: reportedFirmwareType || 'unknown',
         appVersion: currentVersion,
         createdAt: Date.now()
       };

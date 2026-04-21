@@ -418,7 +418,7 @@ export default {
             } else {
               reject(data.msg || 'Unbind failed');
             }
-          });
+          }, { hardDelete: true });
         });
       });
       Promise.all(promises)
@@ -497,7 +497,7 @@ export default {
               showClose: true
             });
           }
-        });
+        }, { hardDelete: true });
       });
     },
     goFirst() {

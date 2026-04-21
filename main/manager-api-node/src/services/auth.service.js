@@ -95,11 +95,15 @@ const login = async (username, password) => {
   const expireSeconds = 3600 * 24 * 7; // 7 days in seconds
   expireDate.setSeconds(expireDate.getSeconds() + expireSeconds);
 
-  // Store token — delete any existing tokens for this user first, then create
-  // This prevents duplicate tokens accumulating on re-login
+  // Store token. Keep existing active sessions so older dashboard tabs or
+  // parallel admin sessions do not break file uploads after a fresh login.
+  // Expired sessions are cleaned up opportunistically before insert.
   try {
     await prisma.sys_user_token.deleteMany({
-      where: { user_id: user.id },
+      where: {
+        user_id: user.id,
+        expire_date: { lt: new Date() },
+      },
     });
 
     // Use raw SQL INSERT — the PrismaPg adapter doesn't handle autoincrement()

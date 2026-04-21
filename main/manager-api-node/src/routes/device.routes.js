@@ -188,7 +188,7 @@ router.get('/bind/:agentId',
 router.post('/unbind',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { deviceId } = req.body;
+    const { deviceId, hardDelete } = req.body;
 
     if (!deviceId) {
       return res.status(200).json({ code: 500, msg: 'Device ID cannot be empty', data: null });
@@ -198,7 +198,7 @@ router.post('/unbind',
     const isSuperAdmin = req.user.super_admin === 1;
 
     try {
-      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin);
+      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin, { hardDelete: Boolean(hardDelete) });
       success(res, null);
     } catch (error) {
       // Match Spring Boot error response format
@@ -698,7 +698,10 @@ router.post('/ota/check',
     }
 
     try {
-      const result = await deviceService.checkOtaVersion(mac, version, board);
+      const result = await deviceService.checkOtaVersion(mac, null, {
+        version: version || null,
+        board: board || null,
+      });
       success(res, result);
     } catch (error) {
       logger.error('OTA check failed:', error);
