@@ -44,3 +44,4 @@ ddtrace
 
 # Grafana Loki logging
 python-logging-loki>=0.3.1
+boto3
