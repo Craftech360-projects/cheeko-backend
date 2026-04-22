@@ -820,13 +820,104 @@ const getAllFirmware = async (type) => {
 const recordTokenUsage = async ({
   mac, sessionId, inputTokens = 0, outputTokens = 0, inputAudioTokens = 0,
   inputTextTokens = 0, inputCachedTokens = 0, outputAudioTokens = 0,
-  outputTextTokens = 0, sessionDurationSeconds = 0, avgTtftSeconds = 0,
+  outputTextTokens = 0, totalTokens, sessionDurationSeconds = 0, avgTtftSeconds = 0,
   messageCount = 0, totalResponseDurationSeconds = 0
 }) => {
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
   const todayDate = new Date(new Date().toISOString().split('T')[0]);
+  const resolvedTotalTokens = Number(totalTokens ?? (inputTokens + outputTokens) ?? 0);
+  let sessionDelta = {
+    inputTokens,
+    outputTokens,
+    totalTokens: resolvedTotalTokens,
+    inputAudioTokens,
+    inputTextTokens,
+    inputCachedTokens,
+    outputAudioTokens,
+    outputTextTokens,
+    sessionDurationSeconds,
+    messageCount,
+    totalResponseDurationSeconds
+  };
+
+  let device = null;
+  if (sessionId) {
+    device = await prisma.ai_device.findUnique({
+      where: { mac_address: normalizedMac },
+      select: { id: true, agent_id: true, kid_id: true }
+    });
+
+    await prisma.voice_sessions.upsert({
+      where: { session_id: sessionId },
+      create: {
+        session_id: sessionId,
+        mac_address: normalizedMac,
+        device_id: device?.id || null,
+        agent_id: device?.agent_id || null,
+        kid_id: device?.kid_id || null,
+        status: 'active',
+        last_event_at: new Date(),
+        metadata: {}
+      },
+      update: {
+        mac_address: normalizedMac,
+        device_id: device?.id || null,
+        agent_id: device?.agent_id || null,
+        kid_id: device?.kid_id || null,
+        last_event_at: new Date()
+      }
+    });
+
+    const existingSessionUsage = await prisma.device_token_usage_session.findUnique({
+      where: { session_id: sessionId }
+    });
+
+    const sessionUsageData = {
+      session_id: sessionId,
+      mac_address: normalizedMac,
+      device_id: device?.id || null,
+      agent_id: device?.agent_id || null,
+      usage_date: todayDate,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      total_tokens: resolvedTotalTokens,
+      input_audio_tokens: inputAudioTokens,
+      input_text_tokens: inputTextTokens,
+      input_cached_tokens: inputCachedTokens,
+      output_audio_tokens: outputAudioTokens,
+      output_text_tokens: outputTextTokens,
+      avg_ttft_seconds: avgTtftSeconds,
+      message_count: messageCount,
+      session_duration_seconds: sessionDurationSeconds,
+      total_response_duration_seconds: totalResponseDurationSeconds,
+      update_date: new Date()
+    };
+
+    if (existingSessionUsage) {
+      await prisma.device_token_usage_session.update({
+        where: { session_id: sessionId },
+        data: sessionUsageData
+      });
+
+      sessionDelta = {
+        inputTokens: inputTokens - Number(existingSessionUsage.input_tokens || 0),
+        outputTokens: outputTokens - Number(existingSessionUsage.output_tokens || 0),
+        totalTokens: resolvedTotalTokens - Number(existingSessionUsage.total_tokens || 0),
+        inputAudioTokens: inputAudioTokens - Number(existingSessionUsage.input_audio_tokens || 0),
+        inputTextTokens: inputTextTokens - Number(existingSessionUsage.input_text_tokens || 0),
+        inputCachedTokens: inputCachedTokens - Number(existingSessionUsage.input_cached_tokens || 0),
+        outputAudioTokens: outputAudioTokens - Number(existingSessionUsage.output_audio_tokens || 0),
+        outputTextTokens: outputTextTokens - Number(existingSessionUsage.output_text_tokens || 0),
+        sessionDurationSeconds: sessionDurationSeconds - Number(existingSessionUsage.session_duration_seconds || 0),
+        messageCount: messageCount - Number(existingSessionUsage.message_count || 0),
+        totalResponseDurationSeconds: totalResponseDurationSeconds - Number(existingSessionUsage.total_response_duration_seconds || 0)
+      };
+    } else {
+      await prisma.device_token_usage_session.create({ data: sessionUsageData });
+    }
+  }
 
   const existing = await prisma.device_token_usage.findFirst({
     where: { mac_address: normalizedMac, usage_date: todayDate },
@@ -834,27 +925,28 @@ const recordTokenUsage = async ({
 
   if (existing) {
     const prevCount = Number(existing.message_count || 0);
-    const newCount = prevCount + messageCount;
+    const newCount = prevCount + sessionDelta.messageCount;
     const prevTtft = Number(existing.avg_ttft_seconds || 0);
     const newAvgTtft = newCount > 0
-      ? ((prevTtft * prevCount) + (avgTtftSeconds * messageCount)) / newCount
+      ? ((prevTtft * prevCount) + (avgTtftSeconds * sessionDelta.messageCount)) / newCount
       : avgTtftSeconds;
 
     return prisma.device_token_usage.update({
       where: { id: existing.id },
       data: {
-        input_tokens: (existing.input_tokens || 0) + inputTokens,
-        output_tokens: (existing.output_tokens || 0) + outputTokens,
-        input_audio_tokens: (existing.input_audio_tokens || 0) + inputAudioTokens,
-        input_text_tokens: (existing.input_text_tokens || 0) + inputTextTokens,
-        input_cached_tokens: (existing.input_cached_tokens || 0) + inputCachedTokens,
-        output_audio_tokens: (existing.output_audio_tokens || 0) + outputAudioTokens,
-        output_text_tokens: (existing.output_text_tokens || 0) + outputTextTokens,
-        session_duration_seconds: Number(existing.session_duration_seconds || 0) + sessionDurationSeconds,
+        input_tokens: (existing.input_tokens || 0) + sessionDelta.inputTokens,
+        output_tokens: (existing.output_tokens || 0) + sessionDelta.outputTokens,
+        total_tokens: (existing.total_tokens || 0) + sessionDelta.totalTokens,
+        input_audio_tokens: (existing.input_audio_tokens || 0) + sessionDelta.inputAudioTokens,
+        input_text_tokens: (existing.input_text_tokens || 0) + sessionDelta.inputTextTokens,
+        input_cached_tokens: (existing.input_cached_tokens || 0) + sessionDelta.inputCachedTokens,
+        output_audio_tokens: (existing.output_audio_tokens || 0) + sessionDelta.outputAudioTokens,
+        output_text_tokens: (existing.output_text_tokens || 0) + sessionDelta.outputTextTokens,
+        session_duration_seconds: Number(existing.session_duration_seconds || 0) + sessionDelta.sessionDurationSeconds,
         avg_ttft_seconds: newAvgTtft,
-        message_count: newCount,
-        total_response_duration_seconds: Number(existing.total_response_duration_seconds || 0) + totalResponseDurationSeconds,
-        session_count: sessionId ? (existing.session_count || 0) + 1 : existing.session_count,
+        message_count: Number(existing.message_count || 0) + sessionDelta.messageCount,
+        total_response_duration_seconds: Number(existing.total_response_duration_seconds || 0) + sessionDelta.totalResponseDurationSeconds,
+        session_count: sessionId && sessionDelta.messageCount > 0 ? (existing.session_count || 0) + 1 : existing.session_count,
         update_date: new Date(),
       },
     });
@@ -867,6 +959,7 @@ const recordTokenUsage = async ({
       usage_date: todayDate,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
+      total_tokens: resolvedTotalTokens,
       input_audio_tokens: inputAudioTokens,
       input_text_tokens: inputTextTokens,
       input_cached_tokens: inputCachedTokens,

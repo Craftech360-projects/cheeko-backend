@@ -29,6 +29,8 @@
     "prisma:seed": "node prisma/seed.js",
     "migrate:mysql": "node scripts/migrate-mysql-to-supabase.js",
     "migrate:mysql:dry": "node scripts/migrate-mysql-to-supabase.js --dry-run",
+    "backfill:chat-history": "node scripts/backfill-ai-agent-chat-history-to-voice-sessions.js",
+    "backfill:chat-history:dry": "node scripts/backfill-ai-agent-chat-history-to-voice-sessions.js --dry-run",
     "seed:rfid-pack": "node scripts/seed-rfid-pack-from-files.js",
     "seed:rfid-packs:fixed": "node scripts/seed-rfid-packs-fixed-ids.js",
     "update:rfid-pack-images": "node scripts/update-rfid-pack-images.js",

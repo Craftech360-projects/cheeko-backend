@@ -9,6 +9,63 @@ const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
 
+const emptyMemoryPayload = () => ({ memories: [], relations: [], entities: [] });
+
+const toStringOrNull = (value) => {
+  if (value === null || value === undefined) return null;
+  return value.toString();
+};
+
+const toISOStringOrNull = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+};
+
+const clampLimit = (value, defaultLimit = 20, maxLimit = 100) => {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return defaultLimit;
+  if (parsed < 0) return 0;
+  if (parsed > maxLimit) return maxLimit;
+  return parsed;
+};
+
+const chatTypeToRole = (chatType) => {
+  if (chatType === 1) return 'user';
+  if (chatType === 2) return 'assistant';
+  return 'unknown';
+};
+
+const roleToChatType = (role) => {
+  if (role === 'user') return 1;
+  if (role === 'assistant' || role === 'agent') return 2;
+  return 0;
+};
+
+const parseMessageTimestamp = (timestamp, fallbackDate = new Date()) => {
+  if (!timestamp) return fallbackDate;
+  if (typeof timestamp === 'number') return new Date(timestamp * 1000);
+  return new Date(timestamp);
+};
+
+const formatChatHistoryMessages = (messages, getChatType) => {
+  if (!messages || messages.length === 0) return [];
+
+  const sessionCreationTime = messages.reduce((min, msg) => {
+    const msgTime = new Date(msg.created_at);
+    return msgTime < min ? msgTime : min;
+  }, new Date(messages[0].created_at));
+
+  return messages.map(msg => ({
+    createdAt: sessionCreationTime.toISOString(),
+    chatType: getChatType(msg),
+    content: msg.content,
+    audioId: msg.audio_id,
+    macAddress: msg.mac_address
+  }));
+};
+
 /**
  * Create a new agent
  * @param {number} userId - User ID
@@ -161,12 +218,20 @@ const getAgentSessions = async (agentId, options = {}) => {
   const page = parseInt(options.page) || 1;
   const limit = parseInt(options.limit) || 10;
 
-  // Get all messages for this agent to group by session
-  const data = await prisma.ai_agent_chat_history.findMany({
+  // Prefer canonical voice session messages, then fall back to legacy history while backfill runs.
+  let data = await prisma.voice_session_messages.findMany({
     where: { agent_id: agentId },
     select: { session_id: true, created_at: true },
-    orderBy: { created_at: 'desc' },
+    orderBy: { created_at: 'desc' }
   });
+
+  if (data.length === 0) {
+    data = await prisma.ai_agent_chat_history.findMany({
+      where: { agent_id: agentId },
+      select: { session_id: true, created_at: true },
+      orderBy: { created_at: 'desc' }
+    });
+  }
 
   // Group by session ID and track message counts and earliest timestamp
   const sessionGroups = new Map();
@@ -220,26 +285,228 @@ const getAgentSessions = async (agentId, options = {}) => {
  * @returns {Promise<Array>} Chat messages with camelCase fields
  */
 const getChatHistory = async (agentId, sessionId) => {
+  const voiceMessages = await prisma.voice_session_messages.findMany({
+    where: { agent_id: agentId, session_id: sessionId },
+    select: { created_at: true, role: true, content: true, audio_id: true, mac_address: true },
+    orderBy: { created_at: 'asc' }
+  });
+
+  if (voiceMessages.length > 0) {
+    return formatChatHistoryMessages(voiceMessages, msg => roleToChatType(msg.role));
+  }
+
   const messages = await prisma.ai_agent_chat_history.findMany({
     where: { agent_id: agentId, session_id: sessionId },
     select: { created_at: true, chat_type: true, content: true, audio_id: true, mac_address: true },
-    orderBy: { created_at: 'asc' },
+    orderBy: { created_at: 'asc' }
   });
-  if (messages.length === 0) return [];
 
-  const sessionCreationTime = messages.reduce((min, msg) => {
-    const msgTime = new Date(msg.created_at);
-    return msgTime < min ? msgTime : min;
-  }, new Date(messages[0].created_at));
+  return formatChatHistoryMessages(messages, msg => msg.chat_type);
+};
 
-  // Transform to camelCase matching AgentChatHistoryDTO
-  return messages.map(msg => ({
-    createdAt: sessionCreationTime.toISOString(),
-    chatType: msg.chat_type,
-    content: msg.content,
-    audioId: msg.audio_id,
-    macAddress: msg.mac_address
-  }));
+const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }) => {
+  await prisma.voice_sessions.upsert({
+    where: { session_id: sessionId },
+    create: {
+      session_id: sessionId,
+      mac_address: normalizedMac,
+      agent_id: agentId || null,
+      status: 'active',
+      last_event_at: eventAt,
+      metadata: {}
+    },
+    update: {
+      mac_address: normalizedMac,
+      agent_id: agentId || null,
+      last_event_at: eventAt
+    }
+  });
+};
+
+const endVoiceSession = async ({ macAddress, sessionId, status = 'ended', endedAt }) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+  if (!sessionId) throw new Error('sessionId is required');
+
+  const endedAtDate = parseMessageTimestamp(endedAt);
+
+  return prisma.voice_sessions.update({
+    where: { session_id: sessionId },
+    data: {
+      mac_address: normalizedMac,
+      status,
+      ended_at: endedAtDate,
+      last_event_at: endedAtDate
+    }
+  });
+};
+
+const saveVoiceSessionSummary = async ({
+  macAddress,
+  sessionId,
+  summary,
+  model,
+  sourceMessageCount,
+  agentId
+}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+  if (!sessionId) throw new Error('sessionId is required');
+  if (summary === undefined || summary === null) throw new Error('summary is required');
+
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true, agent_id: true, kid_id: true }
+  });
+  if (!device) throw new Error('Device not found');
+
+  const resolvedAgentId = agentId || device.agent_id || null;
+  const now = new Date();
+
+  await ensureVoiceSession({
+    sessionId,
+    normalizedMac,
+    agentId: resolvedAgentId,
+    eventAt: now
+  });
+
+  await prisma.voice_session_summaries.upsert({
+    where: { session_id: sessionId },
+    create: {
+      session_id: sessionId,
+      mac_address: normalizedMac,
+      summary,
+      model: model || null,
+      source_message_count: sourceMessageCount ?? null,
+      created_at: now,
+      updated_at: now
+    },
+    update: {
+      mac_address: normalizedMac,
+      summary,
+      model: model || null,
+      source_message_count: sourceMessageCount ?? null,
+      updated_at: now
+    }
+  });
+
+  let updatedAgent = null;
+  if (resolvedAgentId) {
+    updatedAgent = await prisma.ai_agent.update({
+      where: { id: resolvedAgentId },
+      data: {
+        summary_memory: summary,
+        updated_at: now
+      },
+      select: { id: true, agent_name: true, summary_memory: true }
+    });
+  }
+
+  return {
+    sessionId,
+    macAddress: normalizedMac,
+    agentId: resolvedAgentId,
+    summaryMemory: updatedAgent ? updatedAgent.summary_memory : summary
+  };
+};
+
+const getNextVoiceMessageSequence = async (sessionId) => {
+  const latest = await prisma.voice_session_messages.findFirst({
+    where: { session_id: sessionId },
+    select: { sequence: true },
+    orderBy: { sequence: 'desc' }
+  });
+
+  return (latest?.sequence || 0) + 1;
+};
+
+const isVoiceMessageSequenceConflict = (error) => {
+  if (!error) return false;
+
+  const target = error.meta?.target || [];
+  if (error.code === 'P2002') {
+    if (Array.isArray(target) && target.includes('session_id') && target.includes('sequence')) {
+      return true;
+    }
+    if (typeof target === 'string' && target.includes('session_id') && target.includes('sequence')) {
+      return true;
+    }
+  }
+
+  const message = String(error.message || '');
+  return message.includes('Unique constraint failed') &&
+    message.includes('session_id') &&
+    message.includes('sequence');
+};
+
+const createVoiceMessageWithRetry = async (data, explicitSequence, explicitIdempotencyKey) => {
+  let nextData = data;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.voice_session_messages.create({ data: nextData });
+    } catch (error) {
+      if (explicitSequence || explicitIdempotencyKey || !isVoiceMessageSequenceConflict(error) || attempt === 2) {
+        throw error;
+      }
+
+      const latestSequence = await getNextVoiceMessageSequence(nextData.session_id);
+      const retrySequence = Math.max(latestSequence, nextData.sequence + 1);
+      nextData = {
+        ...nextData,
+        sequence: retrySequence,
+        idempotency_key: `${nextData.session_id}:${retrySequence}`
+      };
+    }
+  }
+
+  return prisma.voice_session_messages.create({ data: nextData });
+};
+
+const createVoiceSessionMessage = async ({
+  normalizedMac,
+  agentId,
+  sessionId,
+  chatType,
+  content,
+  audioId,
+  timestamp,
+  sequence,
+  idempotencyKey,
+  providerMessage
+}) => {
+  const createdAt = parseMessageTimestamp(timestamp);
+  const messageSequence = sequence || await getNextVoiceMessageSequence(sessionId);
+
+  await ensureVoiceSession({
+    sessionId,
+    normalizedMac,
+    agentId,
+    eventAt: createdAt
+  });
+
+  const message = await createVoiceMessageWithRetry({
+    session_id: sessionId,
+    mac_address: normalizedMac,
+    agent_id: agentId || null,
+    sequence: messageSequence,
+    role: chatTypeToRole(chatType),
+    content,
+    provider_message: providerMessage || null,
+    audio_id: audioId || null,
+    created_at: createdAt,
+    idempotency_key: idempotencyKey || `${sessionId}:${messageSequence}`
+  }, sequence !== undefined && sequence !== null, Boolean(idempotencyKey));
+
+  return {
+    ...message,
+    mac_address: normalizedMac,
+    agent_id: agentId || null,
+    session_id: sessionId,
+    chat_type: chatType,
+    content,
+    audio_id: audioId || null
+  };
 };
 
 /**
@@ -250,15 +517,13 @@ const getChatHistory = async (agentId, sessionId) => {
 const addChatMessage = async ({ macAddress, agentId, sessionId, chatType, content, audioId }) => {
   const normalizedMac = normalizeMacAddress(macAddress);
 
-  const message = await prisma.ai_agent_chat_history.create({
-    data: {
-      mac_address: normalizedMac,
-      agent_id: agentId,
-      session_id: sessionId,
-      chat_type: chatType, // 1=user, 2=agent
-      content,
-      audio_id: audioId,
-    },
+  const message = await createVoiceSessionMessage({
+    normalizedMac,
+    agentId,
+    sessionId,
+    chatType,
+    content,
+    audioId
   });
 
   return message;
@@ -623,6 +888,185 @@ const getPromptWithMemories = async (mac, options = { includeMemories: true }) =
 };
 
 /**
+ * Build manager-backed bootstrap context for LiveKit fallback/debug hydration.
+ * Room metadata should remain the primary worker startup source.
+ * @param {string} mac - Device MAC address
+ * @param {Object} [options] - Bootstrap options
+ * @param {boolean} [options.includeMemories=true] - Include Mem0 memories when configured
+ * @param {number} [options.recentLimit=20] - Recent chat-history messages to include
+ * @param {number} [options.memoryLimit] - Memory search limit
+ * @returns {Promise<Object>} Bootstrap context
+ */
+const getDeviceBootstrap = async (mac, options = {}) => {
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) {
+    throw new Error('Invalid MAC address');
+  }
+
+  const recentLimit = clampLimit(options.recentLimit, 20, 100);
+  const includeMemories = options.includeMemories !== false;
+
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: {
+      id: true,
+      user_id: true,
+      mac_address: true,
+      agent_id: true,
+      kid_id: true,
+      mode: true,
+      device_mode: true,
+      app_version: true,
+      last_connected_at: true
+    }
+  });
+
+  if (!device) {
+    throw new Error('Device not found');
+  }
+
+  if (!device.agent_id) {
+    throw new Error('Device has no agent assigned');
+  }
+
+  const recentMessagesPromise = recentLimit > 0
+    ? prisma.ai_agent_chat_history.findMany({
+      where: {
+        mac_address: normalizedMac,
+        agent_id: device.agent_id
+      },
+      select: {
+        id: true,
+        session_id: true,
+        chat_type: true,
+        content: true,
+        audio_id: true,
+        created_at: true
+      },
+      orderBy: { created_at: 'desc' },
+      take: recentLimit
+    })
+    : Promise.resolve([]);
+
+  const childProfilePromise = device.kid_id
+    ? prisma.kid_profile.findUnique({
+      where: { id: BigInt(device.kid_id) },
+      select: {
+        id: true,
+        user_id: true,
+        name: true,
+        nickname: true,
+        avatar_url: true,
+        birth_date: true,
+        gender: true,
+        grade: true,
+        school: true,
+        interests: true,
+        language: true,
+        timezone: true,
+        preferences: true
+      }
+    })
+    : Promise.resolve(null);
+
+  const memoryPromise = includeMemories
+    ? getMemoriesByMac(normalizedMac, { limit: options.memoryLimit })
+    : Promise.resolve(emptyMemoryPayload());
+
+  const [agent, childProfile, recentMessages, memories] = await Promise.all([
+    prisma.ai_agent.findUnique({
+      where: { id: device.agent_id },
+      select: {
+        id: true,
+        user_id: true,
+        agent_code: true,
+        agent_name: true,
+        asr_model_id: true,
+        vad_model_id: true,
+        llm_model_id: true,
+        vllm_model_id: true,
+        tts_model_id: true,
+        tts_voice_id: true,
+        mem_model_id: true,
+        intent_model_id: true,
+        chat_history_conf: true,
+        system_prompt: true,
+        summary_memory: true,
+        lang_code: true,
+        language: true
+      }
+    }),
+    childProfilePromise,
+    recentMessagesPromise,
+    memoryPromise
+  ]);
+
+  if (!agent) {
+    throw new Error('Agent not found');
+  }
+
+  return {
+    bootstrapSource: 'manager_api_fallback',
+    device: {
+      id: device.id,
+      userId: toStringOrNull(device.user_id),
+      macAddress: device.mac_address,
+      agentId: device.agent_id,
+      kidId: toStringOrNull(device.kid_id),
+      mode: device.mode,
+      deviceMode: device.device_mode,
+      appVersion: device.app_version,
+      lastConnectedAt: toISOStringOrNull(device.last_connected_at)
+    },
+    agent: {
+      agentId: agent.id,
+      userId: toStringOrNull(agent.user_id),
+      agentCode: agent.agent_code,
+      agentName: agent.agent_name,
+      asrModelId: agent.asr_model_id,
+      vadModelId: agent.vad_model_id,
+      llmModelId: agent.llm_model_id,
+      vllmModelId: agent.vllm_model_id,
+      ttsModelId: agent.tts_model_id,
+      ttsVoiceId: agent.tts_voice_id,
+      memModelId: agent.mem_model_id,
+      intentModelId: agent.intent_model_id,
+      chatHistoryConf: agent.chat_history_conf,
+      systemPrompt: agent.system_prompt,
+      summaryMemory: agent.summary_memory,
+      langCode: agent.lang_code,
+      language: agent.language
+    },
+    childProfile: childProfile ? {
+      id: toStringOrNull(childProfile.id),
+      userId: toStringOrNull(childProfile.user_id),
+      name: childProfile.name,
+      nickname: childProfile.nickname,
+      avatarUrl: childProfile.avatar_url,
+      birthDate: toISOStringOrNull(childProfile.birth_date),
+      gender: childProfile.gender,
+      grade: childProfile.grade,
+      school: childProfile.school,
+      interests: childProfile.interests || [],
+      language: childProfile.language,
+      timezone: childProfile.timezone,
+      preferences: childProfile.preferences || {}
+    } : null,
+    recentMessages: [...recentMessages].reverse().map((message) => ({
+      id: message.id,
+      sessionId: message.session_id,
+      role: chatTypeToRole(message.chat_type),
+      chatType: message.chat_type,
+      content: message.content,
+      audioId: message.audio_id,
+      createdAt: toISOStringOrNull(message.created_at)
+    })),
+    memories: memories || emptyMemoryPayload(),
+    generatedAt: new Date().toISOString()
+  };
+};
+
+/**
  * Clear all memories for a device
  * @param {string} mac - Device MAC address
  * @returns {Promise<boolean>} True if successful
@@ -800,7 +1244,7 @@ const getAgentNameByMac = async (mac) => {
  * @returns {Promise<Object>} Created message
  */
 const reportChatMessage = async (data) => {
-  const { macAddress, agentId, sessionId, chatType, content, audioId } = data;
+  const { macAddress, agentId, sessionId, chatType, content, audioId, timestamp, sequence, idempotencyKey } = data;
   const normalizedMac = normalizeMacAddress(macAddress);
 
   let resolvedAgentId = agentId;
@@ -812,15 +1256,16 @@ const reportChatMessage = async (data) => {
     }
   }
 
-  const message = await prisma.ai_agent_chat_history.create({
-    data: {
-      mac_address: normalizedMac,
-      agent_id: resolvedAgentId,
-      session_id: sessionId,
-      chat_type: chatType,
-      content,
-      audio_id: audioId,
-    },
+  const message = await createVoiceSessionMessage({
+    normalizedMac,
+    agentId: resolvedAgentId,
+    sessionId,
+    chatType,
+    content,
+    audioId,
+    timestamp,
+    sequence,
+    idempotencyKey
   });
 
   return message;
@@ -853,31 +1298,40 @@ const batchUploadSession = async (data) => {
     }
   }
 
+  const startSequence = await getNextVoiceMessageSequence(sessionId);
   const insertData = messages.map((msg, index) => {
-    let createdAt;
-    if (msg.timestamp) {
-      if (typeof msg.timestamp === 'number') {
-        createdAt = new Date(msg.timestamp * 1000);
-      } else {
-        createdAt = new Date(msg.timestamp);
-      }
-    } else {
-      createdAt = new Date(Date.now() + index);
-    }
+    const createdAt = parseMessageTimestamp(msg.timestamp, new Date(Date.now() + index));
+    const sequence = msg.sequence || startSequence + index;
 
     return {
+      session_id: sessionId,
       mac_address: normalizedMac,
       agent_id: resolvedAgentId,
-      session_id: sessionId,
-      chat_type: msg.chatType,
+      sequence,
+      role: chatTypeToRole(msg.chatType),
       content: msg.content,
+      provider_message: msg.providerMessage || null,
       audio_id: msg.audioId || null,
       created_at: createdAt,
+      idempotency_key: msg.idempotencyKey || `${sessionId}:${sequence}`
     };
   });
 
-  const result = await prisma.ai_agent_chat_history.createMany({
+  const lastEventAt = insertData.reduce((max, msg) => {
+    const msgTime = new Date(msg.created_at);
+    return msgTime > max ? msgTime : max;
+  }, new Date(insertData[0].created_at));
+
+  await ensureVoiceSession({
+    sessionId,
+    normalizedMac,
+    agentId: resolvedAgentId,
+    eventAt: lastEventAt
+  });
+
+  const result = await prisma.voice_session_messages.createMany({
     data: insertData,
+    skipDuplicates: true
   });
 
   return {
@@ -897,6 +1351,24 @@ const batchUploadSession = async (data) => {
  * @returns {Promise<Array>} Recent chat messages with only content and audioId
  */
 const getRecentUserChatHistory = async (agentId, limit = 50) => {
+  const voiceMessages = await prisma.voice_session_messages.findMany({
+    where: {
+      agent_id: agentId,
+      role: 'user',
+      audio_id: { not: null }
+    },
+    select: { content: true, audio_id: true },
+    orderBy: { created_at: 'desc' },
+    take: limit
+  });
+
+  if (voiceMessages.length > 0) {
+    return voiceMessages.map(msg => ({
+      content: extractContentFromString(msg.content),
+      audioId: msg.audio_id
+    }));
+  }
+
   const messages = await prisma.ai_agent_chat_history.findMany({
     where: {
       agent_id: agentId,
@@ -905,7 +1377,7 @@ const getRecentUserChatHistory = async (agentId, limit = 50) => {
     },
     select: { content: true, audio_id: true },
     orderBy: { created_at: 'desc' },
-    take: limit,
+    take: limit
   });
 
   return (messages || []).map(msg => ({
@@ -947,9 +1419,16 @@ const extractContentFromString = (content) => {
  * @returns {Promise<string|null>} Content string or null
  */
 const getAudioContent = async (audioId) => {
+  const voiceRecord = await prisma.voice_session_messages.findFirst({
+    where: { audio_id: audioId },
+    select: { content: true }
+  });
+
+  if (voiceRecord) return voiceRecord.content;
+
   const record = await prisma.ai_agent_chat_history.findFirst({
     where: { audio_id: audioId },
-    select: { content: true },
+    select: { content: true }
   });
 
   return record ? record.content : null;
@@ -1587,9 +2066,12 @@ module.exports = {
   addConversationToMemory,
   addFactToMemory,
   getPromptWithMemories,
+  getDeviceBootstrap,
   clearMemoriesByMac,
   // Agent memory and mode methods
   saveMemory,
+  saveVoiceSessionSummary,
+  endVoiceSession,
   updateModeFromTemplate,
   getAgentNameByMac,
   // Chat history batch methods

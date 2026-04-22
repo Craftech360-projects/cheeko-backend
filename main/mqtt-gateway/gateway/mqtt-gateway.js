@@ -25,6 +25,7 @@ const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
 } = require("../core/media-api-client");
+const { buildDispatchMetadata } = require("../core/mem0-integration");
 const logger = require("../utils/logger");
 
 // Character to Agent name mapping for multi-agent dispatch
@@ -1779,15 +1780,13 @@ class MQTTGateway {
             newBridge.agentDeployed = true;
 
             await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
-              metadata: JSON.stringify({
-                device_mac: deviceId,
+              metadata: buildDispatchMetadata({
+                macAddress: connection?.macAddress || deviceId,
+                deviceId: connection?.uuid || newSessionUuid,
                 character: characterName,
-                child_profile: childProfile,
-                session_language_code: connection?.sessionConfig?.languageCode || null,
-                session_language_name: connection?.sessionConfig?.languageName || null,
-                session_voice_id: connection?.sessionConfig?.voiceId || null,
-                session_agent_name: connection?.sessionConfig?.agentName || null,
-                timestamp: Date.now(),
+                childProfile,
+                memoryData: connection?.mem0Memories,
+                sessionConfig: connection?.sessionConfig,
               }),
             });
 
@@ -2017,16 +2016,13 @@ class MQTTGateway {
                       roomName,
                       agentName,
                       {
-                        metadata: JSON.stringify({
-                          device_mac: connection.macAddress,
-                          device_uuid: deviceId,
+                        metadata: buildDispatchMetadata({
+                          macAddress: connection.macAddress,
+                          deviceId: connection?.uuid || deviceId,
                           character: characterName,
-                          child_profile: childProfile,
-                          session_language_code: connection?.sessionConfig?.languageCode || null,
-                          session_language_name: connection?.sessionConfig?.languageName || null,
-                          session_voice_id: connection?.sessionConfig?.voiceId || null,
-                          session_agent_name: connection?.sessionConfig?.agentName || null,
-                          timestamp: Date.now(),
+                          childProfile,
+                          memoryData: connection?.mem0Memories,
+                          sessionConfig: connection?.sessionConfig,
                         }),
                       }
                     );
@@ -2649,15 +2645,13 @@ class MQTTGateway {
             newBridge.agentDeployed = true;
 
             await this.agentDispatchClient.createDispatch(newRoomName, agentName, {
-              metadata: JSON.stringify({
-                device_mac: deviceId,
+              metadata: buildDispatchMetadata({
+                macAddress: connection?.macAddress || deviceId,
+                deviceId: connection?.uuid || newSessionUuid,
                 character: newModeName,
-                child_profile: childProfile,
-                session_language_code: connection?.sessionConfig?.languageCode || null,
-                session_language_name: connection?.sessionConfig?.languageName || null,
-                session_voice_id: connection?.sessionConfig?.voiceId || null,
-                session_agent_name: connection?.sessionConfig?.agentName || null,
-                timestamp: Date.now(),
+                childProfile,
+                memoryData: connection?.mem0Memories,
+                sessionConfig: connection?.sessionConfig,
               }),
             });
             logger.info(`[CHARACTER-CHANGE] Dispatched ${agentName} to ${newRoomName}`);
@@ -3046,16 +3040,13 @@ class MQTTGateway {
                 newRoomName,
                 agentName,
                 {
-                  metadata: JSON.stringify({
-                    device_mac: connection.macAddress,
-                    device_uuid: deviceId,
+                  metadata: buildDispatchMetadata({
+                    macAddress: connection.macAddress,
+                    deviceId: connection?.uuid || deviceId,
                     character: currentCharacter || "Cheeko",
-                    child_profile: childProfile,
-                    session_language_code: connection?.sessionConfig?.languageCode || null,
-                    session_language_name: connection?.sessionConfig?.languageName || null,
-                    session_voice_id: connection?.sessionConfig?.voiceId || null,
-                    session_agent_name: connection?.sessionConfig?.agentName || null,
-                    timestamp: Date.now(),
+                    childProfile,
+                    memoryData: connection?.mem0Memories,
+                    sessionConfig: connection?.sessionConfig,
                   }),
                 }
               );

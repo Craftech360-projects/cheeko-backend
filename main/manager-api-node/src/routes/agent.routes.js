@@ -9,7 +9,7 @@ const express = require('express');
 const router = express.Router();
 const agentService = require('../services/agent.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, requireServiceKey } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
@@ -514,6 +514,105 @@ router.get('/config/:mac',
 
 /**
  * @swagger
+ * /agent/device/{mac}/bootstrap:
+ *   get:
+ *     tags: [Agent]
+ *     summary: Get manager-backed LiveKit bootstrap context for a device
+ *     description: Fallback/debug endpoint. LiveKit room metadata remains the primary startup source.
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: includeMemories
+ *         schema:
+ *           type: boolean
+ *           default: true
+ *       - in: query
+ *         name: recentLimit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Device bootstrap context
+ */
+router.get('/device/:mac/bootstrap',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const includeMemories = req.query.includeMemories !== 'false' && req.query.includeMemories !== '0';
+      const recentLimit = req.query.recentLimit || req.query.limit;
+      const result = await agentService.getDeviceBootstrap(req.params.mac, {
+        includeMemories,
+        recentLimit
+      });
+      success(res, result);
+    } catch (error) {
+      logger.info(`[AGENT] GET /device/${req.params.mac}/bootstrap error: ${error.message}`);
+      if (error.message === 'Invalid MAC address') {
+        return badRequest(res, error.message);
+      }
+      notFound(res, error.message);
+    }
+  })
+);
+
+router.put('/device/:mac/sessions/:sessionId/summary',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { summary, model, sourceMessageCount, agentId } = req.body;
+
+    if (summary === undefined || summary === null) {
+      return badRequest(res, 'summary is required');
+    }
+
+    try {
+      const result = await agentService.saveVoiceSessionSummary({
+        macAddress: req.params.mac,
+        sessionId: req.params.sessionId,
+        summary,
+        model,
+        sourceMessageCount,
+        agentId
+      });
+      success(res, result, 'Session summary saved');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.post('/device/:mac/sessions/:sessionId/end',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { status = 'ended', endedAt, messageCount } = req.body;
+
+    try {
+      const result = await agentService.endVoiceSession({
+        macAddress: req.params.mac,
+        sessionId: req.params.sessionId,
+        status,
+        endedAt,
+        messageCount
+      });
+      success(res, result, 'Session ended');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
  * /agent/agent-id/{mac}:
  *   get:
  *     tags: [Agent]
@@ -824,7 +923,7 @@ router.post('/chat-message',
  */
 router.post('/chat-history/report',
   asyncHandler(async (req, res) => {
-    const { macAddress, agentId, sessionId, chatType, content, audioId } = req.body;
+    const { macAddress, agentId, sessionId, chatType, content, audioId, timestamp, sequence, idempotencyKey, providerMessage } = req.body;
 
     if (!macAddress || !sessionId || chatType === undefined || !content) {
       return badRequest(res, 'macAddress, sessionId, chatType, and content are required');
@@ -837,7 +936,11 @@ router.post('/chat-history/report',
         sessionId,
         chatType,
         content,
-        audioId
+        audioId,
+        timestamp,
+        sequence,
+        idempotencyKey,
+        providerMessage
       });
       success(res, message, 'Message reported successfully');
     } catch (error) {
