@@ -21,13 +21,13 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.1.168")
+SERVER_IP = "139.59.7.72"
 OTA_PORT = 8002
-MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", "192.168.1.168")
+MQTT_BROKER_HOST ="139.59.7.72"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
-MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.1.168:8001/toy")
+MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://139.59.7.72:8001/toy")
 MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
 # DEVICE_MAC is now dynamically generated for uniqueness
 # Minimum frames to have in buffer to continue playback
@@ -1063,8 +1063,15 @@ class TestClient:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Cheeko test client")
-    parser.add_argument("--mode", choices=["voice", "rfid"], default="rfid")
+    parser = argparse.ArgumentParser(
+        description="Cheeko test client. Defaults to voice mode; use --mode rfid with --rfid-uid for card tests."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["voice", "rfid"],
+        default="voice",
+        help="Test mode to run. RFID mode requires --rfid-uid.",
+    )
     parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:ac:b5:38"))
     parser.add_argument("--rfid-uid", default=os.getenv("TEST_RFID_UID"))
     parser.add_argument("--local-version", default=os.getenv("TEST_LOCAL_VERSION"))
