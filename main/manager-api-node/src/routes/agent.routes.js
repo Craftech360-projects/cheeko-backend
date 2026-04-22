@@ -560,6 +560,60 @@ router.get('/device/:mac/bootstrap',
   })
 );
 
+router.put('/device/:mac/artifacts',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { relativePath, content, contentType, sessionId, metadata } = req.body;
+
+    try {
+      const result = await agentService.saveDeviceWorkspaceArtifact({
+        macAddress: req.params.mac,
+        sessionId,
+        relativePath,
+        content,
+        contentType,
+        metadata
+      });
+      success(res, result, 'Workspace artifact saved');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.get('/device/:mac/artifacts/content',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getDeviceWorkspaceArtifact(req.params.mac, req.query.path);
+      success(res, result);
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.get('/device/:mac/artifacts',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.listDeviceWorkspaceArtifacts(req.params.mac, {
+        limit: req.query.limit,
+        includeContent: req.query.includeContent
+      });
+      success(res, result);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 router.put('/device/:mac/sessions/:sessionId/summary',
   requireServiceKey,
   asyncHandler(async (req, res) => {

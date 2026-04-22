@@ -8,8 +8,11 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
+const crypto = require('crypto');
+const path = require('path');
 
 const emptyMemoryPayload = () => ({ memories: [], relations: [], entities: [] });
+const MAX_WORKSPACE_ARTIFACT_BYTES = 256 * 1024;
 
 const toStringOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -42,6 +45,42 @@ const roleToChatType = (role) => {
   if (role === 'assistant' || role === 'agent') return 2;
   return 0;
 };
+
+const normalizeWorkspaceRelativePath = (relativePath) => {
+  if (typeof relativePath !== 'string' || relativePath.trim() === '') {
+    throw new Error('relativePath is required');
+  }
+
+  const slashPath = relativePath.trim().replace(/\\/g, '/');
+  if (/^[A-Za-z]:/.test(slashPath) || slashPath.startsWith('/')) {
+    throw new Error('relativePath must stay inside the workspace');
+  }
+
+  const normalized = path.posix.normalize(slashPath);
+  if (normalized === '.' || normalized.startsWith('../') || normalized === '..') {
+    throw new Error('relativePath must stay inside the workspace');
+  }
+  if (normalized.length > 500) {
+    throw new Error('relativePath is too long');
+  }
+  return normalized;
+};
+
+const artifactToDTO = (artifact) => ({
+  id: artifact.id,
+  macAddress: artifact.mac_address,
+  sessionId: artifact.session_id,
+  deviceId: artifact.device_id,
+  agentId: artifact.agent_id,
+  relativePath: artifact.relative_path,
+  contentType: artifact.content_type,
+  content: artifact.content,
+  sizeBytes: artifact.size_bytes,
+  sha256: artifact.sha256,
+  metadata: artifact.metadata,
+  createdAt: toISOStringOrNull(artifact.created_at),
+  updatedAt: toISOStringOrNull(artifact.updated_at)
+});
 
 const parseMessageTimestamp = (timestamp, fallbackDate = new Date()) => {
   if (!timestamp) return fallbackDate;
@@ -408,6 +447,117 @@ const saveVoiceSessionSummary = async ({
     agentId: resolvedAgentId,
     summaryMemory: updatedAgent ? updatedAgent.summary_memory : summary
   };
+};
+
+const saveDeviceWorkspaceArtifact = async ({
+  macAddress,
+  sessionId,
+  relativePath,
+  content,
+  contentType = 'text/plain',
+  metadata = {}
+}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const normalizedPath = normalizeWorkspaceRelativePath(relativePath);
+  if (typeof content !== 'string') throw new Error('content is required');
+
+  const sizeBytes = Buffer.byteLength(content, 'utf8');
+  if (sizeBytes > MAX_WORKSPACE_ARTIFACT_BYTES) {
+    throw new Error(`artifact exceeds ${MAX_WORKSPACE_ARTIFACT_BYTES} byte limit`);
+  }
+
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true, agent_id: true }
+  });
+  if (!device) throw new Error('Device not found');
+
+  const now = new Date();
+  const sha256 = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
+  const artifact = await prisma.device_workspace_artifacts.upsert({
+    where: {
+      mac_address_relative_path: {
+        mac_address: normalizedMac,
+        relative_path: normalizedPath
+      }
+    },
+    create: {
+      mac_address: normalizedMac,
+      device_id: device.id,
+      agent_id: device.agent_id || null,
+      session_id: sessionId || null,
+      relative_path: normalizedPath,
+      content,
+      content_type: contentType || 'text/plain',
+      size_bytes: sizeBytes,
+      sha256,
+      metadata: metadata || {},
+      created_at: now,
+      updated_at: now
+    },
+    update: {
+      device_id: device.id,
+      agent_id: device.agent_id || null,
+      session_id: sessionId || null,
+      content,
+      content_type: contentType || 'text/plain',
+      size_bytes: sizeBytes,
+      sha256,
+      metadata: metadata || {},
+      updated_at: now
+    }
+  });
+
+  return artifactToDTO(artifact);
+};
+
+const listDeviceWorkspaceArtifacts = async (macAddress, options = {}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const includeContent = options.includeContent === true || options.includeContent === 'true' || options.includeContent === '1';
+  const limit = clampLimit(options.limit, 50, 100);
+  const artifacts = await prisma.device_workspace_artifacts.findMany({
+    where: { mac_address: normalizedMac },
+    orderBy: { updated_at: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      mac_address: true,
+      device_id: true,
+      agent_id: true,
+      session_id: true,
+      relative_path: true,
+      content_type: true,
+      ...(includeContent ? { content: true } : {}),
+      size_bytes: true,
+      sha256: true,
+      metadata: true,
+      created_at: true,
+      updated_at: true
+    }
+  });
+
+  return artifacts.map(artifactToDTO);
+};
+
+const getDeviceWorkspaceArtifact = async (macAddress, relativePath) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const normalizedPath = normalizeWorkspaceRelativePath(relativePath);
+  const artifact = await prisma.device_workspace_artifacts.findUnique({
+    where: {
+      mac_address_relative_path: {
+        mac_address: normalizedMac,
+        relative_path: normalizedPath
+      }
+    }
+  });
+  if (!artifact) throw new Error('Artifact not found');
+  return artifactToDTO(artifact);
 };
 
 const getNextVoiceMessageSequence = async (sessionId) => {
@@ -1625,7 +1775,6 @@ const deleteTemplate = async (templateId) => {
 // MCP Access Point Methods (Spring Boot Compatible)
 // ==============================================
 
-const crypto = require('crypto');
 const WebSocket = require('ws');
 
 // System param key for MCP endpoint
@@ -2067,6 +2216,9 @@ module.exports = {
   addFactToMemory,
   getPromptWithMemories,
   getDeviceBootstrap,
+  saveDeviceWorkspaceArtifact,
+  listDeviceWorkspaceArtifacts,
+  getDeviceWorkspaceArtifact,
   clearMemoriesByMac,
   // Agent memory and mode methods
   saveMemory,

@@ -35,6 +35,7 @@ model ai_agent {
   voice_sessions        voice_sessions[]
   voice_session_messages voice_session_messages[]
   device_token_usage_session device_token_usage_session[]
+  device_workspace_artifacts device_workspace_artifacts[]
 
   @@index([user_id], map: "idx_ai_agent_user")
 }
@@ -104,6 +105,7 @@ model ai_device {
   sys_user          sys_user? @relation(fields: [user_id], references: [id], onUpdate: NoAction)
   voice_sessions    voice_sessions[]
   device_token_usage_session device_token_usage_session[]
+  device_workspace_artifacts device_workspace_artifacts[]
 
   @@index([agent_id], map: "idx_ai_device_agent")
   @@index([kid_id], map: "idx_ai_device_kid")
@@ -518,6 +520,29 @@ model device_token_usage_session {
   @@index([mac_address, usage_date(sort: Desc)], map: "idx_device_token_usage_session_mac_date")
   @@index([agent_id, usage_date(sort: Desc)], map: "idx_device_token_usage_session_agent_date")
   @@index([usage_date], map: "idx_device_token_usage_session_date")
+}
+
+model device_workspace_artifacts {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mac_address   String    @db.VarChar(20)
+  device_id     String?   @db.Uuid
+  agent_id      String?   @db.Uuid
+  session_id    String?
+  relative_path String
+  content       String
+  content_type  String    @default("text/plain")
+  size_bytes    Int       @default(0)
+  sha256        String    @db.VarChar(64)
+  metadata      Json      @default("{}")
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
+  ai_device     ai_device? @relation(fields: [device_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  ai_agent      ai_agent?  @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([mac_address, relative_path], map: "uq_device_workspace_artifacts_mac_path")
+  @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_mac_updated")
+  @@index([agent_id, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_agent_updated")
+  @@index([session_id], map: "idx_device_workspace_artifacts_session")
 }
 
 model game_session {
