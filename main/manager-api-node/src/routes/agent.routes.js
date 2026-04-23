@@ -664,6 +664,19 @@ router.put('/device/:mac/sessions/:sessionId/summary',
       return badRequest(res, 'summary is required');
     }
 
+    const summaryRequestLog = {
+      mac: req.params.mac,
+      sessionId: req.params.sessionId,
+      agentId: agentId || null,
+      model: model || null,
+      sourceMessageCount: sourceMessageCount ?? null,
+      summaryChars: typeof summary === 'string' ? summary.length : 0,
+      summary
+    };
+    logger.info(
+      `[AGENT] PUT /device/${req.params.mac}/sessions/${req.params.sessionId}/summary request ${JSON.stringify(summaryRequestLog)}`
+    );
+
     try {
       const result = await agentService.saveVoiceSessionSummary({
         macAddress: req.params.mac,
@@ -673,8 +686,19 @@ router.put('/device/:mac/sessions/:sessionId/summary',
         sourceMessageCount,
         agentId
       });
+      const summarySavedLog = {
+        mac: req.params.mac,
+        sessionId: req.params.sessionId,
+        agentId: result?.agentId || null,
+        summaryMemoryChars: result?.summaryMemory ? result.summaryMemory.length : 0,
+        summaryMemory: result?.summaryMemory || null
+      };
+      logger.info(
+        `[AGENT] PUT /device/${req.params.mac}/sessions/${req.params.sessionId}/summary saved ${JSON.stringify(summarySavedLog)}`
+      );
       success(res, result, 'Session summary saved');
     } catch (error) {
+      logger.error(`[AGENT] PUT /device/${req.params.mac}/sessions/${req.params.sessionId}/summary failed: ${error.message}`);
       if (error.message.includes('not found')) {
         return notFound(res, error.message);
       }

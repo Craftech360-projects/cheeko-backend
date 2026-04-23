@@ -443,6 +443,12 @@ const addIfMatches = (items, text, pattern, label) => {
   if (pattern.test(text)) items.push(label);
 };
 
+const uniqueNonEmptyItems = (items, maxItems = 8) => [...new Set(
+  (items || [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+)].slice(0, maxItems);
+
 const extractMemorySignals = (text) => {
   const normalized = normalizeMemoryText(text);
   const lower = normalized.toLowerCase();
@@ -454,6 +460,8 @@ const extractMemorySignals = (text) => {
   addIfMatches(interests, lower, /\bstor(?:y|ies)\b|\btale\b/, 'short stories');
   addIfMatches(interests, lower, /\bdrawing\b|\bdraw\b/, 'drawing');
   addIfMatches(interests, lower, /playful learning/, 'playful learning');
+  addIfMatches(interests, lower, /\bscience\b|experiment|fun facts?/, 'science facts');
+  addIfMatches(interests, lower, /\bsports?\b|cricket/, 'sports talk');
 
   addIfMatches(topics, lower, /\belephants?\b/, 'elephants');
   addIfMatches(topics, lower, /\bzoomy\b|\brocket ship\b|\brocket\b/, 'Zoomy the rocket');
@@ -462,10 +470,14 @@ const extractMemorySignals = (text) => {
   addIfMatches(topics, lower, /banana.*joke|joke.*banana/, 'banana jokes');
   addIfMatches(topics, lower, /\bflowers?\b/, 'flowers');
   addIfMatches(topics, lower, /\brobots?\b/, 'robot stories');
+  addIfMatches(topics, lower, /\bipl\b|cricket/, 'IPL');
+  addIfMatches(topics, lower, /\bscience\b|\bdiamond rain\b/, 'science facts');
+  addIfMatches(topics, lower, /deep[- ]sea|ocean creatures?/, 'deep-sea creatures');
+  addIfMatches(topics, lower, /\bdinosaurs?\b/, 'dinosaurs');
 
   return {
-    interests: [...new Set(interests)],
-    topics: [...new Set(topics)],
+    interests: uniqueNonEmptyItems(interests, 8),
+    topics: uniqueNonEmptyItems(topics, 10),
     expectsMemory: /remember|remembers|previous conversation|previous conversations|last time/.test(lower)
   };
 };
@@ -473,6 +485,105 @@ const extractMemorySignals = (text) => {
 const stripRollingMemoryNoise = (text) => normalizeMemoryText(text)
   .replace(/^Overall memory:\s*/i, '')
   .replace(/\n?\s*Recent durable context:\s*/gi, '\n');
+
+const normalizeMemoryLineKey = (line) => String(line || '')
+  .toLowerCase()
+  .replace(/^-+\s*/, '')
+  .replace(/[^a-z0-9\s]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const parseRollingMemoryBullets = (text) => stripRollingMemoryNoise(text)
+  .split('\n')
+  .map((line) => line.trim())
+  .filter(Boolean)
+  .map((line) => (line.startsWith('-') ? line : `- ${line}`));
+
+const isEphemeralRollingLine = (line) => {
+  const trimmed = String(line || '').trim();
+  return /^\-\s*(?:last|latest|most recent)\s+session\b/i.test(trimmed) ||
+    /^\-\s*good follow-up topics\b/i.test(trimmed);
+};
+
+const categorizeRollingMemoryLine = (line) => {
+  const normalized = String(line || '').trim().toLowerCase().replace(/^-+\s*/, '');
+  if (!normalized) return null;
+  if (/ is \d+ years old\.$/.test(normalized) || / is the child using this device\.$/.test(normalized)) {
+    return 'child_profile';
+  }
+  if (/ enjoys .* with cheeko\.$/.test(normalized)) {
+    return 'interests';
+  }
+  if (/ expects cheeko to remember previous conversations\.$/.test(normalized)) {
+    return 'memory_expectation';
+  }
+  if (/^recent recurring topics include /.test(normalized)) {
+    return 'recurring_topics';
+  }
+  if (/^last session highlights: /.test(normalized)) {
+    return 'last_session';
+  }
+  if (/^good follow-up topics: /.test(normalized)) {
+    return 'follow_up';
+  }
+  return null;
+};
+
+const summarizeLatestSessionForMemory = (latestSummary, maxChars = 320) => {
+  const normalized = normalizeMemoryText(latestSummary);
+  if (!normalized) return '';
+
+  const sentences = normalized.match(/[^.!?]+[.!?]?/g) || [normalized];
+  let result = '';
+  for (const sentence of sentences) {
+    const candidate = result ? `${result} ${sentence.trim()}` : sentence.trim();
+    if (candidate.length > maxChars) break;
+    result = candidate;
+    if (result.length >= Math.floor(maxChars * 0.7)) break;
+  }
+
+  if (!result) result = normalized;
+  if (result.length > maxChars) {
+    result = `${result.slice(0, maxChars - 3).trimEnd()}...`;
+  }
+  return result;
+};
+
+const extractFollowUpTopics = (latestSummary, maxChars = 160) => {
+  const normalized = normalizeMemoryText(latestSummary);
+  if (!normalized) return '';
+
+  const patterns = [
+    /\b(?:offer(?:ed|ing)?|suggest(?:ed|s)?)\s+(?:to\s+discuss\s+)?([^.;\n]+?)\s+(?:next time|later)\b/i,
+    /\bnext(?:\s*time)?\s+(?:discuss|talk about)\s+([^.;\n]+)/i,
+    /\b(?:could discuss|offer(?:ed|ing)? to discuss)\s+([^.;\n]+)/i
+  ];
+
+  let rawTopic = '';
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) {
+      rawTopic = match[1];
+      break;
+    }
+  }
+  if (!rawTopic) return '';
+
+  const cleaned = rawTopic
+    .replace(/^\b(?:about|on|the)\b\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/,+$/, '')
+    .replace(/\b(?:for|to|on|about)\s*$/i, '')
+    .trim();
+  if (!cleaned) return '';
+  if (/\bunavailable|not available|cannot|can't|limit(?:ed|s)?\b/i.test(cleaned)) return '';
+
+  if (cleaned.length > maxChars) {
+    return `${cleaned.slice(0, maxChars - 3).trimEnd()}...`;
+  }
+  return cleaned;
+};
 
 const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
   const existing = stripRollingMemoryNoise(existingMemory);
@@ -485,29 +596,64 @@ const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
   const age = extractChildAge(combinedInput, childName);
   const signals = extractMemorySignals(combinedInput);
   const lines = ['Overall memory:'];
+  const seenLineKeys = new Set();
+  const generatedCategories = new Set();
+  const pushUniqueLine = (line) => {
+    const normalizedLine = String(line || '').trim();
+    if (!normalizedLine) return;
+    const lineWithBullet = normalizedLine.startsWith('-') ? normalizedLine : `- ${normalizedLine}`;
+    const key = normalizeMemoryLineKey(lineWithBullet);
+    if (!key || seenLineKeys.has(key)) return false;
+    seenLineKeys.add(key);
+    lines.push(lineWithBullet);
+    return true;
+  };
+  const pushStructuredLine = (line, category) => {
+    const added = pushUniqueLine(line);
+    if (added && category) generatedCategories.add(category);
+    return added;
+  };
 
   if (childName && age) {
-    lines.push(`- ${childName} is ${age} years old.`);
+    pushStructuredLine(`- ${childName} is ${age} years old.`, 'child_profile');
   } else if (childName) {
-    lines.push(`- ${childName} is the child using this device.`);
+    pushStructuredLine(`- ${childName} is the child using this device.`, 'child_profile');
   }
 
   if (signals.interests.length > 0) {
-    lines.push(`- ${displayName} enjoys ${formatMemoryList(signals.interests)} with Cheeko.`);
+    pushStructuredLine(`- ${displayName} enjoys ${formatMemoryList(signals.interests)} with Cheeko.`, 'interests');
   }
 
   if (signals.expectsMemory && childName) {
-    lines.push(`- ${childName} expects Cheeko to remember previous conversations.`);
+    pushStructuredLine(`- ${childName} expects Cheeko to remember previous conversations.`, 'memory_expectation');
   } else if (signals.expectsMemory) {
-    lines.push('- The child expects Cheeko to remember previous conversations.');
+    pushStructuredLine('- The child expects Cheeko to remember previous conversations.', 'memory_expectation');
   }
 
   if (signals.topics.length > 0) {
-    lines.push(`- Recent recurring topics include ${formatMemoryList(signals.topics)}.`);
+    pushStructuredLine(`- Recent recurring topics include ${formatMemoryList(signals.topics)}.`, 'recurring_topics');
+  }
+
+  const durableExistingLines = parseRollingMemoryBullets(existing)
+    .filter((line) => !isEphemeralRollingLine(line));
+  durableExistingLines.forEach((line) => {
+    const lineCategory = categorizeRollingMemoryLine(line);
+    if (lineCategory && generatedCategories.has(lineCategory)) return;
+    pushUniqueLine(line);
+  });
+
+  const latestSessionHighlights = summarizeLatestSessionForMemory(latest);
+  if (latestSessionHighlights) {
+    pushUniqueLine(`- Last session highlights: ${latestSessionHighlights}`);
+  }
+
+  const followUpTopics = extractFollowUpTopics(latest);
+  if (followUpTopics) {
+    pushUniqueLine(`- Good follow-up topics: ${followUpTopics}.`);
   }
 
   if (lines.length === 1) {
-    lines.push(`- ${truncateMemoryText(latest, 500)}`);
+    pushUniqueLine(`- ${truncateMemoryText(latest, 500)}`);
   }
 
   return truncateMemoryText(lines.join('\n'));
@@ -743,7 +889,7 @@ const saveVoiceSessionSummary = async ({
     eventAt: now
   });
 
-  await prisma.voice_session_summaries.upsert({
+  const summaryRecord = await prisma.voice_session_summaries.upsert({
     where: { session_id: sessionId },
     create: {
       session_id: sessionId,
@@ -763,6 +909,18 @@ const saveVoiceSessionSummary = async ({
     }
   });
 
+  const savedSummaryLog = {
+    macAddress: normalizedMac,
+    sessionId,
+    agentId: resolvedAgentId,
+    summaryChars: typeof summary === 'string' ? summary.length : 0,
+    insertedSummary: summaryRecord.summary,
+    sourceMessageCount: summaryRecord.source_message_count ?? null,
+    model: summaryRecord.model || null,
+    recordUpdatedAt: summaryRecord.updated_at
+  };
+  logger.info(`[VOICE-SESSION] Saved session summary record ${JSON.stringify(savedSummaryLog)}`);
+
   const rollingMemory = await saveRollingOverallMemory({
     macAddress: normalizedMac,
     latestSummary: summary,
@@ -774,6 +932,15 @@ const saveVoiceSessionSummary = async ({
       sourceMessageCount: sourceMessageCount ?? null
     }
   });
+
+  const rollingSummaryLog = {
+    macAddress: normalizedMac,
+    sessionId,
+    agentId: resolvedAgentId,
+    summaryMemoryChars: rollingMemory?.summaryMemory ? rollingMemory.summaryMemory.length : 0,
+    insertedSummaryMemory: rollingMemory?.summaryMemory || null
+  };
+  logger.info(`[VOICE-SESSION] Updated rolling agent summary memory ${JSON.stringify(rollingSummaryLog)}`);
 
   return {
     sessionId,

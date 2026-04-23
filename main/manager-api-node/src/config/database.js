@@ -13,12 +13,62 @@ const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const logger = require('../utils/logger');
 
+/**
+ * Derive a safe/usable DB URL for Supabase pooler deployments.
+ * This prevents opaque "Tenant or user not found" failures when
+ * DATABASE_URL has stale project-ref credentials.
+ *
+ * @param {string} rawUrl
+ * @returns {string}
+ */
+const resolveDatabaseUrl = (rawUrl) => {
+  const input = String(rawUrl || '').trim();
+  if (!input) return input;
+
+  let parsed;
+  try {
+    parsed = new URL(input);
+  } catch (_) {
+    return input;
+  }
+
+  const isSupabasePooler = parsed.hostname.endsWith('.pooler.supabase.com');
+  if (!isSupabasePooler) return input;
+
+  const supabaseUrl = String(process.env.SUPABASE_URL || '').trim();
+  const projectRef = supabaseUrl.match(/^https?:\/\/([^.]+)\.supabase\.co\/?$/i)?.[1] || null;
+  const dbPassword = process.env.SUPABASE_DB_PASSWORD || null;
+
+  let changed = false;
+  const [baseUser, userRef] = parsed.username.split('.');
+  const hasExplicitProjectRef = baseUser === 'postgres' && Boolean(userRef);
+
+  // Trust explicit postgres.<project-ref> credentials in DATABASE_URL.
+  // Auto-rewrite only when user is plain "postgres" (missing project-ref).
+  if (!hasExplicitProjectRef && projectRef && baseUser === 'postgres') {
+    parsed.username = `postgres.${projectRef}`;
+    changed = true;
+  }
+
+  // If we had to rewrite missing project-ref, prefer canonical DB password from env.
+  if (changed && dbPassword) {
+    parsed.password = dbPassword;
+  }
+
+  if (!changed) return input;
+
+  logger.warn(
+    `DATABASE_URL credentials looked stale for Supabase pooler; auto-corrected to project ${projectRef}`
+  );
+  return parsed.toString();
+};
+
 // ─── Prisma (primary DB — DigitalOcean PostgreSQL) ───────────────────────────
 // Strip sslmode from the URL to prevent pg v8.19 from treating 'require' as
 // 'verify-full' (which rejects DigitalOcean's self-signed CA cert chain).
 // SSL is re-enabled explicitly via ssl: { rejectUnauthorized: false }.
 const _rawUrl = process.env.DATABASE_URL || '';
-const dbConnectionString = _rawUrl
+const dbConnectionString = resolveDatabaseUrl(_rawUrl)
   .replace(/([?&])sslmode=[^&]*/g, '$1') // remove sslmode value
   .replace(/\?&/g, '?')                  // fix ?& → ?
   .replace(/[?&]$/g, '');               // remove trailing ? or &
