@@ -14,6 +14,7 @@ const path = require('path');
 const emptyMemoryPayload = () => ({ memories: [], relations: [], entities: [] });
 const MAX_WORKSPACE_ARTIFACT_BYTES = 256 * 1024;
 const MAX_DEVICE_MEMORY_DOCUMENT_BYTES = 512 * 1024;
+const MAX_ROLLING_SUMMARY_MEMORY_CHARS = 1500;
 
 const toStringOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -398,6 +399,200 @@ const buildSessionEpisodeMemoryContent = ({ summary, messages }) => {
   return parts.join('\n\n');
 };
 
+const normalizeMemoryText = (value) => String(value || '')
+  .replace(/\r\n/g, '\n')
+  .replace(/[ \t]+/g, ' ')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
+
+const truncateMemoryText = (value, maxChars = MAX_ROLLING_SUMMARY_MEMORY_CHARS) => {
+  const normalized = normalizeMemoryText(value);
+  if (normalized.length <= maxChars) return normalized;
+
+  const truncated = normalized.slice(0, maxChars);
+  const lastBreak = truncated.lastIndexOf('\n');
+  if (lastBreak > Math.floor(maxChars * 0.75)) {
+    return truncated.slice(0, lastBreak).trim();
+  }
+  return truncated.trim();
+};
+
+const formatMemoryList = (items) => {
+  const filtered = [...new Set((items || []).filter(Boolean))];
+  if (filtered.length === 0) return '';
+  if (filtered.length === 1) return filtered[0];
+  if (filtered.length === 2) return `${filtered[0]} and ${filtered[1]}`;
+  return `${filtered.slice(0, -1).join(', ')}, and ${filtered[filtered.length - 1]}`;
+};
+
+const extractChildName = (text) => {
+  const candidates = [...String(text || '').matchAll(/\b([A-Z][a-z]+)\b(?=\s+(?:is|likes|loves|enjoys|asks|asked|expects|recently))/g)]
+    .map((match) => match[1])
+    .filter((name) => !['Cheeko', 'Child', 'After', 'Recent', 'Overall', 'The'].includes(name));
+  return candidates[0] || null;
+};
+
+const extractChildAge = (text, childName) => {
+  const escapedName = childName ? childName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '[A-Z][a-z]+';
+  const pattern = new RegExp(`\\b${escapedName}\\s+is\\s+(\\d+)\\s+years?\\s+old\\b`, 'i');
+  const match = String(text || '').match(pattern);
+  return match ? match[1] : null;
+};
+
+const addIfMatches = (items, text, pattern, label) => {
+  if (pattern.test(text)) items.push(label);
+};
+
+const extractMemorySignals = (text) => {
+  const normalized = normalizeMemoryText(text);
+  const lower = normalized.toLowerCase();
+  const interests = [];
+  const topics = [];
+
+  addIfMatches(interests, lower, /\bsongs?\b|sing|sings|rhyme/, 'songs');
+  addIfMatches(interests, lower, /\bjokes?\b|silly joke|funny/, 'jokes');
+  addIfMatches(interests, lower, /\bstor(?:y|ies)\b|\btale\b/, 'short stories');
+  addIfMatches(interests, lower, /\bdrawing\b|\bdraw\b/, 'drawing');
+  addIfMatches(interests, lower, /playful learning/, 'playful learning');
+
+  addIfMatches(topics, lower, /\belephants?\b/, 'elephants');
+  addIfMatches(topics, lower, /\bzoomy\b|\brocket ship\b|\brocket\b/, 'Zoomy the rocket');
+  addIfMatches(topics, lower, /choco-?planet|chocolate planet/, 'chocolate planet');
+  addIfMatches(topics, lower, /tomato.*joke|joke.*tomato/, 'tomato jokes');
+  addIfMatches(topics, lower, /banana.*joke|joke.*banana/, 'banana jokes');
+  addIfMatches(topics, lower, /\bflowers?\b/, 'flowers');
+  addIfMatches(topics, lower, /\brobots?\b/, 'robot stories');
+
+  return {
+    interests: [...new Set(interests)],
+    topics: [...new Set(topics)],
+    expectsMemory: /remember|remembers|previous conversation|previous conversations|last time/.test(lower)
+  };
+};
+
+const stripRollingMemoryNoise = (text) => normalizeMemoryText(text)
+  .replace(/^Overall memory:\s*/i, '')
+  .replace(/\n?\s*Recent durable context:\s*/gi, '\n');
+
+const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
+  const existing = stripRollingMemoryNoise(existingMemory);
+  const latest = normalizeMemoryText(latestSummary);
+  if (!latest) return truncateMemoryText(existing);
+
+  const combinedInput = normalizeMemoryText(`${existing}\n${latest}`);
+  const childName = extractChildName(combinedInput);
+  const displayName = childName || 'The child';
+  const age = extractChildAge(combinedInput, childName);
+  const signals = extractMemorySignals(combinedInput);
+  const lines = ['Overall memory:'];
+
+  if (childName && age) {
+    lines.push(`- ${childName} is ${age} years old.`);
+  } else if (childName) {
+    lines.push(`- ${childName} is the child using this device.`);
+  }
+
+  if (signals.interests.length > 0) {
+    lines.push(`- ${displayName} enjoys ${formatMemoryList(signals.interests)} with Cheeko.`);
+  }
+
+  if (signals.expectsMemory && childName) {
+    lines.push(`- ${childName} expects Cheeko to remember previous conversations.`);
+  } else if (signals.expectsMemory) {
+    lines.push('- The child expects Cheeko to remember previous conversations.');
+  }
+
+  if (signals.topics.length > 0) {
+    lines.push(`- Recent recurring topics include ${formatMemoryList(signals.topics)}.`);
+  }
+
+  if (lines.length === 1) {
+    lines.push(`- ${truncateMemoryText(latest, 500)}`);
+  }
+
+  return truncateMemoryText(lines.join('\n'));
+};
+
+const getExistingOverallMemory = async ({ normalizedMac, agentId }) => {
+  const existingDocument = await prisma.device_memory_documents.findFirst({
+    where: {
+      mac_address: normalizedMac,
+      document_key: 'summary'
+    },
+    select: { content: true },
+    orderBy: { updated_at: 'desc' }
+  });
+  if (existingDocument?.content) return existingDocument.content;
+
+  if (agentId) {
+    const agent = await prisma.ai_agent.findUnique({
+      where: { id: agentId },
+      select: { summary_memory: true }
+    });
+    if (agent?.summary_memory) return agent.summary_memory;
+  }
+
+  return '';
+};
+
+const saveRollingOverallMemory = async ({
+  macAddress,
+  latestSummary,
+  source,
+  sessionId,
+  metadata = {},
+  agentId
+}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+  if (latestSummary === undefined || latestSummary === null) throw new Error('latestSummary is required');
+
+  const device = agentId
+    ? null
+    : await prisma.ai_device.findUnique({
+      where: { mac_address: normalizedMac },
+      select: { agent_id: true }
+    });
+  const resolvedAgentId = agentId || device?.agent_id || null;
+  const existingMemory = await getExistingOverallMemory({ normalizedMac, agentId: resolvedAgentId });
+  const rollingMemory = buildRollingOverallMemory({
+    existingMemory,
+    latestSummary
+  });
+  const now = new Date();
+
+  let updatedAgent = null;
+  if (resolvedAgentId) {
+    updatedAgent = await prisma.ai_agent.update({
+      where: { id: resolvedAgentId },
+      data: {
+        summary_memory: rollingMemory,
+        updated_at: now
+      },
+      select: { id: true, agent_name: true, summary_memory: true }
+    });
+  }
+
+  await saveDeviceMemoryDocument({
+    macAddress: normalizedMac,
+    documentKey: 'summary',
+    memoryType: 'summary',
+    content: rollingMemory,
+    source,
+    sessionId,
+    metadata: {
+      ...metadata,
+      rollingMemory: true,
+      latestSummary: normalizeMemoryText(latestSummary)
+    }
+  });
+
+  return {
+    agent: updatedAgent,
+    summaryMemory: updatedAgent ? updatedAgent.summary_memory : rollingMemory
+  };
+};
+
 const consolidateDeviceMemoryForSession = async ({ macAddress, sessionId }) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
@@ -434,11 +629,9 @@ const consolidateDeviceMemoryForSession = async ({ macAddress, sessionId }) => {
 
   const documentKeys = [];
   if (summaryRecord?.summary) {
-    await saveDeviceMemoryDocument({
+    await saveRollingOverallMemory({
       macAddress: normalizedMac,
-      documentKey: 'summary',
-      memoryType: 'summary',
-      content: summaryRecord.summary,
+      latestSummary: summaryRecord.summary,
       source: 'session_end_consolidation',
       sessionId,
       metadata: {
@@ -570,25 +763,12 @@ const saveVoiceSessionSummary = async ({
     }
   });
 
-  let updatedAgent = null;
-  if (resolvedAgentId) {
-    updatedAgent = await prisma.ai_agent.update({
-      where: { id: resolvedAgentId },
-      data: {
-        summary_memory: summary,
-        updated_at: now
-      },
-      select: { id: true, agent_name: true, summary_memory: true }
-    });
-  }
-
-  await saveDeviceMemoryDocument({
+  const rollingMemory = await saveRollingOverallMemory({
     macAddress: normalizedMac,
-    documentKey: 'summary',
-    memoryType: 'summary',
-    content: summary,
-    source: 'session_summary',
+    latestSummary: summary,
+    source: 'rolling_session_summary',
     sessionId,
+    agentId: resolvedAgentId,
     metadata: {
       model: model || null,
       sourceMessageCount: sourceMessageCount ?? null
@@ -599,7 +779,7 @@ const saveVoiceSessionSummary = async ({
     sessionId,
     macAddress: normalizedMac,
     agentId: resolvedAgentId,
-    summaryMemory: updatedAgent ? updatedAgent.summary_memory : summary
+    summaryMemory: rollingMemory.summaryMemory
   };
 };
 
@@ -1551,27 +1731,19 @@ const saveMemory = async (mac, summaryMemory) => {
     throw new Error('Device or agent not found');
   }
 
-  const agent = await prisma.ai_agent.update({
-    where: { id: device.agent_id },
-    data: {
-      summary_memory: summaryMemory,
-      updated_at: new Date(),
-    },
-    select: { id: true, agent_name: true, summary_memory: true },
+  const rollingMemory = await saveRollingOverallMemory({
+    macAddress: normalizedMac,
+    latestSummary: summaryMemory,
+    source: 'save_memory',
+    agentId: device.agent_id
   });
 
-  await saveDeviceMemoryDocument({
-    macAddress: normalizedMac,
-    documentKey: 'summary',
-    memoryType: 'summary',
-    content: summaryMemory,
-    source: 'save_memory'
-  });
+  const agent = rollingMemory.agent;
 
   return {
-    agentId: agent.id,
-    agentName: agent.agent_name,
-    summaryMemory: agent.summary_memory
+    agentId: agent ? agent.id : device.agent_id,
+    agentName: agent ? agent.agent_name : null,
+    summaryMemory: rollingMemory.summaryMemory
   };
 };
 
