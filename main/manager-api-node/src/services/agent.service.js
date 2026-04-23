@@ -13,6 +13,7 @@ const path = require('path');
 
 const emptyMemoryPayload = () => ({ memories: [], relations: [], entities: [] });
 const MAX_WORKSPACE_ARTIFACT_BYTES = 256 * 1024;
+const MAX_DEVICE_MEMORY_DOCUMENT_BYTES = 512 * 1024;
 
 const toStringOrNull = (value) => {
   if (value === null || value === undefined) return null;
@@ -81,6 +82,40 @@ const artifactToDTO = (artifact) => ({
   createdAt: toISOStringOrNull(artifact.created_at),
   updatedAt: toISOStringOrNull(artifact.updated_at)
 });
+
+const memoryDocumentToDTO = (document) => ({
+  id: document.id,
+  macAddress: document.mac_address,
+  deviceId: document.device_id,
+  agentId: document.agent_id,
+  kidId: toStringOrNull(document.kid_id),
+  documentKey: document.document_key,
+  memoryType: document.memory_type,
+  memoryDate: document.memory_date ? toISOStringOrNull(document.memory_date)?.slice(0, 10) : null,
+  content: document.content,
+  source: document.source,
+  sessionId: document.session_id,
+  metadata: document.metadata,
+  createdAt: toISOStringOrNull(document.created_at),
+  updatedAt: toISOStringOrNull(document.updated_at)
+});
+
+const normalizeMemoryDocumentKey = (documentKey) => {
+  if (typeof documentKey !== 'string' || documentKey.trim() === '') {
+    throw new Error('documentKey is required');
+  }
+  const normalized = documentKey.trim().toLowerCase().replace(/[^a-z0-9:_-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!normalized) throw new Error('documentKey is required');
+  if (normalized.length > 120) throw new Error('documentKey is too long');
+  return normalized;
+};
+
+const parseMemoryDate = (memoryDate) => {
+  if (!memoryDate) return null;
+  const parsed = new Date(memoryDate);
+  if (Number.isNaN(parsed.getTime())) throw new Error('memoryDate is invalid');
+  return parsed;
+};
 
 const parseMessageTimestamp = (timestamp, fallbackDate = new Date()) => {
   if (!timestamp) return fallbackDate;
@@ -257,20 +292,11 @@ const getAgentSessions = async (agentId, options = {}) => {
   const page = parseInt(options.page) || 1;
   const limit = parseInt(options.limit) || 10;
 
-  // Prefer canonical voice session messages, then fall back to legacy history while backfill runs.
-  let data = await prisma.voice_session_messages.findMany({
+  const data = await prisma.voice_session_messages.findMany({
     where: { agent_id: agentId },
     select: { session_id: true, created_at: true },
     orderBy: { created_at: 'desc' }
   });
-
-  if (data.length === 0) {
-    data = await prisma.ai_agent_chat_history.findMany({
-      where: { agent_id: agentId },
-      select: { session_id: true, created_at: true },
-      orderBy: { created_at: 'desc' }
-    });
-  }
 
   // Group by session ID and track message counts and earliest timestamp
   const sessionGroups = new Map();
@@ -330,17 +356,7 @@ const getChatHistory = async (agentId, sessionId) => {
     orderBy: { created_at: 'asc' }
   });
 
-  if (voiceMessages.length > 0) {
-    return formatChatHistoryMessages(voiceMessages, msg => roleToChatType(msg.role));
-  }
-
-  const messages = await prisma.ai_agent_chat_history.findMany({
-    where: { agent_id: agentId, session_id: sessionId },
-    select: { created_at: true, chat_type: true, content: true, audio_id: true, mac_address: true },
-    orderBy: { created_at: 'asc' }
-  });
-
-  return formatChatHistoryMessages(messages, msg => msg.chat_type);
+  return formatChatHistoryMessages(voiceMessages, msg => roleToChatType(msg.role));
 };
 
 const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }) => {
@@ -362,6 +378,106 @@ const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }
   });
 };
 
+const buildSessionEpisodeMemoryContent = ({ summary, messages }) => {
+  const parts = [];
+  if (summary) {
+    parts.push(`Session summary:\n${summary}`);
+  }
+
+  const transcriptLines = (messages || [])
+    .filter((message) => message.content)
+    .map((message) => {
+      const role = message.role === 'assistant' || message.role === 'agent' ? 'Assistant' : 'User';
+      return `${role}: ${message.content}`;
+    });
+
+  if (transcriptLines.length > 0) {
+    parts.push(`Transcript excerpt:\n${transcriptLines.join('\n')}`);
+  }
+
+  return parts.join('\n\n');
+};
+
+const consolidateDeviceMemoryForSession = async ({ macAddress, sessionId }) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+  if (!sessionId) throw new Error('sessionId is required');
+
+  const [summaryRecord, messages] = await Promise.all([
+    prisma.voice_session_summaries.findUnique({
+      where: { session_id: sessionId },
+      select: {
+        summary: true,
+        model: true,
+        source_message_count: true
+      }
+    }),
+    prisma.voice_session_messages.findMany({
+      where: { session_id: sessionId },
+      select: {
+        sequence: true,
+        role: true,
+        content: true
+      },
+      orderBy: { sequence: 'asc' },
+      take: 40
+    })
+  ]);
+
+  if (!summaryRecord?.summary && (!messages || messages.length === 0)) {
+    return {
+      consolidated: false,
+      reason: 'no_session_memory_inputs',
+      documentKeys: []
+    };
+  }
+
+  const documentKeys = [];
+  if (summaryRecord?.summary) {
+    await saveDeviceMemoryDocument({
+      macAddress: normalizedMac,
+      documentKey: 'summary',
+      memoryType: 'summary',
+      content: summaryRecord.summary,
+      source: 'session_end_consolidation',
+      sessionId,
+      metadata: {
+        model: summaryRecord.model || null,
+        sourceMessageCount: summaryRecord.source_message_count ?? null
+      }
+    });
+    documentKeys.push('summary');
+  }
+
+  const episodeKey = `session:${sessionId}`;
+  const episodeContent = buildSessionEpisodeMemoryContent({
+    summary: summaryRecord?.summary,
+    messages
+  });
+
+  if (episodeContent.trim()) {
+    await saveDeviceMemoryDocument({
+      macAddress: normalizedMac,
+      documentKey: episodeKey,
+      memoryType: 'episode',
+      content: episodeContent,
+      source: 'session_end_consolidation',
+      sessionId,
+      metadata: {
+        messageCount: messages ? messages.length : 0,
+        summaryModel: summaryRecord?.model || null,
+        sourceMessageCount: summaryRecord?.source_message_count ?? null
+      }
+    });
+    documentKeys.push(episodeKey);
+  }
+
+  return {
+    consolidated: documentKeys.length > 0,
+    documentKeys
+  };
+};
+
 const endVoiceSession = async ({ macAddress, sessionId, status = 'ended', endedAt }) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
@@ -369,7 +485,7 @@ const endVoiceSession = async ({ macAddress, sessionId, status = 'ended', endedA
 
   const endedAtDate = parseMessageTimestamp(endedAt);
 
-  return prisma.voice_sessions.update({
+  const session = await prisma.voice_sessions.update({
     where: { session_id: sessionId },
     data: {
       mac_address: normalizedMac,
@@ -378,6 +494,31 @@ const endVoiceSession = async ({ macAddress, sessionId, status = 'ended', endedA
       last_event_at: endedAtDate
     }
   });
+
+  let memoryConsolidation;
+  try {
+    memoryConsolidation = await consolidateDeviceMemoryForSession({
+      macAddress: normalizedMac,
+      sessionId
+    });
+  } catch (error) {
+    logger.error('Failed to consolidate device memory for ended session:', {
+      error: error.message,
+      mac: normalizedMac,
+      sessionId
+    });
+    memoryConsolidation = {
+      consolidated: false,
+      reason: 'consolidation_failed',
+      error: error.message,
+      documentKeys: []
+    };
+  }
+
+  return {
+    ...session,
+    memoryConsolidation
+  };
 };
 
 const saveVoiceSessionSummary = async ({
@@ -440,6 +581,19 @@ const saveVoiceSessionSummary = async ({
       select: { id: true, agent_name: true, summary_memory: true }
     });
   }
+
+  await saveDeviceMemoryDocument({
+    macAddress: normalizedMac,
+    documentKey: 'summary',
+    memoryType: 'summary',
+    content: summary,
+    source: 'session_summary',
+    sessionId,
+    metadata: {
+      model: model || null,
+      sourceMessageCount: sourceMessageCount ?? null
+    }
+  });
 
   return {
     sessionId,
@@ -558,6 +712,114 @@ const getDeviceWorkspaceArtifact = async (macAddress, relativePath) => {
   });
   if (!artifact) throw new Error('Artifact not found');
   return artifactToDTO(artifact);
+};
+
+const saveDeviceMemoryDocument = async ({
+  macAddress,
+  documentKey,
+  memoryType = 'general',
+  memoryDate,
+  content,
+  source = 'manager_api',
+  sessionId,
+  metadata = {}
+}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+  const normalizedKey = normalizeMemoryDocumentKey(documentKey);
+  if (typeof content !== 'string') throw new Error('content is required');
+
+  const sizeBytes = Buffer.byteLength(content, 'utf8');
+  if (sizeBytes > MAX_DEVICE_MEMORY_DOCUMENT_BYTES) {
+    throw new Error(`memory document exceeds ${MAX_DEVICE_MEMORY_DOCUMENT_BYTES} byte limit`);
+  }
+
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true, agent_id: true, kid_id: true }
+  });
+  if (!device) throw new Error('Device not found');
+
+  const now = new Date();
+  const parsedMemoryDate = parseMemoryDate(memoryDate);
+  const document = await prisma.device_memory_documents.upsert({
+    where: {
+      mac_address_document_key: {
+        mac_address: normalizedMac,
+        document_key: normalizedKey
+      }
+    },
+    create: {
+      mac_address: normalizedMac,
+      device_id: device.id,
+      agent_id: device.agent_id || null,
+      kid_id: device.kid_id || null,
+      document_key: normalizedKey,
+      memory_type: memoryType || 'general',
+      memory_date: parsedMemoryDate,
+      content,
+      source: source || 'manager_api',
+      session_id: sessionId || null,
+      metadata: metadata || {},
+      created_at: now,
+      updated_at: now
+    },
+    update: {
+      device_id: device.id,
+      agent_id: device.agent_id || null,
+      kid_id: device.kid_id || null,
+      memory_type: memoryType || 'general',
+      memory_date: parsedMemoryDate,
+      content,
+      source: source || 'manager_api',
+      session_id: sessionId || null,
+      metadata: metadata || {},
+      updated_at: now
+    }
+  });
+
+  await prisma.device_memory_chunks.deleteMany({
+    where: { document_id: document.id }
+  });
+
+  const trimmedContent = content.trim();
+  if (trimmedContent) {
+    await prisma.device_memory_chunks.createMany({
+      data: [
+        {
+          document_id: document.id,
+          mac_address: normalizedMac,
+          device_id: device.id,
+          agent_id: device.agent_id || null,
+          kid_id: device.kid_id || null,
+          content: trimmedContent,
+          content_hash: crypto.createHash('sha256').update(trimmedContent, 'utf8').digest('hex'),
+          category: memoryType || 'general'
+        }
+      ],
+      skipDuplicates: true
+    });
+  }
+
+  return memoryDocumentToDTO(document);
+};
+
+const listDeviceMemoryDocuments = async (macAddress, options = {}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  const limit = clampLimit(options.limit, 20, 100);
+  const memoryType = options.memoryType || options.type;
+  const documents = await prisma.device_memory_documents.findMany({
+    where: {
+      mac_address: normalizedMac,
+      ...(memoryType ? { memory_type: memoryType } : {})
+    },
+    orderBy: { updated_at: 'desc' },
+    take: limit
+  });
+
+  return (documents || []).map(memoryDocumentToDTO);
 };
 
 const getNextVoiceMessageSequence = async (sessionId) => {
@@ -920,6 +1182,34 @@ const getCurrentCharacter = async (mac) => {
 const getMemoriesByMac = async (mac, options = {}) => {
   const normalizedMac = normalizeMacAddress(mac);
 
+  try {
+    if (prisma.device_memory_documents) {
+      const documents = await listDeviceMemoryDocuments(normalizedMac, {
+        limit: options.limit,
+        memoryType: options.memoryType
+      });
+      if (documents.length > 0 || !mem0Service.isAvailable()) {
+        return {
+          memories: documents.map((document) => ({
+            id: document.id,
+            memory: document.content,
+            content: document.content,
+            documentKey: document.documentKey,
+            memoryType: document.memoryType,
+            source: document.source,
+            sessionId: document.sessionId,
+            updatedAt: document.updatedAt
+          })),
+          relations: [],
+          entities: [],
+          source: 'postgres'
+        };
+      }
+    }
+  } catch (error) {
+    logger.error('Failed to get Postgres memories by MAC:', { error: error.message, mac: normalizedMac });
+  }
+
   if (!mem0Service.isAvailable()) {
     logger.debug('Mem0 not configured, returning empty memories');
     return { memories: [], relations: [], entities: [] };
@@ -1080,7 +1370,7 @@ const getDeviceBootstrap = async (mac, options = {}) => {
   }
 
   const recentMessagesPromise = recentLimit > 0
-    ? prisma.ai_agent_chat_history.findMany({
+    ? prisma.voice_session_messages.findMany({
       where: {
         mac_address: normalizedMac,
         agent_id: device.agent_id
@@ -1088,7 +1378,7 @@ const getDeviceBootstrap = async (mac, options = {}) => {
       select: {
         id: true,
         session_id: true,
-        chat_type: true,
+        role: true,
         content: true,
         audio_id: true,
         created_at: true
@@ -1205,8 +1495,8 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     recentMessages: [...recentMessages].reverse().map((message) => ({
       id: message.id,
       sessionId: message.session_id,
-      role: chatTypeToRole(message.chat_type),
-      chatType: message.chat_type,
+      role: message.role,
+      chatType: roleToChatType(message.role),
       content: message.content,
       audioId: message.audio_id,
       createdAt: toISOStringOrNull(message.created_at)
@@ -1268,6 +1558,14 @@ const saveMemory = async (mac, summaryMemory) => {
       updated_at: new Date(),
     },
     select: { id: true, agent_name: true, summary_memory: true },
+  });
+
+  await saveDeviceMemoryDocument({
+    macAddress: normalizedMac,
+    documentKey: 'summary',
+    memoryType: 'summary',
+    content: summaryMemory,
+    source: 'save_memory'
   });
 
   return {
@@ -1512,25 +1810,7 @@ const getRecentUserChatHistory = async (agentId, limit = 50) => {
     take: limit
   });
 
-  if (voiceMessages.length > 0) {
-    return voiceMessages.map(msg => ({
-      content: extractContentFromString(msg.content),
-      audioId: msg.audio_id
-    }));
-  }
-
-  const messages = await prisma.ai_agent_chat_history.findMany({
-    where: {
-      agent_id: agentId,
-      chat_type: 1, // USER messages only
-      audio_id: { not: null }, // Only messages with audio
-    },
-    select: { content: true, audio_id: true },
-    orderBy: { created_at: 'desc' },
-    take: limit
-  });
-
-  return (messages || []).map(msg => ({
+  return voiceMessages.map(msg => ({
     content: extractContentFromString(msg.content),
     audioId: msg.audio_id
   }));
@@ -1574,14 +1854,7 @@ const getAudioContent = async (audioId) => {
     select: { content: true }
   });
 
-  if (voiceRecord) return voiceRecord.content;
-
-  const record = await prisma.ai_agent_chat_history.findFirst({
-    where: { audio_id: audioId },
-    select: { content: true }
-  });
-
-  return record ? record.content : null;
+  return voiceRecord ? voiceRecord.content : null;
 };
 
 // =============================================
@@ -2219,6 +2492,9 @@ module.exports = {
   saveDeviceWorkspaceArtifact,
   listDeviceWorkspaceArtifacts,
   getDeviceWorkspaceArtifact,
+  saveDeviceMemoryDocument,
+  listDeviceMemoryDocuments,
+  consolidateDeviceMemoryForSession,
   clearMemoriesByMac,
   // Agent memory and mode methods
   saveMemory,

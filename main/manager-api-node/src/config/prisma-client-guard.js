@@ -3,7 +3,9 @@ const REQUIRED_PRISMA_MODELS = [
   'voice_session_messages',
   'voice_session_summaries',
   'device_token_usage_session',
-  'device_workspace_artifacts'
+  'device_workspace_artifacts',
+  'device_memory_documents',
+  'device_memory_chunks'
 ];
 
 const REQUIRED_PRISMA_TABLES = [...REQUIRED_PRISMA_MODELS];

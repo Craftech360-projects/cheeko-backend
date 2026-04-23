@@ -7,7 +7,7 @@ describe('Prisma client startup guard', () => {
       voice_session_messages: {},
       voice_session_summaries: {},
       device_token_usage_session: {}
-    })).toThrow(/device_workspace_artifacts.*npx prisma generate/s);
+    })).toThrow(/device_workspace_artifacts.*device_memory_documents.*device_memory_chunks.*npx prisma generate/s);
   });
 
   it('accepts a Prisma client that exposes all required runtime delegates', () => {
@@ -18,7 +18,9 @@ describe('Prisma client startup guard', () => {
       voice_session_messages: {},
       voice_session_summaries: {},
       device_token_usage_session: {},
-      device_workspace_artifacts: {}
+      device_workspace_artifacts: {},
+      device_memory_documents: {},
+      device_memory_chunks: {}
     })).not.toThrow();
   });
 
@@ -29,16 +31,17 @@ describe('Prisma client startup guard', () => {
         { table_name: 'voice_sessions' },
         { table_name: 'voice_session_messages' },
         { table_name: 'voice_session_summaries' },
-        { table_name: 'device_token_usage_session' }
+        { table_name: 'device_token_usage_session' },
+        { table_name: 'device_workspace_artifacts' }
       ])
     };
 
     await expect(assertRequiredDatabaseTables(prisma)).rejects.toThrow(
-      /device_workspace_artifacts.*prisma migrate deploy/s
+      /device_memory_documents.*device_memory_chunks.*prisma migrate deploy/s
     );
     expect(prisma.$queryRawUnsafe).toHaveBeenCalledWith(
       expect.stringContaining('information_schema.tables'),
-      expect.arrayContaining(['device_workspace_artifacts'])
+      expect.arrayContaining(['device_memory_documents', 'device_memory_chunks'])
     );
   });
 
@@ -55,10 +58,11 @@ describe('Prisma client startup guard', () => {
 });
 
 describe('Prisma generate deployment guard scripts', () => {
-  it('runs prisma generate before normal server entrypoints', () => {
+  it('generates Prisma during install while server startup owns runtime generation', () => {
     const packageJson = require('../../package.json');
 
-    expect(packageJson.scripts.prestart).toBe('prisma generate');
-    expect(packageJson.scripts.predev).toBe('prisma generate');
+    expect(packageJson.scripts.postinstall).toBe('prisma generate');
+    expect(packageJson.scripts.prestart).toBeUndefined();
+    expect(packageJson.scripts.predev).toBeUndefined();
   });
 });

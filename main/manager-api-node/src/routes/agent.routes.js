@@ -560,6 +560,47 @@ router.get('/device/:mac/bootstrap',
   })
 );
 
+router.get('/device/:mac/memory',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.listDeviceMemoryDocuments(req.params.mac, {
+        limit: req.query.limit,
+        memoryType: req.query.memoryType || req.query.type
+      });
+      success(res, result);
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+router.post('/device/:mac/memory/documents',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { documentKey, memoryType, memoryDate, content, source, sessionId, metadata } = req.body;
+
+    try {
+      const result = await agentService.saveDeviceMemoryDocument({
+        macAddress: req.params.mac,
+        documentKey,
+        memoryType,
+        memoryDate,
+        content,
+        source,
+        sessionId,
+        metadata
+      });
+      success(res, result, 'Device memory document saved');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
+  })
+);
+
 router.put('/device/:mac/artifacts',
   requireServiceKey,
   asyncHandler(async (req, res) => {

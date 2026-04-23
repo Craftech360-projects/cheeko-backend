@@ -17,6 +17,12 @@ describe('agent bootstrap fallback', () => {
       },
       ai_agent_chat_history: {
         findMany: jest.fn()
+      },
+      voice_session_messages: {
+        findMany: jest.fn()
+      },
+      device_memory_documents: {
+        findMany: jest.fn()
       }
     };
 
@@ -88,11 +94,12 @@ describe('agent bootstrap fallback', () => {
       timezone: 'Asia/Kolkata',
       preferences: { tone: 'gentle' }
     });
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([
+    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.findMany.mockResolvedValue([
       {
         id: 'msg-2',
         session_id: 'session-1',
-        chat_type: 2,
+        role: 'assistant',
         content: 'Hi Asha!',
         audio_id: 'audio-2',
         created_at: new Date('2026-04-22T08:02:00.000Z')
@@ -100,12 +107,13 @@ describe('agent bootstrap fallback', () => {
       {
         id: 'msg-1',
         session_id: 'session-1',
-        chat_type: 1,
+        role: 'user',
         content: 'Hello',
         audio_id: null,
         created_at: new Date('2026-04-22T08:01:00.000Z')
       }
     ]);
+    prisma.device_memory_documents.findMany.mockResolvedValue([]);
 
     const result = await agentService.getDeviceBootstrap('aa-bb-cc-dd-ee-ff', {
       includeMemories: true,
@@ -115,10 +123,11 @@ describe('agent bootstrap fallback', () => {
     expect(prisma.ai_device.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       where: { mac_address: 'AA:BB:CC:DD:EE:FF' }
     }));
-    expect(prisma.ai_agent_chat_history.findMany).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prisma.voice_session_messages.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-id' },
       take: 2
     }));
+    expect(prisma.ai_agent_chat_history.findMany).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       bootstrapSource: 'manager_api_fallback',
       device: {

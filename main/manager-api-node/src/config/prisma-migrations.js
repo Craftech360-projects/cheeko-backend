@@ -2,7 +2,7 @@
  * Prisma Migration Runner
  *
  * Runs Prisma migrations on server startup using `prisma migrate deploy`.
- * This ensures the database schema is synchronized with the Prisma schema definition.
+ * This ensures committed migration files are applied before API traffic starts.
  *
  * Usage:
  *   const { runPrismaMigrations } = require('./config/prisma-migrations');
@@ -13,6 +13,47 @@ const { execSync } = require('child_process');
 const path = require('path');
 const logger = require('../utils/logger');
 
+const getProjectRoot = () => path.resolve(__dirname, '../..');
+
+const runPrismaGenerate = async () => {
+  try {
+    logger.info('Generating Prisma client...');
+
+    const output = execSync('npx prisma generate', {
+      cwd: getProjectRoot(),
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+        FORCE_COLOR: '0'
+      },
+      timeout: 60000
+    });
+
+    if (output) {
+      const lines = output.trim().split('\n');
+      for (const line of lines) {
+        if (line.trim()) {
+          logger.info(`Prisma generate: ${line.trim()}`);
+        }
+      }
+    }
+
+    logger.info('Prisma client generated.');
+    return true;
+  } catch (error) {
+    const errorMessage = error.stderr?.toString().trim() ||
+      error.stdout?.toString().trim() ||
+      error.message ||
+      'Prisma generate failed';
+
+    logger.error('Prisma client generation failed!');
+    logger.error(`Error: ${errorMessage}`);
+    throw new Error(`Prisma generate failed: ${errorMessage}`);
+  }
+};
+
 /**
  * Run database seed to insert initial data
  *
@@ -22,10 +63,8 @@ const runSeed = async () => {
   try {
     logger.info('Running database seed...');
 
-    const projectRoot = path.resolve(__dirname, '../..');
-
     const output = execSync('node prisma/seed.js', {
-      cwd: projectRoot,
+      cwd: getProjectRoot(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -66,8 +105,8 @@ const runSeed = async () => {
 /**
  * Run Prisma migrations/schema sync
  *
- * In DEVELOPMENT: Uses `prisma db push` to auto-sync schema changes (creates missing tables/columns)
- * In PRODUCTION: Uses `prisma migrate deploy` to apply migration files only (safe, no auto-changes)
+ * Default: Uses `prisma migrate deploy` to apply committed migration files only.
+ * Local prototype opt-in: ALLOW_PRISMA_DB_PUSH=1 uses `prisma db push --accept-data-loss`.
  *
  * @returns {Promise<boolean>} True if migrations succeeded
  * @throws {Error} If migrations fail
@@ -94,21 +133,19 @@ const runPrismaMigrations = async () => {
   }
 
   try {
-    // Get the project root directory (where prisma.config.ts is located)
-    const projectRoot = path.resolve(__dirname, '../..');
-
-    const isDevelopment = process.env.NODE_ENV !== 'production';
-
-    // In development: use db push to auto-sync schema (creates missing tables)
-    // In production: use migrate deploy (only applies existing migration files)
-    const command = isDevelopment
+    const allowPrismaDbPush = process.env.ALLOW_PRISMA_DB_PUSH === '1';
+    const command = allowPrismaDbPush
       ? 'npx prisma db push --accept-data-loss'
       : 'npx prisma migrate deploy';
 
-    logger.info(`Running: ${command} (${isDevelopment ? 'development' : 'production'} mode)`);
+    if (allowPrismaDbPush) {
+      logger.warn('ALLOW_PRISMA_DB_PUSH=1 is enabled; using prisma db push --accept-data-loss for local schema prototyping only.');
+    }
+
+    logger.info(`Running: ${command}`);
 
     const output = execSync(command, {
-      cwd: projectRoot,
+      cwd: getProjectRoot(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -181,10 +218,8 @@ const runPrismaMigrations = async () => {
  */
 const getMigrationStatus = async () => {
   try {
-    const projectRoot = path.resolve(__dirname, '../..');
-
     const output = execSync('npx prisma migrate status', {
-      cwd: projectRoot,
+      cwd: getProjectRoot(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
@@ -204,6 +239,7 @@ const getMigrationStatus = async () => {
 };
 
 module.exports = {
+  runPrismaGenerate,
   runPrismaMigrations,
   getMigrationStatus
 };

@@ -31,6 +31,17 @@ describe('voice session schema', () => {
     expect(schema).toContain('@@index([mac_address, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_mac_updated")');
   });
 
+  it('declares device-scoped memory document and chunk storage', () => {
+    const schema = fs.readFileSync(schemaPath, 'utf8');
+
+    expect(schema).toContain('model device_memory_documents');
+    expect(schema).toContain('model device_memory_chunks');
+    expect(schema).toContain('document_key');
+    expect(schema).toContain('@@unique([mac_address, document_key], map: "uq_device_memory_documents_mac_key")');
+    expect(schema).toContain('@@unique([mac_address, content_hash], map: "uq_device_memory_chunks_mac_hash")');
+    expect(schema).toContain('@@index([mac_address, updated_at(sort: Desc)], map: "idx_device_memory_documents_mac_updated")');
+  });
+
   it('creates the runtime tables with indexes for the planned access paths', () => {
     const migration = fs.readFileSync(migrationPath, 'utf8');
 
@@ -54,5 +65,19 @@ describe('voice session schema', () => {
     expect(artifactMigration).toContain('CONSTRAINT "uq_device_workspace_artifacts_mac_path" UNIQUE ("mac_address", "relative_path")');
     expect(artifactMigration).toContain('CREATE INDEX "idx_device_workspace_artifacts_mac_updated" ON "device_workspace_artifacts"("mac_address", "updated_at" DESC)');
     expect(artifactMigration).toContain('CREATE INDEX "idx_device_workspace_artifacts_session" ON "device_workspace_artifacts"("session_id")');
+  });
+
+  it('creates the device memory runtime tables and access-path indexes', () => {
+    const memoryMigration = fs.readFileSync(
+      path.join(repoRoot, 'prisma/migrations/20260423_add_device_memory_documents/migration.sql'),
+      'utf8'
+    );
+
+    expect(memoryMigration).toContain('CREATE TABLE "device_memory_documents"');
+    expect(memoryMigration).toContain('CREATE TABLE "device_memory_chunks"');
+    expect(memoryMigration).toContain('CONSTRAINT "uq_device_memory_documents_mac_key" UNIQUE ("mac_address", "document_key")');
+    expect(memoryMigration).toContain('CONSTRAINT "uq_device_memory_chunks_mac_hash" UNIQUE ("mac_address", "content_hash")');
+    expect(memoryMigration).toContain('CREATE INDEX "idx_device_memory_documents_mac_updated" ON "device_memory_documents"("mac_address", "updated_at" DESC)');
+    expect(memoryMigration).toContain('CREATE INDEX "idx_device_memory_chunks_document" ON "device_memory_chunks"("document_id")');
   });
 });

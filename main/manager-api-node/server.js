@@ -12,12 +12,8 @@ require('dotenv').config();
 // eslint-disable-next-line no-extend-native
 BigInt.prototype.toJSON = function () { return this.toString(); };
 
-const app = require('./src/app');
 const logger = require('./src/utils/logger');
-const { runPrismaMigrations } = require('./src/config/prisma-migrations');
-const { prisma } = require('./src/config/database');
-const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
-const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
+const { runPrismaGenerate, runPrismaMigrations } = require('./src/config/prisma-migrations');
 
 const PORT = process.env.PORT || 8002;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -27,13 +23,20 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
  */
 const startServer = async () => {
   try {
-    // Run Prisma database migrations
-    // Server will exit with code 1 if migrations fail
+    await runPrismaGenerate();
+
+    // Server will exit with code 1 if migrations or schema guards fail.
     logger.info('Running Prisma migrations...');
     await runPrismaMigrations();
+
+    const app = require('./src/app');
+    const { prisma } = require('./src/config/database');
+    const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
+    const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
+
     assertRequiredPrismaModels(prisma);
     await assertRequiredDatabaseTables(prisma);
-    logger.info('Database schema synchronized.');
+    logger.info('Database schema ready.');
 
     // Start Express server
     // Bind to 127.0.0.1 to avoid Windows EACCES permission issues
@@ -48,7 +51,7 @@ const startServer = async () => {
 ║  Port:        ${String(PORT).padEnd(43)}║
 ║  API Base:    http://localhost:${PORT}/toy${' '.repeat(23)}║
 ║  Swagger:     http://localhost:${PORT}/toy/doc.html${' '.repeat(14)}║
-║  Database:    Prisma Migrations Applied                   ║
+║  Database:    Schema Ready                                ║
 ╚═══════════════════════════════════════════════════════════╝
       `);
 

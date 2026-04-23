@@ -36,6 +36,8 @@ model ai_agent {
   voice_session_messages voice_session_messages[]
   device_token_usage_session device_token_usage_session[]
   device_workspace_artifacts device_workspace_artifacts[]
+  device_memory_documents device_memory_documents[]
+  device_memory_chunks device_memory_chunks[]
 
   @@index([user_id], map: "idx_ai_agent_user")
 }
@@ -106,6 +108,8 @@ model ai_device {
   voice_sessions    voice_sessions[]
   device_token_usage_session device_token_usage_session[]
   device_workspace_artifacts device_workspace_artifacts[]
+  device_memory_documents device_memory_documents[]
+  device_memory_chunks device_memory_chunks[]
 
   @@index([agent_id], map: "idx_ai_device_agent")
   @@index([kid_id], map: "idx_ai_device_kid")
@@ -545,6 +549,54 @@ model device_workspace_artifacts {
   @@index([session_id], map: "idx_device_workspace_artifacts_session")
 }
 
+model device_memory_documents {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mac_address   String    @db.VarChar(20)
+  device_id     String?   @db.Uuid
+  agent_id      String?   @db.Uuid
+  kid_id        BigInt?
+  document_key  String
+  memory_type   String
+  memory_date   DateTime? @db.Date
+  content       String
+  source        String    @default("manager_api")
+  session_id    String?
+  metadata      Json      @default("{}")
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @db.Timestamptz(6)
+  ai_device     ai_device? @relation(fields: [device_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  ai_agent      ai_agent?  @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  kid_profile   kid_profile? @relation(fields: [kid_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  device_memory_chunks device_memory_chunks[]
+
+  @@unique([mac_address, document_key], map: "uq_device_memory_documents_mac_key")
+  @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_memory_documents_mac_updated")
+  @@index([kid_id, updated_at(sort: Desc)], map: "idx_device_memory_documents_kid_updated")
+  @@index([session_id], map: "idx_device_memory_documents_session")
+}
+
+model device_memory_chunks {
+  id           BigInt    @id @default(autoincrement())
+  document_id  String    @db.Uuid
+  mac_address  String    @db.VarChar(20)
+  device_id    String?   @db.Uuid
+  agent_id     String?   @db.Uuid
+  kid_id       BigInt?
+  content      String
+  content_hash String    @db.VarChar(64)
+  category     String?   @default("general")
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  device_memory_documents device_memory_documents @relation(fields: [document_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  ai_device    ai_device? @relation(fields: [device_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  ai_agent     ai_agent?  @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  kid_profile  kid_profile? @relation(fields: [kid_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([mac_address, content_hash], map: "uq_device_memory_chunks_mac_hash")
+  @@index([document_id], map: "idx_device_memory_chunks_document")
+  @@index([mac_address, created_at(sort: Desc)], map: "idx_device_memory_chunks_mac_created")
+  @@index([kid_id, created_at(sort: Desc)], map: "idx_device_memory_chunks_kid_created")
+}
+
 model game_session {
   id               BigInt    @id @default(autoincrement())
   mac_address      String    @db.VarChar(50)
@@ -610,6 +662,8 @@ model kid_profile {
   kid_learning_progress kid_learning_progress[]
   sys_user              sys_user?               @relation(fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
   voice_sessions        voice_sessions[]
+  device_memory_documents device_memory_documents[]
+  device_memory_chunks device_memory_chunks[]
 
   @@index([user_id], map: "idx_kid_profile_user")
   @@index([user_id], map: "idx_kid_profile_user_id")

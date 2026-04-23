@@ -89,7 +89,7 @@ describe('agent chat history voice-session compatibility', () => {
     ]);
   });
 
-  it('falls back to legacy chat history when a session is not migrated', async () => {
+  it('does not fall back to legacy chat history after migration verification', async () => {
     prisma.voice_session_messages.findMany.mockResolvedValue([]);
     prisma.ai_agent_chat_history.findMany.mockResolvedValue([
       {
@@ -103,18 +103,33 @@ describe('agent chat history voice-session compatibility', () => {
 
     const history = await agentService.getChatHistory('agent-id', 'legacy-session');
 
-    expect(prisma.ai_agent_chat_history.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { agent_id: 'agent-id', session_id: 'legacy-session' }
-    }));
-    expect(history).toEqual([
+    expect(prisma.ai_agent_chat_history.findMany).not.toHaveBeenCalled();
+    expect(history).toEqual([]);
+  });
+
+  it('does not fall back to legacy user-audio history after migration verification', async () => {
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
+    prisma.ai_agent_chat_history.findMany.mockResolvedValue([
       {
-        createdAt: '2026-04-22T08:01:00.000Z',
-        chatType: 1,
-        content: 'Legacy hello',
-        audioId: null,
-        macAddress: 'AA:BB:CC:DD:EE:FF'
+        content: 'Legacy audio',
+        audio_id: 'legacy-audio'
       }
     ]);
+
+    const history = await agentService.getRecentUserChatHistory('agent-id', 10);
+
+    expect(prisma.ai_agent_chat_history.findMany).not.toHaveBeenCalled();
+    expect(history).toEqual([]);
+  });
+
+  it('does not fall back to legacy audio content after migration verification', async () => {
+    prisma.voice_session_messages.findFirst.mockResolvedValue(null);
+    prisma.ai_agent_chat_history.findFirst = jest.fn().mockResolvedValue({ content: 'Legacy audio content' });
+
+    const content = await agentService.getAudioContent('legacy-audio');
+
+    expect(prisma.ai_agent_chat_history.findFirst).not.toHaveBeenCalled();
+    expect(content).toBeNull();
   });
 
   it('writes reported messages to voice session tables with deterministic idempotency', async () => {
