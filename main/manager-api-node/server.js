@@ -15,6 +15,8 @@ BigInt.prototype.toJSON = function () { return this.toString(); };
 const app = require('./src/app');
 const logger = require('./src/utils/logger');
 const { runPrismaMigrations } = require('./src/config/prisma-migrations');
+const { prisma } = require('./src/config/database');
+const { assertRequiredPrismaModels } = require('./src/config/prisma-client-guard');
 const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
 
 const PORT = process.env.PORT || 8002;
@@ -29,6 +31,7 @@ const startServer = async () => {
     // Server will exit with code 1 if migrations fail
     logger.info('Running Prisma migrations...');
     await runPrismaMigrations();
+    assertRequiredPrismaModels(prisma);
     logger.info('Database schema synchronized.');
 
     // Start Express server

@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "postinstall": "prisma generate",
+    "prestart": "prisma generate",
     "start": "node server.js",
+    "predev": "prisma generate",
     "dev": "nodemon server.js",
     "dev:no-sync": "set SKIP_DB_SYNC=1 && nodemon server.js",
     "test": "jest --detectOpenHandles",
