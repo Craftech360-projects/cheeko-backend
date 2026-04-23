@@ -61,6 +61,14 @@ AGENT_CONFIGS = {
         "game_state_class": None,
         "port": 8089,
     },
+    "Cheeko RunPod": {
+        "agent_name": "cheeko-runpod",
+        "prompt_file": None,  # Uses database prompt
+        "tools": [],
+        "features": ["mode_switching"],
+        "game_state_class": None,
+        "port": 8090,
+    },
 }
 
 # Reverse mapping: agent_name -> character_name

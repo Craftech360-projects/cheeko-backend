@@ -1,5 +1,5 @@
 [cerebrium.deployment]
-name = "multiagent"
+name = "cheeko-xai"
 python_version = "3.11"
 disable_auth = false
 include = ['./*', 'main.py', 'media_api.py', 'start.sh', 'requirements.txt', 'cerebrium.toml', 'config.yaml', 'src/**/*', 'config/**/*', 'workers/**/*']
@@ -35,7 +35,7 @@ LIVEKIT_API_SECRET="PuevKxhh7jhi2apAWmKziOBmDoHfjCpICBeokRRNCAnB"
 GOOGLE_API_KEY = "AIzaSyDQnuv8reaFvyUO68OE750MwOdGzSptuZw"
 
 # Manager API Configuration (Railway production - NOTE: /toy context path required!)
-MANAGER_API_URL = "http://64.227.170.31/toy"
+MANAGER_API_URL = "http://139.59.7.72/toy"
 MANAGER_API_SECRET = "da11d988-f105-4e71-b095-da62ada82189"
 
 # STT Configuration

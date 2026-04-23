@@ -22,7 +22,7 @@ sleep 2
 # Workers use their DEFAULT_PORT values (8081-8084) defined in each worker file
 # They ignore the global PORT env var set by Cerebrium
 echo "Starting Cheeko Agent Worker on port 8081..."
-python workers/cheeko_worker.py dev &
+python workers/cheeko_xai.py dev &
 
 # Wait for any process to exit so logs stay visible
 wait -n
