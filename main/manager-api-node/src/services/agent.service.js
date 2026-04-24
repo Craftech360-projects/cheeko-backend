@@ -379,24 +379,10 @@ const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }
   });
 };
 
-const buildSessionEpisodeMemoryContent = ({ summary, messages }) => {
-  const parts = [];
-  if (summary) {
-    parts.push(`Session summary:\n${summary}`);
-  }
-
-  const transcriptLines = (messages || [])
-    .filter((message) => message.content)
-    .map((message) => {
-      const role = message.role === 'assistant' || message.role === 'agent' ? 'Assistant' : 'User';
-      return `${role}: ${message.content}`;
-    });
-
-  if (transcriptLines.length > 0) {
-    parts.push(`Transcript excerpt:\n${transcriptLines.join('\n')}`);
-  }
-
-  return parts.join('\n\n');
+const buildSessionEpisodeMemoryContent = ({ summary }) => {
+  const cleanedSummary = normalizeMemoryText(summary);
+  if (!cleanedSummary) return '';
+  return `Session summary:\n${cleanedSummary}`;
 };
 
 const normalizeMemoryText = (value) => String(value || '')
@@ -482,9 +468,42 @@ const extractMemorySignals = (text) => {
   };
 };
 
+const isControlOrTranscriptLine = (line) => {
+  const trimmed = String(line || '').trim().replace(/^-+\s*/, '');
+  if (!trimmed) return true;
+  return /^Transcript excerpt:$/i.test(trimmed) ||
+    /^Session summary:$/i.test(trimmed) ||
+    /^\s*(User|Assistant|System|Tool):/i.test(trimmed) ||
+    /\[System Event\]/i.test(trimmed) ||
+    /successfully connected to the room/i.test(trimmed) ||
+    /You must end this conversation now/i.test(trimmed);
+};
+
 const stripRollingMemoryNoise = (text) => normalizeMemoryText(text)
   .replace(/^Overall memory:\s*/i, '')
-  .replace(/\n?\s*Recent durable context:\s*/gi, '\n');
+  .replace(/\n?\s*Recent durable context:\s*/gi, '\n')
+  .split('\n')
+  .reduce((lines, line) => {
+    const trimmed = String(line || '').trim();
+    const normalized = trimmed.replace(/^-+\s*/, '');
+    const isBlockLabel = /^Transcript excerpt:$/i.test(normalized) || /^Session summary:$/i.test(normalized);
+    if (isBlockLabel) {
+      lines.skipRawBlock = true;
+      return lines;
+    }
+    if (lines.skipRawBlock) {
+      if (!trimmed || /^\s*(User|Assistant|System|Tool):/i.test(trimmed) || !trimmed.startsWith('-')) {
+        return lines;
+      }
+      lines.skipRawBlock = false;
+    }
+    if (!isControlOrTranscriptLine(line)) {
+      lines.values.push(line);
+    }
+    return lines;
+  }, { values: [], skipRawBlock: false })
+  .values
+  .join('\n');
 
 const normalizeMemoryLineKey = (line) => String(line || '')
   .toLowerCase()
@@ -511,6 +530,9 @@ const categorizeRollingMemoryLine = (line) => {
   if (/ is \d+ years old\.$/.test(normalized) || / is the child using this device\.$/.test(normalized)) {
     return 'child_profile';
   }
+  if (/ is \d+ years old and likes /.test(normalized)) {
+    return 'child_profile';
+  }
   if (/ enjoys .* with cheeko\.$/.test(normalized)) {
     return 'interests';
   }
@@ -529,60 +551,16 @@ const categorizeRollingMemoryLine = (line) => {
   return null;
 };
 
-const summarizeLatestSessionForMemory = (latestSummary, maxChars = 320) => {
-  const normalized = normalizeMemoryText(latestSummary);
-  if (!normalized) return '';
-
-  const sentences = normalized.match(/[^.!?]+[.!?]?/g) || [normalized];
-  let result = '';
-  for (const sentence of sentences) {
-    const candidate = result ? `${result} ${sentence.trim()}` : sentence.trim();
-    if (candidate.length > maxChars) break;
-    result = candidate;
-    if (result.length >= Math.floor(maxChars * 0.7)) break;
+const isNarrativeSessionLine = (line) => {
+  const normalized = String(line || '').trim().toLowerCase().replace(/^-+\s*/, '');
+  if (!normalized) return false;
+  if (/^(after reconnecting|cheeko greets|cheeko greeted|the segment|the session|the call)\b/.test(normalized)) {
+    return true;
   }
-
-  if (!result) result = normalized;
-  if (result.length > maxChars) {
-    result = `${result.slice(0, maxChars - 3).trimEnd()}...`;
+  if (/\b(the segment ends|the segment concludes|the session ends|the call ends)\b/.test(normalized)) {
+    return true;
   }
-  return result;
-};
-
-const extractFollowUpTopics = (latestSummary, maxChars = 160) => {
-  const normalized = normalizeMemoryText(latestSummary);
-  if (!normalized) return '';
-
-  const patterns = [
-    /\b(?:offer(?:ed|ing)?|suggest(?:ed|s)?)\s+(?:to\s+discuss\s+)?([^.;\n]+?)\s+(?:next time|later)\b/i,
-    /\bnext(?:\s*time)?\s+(?:discuss|talk about)\s+([^.;\n]+)/i,
-    /\b(?:could discuss|offer(?:ed|ing)? to discuss)\s+([^.;\n]+)/i
-  ];
-
-  let rawTopic = '';
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (match?.[1]) {
-      rawTopic = match[1];
-      break;
-    }
-  }
-  if (!rawTopic) return '';
-
-  const cleaned = rawTopic
-    .replace(/^\b(?:about|on|the)\b\s*/i, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/,+$/, '')
-    .replace(/\b(?:for|to|on|about)\s*$/i, '')
-    .trim();
-  if (!cleaned) return '';
-  if (/\bunavailable|not available|cannot|can't|limit(?:ed|s)?\b/i.test(cleaned)) return '';
-
-  if (cleaned.length > maxChars) {
-    return `${cleaned.slice(0, maxChars - 3).trimEnd()}...`;
-  }
-  return cleaned;
+  return normalized.length > 220 && categorizeRollingMemoryLine(line) === null;
 };
 
 const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
@@ -635,22 +613,13 @@ const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
   }
 
   const durableExistingLines = parseRollingMemoryBullets(existing)
-    .filter((line) => !isEphemeralRollingLine(line));
+    .filter((line) => !isEphemeralRollingLine(line))
+    .filter((line) => !isNarrativeSessionLine(line));
   durableExistingLines.forEach((line) => {
     const lineCategory = categorizeRollingMemoryLine(line);
     if (lineCategory && generatedCategories.has(lineCategory)) return;
     pushUniqueLine(line);
   });
-
-  const latestSessionHighlights = summarizeLatestSessionForMemory(latest);
-  if (latestSessionHighlights) {
-    pushUniqueLine(`- Last session highlights: ${latestSessionHighlights}`);
-  }
-
-  const followUpTopics = extractFollowUpTopics(latest);
-  if (followUpTopics) {
-    pushUniqueLine(`- Good follow-up topics: ${followUpTopics}.`);
-  }
 
   if (lines.length === 1) {
     pushUniqueLine(`- ${truncateMemoryText(latest, 500)}`);
@@ -790,8 +759,7 @@ const consolidateDeviceMemoryForSession = async ({ macAddress, sessionId }) => {
 
   const episodeKey = `session:${sessionId}`;
   const episodeContent = buildSessionEpisodeMemoryContent({
-    summary: summaryRecord?.summary,
-    messages
+    summary: summaryRecord?.summary
   });
 
   if (episodeContent.trim()) {
@@ -1735,6 +1703,54 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     })
     : Promise.resolve([]);
 
+  const recentSessionsPromise = recentLimit > 0
+    ? prisma.voice_sessions.findMany({
+      where: {
+        mac_address: normalizedMac,
+        agent_id: device.agent_id
+      },
+      select: {
+        session_id: true,
+        status: true,
+        started_at: true,
+        ended_at: true,
+        last_event_at: true,
+        _count: {
+          select: { voice_session_messages: true }
+        }
+      },
+      orderBy: { started_at: 'desc' },
+      take: recentLimit
+    })
+    : Promise.resolve([]);
+
+  const sessionSummariesPromise = recentLimit > 0
+    ? prisma.voice_session_summaries.findMany({
+      where: {
+        mac_address: normalizedMac,
+        voice_sessions: {
+          agent_id: device.agent_id
+        }
+      },
+      select: {
+        session_id: true,
+        summary: true,
+        model: true,
+        source_message_count: true,
+        updated_at: true,
+        voice_sessions: {
+          select: {
+            started_at: true,
+            ended_at: true,
+            status: true
+          }
+        }
+      },
+      orderBy: { updated_at: 'desc' },
+      take: recentLimit
+    })
+    : Promise.resolve([]);
+
   const childProfilePromise = device.kid_id
     ? prisma.kid_profile.findUnique({
       where: { id: BigInt(device.kid_id) },
@@ -1760,7 +1776,7 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     ? getMemoriesByMac(normalizedMac, { limit: options.memoryLimit })
     : Promise.resolve(emptyMemoryPayload());
 
-  const [agent, childProfile, recentMessages, memories] = await Promise.all([
+  const [agent, childProfile, recentMessages, recentSessions, sessionSummaries, memories] = await Promise.all([
     prisma.ai_agent.findUnique({
       where: { id: device.agent_id },
       select: {
@@ -1785,6 +1801,8 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     }),
     childProfilePromise,
     recentMessagesPromise,
+    recentSessionsPromise,
+    sessionSummariesPromise,
     memoryPromise
   ]);
 
@@ -1847,6 +1865,24 @@ const getDeviceBootstrap = async (mac, options = {}) => {
       content: message.content,
       audioId: message.audio_id,
       createdAt: toISOStringOrNull(message.created_at)
+    })),
+    recentSessions: recentSessions.map((session) => ({
+      sessionId: session.session_id,
+      status: session.status,
+      startedAt: toISOStringOrNull(session.started_at),
+      endedAt: toISOStringOrNull(session.ended_at),
+      lastEventAt: toISOStringOrNull(session.last_event_at),
+      messageCount: session._count?.voice_session_messages || 0
+    })),
+    sessionSummaries: sessionSummaries.map((summary) => ({
+      sessionId: summary.session_id,
+      summary: summary.summary,
+      model: summary.model,
+      sourceMessageCount: summary.source_message_count,
+      updatedAt: toISOStringOrNull(summary.updated_at),
+      startedAt: toISOStringOrNull(summary.voice_sessions?.started_at),
+      endedAt: toISOStringOrNull(summary.voice_sessions?.ended_at),
+      status: summary.voice_sessions?.status || null
     })),
     memories: memories || emptyMemoryPayload(),
     generatedAt: new Date().toISOString()
@@ -2856,4 +2892,10 @@ module.exports = {
   // MCP Access Point methods
   getMcpAddress,
   getMcpTools
+};
+
+module.exports.__testables = {
+  buildRollingOverallMemory,
+  buildSessionEpisodeMemoryContent,
+  normalizeMemoryText
 };

@@ -21,6 +21,12 @@ describe('agent bootstrap fallback', () => {
       voice_session_messages: {
         findMany: jest.fn()
       },
+      voice_sessions: {
+        findMany: jest.fn()
+      },
+      voice_session_summaries: {
+        findMany: jest.fn()
+      },
       device_memory_documents: {
         findMany: jest.fn()
       }
@@ -113,6 +119,30 @@ describe('agent bootstrap fallback', () => {
         created_at: new Date('2026-04-22T08:01:00.000Z')
       }
     ]);
+    prisma.voice_sessions.findMany.mockResolvedValue([
+      {
+        session_id: 'session-1',
+        status: 'ended',
+        started_at: new Date('2026-04-22T08:00:00.000Z'),
+        ended_at: new Date('2026-04-22T08:05:00.000Z'),
+        last_event_at: new Date('2026-04-22T08:05:00.000Z'),
+        _count: { voice_session_messages: 4 }
+      }
+    ]);
+    prisma.voice_session_summaries.findMany.mockResolvedValue([
+      {
+        session_id: 'session-1',
+        summary: 'Asha asked about planets yesterday.',
+        model: 'summary-model',
+        source_message_count: 4,
+        updated_at: new Date('2026-04-22T08:06:00.000Z'),
+        voice_sessions: {
+          started_at: new Date('2026-04-22T08:00:00.000Z'),
+          ended_at: new Date('2026-04-22T08:05:00.000Z'),
+          status: 'ended'
+        }
+      }
+    ]);
     prisma.device_memory_documents.findMany.mockResolvedValue([]);
 
     const result = await agentService.getDeviceBootstrap('aa-bb-cc-dd-ee-ff', {
@@ -125,6 +155,17 @@ describe('agent bootstrap fallback', () => {
     }));
     expect(prisma.voice_session_messages.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: { mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-id' },
+      take: 2
+    }));
+    expect(prisma.voice_sessions.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-id' },
+      take: 2
+    }));
+    expect(prisma.voice_session_summaries.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        voice_sessions: { agent_id: 'agent-id' }
+      },
       take: 2
     }));
     expect(prisma.ai_agent_chat_history.findMany).not.toHaveBeenCalled();
@@ -177,6 +218,28 @@ describe('agent bootstrap fallback', () => {
           content: 'Hi Asha!',
           audioId: 'audio-2',
           createdAt: '2026-04-22T08:02:00.000Z'
+        }
+      ],
+      recentSessions: [
+        {
+          sessionId: 'session-1',
+          status: 'ended',
+          startedAt: '2026-04-22T08:00:00.000Z',
+          endedAt: '2026-04-22T08:05:00.000Z',
+          lastEventAt: '2026-04-22T08:05:00.000Z',
+          messageCount: 4
+        }
+      ],
+      sessionSummaries: [
+        {
+          sessionId: 'session-1',
+          summary: 'Asha asked about planets yesterday.',
+          model: 'summary-model',
+          sourceMessageCount: 4,
+          updatedAt: '2026-04-22T08:06:00.000Z',
+          startedAt: '2026-04-22T08:00:00.000Z',
+          endedAt: '2026-04-22T08:05:00.000Z',
+          status: 'ended'
         }
       ],
       memories: {

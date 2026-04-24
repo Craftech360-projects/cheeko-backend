@@ -196,11 +196,13 @@ describe('agent voice session lifecycle', () => {
       },
       create: expect.objectContaining({
         memory_type: 'episode',
-        content: expect.stringContaining('User: My name is Rahul.'),
+        content: expect.stringContaining('Session summary:\nRahul likes elephant songs and wants them read aloud.'),
         source: 'session_end_consolidation',
         session_id: 'session-1'
       })
     }));
+    expect(prisma.device_memory_documents.upsert.mock.calls[1][0].create.content).not.toContain('User: My name is Rahul.');
+    expect(prisma.device_memory_documents.upsert.mock.calls[1][0].create.content).not.toContain('Assistant:');
     expect(result.memoryConsolidation).toEqual(expect.objectContaining({
       consolidated: true,
       documentKeys: ['summary', 'session:session-1']
