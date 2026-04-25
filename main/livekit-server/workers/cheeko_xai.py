@@ -32,11 +32,14 @@ from livekit.agents import (
     # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
 from livekit import rtc
-from livekit.plugins import xai
+from livekit.plugins import openai
 import pytz
+from openai.types.realtime import AudioTranscription
+from openai.types.realtime.realtime_audio_input_turn_detection import ServerVad
 
 from src.config.config_loader import ConfigLoader
 from src.utils.database_helper import DatabaseHelper
+from src.utils.safety_filter import contains_unsafe_content, UNSAFE_RESPONSE_TEXT
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
 from src.utils.loki_agent_logger import logger
@@ -469,8 +472,30 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
     xai_voice = os.getenv("XAI_REALTIME_VOICE", "Ara")
-    realtime_model = xai.realtime.RealtimeModel(voice=xai_voice)
-    logger.info(f"xAI realtime model created with voice={xai_voice}")
+    xai_model_name = os.getenv("XAI_REALTIME_MODEL", "grok-voice-think-fast-1.0")
+    xai_api_key = os.getenv("XAI_API_KEY")
+    if not xai_api_key:
+        raise ValueError("XAI_API_KEY is required for the xAI realtime worker")
+
+    realtime_model = openai.realtime.RealtimeModel(
+        base_url="wss://api.x.ai/v1/realtime",
+        api_key=xai_api_key,
+        model=xai_model_name,
+        voice=xai_voice,
+        modalities=["audio"],
+        input_audio_transcription=AudioTranscription(),
+        turn_detection=ServerVad(
+            type="server_vad",
+            threshold=0.5,
+            prefix_padding_ms=300,
+            silence_duration_ms=200,
+            create_response=True,
+            interrupt_response=True,
+        ),
+    )
+    realtime_model._capabilities.per_response_tool_choice = False
+    realtime_model._provider_label = "xAI Realtime API"
+    logger.info(f"xAI realtime model created with model={xai_model_name}, voice={xai_voice}")
 
     # Create AgentSession with xAI realtime, mode switching, and deterministic time/date.
     session_tools = [*MODE_SWITCH_TOOLS, get_time_date]
@@ -505,6 +530,27 @@ async def entrypoint(ctx: JobContext):
 
         text = getattr(msg, 'text', str(msg)) if hasattr(msg, 'text') else str(msg)
         logger.info(f"🎤 USER SAID: '{text}'")
+
+        if contains_unsafe_content(text):
+            logger.warning("ðŸ›¡ï¸ [SAFETY] Unsafe speech detected; bypassing model response")
+
+            async def handle_unsafe_speech():
+                try:
+                    await session.interrupt(force=True)
+                except Exception as interrupt_error:
+                    logger.debug(f"ðŸ›¡ï¸ [SAFETY] Interrupt skipped: {interrupt_error}")
+
+                try:
+                    session.say(
+                        UNSAFE_RESPONSE_TEXT,
+                        allow_interruptions=True,
+                        add_to_chat_ctx=False,
+                    )
+                except Exception as say_error:
+                    logger.error(f"ðŸ›¡ï¸ [SAFETY] Failed to deliver safe refusal: {say_error}")
+
+            asyncio.create_task(handle_unsafe_speech())
+            return
 
         # Skip memory injection if one is already in progress or happened recently
         current_time = time.time()
@@ -796,6 +842,16 @@ async def entrypoint(ctx: JobContext):
 
                 async def handle_user_text():
                     try:
+                        source_text = content_text if content_type in ('animal', 'read_only') else text
+                        if contains_unsafe_content(source_text):
+                            logger.warning("ðŸ›¡ï¸ [SAFETY] Unsafe gateway text detected; refusing locally")
+                            session.say(
+                                UNSAFE_RESPONSE_TEXT,
+                                allow_interruptions=True,
+                                add_to_chat_ctx=False,
+                            )
+                            return
+
                         # Mark agent as listening/processing for LED state
                         await emit_agent_state("listening")
 

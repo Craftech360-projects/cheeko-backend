@@ -2,7 +2,7 @@
 Cheeko Agent Worker
 Main conversational agent with all features enabled
 
-agent_name: cheeko-runpod
+agent_name: cheeko-xai
 Port: 8090
 """
 
@@ -49,7 +49,7 @@ from src.shared.entrypoint_utils import (
 # from src.features.mode_switching import update_agent_mode  # COMMENTED OUT - Mode switching disabled
 
 # Agent configuration
-AGENT_NAME = "cheeko-runpod"
+AGENT_NAME = "cheeko-xai"
 CHARACTER_NAME = "Cheeko"
 DEFAULT_PORT = 8090
 # MUSIC_TOOLS = [play_music, stop_music, next_song, previous_song]  # COMMENTED OUT - Music service disabled

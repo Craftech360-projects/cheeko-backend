@@ -29,7 +29,7 @@ const logger = require("../utils/logger");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-runpod",
+  "Cheeko": "cheeko-xai",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -1301,7 +1301,7 @@ class MQTTGateway {
         if (
           participant.identity &&
           (participant.identity.toLowerCase().includes("agent") ||
-            participant.identity === "cheeko-runpod")
+            participant.identity === "cheeko-xai")
         ) {
           // logger.info(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
           return { exists: true, identity: participant.identity };
@@ -1773,7 +1773,7 @@ class MQTTGateway {
               logger.warn(`⚠️ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
             }
 
-            const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-runpod";
+            const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
             logger.info(`🚀 [MODE-CHANGE] Dispatching: ${characterName} → ${agentName}`);
 
             newBridge.agentDeployed = true;
@@ -1894,6 +1894,8 @@ class MQTTGateway {
       const previousMode =
         deviceInfo.previousMode || deviceInfo.currentMode || null;
       const isModeSwitch = previousMode !== null && previousMode !== roomType;
+      const shouldAutoStartRestoredMusic =
+        roomType === "music" && previousMode === roomType;
 
       if (deviceInfo.previousMode) {
         delete deviceInfo.previousMode;
@@ -1905,7 +1907,7 @@ class MQTTGateway {
         try {
           const response = await axios.post(
             apiUrl,
-            { is_mode_switch: isModeSwitch },
+            { is_mode_switch: isModeSwitch || shouldAutoStartRestoredMusic },
             mediaAxiosConfig({ timeout: 5000 })
           );
 
@@ -2006,7 +2008,7 @@ class MQTTGateway {
                     logger.warn(`[START-AGENT] ⚠️ Fetch error: ${fetchError.message}`);
                   }
 
-                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-runpod";
+                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
                   logger.info(`[START-AGENT] 🚀 Dispatching: Character "${characterName}" → Agent "${agentName}"`);
 
                   // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
@@ -2398,7 +2400,7 @@ class MQTTGateway {
         const identity = participant.identity || '';
         if (identity.toLowerCase().includes('agent') ||
           identity.startsWith('agent-') ||
-          identity === 'cheeko-runpod') {
+          identity === 'cheeko-xai') {
           logger.info(`[CLEANUP] Removing agent participant: ${identity}`);
           try {
             await this.roomService.removeParticipant(roomName, identity);
@@ -2547,7 +2549,7 @@ class MQTTGateway {
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
         // Step 1: Get agent name for the new character
-        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-runpod";
+        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-xai";
         logger.info(`[CHARACTER-CHANGE] Dispatching agent: ${agentName}`);
 
         // Step 2: Get device connection
@@ -3037,7 +3039,7 @@ class MQTTGateway {
             try {
               // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
               logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
-              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-runpod";
+              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-xai";
               logger.info(`[MODE-CHANGE] 🚀 Dispatching: Character "${currentCharacter || 'Cheeko'}" → Agent "${agentName}"`)
 
               // CRITICAL: Set flag BEFORE dispatch to prevent race conditions

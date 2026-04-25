@@ -52,7 +52,7 @@ async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-runpod",
+  "Cheeko": "cheeko-xai",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -680,7 +680,7 @@ class VirtualMQTTConnection {
       }
 
       const roomName = this.bridge?.room?.name || this.udp.session_id;
-      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-runpod";
+      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-xai";
       logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
 
       try {
@@ -1594,6 +1594,12 @@ class VirtualMQTTConnection {
 
   onUdpMessage(rinfo, message, payloadLength, timestamp, sequence) {
     // UDP messages do not reset inactivity timer - only MQTT messages do
+
+    if (rinfo && this.udp.remoteAddress !== rinfo) {
+      // Save the return address before deferred-start buffering. On fresh boot
+      // in music/story mode, bot audio may start before another UDP frame arrives.
+      this.udp.remoteAddress = rinfo;
+    }
 
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {

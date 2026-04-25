@@ -51,11 +51,32 @@ class PromptService:
         config = self.load_config()
         return config.get('read_config_from_api', False)
 
+    def get_manager_api_config(self) -> dict:
+        """Return manager API config with environment overrides applied."""
+        config = self.load_config()
+        manager_api = dict(config.get('manager_api', {}) or {})
+
+        env_url = os.getenv("MANAGER_API_URL", "").strip()
+        env_secret = os.getenv("MANAGER_API_SECRET", "").strip()
+        env_timeout = os.getenv("MANAGER_API_TIMEOUT", "").strip()
+
+        if env_url:
+            manager_api['url'] = env_url
+        if env_secret:
+            manager_api['secret'] = env_secret
+        if env_timeout:
+            try:
+                manager_api['timeout'] = int(env_timeout)
+            except ValueError:
+                logger.warning(f"Invalid MANAGER_API_TIMEOUT value: {env_timeout}")
+
+        manager_api['timeout'] = int(manager_api.get('timeout', 10) or 10)
+        return manager_api
+
     async def fetch_prompt_from_api(self, mac_address: str) -> Optional[str]:
         """Fetch prompt from manager API using device MAC address"""
         try:
-            config = self.load_config()
-            manager_api = config.get('manager_api', {})
+            manager_api = self.get_manager_api_config()
 
             if not manager_api:
                 logger.error("Manager API configuration not found")
@@ -285,8 +306,7 @@ class PromptService:
             Dict containing model configurations (TTS, STT, LLM, etc.)
         """
         try:
-            config = self.load_config()
-            manager_api = config.get('manager_api', {})
+            manager_api = self.get_manager_api_config()
 
             if not manager_api:
                 logger.error("Manager API configuration not found")

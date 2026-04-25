@@ -112,7 +112,7 @@ module.exports = {
       max_memory_restart: "2G",
     },
     {
-      name: "cheeko-runpod",
+      name: "cheeko-xai",
       script: "env/bin/python",
       args: "workers/cheeko_runpod.py dev",
       cwd: __dirname,

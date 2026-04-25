@@ -62,7 +62,7 @@ AGENT_CONFIGS = {
         "port": 8089,
     },
     "Cheeko RunPod": {
-        "agent_name": "cheeko-runpod",
+        "agent_name": "cheeko-xai",
         "prompt_file": None,  # Uses database prompt
         "tools": [],
         "features": ["mode_switching"],
