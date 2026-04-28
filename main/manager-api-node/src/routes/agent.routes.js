@@ -8,8 +8,9 @@
 const express = require('express');
 const router = express.Router();
 const agentService = require('../services/agent.service');
+const { getWorkspaceFiles, saveWorkspaceFiles } = require('../services/workspace.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth, requireServiceKey } = require('../middleware/auth');
+const { requireAuth, requireServiceKey, requireDualAuth } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
@@ -1498,6 +1499,24 @@ router.post('/set-character/:mac/:agentId',
     } catch (error) {
       badRequest(res, error.message);
     }
+  })
+);
+
+router.get('/device/:mac/workspace-files',
+  requireDualAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.isServiceAuth ? null : req.user.id;
+    const result = await getWorkspaceFiles(req.params.mac, userId);
+    success(res, result, 'Workspace files retrieved');
+  })
+);
+
+router.put('/device/:mac/workspace-files',
+  requireDualAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.isServiceAuth ? null : req.user.id;
+    const result = await saveWorkspaceFiles(req.params.mac, userId, req.body);
+    success(res, result, 'Workspace files saved');
   })
 );
 
