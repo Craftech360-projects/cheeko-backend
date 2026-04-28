@@ -19,21 +19,23 @@ const { success, badRequest, notFound } = require('../utils/response');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB max file size
+    fileSize: 500 * 1024 * 1024, // 500MB max file size for content packs
   },
   fileFilter: (req, file, cb) => {
     // Allow audio, image, and binary files (.bin for LVGL ESP32 images)
     const allowedMimes = [
       'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a',
       'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/zip', 'application/x-zip-compressed',
       'application/octet-stream' // For .bin files (LVGL binary format)
     ];
     // Also check file extension for .bin files (some systems may not set correct MIME)
     const isBinFile = file.originalname && file.originalname.toLowerCase().endsWith('.bin');
-    if (allowedMimes.includes(file.mimetype) || isBinFile) {
+    const isZipFile = file.originalname && file.originalname.toLowerCase().endsWith('.zip');
+    if (allowedMimes.includes(file.mimetype) || isBinFile || isZipFile) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Only audio, image, and .bin files are allowed.'));
+      cb(new Error('Invalid file type. Only audio, image, .bin, and .zip files are allowed.'));
     }
   }
 });
@@ -532,6 +534,48 @@ router.post('/library/upload',
       );
 
       return success(res, result);
+    } catch (error) {
+      return badRequest(res, error.message);
+    }
+  })
+);
+
+router.post('/library/content-pack/upload',
+  requireAdmin,
+  upload.array('files', 200),
+  asyncHandler(async (req, res) => {
+    const files = req.files || [];
+    if (!files.length) {
+      return badRequest(res, 'No files uploaded');
+    }
+
+    const { packCode, name, contentType, language, version, description, status, active } = req.body;
+    if (!packCode) {
+      return badRequest(res, 'Pack code is required');
+    }
+    if (!name) {
+      return badRequest(res, 'Pack name is required');
+    }
+
+    const allowedContentTypes = ['story_pack', 'rhyme_pack', 'habit_pack', 'rfidcontent'];
+    if (contentType && !allowedContentTypes.includes(contentType)) {
+      return badRequest(res, `Content type must be one of: ${allowedContentTypes.join(', ')}`);
+    }
+
+    try {
+      const result = await contentService.uploadContentPack({
+        files,
+        packCode,
+        name,
+        description,
+        contentType,
+        language,
+        version,
+        status,
+        active,
+        userId: req.user?.id
+      });
+      return success(res, result, 'Content pack uploaded successfully');
     } catch (error) {
       return badRequest(res, error.message);
     }

@@ -183,7 +183,7 @@ let rfidCardTapLogTableExistsPromise = null;
 const getRfidSeriesColumns = async () => {
   if (!rfidSeriesColumnsPromise) {
     rfidSeriesColumnsPromise = prisma.$queryRaw`
-      SELECT column_name
+      SELECT column_name::text AS column_name
       FROM information_schema.columns
       WHERE table_schema = current_schema()
         AND table_name = 'rfid_series'

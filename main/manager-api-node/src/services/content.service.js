@@ -7,6 +7,10 @@
 
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
+const crypto = require('crypto');
+const path = require('path');
+const zlib = require('zlib');
+const uploadService = require('./upload.service');
 
 // ==================== CONTENT LIBRARY METHODS ====================
 
@@ -298,6 +302,369 @@ const getLibraryStatistics = async () => {
     total: total || 0,
     byType,
     byCategory
+  };
+};
+
+// ==================== CONTENT PACK UPLOAD METHODS ====================
+
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac']);
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bin']);
+
+const normalizePackCode = (value) => {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9\-_]/g, '');
+};
+
+const normalizeZipPath = (value) => String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
+
+const getMimeTypeFromName = (filename) => {
+  const ext = path.extname(filename).toLowerCase();
+  const map = {
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.ogg': 'audio/ogg',
+    '.m4a': 'audio/mp4',
+    '.aac': 'audio/aac',
+    '.flac': 'audio/flac',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bin': 'application/octet-stream',
+    '.json': 'application/json'
+  };
+  return map[ext] || 'application/octet-stream';
+};
+
+const getAssetTypeFromName = (filename) => {
+  const ext = path.extname(filename).toLowerCase();
+  if (AUDIO_EXTENSIONS.has(ext)) return 'audio';
+  if (IMAGE_EXTENSIONS.has(ext)) return 'images';
+  return 'misc';
+};
+
+const getBaseKey = (filename) => {
+  return path.basename(filename, path.extname(filename)).toLowerCase().replace(/[^a-z0-9]+/g, '');
+};
+
+const stripBom = (value) => String(value || '').replace(/^\uFEFF/, '');
+
+const parseZipEntries = (zipBuffer) => {
+  const entries = [];
+  const eocdSignature = 0x06054b50;
+  let eocdOffset = -1;
+  const searchStart = Math.max(0, zipBuffer.length - 0x10000 - 22);
+
+  for (let i = zipBuffer.length - 22; i >= searchStart; i--) {
+    if (zipBuffer.readUInt32LE(i) === eocdSignature) {
+      eocdOffset = i;
+      break;
+    }
+  }
+
+  if (eocdOffset === -1) {
+    throw new Error('Invalid ZIP file: central directory not found');
+  }
+
+  const totalEntries = zipBuffer.readUInt16LE(eocdOffset + 10);
+  const centralDirectoryOffset = zipBuffer.readUInt32LE(eocdOffset + 16);
+  let offset = centralDirectoryOffset;
+
+  for (let index = 0; index < totalEntries; index++) {
+    if (zipBuffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error('Invalid ZIP file: central directory entry is corrupt');
+    }
+
+    const compressionMethod = zipBuffer.readUInt16LE(offset + 10);
+    const compressedSize = zipBuffer.readUInt32LE(offset + 20);
+    const uncompressedSize = zipBuffer.readUInt32LE(offset + 24);
+    const fileNameLength = zipBuffer.readUInt16LE(offset + 28);
+    const extraLength = zipBuffer.readUInt16LE(offset + 30);
+    const commentLength = zipBuffer.readUInt16LE(offset + 32);
+    const localHeaderOffset = zipBuffer.readUInt32LE(offset + 42);
+    const rawName = zipBuffer.toString('utf8', offset + 46, offset + 46 + fileNameLength);
+    const name = normalizeZipPath(rawName);
+
+    offset += 46 + fileNameLength + extraLength + commentLength;
+
+    if (!name || name.endsWith('/')) {
+      continue;
+    }
+
+    if (zipBuffer.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+      throw new Error(`Invalid ZIP file: local header missing for ${name}`);
+    }
+
+    const localNameLength = zipBuffer.readUInt16LE(localHeaderOffset + 26);
+    const localExtraLength = zipBuffer.readUInt16LE(localHeaderOffset + 28);
+    const dataOffset = localHeaderOffset + 30 + localNameLength + localExtraLength;
+    const compressedData = zipBuffer.subarray(dataOffset, dataOffset + compressedSize);
+    let buffer;
+
+    if (compressionMethod === 0) {
+      buffer = Buffer.from(compressedData);
+    } else if (compressionMethod === 8) {
+      buffer = zlib.inflateRawSync(compressedData);
+    } else {
+      throw new Error(`Unsupported ZIP compression method ${compressionMethod} for ${name}`);
+    }
+
+    if (uncompressedSize && buffer.length !== uncompressedSize) {
+      logger.warn('ZIP entry size mismatch', { name, expected: uncompressedSize, actual: buffer.length });
+    }
+
+    entries.push({
+      originalname: name,
+      buffer,
+      size: buffer.length,
+      mimetype: getMimeTypeFromName(name)
+    });
+  }
+
+  return entries;
+};
+
+const parseContentPackManifest = (files) => {
+  const manifestFile = files.find((file) => path.basename(file.originalname).toLowerCase() === 'manifest.json');
+  if (!manifestFile) return null;
+
+  try {
+    return JSON.parse(stripBom(manifestFile.buffer.toString('utf8')));
+  } catch (error) {
+    throw new Error(`Invalid manifest.json: ${error.message}`);
+  }
+};
+
+const buildItemsFromFiles = (files, manifest) => {
+  if (manifest?.items && Array.isArray(manifest.items)) {
+    return manifest.items.map((item, index) => ({
+      sequence: Number(item.sequence || item.itemNumber || index + 1),
+      title: item.title || path.basename(item.audio || item.audioUrl || item.image || item.imageUrl || `Item ${index + 1}`, path.extname(item.audio || item.image || '')),
+      text: item.text || item.lyricsText || item.contentText || null,
+      audioPath: item.audio || item.audioFile || null,
+      imagePath: item.image || item.imageFile || null,
+      storyNumber: item.storyNumber || item.story_number || null,
+      storyTitle: item.storyTitle || item.story_title || null
+    }));
+  }
+
+  const audioFiles = files
+    .filter((file) => getAssetTypeFromName(file.originalname) === 'audio')
+    .sort((a, b) => a.originalname.localeCompare(b.originalname));
+  const imageFiles = files.filter((file) => getAssetTypeFromName(file.originalname) === 'images');
+
+  return audioFiles.map((file, index) => {
+    const baseKey = getBaseKey(file.originalname);
+    const image = imageFiles.find((candidate) => getBaseKey(candidate.originalname) === baseKey);
+    const title = path.basename(file.originalname, path.extname(file.originalname)).replace(/[_-]+/g, ' ').trim();
+    return {
+      sequence: index + 1,
+      title,
+      text: null,
+      audioPath: file.originalname,
+      imagePath: image?.originalname || null,
+      storyNumber: null,
+      storyTitle: null
+    };
+  });
+};
+
+const findUploadedAsset = (uploadedAssets, originalPath) => {
+  if (!originalPath) return null;
+  const normalized = normalizeZipPath(originalPath);
+  return uploadedAssets.find((asset) => asset.originalPath === normalized || path.basename(asset.originalPath) === path.basename(normalized));
+};
+
+/**
+ * Upload a new RFID content pack from normal files or a ZIP archive.
+ * @param {Object} params
+ * @returns {Promise<Object>} Created pack summary
+ */
+const uploadContentPack = async ({ files = [], packCode, name, description, contentType, language, version, status, active, userId }) => {
+  const normalizedPackCode = normalizePackCode(packCode);
+  if (!normalizedPackCode) {
+    throw new Error('Pack code is required');
+  }
+
+  const sourceFiles = Array.isArray(files) ? files : [];
+  if (sourceFiles.length === 0) {
+    throw new Error('At least one file or ZIP archive is required');
+  }
+
+  const existing = await prisma.rfid_content_pack.findFirst({
+    where: { pack_code: normalizedPackCode },
+    select: { id: true }
+  });
+  if (existing) {
+    throw new Error('Content pack with this code already exists');
+  }
+
+  let expandedFiles = [];
+  for (const file of sourceFiles) {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isZip = ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed';
+    if (isZip) {
+      expandedFiles.push(...parseZipEntries(file.buffer));
+    } else {
+      expandedFiles.push({
+        originalname: normalizeZipPath(file.originalname),
+        buffer: file.buffer,
+        size: file.size || file.buffer.length,
+        mimetype: file.mimetype || getMimeTypeFromName(file.originalname)
+      });
+    }
+  }
+
+  expandedFiles = expandedFiles.filter((file) => path.basename(file.originalname).toLowerCase() !== 'manifest.json');
+  const manifest = parseContentPackManifest(sourceFiles.flatMap((file) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext === '.zip' || file.mimetype === 'application/zip' || file.mimetype === 'application/x-zip-compressed') {
+      return parseZipEntries(file.buffer);
+    }
+    return [file];
+  }));
+
+  const assetFiles = expandedFiles.filter((file) => ['audio', 'images'].includes(getAssetTypeFromName(file.originalname)));
+  if (assetFiles.length === 0) {
+    throw new Error('No audio or image files were found in the upload');
+  }
+
+  const uploadedAssets = [];
+  for (const file of assetFiles) {
+    const assetType = getAssetTypeFromName(file.originalname);
+    const result = await uploadService.uploadContentPackAsset(
+      file.buffer,
+      path.basename(file.originalname),
+      normalizedPackCode,
+      assetType,
+      file.mimetype || getMimeTypeFromName(file.originalname)
+    );
+    uploadedAssets.push({
+      originalPath: normalizeZipPath(file.originalname),
+      assetType,
+      size: file.size || file.buffer.length,
+      ...result
+    });
+  }
+
+  const manifestWithFallback = manifest || {};
+  const packName = name || manifestWithFallback.name || normalizedPackCode;
+  const packContentType = contentType || manifestWithFallback.contentType || 'rhyme_pack';
+  const packLanguage = language || manifestWithFallback.language || 'en';
+  const packVersion = version || manifestWithFallback.version || '1';
+  const packStatus = status || manifestWithFallback.status || 'published';
+  const items = buildItemsFromFiles(assetFiles, manifestWithFallback)
+    .map((item, index) => {
+      const audio = findUploadedAsset(uploadedAssets, item.audioPath);
+      const image = findUploadedAsset(uploadedAssets, item.imagePath);
+      return {
+        sequence: item.sequence || index + 1,
+        title: item.title || `Item ${index + 1}`,
+        text: item.text || null,
+        audioUrl: audio?.url || null,
+        imageUrl: image?.url || null,
+        storyNumber: item.storyNumber || null,
+        storyTitle: item.storyTitle || null
+      };
+    })
+    .filter((item) => item.audioUrl || item.imageUrl);
+
+  if (items.length === 0) {
+    throw new Error('No content items could be created from the uploaded files');
+  }
+
+  const hashInput = {
+    packCode: normalizedPackCode,
+    name: packName,
+    contentType: packContentType,
+    version: packVersion,
+    assets: uploadedAssets.map((asset) => ({
+      path: asset.originalPath,
+      key: asset.s3Key,
+      size: asset.size
+    }))
+  };
+  const contentHash = crypto.createHash('sha256').update(JSON.stringify(hashInput)).digest('hex');
+
+  const created = await prisma.$transaction(async (tx) => {
+    const pack = await tx.rfid_content_pack.create({
+      data: {
+        pack_code: normalizedPackCode,
+        name: packName,
+        description: description || manifestWithFallback.description || null,
+        content_type: packContentType,
+        total_items: items.length,
+        language: packLanguage,
+        version: String(packVersion),
+        status: packStatus,
+        content_hash: contentHash,
+        thumbnail_url: items.find((item) => item.imageUrl)?.imageUrl || null,
+        active: active !== false && active !== 'false',
+        creator: userId ? BigInt(userId) : null
+      }
+    });
+
+    await tx.content_item.createMany({
+      data: items.map((item, index) => ({
+        content_pack_id: pack.id,
+        item_number: item.sequence || index + 1,
+        title: item.title,
+        audio_url: item.audioUrl,
+        image_url: item.imageUrl,
+        lyrics_text: item.text,
+        story_number: item.storyNumber,
+        story_title: item.storyTitle,
+        creator: userId ? BigInt(userId) : null,
+        active: true
+      }))
+    });
+
+    const libraryContentType = packContentType === 'rhyme_pack' ? 'music' : 'story';
+    await tx.content_library.createMany({
+      data: items
+        .filter((item) => item.audioUrl)
+        .map((item) => ({
+          content_type: libraryContentType,
+          title: item.title,
+          description: packName,
+          url: item.audioUrl,
+          thumbnail_url: item.imageUrl,
+          category: packLanguage,
+          tags: [normalizedPackCode, packContentType],
+          language: packLanguage,
+          metadata: {
+            filename: path.basename(item.audioUrl),
+            packCode: normalizedPackCode,
+            contentPackId: Number(pack.id),
+            contentHash
+          },
+          status: active !== false && active !== 'false' ? 1 : 0
+        }))
+    });
+
+    return pack;
+  });
+
+  return {
+    id: Number(created.id),
+    packCode: created.pack_code,
+    name: created.name,
+    contentType: created.content_type,
+    language: created.language,
+    version: created.version,
+    status: created.status,
+    contentHash,
+    totalItems: items.length,
+    uploadedAssets: uploadedAssets.map((asset) => ({
+      originalPath: asset.originalPath,
+      assetType: asset.assetType,
+      url: asset.url,
+      s3Key: asset.s3Key
+    })),
+    items
   };
 };
 
@@ -1446,6 +1813,7 @@ module.exports = {
   deleteLibraryItem,
   batchCreateLibraryItems,
   getLibraryStatistics,
+  uploadContentPack,
   // Legacy music methods
   getMusicList,
   getMusicById,

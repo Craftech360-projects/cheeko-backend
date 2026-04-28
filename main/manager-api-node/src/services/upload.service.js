@@ -28,6 +28,39 @@ const s3Client = new S3Client({
   }
 });
 
+const cleanPathSegment = (value, fallback = 'default') => {
+  const cleaned = String(value || '')
+    .replace(/[^a-zA-Z0-9\s\-\_]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+  return cleaned || fallback;
+};
+
+const encodeS3KeyForCloudFront = (s3Key) => {
+  return s3Key.split('/').map(encodeURIComponent).join('/');
+};
+
+const putObjectAndBuildUrl = async ({ s3Key, fileBuffer, mimeType, logLabel }) => {
+  const command = new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: fileBuffer,
+    ContentType: mimeType || 'application/octet-stream',
+    CacheControl: 'max-age=31536000'
+  });
+
+  await s3Client.send(command);
+
+  const url = `https://${CLOUDFRONT_DOMAIN}/${encodeS3KeyForCloudFront(s3Key)}`;
+  logger.info(logLabel || 'File uploaded to S3', { s3Key, url });
+
+  return {
+    success: true,
+    url,
+    s3Key
+  };
+};
+
 /**
  * Upload content file to S3
  * @param {Buffer} fileBuffer - File buffer
@@ -144,7 +177,48 @@ const uploadThumbnail = async (fileBuffer, filename, contentType, mimeType) => {
   }
 };
 
+/**
+ * Upload an RFID/content-pack asset to S3 under a stable pack prefix.
+ * @param {Buffer} fileBuffer
+ * @param {string} filename
+ * @param {string} packCode
+ * @param {'audio'|'images'|'misc'} assetType
+ * @param {string} mimeType
+ * @returns {Promise<Object>} Upload result with CloudFront URL
+ */
+const uploadContentPackAsset = async (fileBuffer, filename, packCode, assetType, mimeType) => {
+  try {
+    const ext = path.extname(filename);
+    const baseName = path.basename(filename, ext)
+      .replace(/[^a-zA-Z0-9\s\-\_]/g, '')
+      .trim()
+      .replace(/\s+/g, '-');
+    const cleanFilename = `${baseName || 'asset'}${ext.toLowerCase()}`;
+    const cleanPackCode = cleanPathSegment(packCode, 'pack');
+    const cleanAssetType = ['audio', 'images', 'misc'].includes(assetType) ? assetType : 'misc';
+    const s3Key = `rfidcontent/${cleanPackCode}/${cleanAssetType}/${cleanFilename}`;
+
+    const result = await putObjectAndBuildUrl({
+      s3Key,
+      fileBuffer,
+      mimeType,
+      logLabel: 'Content pack asset uploaded to S3'
+    });
+
+    return {
+      ...result,
+      filename: cleanFilename,
+      folder: `rfidcontent/${cleanPackCode}/${cleanAssetType}`,
+      assetType: cleanAssetType
+    };
+  } catch (error) {
+    logger.error('Failed to upload content pack asset to S3', { error: error.message });
+    throw new Error(`Content pack asset upload failed: ${error.message}`);
+  }
+};
+
 module.exports = {
   uploadContentFile,
-  uploadThumbnail
+  uploadThumbnail,
+  uploadContentPackAsset
 };

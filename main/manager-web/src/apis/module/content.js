@@ -139,6 +139,22 @@ export default {
             }).send();
     },
 
+    // Upload files/ZIP and create an RFID content pack
+    uploadContentPack(formData, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/content/library/content-pack/upload`)
+            .method('POST')
+            .data(formData)
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                console.error('Failed to upload content pack:', err);
+                callback({ data: { code: -1, msg: 'Failed to upload content pack' } });
+            }).send();
+    },
+
     // Get content library statistics
     getStatistics(callback) {
         RequestService.sendRequest()

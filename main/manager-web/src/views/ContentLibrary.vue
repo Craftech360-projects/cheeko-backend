@@ -13,6 +13,9 @@
               <span class="header-title">Content Library</span>
             </div>
             <div class="header-actions">
+              <el-button type="success" size="small" @click="showUploadPackDialog">
+                <i class="el-icon-upload2"></i> Upload Pack
+              </el-button>
               <el-button type="primary" size="small" @click="showAddDialog">
                 <i class="el-icon-plus"></i> Add Content
               </el-button>
@@ -234,6 +237,73 @@
       </span>
     </el-dialog>
 
+    <!-- Upload Content Pack Dialog -->
+    <el-dialog
+      title="Upload Content Pack"
+      :visible.sync="packUploadVisible"
+      width="620px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="packUploadForm" :rules="packUploadRules" ref="packUploadForm" label-width="120px" size="small">
+        <el-form-item label="Pack Code" prop="packCode">
+          <el-input v-model="packUploadForm.packCode" placeholder="e.g., ANIMAL01" maxlength="32" />
+        </el-form-item>
+        <el-form-item label="Pack Name" prop="name">
+          <el-input v-model="packUploadForm.name" placeholder="Display name" />
+        </el-form-item>
+        <el-form-item label="Content Type" prop="contentType">
+          <el-select v-model="packUploadForm.contentType" style="width: 100%">
+            <el-option label="Story Pack" value="story_pack" />
+            <el-option label="Rhyme Pack" value="rhyme_pack" />
+            <el-option label="Habit Pack" value="habit_pack" />
+            <el-option label="RFID Content" value="rfidcontent" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Language" prop="language">
+          <el-select v-model="packUploadForm.language" style="width: 100%">
+            <el-option label="English" value="en" />
+            <el-option label="Hindi" value="hi" />
+            <el-option label="Telugu" value="te" />
+            <el-option label="Kannada" value="kn" />
+            <el-option label="Tamil" value="ta" />
+            <el-option label="Malayalam" value="ml" />
+            <el-option label="German" value="de" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Version" prop="version">
+          <el-input v-model="packUploadForm.version" placeholder="1" />
+        </el-form-item>
+        <el-form-item label="Description">
+          <el-input type="textarea" v-model="packUploadForm.description" :rows="2" placeholder="Optional description" />
+        </el-form-item>
+        <el-form-item label="Files" prop="files">
+          <el-upload
+            ref="packUpload"
+            action=""
+            multiple
+            :auto-upload="false"
+            :file-list="packUploadFileList"
+            :on-change="handlePackFileChange"
+            :on-remove="handlePackFileRemove"
+            accept=".zip,audio/*,image/*,.bin"
+          >
+            <el-button size="small" type="primary">
+              <i class="el-icon-folder-add"></i> Select ZIP or Files
+            </el-button>
+            <div slot="tip" class="el-upload__tip">
+              ZIP may include manifest.json. Normal upload pairs audio/image by matching filename.
+            </div>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="packUploadVisible = false" size="small">Cancel</el-button>
+        <el-button type="success" @click="handlePackUploadSubmit" :loading="packUploading" size="small">
+          Upload & Create Pack
+        </el-button>
+      </span>
+    </el-dialog>
+
     <!-- Hidden Audio Player -->
     <audio
       ref="audioPlayer"
@@ -278,6 +348,17 @@ export default {
       submitting: false,
       uploading: false,
       uploadedFile: null,
+      packUploadVisible: false,
+      packUploading: false,
+      packUploadFileList: [],
+      packUploadForm: {
+        packCode: '',
+        name: '',
+        contentType: 'rhyme_pack',
+        language: 'en',
+        version: '1',
+        description: ''
+      },
       currentlyPlaying: null,
       contentForm: {
         id: null,
@@ -297,6 +378,32 @@ export default {
         ],
         content_type: [
           { required: true, message: 'Please select content type', trigger: 'change' }
+        ]
+      },
+      packUploadRules: {
+        packCode: [
+          { required: true, message: 'Please enter pack code', trigger: 'blur' }
+        ],
+        name: [
+          { required: true, message: 'Please enter pack name', trigger: 'blur' }
+        ],
+        contentType: [
+          { required: true, message: 'Please select content type', trigger: 'change' }
+        ],
+        language: [
+          { required: true, message: 'Please select language', trigger: 'change' }
+        ],
+        files: [
+          {
+            validator: (_rule, _value, callback) => {
+              if (!this.packUploadFileList.length) {
+                callback(new Error('Please select a ZIP or media files'));
+                return;
+              }
+              callback();
+            },
+            trigger: 'change'
+          }
         ]
       }
     };
@@ -512,6 +619,77 @@ export default {
       this.dialogVisible = true;
       this.$nextTick(() => {
         this.$refs.contentForm && this.$refs.contentForm.clearValidate();
+      });
+    },
+    showUploadPackDialog() {
+      this.packUploadForm = {
+        packCode: '',
+        name: '',
+        contentType: 'rhyme_pack',
+        language: 'en',
+        version: '1',
+        description: ''
+      };
+      this.packUploadFileList = [];
+      this.packUploadVisible = true;
+      this.$nextTick(() => {
+        this.$refs.packUpload && this.$refs.packUpload.clearFiles();
+        this.$refs.packUploadForm && this.$refs.packUploadForm.clearValidate();
+      });
+    },
+    handlePackFileChange(file, fileList) {
+      this.packUploadFileList = fileList;
+      if (!this.packUploadForm.name && file && file.name) {
+        this.packUploadForm.name = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ');
+      }
+      if (!this.packUploadForm.packCode && file && file.name) {
+        this.packUploadForm.packCode = file.name
+          .replace(/\.[^/.]+$/, '')
+          .toUpperCase()
+          .replace(/[^A-Z0-9]+/g, '')
+          .slice(0, 16);
+      }
+      this.$refs.packUploadForm && this.$refs.packUploadForm.validateField('files');
+    },
+    handlePackFileRemove(_file, fileList) {
+      this.packUploadFileList = fileList;
+      this.$refs.packUploadForm && this.$refs.packUploadForm.validateField('files');
+    },
+    handlePackUploadSubmit() {
+      this.$refs.packUploadForm.validate((valid) => {
+        if (!valid) return;
+
+        const formData = new FormData();
+        formData.append('packCode', this.packUploadForm.packCode);
+        formData.append('name', this.packUploadForm.name);
+        formData.append('contentType', this.packUploadForm.contentType);
+        formData.append('language', this.packUploadForm.language);
+        formData.append('version', this.packUploadForm.version || '1');
+        formData.append('description', this.packUploadForm.description || '');
+        formData.append('status', 'published');
+        formData.append('active', 'true');
+
+        this.packUploadFileList.forEach((file) => {
+          if (file.raw) {
+            formData.append('files', file.raw, file.name);
+          }
+        });
+
+        this.packUploading = true;
+        Api.content.uploadContentPack(formData, (res) => {
+          this.packUploading = false;
+          const data = res.data || {};
+          if (data.code === 0) {
+            const pack = data.data || {};
+            this.$message.success(`Created content pack ${pack.packCode || this.packUploadForm.packCode}`);
+            this.packUploadVisible = false;
+            this.fetchContent();
+            this.fetchStats();
+            this.fetchCategories();
+          } else {
+            this.$message.error(data.msg || 'Failed to upload content pack');
+          }
+        });
       });
     },
     handleEdit(row) {
