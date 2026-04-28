@@ -682,21 +682,36 @@ class VirtualMQTTConnection {
       const roomName = this.bridge?.room?.name || this.udp.session_id;
       const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-agent";
       logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
+      const dispatchMetadata = buildDispatchMetadata({
+        macAddress: this.macAddress,
+        deviceId: this.deviceId,
+        character: this.currentCharacter,
+        childProfile: this.childProfile,
+        memoryData: this.mem0Memories,
+        sessionConfig: this.sessionConfig,
+      });
+      const roomService = this.server?.roomService || this.gateway?.roomService;
 
       try {
+        if (roomService) {
+          try {
+            await roomService.updateRoomMetadata(roomName, dispatchMetadata);
+            logger.info(
+              `🧩 [ROOM-METADATA] Updated room metadata (${dispatchMetadata.length} bytes) for room: ${roomName}`
+            );
+          } catch (roomMetadataError) {
+            logger.warn(
+              `⚠️ [ROOM-METADATA] Failed to update room metadata for room ${roomName}: ${roomMetadataError.message}`
+            );
+          }
+        }
+
         this.bridge.agentDeployed = true;
         await this.gateway.agentDispatchClient.createDispatch(
           roomName,
           agentName,
           {
-            metadata: buildDispatchMetadata({
-              macAddress: this.macAddress,
-              deviceId: this.deviceId,
-              character: this.currentCharacter,
-              childProfile: this.childProfile,
-              memoryData: this.mem0Memories,
-              sessionConfig: this.sessionConfig,
-            }),
+            metadata: dispatchMetadata,
           }
         );
         logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
