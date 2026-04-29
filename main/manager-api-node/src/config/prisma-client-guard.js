@@ -28,11 +28,11 @@ const assertRequiredDatabaseTables = async (prisma, requiredTables = REQUIRED_PR
   }
 
   const rows = await prisma.$queryRawUnsafe(`
-    SELECT table_name
+    SELECT table_name::text AS table_name
     FROM information_schema.tables
     WHERE table_schema = 'public'
       AND table_type = 'BASE TABLE'
-      AND table_name = ANY($1::text[])
+      AND table_name::text = ANY($1::text[])
   `, requiredTables);
 
   const existing = new Set((rows || []).map((row) => row.table_name || row.tableName));

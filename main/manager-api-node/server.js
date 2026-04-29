@@ -34,9 +34,13 @@ const startServer = async () => {
     const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
     const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
 
-    assertRequiredPrismaModels(prisma);
-    await assertRequiredDatabaseTables(prisma);
-    logger.info('Database schema ready.');
+    if (process.env.SKIP_DB_SCHEMA_GUARD === '1') {
+      logger.warn('Skipping database schema guard (SKIP_DB_SCHEMA_GUARD=1). Some manager API routes may fail if their tables are missing.');
+    } else {
+      assertRequiredPrismaModels(prisma);
+      await assertRequiredDatabaseTables(prisma);
+      logger.info('Database schema ready.');
+    }
 
     // Start Express server
     // Bind to 127.0.0.1 to avoid Windows EACCES permission issues

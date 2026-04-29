@@ -154,7 +154,7 @@ const runPrismaMigrations = async () => {
         NO_COLOR: '1',
         FORCE_COLOR: '0'
       },
-      timeout: 60000 // 60 second timeout
+      timeout: parseInt(process.env.PRISMA_MIGRATION_TIMEOUT_MS, 10) || 300000 // 5 minute default
     });
 
     // Log migration output
@@ -178,7 +178,10 @@ const runPrismaMigrations = async () => {
     // Extract meaningful error message
     let errorMessage = 'Migration failed';
 
-    if (error.stderr) {
+    if (error.killed || error.signal) {
+      errorMessage = `Migration command timed out or was killed after ${error.signal || 'timeout'}. ` +
+        'Increase PRISMA_MIGRATION_TIMEOUT_MS or run `npx prisma migrate deploy` manually to see full output.';
+    } else if (error.stderr) {
       errorMessage = error.stderr.toString().trim();
     } else if (error.stdout) {
       errorMessage = error.stdout.toString().trim();

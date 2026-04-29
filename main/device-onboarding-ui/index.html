@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cheeko Device Onboarding</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">C</div>
+        <div>
+          <span class="brand-name">Cheeko</span>
+          <span class="brand-subtitle">Device setup</span>
+        </div>
+      </div>
+      <div class="secure-note">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3l7 3v5c0 4.55-2.91 8.67-7 10-4.09-1.33-7-5.45-7-10V6l7-3z"></path>
+          <path d="M9.5 12.2l1.7 1.7 3.6-4"></path>
+        </svg>
+        Secure setup
+      </div>
+    </header>
+
+    <section class="workspace">
+      <aside class="steps" aria-label="Onboarding steps">
+        <div class="steps-header">
+          <h1>Set up your device</h1>
+          <p>Connect your Cheeko device to a WebSocket endpoint in a few focused steps.</p>
+        </div>
+        <button class="step is-active" data-step="0">
+          <span>1</span>
+          <strong>Account</strong>
+        </button>
+        <button class="step" data-step="1">
+          <span>2</span>
+          <strong>Device code</strong>
+        </button>
+        <button class="step" data-step="2">
+          <span>3</span>
+          <strong>WebSocket URL</strong>
+        </button>
+        <button class="step" data-step="3">
+          <span>4</span>
+          <strong>Ready</strong>
+        </button>
+      </aside>
+
+      <section class="panel">
+        <div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+        <section class="screen is-active" data-screen="0">
+          <div class="screen-header">
+            <span>Step 1</span>
+            <h2>Sign in to continue</h2>
+            <p>Create an onboarding account or use an existing one.</p>
+          </div>
+
+          <div class="tabs" role="tablist">
+            <button class="tab is-active" type="button" data-mode="login">Login</button>
+            <button class="tab" type="button" data-mode="register">Register</button>
+          </div>
+
+          <form id="loginForm" class="form">
+            <label>
+              Username or email
+              <input name="username" autocomplete="username" placeholder="name@example.com" required>
+            </label>
+            <label>
+              Password
+              <input name="password" type="password" autocomplete="current-password" placeholder="Enter password" required>
+            </label>
+            <button type="submit" class="primary">Continue</button>
+          </form>
+
+          <form id="registerForm" class="form is-hidden">
+            <label>
+              Username
+              <input name="username" autocomplete="username" minlength="3" placeholder="Choose a username" required>
+            </label>
+            <label>
+              Email
+              <input name="email" type="email" autocomplete="email" placeholder="name@example.com">
+            </label>
+            <label>
+              Password
+              <input name="password" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" required>
+            </label>
+            <label>
+              Confirm password
+              <input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" placeholder="Confirm password" required>
+            </label>
+            <button type="submit" class="primary">Create account</button>
+          </form>
+        </section>
+
+        <section class="screen" data-screen="1">
+          <div class="screen-header">
+            <span>Step 2</span>
+            <h2>Enter activation code</h2>
+            <p>Use the six-digit code displayed by the device.</p>
+          </div>
+          <form id="activationForm" class="form">
+            <label>
+              Device activation code
+              <input class="code-input" name="activationCode" inputmode="numeric" maxlength="6" placeholder="123456" required>
+            </label>
+            <div class="actions">
+              <button type="button" class="secondary" data-back="0">Back</button>
+              <button type="submit" class="primary">Bind device</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="screen" data-screen="2">
+          <div class="screen-header">
+            <span>Step 3</span>
+            <h2>Add WebSocket address</h2>
+            <p>This URL will replace MQTT details for this device during OTA checks.</p>
+          </div>
+          <div id="deviceSummary" class="summary" hidden></div>
+          <form id="websocketForm" class="form">
+            <label>
+              WebSocket URL
+              <input name="websocketUrl" placeholder="wss://your-server.example.com/cheeko/v1/" required>
+            </label>
+            <div class="actions">
+              <button type="button" class="secondary" data-back="1">Back</button>
+              <button type="submit" class="primary">Save WebSocket</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="screen done" data-screen="3">
+          <div class="done-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M20 6L9 17l-5-5"></path>
+            </svg>
+          </div>
+          <h2>Device ready</h2>
+          <p>The saved WebSocket address will be sent to the device on the next OTA check.</p>
+          <code id="savedUrl"></code>
+          <button type="button" class="primary" id="againButton">Onboard another device</button>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>

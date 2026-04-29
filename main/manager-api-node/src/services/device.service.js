@@ -7,6 +7,7 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
+const onboardingService = require('./onboarding.service');
 
 /**
  * In-memory activation code cache
@@ -571,23 +572,29 @@ const checkOtaVersion = async (mac, clientIdOrVersion, deviceReportOrBoard) => {
     });
   }
 
-  // Build WebSocket configuration
-  let wsUrl = await getSystemParam('server.websocket');
-  if (!wsUrl || wsUrl === 'null') {
-    wsUrl = 'ws://192.168.1.99:8000/cheeko/v1/';
+  // Build WebSocket configuration. Devices onboarded through the new public
+  // flow receive their saved WebSocket URL and skip MQTT credentials.
+  const onboardingWebsocketUrl = await onboardingService.getDeviceWebsocketByMac(normalizedMac);
+  if (onboardingWebsocketUrl) {
+    response.websocket = { url: onboardingWebsocketUrl };
   } else {
-    // If multiple URLs (semicolon separated), pick random one
-    const wsUrls = wsUrl.split(';');
-    wsUrl = wsUrls[Math.floor(Math.random() * wsUrls.length)];
-  }
-  response.websocket = { url: wsUrl };
+    let wsUrl = await getSystemParam('server.websocket');
+    if (!wsUrl || wsUrl === 'null') {
+      wsUrl = 'ws://192.168.1.99:8000/cheeko/v1/';
+    } else {
+      // If multiple URLs (semicolon separated), pick random one
+      const wsUrls = wsUrl.split(';');
+      wsUrl = wsUrls[Math.floor(Math.random() * wsUrls.length)];
+    }
+    response.websocket = { url: wsUrl };
 
-  // Build MQTT credentials (always included)
-  response.mqtt = await buildMqttCredentials(normalizedMac);
+    // Existing devices keep receiving MQTT credentials.
+    response.mqtt = await buildMqttCredentials(normalizedMac);
+  }
 
   // Build activation code for unregistered OR unbound devices
   // Unbound devices (user_id=null) need activation code so another user can bind them
-  if (!device || !device.user_id) {
+  if (!onboardingWebsocketUrl && (!device || !device.user_id)) {
     const frontendUrl = await getSystemParam('server.frontend_url') || 'http://localhost:8001';
 
     // Check if we already have an activation code for this MAC
@@ -610,6 +617,13 @@ const checkOtaVersion = async (mac, clientIdOrVersion, deviceReportOrBoard) => {
 
       logger.info(`Generated activation code ${activationCode} for device ${normalizedMac}`);
     }
+
+    await onboardingService.saveActivationCode({
+      macAddress: normalizedMac,
+      activationCode,
+      board: reportedFirmwareType || 'unknown',
+      appVersion: currentVersion
+    });
 
     response.activation = {
       code: activationCode,

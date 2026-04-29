@@ -37,10 +37,20 @@ app.use(helmet({
 }));
 
 // CORS configuration
+const configuredCorsOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(origin => origin.trim()).filter(Boolean)
+  : ['http://localhost:8080', 'http://localhost:3000'];
+
+const developmentCorsOrigins = process.env.NODE_ENV !== 'production'
+  ? [
+    'http://localhost:8003',
+    'http://127.0.0.1:8003',
+    'http://192.168.0.113:8003'
+  ]
+  : [];
+
 const corsOptions = {
-  origin: process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:8080', 'http://localhost:3000'],
+  origin: Array.from(new Set([...configuredCorsOrigins, ...developmentCorsOrigins])),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Service-Key', 'X-Requested-With']
