@@ -4,8 +4,6 @@ import os
 # Disable CrewAI Telemetry to avoid thread signal issues in Streamlit
 os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
 
-# Set the API key for LiteLLM
-os.environ["GEMINI_API_KEY"] = os.getenv("GEMINI_API_KEY", "")
 # Using Gemini 2.5 Flash as requested (available since mid-2025)
 MODEL_NAME = 'gemini/gemini-2.5-flash'
 

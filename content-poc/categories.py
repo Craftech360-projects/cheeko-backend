@@ -1,3 +1,6 @@
+
+
+
 """
 Card category definitions for Cheeko Content Factory.
 Each category provides context to the AI agents for better script and image generation.

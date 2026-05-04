@@ -12,11 +12,15 @@ from generators import generate_audio, generate_audio_fish, generate_image, init
 from categories import CATEGORIES, get_category_names, get_card_categories, get_general_categories
 
 # Load env variables
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"), override=True)
 
-def sanitize_dirname(name):
-    """Remove characters invalid in Windows folder names."""
-    return re.sub(r'[<>:"/\\|?*]', '', name).replace(" ", "_").strip()
+def sanitize_dirname(name, max_len=80):
+    """Create a safe, short Windows folder name."""
+    safe = re.sub(r'[<>:"/\\|?*]', '', str(name)).replace(" ", "_").strip(" ._")
+    safe = re.sub(r"_+", "_", safe)
+    if not safe:
+        return "Untitled_Project"
+    return safe[:max_len]
 
 st.set_page_config(page_title="Cheeko Content Factory", layout="wide")
 
@@ -176,7 +180,10 @@ def main():
                 "Gigi (Child - American)": "jBpfuIE2acCO8z3wKNLl",
                 "Rachel": "21m00Tcm4TlvDq8ikWAM",
                 "Nicole (Soft & Calm)": "piTKgcLEGmPE4e6mEKli",
-                "Bella (Soft)": "EXAVITQu4vr4xnSDxMaL"
+                "Bella (Soft)": "EXAVITQu4vr4xnSDxMaL",
+                "Suhana Very Young & Joyful Narrator":"9vP6R7VVxNwGIGLnpl17"
+
+
             }
             selected_voice_name = st.selectbox("Voice Character", list(voices.keys()), index=0)
             selected_voice_id = voices[selected_voice_name]
