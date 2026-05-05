@@ -33,9 +33,17 @@ const startServer = async () => {
     const { prisma } = require('./src/config/database');
     const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
     const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
+    const shouldSkipRequiredTableGuard = process.env.SKIP_DB_SYNC === '1';
 
     assertRequiredPrismaModels(prisma);
-    await assertRequiredDatabaseTables(prisma);
+    if (shouldSkipRequiredTableGuard) {
+      logger.warn(
+        'Skipping required Prisma table guard (SKIP_DB_SYNC=1). ' +
+        'Run `npx prisma migrate deploy` before enabling routes that need recent schema tables.'
+      );
+    } else {
+      await assertRequiredDatabaseTables(prisma);
+    }
     logger.info('Database schema ready.');
 
     // Start Express server

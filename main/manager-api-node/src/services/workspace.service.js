@@ -3,11 +3,15 @@ const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 
 const FILE_MAP = {
-  'IDENTITY.md': 'IDENTITY.md',
+  'AGENT.md': 'AGENT.md',
   'USER.md': 'USER.md',
   'SOUL.md': 'SOUL.md',
   'HEARTBEAT.md': 'HEARTBEAT.md',
   'MEMORY.md': 'memory/MEMORY.md',
+};
+
+const INPUT_KEY_ALIASES = {
+  'memory/MEMORY.md': 'MEMORY.md',
 };
 
 const MAX_BYTES = 256 * 1024;
@@ -45,10 +49,16 @@ async function getWorkspaceFiles(macAddress, userId = null) {
       select: { content: true, updated_at: true },
     });
 
-    result[displayName] = {
+    const payload = {
       content: row?.content ?? '',
       updatedAt: row?.updated_at?.toISOString() ?? null,
     };
+    result[displayName] = payload;
+
+    // Backward-compatible response alias for memory path.
+    if (displayName === 'MEMORY.md') {
+      result['memory/MEMORY.md'] = payload;
+    }
   }
 
   return result;
@@ -68,13 +78,22 @@ async function saveWorkspaceFiles(macAddress, userId = null, files = {}) {
   });
   if (!device) throw new Error('Device not found');
 
+  const normalizedFiles = {};
+  for (const [rawKey, rawValue] of Object.entries(files || {})) {
+    const canonicalKey = INPUT_KEY_ALIASES[rawKey] || rawKey;
+    if (!(canonicalKey in FILE_MAP)) continue;
+    if (!(canonicalKey in normalizedFiles)) {
+      normalizedFiles[canonicalKey] = rawValue;
+    }
+  }
+
   const saved = [];
   const now = new Date();
 
   for (const [displayName, storagePath] of Object.entries(FILE_MAP)) {
-    if (!(displayName in files)) continue;
+    if (!(displayName in normalizedFiles)) continue;
 
-    const content = typeof files[displayName] === 'string' ? files[displayName] : '';
+    const content = typeof normalizedFiles[displayName] === 'string' ? normalizedFiles[displayName] : '';
     const sizeBytes = Buffer.byteLength(content, 'utf8');
     if (sizeBytes > MAX_BYTES) {
       throw new Error(`${displayName} exceeds 256 KB`);

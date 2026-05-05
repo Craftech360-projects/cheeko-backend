@@ -10,8 +10,17 @@
 const { createClient } = require('@supabase/supabase-js');
 const { Pool } = require('pg');
 const { PrismaClient } = require('@prisma/client');
-const { PrismaPg } = require('@prisma/adapter-pg');
 const logger = require('../utils/logger');
+
+let PrismaPg = null;
+try {
+  ({ PrismaPg } = require('@prisma/adapter-pg'));
+} catch (error) {
+  // Keep startup alive when adapter package is absent in a deployed environment.
+  logger.warn(
+    `@prisma/adapter-pg is unavailable (${error.code || error.message}); using Prisma default connection mode.`
+  );
+}
 
 /**
  * Derive a safe/usable DB URL for Supabase pooler deployments.
@@ -85,11 +94,17 @@ pgPool.on('error', (err) => {
   logger.error('❌ Unexpected idle pg pool error:', err.message);
 });
 
-const adapter = new PrismaPg(pgPool);
-const prisma = new PrismaClient({
-  adapter,
+const prismaClientOptions = {
   log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
-});
+};
+
+if (PrismaPg) {
+  prismaClientOptions.adapter = new PrismaPg(pgPool);
+} else if (dbConnectionString) {
+  prismaClientOptions.datasourceUrl = dbConnectionString;
+}
+
+const prisma = new PrismaClient(prismaClientOptions);
 
 /**
  * Test database connection via Prisma (DigitalOcean PostgreSQL).
