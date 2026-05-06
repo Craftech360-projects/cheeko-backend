@@ -73,7 +73,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // XSS protection
-app.use(xssFilter());
+app.use(xssFilter({
+  // Workspace markdown files are trusted service-to-service payloads and
+  // must be stored verbatim (without HTML entity escaping).
+  shouldSkip: (req) => /^\/toy\/agent\/device\/[^/]+\/workspace-files$/.test(req.path)
+}));
 
 // ===========================================
 // Request Tracking Middleware

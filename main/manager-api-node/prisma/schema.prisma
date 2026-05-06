@@ -788,7 +788,7 @@ model rfid_question_pack {
   language     String?   @default("en") @db.VarChar(10)
   category     String?   @db.VarChar(100)
   version      Int?
-  status       String?   @db.VarChar(50)
+  status       Int?      @default(1)
   active       Boolean?  @default(true)
   creator      BigInt?
   create_date  DateTime? @default(now()) @db.Timestamptz(6)

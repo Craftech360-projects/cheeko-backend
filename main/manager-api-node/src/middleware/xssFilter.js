@@ -71,17 +71,23 @@ const sanitize = (obj, options = {}) => {
  * @param {boolean} options.sanitizeQuery - Whether to sanitize query params
  * @param {boolean} options.sanitizeBody - Whether to sanitize body
  * @param {boolean} options.sanitizeParams - Whether to sanitize params
+ * @param {(req: import('express').Request) => boolean} options.shouldSkip - Whether to skip sanitization for request
  */
 const xssFilter = (options = {}) => {
   const {
     skipFields = ['systemPrompt', 'contentMd', 'promptText', 'content', 'firmwarePath'],
     sanitizeQuery = true,
     sanitizeBody = true,
-    sanitizeParams = true
+    sanitizeParams = true,
+    shouldSkip = null
   } = options;
 
   return (req, res, next) => {
     try {
+      if (typeof shouldSkip === 'function' && shouldSkip(req) === true) {
+        return next();
+      }
+
       if (sanitizeBody && req.body) {
         req.body = sanitize(req.body, { skipFields });
       }

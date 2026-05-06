@@ -3922,6 +3922,12 @@ const deleteContentPacks = async (ids) => {
  */
 const transformQuestionPackToCamelCase = (pack) => {
   if (!pack) return null;
+  const active = pack.active !== undefined && pack.active !== null
+    ? Boolean(pack.active)
+    : pack.status === 1;
+  const status = pack.status !== undefined && pack.status !== null
+    ? Number(pack.status)
+    : (active ? 1 : 0);
   return {
     id: pack.id ? Number(pack.id) : null,
     packCode: pack.pack_code,
@@ -3931,8 +3937,8 @@ const transformQuestionPackToCamelCase = (pack) => {
     language: pack.language,
     category: pack.category,
     version: pack.version,
-    status: pack.status,
-    active: pack.active,
+    status,
+    active,
     createDate: formatDate(pack.create_date),
     updateDate: formatDate(pack.update_date),
   };
@@ -4081,7 +4087,7 @@ const createQuestionPack = async (data, userId) => {
         question_ids: finalQuestionIds,
         language: data.language || 'en',
         category: data.category || 'general',
-        version: data.version || '1',
+        version: data.version != null ? Number(data.version) : 1,
         active: true,
         status: 1,
         creator: userId ? BigInt(userId) : null,
@@ -4111,8 +4117,12 @@ const updateQuestionPack = async (data, userId) => {
   if (data.questionIds !== undefined) updateData.question_ids = data.questionIds;
   if (data.language !== undefined) updateData.language = data.language;
   if (data.category !== undefined) updateData.category = data.category;
-  if (data.version !== undefined) updateData.version = data.version != null ? String(data.version) : null;
-  if (data.active !== undefined) updateData.active = data.active;
+  if (data.version !== undefined) updateData.version = data.version != null ? Number(data.version) : null;
+  if (data.active !== undefined) {
+    const activeFlag = Boolean(data.active);
+    updateData.active = activeFlag;
+    updateData.status = activeFlag ? 1 : 0;
+  }
   if (userId) updateData.updater = BigInt(userId);
 
   try {
