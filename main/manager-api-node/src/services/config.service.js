@@ -423,11 +423,87 @@ const getWeather = async ({ latitude, longitude, city }) => {
   };
 };
 
+/**
+ * Create a kid profile and assign it to a device by MAC address.
+ * Internal helper for service endpoint /config/assign-child-profile.
+ *
+ * @param {string} macAddress
+ * @param {Object} payload
+ * @param {string} payload.name
+ * @param {string} [payload.dateOfBirth]
+ * @param {string} [payload.gender]
+ * @param {string[]} [payload.interests]
+ * @param {string} [payload.additionalNotes]
+ * @returns {Promise<Object>}
+ */
+const createAndAssignChildProfile = async (macAddress, payload = {}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) {
+    throw new Error('Invalid MAC address');
+  }
+
+  const name = String(payload.name || '').trim();
+  if (!name) {
+    throw new Error('Child name is required');
+  }
+
+  const interests = Array.isArray(payload.interests)
+    ? payload.interests.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
+
+  const preferences = payload.additionalNotes
+    ? { additionalNotes: String(payload.additionalNotes).trim() }
+    : {};
+
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac },
+    select: { id: true, user_id: true }
+  });
+  if (!device) {
+    throw new Error('Device not found');
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const kid = await tx.kid_profile.create({
+      data: {
+        user_id: device.user_id || null,
+        name,
+        birth_date: payload.dateOfBirth ? new Date(payload.dateOfBirth) : null,
+        gender: payload.gender ? String(payload.gender).trim() : null,
+        interests,
+        language: 'en',
+        preferences
+      }
+    });
+
+    await tx.ai_device.update({
+      where: { id: device.id },
+      data: {
+        kid_id: kid.id,
+        update_date: new Date()
+      }
+    });
+
+    return kid;
+  });
+
+  return {
+    macAddress: normalizedMac,
+    deviceId: device.id,
+    kidId: result.id.toString(),
+    name: result.name,
+    gender: result.gender,
+    interests: result.interests || [],
+    additionalNotes: result.preferences?.additionalNotes || null
+  };
+};
+
 module.exports = {
   getServerBaseConfig,
   getAgentModels,
   getAgentPrompt,
   getChildProfileByMac,
+  createAndAssignChildProfile,
   getAgentTemplateIdByMac,
   getTemplateContent,
   getDeviceLocation,
