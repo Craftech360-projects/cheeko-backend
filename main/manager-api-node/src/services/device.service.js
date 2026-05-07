@@ -151,14 +151,17 @@ const getDevicesByAgent = async (userId, agentId, isSuperAdmin = false) => {
 /**
  * Unbind device from user
  * @param {number} userId - User ID
- * @param {string} deviceId - Device ID
+ * @param {string} deviceId - Device UUID or MAC address
  * @param {Object} options - unbind options
  * @param {boolean} options.hardDelete - delete the device row instead of only clearing bindings
  */
 const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}) => {
   const { hardDelete = false } = options;
-  const device = await prisma.ai_device.findUnique({
-    where: { id: deviceId },
+  const normalizedMac = normalizeMacAddress(deviceId);
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(deviceId);
+
+  const device = await prisma.ai_device.findFirst({
+    where: isUuid ? { id: deviceId } : { mac_address: normalizedMac || deviceId },
     select: { id: true, user_id: true },
   });
 
@@ -170,13 +173,13 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}
 
   if (hardDelete) {
     await prisma.ai_device.delete({
-      where: { id: deviceId },
+      where: { id: device.id },
     });
     return;
   }
 
   await prisma.ai_device.update({
-    where: { id: deviceId },
+    where: { id: device.id },
     data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() },
   });
 };
