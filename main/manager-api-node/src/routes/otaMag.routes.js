@@ -340,8 +340,7 @@ router.get('/download/:token',
         }
       }
 
-      // Read file content
-      const fileContent = fs.readFileSync(filePath);
+      const fileStat = fs.statSync(filePath);
 
       // Set response headers
       let originalFilename = firmware.type + '_' + firmware.version;
@@ -354,7 +353,25 @@ router.get('/download/:token',
 
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
-      res.send(fileContent);
+      res.setHeader('Content-Length', fileStat.size);
+
+      const stream = fs.createReadStream(filePath);
+      res.on('finish', () => {
+        logger.info(`Firmware download complete: id=${firmwareLookupId}, bytes=${fileStat.size}`);
+      });
+      res.on('close', () => {
+        logger.info(`Firmware download connection closed: id=${firmwareLookupId}`);
+      });
+      stream.on('error', (streamError) => {
+        logger.error('Failed while streaming firmware file', streamError);
+        if (!res.headersSent) {
+          res.status(500).send();
+        } else {
+          res.destroy(streamError);
+        }
+      });
+
+      stream.pipe(res);
     } catch (error) {
       logger.error('Failed to read firmware file', error);
       return res.status(500).send();

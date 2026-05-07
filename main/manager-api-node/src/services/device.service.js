@@ -16,6 +16,17 @@ const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
 const activationCodeCache = new Map();
 const activationMacCache = new Map(); // macAddress -> activationCode (reverse lookup)
 
+const buildOtaDownloadUrl = (otaUrl, firmwareId) => {
+  const baseUrl = (otaUrl || '').trim();
+  if (!baseUrl) return null;
+
+  if (baseUrl.includes('/ota/')) {
+    return `${baseUrl.replace('/ota/', '/otaMag/download/')}${firmwareId}`;
+  }
+
+  return `${baseUrl.replace(/\/+$/, '')}/otaMag/download/${firmwareId}`;
+};
+
 // Clean up expired activation codes (older than 24 hours)
 const ACTIVATION_CODE_TTL = 24 * 60 * 60 * 1000; // 24 hours in ms
 setInterval(() => {

@@ -309,6 +309,91 @@ const buildEmptyCardTapAnalyticsSummary = ({ startDate, endDate }) => ({
   }))
 });
 
+const normalizeContentItemRow = (item) => {
+  if (!item) return null;
+  return {
+    ...item,
+    image_url: null,
+    content_text: null,
+    story_number: item.story_number ?? null,
+    story_title: item.story_title ?? null
+  };
+};
+
+const isActiveContentItem = (item) => {
+  if (item?.active === null || item?.active === undefined) return true;
+  if (typeof item.active === 'boolean') return item.active;
+  if (typeof item.active === 'number') return item.active !== 0;
+  if (typeof item.active === 'string') {
+    const normalized = item.active.toLowerCase();
+    return normalized === 'true' || normalized === 't' || normalized === '1';
+  }
+  return Boolean(item.active);
+};
+
+const listContentItemsCompat = async (contentPackId) => {
+  const rows = await prisma.$queryRaw`
+    SELECT
+      id,
+      content_pack_id,
+      item_number,
+      title,
+      description,
+      audio_url,
+      audio_size_bytes,
+      audio_duration_ms,
+      images_json,
+      lyrics_text,
+      active,
+      creator,
+      create_date,
+      updater,
+      update_date,
+      NULL::text AS image_url,
+      NULL::text AS content_text,
+      NULL::integer AS story_number,
+      NULL::text AS story_title
+    FROM content_item
+    WHERE content_pack_id = ${BigInt(contentPackId)}
+    ORDER BY item_number ASC
+  `;
+
+  return (rows || []).map(normalizeContentItemRow).filter(isActiveContentItem);
+};
+
+const getContentItemCompat = async (contentPackId, itemNumber) => {
+  const rows = await prisma.$queryRaw`
+    SELECT
+      id,
+      content_pack_id,
+      item_number,
+      title,
+      description,
+      audio_url,
+      audio_size_bytes,
+      audio_duration_ms,
+      images_json,
+      lyrics_text,
+      active,
+      creator,
+      create_date,
+      updater,
+      update_date,
+      NULL::text AS image_url,
+      NULL::text AS content_text,
+      NULL::integer AS story_number,
+      NULL::text AS story_title
+    FROM content_item
+    WHERE content_pack_id = ${BigInt(contentPackId)}
+      AND item_number = ${itemNumber}
+    ORDER BY item_number ASC
+    LIMIT 1
+  `;
+
+  const item = rows?.[0] ? normalizeContentItemRow(rows[0]) : null;
+  return item && isActiveContentItem(item) ? item : null;
+};
+
 // =============================================
 // Helper: Transform RFID Question to camelCase (RfidQuestionDTO)
 // =============================================
@@ -696,10 +781,7 @@ const lookupCardByUid = async (rfidUid) => {
     if (pack) {
       let items = [];
       try {
-        items = await prisma.content_item.findMany({
-          where: { content_pack_id: pack.id },
-          orderBy: { item_number: 'asc' }
-        });
+        items = await listContentItemsCompat(pack.id);
       } catch (itemsErr) {
         logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
       }
@@ -2989,11 +3071,7 @@ const registerDeviceTags = async (mac, tags) => {
  */
 const getContentItemsByPackId = async (contentPackId) => {
   try {
-    const items = await prisma.content_item.findMany({
-      where: { content_pack_id: BigInt(contentPackId), active: true },
-      orderBy: [{ story_number: 'asc' }, { item_number: 'asc' }]
-    });
-    return items;
+    return await listContentItemsCompat(contentPackId);
   } catch (error) {
     logger.error('Failed to fetch content items:', { error, contentPackId });
     throw new Error('Failed to fetch content items');
@@ -3008,14 +3086,7 @@ const getContentItemsByPackId = async (contentPackId) => {
  */
 const getContentItem = async (contentPackId, itemNumber) => {
   try {
-    const item = await prisma.content_item.findFirst({
-      where: {
-        content_pack_id: BigInt(contentPackId),
-        item_number: itemNumber,
-        active: true
-      }
-    });
-    return item || null;
+    return await getContentItemCompat(contentPackId, itemNumber);
   } catch (error) {
     logger.error('Failed to fetch content item:', { error, contentPackId, itemNumber });
     throw new Error('Failed to fetch content item');
@@ -3029,10 +3100,7 @@ const getContentItem = async (contentPackId, itemNumber) => {
  */
 const getTotalAudioSize = async (contentPackId) => {
   try {
-    const items = await prisma.content_item.findMany({
-      where: { content_pack_id: BigInt(contentPackId), active: true },
-      select: { audio_size_bytes: true }
-    });
+    const items = await listContentItemsCompat(contentPackId);
     return (items || []).reduce((sum, item) => sum + (item.audio_size_bytes ? Number(item.audio_size_bytes) : 0), 0);
   } catch (error) {
     logger.error('Failed to get total audio size:', { error, contentPackId });
@@ -3047,14 +3115,7 @@ const getTotalAudioSize = async (contentPackId) => {
  */
 const countItemsWithImages = async (contentPackId) => {
   try {
-    const items = await prisma.content_item.findMany({
-      where: {
-        content_pack_id: BigInt(contentPackId),
-        active: true,
-        NOT: { images_json: null }
-      },
-      select: { id: true, images_json: true }
-    });
+    const items = await listContentItemsCompat(contentPackId);
 
     // Filter for non-empty arrays
     return (items || []).filter(item => {
@@ -3644,10 +3705,7 @@ const getContentPackByCode = async (packCode) => {
     // Fetch associated items
     let items = [];
     try {
-      items = await prisma.content_item.findMany({
-        where: { content_pack_id: pack.id },
-        orderBy: { item_number: 'asc' }
-      });
+      items = await listContentItemsCompat(pack.id);
     } catch (itemsError) {
       logger.error('Failed to fetch content items:', itemsError);
       // Non-fatal, continue without items
