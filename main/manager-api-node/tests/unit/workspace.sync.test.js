@@ -110,4 +110,30 @@ describe('workspace sync service', () => {
       deletedCount: 1
     });
   });
+
+  it('rejects workspace sync files containing NUL bytes with 400 validation error', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({
+      id: 'device-id',
+      agent_id: 'agent-id'
+    });
+    prisma.device_workspace_artifacts.findUnique.mockResolvedValue({
+      content: JSON.stringify({ revision: 'rev-1' })
+    });
+
+    await expect(workspaceService.saveWorkspaceSync('aa-bb-cc-dd-ee-ff', null, {
+      baseRevision: 'rev-1',
+      newRevision: 'rev-2',
+      files: [
+        {
+          relativePath: 'notes/binary.txt',
+          content: 'hello\u0000world',
+          contentType: 'text/plain'
+        }
+      ]
+    })).rejects.toMatchObject({
+      statusCode: 400
+    });
+
+    expect(prisma.device_workspace_artifacts.upsert).not.toHaveBeenCalled();
+  });
 });

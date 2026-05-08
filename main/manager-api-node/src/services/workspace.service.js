@@ -19,6 +19,7 @@ const MAX_BYTES = 256 * 1024;
 const DEFAULT_SYNC_LIMIT = 500;
 const MAX_SYNC_LIMIT = 2000;
 const MANIFEST_PATH = '.picoclaw/workspace-manifest.json';
+const NUL_CHAR = '\u0000';
 
 function clampLimit(value, defaultLimit = DEFAULT_SYNC_LIMIT, maxLimit = MAX_SYNC_LIMIT) {
   const parsed = Number.parseInt(value, 10);
@@ -56,6 +57,15 @@ function parseManifestContent(content) {
     // ignore malformed old manifest
   }
   return {};
+}
+
+function ensureNoNulBytes(content, label) {
+  if (typeof content !== 'string') return;
+  if (content.includes(NUL_CHAR)) {
+    const error = new Error(`${label} contains unsupported binary null bytes`);
+    error.statusCode = 400;
+    throw error;
+  }
 }
 
 async function getDeviceByMac(normalizedMac) {
@@ -140,6 +150,7 @@ async function saveWorkspaceFiles(macAddress, userId = null, files = {}) {
     if (!(displayName in normalizedFiles)) continue;
 
     const content = typeof normalizedFiles[displayName] === 'string' ? normalizedFiles[displayName] : '';
+    ensureNoNulBytes(content, displayName);
     const sizeBytes = Buffer.byteLength(content, 'utf8');
     if (sizeBytes > MAX_BYTES) {
       throw new Error(`${displayName} exceeds 256 KB`);
@@ -308,6 +319,7 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
     if (relativePath === MANIFEST_PATH) continue;
 
     const content = typeof item.content === 'string' ? item.content : '';
+    ensureNoNulBytes(content, relativePath);
     const sizeBytes = Buffer.byteLength(content, 'utf8');
     if (sizeBytes > MAX_BYTES) {
       throw new Error(`${relativePath} exceeds ${MAX_BYTES} bytes`);
@@ -396,6 +408,7 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
     deleted: normalizedDeleted,
   };
   const manifestText = JSON.stringify(manifestContent, null, 2);
+  ensureNoNulBytes(manifestText, MANIFEST_PATH);
 
   await prisma.device_workspace_artifacts.upsert({
     where: {
