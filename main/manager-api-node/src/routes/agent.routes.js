@@ -8,11 +8,16 @@
 const express = require('express');
 const router = express.Router();
 const agentService = require('../services/agent.service');
-const { getWorkspaceFiles, saveWorkspaceFiles } = require('../services/workspace.service');
+const {
+  getWorkspaceFiles,
+  saveWorkspaceFiles,
+  getWorkspaceSync,
+  saveWorkspaceSync,
+} = require('../services/workspace.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireServiceKey, requireDualAuth } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
-const { success, badRequest, notFound } = require('../utils/response');
+const { success, badRequest, notFound, conflict } = require('../utils/response');
 const logger = require('../utils/logger');
 
 // ==============================================
@@ -1517,6 +1522,52 @@ router.put('/device/:mac/workspace-files',
     const userId = req.isServiceAuth ? null : req.user.id;
     const result = await saveWorkspaceFiles(req.params.mac, userId, req.body);
     success(res, result, 'Workspace files saved');
+  })
+);
+
+router.get('/device/:mac/workspace-sync',
+  requireDualAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.isServiceAuth ? null : req.user.id;
+    const result = await getWorkspaceSync(req.params.mac, userId, {
+      sinceRevision: req.query.sinceRevision,
+      limit: req.query.limit,
+    });
+    success(res, result, 'Workspace sync snapshot retrieved');
+  })
+);
+
+router.put('/device/:mac/workspace-sync',
+  requireDualAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.isServiceAuth ? null : req.user.id;
+    try {
+      const result = await saveWorkspaceSync(req.params.mac, userId, req.body || {});
+      success(res, result, 'Workspace sync snapshot saved');
+    } catch (error) {
+      if (error?.statusCode === 409) {
+        return conflict(res, error.message);
+      }
+      throw error;
+    }
+  })
+);
+
+router.get('/device/:mac/sessions/:sessionId/messages',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getVoiceSessionMessagesForDevice(req.params.mac, req.params.sessionId, {
+        cursor: req.query.cursor,
+        limit: req.query.limit,
+      });
+      success(res, result, 'Voice session messages retrieved');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      badRequest(res, error.message);
+    }
   })
 );
 

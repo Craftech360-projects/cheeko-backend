@@ -9,6 +9,9 @@ describe('agent workspace artifacts', () => {
       ai_device: {
         findUnique: jest.fn()
       },
+      voice_session_messages: {
+        findMany: jest.fn()
+      },
       device_workspace_artifacts: {
         upsert: jest.fn(),
         findMany: jest.fn(),
@@ -139,6 +142,63 @@ describe('agent workspace artifacts', () => {
       })
     ]);
   });
+
+  it('returns paginated voice session messages for a device using sequence cursor', async () => {
+    prisma.voice_session_messages.findMany.mockResolvedValue([
+      {
+        id: 'm1',
+        session_id: 'session-1',
+        sequence: 1,
+        role: 'user',
+        content: 'hello',
+        audio_id: null,
+        idempotency_key: 'session-1:1',
+        created_at: new Date('2026-05-08T10:00:00.000Z')
+      },
+      {
+        id: 'm2',
+        session_id: 'session-1',
+        sequence: 2,
+        role: 'assistant',
+        content: 'hi there',
+        audio_id: 'aud-2',
+        idempotency_key: 'session-1:2',
+        created_at: new Date('2026-05-08T10:00:02.000Z')
+      }
+    ]);
+
+    const result = await agentService.getVoiceSessionMessagesForDevice('aa-bb-cc-dd-ee-ff', 'session-1', {
+      cursor: '0',
+      limit: 1
+    });
+
+    expect(prisma.voice_session_messages.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        session_id: 'session-1',
+        sequence: { gt: 0 }
+      }),
+      orderBy: { sequence: 'asc' },
+      take: 2
+    }));
+
+    expect(result).toMatchObject({
+      sessionId: 'session-1',
+      macAddress: 'AA:BB:CC:DD:EE:FF',
+      cursor: 0,
+      nextCursor: 1,
+      hasMore: true,
+      messages: [
+        expect.objectContaining({
+          id: 'm1',
+          sequence: 1,
+          role: 'user',
+          chatType: 1,
+          content: 'hello'
+        })
+      ]
+    });
+  });
 });
 
 describe('agent workspace artifact routes', () => {
@@ -150,5 +210,15 @@ describe('agent workspace artifact routes', () => {
     expect(source).toMatch(/router\.put\('\/device\/:mac\/artifacts',\s*requireServiceKey,/);
     expect(source).toMatch(/router\.get\('\/device\/:mac\/artifacts',\s*requireServiceKey,/);
     expect(source).toMatch(/router\.get\('\/device\/:mac\/artifacts\/content',\s*requireServiceKey,/);
+    expect(source).toMatch(/router\.get\('\/device\/:mac\/sessions\/:sessionId\/messages',\s*requireServiceKey,/);
+  });
+
+  it('protects workspace sync endpoints with dual auth', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.join(__dirname, '../../src/routes/agent.routes.js'), 'utf8');
+
+    expect(source).toMatch(/router\.get\('\/device\/:mac\/workspace-sync',\s*requireDualAuth,/);
+    expect(source).toMatch(/router\.put\('\/device\/:mac\/workspace-sync',\s*requireDualAuth,/);
   });
 });

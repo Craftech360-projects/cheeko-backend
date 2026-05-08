@@ -360,6 +360,61 @@ const getChatHistory = async (agentId, sessionId) => {
   return formatChatHistoryMessages(voiceMessages, msg => roleToChatType(msg.role));
 };
 
+const getVoiceSessionMessagesForDevice = async (macAddress, sessionId, options = {}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+  if (!sessionId || typeof sessionId !== 'string' || sessionId.trim() === '') {
+    throw new Error('sessionId is required');
+  }
+
+  const limit = clampLimit(options.limit, 100, 500);
+  const parsedCursor = Number.parseInt(options.cursor, 10);
+  const cursor = Number.isNaN(parsedCursor) || parsedCursor < 0 ? 0 : parsedCursor;
+
+  const rows = await prisma.voice_session_messages.findMany({
+    where: {
+      mac_address: normalizedMac,
+      session_id: sessionId.trim(),
+      sequence: { gt: cursor }
+    },
+    orderBy: { sequence: 'asc' },
+    take: limit + 1,
+    select: {
+      id: true,
+      session_id: true,
+      sequence: true,
+      role: true,
+      content: true,
+      audio_id: true,
+      created_at: true,
+      idempotency_key: true,
+    }
+  });
+
+  const hasMore = rows.length > limit;
+  const slice = hasMore ? rows.slice(0, limit) : rows;
+  const nextCursor = hasMore && slice.length > 0 ? slice[slice.length - 1].sequence : null;
+
+  return {
+    sessionId: sessionId.trim(),
+    macAddress: normalizedMac,
+    cursor,
+    nextCursor,
+    hasMore,
+    messages: slice.map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      sequence: row.sequence,
+      role: row.role,
+      chatType: roleToChatType(row.role),
+      content: row.content || '',
+      audioId: row.audio_id || null,
+      idempotencyKey: row.idempotency_key,
+      createdAt: toISOStringOrNull(row.created_at)
+    }))
+  };
+};
+
 const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }) => {
   await prisma.voice_sessions.upsert({
     where: { session_id: sessionId },
@@ -2851,6 +2906,7 @@ module.exports = {
   adminAgentListPaginated,
   getAgentSessions,
   getChatHistory,
+  getVoiceSessionMessagesForDevice,
   addChatMessage,
   getPromptByMac,
   getAgentIdByMac,
