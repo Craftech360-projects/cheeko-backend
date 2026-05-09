@@ -5,7 +5,7 @@ const { requireFirebaseAuth } = require('../middleware/firebaseAuth');
 const mobileService = require('../services/mobile.service');
 const agentService = require('../services/agent.service');
 const deviceService = require('../services/device.service');
-const { success } = require('../utils/response');
+const { success, badRequest } = require('../utils/response');
 
 // All mobile routes require a valid Firebase ID token
 router.use(requireFirebaseAuth);
@@ -28,13 +28,25 @@ router.put('/parent-profile', asyncHandler(async (req, res) => {
     res.json(profile);
 }));
 
-// Mock FCM token endpoints (since token is usually handled locally or via push service)
 router.put('/parent-profile/fcm-token', asyncHandler(async (req, res) => {
-    res.json({ success: true, message: 'FCM token recorded' });
+    const fcmToken = req.body.fcmToken || req.body.fcm_token || req.body.token;
+    if (!fcmToken) return badRequest(res, 'FCM token is required');
+
+    const profile = await mobileService.updateFcmToken(req.firebaseUser.uid, fcmToken);
+    res.json({
+        success: true,
+        fcmToken: profile.fcmToken,
+        fcm_token: profile.fcm_token,
+    });
 }));
 
 router.delete('/parent-profile/fcm-token', asyncHandler(async (req, res) => {
-    res.json({ success: true, message: 'FCM token cleared' });
+    const profile = await mobileService.clearFcmToken(req.firebaseUser.uid);
+    res.json({
+        success: true,
+        fcmToken: profile.fcmToken,
+        fcm_token: profile.fcm_token,
+    });
 }));
 
 // ─── User State ─────────────────────────────────────────────────────────────

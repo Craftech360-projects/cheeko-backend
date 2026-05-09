@@ -3,12 +3,29 @@ const logger = require('../utils/logger');
 
 // ─── Parent Profile ─────────────────────────────────────────────────────────
 
+function formatParentProfile(profile) {
+    if (!profile) return null;
+
+    return {
+        ...profile,
+        parent_name: profile.display_name,
+        fullName: profile.display_name,
+        phoneNumber: profile.phone_number,
+        fcmToken: profile.fcm_token,
+        preferredLanguage: profile.language,
+        emailNotifications: profile.email_notifications,
+        pushNotifications: profile.push_notifications,
+        weeklyReport: profile.weekly_report,
+        onboardingCompleted: profile.onboarding_completed,
+    };
+}
+
 async function getParentProfile(firebaseUid) {
     const user = await prisma.sys_user.findUnique({
         where: { firebase_uid: firebaseUid },
         include: { parent_profile: true },
     });
-    return user?.parent_profile || null;
+    return formatParentProfile(user?.parent_profile || null);
 }
 
 async function createParentProfile(firebaseUid, data) {
@@ -22,19 +39,25 @@ async function createParentProfile(firebaseUid, data) {
         create: {
             user_id: user.id,
             email: user.email,
-            display_name: data.parent_name || data.fullName,
-            phone_number: data.phone_number,
-            language: data.preferred_language,
+            display_name: data.parent_name || data.fullName || data.displayName,
+            phone_number: data.phone_number || data.phoneNumber,
+            language: data.preferred_language || data.preferredLanguage || data.language,
             timezone: data.timezone,
+            email_notifications: data.email_notifications ?? data.emailNotifications,
+            push_notifications: data.push_notifications ?? data.pushNotifications,
+            weekly_report: data.weekly_report ?? data.weeklyReport,
             onboarding_completed: false,
         },
         update: {
-            display_name: data.parent_name || data.fullName || undefined,
-            phone_number: data.phone_number || undefined,
-            language: data.preferred_language || undefined,
+            display_name: data.parent_name || data.fullName || data.displayName || undefined,
+            phone_number: data.phone_number || data.phoneNumber || undefined,
+            language: data.preferred_language || data.preferredLanguage || data.language || undefined,
             timezone: data.timezone || undefined,
+            email_notifications: data.email_notifications ?? data.emailNotifications ?? undefined,
+            push_notifications: data.push_notifications ?? data.pushNotifications ?? undefined,
+            weekly_report: data.weekly_report ?? data.weeklyReport ?? undefined,
         },
-    });
+    }).then(formatParentProfile);
 }
 
 async function updateParentProfile(firebaseUid, data) {
@@ -44,11 +67,22 @@ async function updateParentProfile(firebaseUid, data) {
     if (!user) throw new Error('User not found');
 
     const updates = {};
-    if (data.parent_name) updates.display_name = data.parent_name;
-    if (data.phone_number) updates.phone_number = data.phone_number;
-    if (data.preferred_language) updates.language = data.preferred_language;
+    if (data.parent_name || data.fullName || data.displayName) {
+        updates.display_name = data.parent_name || data.fullName || data.displayName;
+    }
+    if (data.phone_number || data.phoneNumber) updates.phone_number = data.phone_number || data.phoneNumber;
+    if (data.preferred_language || data.preferredLanguage || data.language) {
+        updates.language = data.preferred_language || data.preferredLanguage || data.language;
+    }
     if (data.timezone) updates.timezone = data.timezone;
+    if (data.email_notifications !== undefined) updates.email_notifications = data.email_notifications;
+    if (data.emailNotifications !== undefined) updates.email_notifications = data.emailNotifications;
+    if (data.push_notifications !== undefined) updates.push_notifications = data.push_notifications;
+    if (data.pushNotifications !== undefined) updates.push_notifications = data.pushNotifications;
+    if (data.weekly_report !== undefined) updates.weekly_report = data.weekly_report;
+    if (data.weeklyReport !== undefined) updates.weekly_report = data.weeklyReport;
     if (data.onboarding_completed !== undefined) updates.onboarding_completed = data.onboarding_completed;
+    if (data.onboardingCompleted !== undefined) updates.onboarding_completed = data.onboardingCompleted;
 
     return prisma.parent_profile.upsert({
         where: { user_id: user.id },
@@ -58,7 +92,45 @@ async function updateParentProfile(firebaseUid, data) {
             ...updates,
         },
         update: updates,
+    }).then(formatParentProfile);
+}
+
+async function updateFcmToken(firebaseUid, fcmToken) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
     });
+    if (!user) throw new Error('User not found');
+
+    return prisma.parent_profile.upsert({
+        where: { user_id: user.id },
+        create: {
+            user_id: user.id,
+            email: user.email,
+            fcm_token: fcmToken,
+        },
+        update: {
+            fcm_token: fcmToken,
+        },
+    }).then(formatParentProfile);
+}
+
+async function clearFcmToken(firebaseUid) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+    });
+    if (!user) throw new Error('User not found');
+
+    return prisma.parent_profile.upsert({
+        where: { user_id: user.id },
+        create: {
+            user_id: user.id,
+            email: user.email,
+            fcm_token: null,
+        },
+        update: {
+            fcm_token: null,
+        },
+    }).then(formatParentProfile);
 }
 
 // ─── User State ─────────────────────────────────────────────────────────────
@@ -221,6 +293,8 @@ module.exports = {
     getParentProfile,
     createParentProfile,
     updateParentProfile,
+    updateFcmToken,
+    clearFcmToken,
     getUserState,
     markOnboardingCompleted,
     getKids,
