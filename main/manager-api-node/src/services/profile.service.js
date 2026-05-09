@@ -331,6 +331,50 @@ const updatePreferences = async (userId, kidId, preferences) => {
 // Parent Profile Methods
 // =============================================
 
+const dateOrNull = (value) => (value ? new Date(value) : null);
+
+const applyParentProfileFields = (target, data) => {
+  if (data.fullName !== undefined) target.display_name = data.fullName;
+  if (data.displayName !== undefined) target.display_name = data.displayName;
+  if (data.parent_name !== undefined) target.display_name = data.parent_name;
+  if (data.email !== undefined) target.email = data.email;
+  if (data.phoneNumber !== undefined) target.phone_number = data.phoneNumber;
+  if (data.phone_number !== undefined) target.phone_number = data.phone_number;
+  if (data.preferredLanguage !== undefined) target.language = data.preferredLanguage;
+  if (data.preferred_language !== undefined) target.language = data.preferred_language;
+  if (data.language !== undefined) target.language = data.language;
+  if (data.timezone !== undefined) target.timezone = data.timezone;
+  if (data.fcm_token !== undefined) target.fcm_token = data.fcm_token;
+  if (data.fcmToken !== undefined) target.fcm_token = data.fcmToken;
+  if (data.terms_version !== undefined) target.terms_version = data.terms_version;
+  if (data.termsVersion !== undefined) target.terms_version = data.termsVersion;
+  if (data.terms_accepted_at !== undefined) target.terms_accepted_at = dateOrNull(data.terms_accepted_at);
+  if (data.termsAcceptedAt !== undefined) target.terms_accepted_at = dateOrNull(data.termsAcceptedAt);
+  if (data.privacy_policy_accepted_at !== undefined) {
+    target.privacy_policy_accepted_at = dateOrNull(data.privacy_policy_accepted_at);
+  }
+  if (data.privacyPolicyAcceptedAt !== undefined) {
+    target.privacy_policy_accepted_at = dateOrNull(data.privacyPolicyAcceptedAt);
+  }
+  if (data.consent_accepted_at !== undefined) target.consent_accepted_at = dateOrNull(data.consent_accepted_at);
+  if (data.consentAcceptedAt !== undefined) target.consent_accepted_at = dateOrNull(data.consentAcceptedAt);
+  if (data.onboardingCompleted !== undefined) target.onboarding_completed = data.onboardingCompleted;
+  if (data.onboarding_completed !== undefined) target.onboarding_completed = data.onboarding_completed;
+  if (data.emailNotifications !== undefined) target.email_notifications = data.emailNotifications;
+  if (data.email_notifications !== undefined) target.email_notifications = data.email_notifications;
+  if (data.pushNotifications !== undefined) target.push_notifications = data.pushNotifications;
+  if (data.push_notifications !== undefined) target.push_notifications = data.push_notifications;
+  if (data.weeklyReport !== undefined) target.weekly_report = data.weeklyReport;
+  if (data.weekly_report !== undefined) target.weekly_report = data.weekly_report;
+
+  if (data.notificationPreferences !== undefined) {
+    const prefs = data.notificationPreferences;
+    if (prefs.email !== undefined) target.email_notifications = prefs.email;
+    if (prefs.push !== undefined) target.push_notifications = prefs.push;
+    if (prefs.weeklyReport !== undefined) target.weekly_report = prefs.weeklyReport;
+  }
+};
+
 /**
  * Get parent profile for user
  * @param {string|number} userId - User ID
@@ -375,22 +419,16 @@ const createParentProfile = async (userId, data) => {
   }
 
   try {
+    const createData = {
+      user_id: BigInt(userId),
+      email: data.email || null,
+      language: data.preferredLanguage || data.preferred_language || data.language || 'en',
+      onboarding_completed: data.onboardingCompleted || data.onboarding_completed || false
+    };
+    applyParentProfileFields(createData, data);
+
     const profile = await prisma.parent_profile.create({
-      data: {
-        user_id: BigInt(userId),
-        // Map old field names to current schema columns
-        email: data.email || null,
-        phone_number: data.phoneNumber || null,
-        display_name: data.fullName || data.displayName || null,
-        language: data.preferredLanguage || data.language || 'en',
-        timezone: data.timezone || null,
-        onboarding_completed: data.onboardingCompleted || false,
-        terms_accepted_at: data.termsAcceptedAt ? new Date(data.termsAcceptedAt) : null
-        // notification_preferences is no longer a JSON column in current schema;
-        // email_notifications/push_notifications/weekly_report are separate booleans
-        // but data.notificationPreferences cannot be mapped without more context.
-        // privacy_policy_accepted_at no longer exists in current schema.
-      }
+      data: createData
     });
 
     return profile;
@@ -412,30 +450,7 @@ const updateParentProfile = async (userId, data) => {
   if (!existing) throw new Error('Parent profile not found');
 
   const updateData = { updated_at: new Date() };
-
-  // Map old camelCase fields to current schema columns
-  if (data.fullName !== undefined) updateData.display_name = data.fullName;
-  if (data.displayName !== undefined) updateData.display_name = data.displayName;
-  if (data.email !== undefined) updateData.email = data.email;
-  if (data.phoneNumber !== undefined) updateData.phone_number = data.phoneNumber;
-  if (data.preferredLanguage !== undefined) updateData.language = data.preferredLanguage;
-  if (data.language !== undefined) updateData.language = data.language;
-  if (data.timezone !== undefined) updateData.timezone = data.timezone;
-  if (data.onboardingCompleted !== undefined) updateData.onboarding_completed = data.onboardingCompleted;
-  if (data.termsAcceptedAt !== undefined) updateData.terms_accepted_at = data.termsAcceptedAt ? new Date(data.termsAcceptedAt) : null;
-
-  // Map notification_preferences object fields to individual boolean columns if provided
-  if (data.notificationPreferences !== undefined) {
-    const prefs = data.notificationPreferences;
-    if (prefs.email !== undefined) updateData.email_notifications = prefs.email;
-    if (prefs.push !== undefined) updateData.push_notifications = prefs.push;
-    if (prefs.weeklyReport !== undefined) updateData.weekly_report = prefs.weeklyReport;
-  }
-
-  // Individual notification flag overrides
-  if (data.emailNotifications !== undefined) updateData.email_notifications = data.emailNotifications;
-  if (data.pushNotifications !== undefined) updateData.push_notifications = data.pushNotifications;
-  if (data.weeklyReport !== undefined) updateData.weekly_report = data.weeklyReport;
+  applyParentProfileFields(updateData, data);
 
   try {
     const profile = await prisma.parent_profile.update({

@@ -92,4 +92,56 @@ describe('mobile.service parent profile compatibility', () => {
     expect(saved.fcmToken).toBe('fcm-token-123');
     expect(cleared.fcmToken).toBeNull();
   });
+
+  it('saves legal consent fields and notification values from parent profile create/update', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      email: 'parent@example.com'
+    });
+    prisma.parent_profile.upsert.mockResolvedValue({
+      id: 10n,
+      user_id: 1n,
+      terms_version: 'v1.0',
+      terms_accepted_at: new Date('2026-05-09T07:30:00.000Z'),
+      privacy_policy_accepted_at: new Date('2026-05-09T07:31:00.000Z'),
+      consent_accepted_at: new Date('2026-05-09T07:32:00.000Z'),
+      push_notifications: true,
+      email_notifications: false,
+      fcm_token: 'fcm-token-456'
+    });
+
+    await mobileService.updateParentProfile('firebase-user-1', {
+      terms_version: 'v1.0',
+      terms_accepted_at: '2026-05-09T07:30:00.000Z',
+      privacy_policy_accepted_at: '2026-05-09T07:31:00.000Z',
+      consent_accepted_at: '2026-05-09T07:32:00.000Z',
+      push_notifications: true,
+      email_notifications: false,
+      fcm_token: 'fcm-token-456'
+    });
+
+    expect(prisma.parent_profile.upsert).toHaveBeenCalledWith({
+      where: { user_id: 1n },
+      create: {
+        user_id: 1n,
+        email: 'parent@example.com',
+        terms_version: 'v1.0',
+        terms_accepted_at: new Date('2026-05-09T07:30:00.000Z'),
+        privacy_policy_accepted_at: new Date('2026-05-09T07:31:00.000Z'),
+        consent_accepted_at: new Date('2026-05-09T07:32:00.000Z'),
+        push_notifications: true,
+        email_notifications: false,
+        fcm_token: 'fcm-token-456'
+      },
+      update: {
+        terms_version: 'v1.0',
+        terms_accepted_at: new Date('2026-05-09T07:30:00.000Z'),
+        privacy_policy_accepted_at: new Date('2026-05-09T07:31:00.000Z'),
+        consent_accepted_at: new Date('2026-05-09T07:32:00.000Z'),
+        push_notifications: true,
+        email_notifications: false,
+        fcm_token: 'fcm-token-456'
+      }
+    });
+  });
 });

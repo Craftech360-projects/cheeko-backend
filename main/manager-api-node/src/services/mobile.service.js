@@ -3,6 +3,47 @@ const logger = require('../utils/logger');
 
 // ─── Parent Profile ─────────────────────────────────────────────────────────
 
+function dateOrNull(value) {
+    return value ? new Date(value) : null;
+}
+
+function collectParentProfileUpdates(data) {
+    const updates = {};
+
+    if (data.parent_name || data.fullName || data.displayName) {
+        updates.display_name = data.parent_name || data.fullName || data.displayName;
+    }
+    if (data.phone_number || data.phoneNumber) updates.phone_number = data.phone_number || data.phoneNumber;
+    if (data.preferred_language || data.preferredLanguage || data.language) {
+        updates.language = data.preferred_language || data.preferredLanguage || data.language;
+    }
+    if (data.timezone) updates.timezone = data.timezone;
+    if (data.email_notifications !== undefined) updates.email_notifications = data.email_notifications;
+    if (data.emailNotifications !== undefined) updates.email_notifications = data.emailNotifications;
+    if (data.push_notifications !== undefined) updates.push_notifications = data.push_notifications;
+    if (data.pushNotifications !== undefined) updates.push_notifications = data.pushNotifications;
+    if (data.weekly_report !== undefined) updates.weekly_report = data.weekly_report;
+    if (data.weeklyReport !== undefined) updates.weekly_report = data.weeklyReport;
+    if (data.fcm_token !== undefined) updates.fcm_token = data.fcm_token;
+    if (data.fcmToken !== undefined) updates.fcm_token = data.fcmToken;
+    if (data.terms_version !== undefined) updates.terms_version = data.terms_version;
+    if (data.termsVersion !== undefined) updates.terms_version = data.termsVersion;
+    if (data.terms_accepted_at !== undefined) updates.terms_accepted_at = dateOrNull(data.terms_accepted_at);
+    if (data.termsAcceptedAt !== undefined) updates.terms_accepted_at = dateOrNull(data.termsAcceptedAt);
+    if (data.privacy_policy_accepted_at !== undefined) {
+        updates.privacy_policy_accepted_at = dateOrNull(data.privacy_policy_accepted_at);
+    }
+    if (data.privacyPolicyAcceptedAt !== undefined) {
+        updates.privacy_policy_accepted_at = dateOrNull(data.privacyPolicyAcceptedAt);
+    }
+    if (data.consent_accepted_at !== undefined) updates.consent_accepted_at = dateOrNull(data.consent_accepted_at);
+    if (data.consentAcceptedAt !== undefined) updates.consent_accepted_at = dateOrNull(data.consentAcceptedAt);
+    if (data.onboarding_completed !== undefined) updates.onboarding_completed = data.onboarding_completed;
+    if (data.onboardingCompleted !== undefined) updates.onboarding_completed = data.onboardingCompleted;
+
+    return updates;
+}
+
 function formatParentProfile(profile) {
     if (!profile) return null;
 
@@ -16,6 +57,10 @@ function formatParentProfile(profile) {
         emailNotifications: profile.email_notifications,
         pushNotifications: profile.push_notifications,
         weeklyReport: profile.weekly_report,
+        termsVersion: profile.terms_version,
+        termsAcceptedAt: profile.terms_accepted_at,
+        privacyPolicyAcceptedAt: profile.privacy_policy_accepted_at,
+        consentAcceptedAt: profile.consent_accepted_at,
         onboardingCompleted: profile.onboarding_completed,
     };
 }
@@ -33,30 +78,17 @@ async function createParentProfile(firebaseUid, data) {
         where: { firebase_uid: firebaseUid },
     });
     if (!user) throw new Error('User not found');
+    const updates = collectParentProfileUpdates(data);
 
     return prisma.parent_profile.upsert({
         where: { user_id: user.id },
         create: {
             user_id: user.id,
             email: user.email,
-            display_name: data.parent_name || data.fullName || data.displayName,
-            phone_number: data.phone_number || data.phoneNumber,
-            language: data.preferred_language || data.preferredLanguage || data.language,
-            timezone: data.timezone,
-            email_notifications: data.email_notifications ?? data.emailNotifications,
-            push_notifications: data.push_notifications ?? data.pushNotifications,
-            weekly_report: data.weekly_report ?? data.weeklyReport,
+            ...updates,
             onboarding_completed: false,
         },
-        update: {
-            display_name: data.parent_name || data.fullName || data.displayName || undefined,
-            phone_number: data.phone_number || data.phoneNumber || undefined,
-            language: data.preferred_language || data.preferredLanguage || data.language || undefined,
-            timezone: data.timezone || undefined,
-            email_notifications: data.email_notifications ?? data.emailNotifications ?? undefined,
-            push_notifications: data.push_notifications ?? data.pushNotifications ?? undefined,
-            weekly_report: data.weekly_report ?? data.weeklyReport ?? undefined,
-        },
+        update: updates,
     }).then(formatParentProfile);
 }
 
@@ -66,23 +98,7 @@ async function updateParentProfile(firebaseUid, data) {
     });
     if (!user) throw new Error('User not found');
 
-    const updates = {};
-    if (data.parent_name || data.fullName || data.displayName) {
-        updates.display_name = data.parent_name || data.fullName || data.displayName;
-    }
-    if (data.phone_number || data.phoneNumber) updates.phone_number = data.phone_number || data.phoneNumber;
-    if (data.preferred_language || data.preferredLanguage || data.language) {
-        updates.language = data.preferred_language || data.preferredLanguage || data.language;
-    }
-    if (data.timezone) updates.timezone = data.timezone;
-    if (data.email_notifications !== undefined) updates.email_notifications = data.email_notifications;
-    if (data.emailNotifications !== undefined) updates.email_notifications = data.emailNotifications;
-    if (data.push_notifications !== undefined) updates.push_notifications = data.push_notifications;
-    if (data.pushNotifications !== undefined) updates.push_notifications = data.pushNotifications;
-    if (data.weekly_report !== undefined) updates.weekly_report = data.weekly_report;
-    if (data.weeklyReport !== undefined) updates.weekly_report = data.weeklyReport;
-    if (data.onboarding_completed !== undefined) updates.onboarding_completed = data.onboarding_completed;
-    if (data.onboardingCompleted !== undefined) updates.onboarding_completed = data.onboardingCompleted;
+    const updates = collectParentProfileUpdates(data);
 
     return prisma.parent_profile.upsert({
         where: { user_id: user.id },
