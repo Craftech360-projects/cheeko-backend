@@ -10,6 +10,7 @@
 
 const request = require('supertest');
 const app = require('../../src/app');
+const deviceService = require('../../src/services/device.service');
 
 const VALID_MAC = 'AA:BB:CC:DD:EE:FF';
 const INVALID_MAC = 'not-a-mac-address';
@@ -159,6 +160,35 @@ describe('OTA Routes (/toy/ota)', () => {
 
       // Unregistered → 202 (Spring Boot compat)
       expect([200, 202]).toContain(res.status);
+    });
+
+    it('should return activation code payload for an unregistered device when available', async () => {
+      const activationPayload = {
+        device: { mac: VALID_MAC },
+        activation: {
+          code: '123456',
+          message: 'http://localhost:8001\n123456',
+          challenge: VALID_MAC
+        }
+      };
+
+      jest.spyOn(deviceService, 'getDeviceByMac').mockResolvedValue(null);
+      jest.spyOn(deviceService, 'checkOtaVersion').mockResolvedValue(activationPayload);
+
+      const res = await request(app)
+        .post('/toy/ota/activate')
+        .send({ mac: VALID_MAC, version: '1.0.0', board: 'esp32s3' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(activationPayload);
+      expect(deviceService.checkOtaVersion).toHaveBeenCalledWith(
+        VALID_MAC,
+        VALID_MAC,
+        expect.objectContaining({
+          version: '1.0.0',
+          board: 'esp32s3'
+        })
+      );
     });
   });
 
