@@ -57,6 +57,10 @@
           "valueFrom": "__SECRET_GOOGLE_API_KEY_ARN__"
         },
         {
+          "name": "GEMINI_REALTIME_MODEL",
+          "valueFrom": "__SECRET_GEMINI_REALTIME_MODEL_ARN__"
+        },
+        {
           "name": "MANAGER_API_URL",
           "valueFrom": "__SECRET_MANAGER_API_URL_ARN__"
         },

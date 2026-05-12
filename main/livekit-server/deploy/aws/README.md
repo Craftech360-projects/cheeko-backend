@@ -83,6 +83,7 @@ Create one secret per value (recommended), for example:
 - `prod/cheeko/LIVEKIT_API_KEY`
 - `prod/cheeko/LIVEKIT_API_SECRET`
 - `prod/cheeko/GOOGLE_API_KEY`
+- `prod/cheeko/GEMINI_REALTIME_MODEL`
 - `prod/cheeko/MANAGER_API_URL`
 - `prod/cheeko/MANAGER_API_SECRET`
 - `prod/cheeko/ELEVEN_API_KEY`
@@ -92,6 +93,14 @@ Create one secret per value (recommended), for example:
 - `prod/cheeko/QDRANT_API_KEY`
 
 Collect each ARN from Secrets Manager for the next step.
+
+### Gemini Realtime Model Mode
+
+- `GEMINI_REALTIME_MODEL` controls whether runtime selects Gemini API or Vertex behavior.
+- Safe default for this deployment is a non-Vertex model, for example:
+  - `gemini-2.5-flash-native-audio-latest`
+- Models starting with `gemini-live-` are treated as Vertex-style models.
+- If `GEMINI_USE_VERTEXAI=true` is set, runtime will force Vertex mode.
 
 ## 4) Register Task Definition
 
@@ -110,6 +119,7 @@ $TaskRoleArn = "arn:aws:iam::<account>:role/cheekoAgentTaskRole"
   -SecretLivekitApiKeyArn "<arn>" `
   -SecretLivekitApiSecretArn "<arn>" `
   -SecretGoogleApiKeyArn "<arn>" `
+  -SecretGeminiRealtimeModelArn "<arn>" `
   -SecretManagerApiUrlArn "<arn>" `
   -SecretManagerApiSecretArn "<arn>" `
   -SecretElevenApiKeyArn "<arn>" `
@@ -164,3 +174,10 @@ To deploy a new version:
 1. Build and push new image tag
 2. Re-run `register-task-definition.ps1` with new `-ImageUri`
 3. Re-run `create-or-update-service.ps1` with latest task definition ARN
+
+## 8) Quick Checks
+
+```powershell
+aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/GEMINI_REALTIME_MODEL --query SecretString --output text
+aws ecs describe-task-definition --region ap-south-2 --task-definition cheeko-agent --query "taskDefinition.containerDefinitions[0].secrets[?name=='GEMINI_REALTIME_MODEL']" --output json
+```

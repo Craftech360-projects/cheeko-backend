@@ -53,6 +53,7 @@ $requiredKeys = @(
   "LIVEKIT_API_KEY",
   "LIVEKIT_API_SECRET",
   "GOOGLE_API_KEY",
+  "GEMINI_REALTIME_MODEL",
   "MANAGER_API_URL",
   "MANAGER_API_SECRET",
   "ELEVEN_API_KEY",
@@ -105,6 +106,7 @@ foreach ($key in $requiredKeys) {
   -SecretLivekitApiKeyArn $secretArn["LIVEKIT_API_KEY"] `
   -SecretLivekitApiSecretArn $secretArn["LIVEKIT_API_SECRET"] `
   -SecretGoogleApiKeyArn $secretArn["GOOGLE_API_KEY"] `
+  -SecretGeminiRealtimeModelArn $secretArn["GEMINI_REALTIME_MODEL"] `
   -SecretManagerApiUrlArn $secretArn["MANAGER_API_URL"] `
   -SecretManagerApiSecretArn $secretArn["MANAGER_API_SECRET"] `
   -SecretElevenApiKeyArn $secretArn["ELEVEN_API_KEY"] `

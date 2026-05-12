@@ -41,6 +41,7 @@ Create or maintain these in Secrets Manager:
 - `prod/cheeko/LIVEKIT_API_KEY`
 - `prod/cheeko/LIVEKIT_API_SECRET`
 - `prod/cheeko/GOOGLE_API_KEY`
+- `prod/cheeko/GEMINI_REALTIME_MODEL`
 - `prod/cheeko/MANAGER_API_URL`
 - `prod/cheeko/MANAGER_API_SECRET`
 - `prod/cheeko/ELEVEN_API_KEY`
@@ -48,6 +49,12 @@ Create or maintain these in Secrets Manager:
 - `prod/cheeko/MEM0_API_KEY`
 - `prod/cheeko/QDRANT_URL`
 - `prod/cheeko/QDRANT_API_KEY`
+
+### 3.4 Gemini model mode (important)
+
+- Keep `GEMINI_REALTIME_MODEL` set to a non-`gemini-live-*` value (recommended: `gemini-2.5-flash-native-audio-latest`) for Gemini API mode.
+- `gemini-live-*` models are treated as Vertex-style models.
+- `GEMINI_USE_VERTEXAI=true` forces Vertex mode.
 
 ## 4) First Deployment (One Command)
 
@@ -130,6 +137,7 @@ aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/
 aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/LIVEKIT_API_KEY --query SecretString --output text
 aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/LIVEKIT_API_SECRET --query SecretString --output text
 aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/MANAGER_API_URL --query SecretString --output text
+aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/GEMINI_REALTIME_MODEL --query SecretString --output text
 ```
 
 ## 8) Logs

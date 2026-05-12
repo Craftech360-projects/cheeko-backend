@@ -7,6 +7,7 @@ param(
   [Parameter(Mandatory = $true)] [string] $SecretLivekitApiKeyArn,
   [Parameter(Mandatory = $true)] [string] $SecretLivekitApiSecretArn,
   [Parameter(Mandatory = $true)] [string] $SecretGoogleApiKeyArn,
+  [Parameter(Mandatory = $true)] [string] $SecretGeminiRealtimeModelArn,
   [Parameter(Mandatory = $true)] [string] $SecretManagerApiUrlArn,
   [Parameter(Mandatory = $true)] [string] $SecretManagerApiSecretArn,
   [Parameter(Mandatory = $true)] [string] $SecretElevenApiKeyArn,
@@ -31,6 +32,7 @@ $json = $json.Replace("__SECRET_LIVEKIT_URL_ARN__", $SecretLivekitUrlArn)
 $json = $json.Replace("__SECRET_LIVEKIT_API_KEY_ARN__", $SecretLivekitApiKeyArn)
 $json = $json.Replace("__SECRET_LIVEKIT_API_SECRET_ARN__", $SecretLivekitApiSecretArn)
 $json = $json.Replace("__SECRET_GOOGLE_API_KEY_ARN__", $SecretGoogleApiKeyArn)
+$json = $json.Replace("__SECRET_GEMINI_REALTIME_MODEL_ARN__", $SecretGeminiRealtimeModelArn)
 $json = $json.Replace("__SECRET_MANAGER_API_URL_ARN__", $SecretManagerApiUrlArn)
 $json = $json.Replace("__SECRET_MANAGER_API_SECRET_ARN__", $SecretManagerApiSecretArn)
 $json = $json.Replace("__SECRET_ELEVEN_API_KEY_ARN__", $SecretElevenApiKeyArn)
