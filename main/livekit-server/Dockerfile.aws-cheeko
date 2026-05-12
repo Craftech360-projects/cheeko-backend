@@ -1,0 +1,78 @@
+# Docker image for deploying cheeko-agent on AWS ECS Fargate
+# syntax=docker/dockerfile:1
+
+ARG PYTHON_VERSION=3.11.6
+FROM python:${PYTHON_VERSION}-slim
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Cache locations for model downloads
+ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV TRANSFORMERS_CACHE=/home/appuser/.cache/huggingface
+ENV SENTENCE_TRANSFORMERS_HOME=/home/appuser/.cache/sentence-transformers
+
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/home/appuser" \
+    --shell "/sbin/nologin" \
+    --uid "${UID}" \
+    appuser
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    bash \
+    gcc \
+    g++ \
+    python3-dev \
+    libasound2-dev \
+    portaudio19-dev \
+    libffi-dev \
+    libssl-dev \
+    ffmpeg \
+    dos2unix && \
+    rm -rf /var/lib/apt/lists/*
+
+USER appuser
+WORKDIR /home/appuser
+
+RUN mkdir -p /home/appuser/.cache/huggingface /home/appuser/.cache/sentence-transformers
+
+COPY requirements.txt ./
+RUN python -m pip install --user --no-cache-dir -r requirements.txt
+
+COPY pyproject.toml ./
+RUN python -m pip install --user --no-cache-dir \
+    'livekit-agents[openai,turn-detector,silero]~=1.2' \
+    'livekit-plugins-google' \
+    'google-genai' \
+    'livekit-plugins-noise-cancellation~=0.2' \
+    'livekit-plugins-groq' \
+    'livekit-plugins-deepgram' \
+    'livekit-plugins-elevenlabs' \
+    'python-dotenv' \
+    'paho-mqtt' \
+    'aiohttp' \
+    'pydub' \
+    'edge-tts==7.0.2' \
+    'gtts' \
+    'pyttsx3' \
+    'mem0ai==1.0.0' \
+    'jinja2' \
+    'pytz' \
+    'qdrant-client>=1.7.0' \
+    'sentence-transformers>=2.2.0' \
+    'uvicorn[standard]'
+
+COPY . .
+RUN dos2unix /home/appuser/start-aws-cheeko.sh 2>/dev/null || true && \
+    chmod +x /home/appuser/start-aws-cheeko.sh
+
+# Optional pre-download to reduce first-run latency.
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || echo "Model download skipped"
+
+EXPOSE 8081
+
+CMD ["bash", "start-aws-cheeko.sh"]

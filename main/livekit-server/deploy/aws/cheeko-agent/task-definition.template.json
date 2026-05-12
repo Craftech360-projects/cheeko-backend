@@ -1,0 +1,108 @@
+{
+  "family": "cheeko-agent",
+  "executionRoleArn": "__EXECUTION_ROLE_ARN__",
+  "taskRoleArn": "__TASK_ROLE_ARN__",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": [
+    "FARGATE"
+  ],
+  "cpu": "2048",
+  "memory": "4096",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "containerDefinitions": [
+    {
+      "name": "cheeko-agent",
+      "image": "__IMAGE_URI__",
+      "essential": true,
+      "command": [
+        "bash",
+        "start-aws-cheeko.sh"
+      ],
+      "portMappings": [
+        {
+          "name": "health",
+          "containerPort": 8081,
+          "hostPort": 8081,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "CHEEKO_PORT",
+          "value": "8081"
+        },
+        {
+          "name": "LIVEKIT_LOG_LEVEL",
+          "value": "info"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "LIVEKIT_URL",
+          "valueFrom": "__SECRET_LIVEKIT_URL_ARN__"
+        },
+        {
+          "name": "LIVEKIT_API_KEY",
+          "valueFrom": "__SECRET_LIVEKIT_API_KEY_ARN__"
+        },
+        {
+          "name": "LIVEKIT_API_SECRET",
+          "valueFrom": "__SECRET_LIVEKIT_API_SECRET_ARN__"
+        },
+        {
+          "name": "GOOGLE_API_KEY",
+          "valueFrom": "__SECRET_GOOGLE_API_KEY_ARN__"
+        },
+        {
+          "name": "MANAGER_API_URL",
+          "valueFrom": "__SECRET_MANAGER_API_URL_ARN__"
+        },
+        {
+          "name": "MANAGER_API_SECRET",
+          "valueFrom": "__SECRET_MANAGER_API_SECRET_ARN__"
+        },
+        {
+          "name": "ELEVEN_API_KEY",
+          "valueFrom": "__SECRET_ELEVEN_API_KEY_ARN__"
+        },
+        {
+          "name": "ELEVENLABS_VOICE_ID",
+          "valueFrom": "__SECRET_ELEVENLABS_VOICE_ID_ARN__"
+        },
+        {
+          "name": "MEM0_API_KEY",
+          "valueFrom": "__SECRET_MEM0_API_KEY_ARN__"
+        },
+        {
+          "name": "QDRANT_URL",
+          "valueFrom": "__SECRET_QDRANT_URL_ARN__"
+        },
+        {
+          "name": "QDRANT_API_KEY",
+          "valueFrom": "__SECRET_QDRANT_API_KEY_ARN__"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8081/', timeout=2).getcode()==200 else 1)\""
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 40
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/cheeko-agent",
+          "awslogs-region": "__AWS_REGION__",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}
