@@ -56,6 +56,12 @@ Create or maintain these in Secrets Manager:
 - `gemini-live-*` models are treated as Vertex-style models.
 - `GEMINI_USE_VERTEXAI=true` forces Vertex mode.
 
+### 3.5 Autoscaling model (important)
+
+- Worker admission control: `LIVEKIT_LOAD_THRESHOLD` (default now `0.7` in `workers/cheeko_worker.py`)
+- Service autoscaling: ECS target tracking on CPU
+- Recommended starting target: CPU `50%` so scale-out happens before workers saturate near `0.7`
+
 ## 4) First Deployment (One Command)
 
 Run from:
@@ -140,6 +146,70 @@ aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/
 aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/GEMINI_REALTIME_MODEL --query SecretString --output text
 ```
 
+### 7.4 Configure ECS autoscaling (Fargate)
+
+```powershell
+.\deploy\aws\cheeko-agent\configure-autoscaling.ps1 `
+  -Region "ap-south-2" `
+  -ClusterName "cheeko-agents-cluster" `
+  -ServiceName "cheeko-agent-service" `
+  -MinCapacity 1 `
+  -MaxCapacity 5 `
+  -TargetCPU 50 `
+  -ScaleOutCooldown 60 `
+  -ScaleInCooldown 300
+```
+
+### 7.5 Verify autoscaling configuration
+
+```powershell
+aws application-autoscaling describe-scalable-targets --region ap-south-2 --service-namespace ecs --resource-id service/cheeko-agents-cluster/cheeko-agent-service --scalable-dimension ecs:service:DesiredCount --output json
+aws application-autoscaling describe-scaling-policies --region ap-south-2 --service-namespace ecs --resource-id service/cheeko-agents-cluster/cheeko-agent-service --scalable-dimension ecs:service:DesiredCount --output json
+```
+
+### 7.6 Check runtime load (CPU/Memory)
+
+Use UTC timestamps for CloudWatch queries:
+
+```powershell
+$start = (Get-Date).ToUniversalTime().AddHours(-2).ToString("yyyy-MM-ddTHH:mm:ssZ")
+$end   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+```
+
+CPU:
+
+```powershell
+aws cloudwatch get-metric-statistics `
+  --region ap-south-2 `
+  --namespace AWS/ECS `
+  --metric-name CPUUtilization `
+  --dimensions Name=ClusterName,Value=cheeko-agents-cluster Name=ServiceName,Value=cheeko-agent-service `
+  --start-time $start `
+  --end-time $end `
+  --period 300 `
+  --statistics Average Maximum
+```
+
+Memory:
+
+```powershell
+aws cloudwatch get-metric-statistics `
+  --region ap-south-2 `
+  --namespace AWS/ECS `
+  --metric-name MemoryUtilization `
+  --dimensions Name=ClusterName,Value=cheeko-agents-cluster Name=ServiceName,Value=cheeko-agent-service `
+  --start-time $start `
+  --end-time $end `
+  --period 300 `
+  --statistics Average Maximum
+```
+
+Interpretation:
+
+- CPU target policy is currently `50%`, so values like `0.5%` to `1.5%` are very low and will keep service near min capacity (`1` task).
+- Memory around `10%` on a `4096 MB` task is about `410 MB` usage (`4096 * 0.10`).
+- This is a healthy low-load baseline.
+
 ## 8) Logs
 
 ```powershell
@@ -204,5 +274,6 @@ aws ecs update-service --region ap-south-2 --cluster cheeko-agents-cluster --ser
 - `deploy/aws/cheeko-agent/create-or-update-secret.ps1`
 - `deploy/aws/cheeko-agent/register-task-definition.ps1`
 - `deploy/aws/cheeko-agent/create-or-update-service.ps1`
+- `deploy/aws/cheeko-agent/configure-autoscaling.ps1`
 - `Dockerfile.aws-cheeko`
 - `start-aws-cheeko.sh`

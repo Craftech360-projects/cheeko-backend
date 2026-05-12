@@ -20,6 +20,7 @@ This deployment does not include game workers yet.
 - `cheeko-agent/create-or-update-secret.ps1`: Secrets Manager helper
 - `cheeko-agent/register-task-definition.ps1`: renders and registers task definition
 - `cheeko-agent/create-or-update-service.ps1`: creates or updates ECS service
+- `cheeko-agent/configure-autoscaling.ps1`: configures ECS Service Auto Scaling (CPU target tracking)
 
 ## 0) Security First
 
@@ -175,9 +176,56 @@ To deploy a new version:
 2. Re-run `register-task-definition.ps1` with new `-ImageUri`
 3. Re-run `create-or-update-service.ps1` with latest task definition ARN
 
-## 8) Quick Checks
+## 8) Enable Autoscaling (Fargate)
+
+LiveKit worker admission control and ECS autoscaling should be configured together:
+
+- Worker-side: `LIVEKIT_LOAD_THRESHOLD` (defaults to `0.7` in `cheeko_worker.py`)
+- Service-side: ECS target tracking on CPU
+
+Recommended starting point:
+
+- `LIVEKIT_LOAD_THRESHOLD=0.7`
+- CPU target tracking around `50%` (scale up before workers hit 70% busy)
+- Min tasks `1`, max tasks `5`
+- Scale-out cooldown `60s`, scale-in cooldown `300s`
+
+```powershell
+.\deploy\aws\cheeko-agent\configure-autoscaling.ps1 `
+  -Region "ap-south-2" `
+  -ClusterName "cheeko-agents-cluster" `
+  -ServiceName "cheeko-agent-service" `
+  -MinCapacity 1 `
+  -MaxCapacity 5 `
+  -TargetCPU 50 `
+  -ScaleOutCooldown 60 `
+  -ScaleInCooldown 300
+```
+
+## 9) Quick Checks
 
 ```powershell
 aws secretsmanager get-secret-value --region ap-south-2 --secret-id prod/cheeko/GEMINI_REALTIME_MODEL --query SecretString --output text
 aws ecs describe-task-definition --region ap-south-2 --task-definition cheeko-agent --query "taskDefinition.containerDefinitions[0].secrets[?name=='GEMINI_REALTIME_MODEL']" --output json
+aws application-autoscaling describe-scalable-targets --region ap-south-2 --service-namespace ecs --resource-id service/cheeko-agents-cluster/cheeko-agent-service --scalable-dimension ecs:service:DesiredCount --output json
+aws application-autoscaling describe-scaling-policies --region ap-south-2 --service-namespace ecs --resource-id service/cheeko-agents-cluster/cheeko-agent-service --scalable-dimension ecs:service:DesiredCount --output json
 ```
+
+### Check Current Runtime Load
+
+Use UTC timestamps:
+
+```powershell
+$start = (Get-Date).ToUniversalTime().AddHours(-2).ToString("yyyy-MM-ddTHH:mm:ssZ")
+$end   = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+```
+
+```powershell
+aws cloudwatch get-metric-statistics --region ap-south-2 --namespace AWS/ECS --metric-name CPUUtilization --dimensions Name=ClusterName,Value=cheeko-agents-cluster Name=ServiceName,Value=cheeko-agent-service --start-time $start --end-time $end --period 300 --statistics Average Maximum
+aws cloudwatch get-metric-statistics --region ap-south-2 --namespace AWS/ECS --metric-name MemoryUtilization --dimensions Name=ClusterName,Value=cheeko-agents-cluster Name=ServiceName,Value=cheeko-agent-service --start-time $start --end-time $end --period 300 --statistics Average Maximum
+```
+
+Interpretation example:
+
+- CPU near `1%` with autoscaling target `50%` means no scale-out trigger yet.
+- Memory near `10%` on a `4096 MB` task is about `410 MB` usage.

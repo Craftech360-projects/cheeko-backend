@@ -1206,12 +1206,15 @@ async def entrypoint(ctx: JobContext):
 if __name__ == "__main__":
     # Use worker-specific port (ignore global PORT env var from Cerebrium)
     port = int(os.getenv("CHEEKO_PORT", DEFAULT_PORT))
+    load_threshold = float(os.getenv("LIVEKIT_LOAD_THRESHOLD", "0.7"))
     logger.info(f"Starting {AGENT_NAME} on port {port}")
+    logger.info(f"Worker load threshold: {load_threshold}")
 
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
         agent_name=AGENT_NAME,
+        load_threshold=load_threshold,
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,
