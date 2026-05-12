@@ -16,7 +16,7 @@ param(
   [Parameter(Mandatory = $true)] [string] $SecretQdrantApiKeyArn
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $templatePath = Join-Path $scriptDir "task-definition.template.json"
@@ -39,11 +39,15 @@ $json = $json.Replace("__SECRET_MEM0_API_KEY_ARN__", $SecretMem0ApiKeyArn)
 $json = $json.Replace("__SECRET_QDRANT_URL_ARN__", $SecretQdrantUrlArn)
 $json = $json.Replace("__SECRET_QDRANT_API_KEY_ARN__", $SecretQdrantApiKeyArn)
 
-Set-Content -Path $renderedPath -Value $json -Encoding UTF8
+[System.IO.File]::WriteAllText($renderedPath, $json, (New-Object System.Text.UTF8Encoding($false)))
 
 Write-Host "Registering ECS task definition from $renderedPath..."
 aws ecs register-task-definition `
   --region $Region `
   --cli-input-json "file://$renderedPath"
+
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to register ECS task definition."
+}
 
 Write-Host "Done. New task definition revision registered."

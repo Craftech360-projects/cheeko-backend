@@ -6,6 +6,7 @@ FROM python:${PYTHON_VERSION}-slim
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV PIP_DEFAULT_TIMEOUT=1200
 
 # Cache locations for model downloads
 ENV HF_HOME=/home/appuser/.cache/huggingface
@@ -41,10 +42,12 @@ WORKDIR /home/appuser
 RUN mkdir -p /home/appuser/.cache/huggingface /home/appuser/.cache/sentence-transformers
 
 COPY requirements.txt ./
-RUN python -m pip install --user --no-cache-dir -r requirements.txt
+RUN grep -v -E "^(qdrant-client|sentence-transformers)\\s*$" requirements.txt > requirements.aws.txt && \
+    python -m pip install --user --no-cache-dir --retries 15 -r requirements.aws.txt
 
 COPY pyproject.toml ./
 RUN python -m pip install --user --no-cache-dir \
+    --retries 15 \
     'livekit-agents[openai,turn-detector,silero]~=1.2' \
     'livekit-plugins-google' \
     'google-genai' \
@@ -62,16 +65,15 @@ RUN python -m pip install --user --no-cache-dir \
     'mem0ai==1.0.0' \
     'jinja2' \
     'pytz' \
-    'qdrant-client>=1.7.0' \
-    'sentence-transformers>=2.2.0' \
     'uvicorn[standard]'
 
+USER root
 COPY . .
 RUN dos2unix /home/appuser/start-aws-cheeko.sh 2>/dev/null || true && \
+    chown -R appuser:appuser /home/appuser && \
     chmod +x /home/appuser/start-aws-cheeko.sh
 
-# Optional pre-download to reduce first-run latency.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" || echo "Model download skipped"
+USER appuser
 
 EXPOSE 8081
 

@@ -279,9 +279,35 @@ def render_prompt_with_profile(
 
     except Exception as e:
         logger.error(f"Jinja2 template error: {e}")
-        # Fallback to simple string replacement
-        agent_prompt = agent_prompt.replace("{{ child_name }}", child_profile.get('name', ''))
-        agent_prompt = agent_prompt.replace("{{child_name}}", child_profile.get('name', ''))
+        # Fallback to simple string replacement with safe defaults
+        safe_child_profile = child_profile or {}
+        safe_interests = safe_child_profile.get('interests', '')
+        if isinstance(safe_interests, str) and safe_interests.startswith('['):
+            try:
+                safe_interests_list = json.loads(safe_interests)
+                safe_interests = ', '.join(safe_interests_list)
+            except json.JSONDecodeError:
+                pass
+
+        fallback_vars = {
+            "child_name": safe_child_profile.get('name', '') or '',
+            "child_age": safe_child_profile.get('age', '') or '',
+            "age_group": safe_child_profile.get('ageGroup', '') or '',
+            "child_gender": safe_child_profile.get('gender', '') or '',
+            "child_interests": safe_interests or '',
+            "primary_language": safe_child_profile.get('primaryLanguage', 'English') or 'English',
+            "additional_notes": safe_child_profile.get('additionalNotes', '') or '',
+        }
+
+        if extra_vars:
+            for key, value in extra_vars.items():
+                fallback_vars[key] = value if value is not None else ''
+
+        for key, value in fallback_vars.items():
+            replacement = str(value)
+            agent_prompt = agent_prompt.replace(f"{{{{ {key} }}}}", replacement)
+            agent_prompt = agent_prompt.replace(f"{{{{{key}}}}}", replacement)
+
         return agent_prompt
 
 

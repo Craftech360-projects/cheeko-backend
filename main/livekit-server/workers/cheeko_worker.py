@@ -60,7 +60,7 @@ from src.features.mode_switching import update_agent_mode
 from src.services.mem0_service import mem0_service
 
 # Agent configuration
-AGENT_NAME = "cheeko-agent"
+AGENT_NAME = "cheeko-agent1"
 
 # Keywords that trigger context-aware memory search (high-value triggers only)
 # These are patterns where memory injection provides significant value
@@ -99,6 +99,35 @@ TIMEZONE_ALIASES = {
 
 DEFAULT_TIMEZONE_ID = "Asia/Kolkata"
 DEFAULT_TIMEZONE_LABEL = "India Standard Time (IST)"
+DEFAULT_GEMINI_API_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
+
+
+def _parse_bool(value: str, default: bool = False) -> bool:
+    """Parse boolean-like environment values safely."""
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "y", "on"):
+        return True
+    if normalized in ("0", "false", "no", "n", "off"):
+        return False
+    return default
+
+
+def resolve_vertexai_mode(model_name: str) -> bool:
+    """
+    Resolve whether Google Realtime should run in Vertex AI mode.
+
+    Priority:
+    1) Explicit env override via GEMINI_USE_VERTEXAI
+    2) Model name heuristic: gemini-live-* models are Vertex AI models
+    """
+    explicit = os.getenv("GEMINI_USE_VERTEXAI")
+    if explicit is not None and explicit.strip() != "":
+        return _parse_bool(explicit, default=False)
+
+    normalized_model = (model_name or "").strip().lower()
+    return normalized_model.startswith("gemini-live-")
 
 
 def build_session_prompt_vars(dispatch_metadata: dict) -> dict:
@@ -454,9 +483,26 @@ async def entrypoint(ctx: JobContext):
 
     # Load configuration
     realtime_config = ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')
+    gemini_model = realtime_config.get('model', DEFAULT_GEMINI_API_MODEL)
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.8)
+    use_vertexai = resolve_vertexai_mode(gemini_model)
+
+    # Vertex AI requires Google Application Default Credentials inside the container.
+    # If missing, gracefully fall back to Gemini API mode with a compatible model.
+    if use_vertexai:
+        has_adc = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+        has_project = bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT"))
+        if not has_adc and not has_project:
+            fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", DEFAULT_GEMINI_API_MODEL)
+            logger.warning(
+                "Vertex AI model selected but no ADC/project env found. "
+                f"Falling back to Gemini API model: {fallback_model}"
+            )
+            gemini_model = fallback_model
+            use_vertexai = False
+
+    logger.info(f"Realtime model: {gemini_model}, vertexai={use_vertexai}")
 
     # Parse room name
     room_name = ctx.room.name
@@ -599,6 +645,7 @@ async def entrypoint(ctx: JobContext):
     # Create Gemini Realtime model
     realtime_model = NonResumableGeminiRealtimeModel(
         model=gemini_model,
+        vertexai=use_vertexai,
         voice=gemini_voice,
         instructions=agent_prompt,
         temperature=gemini_temperature,

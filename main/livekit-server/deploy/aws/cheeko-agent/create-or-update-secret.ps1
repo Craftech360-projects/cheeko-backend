@@ -4,7 +4,7 @@ param(
   [Parameter(Mandatory = $true)] [string] $Value
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 $existingArn = aws secretsmanager describe-secret `
   --region $Region `
@@ -16,14 +16,20 @@ if ($LASTEXITCODE -eq 0 -and $existingArn -and $existingArn -ne "None") {
   aws secretsmanager put-secret-value `
     --region $Region `
     --secret-id $Name `
-    --secret-string $Value | Out-Null
+    --secret-string $Value 1>$null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed updating secret: $Name"
+  }
   Write-Host "Updated secret: $Name"
 }
 else {
   aws secretsmanager create-secret `
     --region $Region `
     --name $Name `
-    --secret-string $Value | Out-Null
+    --secret-string $Value 1>$null
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed creating secret: $Name"
+  }
   Write-Host "Created secret: $Name"
 }
 
