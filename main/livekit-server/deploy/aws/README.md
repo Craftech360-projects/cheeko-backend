@@ -15,6 +15,9 @@ This deployment does not include game workers yet.
 - `Dockerfile.aws-cheeko`: container image for AWS
 - `start-aws-cheeko.sh`: starts `workers/cheeko_worker.py` in production mode (`start`)
 - `cheeko-agent/task-definition.template.json`: ECS task definition template
+- `cheeko-agent/deploy-cheeko-agent.ps1`: one-command deploy (build image + sync secrets + register task + create/update service)
+- `cheeko-agent/build-and-push-image.ps1`: ECR build/push helper
+- `cheeko-agent/create-or-update-secret.ps1`: Secrets Manager helper
 - `cheeko-agent/register-task-definition.ps1`: renders and registers task definition
 - `cheeko-agent/create-or-update-service.ps1`: creates or updates ECS service
 
@@ -49,6 +52,27 @@ aws ecr get-login-password --region $Region | docker login --username AWS --pass
 
 docker build -f Dockerfile.aws-cheeko -t $ImageUri .
 docker push $ImageUri
+```
+
+## 2.5) Optional: One-command deployment
+
+If your `.env` already has required values, this script can do all steps:
+
+```powershell
+.\deploy\aws\cheeko-agent\deploy-cheeko-agent.ps1 `
+  -Region "us-east-1" `
+  -ClusterName "cheeko-agents-cluster" `
+  -ServiceName "cheeko-agent-service" `
+  -ExecutionRoleArn "arn:aws:iam::<account>:role/ecsTaskExecutionRole" `
+  -TaskRoleArn "arn:aws:iam::<account>:role/cheekoAgentTaskRole" `
+  -Subnets @("subnet-aaaa1111","subnet-bbbb2222") `
+  -SecurityGroups @("sg-cccc3333") `
+  -RepositoryName "cheeko-agent" `
+  -ImageTag "v1" `
+  -SecretPrefix "prod/cheeko" `
+  -DotEnvPath ".env" `
+  -AssignPublicIp DISABLED `
+  -DesiredCount 1
 ```
 
 ## 3) Create Secrets in Secrets Manager
