@@ -14,6 +14,7 @@ dependencies = [
     "livekit-plugins-groq",
     "livekit.plugins.deepgram",
     "livekit-plugins-elevenlabs",
+    "livekit-plugins-google",
     "livekit-plugins-inworld",
     "python-dotenv",
     "paho-mqtt",
@@ -30,6 +31,7 @@ dependencies = [
     "websockets>=11.0",
     "torchaudio>=2.8.0",
     "silero-vad==6.2.0",
+    "boto3",
 ]
 
 [dependency-groups]

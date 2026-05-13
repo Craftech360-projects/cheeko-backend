@@ -33,6 +33,8 @@ from livekit.agents import (
 )
 from livekit import rtc, api
 from livekit.plugins import google, elevenlabs
+if not hasattr(google, "realtime") and hasattr(google, "beta"):
+    google.realtime = google.beta.realtime
 import io
 import pytz
 from pydub import AudioSegment
@@ -423,8 +425,8 @@ class CheekoAssistant(BaseAssistant):
     # Custom greeting for Cheeko
     GREETING_INSTRUCTION = "Greet the user warmly as Cheeko, a friendly AI companion. Keep it brief and playful."
 
-    def __init__(self, instructions: str = None) -> None:
-        super().__init__(instructions=instructions)
+    def __init__(self, instructions: str = None, tools: list | None = None) -> None:
+        super().__init__(instructions=instructions, tools=tools)
 
 
 
@@ -612,11 +614,11 @@ async def entrypoint(ctx: JobContext):
     elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
     logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
 
-    # Create AgentSession with mode switching, deterministic time/date, and TTS for session.say()
+    # Create AgentSession with deterministic time/date and TTS for session.say()
     session_tools = [*MODE_SWITCH_TOOLS, get_time_date]
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts, tools=session_tools)
+    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts)
     logger.info(
-        f"AgentSession created with {len(MODE_SWITCH_TOOLS)} mode switching tools + 1 time/date tool + ElevenLabs TTS"
+        f"AgentSession created with ElevenLabs TTS; {len(session_tools)} tools will be attached to the assistant"
     )
 
     # Initialize animal audio service
@@ -746,7 +748,7 @@ async def entrypoint(ctx: JobContext):
     # logger.info("Music service initialized (async)")
 
     # Create assistant instance
-    assistant = CheekoAssistant(instructions=agent_prompt)
+    assistant = CheekoAssistant(instructions=agent_prompt, tools=session_tools)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
     logger.info(f"{CHARACTER_NAME} Assistant initialized")
 

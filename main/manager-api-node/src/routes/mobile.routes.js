@@ -7,6 +7,38 @@ const agentService = require('../services/agent.service');
 const deviceService = require('../services/device.service');
 const { success, badRequest } = require('../utils/response');
 
+const formatMobileDevice = (device) => ({
+    id: device.id,
+    userId: device.user_id,
+    user_id: device.user_id,
+    macAddress: device.mac_address,
+    mac_address: device.mac_address,
+    deviceName: device.device_name || device.alias || 'Cheeko',
+    device_name: device.device_name || device.alias || 'Cheeko',
+    alias: device.alias,
+    status: device.user_id ? 'active' : 'unbound',
+    bindingStatus: device.user_id ? 'bound' : 'unbound',
+    binding_status: device.user_id ? 'bound' : 'unbound',
+    agentId: device.agent_id,
+    agent_id: device.agent_id,
+    kidId: device.kid_id,
+    kid_id: device.kid_id,
+    board: device.board,
+    mode: device.mode,
+    deviceMode: device.device_mode,
+    device_mode: device.device_mode,
+    appVersion: device.app_version,
+    app_version: device.app_version,
+    autoUpdate: device.auto_update,
+    auto_update: device.auto_update,
+    lastConnectedAt: device.last_connected_at,
+    last_connected_at: device.last_connected_at,
+    createdAt: device.create_date,
+    created_at: device.create_date,
+    updatedAt: device.update_date,
+    updated_at: device.update_date,
+});
+
 // All mobile routes require a valid Firebase ID token
 router.use(requireFirebaseAuth);
 
@@ -55,6 +87,11 @@ router.get('/user-state', asyncHandler(async (req, res) => {
     const state = await mobileService.getUserState(req.firebaseUser.uid);
     if (!state) return res.status(404).json({ error: 'User state not found' });
     res.json(state);
+}));
+
+router.get('/homepage-activity', asyncHandler(async (req, res) => {
+    const activity = await mobileService.getHomepageActivity(req.firebaseUser.uid);
+    success(res, activity);
 }));
 
 router.post('/user-state', asyncHandler(async (req, res) => {
@@ -135,21 +172,32 @@ router.delete('/agents/:agentId', asyncHandler(async (req, res) => {
 
 router.get('/agents/:agentId/devices', asyncHandler(async (req, res) => {
     const devices = await deviceService.getDevicesByAgent(req.mobileUser.id, req.params.agentId);
-    const mapped = devices.map(d => ({
-        id: d.id != null ? d.id.toString() : null,
-        macAddress: d.mac_address,
-        agentId: d.agent_id,
-        deviceName: d.device_name || d.alias || 'Cheeko',
-        alias: d.alias,
-        board: d.board,
-        appVersion: d.app_version,
-        autoUpdate: d.auto_update || false,
-        lastConnectedAt: d.last_connected_at,
-        createDate: d.create_date,
-        updateDate: d.update_date,
-        kidId: d.kid_id,
-    }));
+    const mapped = devices.map(formatMobileDevice);
     success(res, mapped);
+}));
+
+router.get('/devices', asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const result = await deviceService.listDevices(req.mobileUser.id, {
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 50,
+    });
+    success(res, {
+        ...result,
+        list: result.list.map(formatMobileDevice),
+    });
+}));
+
+router.get('/user-devices', asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const result = await deviceService.listDevices(req.mobileUser.id, {
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 50,
+    });
+    success(res, {
+        ...result,
+        list: result.list.map(formatMobileDevice),
+    });
 }));
 
 router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) => {
@@ -168,8 +216,8 @@ router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) =
 
 router.put('/devices/assign-kid-by-mac', asyncHandler(async (req, res) => {
     const { mac, kidId } = req.body;
-    const device = await deviceService.assignKidByMac(mac, kidId);
-    success(res, device, 'Kid assigned to device');
+    const device = await deviceService.assignKidByMac(mac, kidId, req.mobileUser.id);
+    success(res, formatMobileDevice(device), 'Kid assigned to device');
 }));
 
 // ─── Chat History ────────────────────────────────────────────────────────────

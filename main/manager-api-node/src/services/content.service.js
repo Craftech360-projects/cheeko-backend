@@ -10,6 +10,20 @@ const logger = require('../utils/logger');
 
 // ==================== CONTENT LIBRARY METHODS ====================
 
+const formatContentLibraryItem = (item) => {
+  if (!item) return null;
+
+  return {
+    ...item,
+    content_url: item.url,
+    contentUrl: item.url,
+    contentType: item.content_type,
+    thumbnailUrl: item.thumbnail_url,
+    durationSeconds: item.duration_seconds,
+    duration_seconds: item.duration_seconds,
+  };
+};
+
 /**
  * Get content library list with pagination
  * @param {Object} options - Filter and pagination options
@@ -44,7 +58,7 @@ const getLibraryList = async ({ page = 1, limit = 10, contentType, category, isA
   ]);
 
   return {
-    list: content || [],
+    list: (content || []).map(formatContentLibraryItem),
     total: total || 0,
     page,
     limit
@@ -87,7 +101,7 @@ const searchLibrary = async (query, { page = 1, limit = 20, contentType, categor
   ]);
 
   return {
-    list: content || [],
+    list: (content || []).map(formatContentLibraryItem),
     total: total || 0,
     page,
     limit,
@@ -142,7 +156,7 @@ const getLibraryById = async (contentId) => {
     const content = await prisma.content_library.findFirst({
       where: { id: BigInt(contentId) }
     });
-    return content || null;
+    return formatContentLibraryItem(content);
   } catch {
     return null;
   }
@@ -174,7 +188,7 @@ const createLibraryItem = async (data) => {
     }
   });
 
-  return content;
+  return formatContentLibraryItem(content);
 };
 
 /**
@@ -215,7 +229,7 @@ const updateLibraryItem = async (contentId, data) => {
     data: updateData
   });
 
-  return content;
+  return formatContentLibraryItem(content);
 };
 
 /**

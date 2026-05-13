@@ -507,6 +507,7 @@ model parent_profile {
   display_name         String?   @db.VarChar(255)
   avatar_url           String?   @db.VarChar(500)
   fcm_token            String?   @db.VarChar(500)
+  country_region       String?   @db.VarChar(100)
   timezone             String?   @db.VarChar(50)
   language             String?   @default("en") @db.VarChar(10)
   email_notifications  Boolean?  @default(true)

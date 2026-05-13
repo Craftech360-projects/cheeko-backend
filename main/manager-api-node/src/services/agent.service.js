@@ -1448,6 +1448,9 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
     return {
       id: agent.id,
       agentName: agent.agent_name,
+      agent_name: agent.agent_name,
+      displayName: agent.agent_name,
+      display_name: agent.agent_name,
       memModelId: agent.mem_model_id,
       systemPrompt: agent.system_prompt,
       summaryMemory: agent.summary_memory,

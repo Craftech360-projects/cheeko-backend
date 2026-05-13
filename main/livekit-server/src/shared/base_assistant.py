@@ -21,14 +21,18 @@ class BaseAssistant(Agent):
     # Default greeting instruction - override in subclasses for custom greetings
     GREETING_INSTRUCTION = "Greet the user warmly. Keep it brief and friendly."
 
-    def __init__(self, instructions: str = None) -> None:
+    def __init__(self, instructions: str = None, tools: list | None = None) -> None:
         """
         Initialize base assistant
 
         Args:
             instructions: Agent instructions/prompt
+            tools: LiveKit function tools exposed by the agent
         """
-        super().__init__(instructions=instructions or "You are Cheeko, a helpful AI assistant.")
+        super().__init__(
+            instructions=instructions or "You are Cheeko, a helpful AI assistant.",
+            tools=tools,
+        )
 
         # Room and device information
         self.room_name: Optional[str] = None

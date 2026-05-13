@@ -8,6 +8,13 @@ jest.mock('../../src/config/database', () => ({
     parent_profile: {
       upsert: jest.fn(),
       update: jest.fn()
+    },
+    ai_device: {
+      findMany: jest.fn()
+    },
+    rfid_card_tap_log: {
+      count: jest.fn(),
+      findFirst: jest.fn()
     }
   }
 }));
@@ -68,6 +75,35 @@ describe('mobile.service parent profile compatibility', () => {
     });
     expect(profile.push_notifications).toBe(false);
     expect(profile.pushNotifications).toBe(false);
+  });
+
+  it('saves and returns the parent country/region field', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      email: 'parent@example.com'
+    });
+    prisma.parent_profile.upsert.mockResolvedValue({
+      id: 10n,
+      user_id: 1n,
+      country_region: 'IN'
+    });
+
+    const profile = await mobileService.updateParentProfile('firebase-user-1', {
+      country_region: 'IN'
+    });
+
+    expect(prisma.parent_profile.upsert).toHaveBeenCalledWith({
+      where: { user_id: 1n },
+      create: {
+        user_id: 1n,
+        email: 'parent@example.com',
+        country_region: 'IN'
+      },
+      update: {
+        country_region: 'IN'
+      }
+    });
+    expect(profile.country_region).toBe('IN');
   });
 
   it('stores and clears the mobile FCM token on the parent profile', async () => {
@@ -143,5 +179,44 @@ describe('mobile.service parent profile compatibility', () => {
         fcm_token: 'fcm-token-456'
       }
     });
+  });
+
+  it('separates today-only card progress from latest card activity across all time', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF' }
+    ]);
+    prisma.rfid_card_tap_log.count.mockResolvedValue(0);
+    prisma.rfid_card_tap_log.findFirst.mockResolvedValue({
+      id: 99n,
+      mac_address: 'AA:BB:CC:DD:EE:FF',
+      rfid_uid: 'ABC123',
+      card_type: 'content',
+      content_pack_id: 5n,
+      content_pack_code: 'STORY001',
+      content_pack_name: 'Bedtime Story',
+      created_at: new Date('2026-05-12T18:00:00.000Z')
+    });
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(prisma.rfid_card_tap_log.count).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { user_id: 1n },
+          { mac_address: { in: ['AA:BB:CC:DD:EE:FF'] } }
+        ],
+        created_at: {
+          gte: new Date('2026-05-12T18:30:00.000Z'),
+          lte: new Date('2026-05-13T18:29:59.999Z')
+        }
+      }
+    });
+    expect(result.today_progress.card_tap_count).toBe(0);
+    expect(result.today_progress.date).toBe('2026-05-13');
+    expect(result.recent_activity.rfid_uid).toBe('ABC123');
+    expect(result.recent_activity.content_pack_name).toBe('Bedtime Story');
   });
 });

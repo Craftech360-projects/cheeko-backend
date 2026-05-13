@@ -134,7 +134,12 @@ const getSessionsByMac = async (mac, { page = 1, limit = 10, modeType } = {}) =>
     ]);
 
     return {
-      list: sessions || [],
+      list: (sessions || []).map(session => ({
+        ...session,
+        summary: session.metadata && typeof session.metadata === 'object'
+          ? (session.metadata.summary || session.metadata.title || null)
+          : null
+      })),
       total: total || 0,
       page,
       limit
@@ -581,14 +586,24 @@ const getOverallStats = async (mac) => {
     where: { mac_address: normalizedMac }
   });
 
-  // Get session count
-  const [totalSessions, totalAttempts, correctAttempts] = await Promise.all([
-    prisma.analytics_game_sessions.count({ where: { mac_address: normalizedMac } }),
+  const [sessions, totalAttempts, correctAttempts] = await Promise.all([
+    prisma.analytics_game_sessions.findMany({
+      where: { mac_address: normalizedMac },
+      select: { duration_seconds: true, interaction_count: true, mode_type: true }
+    }),
     prisma.analytics_game_attempts.count({ where: { mac_address: normalizedMac } }),
     prisma.analytics_game_attempts.count({ where: { mac_address: normalizedMac, is_correct: true } })
   ]);
 
-  const totalTimeSeconds = progress ? (Number(progress.total_duration_seconds) || 0) : 0;
+  const totalSessions = sessions?.length || 0;
+  const sessionDurationSeconds = (sessions || []).reduce((sum, session) => sum + (session.duration_seconds || 0), 0);
+  const totalTimeSeconds = sessionDurationSeconds || (progress ? (Number(progress.total_duration_seconds) || 0) : 0);
+  const totalInteractions = (sessions || []).reduce((sum, session) => sum + (session.interaction_count || 0), 0);
+  const sessionsByMode = {};
+  (sessions || []).forEach(session => {
+    const mode = session.mode_type || 'unknown';
+    sessionsByMode[mode] = (sessionsByMode[mode] || 0) + 1;
+  });
   const longestStreak = progress ? (progress.longest_streak || 0) : 0;
 
   const overallAccuracy = totalAttempts > 0
@@ -597,12 +612,25 @@ const getOverallStats = async (mac) => {
 
   return {
     totalSessions: totalSessions || 0,
+    total_sessions: totalSessions || 0,
     totalTimeSeconds,
+    totalUsageSeconds: totalTimeSeconds,
+    total_usage_seconds: totalTimeSeconds,
     totalAttempts: totalAttempts || 0,
+    total_attempts: totalAttempts || 0,
     correctAttempts: correctAttempts || 0,
+    correct_attempts: correctAttempts || 0,
     overallAccuracy,
+    overall_accuracy: overallAccuracy,
+    accuracy: overallAccuracy,
     longestStreak,
-    progressByMode: progress ? [progress] : []
+    longest_streak: longestStreak,
+    totalInteractions,
+    total_interactions: totalInteractions,
+    sessionsByMode,
+    sessions_by_mode: sessionsByMode,
+    progressByMode: progress ? [progress] : [],
+    progress_by_mode: progress ? [progress] : []
   };
 };
 
@@ -718,12 +746,16 @@ const getDailyUsage = async (mac, days = 7) => {
         dailyData[date] = {
           date,
           sessionCount: 0,
+          session_count: 0,
           totalSeconds: 0,
+          total_usage_seconds: 0,
           byMode: {}
         };
       }
       dailyData[date].sessionCount++;
+      dailyData[date].session_count++;
       dailyData[date].totalSeconds += session.duration_seconds || 0;
+      dailyData[date].total_usage_seconds += session.duration_seconds || 0;
 
       const mode = session.mode_type;
       if (!dailyData[date].byMode[mode]) {
@@ -1266,7 +1298,7 @@ const getAttemptStatsByQuestionType = async (mac) => {
   });
 
   if (!attempts || attempts.length === 0) {
-    return { stats: [], totalAttempts: 0, overallAccuracy: 0 };
+    return { stats: [], totalAttempts: 0, total_attempts: 0, correctAttempts: 0, correct_attempts: 0, overallAccuracy: 0, accuracy: 0 };
   }
 
   // Group by question type
@@ -1306,7 +1338,11 @@ const getAttemptStatsByQuestionType = async (mac) => {
   return {
     stats,
     totalAttempts,
-    overallAccuracy
+    total_attempts: totalAttempts,
+    correctAttempts: totalCorrect,
+    correct_attempts: totalCorrect,
+    overallAccuracy,
+    accuracy: overallAccuracy
   };
 };
 

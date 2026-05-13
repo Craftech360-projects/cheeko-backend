@@ -7,6 +7,55 @@ function dateOrNull(value) {
     return value ? new Date(value) : null;
 }
 
+function ageFromBirthDate(value) {
+    if (!value) return null;
+    const birthDate = new Date(value);
+    if (Number.isNaN(birthDate.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDelta = today.getMonth() - birthDate.getMonth();
+    if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birthDate.getDate())) age--;
+    return age;
+}
+
+function getDayRange(now = new Date()) {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+}
+
+function formatLocalDate(value) {
+    const date = new Date(value);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function formatRecentCardActivity(row) {
+    if (!row) return null;
+
+    return {
+        id: row.id != null ? row.id.toString() : null,
+        mac_address: row.mac_address,
+        macAddress: row.mac_address,
+        rfid_uid: row.rfid_uid,
+        rfidUid: row.rfid_uid,
+        card_type: row.card_type || 'unknown',
+        cardType: row.card_type || 'unknown',
+        content_pack_id: row.content_pack_id != null ? row.content_pack_id.toString() : null,
+        contentPackId: row.content_pack_id != null ? row.content_pack_id.toString() : null,
+        content_pack_code: row.content_pack_code || null,
+        contentPackCode: row.content_pack_code || null,
+        content_pack_name: row.content_pack_name || null,
+        contentPackName: row.content_pack_name || null,
+        created_at: row.created_at,
+        createdAt: row.created_at,
+    };
+}
+
 function collectParentProfileUpdates(data) {
     const updates = {};
 
@@ -14,6 +63,7 @@ function collectParentProfileUpdates(data) {
         updates.display_name = data.parent_name || data.fullName || data.displayName;
     }
     if (data.phone_number || data.phoneNumber) updates.phone_number = data.phone_number || data.phoneNumber;
+    if (data.country_region || data.countryRegion) updates.country_region = data.country_region || data.countryRegion;
     if (data.preferred_language || data.preferredLanguage || data.language) {
         updates.language = data.preferred_language || data.preferredLanguage || data.language;
     }
@@ -51,9 +101,16 @@ function formatParentProfile(profile) {
         ...profile,
         parent_name: profile.display_name,
         fullName: profile.display_name,
+        country_region: profile.country_region || null,
         phoneNumber: profile.phone_number,
         fcmToken: profile.fcm_token,
+        preferred_language: profile.language,
         preferredLanguage: profile.language,
+        notification_preferences: {
+            email_notifications: profile.email_notifications,
+            push_notifications: profile.push_notifications,
+            weekly_report: profile.weekly_report,
+        },
         emailNotifications: profile.email_notifications,
         pushNotifications: profile.push_notifications,
         weeklyReport: profile.weekly_report,
@@ -200,6 +257,9 @@ async function getKids(firebaseUid) {
         avatar_url: k.avatar_url,
         date_of_birth: k.birth_date,
         birth_date: k.birth_date,
+        age: ageFromBirthDate(k.birth_date),
+        is_active: true,
+        isActive: true,
         gender: k.gender,
         interests: k.interests || [],
         language: k.language,
@@ -233,6 +293,9 @@ async function createKid(firebaseUid, data) {
         nickname: kid.nickname,
         date_of_birth: kid.birth_date,
         birth_date: kid.birth_date,
+        age: ageFromBirthDate(kid.birth_date),
+        is_active: true,
+        isActive: true,
         gender: kid.gender,
         interests: kid.interests || [],
     };
@@ -258,6 +321,9 @@ async function updateKid(kidId, data) {
         name: kid.name,
         date_of_birth: kid.birth_date,
         birth_date: kid.birth_date,
+        age: ageFromBirthDate(kid.birth_date),
+        is_active: true,
+        isActive: true,
         gender: kid.gender,
         interests: kid.interests || [],
     };
@@ -305,6 +371,58 @@ async function deleteUserAccount(firebaseUid) {
     return { success: true, user_id: firebaseUid, deleted_at: new Date().toISOString() };
 }
 
+async function getHomepageActivity(firebaseUid, options = {}) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+        select: { id: true },
+    });
+    if (!user) throw new Error('User not found');
+
+    const devices = await prisma.ai_device.findMany({
+        where: { user_id: user.id },
+        select: { mac_address: true },
+    });
+    const macAddresses = (devices || []).map(device => device.mac_address).filter(Boolean);
+    const ownershipFilters = [
+        { user_id: user.id },
+    ];
+    if (macAddresses.length > 0) {
+        ownershipFilters.push({ mac_address: { in: macAddresses } });
+    }
+    const ownedWhere = { OR: ownershipFilters };
+    const { start, end } = getDayRange(options.now || new Date());
+
+    const [todayCardTapCount, recentCardTap] = await Promise.all([
+        prisma.rfid_card_tap_log.count({
+            where: {
+                ...ownedWhere,
+                created_at: {
+                    gte: start,
+                    lte: end,
+                },
+            },
+        }),
+        prisma.rfid_card_tap_log.findFirst({
+            where: ownedWhere,
+            orderBy: { created_at: 'desc' },
+        }),
+    ]);
+
+    return {
+        today_progress: {
+            date: formatLocalDate(start),
+            card_tap_count: todayCardTapCount || 0,
+            cardTapCount: todayCardTapCount || 0,
+        },
+        todayProgress: {
+            date: formatLocalDate(start),
+            cardTapCount: todayCardTapCount || 0,
+        },
+        recent_activity: formatRecentCardActivity(recentCardTap),
+        recentActivity: formatRecentCardActivity(recentCardTap),
+    };
+}
+
 module.exports = {
     getParentProfile,
     createParentProfile,
@@ -319,4 +437,5 @@ module.exports = {
     deleteKid,
     checkEmailExists,
     deleteUserAccount,
+    getHomepageActivity,
 };

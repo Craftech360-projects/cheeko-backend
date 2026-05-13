@@ -29,7 +29,7 @@ const buildOtaDownloadUrl = (otaUrl, firmwareId) => {
 
 // Clean up expired activation codes (older than 24 hours)
 const ACTIVATION_CODE_TTL = 24 * 60 * 60 * 1000; // 24 hours in ms
-setInterval(() => {
+const activationCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [code, data] of activationCodeCache.entries()) {
     if (now - data.createdAt > ACTIVATION_CODE_TTL) {
@@ -38,6 +38,7 @@ setInterval(() => {
     }
   }
 }, 60 * 60 * 1000); // Clean up every hour
+if (activationCleanupTimer.unref) activationCleanupTimer.unref();
 
 /**
  * Register a new device
@@ -260,11 +261,27 @@ const assignKidToDevice = async (userId, deviceId, kidId) => {
  * @param {number} kidId - Kid profile ID
  * @returns {Promise<Object>} Updated device
  */
-const assignKidByMac = async (mac, kidId) => {
+const assignKidByMac = async (mac, kidId, userId = null) => {
   const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) throw new Error('Invalid MAC address format');
+
+  if (userId && kidId) {
+    const kid = await prisma.kid_profile.findFirst({
+      where: { id: BigInt(kidId), user_id: BigInt(userId) },
+      select: { id: true },
+    });
+    if (!kid) throw new Error('Kid profile not found');
+  }
+
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac, ...(userId ? { user_id: BigInt(userId) } : {}) },
+    select: { id: true },
+  });
+  if (!device) throw new Error('Device not found');
+
   const updated = await prisma.ai_device.update({
-    where: { mac_address: normalizedMac },
-    data: { kid_id: BigInt(kidId), update_date: new Date() },
+    where: { id: device.id },
+    data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
   });
   return updated;
 };
@@ -353,6 +370,22 @@ const listDevices = async (userId, { page = 1, limit = 10 } = {}) => {
     }),
   ]);
   return { list: devices, total: count, page, limit };
+};
+
+/**
+ * Get a device by MAC only if it belongs to the supplied user.
+ * Used by Firebase-backed mobile analytics endpoints before reading MAC data.
+ */
+const getOwnedDeviceByMac = async (userId, mac) => {
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) return null;
+
+  return prisma.ai_device.findFirst({
+    where: {
+      mac_address: normalizedMac,
+      user_id: BigInt(userId)
+    }
+  });
 };
 
 /**
@@ -1375,6 +1408,7 @@ module.exports = {
   getMode,
   getDeviceByMac,
   getDeviceById,
+  getOwnedDeviceByMac,
   listDevices,
   manualAddDevice,
   // OTA methods
