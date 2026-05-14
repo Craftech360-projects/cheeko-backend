@@ -380,9 +380,10 @@ async function getHomepageActivity(firebaseUid, options = {}) {
 
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id },
-        select: { mac_address: true },
+        select: { mac_address: true, agent_id: true },
     });
     const macAddresses = (devices || []).map(device => device.mac_address).filter(Boolean);
+    const agentIds = (devices || []).map(device => device.agent_id).filter(Boolean);
     const ownershipFilters = [
         { user_id: user.id },
     ];
@@ -390,9 +391,16 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         ownershipFilters.push({ mac_address: { in: macAddresses } });
     }
     const ownedWhere = { OR: ownershipFilters };
+    const chatOwnershipFilters = [];
+    if (macAddresses.length > 0) {
+        chatOwnershipFilters.push({ mac_address: { in: macAddresses } });
+    }
+    if (agentIds.length > 0) {
+        chatOwnershipFilters.push({ agent_id: { in: agentIds } });
+    }
     const { start, end } = getDayRange(options.now || new Date());
 
-    const [todayCardTapCount, recentCardTap] = await Promise.all([
+    const [todayCardTapCount, todayAiInteractionCount, recentCardTap] = await Promise.all([
         prisma.rfid_card_tap_log.count({
             where: {
                 ...ownedWhere,
@@ -402,6 +410,18 @@ async function getHomepageActivity(firebaseUid, options = {}) {
                 },
             },
         }),
+        chatOwnershipFilters.length > 0
+            ? prisma.ai_agent_chat_history.count({
+                where: {
+                    chat_type: 1,
+                    OR: chatOwnershipFilters,
+                    created_at: {
+                        gte: start,
+                        lte: end,
+                    },
+                },
+            })
+            : Promise.resolve(0),
         prisma.rfid_card_tap_log.findFirst({
             where: ownedWhere,
             orderBy: { created_at: 'desc' },
@@ -413,10 +433,13 @@ async function getHomepageActivity(firebaseUid, options = {}) {
             date: formatLocalDate(start),
             card_tap_count: todayCardTapCount || 0,
             cardTapCount: todayCardTapCount || 0,
+            ai_interaction_count: todayAiInteractionCount || 0,
+            aiInteractionCount: todayAiInteractionCount || 0,
         },
         todayProgress: {
             date: formatLocalDate(start),
             cardTapCount: todayCardTapCount || 0,
+            aiInteractionCount: todayAiInteractionCount || 0,
         },
         recent_activity: formatRecentCardActivity(recentCardTap),
         recentActivity: formatRecentCardActivity(recentCardTap),

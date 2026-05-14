@@ -12,6 +12,9 @@ jest.mock('../../src/config/database', () => ({
     ai_device: {
       findMany: jest.fn()
     },
+    ai_agent_chat_history: {
+      count: jest.fn()
+    },
     rfid_card_tap_log: {
       count: jest.fn(),
       findFirst: jest.fn()
@@ -184,9 +187,10 @@ describe('mobile.service parent profile compatibility', () => {
   it('separates today-only card progress from latest card activity across all time', async () => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.ai_device.findMany.mockResolvedValue([
-      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF' }
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
     ]);
     prisma.rfid_card_tap_log.count.mockResolvedValue(0);
+    prisma.ai_agent_chat_history.count.mockResolvedValue(3);
     prisma.rfid_card_tap_log.findFirst.mockResolvedValue({
       id: 99n,
       mac_address: 'AA:BB:CC:DD:EE:FF',
@@ -214,7 +218,23 @@ describe('mobile.service parent profile compatibility', () => {
         }
       }
     });
+    expect(prisma.ai_agent_chat_history.count).toHaveBeenCalledWith({
+      where: {
+        chat_type: 1,
+        OR: [
+          { mac_address: { in: ['AA:BB:CC:DD:EE:FF'] } },
+          { agent_id: { in: ['agent-1'] } }
+        ],
+        created_at: {
+          gte: new Date('2026-05-12T18:30:00.000Z'),
+          lte: new Date('2026-05-13T18:29:59.999Z')
+        }
+      }
+    });
     expect(result.today_progress.card_tap_count).toBe(0);
+    expect(result.today_progress.ai_interaction_count).toBe(3);
+    expect(result.today_progress.aiInteractionCount).toBe(3);
+    expect(result.todayProgress.aiInteractionCount).toBe(3);
     expect(result.today_progress.date).toBe('2026-05-13');
     expect(result.recent_activity.rfid_uid).toBe('ABC123');
     expect(result.recent_activity.content_pack_name).toBe('Bedtime Story');
