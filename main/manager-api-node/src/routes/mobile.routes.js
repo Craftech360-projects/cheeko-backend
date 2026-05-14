@@ -96,6 +96,30 @@ router.get('/homepage-activity', asyncHandler(async (req, res) => {
     success(res, activity);
 }));
 
+router.get('/recommendations/homepage', asyncHandler(async (req, res) => {
+    const { kidId, kid_id, limit } = req.query;
+    const resolvedKidId = kidId || kid_id;
+    if (!resolvedKidId) return badRequest(res, 'kidId is required');
+
+    const recommendations = await mobileService.getHomepageRecommendations(req.firebaseUser.uid, {
+        kidId: resolvedKidId,
+        limit,
+    });
+    success(res, recommendations);
+}));
+
+router.get('/homepage-recommendations', asyncHandler(async (req, res) => {
+    const { kidId, kid_id, limit } = req.query;
+    const resolvedKidId = kidId || kid_id;
+    if (!resolvedKidId) return badRequest(res, 'kidId is required');
+
+    const recommendations = await mobileService.getHomepageRecommendations(req.firebaseUser.uid, {
+        kidId: resolvedKidId,
+        limit,
+    });
+    success(res, recommendations);
+}));
+
 router.post('/user-state', asyncHandler(async (req, res) => {
     res.status(201).json({ success: true }); // Sys_user is auto-created in auth middleware
 }));

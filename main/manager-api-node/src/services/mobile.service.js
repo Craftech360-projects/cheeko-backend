@@ -1,5 +1,6 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
+const { ApiError } = require('../middleware/errorHandler');
 
 // ─── Parent Profile ─────────────────────────────────────────────────────────
 
@@ -54,6 +55,358 @@ function formatRecentCardActivity(row) {
         created_at: row.created_at,
         createdAt: row.created_at,
     };
+}
+
+const HOMEPAGE_AI_CARDS = [
+    {
+        itemType: 'ai',
+        id: 'ai-story-mode',
+        title: 'Story AI',
+        aiMode: 'story',
+        category: 'AI',
+        routeName: 'aiStoryMode',
+        thumbnailUrl: null,
+    },
+    {
+        itemType: 'ai',
+        id: 'ai-music-mode',
+        title: 'Music AI',
+        aiMode: 'music',
+        category: 'AI',
+        routeName: 'aiMusicMode',
+        thumbnailUrl: null,
+    },
+    {
+        itemType: 'ai',
+        id: 'ai-learning-mode',
+        title: 'Learning AI',
+        aiMode: 'learning',
+        category: 'AI',
+        routeName: 'aiLearningMode',
+        thumbnailUrl: null,
+    },
+    {
+        itemType: 'ai',
+        id: 'ai-game-mode',
+        title: 'Game AI',
+        aiMode: 'game',
+        category: 'AI',
+        routeName: 'aiGameMode',
+        thumbnailUrl: null,
+    },
+    {
+        itemType: 'ai',
+        id: 'ai-chat-mode',
+        title: 'AI Chat',
+        aiMode: 'conversation',
+        category: 'AI',
+        routeName: 'aiChatMode',
+        thumbnailUrl: null,
+    },
+];
+
+function clampRecommendationLimit(value) {
+    const parsed = parseInt(value, 10);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 8;
+    return Math.min(parsed, 20);
+}
+
+function parseBigIntId(value, fieldName) {
+    try {
+        return BigInt(value);
+    } catch (err) {
+        throw new ApiError(`${fieldName} must be a valid id`, 400, 400);
+    }
+}
+
+function normalizeText(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function toArray(value) {
+    if (Array.isArray(value)) return value.filter(Boolean);
+    if (typeof value === 'string' && value.trim()) return [value.trim()];
+    return [];
+}
+
+function addTerms(target, values) {
+    toArray(values).forEach(value => {
+        const normalized = normalizeText(value);
+        if (normalized) target.add(normalized);
+    });
+}
+
+function addKeywordTokens(target, value) {
+    const normalized = normalizeText(value);
+    if (!normalized) return;
+    target.add(normalized);
+    normalized.split(/[^a-z0-9]+/).filter(token => token.length > 1).forEach(token => target.add(token));
+}
+
+function metadataTokens(metadata) {
+    if (!metadata || typeof metadata !== 'object') return [];
+    const values = [];
+    const collect = (value) => {
+        if (value == null) return;
+        if (Array.isArray(value)) {
+            value.forEach(collect);
+            return;
+        }
+        if (typeof value === 'object') {
+            Object.values(value).forEach(collect);
+            return;
+        }
+        values.push(value);
+    };
+    collect(metadata);
+    return values;
+}
+
+function collectPreferenceSignals(kid) {
+    const preferences = kid.preferences || {};
+    const categories = new Set();
+    const contentTypes = new Set();
+    const aiModes = new Set();
+
+    addTerms(categories, kid.interests);
+    addTerms(categories, preferences.interests);
+    addTerms(categories, preferences.categories);
+    addTerms(categories, preferences.preferredCategories);
+    addTerms(categories, preferences.selectedInterests);
+    addTerms(categories, preferences.topics);
+
+    addTerms(contentTypes, preferences.contentTypes);
+    addTerms(contentTypes, preferences.preferredContentTypes);
+    addTerms(contentTypes, preferences.mediaTypes);
+
+    addTerms(aiModes, preferences.aiModes);
+    addTerms(aiModes, preferences.preferredAiModes);
+    addTerms(aiModes, preferences.aiExperiences);
+    addTerms(aiModes, preferences.preferredAiExperiences);
+
+    return { categories, contentTypes, aiModes };
+}
+
+function contentTokens(content) {
+    return [
+        content.title,
+        content.category,
+        content.content_type,
+        content.content_pack_code,
+        content.contentPackCode,
+        content.pack_code,
+        content.packCode,
+        ...(Array.isArray(content.tags) ? content.tags : []),
+        ...metadataTokens(content.metadata),
+    ].map(normalizeText).filter(Boolean);
+}
+
+function formatDuration(seconds) {
+    if (!seconds || seconds < 0) return null;
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function buildRecentSignals({ kid, cardTaps, sessions, mediaPlayback }) {
+    const preferenceSignals = collectPreferenceSignals(kid);
+    const keywords = new Set();
+    const recentCategories = new Set();
+    const recentContentTypes = new Set();
+    const recentModes = new Set();
+    const recentContentIds = new Set();
+    const recentPackCodes = new Set();
+    const recentPackNames = new Set();
+    const recentPackCodeLabels = new Map();
+    const recentPackNameLabels = new Map();
+    let aiCardUsed = false;
+
+    for (const category of preferenceSignals.categories) addKeywordTokens(keywords, category);
+
+    for (const tap of cardTaps || []) {
+        [tap.content_pack_name, tap.content_pack_code, tap.card_type, tap.rfid_uid].forEach(value => addKeywordTokens(keywords, value));
+        addTerms(recentCategories, tap.content_pack_name);
+        addTerms(recentContentTypes, tap.card_type);
+        addTerms(recentPackCodes, tap.content_pack_code);
+        addTerms(recentPackNames, tap.content_pack_name);
+        if (tap.content_pack_code) recentPackCodeLabels.set(normalizeText(tap.content_pack_code), tap.content_pack_code);
+        if (tap.content_pack_name) recentPackNameLabels.set(normalizeText(tap.content_pack_name), tap.content_pack_name);
+        const tapText = normalizeText(`${tap.content_pack_name || ''} ${tap.content_pack_code || ''} ${tap.card_type || ''}`);
+        if (tapText.includes('ai')) {
+            aiCardUsed = true;
+            if (tapText.includes('story')) recentModes.add('story');
+            if (tapText.includes('music')) recentModes.add('music');
+            if (tapText.includes('game')) recentModes.add('game');
+            if (tapText.includes('learn')) recentModes.add('learning');
+            recentModes.add('conversation');
+        }
+    }
+
+    for (const session of sessions || []) {
+        addTerms(recentModes, session.mode_type);
+        addTerms(recentContentTypes, session.mode_type);
+    }
+
+    for (const playback of mediaPlayback || []) {
+        if (playback.content_id != null) recentContentIds.add(playback.content_id.toString());
+        addTerms(recentContentTypes, playback.content_type);
+    }
+
+    return {
+        preferredCategories: preferenceSignals.categories,
+        preferredContentTypes: preferenceSignals.contentTypes,
+        preferredAiModes: preferenceSignals.aiModes,
+        recentKeywords: keywords,
+        recentCategories,
+        recentContentTypes,
+        recentModes,
+        recentContentIds,
+        recentPackCodes,
+        recentPackNames,
+        recentPackCodeLabels,
+        recentPackNameLabels,
+        aiCardUsed,
+        language: normalizeText(kid.language || 'en'),
+        age: ageFromBirthDate(kid.birth_date),
+    };
+}
+
+function keywordMatchesContent(keywords, content) {
+    const haystack = contentTokens(content).join(' ');
+    for (const keyword of keywords) {
+        if (keyword && haystack.includes(keyword)) return true;
+    }
+    return false;
+}
+
+function categoryMatches(set, category) {
+    const normalized = normalizeText(category);
+    return normalized && set.has(normalized);
+}
+
+function scoreContent(content, profile) {
+    let score = 0;
+    const reasons = [];
+    const category = normalizeText(content.category);
+    const contentType = normalizeText(content.content_type);
+    const language = normalizeText(content.language);
+    const tokens = contentTokens(content);
+    const tokenText = tokens.join(' ');
+
+    for (const code of profile.recentPackCodes) {
+        if (code && tokenText.includes(code)) {
+            score += 80;
+            reasons.push(`Because child used ${profile.recentPackCodeLabels.get(code) || code}`);
+            break;
+        }
+    }
+
+    for (const packName of profile.recentPackNames) {
+        if (packName && tokenText.includes(packName)) {
+            score += 60;
+            reasons.push(`Because child used ${profile.recentPackNameLabels.get(packName) || packName}`);
+            break;
+        }
+    }
+
+    if (categoryMatches(profile.recentCategories, category) || categoryMatches(profile.preferredCategories, category)) {
+        score += 50;
+        reasons.push(`Because ${content.category} matches your child's recent activity or preferences`);
+    }
+    if (profile.recentContentTypes.has(contentType) || profile.preferredContentTypes.has(contentType)) {
+        score += 40;
+        reasons.push(`Because child used ${content.content_type} cards`);
+    }
+    if (keywordMatchesContent(profile.recentKeywords, content)) {
+        score += 30;
+        reasons.push(`Because your child recently used ${content.category || content.title}`);
+    }
+    if (profile.preferredCategories.has(category) || profile.preferredContentTypes.has(contentType)) {
+        score += 20;
+    }
+    if (profile.language && language && profile.language === language) {
+        score += 10;
+    }
+    if (profile.age != null) {
+        const min = content.age_min == null ? null : Number(content.age_min);
+        const max = content.age_max == null ? null : Number(content.age_max);
+        if ((min == null || profile.age >= min) && (max == null || profile.age <= max)) {
+            score += 10;
+        }
+    }
+    if (profile.recentContentIds.has(content.id?.toString())) {
+        score -= 100;
+        reasons.push('Similar alternatives are ranked higher because this was played recently');
+    }
+
+    return {
+        score,
+        reason: reasons[0] || 'Popular content from the library',
+    };
+}
+
+function formatRecommendationContent(content, reason) {
+    const contentId = content.id != null ? content.id.toString() : null;
+    return {
+        itemType: 'content',
+        id: contentId,
+        contentId,
+        title: content.title,
+        subtitle: reason,
+        contentType: content.content_type,
+        category: content.category,
+        thumbnailUrl: content.thumbnail_url || null,
+        durationSeconds: content.duration_seconds || null,
+        formattedDuration: formatDuration(content.duration_seconds),
+        reason,
+    };
+}
+
+function scoreAiCard(card, profile) {
+    let score = 0;
+    const aiMode = normalizeText(card.aiMode);
+
+    if (profile.aiCardUsed) score += 80;
+    if (profile.preferredAiModes.has(aiMode)) score += 70;
+    if (profile.recentModes.has(aiMode)) score += 20;
+    if (profile.recentContentTypes.has(aiMode)) score += 20;
+    if (score === 0) return null;
+
+    const subtitle = profile.aiCardUsed
+        ? 'Because child used an AI card'
+        : (profile.preferredAiModes.has(aiMode)
+            ? `Because ${card.title} is selected in the child profile preferences`
+            : `Because your child recently used ${card.title}`);
+
+    return {
+        ...card,
+        subtitle,
+        reason: subtitle,
+        _score: score,
+        _createdAt: 0,
+    };
+}
+
+function sortRecommendations(a, b) {
+    if (b._score !== a._score) return b._score - a._score;
+    return (b._createdAt || 0) - (a._createdAt || 0);
+}
+
+function dedupeRecommendations(items) {
+    const seenIds = new Set();
+    const seenTitles = new Set();
+    const deduped = [];
+
+    for (const item of items) {
+        const idKey = `${item.itemType}:${item.id}`;
+        const titleKey = `${item.itemType}:${normalizeText(item.title)}`;
+        if (seenIds.has(idKey) || seenTitles.has(titleKey)) continue;
+        seenIds.add(idKey);
+        seenTitles.add(titleKey);
+        deduped.push(item);
+    }
+
+    return deduped;
 }
 
 function collectParentProfileUpdates(data) {
@@ -446,6 +799,139 @@ async function getHomepageActivity(firebaseUid, options = {}) {
     };
 }
 
+async function getHomepageRecommendations(firebaseUid, options = {}) {
+    const limit = clampRecommendationLimit(options.limit);
+    const kidId = options.kidId || options.kid_id;
+    if (!kidId) throw new ApiError('kidId is required', 400, 400);
+    const kidBigIntId = parseBigIntId(kidId, 'kidId');
+
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+        select: { id: true },
+    });
+    if (!user) throw new ApiError('Access denied', 403, 403);
+
+    const kid = await prisma.kid_profile.findFirst({
+        where: {
+            id: kidBigIntId,
+            user_id: user.id,
+        },
+    });
+    if (!kid) throw new ApiError('Access denied', 403, 403);
+
+    logger.info('recommendations_requested', { userId: user.id?.toString(), kidId: kid.id?.toString(), limit });
+
+    const devices = await prisma.ai_device.findMany({
+        where: {
+            user_id: user.id,
+            OR: [
+                { kid_id: kid.id },
+                { kid_id: null },
+            ],
+        },
+        select: { mac_address: true, agent_id: true, kid_id: true },
+    });
+    const macAddresses = (devices || []).map(device => device.mac_address).filter(Boolean);
+    const agentIds = (devices || []).map(device => device.agent_id).filter(Boolean);
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const activityOwnership = [
+        { kid_id: kid.id },
+        { user_id: user.id },
+    ];
+    if (macAddresses.length > 0) {
+        activityOwnership.push({ mac_address: { in: macAddresses } });
+    }
+
+    const [cardTaps, sessions, mediaPlayback, chatHistory, contentCandidates] = await Promise.all([
+        prisma.rfid_card_tap_log.findMany({
+            where: {
+                OR: activityOwnership,
+                created_at: { gte: since },
+            },
+            orderBy: { created_at: 'desc' },
+            take: 20,
+        }),
+        macAddresses.length > 0
+            ? prisma.analytics_game_sessions.findMany({
+                where: {
+                    mac_address: { in: macAddresses },
+                    started_at: { gte: since },
+                },
+                orderBy: { started_at: 'desc' },
+                take: 20,
+            })
+            : Promise.resolve([]),
+        macAddresses.length > 0
+            ? prisma.analytics_media_playback.findMany({
+                where: {
+                    mac_address: { in: macAddresses },
+                    created_at: { gte: since },
+                },
+                orderBy: { created_at: 'desc' },
+                take: 20,
+            })
+            : Promise.resolve([]),
+        (macAddresses.length > 0 || agentIds.length > 0)
+            ? prisma.ai_agent_chat_history.findMany({
+                where: {
+                    chat_type: 1,
+                    OR: [
+                        ...(macAddresses.length > 0 ? [{ mac_address: { in: macAddresses } }] : []),
+                        ...(agentIds.length > 0 ? [{ agent_id: { in: agentIds } }] : []),
+                    ],
+                    created_at: { gte: since },
+                },
+                orderBy: { created_at: 'desc' },
+                take: 20,
+            })
+            : Promise.resolve([]),
+        prisma.content_library.findMany({
+            where: { status: 1 },
+            orderBy: { created_at: 'desc' },
+            take: Math.max(limit * 8, 50),
+        }),
+    ]);
+
+    const profile = buildRecentSignals({ kid, cardTaps, sessions, mediaPlayback });
+    if ((chatHistory || []).length > 0) {
+        profile.recentModes.add('conversation');
+    }
+
+    const scoredContent = (contentCandidates || [])
+        .filter(content => content && content.status !== 0)
+        .map(content => {
+            const scored = scoreContent(content, profile);
+            return {
+                ...formatRecommendationContent(content, scored.reason),
+                _score: scored.score,
+                _createdAt: content.created_at ? new Date(content.created_at).getTime() : 0,
+                _recentlyConsumed: profile.recentContentIds.has(content.id?.toString()),
+            };
+        });
+
+    const nonConsumedContent = scoredContent.filter(item => !item._recentlyConsumed);
+    const contentPool = nonConsumedContent.length >= limit ? nonConsumedContent : scoredContent;
+    const aiItems = HOMEPAGE_AI_CARDS
+        .map(card => scoreAiCard(card, profile))
+        .filter(Boolean);
+
+    const ranked = dedupeRecommendations([...contentPool, ...aiItems].sort(sortRecommendations))
+        .slice(0, limit)
+        .map(({ _score, _createdAt, _recentlyConsumed, ...item }) => item);
+
+    const source = ranked.length === 0
+        ? 'empty'
+        : ((cardTaps || []).length || (sessions || []).length || (mediaPlayback || []).length || (chatHistory || []).length ? 'personalized' : 'default');
+    logger.info('recommendations_returned_count', {
+        userId: user.id?.toString(),
+        kidId: kid.id?.toString(),
+        count: ranked.length,
+        recommendation_source: source,
+    });
+
+    return { items: ranked };
+}
+
 module.exports = {
     getParentProfile,
     createParentProfile,
@@ -461,4 +947,5 @@ module.exports = {
     checkEmailExists,
     deleteUserAccount,
     getHomepageActivity,
+    getHomepageRecommendations,
 };
