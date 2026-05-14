@@ -221,6 +221,66 @@ export default {
                 })
             }).send()
     },
+    // Get device settings sync data by MAC (Admin dashboard)
+    getDeviceSettingsByMac(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/settings`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device settings:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Patch device settings by MAC (Admin dashboard)
+    updateDeviceSettingsByMac(macAddress, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/settings`)
+            .method('PATCH')
+            .data(payload)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to update device settings:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get runtime state by MAC (Admin dashboard)
+    getDeviceRuntimeStateByMac(macAddress, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/state`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device runtime state:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get sync events by MAC (Admin dashboard)
+    getDeviceSyncEventsByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            limit: params?.limit || 20
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/sync-events?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device sync events:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
     // Get WebSocket server list
     getWsServerList(params, callback) {
         RequestService.sendRequest()

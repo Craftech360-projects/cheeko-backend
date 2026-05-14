@@ -5,7 +5,9 @@ const { requireFirebaseAuth } = require('../middleware/firebaseAuth');
 const mobileService = require('../services/mobile.service');
 const agentService = require('../services/agent.service');
 const deviceService = require('../services/device.service');
+const deviceSettingsService = require('../services/deviceSettings.service');
 const { success, badRequest } = require('../utils/response');
+const logger = require('../utils/logger');
 
 const formatMobileDevice = (device) => ({
     id: device.id,
@@ -185,6 +187,107 @@ router.get('/devices', asyncHandler(async (req, res) => {
     success(res, {
         ...result,
         list: result.list.map(formatMobileDevice),
+    });
+}));
+
+router.get('/devices/:mac/settings', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] GET /devices/${req.params.mac}/settings user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const settings = await deviceSettingsService.getSettingsByMac(device.mac_address);
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        settingsVersion: settings.settings_version,
+        settings: settings.settings,
+        syncStatus: settings.sync_status,
+        lastAckStatus: settings.last_ack_status,
+        lastAckReason: settings.last_ack_reason,
+        lastAppliedVersion: settings.last_applied_version,
+    });
+}));
+
+router.patch('/devices/:mac/settings', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] PATCH /devices/${req.params.mac}/settings user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const payloadSettings = req.body?.settings;
+    if (!payloadSettings || typeof payloadSettings !== 'object' || Array.isArray(payloadSettings)) {
+        return badRequest(res, 'settings object is required');
+    }
+
+    const patchResult = await deviceSettingsService.patchSettingsByMac(
+        device.mac_address,
+        payloadSettings
+    );
+
+    let publishResult = null;
+    if (patchResult.changed && patchResult.publishRequired) {
+        try {
+            publishResult = await deviceSettingsService.requestGatewaySettingsPublish({
+                mac_address: device.mac_address,
+                version: patchResult.settings.settings_version,
+                settings: patchResult.settings.settings,
+            });
+        } catch (error) {
+            // Device likely offline or gateway unavailable - mark pending_offline.
+            logger.warn(`[SETTINGS-SYNC][MOBILE] publish failed for mac=${device.mac_address}: ${error.message}`);
+            await deviceSettingsService.markSyncStatusByMac(
+                device.mac_address,
+                'pending_offline',
+                `publish_failed:${error.message}`
+            );
+        }
+    }
+
+    const finalSettings = await deviceSettingsService.getSettingsByMac(device.mac_address);
+
+    success(res, {
+        changed: patchResult.changed,
+        publishRequired: patchResult.publishRequired,
+        publishResult,
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        settingsVersion: finalSettings.settings_version,
+        settings: finalSettings.settings,
+        syncStatus: finalSettings.sync_status,
+    });
+}));
+
+router.get('/devices/:mac/state', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] GET /devices/${req.params.mac}/state user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const state = await deviceSettingsService.getRuntimeStateByMac(device.mac_address);
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        state,
+    });
+}));
+
+router.get('/devices/:mac/sync-events', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] GET /devices/${req.params.mac}/sync-events user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const events = await deviceSettingsService.listSyncEventsByMac(device.mac_address, limit);
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        events,
     });
 }));
 
