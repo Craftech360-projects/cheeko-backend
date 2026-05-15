@@ -230,6 +230,55 @@
             <el-table-column label="Reason" prop="reason" min-width="220" show-overflow-tooltip />
           </el-table>
         </el-card>
+
+        <el-card shadow="never" class="settings-section-card">
+          <div slot="header" class="settings-section-title">Firmware Analytics Snapshot</div>
+          <el-skeleton :rows="4" animated v-if="analyticsLoading" />
+          <div v-else class="analytics-grid">
+            <div><strong>Total Usage:</strong> {{ analyticsOverview.totalUsageMinutes || 0 }} min</div>
+            <div><strong>Card Taps:</strong> {{ analyticsOverview.cardTapCount || 0 }}</div>
+            <div><strong>AI Sessions:</strong> {{ analyticsOverview.aiTalk?.sessionCount || 0 }}</div>
+            <div><strong>Game Launches:</strong> {{ analyticsOverview.games?.launchCount || 0 }}</div>
+            <div><strong>AI Minutes:</strong> {{ formatMinutesFromMs(analyticsOverview.aiTalk?.totalDurationMs) }}</div>
+            <div><strong>Game Minutes:</strong> {{ formatMinutesFromMs(analyticsOverview.games?.totalDurationMs) }}</div>
+            <div><strong>Avg Score:</strong> {{ analyticsOverview.games?.averageScore || 0 }}</div>
+            <div><strong>Latest Battery:</strong> {{ analyticsBattery?.latest?.battery != null ? (analyticsBattery.latest.battery + '%') : '-' }}</div>
+          </div>
+        </el-card>
+
+        <el-card shadow="never" class="settings-section-card">
+          <div slot="header" class="settings-section-title">Daily Usage (Last Period)</div>
+          <el-table :data="analyticsTimeseries.slice(-7).reverse()" size="mini" max-height="220" style="width: 100%">
+            <el-table-column label="Date" prop="date" min-width="120" />
+            <el-table-column label="Usage (min)" min-width="100">
+              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.totalUsageMs) }}</template>
+            </el-table-column>
+            <el-table-column label="Card Taps" prop="cardTapCount" min-width="90" />
+            <el-table-column label="AI (min)" min-width="90">
+              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.aiTalkDurationMs) }}</template>
+            </el-table-column>
+            <el-table-column label="Game (min)" min-width="90">
+              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.gameDurationMs) }}</template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <el-card shadow="never" class="settings-section-card">
+          <div slot="header" class="settings-section-title">Recent Firmware Events</div>
+          <el-table :data="analyticsEvents" size="mini" max-height="260" style="width: 100%">
+            <el-table-column label="Time" min-width="170">
+              <template slot-scope="scope">{{ formatDate(scope.row.timestamp) }}</template>
+            </el-table-column>
+            <el-table-column label="Event" prop="event" min-width="130" />
+            <el-table-column label="Duration (min)" min-width="110">
+              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.durationMs) }}</template>
+            </el-table-column>
+            <el-table-column label="Score" min-width="80">
+              <template slot-scope="scope">{{ scope.row.score == null ? '-' : scope.row.score }}</template>
+            </el-table-column>
+            <el-table-column label="Reason" prop="reason" min-width="160" show-overflow-tooltip />
+          </el-table>
+        </el-card>
       </div>
 
       <span slot="footer" class="dialog-footer">
@@ -271,6 +320,11 @@ export default {
       },
       runtimeState: {},
       syncEvents: [],
+      analyticsLoading: false,
+      analyticsOverview: {},
+      analyticsTimeseries: [],
+      analyticsEvents: [],
+      analyticsBattery: null,
       settingsForm: {
         volume: 70,
         brightness: 80,
@@ -459,6 +513,11 @@ export default {
       };
       this.runtimeState = {};
       this.syncEvents = [];
+      this.analyticsLoading = false;
+      this.analyticsOverview = {};
+      this.analyticsTimeseries = [];
+      this.analyticsEvents = [];
+      this.analyticsBattery = null;
       this.settingsForm = this.getDefaultSettingsForm();
     },
     onSettingsDialogClosed() {
@@ -496,14 +555,24 @@ export default {
       const mac = this.selectedSettingsDevice.macAddress;
       this.settingsLoading = true;
 
+      this.analyticsLoading = true;
+
       Promise.all([
         this.fetchDeviceSettings(mac),
         this.fetchDeviceRuntimeState(mac),
-        this.fetchDeviceSyncEvents(mac, 20)
-      ]).then(([settingsRes, stateRes, eventsRes]) => {
+        this.fetchDeviceSyncEvents(mac, 20),
+        this.fetchDeviceAnalyticsOverview(mac),
+        this.fetchDeviceAnalyticsTimeseries(mac),
+        this.fetchDeviceAnalyticsEvents(mac, 20),
+        this.fetchDeviceAnalyticsBattery(mac)
+      ]).then(([settingsRes, stateRes, eventsRes, overviewRes, timeseriesRes, analyticsEventsRes, batteryRes]) => {
         const settingsData = settingsRes?.data || {};
         const runtimeData = stateRes?.data?.state || {};
         const eventsData = eventsRes?.data?.events || [];
+        const overviewData = overviewRes?.data || {};
+        const timeseriesData = timeseriesRes?.data?.timeseries || [];
+        const analyticsEventsData = analyticsEventsRes?.data?.events || [];
+        const batteryData = batteryRes?.data || null;
 
         this.settingsMeta = {
           syncStatus: settingsData.syncStatus || null,
@@ -514,11 +583,16 @@ export default {
         };
         this.runtimeState = runtimeData || {};
         this.syncEvents = Array.isArray(eventsData) ? eventsData : [];
+        this.analyticsOverview = overviewData || {};
+        this.analyticsTimeseries = Array.isArray(timeseriesData) ? timeseriesData : [];
+        this.analyticsEvents = Array.isArray(analyticsEventsData) ? analyticsEventsData : [];
+        this.analyticsBattery = batteryData;
         this.settingsForm = this.mapSettingsDataToForm(settingsData.settings || {});
       }).catch((error) => {
         this.$message.error(error?.message || 'Failed to load settings sync data');
       }).finally(() => {
         this.settingsLoading = false;
+        this.analyticsLoading = false;
       });
     },
     fetchDeviceSettings(mac) {
@@ -553,6 +627,55 @@ export default {
           }
         });
       });
+    },
+    fetchDeviceAnalyticsOverview(mac) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceAnalyticsOverviewByMac(mac, {}, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch analytics overview'));
+          }
+        });
+      });
+    },
+    fetchDeviceAnalyticsTimeseries(mac) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceAnalyticsTimeseriesByMac(mac, {}, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch analytics timeseries'));
+          }
+        });
+      });
+    },
+    fetchDeviceAnalyticsEvents(mac, limit = 20) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceAnalyticsEventsByMac(mac, { limit }, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch analytics events'));
+          }
+        });
+      });
+    },
+    fetchDeviceAnalyticsBattery(mac) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceAnalyticsBatteryByMac(mac, {}, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch analytics battery'));
+          }
+        });
+      });
+    },
+    formatMinutesFromMs(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return 0;
+      return Math.round(num / 60000);
     },
     mapSettingsDataToForm(settings) {
       const defaults = this.getDefaultSettingsForm();

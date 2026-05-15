@@ -28,6 +28,7 @@ const VALID_SYNC_STATUS = new Set(['synced', 'syncing', 'pending_offline', 'reje
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const SETTINGS_CHANGED_DEDUPE_WINDOW_MS = 10000;
 
 function cloneDefaultSettings() {
   return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -135,6 +136,20 @@ function toSyncStatusFromAck(ackStatus) {
   if (ackStatus === 'ignored') return 'stale';
   if (ackStatus === 'rejected') return 'rejected';
   return 'syncing';
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    const parts = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+    return `{${parts.join(',')}}`;
+  }
+
+  return JSON.stringify(value);
 }
 
 async function createSyncEvent({ mac_address, device_id = null, sender_client_id = null, event_type, version = null, status = null, reason = null, payload = {} }) {
@@ -353,6 +368,99 @@ async function onSettingsAck({ mac_address, sender_client_id = null, device_id =
   return updated;
 }
 
+async function onSettingsChanged({ mac_address, sender_client_id = null, device_id = null, payload = {} }) {
+  const mac = normalizeRequiredMac(mac_address);
+  const snapshot = payload?.settings;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new Error('payload.settings object is required');
+  }
+
+  const settings = await findOrCreateSettingsByMac(mac, device_id);
+  const latestEvent = await prisma.device_sync_event.findFirst({
+    where: {
+      mac_address: mac,
+      event_type: 'settings_changed',
+    },
+    orderBy: { created_at: 'desc' },
+    select: {
+      created_at: true,
+      reason: true,
+      payload: true,
+    },
+  });
+
+  const nowMs = Date.now();
+  const previousSettings = latestEvent?.payload && typeof latestEvent.payload === 'object'
+    ? latestEvent.payload.settings
+    : null;
+  const isRecent = latestEvent?.created_at
+    ? (nowMs - new Date(latestEvent.created_at).getTime()) <= SETTINGS_CHANGED_DEDUPE_WINDOW_MS
+    : false;
+  const isSameReason = (latestEvent?.reason || null) === (payload.reason || null);
+  const isSameSnapshot = previousSettings != null
+    && stableStringify(previousSettings) === stableStringify(snapshot);
+
+  if (isRecent && isSameReason && isSameSnapshot) {
+    logger.info(`[SETTINGS-SYNC][CHANGED] deduped mac=${mac} sender=${sender_client_id || 'na'} reason=${payload.reason || 'na'}`);
+    return {
+      deduplicated: true,
+      shouldPublish: false,
+      settingsVersion: settings.settings_version,
+      mqttMessage: null,
+    };
+  }
+
+  const nextVersion = settings.settings_version + 1;
+  const updated = await prisma.device_settings.update({
+    where: { id: settings.id },
+    data: {
+      device_id: device_id || settings.device_id,
+      settings: snapshot,
+      settings_version: nextVersion,
+      sync_status: 'syncing',
+      last_sent_version: nextVersion,
+      updated_at: new Date(),
+    },
+  });
+
+  await createSyncEvent({
+    mac_address: mac,
+    device_id,
+    sender_client_id,
+    event_type: 'settings_changed',
+    version: Number.isFinite(Number(payload.settings_version)) ? Number(payload.settings_version) : settings.settings_version,
+    status: 'received',
+    reason: payload.reason || null,
+    payload,
+  });
+
+  await createSyncEvent({
+    mac_address: mac,
+    device_id,
+    sender_client_id,
+    event_type: 'settings_update',
+    version: nextVersion,
+    status: 'queued',
+    reason: payload.reason || null,
+    payload: { source: 'settings_changed_echo' },
+  });
+
+  logger.info(
+    `[SETTINGS-SYNC][CHANGED] mac=${mac} sender=${sender_client_id || 'na'} reason=${payload.reason || 'na'} server_version=${nextVersion}`
+  );
+
+  return {
+    deduplicated: false,
+    shouldPublish: true,
+    settingsVersion: updated.settings_version,
+    mqttMessage: {
+      type: 'settings_update',
+      version: updated.settings_version,
+      settings: updated.settings,
+    },
+  };
+}
+
 async function onDeviceState({ mac_address, sender_client_id = null, device_id = null, payload = {} }) {
   const mac = normalizeRequiredMac(mac_address);
   await findOrCreateSettingsByMac(mac, device_id);
@@ -528,6 +636,7 @@ module.exports = {
   patchSettingsByMac,
   onSettingsGet,
   onSettingsAck,
+  onSettingsChanged,
   onDeviceState,
   markSyncStatusByMac,
   getRuntimeStateByMac,

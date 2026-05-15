@@ -6,6 +6,7 @@ const mobileService = require('../services/mobile.service');
 const agentService = require('../services/agent.service');
 const deviceService = require('../services/device.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
+const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
 
@@ -284,10 +285,74 @@ router.get('/devices/:mac/sync-events', asyncHandler(async (req, res) => {
 
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const events = await deviceSettingsService.listSyncEventsByMac(device.mac_address, limit);
+  success(res, {
+    deviceId: device.id,
+    macAddress: device.mac_address,
+    events,
+  });
+}));
+
+router.get('/devices/:mac/analytics/overview', asyncHandler(async (req, res) => {
+    logger.info(`[ANALYTICS][MOBILE] GET /devices/${req.params.mac}/analytics/overview user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const { from, to } = req.query;
+    const overview = await deviceAnalyticsService.getAnalyticsOverviewByMac(device.mac_address, { from, to });
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        ...overview,
+    });
+}));
+
+router.get('/devices/:mac/analytics/timeseries', asyncHandler(async (req, res) => {
+    logger.info(`[ANALYTICS][MOBILE] GET /devices/${req.params.mac}/analytics/timeseries user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const { from, to } = req.query;
+    const timeseries = await deviceAnalyticsService.getAnalyticsTimeSeriesByMac(device.mac_address, { from, to });
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        timeseries,
+    });
+}));
+
+router.get('/devices/:mac/analytics/events', asyncHandler(async (req, res) => {
+    logger.info(`[ANALYTICS][MOBILE] GET /devices/${req.params.mac}/analytics/events user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const events = await deviceAnalyticsService.getRecentAnalyticsEventsByMac(device.mac_address, { limit });
     success(res, {
         deviceId: device.id,
         macAddress: device.mac_address,
         events,
+    });
+}));
+
+router.get('/devices/:mac/analytics/battery', asyncHandler(async (req, res) => {
+    logger.info(`[ANALYTICS][MOBILE] GET /devices/${req.params.mac}/analytics/battery user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const { from, to } = req.query;
+    const battery = await deviceAnalyticsService.getBatteryTrendByMac(device.mac_address, { from, to });
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        ...battery,
     });
 }));
 

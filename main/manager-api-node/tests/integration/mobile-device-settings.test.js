@@ -25,4 +25,24 @@ describe('Mobile Device Settings Routes', () => {
     const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/sync-events`);
     expect(res.statusCode).toBe(401);
   });
+
+  it('requires Firebase auth for GET analytics overview', async () => {
+    const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/analytics/overview`);
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('requires Firebase auth for GET analytics timeseries', async () => {
+    const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/analytics/timeseries`);
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('requires Firebase auth for GET analytics events', async () => {
+    const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/analytics/events`);
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('requires Firebase auth for GET analytics battery', async () => {
+    const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/analytics/battery`);
+    expect(res.statusCode).toBe(401);
+  });
 });
