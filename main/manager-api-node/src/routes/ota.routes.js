@@ -222,7 +222,8 @@ router.post('/activate',
   asyncHandler(async (req, res) => {
     // Spring Boot compatibility: MAC comes from Device-Id header
     const deviceId = req.headers['device-id'] || req.headers['Device-Id'];
-    const mac = deviceId || req.body.mac;
+    const clientId = req.headers['client-id'] || req.headers['Client-Id'] || deviceId;
+    const mac = deviceId || req.body.mac || req.body.mac_address;
 
     if (!mac) {
       // Spring Boot returns 202 for missing device ID
@@ -233,9 +234,21 @@ router.post('/activate',
       // Get device by MAC to check if it exists/activated
       const device = await deviceService.getDeviceByMac(mac);
 
-      if (!device) {
-        // Spring Boot returns 202 for unregistered devices
-        return res.status(202).end();
+      if (!device || !device.user_id) {
+        const deviceReport = {
+          version: req.body.version,
+          flashSize: req.body.flash_size,
+          macAddress: req.body.mac_address || mac,
+          chipModelName: req.body.chip_model_name,
+          chipInfo: req.body.chip_info,
+          application: req.body.application,
+          board: req.body.board,
+          ota: req.body.ota
+        };
+
+        const result = await deviceService.checkOtaVersion(mac, clientId || mac, deviceReport);
+        logger.info('[OTA activate] Outgoing activation payload: ' + JSON.stringify(result, null, 2));
+        return res.status(200).json(result);
       }
 
       // Spring Boot returns simple "success" string for activated devices

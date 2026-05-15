@@ -31,6 +31,7 @@
 const express = require('express');
 const router = express.Router();
 const adminService = require('../services/admin.service');
+const deviceSettingsService = require('../services/deviceSettings.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -1394,6 +1395,120 @@ router.get('/device/all',
 
     const result = await adminService.getAllDevices({ page, limit, keywords });
     success(res, result);
+  })
+);
+
+/**
+ * Admin: Get device settings by MAC for dashboard testing.
+ */
+router.get('/device/:mac/settings',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+
+    const settings = await deviceSettingsService.getSettingsByMac(mac);
+    success(res, {
+      deviceId: settings.device_id,
+      macAddress: settings.mac_address,
+      settingsVersion: settings.settings_version,
+      settings: settings.settings,
+      syncStatus: settings.sync_status,
+      lastAckStatus: settings.last_ack_status,
+      lastAckReason: settings.last_ack_reason,
+      lastAppliedVersion: settings.last_applied_version,
+    });
+  })
+);
+
+/**
+ * Admin: Patch device settings by MAC for dashboard testing.
+ */
+router.patch('/device/:mac/settings',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+
+    const payloadSettings = req.body?.settings;
+    if (!payloadSettings || typeof payloadSettings !== 'object' || Array.isArray(payloadSettings)) {
+      return badRequest(res, 'settings object is required');
+    }
+
+    const patchResult = await deviceSettingsService.patchSettingsByMac(mac, payloadSettings);
+
+    let publishResult = null;
+    if (patchResult.changed && patchResult.publishRequired) {
+      try {
+        publishResult = await deviceSettingsService.requestGatewaySettingsPublish({
+          mac_address: patchResult.settings.mac_address,
+          version: patchResult.settings.settings_version,
+          settings: patchResult.settings.settings,
+        });
+      } catch (error) {
+        await deviceSettingsService.markSyncStatusByMac(
+          patchResult.settings.mac_address,
+          'pending_offline',
+          `publish_failed:${error.message}`
+        );
+      }
+    }
+
+    const finalSettings = await deviceSettingsService.getSettingsByMac(mac);
+    success(res, {
+      changed: patchResult.changed,
+      publishRequired: patchResult.publishRequired,
+      publishResult,
+      deviceId: finalSettings.device_id,
+      macAddress: finalSettings.mac_address,
+      settingsVersion: finalSettings.settings_version,
+      settings: finalSettings.settings,
+      syncStatus: finalSettings.sync_status,
+      lastAckStatus: finalSettings.last_ack_status,
+      lastAckReason: finalSettings.last_ack_reason,
+      lastAppliedVersion: finalSettings.last_applied_version,
+    });
+  })
+);
+
+/**
+ * Admin: Get runtime state by MAC.
+ */
+router.get('/device/:mac/state',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+
+    const state = await deviceSettingsService.getRuntimeStateByMac(mac);
+    success(res, { state });
+  })
+);
+
+/**
+ * Admin: Get sync events by MAC.
+ */
+router.get('/device/:mac/sync-events',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const events = await deviceSettingsService.listSyncEventsByMac(mac, limit);
+    success(res, { events });
   })
 );
 

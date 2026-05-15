@@ -687,6 +687,8 @@ model parent_profile {
   phone_number         String?   @db.VarChar(50)
   display_name         String?   @db.VarChar(255)
   avatar_url           String?   @db.VarChar(500)
+  fcm_token            String?   @db.VarChar(500)
+  country_region       String?   @db.VarChar(100)
   timezone             String?   @db.VarChar(50)
   language             String?   @default("en") @db.VarChar(10)
   email_notifications  Boolean?  @default(true)
@@ -695,6 +697,8 @@ model parent_profile {
   onboarding_completed Boolean?  @default(false)
   terms_accepted_at    DateTime? @db.Timestamptz(6)
   terms_version        String?   @db.VarChar(20)
+  privacy_policy_accepted_at DateTime? @db.Timestamptz(6)
+  consent_accepted_at  DateTime? @db.Timestamptz(6)
   created_at           DateTime? @default(now()) @db.Timestamptz(6)
   updated_at           DateTime? @default(now()) @db.Timestamptz(6)
   sys_user             sys_user? @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -1126,4 +1130,64 @@ model user_question_quota {
   @@unique([user_id, month_key])
   @@index([month_key], map: "idx_user_question_quota_month_key")
   @@index([user_id], map: "idx_user_question_quota_user_id")
+}
+
+model device_settings {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mac_address          String    @unique @db.VarChar(20)
+  device_id            String?   @db.VarChar(100)
+  settings_version     Int       @default(1)
+  settings             Json      @default("{\"volume\":70,\"brightness\":80,\"auto_listen\":false,\"system_sound\":true,\"system_prompt\":true,\"vibration\":true,\"sleep_enabled\":true,\"quiet_hours\":{\"enabled\":false,\"start\":\"21:00\",\"end\":\"07:00\"}}")
+  sync_status          String    @default("synced") @db.VarChar(30)
+  last_ack_status      String?   @db.VarChar(30)
+  last_ack_reason      String?
+  last_sent_version    Int?
+  last_applied_version Int?
+  created_at           DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address], map: "idx_device_settings_mac")
+  @@index([settings_version], map: "idx_device_settings_version")
+  @@index([sync_status], map: "idx_device_settings_sync_status")
+}
+
+model device_runtime_state {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mac_address      String    @unique @db.VarChar(20)
+  device_id        String?   @db.VarChar(100)
+  online           Boolean   @default(false)
+  last_seen_at     DateTime? @db.Timestamptz(6)
+  firmware         String?   @db.VarChar(100)
+  build_label      String?   @db.VarChar(100)
+  mode             String?   @db.VarChar(50)
+  network          String?   @db.VarChar(50)
+  battery          Int?
+  charging         Boolean?
+  discharging      Boolean?
+  settings_version Int?
+  reason           String?   @db.VarChar(50)
+  raw_state        Json      @default("{}")
+  created_at       DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address], map: "idx_device_runtime_state_mac")
+  @@index([online], map: "idx_device_runtime_state_online")
+  @@index([last_seen_at], map: "idx_device_runtime_state_last_seen")
+}
+
+model device_sync_event {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  mac_address   String    @db.VarChar(20)
+  device_id     String?   @db.VarChar(100)
+  sender_client_id String? @db.VarChar(255)
+  event_type    String    @db.VarChar(40)
+  version       Int?
+  status        String?   @db.VarChar(30)
+  reason        String?
+  payload       Json      @default("{}")
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address], map: "idx_device_sync_event_mac")
+  @@index([event_type], map: "idx_device_sync_event_type")
+  @@index([created_at], map: "idx_device_sync_event_created_at")
 }

@@ -5,7 +5,41 @@ const { requireFirebaseAuth } = require('../middleware/firebaseAuth');
 const mobileService = require('../services/mobile.service');
 const agentService = require('../services/agent.service');
 const deviceService = require('../services/device.service');
-const { success } = require('../utils/response');
+const deviceSettingsService = require('../services/deviceSettings.service');
+const { success, badRequest } = require('../utils/response');
+const logger = require('../utils/logger');
+
+const formatMobileDevice = (device) => ({
+    id: device.id,
+    userId: device.user_id,
+    user_id: device.user_id,
+    macAddress: device.mac_address,
+    mac_address: device.mac_address,
+    deviceName: device.device_name || device.alias || 'Cheeko',
+    device_name: device.device_name || device.alias || 'Cheeko',
+    alias: device.alias,
+    status: device.user_id ? 'active' : 'unbound',
+    bindingStatus: device.user_id ? 'bound' : 'unbound',
+    binding_status: device.user_id ? 'bound' : 'unbound',
+    agentId: device.agent_id,
+    agent_id: device.agent_id,
+    kidId: device.kid_id,
+    kid_id: device.kid_id,
+    board: device.board,
+    mode: device.mode,
+    deviceMode: device.device_mode,
+    device_mode: device.device_mode,
+    appVersion: device.app_version,
+    app_version: device.app_version,
+    autoUpdate: device.auto_update,
+    auto_update: device.auto_update,
+    lastConnectedAt: device.last_connected_at,
+    last_connected_at: device.last_connected_at,
+    createdAt: device.create_date,
+    created_at: device.create_date,
+    updatedAt: device.update_date,
+    updated_at: device.update_date,
+});
 
 // All mobile routes require a valid Firebase ID token
 router.use(requireFirebaseAuth);
@@ -28,13 +62,25 @@ router.put('/parent-profile', asyncHandler(async (req, res) => {
     res.json(profile);
 }));
 
-// Mock FCM token endpoints (since token is usually handled locally or via push service)
 router.put('/parent-profile/fcm-token', asyncHandler(async (req, res) => {
-    res.json({ success: true, message: 'FCM token recorded' });
+    const fcmToken = req.body.fcmToken || req.body.fcm_token || req.body.token;
+    if (!fcmToken) return badRequest(res, 'FCM token is required');
+
+    const profile = await mobileService.updateFcmToken(req.firebaseUser.uid, fcmToken);
+    res.json({
+        success: true,
+        fcmToken: profile.fcmToken,
+        fcm_token: profile.fcm_token,
+    });
 }));
 
 router.delete('/parent-profile/fcm-token', asyncHandler(async (req, res) => {
-    res.json({ success: true, message: 'FCM token cleared' });
+    const profile = await mobileService.clearFcmToken(req.firebaseUser.uid);
+    res.json({
+        success: true,
+        fcmToken: profile.fcmToken,
+        fcm_token: profile.fcm_token,
+    });
 }));
 
 // ─── User State ─────────────────────────────────────────────────────────────
@@ -43,6 +89,11 @@ router.get('/user-state', asyncHandler(async (req, res) => {
     const state = await mobileService.getUserState(req.firebaseUser.uid);
     if (!state) return res.status(404).json({ error: 'User state not found' });
     res.json(state);
+}));
+
+router.get('/homepage-activity', asyncHandler(async (req, res) => {
+    const activity = await mobileService.getHomepageActivity(req.firebaseUser.uid);
+    success(res, activity);
 }));
 
 router.post('/user-state', asyncHandler(async (req, res) => {
@@ -123,21 +174,133 @@ router.delete('/agents/:agentId', asyncHandler(async (req, res) => {
 
 router.get('/agents/:agentId/devices', asyncHandler(async (req, res) => {
     const devices = await deviceService.getDevicesByAgent(req.mobileUser.id, req.params.agentId);
-    const mapped = devices.map(d => ({
-        id: d.id != null ? d.id.toString() : null,
-        macAddress: d.mac_address,
-        agentId: d.agent_id,
-        deviceName: d.device_name || d.alias || 'Cheeko',
-        alias: d.alias,
-        board: d.board,
-        appVersion: d.app_version,
-        autoUpdate: d.auto_update || false,
-        lastConnectedAt: d.last_connected_at,
-        createDate: d.create_date,
-        updateDate: d.update_date,
-        kidId: d.kid_id,
-    }));
+    const mapped = devices.map(formatMobileDevice);
     success(res, mapped);
+}));
+
+router.get('/devices', asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const result = await deviceService.listDevices(req.mobileUser.id, {
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 50,
+    });
+    success(res, {
+        ...result,
+        list: result.list.map(formatMobileDevice),
+    });
+}));
+
+router.get('/devices/:mac/settings', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] GET /devices/${req.params.mac}/settings user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const settings = await deviceSettingsService.getSettingsByMac(device.mac_address);
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        settingsVersion: settings.settings_version,
+        settings: settings.settings,
+        syncStatus: settings.sync_status,
+        lastAckStatus: settings.last_ack_status,
+        lastAckReason: settings.last_ack_reason,
+        lastAppliedVersion: settings.last_applied_version,
+    });
+}));
+
+router.patch('/devices/:mac/settings', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] PATCH /devices/${req.params.mac}/settings user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const payloadSettings = req.body?.settings;
+    if (!payloadSettings || typeof payloadSettings !== 'object' || Array.isArray(payloadSettings)) {
+        return badRequest(res, 'settings object is required');
+    }
+
+    const patchResult = await deviceSettingsService.patchSettingsByMac(
+        device.mac_address,
+        payloadSettings
+    );
+
+    let publishResult = null;
+    if (patchResult.changed && patchResult.publishRequired) {
+        try {
+            publishResult = await deviceSettingsService.requestGatewaySettingsPublish({
+                mac_address: device.mac_address,
+                version: patchResult.settings.settings_version,
+                settings: patchResult.settings.settings,
+            });
+        } catch (error) {
+            // Device likely offline or gateway unavailable - mark pending_offline.
+            logger.warn(`[SETTINGS-SYNC][MOBILE] publish failed for mac=${device.mac_address}: ${error.message}`);
+            await deviceSettingsService.markSyncStatusByMac(
+                device.mac_address,
+                'pending_offline',
+                `publish_failed:${error.message}`
+            );
+        }
+    }
+
+    const finalSettings = await deviceSettingsService.getSettingsByMac(device.mac_address);
+
+    success(res, {
+        changed: patchResult.changed,
+        publishRequired: patchResult.publishRequired,
+        publishResult,
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        settingsVersion: finalSettings.settings_version,
+        settings: finalSettings.settings,
+        syncStatus: finalSettings.sync_status,
+    });
+}));
+
+router.get('/devices/:mac/state', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] GET /devices/${req.params.mac}/state user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const state = await deviceSettingsService.getRuntimeStateByMac(device.mac_address);
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        state,
+    });
+}));
+
+router.get('/devices/:mac/sync-events', asyncHandler(async (req, res) => {
+    logger.info(`[SETTINGS-SYNC][MOBILE] GET /devices/${req.params.mac}/sync-events user=${req.mobileUser?.id}`);
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const events = await deviceSettingsService.listSyncEventsByMac(device.mac_address, limit);
+    success(res, {
+        deviceId: device.id,
+        macAddress: device.mac_address,
+        events,
+    });
+}));
+
+router.get('/user-devices', asyncHandler(async (req, res) => {
+    const { page, limit } = req.query;
+    const result = await deviceService.listDevices(req.mobileUser.id, {
+        page: parseInt(page) || 1,
+        limit: parseInt(limit) || 50,
+    });
+    success(res, {
+        ...result,
+        list: result.list.map(formatMobileDevice),
+    });
 }));
 
 router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) => {
@@ -156,8 +319,8 @@ router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) =
 
 router.put('/devices/assign-kid-by-mac', asyncHandler(async (req, res) => {
     const { mac, kidId } = req.body;
-    const device = await deviceService.assignKidByMac(mac, kidId);
-    success(res, device, 'Kid assigned to device');
+    const device = await deviceService.assignKidByMac(mac, kidId, req.mobileUser.id);
+    success(res, formatMobileDevice(device), 'Kid assigned to device');
 }));
 
 // ─── Chat History ────────────────────────────────────────────────────────────

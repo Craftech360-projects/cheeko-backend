@@ -229,8 +229,11 @@ const deleteAgent = async (agentId, _userId) => {
   const existing = await getAgentById(agentId);
   if (!existing) throw new Error('Agent not found');
 
-  // Unlink devices and unassign kids (set agent_id and kid_id to null rather than delete)
-  await prisma.ai_device.updateMany({ where: { agent_id: agentId }, data: { agent_id: null, kid_id: null } });
+  // Fully unbind devices attached to this agent so they can be paired again.
+  await prisma.ai_device.updateMany({
+    where: { agent_id: agentId },
+    data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() }
+  });
   // Delete associated chat history
   await prisma.ai_agent_chat_history.deleteMany({ where: { agent_id: agentId } });
   // Delete plugin mappings via raw SQL (table not in Prisma schema)
@@ -2776,6 +2779,9 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
     return {
       id: agent.id,
       agentName: agent.agent_name,
+      agent_name: agent.agent_name,
+      displayName: agent.agent_name,
+      display_name: agent.agent_name,
       memModelId: agent.mem_model_id,
       systemPrompt: agent.system_prompt,
       summaryMemory: agent.summary_memory,

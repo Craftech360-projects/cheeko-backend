@@ -680,7 +680,7 @@ class VirtualMQTTConnection {
       }
 
       const roomName = this.bridge?.room?.name || this.udp.session_id;
-      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-agent";
+      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-xai";
       logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
       const dispatchMetadata = buildDispatchMetadata({
         macAddress: this.macAddress,

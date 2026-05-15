@@ -592,7 +592,8 @@ class LiveKitBridge extends EventEmitter {
 
             // Robust identity detection — participantInfo can be an object or plain string
             const identity = participantInfo?.identity ?? participantInfo ?? "unknown";
-            const isAgent = identity?.toString().includes("agent");
+            const identityText = identity?.toString() || "";
+            const isAgent = identityText.includes("agent") || identityText === "cheeko-xai";
 
             console.log(`📝 [TRANSCRIPTION-STREAM] ${isAgent ? "Agent" : "User"} (final=${isFinal}): "${text.trim().substring(0, 80)}"`);
 
@@ -856,7 +857,7 @@ class LiveKitBridge extends EventEmitter {
           // console.log(`👤 [PARTICIPANT] Connected: ${participant.identity} (${participant.sid})`);
 
           // Check if this is an agent joining (agent identity typically contains "agent")
-          if (participant.identity.includes("agent")) {
+          if (participant.identity.includes("agent") || participant.identity === "cheeko-xai") {
             // DUPLICATE AGENT CHECK: If we already have a primary agent, this is a duplicate
             if (this.primaryAgentIdentity && this.primaryAgentIdentity !== participant.identity) {
               console.error(`🚨 [DUPLICATE-AGENT] DUPLICATE AGENT DETECTED!`);

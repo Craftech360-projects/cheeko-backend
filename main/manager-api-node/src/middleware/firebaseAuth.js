@@ -78,13 +78,32 @@ const requireFirebaseAuth = async (req, res, next) => {
         logger.debug(`📋 [firebaseAuth] sys_user lookup result: ${mobileUser ? `found id=${mobileUser.id}` : 'not found'}`);
 
         if (!mobileUser) {
+            if (decoded.email) {
+                mobileUser = await prisma.sys_user.findFirst({
+                    where: { email: decoded.email },
+                });
+
+                if (mobileUser) {
+                    logger.info(`🔗 Linking Firebase uid ${decoded.uid} to existing sys_user email: ${decoded.email}`);
+                    mobileUser = await prisma.sys_user.update({
+                        where: { id: mobileUser.id },
+                        data: {
+                            firebase_uid: decoded.uid,
+                            username: decoded.uid,
+                        },
+                    });
+                }
+            }
+        }
+
+        if (!mobileUser) {
             // First login — create a sys_user record for this Firebase user
             logger.debug(`🆕 [firebaseAuth] Creating new sys_user for uid: ${decoded.uid}`);
             mobileUser = await prisma.sys_user.create({
                 data: {
                     firebase_uid: decoded.uid,
                     email: decoded.email || '',
-                    username: decoded.email || decoded.uid,
+                    username: decoded.uid,
                     role: 'parent',
                     status: 1,
                 },

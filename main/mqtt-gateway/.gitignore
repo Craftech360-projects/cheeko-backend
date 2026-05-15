@@ -1,5 +1,9 @@
 # Include package.json (override parent *.json ignore)
 !package.json
 
+# Ignore local environment files (contain secrets)
+.env
+.env.*
+
 # Ignore config/mqtt.json (contains local MQTT credentials)
 config/mqtt.json

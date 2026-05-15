@@ -9,11 +9,22 @@
 const express = require('express');
 const router = express.Router();
 const analyticsService = require('../services/analytics.service');
+const deviceService = require('../services/device.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireServiceKey } = require('../middleware/auth');
 const { requireFlexAuth } = require('../middleware/flexAuth');
-const { success, badRequest, notFound } = require('../utils/response');
+const { success, badRequest, notFound, forbidden } = require('../utils/response');
 const { isValidMacAddress } = require('../utils/helpers');
+
+const ensureMobileOwnsMac = async (req, res, mac) => {
+  if (!req.mobileUser) return true;
+
+  const device = await deviceService.getOwnedDeviceByMac(req.mobileUser.id, mac);
+  if (device) return true;
+
+  forbidden(res, 'Device does not belong to user');
+  return false;
+};
 
 /**
  * @swagger
@@ -844,6 +855,7 @@ router.get('/user/:mac/overall', requireFlexAuth, asyncHandler(async (req, res) 
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const stats = await analyticsService.getOverallStats(mac);
   return success(res, stats);
@@ -892,6 +904,7 @@ router.get('/user/:mac/math', requireFlexAuth, asyncHandler(async (req, res) => 
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const stats = await analyticsService.getGameStats(mac, 'math_tutor');
   return success(res, stats);
@@ -940,6 +953,7 @@ router.get('/user/:mac/riddle', requireFlexAuth, asyncHandler(async (req, res) =
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const stats = await analyticsService.getGameStats(mac, 'riddle_solver');
   return success(res, stats);
@@ -988,6 +1002,7 @@ router.get('/user/:mac/wordladder', requireFlexAuth, asyncHandler(async (req, re
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const stats = await analyticsService.getGameStats(mac, 'word_ladder');
   return success(res, stats);
@@ -1065,6 +1080,7 @@ router.get('/sessions/:mac', requireFlexAuth, asyncHandler(async (req, res) => {
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const sessions = await analyticsService.getSessionsByMac(mac, {
     page: parseInt(page),
@@ -1137,6 +1153,7 @@ router.get('/usage/daily/:mac', requireFlexAuth, asyncHandler(async (req, res) =
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const usage = await analyticsService.getDailyUsage(mac, parseInt(days));
   return success(res, usage);
@@ -1216,6 +1233,7 @@ router.get('/usage/weekly/:mac', requireFlexAuth, asyncHandler(async (req, res) 
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const usage = await analyticsService.getWeeklyUsage(mac, parseInt(weeks));
   return success(res, usage);
@@ -1295,6 +1313,7 @@ router.get('/usage/monthly/:mac', requireFlexAuth, asyncHandler(async (req, res)
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const usage = await analyticsService.getMonthlyUsage(mac, parseInt(months));
   return success(res, usage);
@@ -1430,6 +1449,7 @@ router.get('/attempts/stats/:mac', requireFlexAuth, asyncHandler(async (req, res
   if (!isValidMacAddress(mac)) {
     return badRequest(res, 'Invalid MAC address format');
   }
+  if (!(await ensureMobileOwnsMac(req, res, mac))) return;
 
   const stats = await analyticsService.getAttemptStatsByQuestionType(mac);
   return success(res, stats);

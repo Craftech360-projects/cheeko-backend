@@ -96,8 +96,15 @@
               />
             </template>
           </el-table-column>
-          <el-table-column label="Actions" min-width="180" align="center">
+          <el-table-column label="Actions" min-width="260" align="center">
             <template slot-scope="scope">
+              <el-button
+                type="text"
+                size="small"
+                @click="openSettingsDialog(scope.row)"
+              >
+                Settings Sync
+              </el-button>
               <el-button
                 type="text"
                 size="small"
@@ -137,6 +144,100 @@
         </div>
       </div>
     </div>
+
+    <el-dialog
+      title="Device Settings Sync"
+      :visible.sync="settingsDialogVisible"
+      width="760px"
+      @close="onSettingsDialogClosed"
+    >
+      <div v-if="selectedSettingsDevice" class="settings-device-header">
+        <div><strong>MAC:</strong> {{ selectedSettingsDevice.macAddress }}</div>
+        <div><strong>Alias:</strong> {{ selectedSettingsDevice.alias || '-' }}</div>
+        <div>
+          <strong>Sync:</strong>
+          <el-tag :type="getSyncStatusTagType(settingsMeta.syncStatus)" size="mini">
+            {{ settingsMeta.syncStatus || 'unknown' }}
+          </el-tag>
+        </div>
+        <div><strong>Version:</strong> {{ settingsMeta.settingsVersion || '-' }}</div>
+      </div>
+
+      <el-skeleton :rows="6" animated v-if="settingsLoading" />
+
+      <div v-else>
+        <el-card shadow="never" class="settings-section-card">
+          <div slot="header" class="settings-section-title">Runtime State</div>
+          <div class="runtime-grid">
+            <div><strong>Online:</strong> {{ runtimeState.online === true ? 'Yes' : (runtimeState.online === false ? 'No' : '-') }}</div>
+            <div><strong>Last Seen:</strong> {{ formatDate(runtimeState.last_seen_at) }}</div>
+            <div><strong>Mode:</strong> {{ runtimeState.mode || '-' }}</div>
+            <div><strong>Network:</strong> {{ runtimeState.network || '-' }}</div>
+            <div><strong>Battery:</strong> {{ runtimeState.battery != null ? runtimeState.battery + '%' : '-' }}</div>
+            <div><strong>Charging:</strong> {{ runtimeState.charging === true ? 'Yes' : (runtimeState.charging === false ? 'No' : '-') }}</div>
+            <div><strong>Firmware:</strong> {{ runtimeState.firmware || '-' }}</div>
+            <div><strong>Build Label:</strong> {{ runtimeState.build_label || '-' }}</div>
+          </div>
+        </el-card>
+
+        <el-card shadow="never" class="settings-section-card">
+          <div slot="header" class="settings-section-title">Settings</div>
+          <el-form :model="settingsForm" label-width="140px" size="small">
+            <el-form-item label="Volume">
+              <el-slider v-model="settingsForm.volume" :min="0" :max="100" :show-input="true" />
+            </el-form-item>
+            <el-form-item label="Brightness">
+              <el-slider v-model="settingsForm.brightness" :min="10" :max="100" :show-input="true" />
+            </el-form-item>
+            <el-form-item label="Auto Listen">
+              <el-switch v-model="settingsForm.auto_listen" />
+            </el-form-item>
+            <el-form-item label="System Sound">
+              <el-switch v-model="settingsForm.system_sound" />
+            </el-form-item>
+            <el-form-item label="System Prompt">
+              <el-switch v-model="settingsForm.system_prompt" />
+            </el-form-item>
+            <el-form-item label="Vibration">
+              <el-switch v-model="settingsForm.vibration" />
+            </el-form-item>
+            <el-form-item label="Sleep Enabled">
+              <el-switch v-model="settingsForm.sleep_enabled" />
+            </el-form-item>
+            <el-form-item label="Quiet Hours Enabled">
+              <el-switch v-model="settingsForm.quiet_hours.enabled" />
+            </el-form-item>
+            <el-form-item label="Quiet Start (HH:mm)">
+              <el-input v-model="settingsForm.quiet_hours.start" maxlength="5" placeholder="21:00" style="width: 120px;" />
+            </el-form-item>
+            <el-form-item label="Quiet End (HH:mm)">
+              <el-input v-model="settingsForm.quiet_hours.end" maxlength="5" placeholder="07:00" style="width: 120px;" />
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+        <el-card shadow="never" class="settings-section-card">
+          <div slot="header" class="settings-section-title">Recent Sync Events</div>
+          <el-table :data="syncEvents" size="mini" max-height="220" style="width: 100%">
+            <el-table-column label="Time" min-width="170">
+              <template slot-scope="scope">{{ formatDate(scope.row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="Type" prop="event_type" min-width="120" />
+            <el-table-column label="Version" min-width="90">
+              <template slot-scope="scope">{{ scope.row.version == null ? '-' : scope.row.version }}</template>
+            </el-table-column>
+            <el-table-column label="Status" prop="status" min-width="120" />
+            <el-table-column label="Reason" prop="reason" min-width="220" show-overflow-tooltip />
+          </el-table>
+        </el-card>
+      </div>
+
+      <span slot="footer" class="dialog-footer">
+        <el-button @click="refreshSettingsDialog" :loading="settingsLoading">Refresh</el-button>
+        <el-button type="primary" @click="saveDeviceSettings" :loading="settingsSaving">Save & Sync</el-button>
+      </span>
+    </el-dialog>
+
     <version-footer />
   </div>
 </template>
@@ -156,7 +257,34 @@ export default {
       searchKeyword: '',
       activeSearchKeyword: '',
       currentPage: 1,
-      pageSize: 20
+      pageSize: 20,
+      settingsDialogVisible: false,
+      settingsLoading: false,
+      settingsSaving: false,
+      selectedSettingsDevice: null,
+      settingsMeta: {
+        syncStatus: null,
+        settingsVersion: null,
+        lastAckStatus: null,
+        lastAckReason: null,
+        lastAppliedVersion: null
+      },
+      runtimeState: {},
+      syncEvents: [],
+      settingsForm: {
+        volume: 70,
+        brightness: 80,
+        auto_listen: false,
+        system_sound: true,
+        system_prompt: true,
+        vibration: true,
+        sleep_enabled: true,
+        quiet_hours: {
+          enabled: false,
+          start: '21:00',
+          end: '07:00'
+        }
+      }
     }
   },
   computed: {
@@ -305,6 +433,186 @@ export default {
         });
       }).catch(() => {});
     },
+    getDefaultSettingsForm() {
+      return {
+        volume: 70,
+        brightness: 80,
+        auto_listen: false,
+        system_sound: true,
+        system_prompt: true,
+        vibration: true,
+        sleep_enabled: true,
+        quiet_hours: {
+          enabled: false,
+          start: '21:00',
+          end: '07:00'
+        }
+      };
+    },
+    resetSettingsDialogState() {
+      this.settingsMeta = {
+        syncStatus: null,
+        settingsVersion: null,
+        lastAckStatus: null,
+        lastAckReason: null,
+        lastAppliedVersion: null
+      };
+      this.runtimeState = {};
+      this.syncEvents = [];
+      this.settingsForm = this.getDefaultSettingsForm();
+    },
+    onSettingsDialogClosed() {
+      this.selectedSettingsDevice = null;
+      this.settingsLoading = false;
+      this.settingsSaving = false;
+      this.resetSettingsDialogState();
+    },
+    getSyncStatusTagType(status) {
+      const map = {
+        synced: 'success',
+        syncing: 'warning',
+        pending_offline: 'info',
+        rejected: 'danger',
+        stale: 'warning'
+      };
+      return map[status] || 'info';
+    },
+    isValidHourMinute(value) {
+      return /^([01]\d|2[0-3]):[0-5]\d$/.test(value || '');
+    },
+    openSettingsDialog(row) {
+      this.selectedSettingsDevice = row;
+      this.settingsDialogVisible = true;
+      this.loadSettingsDialogData();
+    },
+    refreshSettingsDialog() {
+      this.loadSettingsDialogData();
+    },
+    loadSettingsDialogData() {
+      if (!this.selectedSettingsDevice || !this.selectedSettingsDevice.macAddress) {
+        return;
+      }
+
+      const mac = this.selectedSettingsDevice.macAddress;
+      this.settingsLoading = true;
+
+      Promise.all([
+        this.fetchDeviceSettings(mac),
+        this.fetchDeviceRuntimeState(mac),
+        this.fetchDeviceSyncEvents(mac, 20)
+      ]).then(([settingsRes, stateRes, eventsRes]) => {
+        const settingsData = settingsRes?.data || {};
+        const runtimeData = stateRes?.data?.state || {};
+        const eventsData = eventsRes?.data?.events || [];
+
+        this.settingsMeta = {
+          syncStatus: settingsData.syncStatus || null,
+          settingsVersion: settingsData.settingsVersion || null,
+          lastAckStatus: settingsData.lastAckStatus || null,
+          lastAckReason: settingsData.lastAckReason || null,
+          lastAppliedVersion: settingsData.lastAppliedVersion || null
+        };
+        this.runtimeState = runtimeData || {};
+        this.syncEvents = Array.isArray(eventsData) ? eventsData : [];
+        this.settingsForm = this.mapSettingsDataToForm(settingsData.settings || {});
+      }).catch((error) => {
+        this.$message.error(error?.message || 'Failed to load settings sync data');
+      }).finally(() => {
+        this.settingsLoading = false;
+      });
+    },
+    fetchDeviceSettings(mac) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceSettingsByMac(mac, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch device settings'));
+          }
+        });
+      });
+    },
+    fetchDeviceRuntimeState(mac) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceRuntimeStateByMac(mac, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch device runtime state'));
+          }
+        });
+      });
+    },
+    fetchDeviceSyncEvents(mac, limit = 20) {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceSyncEventsByMac(mac, { limit }, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch device sync events'));
+          }
+        });
+      });
+    },
+    mapSettingsDataToForm(settings) {
+      const defaults = this.getDefaultSettingsForm();
+      return {
+        ...defaults,
+        ...settings,
+        quiet_hours: {
+          ...defaults.quiet_hours,
+          ...((settings && settings.quiet_hours) || {})
+        }
+      };
+    },
+    saveDeviceSettings() {
+      if (!this.selectedSettingsDevice || !this.selectedSettingsDevice.macAddress) {
+        return;
+      }
+
+      const qhStart = this.settingsForm.quiet_hours?.start;
+      const qhEnd = this.settingsForm.quiet_hours?.end;
+      if (!this.isValidHourMinute(qhStart) || !this.isValidHourMinute(qhEnd)) {
+        this.$message.warning('Quiet hours start/end must be in HH:mm format');
+        return;
+      }
+
+      const mac = this.selectedSettingsDevice.macAddress;
+      const payload = {
+        settings: {
+          volume: Number(this.settingsForm.volume),
+          brightness: Number(this.settingsForm.brightness),
+          auto_listen: Boolean(this.settingsForm.auto_listen),
+          system_sound: Boolean(this.settingsForm.system_sound),
+          system_prompt: Boolean(this.settingsForm.system_prompt),
+          vibration: Boolean(this.settingsForm.vibration),
+          sleep_enabled: Boolean(this.settingsForm.sleep_enabled),
+          quiet_hours: {
+            enabled: Boolean(this.settingsForm.quiet_hours.enabled),
+            start: qhStart,
+            end: qhEnd
+          }
+        }
+      };
+
+      this.settingsSaving = true;
+      Api.admin.updateDeviceSettingsByMac(mac, payload, ({ data }) => {
+        this.settingsSaving = false;
+        if (data && data.code === 0) {
+          this.$message.success('Settings saved successfully');
+          const updated = data.data || {};
+          this.settingsMeta.syncStatus = updated.syncStatus || this.settingsMeta.syncStatus;
+          this.settingsMeta.settingsVersion = updated.settingsVersion || this.settingsMeta.settingsVersion;
+          this.settingsMeta.lastAckStatus = updated.lastAckStatus || this.settingsMeta.lastAckStatus;
+          this.settingsMeta.lastAckReason = updated.lastAckReason || this.settingsMeta.lastAckReason;
+          this.settingsMeta.lastAppliedVersion = updated.lastAppliedVersion || this.settingsMeta.lastAppliedVersion;
+          this.settingsForm = this.mapSettingsDataToForm(updated.settings || payload.settings);
+          this.loadSettingsDialogData();
+        } else {
+          this.$message.error(data?.msg || 'Failed to save settings');
+        }
+      });
+    },
     fetchActiveModes() {
       // Fetch active mode for each device that has a MAC address
       this.deviceList.forEach(device => {
@@ -431,5 +739,33 @@ export default {
   p {
     margin: 0;
   }
+}
+
+.settings-device-header {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.settings-section-card {
+  margin-top: 12px;
+}
+
+.settings-section-title {
+  font-weight: 600;
+  color: #303133;
+}
+
+.runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  font-size: 13px;
+  color: #606266;
 }
 </style>

@@ -8,6 +8,7 @@
  */
 
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { PrismaClient } = require('@prisma/client');
 const logger = require('../utils/logger');
@@ -130,11 +131,16 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   logger.warn('Supabase credentials not configured. Admin token verification will fail.');
 }
 
+const supabaseRealtimeOptions = {
+  realtime: { transport: WebSocket },
+};
+
 /**
  * Supabase client for client-side operations (respects RLS)
  */
 const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    ...supabaseRealtimeOptions,
     auth: { autoRefreshToken: true, persistSession: false }
   })
   : null;
@@ -144,6 +150,7 @@ const supabase = SUPABASE_URL && SUPABASE_ANON_KEY
  */
 const supabaseAdmin = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    ...supabaseRealtimeOptions,
     auth: { autoRefreshToken: false, persistSession: false }
   })
   : null;
@@ -158,6 +165,7 @@ const getClientWithAuth = (accessToken) => {
     throw new Error('Supabase not configured');
   }
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    ...supabaseRealtimeOptions,
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
     auth: { autoRefreshToken: false, persistSession: false }
   });

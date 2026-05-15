@@ -2,7 +2,7 @@
 Cheeko Agent Worker
 Main conversational agent with all features enabled
 
-agent_name: cheeko-agent
+agent_name: cheeko-xai
 Port: 8081
 """
 
@@ -31,18 +31,11 @@ from livekit.agents import (
     function_tool,
     # BackgroundAudioPlayer,  # NOT used - causes separate audio track (robotic sound)
 )
-from livekit import rtc, api
-from livekit.plugins import google, elevenlabs
-if not hasattr(google, "realtime") and hasattr(google, "beta"):
-    google.realtime = google.beta.realtime
-import io
+from livekit import rtc
+from livekit.plugins import xai
 import pytz
-from pydub import AudioSegment
 
 from src.config.config_loader import ConfigLoader
-from src.services.elevenlabs_tts_service import get_elevenlabs_service
-from src.services.animal_audio_service import AnimalAudioService
-from src.services.rhyme_cache_service import get_rhyme_cache_service
 from src.utils.database_helper import DatabaseHelper
 from src.services.prompt_service import PromptService
 # from src.services.music_service import MusicService  # COMMENTED OUT - Music service disabled
@@ -62,7 +55,7 @@ from src.features.mode_switching import update_agent_mode
 from src.services.mem0_service import mem0_service
 
 # Agent configuration
-AGENT_NAME = "cheeko-agent1"
+AGENT_NAME = "cheeko-xai"
 
 # Keywords that trigger context-aware memory search (high-value triggers only)
 # These are patterns where memory injection provides significant value
@@ -101,35 +94,6 @@ TIMEZONE_ALIASES = {
 
 DEFAULT_TIMEZONE_ID = "Asia/Kolkata"
 DEFAULT_TIMEZONE_LABEL = "India Standard Time (IST)"
-DEFAULT_GEMINI_API_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025"
-
-
-def _parse_bool(value: str, default: bool = False) -> bool:
-    """Parse boolean-like environment values safely."""
-    if value is None:
-        return default
-    normalized = value.strip().lower()
-    if normalized in ("1", "true", "yes", "y", "on"):
-        return True
-    if normalized in ("0", "false", "no", "n", "off"):
-        return False
-    return default
-
-
-def resolve_vertexai_mode(model_name: str) -> bool:
-    """
-    Resolve whether Google Realtime should run in Vertex AI mode.
-
-    Priority:
-    1) Explicit env override via GEMINI_USE_VERTEXAI
-    2) Model name heuristic: gemini-live-* models are Vertex AI models
-    """
-    explicit = os.getenv("GEMINI_USE_VERTEXAI")
-    if explicit is not None and explicit.strip() != "":
-        return _parse_bool(explicit, default=False)
-
-    normalized_model = (model_name or "").strip().lower()
-    return normalized_model.startswith("gemini-live-")
 
 
 def build_session_prompt_vars(dispatch_metadata: dict) -> dict:
@@ -338,173 +302,33 @@ async def get_time_date(
         return "Sorry, I couldn't get the current time right now."
 
 
-class NonResumableGeminiRealtimeModel(google.realtime.RealtimeModel):
-    """Disable Gemini session resumption to avoid stale-handle reconnect failures."""
-
-    def _build_connect_config(self):
-        # Force every reconnect to start as a fresh Gemini Live session.
-        self._session_resumption_handle = None
-        conf = super()._build_connect_config()
-        conf.session_resumption = None
-        return conf
-
-
-async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
-    """
-    Play ElevenLabs MP3 audio via session.say() with pre-synthesized audio frames.
-    This plays through the agent's existing audio track.
-
-    Args:
-        session: The AgentSession to play audio through
-        mp3_data: MP3 audio bytes from ElevenLabs
-        title: Title for logging purposes
-    """
-    try:
-        logger.info(f"🎵 [ELEVENLABS] Playing audio for: {title}")
-
-        # Convert MP3 to raw PCM audio (48kHz mono for LiveKit)
-        audio_segment = AudioSegment.from_mp3(io.BytesIO(mp3_data))
-        audio_segment = audio_segment.set_frame_rate(48000).set_channels(1)
-
-        # Get raw PCM data
-        raw_data = audio_segment.raw_data
-        sample_rate = audio_segment.frame_rate
-        num_channels = audio_segment.channels
-        samples_per_channel = len(audio_segment.get_array_of_samples())
-
-        logger.info(f"🎵 [ELEVENLABS] Audio: {len(audio_segment)}ms, {sample_rate}Hz, {num_channels}ch")
-
-        # Create AudioFrame from the raw PCM data
-        audio_frame = rtc.AudioFrame(
-            data=raw_data,
-            sample_rate=sample_rate,
-            num_channels=num_channels,
-            samples_per_channel=samples_per_channel,
-        )
-
-        # Async generator that yields the audio frame
-        async def audio_generator():
-            yield audio_frame
-
-        # Play using session.say with pre-synthesized audio
-        # Pass title as text (for transcript), audio frames for playback
-        await session.say(text=title, audio=audio_generator(), allow_interruptions=False, add_to_chat_ctx=False)
-
-        logger.info(f"✅ [ELEVENLABS] Finished playing: {title}")
-
-    except Exception as e:
-        logger.error(f"❌ [ELEVENLABS] Error playing audio: {e}")
-        raise
-
-
-async def play_local_mp3_audio(session: AgentSession, file_path: str, title: str = ""):
-    """
-    Play a local MP3 file via session.say() on the same audio track as TTS.
-    This ensures all audio plays on a single track (no robotic mixing).
-
-    Args:
-        session: The AgentSession to play audio through
-        file_path: Absolute path to the MP3 file
-        title: Title for logging purposes
-    """
-    try:
-        logger.info(f"🔊 [LOCAL-MP3] Playing audio from: {file_path}")
-
-        # Read the MP3 file
-        with open(file_path, 'rb') as f:
-            mp3_data = f.read()
-
-        # Convert MP3 to raw PCM audio (48kHz mono for LiveKit)
-        audio_segment = AudioSegment.from_mp3(io.BytesIO(mp3_data))
-        audio_segment = audio_segment.set_frame_rate(48000).set_channels(1)
-
-        # Get raw PCM data
-        raw_data = audio_segment.raw_data
-        sample_rate = audio_segment.frame_rate
-        num_channels = audio_segment.channels
-        samples_per_channel = len(audio_segment.get_array_of_samples())
-
-        logger.info(f"🔊 [LOCAL-MP3] Audio: {len(audio_segment)}ms, {sample_rate}Hz, {num_channels}ch")
-
-        # Create AudioFrame from the raw PCM data
-        audio_frame = rtc.AudioFrame(
-            data=raw_data,
-            sample_rate=sample_rate,
-            num_channels=num_channels,
-            samples_per_channel=samples_per_channel,
-        )
-
-        # Async generator that yields the audio frame
-        async def audio_generator():
-            yield audio_frame
-
-        # Play using session.say with pre-synthesized audio (same track as TTS)
-        await session.say(text=title, audio=audio_generator(), allow_interruptions=False, add_to_chat_ctx=False)
-
-        logger.info(f"✅ [LOCAL-MP3] Finished playing: {title}")
-
-    except Exception as e:
-        logger.error(f"❌ [LOCAL-MP3] Error playing audio: {e}")
-        raise
-
-
 class CheekoAssistant(BaseAssistant):
     """Cheeko Assistant - Main conversational agent"""
 
     # Custom greeting for Cheeko
     GREETING_INSTRUCTION = "Greet the user warmly as Cheeko, a friendly AI companion. Keep it brief and playful."
 
-    def __init__(self, instructions: str = None, tools: list | None = None) -> None:
-        super().__init__(instructions=instructions, tools=tools)
+    def __init__(self, instructions: str = None) -> None:
+        super().__init__(instructions=instructions)
 
 
 
 def prewarm(proc: JobProcess):
-    """Prewarm for Gemini Realtime - start model preloading here (not on import)"""
+    """Prewarm for xAI realtime."""
     # COMMENTED OUT - Music service disabled (saves ~11s startup time)
     # from src.utils import start_preloading
     # start_preloading()  # Only runs in worker process, not watcher
-    logger.info("[PREWARM] Ready for Gemini Realtime")
+    logger.info("[PREWARM] Ready for xAI realtime")
     proc.userdata["ready"] = True
 
 
 async def entrypoint(ctx: JobContext):
     """Entrypoint for Cheeko agent worker"""
 
-    # Ensure GOOGLE_API_KEY is available
-    yaml_config = ConfigLoader.load_yaml_config()
-    api_keys = yaml_config.get('api_keys', {})
-    if 'google' in api_keys and not os.getenv('GOOGLE_API_KEY'):
-        os.environ['GOOGLE_API_KEY'] = api_keys['google']
-        logger.info("Loaded GOOGLE_API_KEY from config.yaml")
-
     ctx.log_context_fields = {"room": ctx.room.name}
     logger.info(f"Starting {CHARACTER_NAME} agent in room: {ctx.room.name}")
 
     init_start_time = asyncio.get_event_loop().time()
-
-    # Load configuration
-    realtime_config = ConfigLoader.get_gemini_realtime_config()
-    gemini_model = realtime_config.get('model', DEFAULT_GEMINI_API_MODEL)
-    gemini_voice = realtime_config.get('voice', 'Zephyr')
-    gemini_temperature = realtime_config.get('temperature', 0.8)
-    use_vertexai = resolve_vertexai_mode(gemini_model)
-
-    # Vertex AI requires Google Application Default Credentials inside the container.
-    # If missing, gracefully fall back to Gemini API mode with a compatible model.
-    if use_vertexai:
-        has_adc = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        has_project = bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT"))
-        if not has_adc and not has_project:
-            fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", DEFAULT_GEMINI_API_MODEL)
-            logger.warning(
-                "Vertex AI model selected but no ADC/project env found. "
-                f"Falling back to Gemini API model: {fallback_model}"
-            )
-            gemini_model = fallback_model
-            use_vertexai = False
-
-    logger.info(f"Realtime model: {gemini_model}, vertexai={use_vertexai}")
 
     # Parse room name
     room_name = ctx.room.name
@@ -644,38 +468,16 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model
-    realtime_model = NonResumableGeminiRealtimeModel(
-        model=gemini_model,
-        vertexai=use_vertexai,
-        voice=gemini_voice,
-        instructions=agent_prompt,
-        temperature=gemini_temperature,
-        modalities=["AUDIO"],
-    )
-    logger.info("Gemini Realtime model created with session resumption disabled")
+    xai_voice = os.getenv("XAI_REALTIME_VOICE", "Ara")
+    realtime_model = xai.realtime.RealtimeModel(voice=xai_voice)
+    logger.info(f"xAI realtime model created with voice={xai_voice}")
 
-    # Create ElevenLabs TTS for session.say() with pre-synthesized audio
-    # This is needed because realtime models don't have built-in TTS for session.say()
-    elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "ecp3DWciuUyW7BYM7II1")
-    elevenlabs_tts = elevenlabs.TTS(voice_id=elevenlabs_voice_id)
-    logger.info(f"ElevenLabs TTS created with voice: {elevenlabs_voice_id}")
-
-    # Create AgentSession with deterministic time/date and TTS for session.say()
+    # Create AgentSession with xAI realtime, mode switching, and deterministic time/date.
     session_tools = [*MODE_SWITCH_TOOLS, get_time_date]
-    session = AgentSession(llm=realtime_model, tts=elevenlabs_tts)
+    session = AgentSession(llm=realtime_model, tools=session_tools)
     logger.info(
-        f"AgentSession created with ElevenLabs TTS; {len(session_tools)} tools will be attached to the assistant"
+        f"AgentSession created with xAI realtime, {len(MODE_SWITCH_TOOLS)} mode switching tools, and 1 time/date tool"
     )
-
-    # Initialize animal audio service
-    animal_audio_service = AnimalAudioService()
-    logger.info(f"Animal audio service initialized: {animal_audio_service.sounds_dir}")
-    
-    # NOTE: BackgroundAudioPlayer is NOT used - it plays on a separate track causing robotic audio
-    # All audio (TTS + animal sounds) now plays via session.say() on a single track
-    # background_audio = BackgroundAudioPlayer()
-    # logger.info("BackgroundAudioPlayer created for animal sounds")
 
     # Create state handlers
     emit_agent_state, emit_speech_created = create_state_handlers(ctx, session)
@@ -795,7 +597,7 @@ async def entrypoint(ctx: JobContext):
     # logger.info("Music service initialized (async)")
 
     # Create assistant instance
-    assistant = CheekoAssistant(instructions=agent_prompt, tools=session_tools)
+    assistant = CheekoAssistant(instructions=agent_prompt)
     assistant.set_room_info(room_name=ctx.room.name, device_mac=device_mac)
     logger.info(f"{CHARACTER_NAME} Assistant initialized")
 
@@ -919,11 +721,11 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"Failed to send shutdown_ack: {e}")
 
     async def handle_end_prompt(prompt_text: str):
-        """Handle end prompt - say goodbye message before cleanup using Gemini Realtime"""
+        """Handle end prompt - say goodbye message before cleanup using xAI realtime."""
         try:
             logger.info(f"👋 [END-PROMPT] Saying goodbye: {prompt_text[:50]}...")
 
-            # For Gemini Realtime, use generate_reply with instructions
+            # For realtime models, use generate_reply with instructions.
             # Add timeout to prevent hanging if session is in bad state
             try:
                 await asyncio.wait_for(
@@ -998,119 +800,21 @@ async def entrypoint(ctx: JobContext):
                         await emit_agent_state("listening")
 
                         if content_type == 'animal' and content_text:
-                            # ANIMAL mode: Play TTS description + animal sound
-                            # audio_file can be explicit or derived from title (e.g., "Cow" → "cow.mp3")
-                            audio_filename = message.get('audio_file', '')
-                            if not audio_filename and title:
-                                # Derive audio filename from title: "Cow" → "cow.mp3"
-                                audio_filename = f"{title.lower().strip().replace(' ', '_')}.mp3"
-                                logger.info(f"🐾 [ANIMAL] Derived audio_file from title: {audio_filename}")
-                            logger.info(f"🐾 [ANIMAL] Processing animal: {title}, audio_file={audio_filename}")
-
-                            try:
-                                # Step 1: Generate and play TTS for the description
-                                logger.info(f"📖 [ANIMAL] Step 1: Speaking description for {title}")
-                                elevenlabs_svc = get_elevenlabs_service()
-                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
-
-                                if audio_data and not error:
-                                    logger.info(f"🎵 [ANIMAL] Generated {len(audio_data)} bytes of TTS audio")
-                                    await emit_agent_state("speaking")
-                                    await play_elevenlabs_audio(session, audio_data, title)
-                                    await emit_agent_state("listening")
-                                    logger.info(f"✅ [ANIMAL] Finished speaking description")
-                                else:
-                                    # Fallback to Gemini if ElevenLabs fails
-                                    logger.warning(f"⚠️ [ANIMAL] ElevenLabs failed: {error}, using Gemini")
-                                    await session.generate_reply(instructions=f"Say this: {content_text}")
-
-                                # Step 2: Play the animal sound (if audio_file provided)
-                                if audio_filename:
-                                    logger.info(f"🔊 [ANIMAL] Step 2: Playing animal sound: {audio_filename}")
-
-                                    # Small pause between TTS and animal sound
-                                    await asyncio.sleep(0.5)
-
-                                    # Get the sound file path
-                                    sound_path = animal_audio_service.get_animal_sound_path(audio_filename)
-
-                                    if sound_path:
-                                        logger.info(f"🎵 [ANIMAL] Playing sound from: {sound_path}")
-                                        # Play the animal sound on the SAME track as TTS (no robotic mixing)
-                                        await play_local_mp3_audio(session, sound_path, f"{title} sound")
-                                        logger.info(f"✅ [ANIMAL] Animal sound playback completed")
-                                    else:
-                                        logger.warning(f"⚠️ [ANIMAL] Sound file not found: {audio_filename}")
-                                else:
-                                    logger.info(f"ℹ️ [ANIMAL] No audio_file provided, skipping sound playback")
-
-                            except Exception as animal_error:
-                                logger.error(f"❌ [ANIMAL] Error in animal playback: {animal_error}")
-                        
+                            instruction = (
+                                f"Speak this animal-card content for a child. Keep it warm and clear. "
+                                f"Title: {title}. Content: {content_text}"
+                            )
+                            logger.info(f"[ANIMAL] Sending animal card to xAI realtime: {title}")
+                            await session.generate_reply(instructions=instruction)
                         elif content_type == 'read_only' and content_text:
-                            # RAG mode: Use ElevenLabs TTS for high-quality rhyme playback
-                            pack_code = message.get('pack_code', '')
-                            generate_and_cache = message.get('generate_and_cache', False)
-                            notify_firmware = message.get('notify_firmware', False)
-                            client_id = message.get('client_id', '')
-
-                            logger.info(f"[RFID-RAG] Generating ElevenLabs audio for: {title}, pack={pack_code}, seq={sequence}, cache={generate_and_cache}")
-
-                            try:
-                                # Get ElevenLabs service and generate audio
-                                elevenlabs_svc = get_elevenlabs_service()
-                                audio_data, error = await elevenlabs_svc.generate_rhyme_speech(content_text, title)
-
-                                if audio_data and not error:
-                                    logger.info(f"[RFID-RAG] ElevenLabs audio generated: {len(audio_data)} bytes")
-
-                                    # Cache to S3 if requested (async, don't block playback)
-                                    if generate_and_cache and pack_code and sequence:
-                                        async def cache_and_notify():
-                                            try:
-                                                rhyme_cache = get_rhyme_cache_service()
-                                                url = await rhyme_cache.cache_rhyme_audio(audio_data, pack_code, sequence)
-                                                if url:
-                                                    logger.info(f"[RHYME-CACHE] Cached: {url}")
-
-                                                    # Notify firmware that URL is ready via data channel
-                                                    if notify_firmware and client_id:
-                                                        notification = {
-                                                            "type": "rhyme_cached",
-                                                            "pack_code": pack_code,
-                                                            "sequence": sequence,
-                                                            "audio_url": url,
-                                                            "title": title,
-                                                            "client_id": client_id
-                                                        }
-                                                        await ctx.room.local_participant.publish_data(
-                                                            json.dumps(notification).encode('utf-8'),
-                                                            reliable=True
-                                                        )
-                                                        logger.info(f"[RHYME-CACHE] Notified firmware: {url}")
-                                            except Exception as cache_err:
-                                                logger.error(f"[RHYME-CACHE] Error: {cache_err}")
-
-                                        asyncio.create_task(cache_and_notify())
-
-                                    # Play audio using session.say with pre-synthesized frames
-                                    await emit_agent_state("speaking")
-                                    await play_elevenlabs_audio(session, audio_data, title)
-                                    await emit_agent_state("listening")
-                                    logger.info(f"[RFID-RAG] Finished playing rhyme: {title}")
-                                else:
-                                    # Fallback to Gemini if ElevenLabs fails
-                                    logger.warning(f"[RFID-RAG] ElevenLabs failed: {error}, falling back to Gemini")
-                                    read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
-                                    await session.generate_reply(instructions=read_instruction)
-
-                            except Exception as tts_error:
-                                logger.error(f"[RFID-RAG] ElevenLabs error: {tts_error}, falling back to Gemini")
-                                read_instruction = f"Recite this nursery rhyme in a sweet voice for a child: {content_text}"
-                                await session.generate_reply(instructions=read_instruction)
+                            instruction = (
+                                f"Recite this child-friendly content exactly and naturally. "
+                                f"Title: {title}. Content: {content_text}"
+                            )
+                            logger.info(f"[RFID-RAG] Sending read-only content to xAI realtime: {title}")
+                            await session.generate_reply(instructions=instruction)
                         else:
-                            # Prompt mode: Send to Gemini for generation (current behavior)
-                            logger.info(f"🤖 [RFID-PROMPT] Sending to Gemini: {text[:100]}...")
+                            logger.info(f"[RFID-PROMPT] Sending to xAI realtime: {text[:100]}...")
                             await session.generate_reply(instructions=text)
                     except Exception as e:
                         logger.error(f"❌ Error handling user_text: {e}")
@@ -1208,15 +912,12 @@ async def entrypoint(ctx: JobContext):
 if __name__ == "__main__":
     # Use worker-specific port (ignore global PORT env var from Cerebrium)
     port = int(os.getenv("CHEEKO_PORT", DEFAULT_PORT))
-    load_threshold = float(os.getenv("LIVEKIT_LOAD_THRESHOLD", "0.7"))
     logger.info(f"Starting {AGENT_NAME} on port {port}")
-    logger.info(f"Worker load threshold: {load_threshold}")
 
     cli.run_app(WorkerOptions(
         entrypoint_fnc=entrypoint,
         prewarm_fnc=prewarm,
         agent_name=AGENT_NAME,
-        load_threshold=load_threshold,
         num_idle_processes=1,
         initialize_process_timeout=120.0,
         job_memory_warn_mb=2000,

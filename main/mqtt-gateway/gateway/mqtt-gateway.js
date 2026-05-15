@@ -30,7 +30,7 @@ const logger = require("../utils/logger");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent",
+  "Cheeko": "cheeko-xai",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -264,6 +264,31 @@ async function fetchContentDownloadManifest(rfidUid) {
   }
 }
 
+async function postDeviceSyncEvent(path, payload, timeoutMs = 5000) {
+  const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/$/, "");
+  if (!baseUrl) {
+    throw new Error("MANAGER_API_URL not configured");
+  }
+
+  const serviceKey = process.env.MANAGER_API_SECRET || process.env.SERVICE_SECRET_KEY;
+  if (!serviceKey) {
+    throw new Error("MANAGER_API_SECRET/SERVICE_SECRET_KEY not configured");
+  }
+
+  const url = `${baseUrl}${path}`;
+  logger.info(`[SETTINGS-SYNC][GW->API] POST ${path} mac=${payload?.mac_address || "na"} sender=${payload?.sender_client_id || "na"}`);
+  const response = await axios.post(url, payload, {
+    timeout: timeoutMs,
+    headers: {
+      "X-Service-Key": serviceKey,
+    },
+  });
+
+  logger.info(`[SETTINGS-SYNC][GW->API] Response ${path} code=${response?.data?.code}`);
+
+  return response.data;
+}
+
 class MQTTGateway {
   constructor(workerPool) {
     // Shared worker pool for all LiveKit bridges / audio processing
@@ -438,7 +463,7 @@ class MQTTGateway {
 
             // Check if room should be cleaned up
             const hasRealDevice = participants.some(p =>
-              p.identity && !p.identity.toLowerCase().includes('agent') && !p.identity.toLowerCase().includes('gateway')
+              p.identity && !p.identity.toLowerCase().includes('agent') && p.identity !== "cheeko-xai" && !p.identity.toLowerCase().includes('gateway')
             );
             const hasOnlyAgents = participants.length > 0 && !hasRealDevice;
             const isEmpty = participants.length === 0;
@@ -668,7 +693,7 @@ class MQTTGateway {
       if (topic === "internal/server-ingest") {
         // Extract client ID and original payload from EMQX republish rule
         const clientId = payload.sender_client_id;
-        const originalPayload = payload.orginal_payload;
+        const originalPayload = payload.orginal_payload || payload.original_payload;
 
         if (!clientId || !originalPayload) {
           logger.error(
@@ -676,13 +701,22 @@ class MQTTGateway {
           );
           return;
         }
+        if (typeof originalPayload !== "object" || Array.isArray(originalPayload)) {
+          logger.error(`❌ [MQTT IN] Invalid original payload type from ${clientId}`);
+          return;
+        }
 
         // Extract device MAC from client ID
         let deviceId = "unknown-device";
         const parts = clientId.split("@@@");
         if (parts.length >= 2) {
-          deviceId = parts[1].replace(/_/g, ":"); // Convert MAC format
+          deviceId = parts[1].replace(/_/g, ":").toUpperCase(); // Convert MAC format
         }
+
+        this.clientConnections.set(clientId, {
+          deviceId,
+          lastSeen: Date.now(),
+        });
 
         logger.info(`📨 [MQTT-IN] ${deviceId}: ${originalPayload.type}`);
 
@@ -707,6 +741,22 @@ class MQTTGateway {
         username: "extracted_from_emqx",
         password: "extracted_from_emqx",
       };
+
+      if (originalPayload.type === "settings_get") {
+        logger.info(`[SETTINGS-SYNC][GW-IN] settings_get mac=${deviceId} sender=${clientId} current_version=${originalPayload.current_version ?? "na"}`);
+        await this.handleSettingsGet(deviceId, originalPayload, clientId);
+        return;
+      }
+      if (originalPayload.type === "settings_ack") {
+        logger.info(`[SETTINGS-SYNC][GW-IN] settings_ack mac=${deviceId} sender=${clientId} status=${originalPayload.status || "na"} version=${originalPayload.version ?? "na"}`);
+        await this.handleSettingsAck(deviceId, originalPayload, clientId);
+        return;
+      }
+      if (originalPayload.type === "device_state") {
+        logger.info(`[SETTINGS-SYNC][GW-IN] device_state mac=${deviceId} sender=${clientId} reason=${originalPayload.reason || "na"}`);
+        await this.handleDeviceState(deviceId, originalPayload, clientId);
+        return;
+      }
 
       if (
         originalPayload.type === "playback_control" &&
@@ -1298,11 +1348,11 @@ class MQTTGateway {
       for (const participant of participants) {
         // logger.info(`   - Participant: ${participant.identity} (state: ${participant.state})`);
 
-        // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-agent')
+        // Check if this participant is an agent (identity contains 'agent' or is 'cheeko-xai')
         if (
           participant.identity &&
           (participant.identity.toLowerCase().includes("agent") ||
-            participant.identity === "cheeko-agent")
+            participant.identity === "cheeko-xai")
         ) {
           // logger.info(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
           return { exists: true, identity: participant.identity };
@@ -1317,6 +1367,71 @@ class MQTTGateway {
       );
       // On error, return false to allow dispatch attempt (fail-safe)
       return { exists: false, identity: null };
+    }
+  }
+
+  resolveSenderClientIdByMac(macAddress) {
+    for (const [clientId, info] of this.clientConnections.entries()) {
+      if ((info?.deviceId || "").toUpperCase() === (macAddress || "").toUpperCase()) {
+        return clientId;
+      }
+    }
+    return null;
+  }
+
+  async handleSettingsGet(deviceId, payload, clientId) {
+    try {
+      const response = await postDeviceSyncEvent("/device-sync/settings-get", {
+        mac_address: deviceId,
+        sender_client_id: clientId,
+        device_id: payload.device_id || null,
+        current_version: payload.current_version,
+        payload,
+      });
+
+      const data = response?.data;
+      if (data?.shouldPublish && data?.mqttMessage) {
+        logger.info(
+          `[SETTINGS-SYNC][GW-OUT] publish settings_update mac=${deviceId} sender=${clientId} version=${data?.mqttMessage?.version ?? "na"} topic=devices/p2p/${clientId} payload=${JSON.stringify(data.mqttMessage)}`
+        );
+        this.mqttPublish(`devices/p2p/${clientId}`, data.mqttMessage);
+      } else {
+        logger.info(`[SETTINGS-SYNC][GW-OUT] no publish needed mac=${deviceId} sender=${clientId}`);
+      }
+    } catch (error) {
+      logger.error(`[SETTINGS-SYNC] settings_get handling failed for ${deviceId}: ${error.message}`);
+    }
+  }
+
+  async handleSettingsAck(deviceId, payload, clientId) {
+    try {
+      await postDeviceSyncEvent("/device-sync/settings-ack", {
+        mac_address: deviceId,
+        sender_client_id: clientId,
+        device_id: payload.device_id || null,
+        version: payload.version,
+        status: payload.status,
+        applied_version: payload.applied_version,
+        reason: payload.reason,
+        payload,
+      });
+      logger.info(`[SETTINGS-SYNC][GW] forwarded settings_ack mac=${deviceId} sender=${clientId}`);
+    } catch (error) {
+      logger.error(`[SETTINGS-SYNC] settings_ack handling failed for ${deviceId}: ${error.message}`);
+    }
+  }
+
+  async handleDeviceState(deviceId, payload, clientId) {
+    try {
+      await postDeviceSyncEvent("/device-sync/device-state", {
+        mac_address: deviceId,
+        sender_client_id: clientId,
+        device_id: payload.device_id || null,
+        payload,
+      });
+      logger.info(`[SETTINGS-SYNC][GW] forwarded device_state mac=${deviceId} sender=${clientId}`);
+    } catch (error) {
+      logger.error(`[SETTINGS-SYNC] device_state handling failed for ${deviceId}: ${error.message}`);
     }
   }
 
@@ -1774,7 +1889,7 @@ class MQTTGateway {
               logger.warn(`⚠️ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
             }
 
-            const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
+            const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
             logger.info(`🚀 [MODE-CHANGE] Dispatching: ${characterName} → ${agentName}`);
 
             newBridge.agentDeployed = true;
@@ -2005,7 +2120,7 @@ class MQTTGateway {
                     logger.warn(`[START-AGENT] ⚠️ Fetch error: ${fetchError.message}`);
                   }
 
-                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-agent";
+                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
                   logger.info(`[START-AGENT] 🚀 Dispatching: Character "${characterName}" → Agent "${agentName}"`);
 
                   // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
@@ -2393,6 +2508,7 @@ class MQTTGateway {
         // Identify agent participants (identity contains 'agent')
         const identity = participant.identity || '';
         if (identity.toLowerCase().includes('agent') ||
+          identity === "cheeko-xai" ||
           identity.startsWith('agent-')) {
           logger.info(`[CLEANUP] Removing agent participant: ${identity}`);
           try {
@@ -2542,7 +2658,7 @@ class MQTTGateway {
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
         // Step 1: Get agent name for the new character
-        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-agent";
+        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-xai";
         logger.info(`[CHARACTER-CHANGE] Dispatching agent: ${agentName}`);
 
         // Step 2: Get device connection
@@ -3030,7 +3146,7 @@ class MQTTGateway {
             try {
               // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
               logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
-              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-agent";
+              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-xai";
               logger.info(`[MODE-CHANGE] 🚀 Dispatching: Character "${currentCharacter || 'Cheeko'}" → Agent "${agentName}"`)
 
               // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
@@ -3147,6 +3263,18 @@ class MQTTGateway {
       payloadStr.length > 500
         ? payloadStr.substring(0, 500) + "..."
         : payloadStr;
+    const isDeviceTopic = topicParts[0] === "devices" && topicParts[1] === "p2p";
+    const isSettingsSyncType = [
+      "settings_get",
+      "settings_update",
+      "settings_ack",
+      "settings_ping",
+    ].includes(msgType);
+    if (isDeviceTopic && isSettingsSyncType) {
+      logger.info(
+        `[SETTINGS-SYNC][GW-OUT][MQTT] topic=${topic} payload=${payloadPreview}`
+      );
+    }
     logger.debug(`📤 [MQTT-OUT] Topic: ${topic} | Payload: ${payloadPreview}`);
 
     this.mqttClient.publish(topic, payloadStr, options, (err) => {
@@ -3303,3 +3431,5 @@ class MQTTGateway {
 }
 
 module.exports = { MQTTGateway, setConfigManager };
+
+
