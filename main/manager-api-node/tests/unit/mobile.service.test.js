@@ -18,6 +18,9 @@ jest.mock('../../src/config/database', () => ({
     content_library: {
       findMany: jest.fn()
     },
+    rfid_content_pack: {
+      findMany: jest.fn()
+    },
     analytics_media_playback: {
       findMany: jest.fn()
     },
@@ -44,7 +47,7 @@ describe('mobile.service parent profile compatibility', () => {
     jest.clearAllMocks();
     prisma.kid_profile.findFirst.mockResolvedValue(null);
     prisma.ai_device.findMany.mockResolvedValue([]);
-    prisma.content_library.findMany.mockResolvedValue([]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([]);
     prisma.analytics_media_playback.findMany.mockResolvedValue([]);
     prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
     prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
@@ -284,6 +287,7 @@ describe('mobile.service homepage recommendations', () => {
     prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.content_library.findMany.mockResolvedValue([]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([]);
   });
 
   it('denies recommendations when the kid does not belong to the parent', async () => {
@@ -298,8 +302,54 @@ describe('mobile.service homepage recommendations', () => {
     });
   });
 
-  it('returns first-time preference-based content and AI cards', async () => {
+  it('uses RFID content-card packs instead of music content library cards', async () => {
     prisma.content_library.findMany.mockResolvedValue([
+      {
+        id: 99n,
+        title: 'Music Library Song',
+        content_type: 'music',
+        category: 'Songs',
+        status: 1
+      }
+    ]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 7n,
+        pack_code: 'ANIMAL-CARD',
+        name: 'Animal Content Card',
+        description: 'RFID content card pack',
+        content_type: 'story',
+        thumbnail_url: 'https://example.com/content-card.png',
+        total_items: 3,
+        language: 'en',
+        active: true,
+        status: 'active',
+        create_date: new Date('2026-05-10T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 4
+    });
+
+    expect(prisma.content_library.findMany).not.toHaveBeenCalled();
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        itemType: 'content',
+        id: '7',
+        contentId: '7',
+        title: 'Animal Content Card',
+        contentType: 'story',
+        category: 'RFID Content Card',
+        packCode: 'ANIMAL-CARD'
+      })
+    ]));
+    expect(result.items.map(item => item.title)).not.toContain('Music Library Song');
+  });
+
+  it('returns first-time preference-based content and AI cards', async () => {
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
       {
         id: 1n,
         title: 'Animal Song',
@@ -357,6 +407,41 @@ describe('mobile.service homepage recommendations', () => {
       })
     ]));
     expect(result.items[0].title).toBe('Animal Song');
+    expect(result.recommendationSource).toBe('profile');
+  });
+
+  it('rewrites stale Supabase thumbnail hosts to the configured project host', async () => {
+    const previousSupabaseUrl = process.env.SUPABASE_URL;
+    process.env.SUPABASE_URL = 'https://uprqkyiwuqribhfxzwhd.supabase.co';
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 1n,
+        title: 'Learning ABC',
+        content_type: 'music',
+        category: 'Alphabet',
+        thumbnail_url: 'https://popppjirsdedxhetcphs.supabase.co/storage/v1/object/public/songs_thumbnails/learning%20abc.png',
+        duration_seconds: 120,
+        language: 'en',
+        tags: ['abc'],
+        age_min: 3,
+        age_max: 6,
+        status: 1,
+        created_at: new Date('2026-05-10T00:00:00.000Z')
+      }
+    ]);
+
+    try {
+      const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+        kidId: '10',
+        limit: 1
+      });
+
+      expect(result.items[0].thumbnailUrl).toBe(
+        'https://uprqkyiwuqribhfxzwhd.supabase.co/storage/v1/object/public/songs_thumbnails/learning%20abc.png'
+      );
+    } finally {
+      process.env.SUPABASE_URL = previousSupabaseUrl;
+    }
   });
 
   it('uses recent card taps to rank similar content first', async () => {
@@ -369,7 +454,7 @@ describe('mobile.service homepage recommendations', () => {
         created_at: new Date('2026-05-14T08:00:00.000Z')
       }
     ]);
-    prisma.content_library.findMany.mockResolvedValue([
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
       {
         id: 1n,
         title: 'Counting Numbers',
@@ -405,6 +490,7 @@ describe('mobile.service homepage recommendations', () => {
       title: 'Jungle Animals Story'
     }));
     expect(result.items[0].reason).toContain('Animal');
+    expect(result.recommendationSource).toBe('personalized');
   });
 
   it('uses old rhyme card taps to rank rhyme content first even when the tap is not from today', async () => {
@@ -417,7 +503,7 @@ describe('mobile.service homepage recommendations', () => {
         created_at: new Date('2026-05-12T08:00:00.000Z')
       }
     ]);
-    prisma.content_library.findMany.mockResolvedValue([
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
       {
         id: 1n,
         title: 'Animal Story',
@@ -484,7 +570,7 @@ describe('mobile.service homepage recommendations', () => {
   });
 
   it('deduplicates content and respects limit', async () => {
-    prisma.content_library.findMany.mockResolvedValue([
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
       { id: 1n, title: 'Animal Song', content_type: 'music', category: 'Animals', language: 'en', status: 1 },
       { id: 1n, title: 'Animal Song', content_type: 'music', category: 'Animals', language: 'en', status: 1 },
       { id: 2n, title: 'Animal Song', content_type: 'music', category: 'Animals', language: 'en', status: 1 },
@@ -500,7 +586,7 @@ describe('mobile.service homepage recommendations', () => {
     expect(result.items.map(item => item.id)).toEqual(['1', '3']);
   });
 
-  it('returns safe default backend content when there is no history and no preferences', async () => {
+  it('returns safe default backend content and AI cards when there is no history and no preferences', async () => {
     prisma.kid_profile.findFirst.mockResolvedValue({
       id: 10n,
       user_id: 1n,
@@ -510,7 +596,7 @@ describe('mobile.service homepage recommendations', () => {
       language: null,
       preferences: {}
     });
-    prisma.content_library.findMany.mockResolvedValue([
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
       {
         id: 44n,
         title: 'Bedtime Story',
@@ -528,13 +614,51 @@ describe('mobile.service homepage recommendations', () => {
       limit: 8
     });
 
-    expect(result.items).toEqual([
+    expect(result.recommendationSource).toBe('default');
+    expect(result.items).toEqual(expect.arrayContaining([
       expect.objectContaining({
         itemType: 'content',
         id: '44',
         title: 'Bedtime Story',
-        subtitle: 'Popular content from the library'
+        subtitle: 'Popular content card'
+      }),
+      expect.objectContaining({
+        itemType: 'ai',
+        subtitle: 'Try a Cheeko AI experience'
       })
-    ]);
+    ]));
+  });
+
+  it('keeps an AI card in default recommendations even when content fills the limit', async () => {
+    prisma.kid_profile.findFirst.mockResolvedValue({
+      id: 10n,
+      user_id: 1n,
+      name: 'Aditi',
+      birth_date: null,
+      interests: [],
+      language: null,
+      preferences: {}
+    });
+    prisma.rfid_content_pack.findMany.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({
+        id: BigInt(index + 1),
+        title: `Default Content ${index + 1}`,
+        content_type: 'music',
+        category: 'General',
+        language: 'en',
+        status: 1,
+        created_at: new Date(`2026-05-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`)
+      }))
+    );
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 8
+    });
+
+    expect(result.items).toHaveLength(8);
+    expect(result.recommendationSource).toBe('default');
+    expect(result.items.some(item => item.itemType === 'content')).toBe(true);
+    expect(result.items.some(item => item.itemType === 'ai')).toBe(true);
   });
 });

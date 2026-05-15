@@ -190,6 +190,7 @@ function collectPreferenceSignals(kid) {
 function contentTokens(content) {
     return [
         content.title,
+        content.name,
         content.category,
         content.content_type,
         content.content_pack_code,
@@ -341,28 +342,62 @@ function scoreContent(content, profile) {
 
     return {
         score,
-        reason: reasons[0] || 'Popular content from the library',
+        reason: reasons[0] || 'Popular content card',
     };
 }
 
 function formatRecommendationContent(content, reason) {
     const contentId = content.id != null ? content.id.toString() : null;
+    const title = content.title || content.name;
+    const category = content.category || 'RFID Content Card';
+    const createdAt = content.created_at || content.create_date;
     return {
         itemType: 'content',
         id: contentId,
         contentId,
-        title: content.title,
+        title,
         subtitle: reason,
         contentType: content.content_type,
-        category: content.category,
-        thumbnailUrl: content.thumbnail_url || null,
+        category,
+        packCode: content.pack_code || null,
+        contentPackCode: content.pack_code || null,
+        thumbnailUrl: normalizeSupabaseAssetUrl(content.thumbnail_url),
         durationSeconds: content.duration_seconds || null,
         formattedDuration: formatDuration(content.duration_seconds),
+        totalItems: content.total_items || null,
+        createdAt,
         reason,
     };
 }
 
-function scoreAiCard(card, profile) {
+function normalizeSupabaseAssetUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    const configuredSupabaseUrl = process.env.SUPABASE_URL;
+    if (!configuredSupabaseUrl) return url;
+
+    try {
+        const assetUrl = new URL(url);
+        const configuredUrl = new URL(configuredSupabaseUrl);
+        if (
+            assetUrl.hostname.endsWith('.supabase.co') &&
+            configuredUrl.hostname.endsWith('.supabase.co') &&
+            assetUrl.hostname !== configuredUrl.hostname
+        ) {
+            assetUrl.hostname = configuredUrl.hostname;
+            return assetUrl.toString();
+        }
+    } catch (error) {
+        return url;
+    }
+
+    return url;
+}
+
+function hasSignals(...sets) {
+    return sets.some(set => set && set.size > 0);
+}
+
+function scoreAiCard(card, profile, recommendationSource = null) {
     let score = 0;
     const aiMode = normalizeText(card.aiMode);
 
@@ -370,13 +405,16 @@ function scoreAiCard(card, profile) {
     if (profile.preferredAiModes.has(aiMode)) score += 70;
     if (profile.recentModes.has(aiMode)) score += 20;
     if (profile.recentContentTypes.has(aiMode)) score += 20;
-    if (score === 0) return null;
+    const isDefaultFallback = recommendationSource === 'default';
+    if (score === 0 && !isDefaultFallback) return null;
 
-    const subtitle = profile.aiCardUsed
+    const subtitle = isDefaultFallback
+        ? 'Try a Cheeko AI experience'
+        : (profile.aiCardUsed
         ? 'Because child used an AI card'
         : (profile.preferredAiModes.has(aiMode)
             ? `Because ${card.title} is selected in the child profile preferences`
-            : `Because your child recently used ${card.title}`);
+            : `Because your child recently used ${card.title}`));
 
     return {
         ...card,
@@ -885,9 +923,9 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
                 take: 20,
             })
             : Promise.resolve([]),
-        prisma.content_library.findMany({
-            where: { status: 1 },
-            orderBy: { created_at: 'desc' },
+        prisma.rfid_content_pack.findMany({
+            where: { active: true },
+            orderBy: { create_date: 'desc' },
             take: Math.max(limit * 8, 50),
         }),
     ]);
@@ -897,14 +935,29 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
         profile.recentModes.add('conversation');
     }
 
+    const hasRecentActivity = Boolean(
+        (cardTaps || []).length ||
+        (sessions || []).length ||
+        (mediaPlayback || []).length ||
+        (chatHistory || []).length
+    );
+    const hasProfilePreferences = hasSignals(
+        profile.preferredCategories,
+        profile.preferredContentTypes,
+        profile.preferredAiModes
+    );
+    const recommendationSource = hasRecentActivity
+        ? 'personalized'
+        : (hasProfilePreferences ? 'profile' : 'default');
+
     const scoredContent = (contentCandidates || [])
-        .filter(content => content && content.status !== 0)
+        .filter(content => content && content.active !== false && content.status !== 'inactive')
         .map(content => {
             const scored = scoreContent(content, profile);
             return {
                 ...formatRecommendationContent(content, scored.reason),
                 _score: scored.score,
-                _createdAt: content.created_at ? new Date(content.created_at).getTime() : 0,
+                _createdAt: (content.created_at || content.create_date) ? new Date(content.created_at || content.create_date).getTime() : 0,
                 _recentlyConsumed: profile.recentContentIds.has(content.id?.toString()),
             };
         });
@@ -912,24 +965,33 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
     const nonConsumedContent = scoredContent.filter(item => !item._recentlyConsumed);
     const contentPool = nonConsumedContent.length >= limit ? nonConsumedContent : scoredContent;
     const aiItems = HOMEPAGE_AI_CARDS
-        .map(card => scoreAiCard(card, profile))
+        .map(card => scoreAiCard(card, profile, recommendationSource))
         .filter(Boolean);
 
-    const ranked = dedupeRecommendations([...contentPool, ...aiItems].sort(sortRecommendations))
+    const rankedPool = recommendationSource === 'default' && aiItems.length > 0 && limit > 1
+        ? [
+            ...dedupeRecommendations(contentPool.sort(sortRecommendations)).slice(0, limit - 1),
+            ...dedupeRecommendations(aiItems.sort(sortRecommendations)).slice(0, 1),
+        ]
+        : [...contentPool, ...aiItems].sort(sortRecommendations);
+
+    const ranked = dedupeRecommendations(rankedPool)
         .slice(0, limit)
         .map(({ _score, _createdAt, _recentlyConsumed, ...item }) => item);
 
-    const source = ranked.length === 0
-        ? 'empty'
-        : ((cardTaps || []).length || (sessions || []).length || (mediaPlayback || []).length || (chatHistory || []).length ? 'personalized' : 'default');
     logger.info('recommendations_returned_count', {
         userId: user.id?.toString(),
         kidId: kid.id?.toString(),
         count: ranked.length,
-        recommendation_source: source,
+        recommendation_source: ranked.length === 0 ? 'empty' : recommendationSource,
     });
 
-    return { items: ranked };
+    return {
+        items: ranked,
+        recommendationSource: ranked.length === 0 ? 'empty' : recommendationSource,
+        source: ranked.length === 0 ? 'empty' : recommendationSource,
+        generatedAt: new Date().toISOString(),
+    };
 }
 
 module.exports = {
