@@ -1191,3 +1191,39 @@ model device_sync_event {
   @@index([event_type], map: "idx_device_sync_event_type")
   @@index([created_at], map: "idx_device_sync_event_created_at")
 }
+
+model device_analytics_event {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  device_id         String    @db.VarChar(100)
+  event_id          String    @db.VarChar(120)
+  mac_address       String    @db.VarChar(20)
+  sender_client_id  String?   @db.VarChar(255)
+  board             String?   @db.VarChar(50)
+  firmware          String?   @db.VarChar(100)
+  build_label       String?   @db.VarChar(100)
+  seq               Int?
+  uptime_ms         BigInt?
+  event_name        String    @db.VarChar(80)
+  event_timestamp   DateTime? @db.Timestamptz(6)
+  server_received_at DateTime? @default(now()) @db.Timestamptz(6)
+  battery           Int?
+  battery_percentage Int?
+  charging          Boolean?
+  discharging       Boolean?
+  duration_ms       Int?
+  rfid_uid          String?   @db.VarChar(120)
+  content_id        String?   @db.VarChar(120)
+  content_type      String?   @db.VarChar(50)
+  game_id           String?   @db.VarChar(80)
+  score             Int?
+  reason            String?   @db.VarChar(120)
+  station           String?   @db.VarChar(120)
+  station_index     Int?
+  data              Json      @default("{}")
+  raw_payload       Json      @default("{}")
+
+  @@unique([device_id, event_id], map: "uq_device_analytics_event_device_event")
+  @@index([mac_address, event_timestamp(sort: Desc)], map: "idx_device_analytics_event_mac_event_ts")
+  @@index([mac_address, server_received_at(sort: Desc)], map: "idx_device_analytics_event_mac_received")
+  @@index([mac_address, event_name], map: "idx_device_analytics_event_mac_name")
+}

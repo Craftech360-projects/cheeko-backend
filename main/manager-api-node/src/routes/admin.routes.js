@@ -32,6 +32,7 @@ const express = require('express');
 const router = express.Router();
 const adminService = require('../services/admin.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
+const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -1509,6 +1510,74 @@ router.get('/device/:mac/sync-events',
     const limit = req.query.limit ? Number(req.query.limit) : 50;
     const events = await deviceSettingsService.listSyncEventsByMac(mac, limit);
     success(res, { events });
+  })
+);
+
+/**
+ * Admin: Get firmware analytics overview by MAC.
+ */
+router.get('/device/:mac/analytics/overview',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const { from, to } = req.query;
+    const overview = await deviceAnalyticsService.getAnalyticsOverviewByMac(mac, { from, to });
+    success(res, overview);
+  })
+);
+
+/**
+ * Admin: Get firmware analytics time series by MAC.
+ */
+router.get('/device/:mac/analytics/timeseries',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const { from, to } = req.query;
+    const timeseries = await deviceAnalyticsService.getAnalyticsTimeSeriesByMac(mac, { from, to });
+    success(res, { timeseries });
+  })
+);
+
+/**
+ * Admin: Get recent firmware analytics events by MAC.
+ */
+router.get('/device/:mac/analytics/events',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const limit = req.query.limit ? Number(req.query.limit) : 100;
+    const events = await deviceAnalyticsService.getRecentAnalyticsEventsByMac(mac, { limit });
+    success(res, { events });
+  })
+);
+
+/**
+ * Admin: Get battery trend analytics by MAC.
+ */
+router.get('/device/:mac/analytics/battery',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const { from, to } = req.query;
+    const battery = await deviceAnalyticsService.getBatteryTrendByMac(mac, { from, to });
+    success(res, battery);
   })
 );
 

@@ -281,6 +281,77 @@ export default {
                 callback({ data: { code: -1, msg: 'Network error', data: null } })
             }).send()
     },
+    // Get firmware analytics overview by MAC (Admin dashboard)
+    getDeviceAnalyticsOverviewByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            from: params?.from || '',
+            to: params?.to || ''
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/analytics/overview?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device analytics overview:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get firmware analytics timeseries by MAC (Admin dashboard)
+    getDeviceAnalyticsTimeseriesByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            from: params?.from || '',
+            to: params?.to || ''
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/analytics/timeseries?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device analytics timeseries:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get firmware analytics events by MAC (Admin dashboard)
+    getDeviceAnalyticsEventsByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            limit: params?.limit || 100
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/analytics/events?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device analytics events:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get firmware battery trend by MAC (Admin dashboard)
+    getDeviceAnalyticsBatteryByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            from: params?.from || '',
+            to: params?.to || ''
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/analytics/battery?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device analytics battery:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
     // Get WebSocket server list
     getWsServerList(params, callback) {
         RequestService.sendRequest()

@@ -47,4 +47,69 @@ describe('Device Sync Routes', () => {
     expect(res.statusCode).toBe(expectedCode);
     expect(res.body).toHaveProperty('code', expectedCode);
   });
+
+  it('rejects settings-changed with missing mac_address', async () => {
+    const res = await request(app)
+      .post(`${BASE}/settings-changed`)
+      .set('X-Service-Key', SERVICE_KEY)
+      .send({
+        payload: {
+          settings: { volume: 70 },
+        },
+      });
+
+    const expectedCode = HAS_REAL_SERVICE_KEY ? 400 : 401;
+    expect(res.statusCode).toBe(expectedCode);
+    expect(res.body).toHaveProperty('code', expectedCode);
+  });
+
+  it('rejects settings-changed with missing payload.settings', async () => {
+    const res = await request(app)
+      .post(`${BASE}/settings-changed`)
+      .set('X-Service-Key', SERVICE_KEY)
+      .send({
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        payload: {},
+      });
+
+    const expectedCode = HAS_REAL_SERVICE_KEY ? 400 : 401;
+    expect(res.statusCode).toBe(expectedCode);
+    expect(res.body).toHaveProperty('code', expectedCode);
+  });
+
+  it('rejects analytics-event with missing mac_address', async () => {
+    const res = await request(app)
+      .post(`${BASE}/analytics-event`)
+      .set('X-Service-Key', SERVICE_KEY)
+      .send({
+        payload: {
+          type: 'analytics_event',
+          device_id: 'dev-1',
+          event_id: 'evt-1',
+          event: 'game_start',
+        },
+      });
+
+    const expectedCode = HAS_REAL_SERVICE_KEY ? 400 : 401;
+    expect(res.statusCode).toBe(expectedCode);
+    expect(res.body).toHaveProperty('code', expectedCode);
+  });
+
+  it('rejects analytics-event with missing payload.event_id', async () => {
+    const res = await request(app)
+      .post(`${BASE}/analytics-event`)
+      .set('X-Service-Key', SERVICE_KEY)
+      .send({
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        payload: {
+          type: 'analytics_event',
+          device_id: 'dev-1',
+          event: 'game_start',
+        },
+      });
+
+    const expectedCode = HAS_REAL_SERVICE_KEY ? 400 : 401;
+    expect(res.statusCode).toBe(expectedCode);
+    expect(res.body).toHaveProperty('code', expectedCode);
+  });
 });

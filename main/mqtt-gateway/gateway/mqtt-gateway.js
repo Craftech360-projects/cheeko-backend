@@ -673,7 +673,13 @@ class MQTTGateway {
 
   async handleMqttMessage(topic, message) {
     try {
-      const payload = JSON.parse(message.toString());
+      const rawMessage = message.toString();
+      const rawPreview =
+        rawMessage.length > 1200
+          ? rawMessage.substring(0, 1200) + "..."
+          : rawMessage;
+      logger.info(`[MQTT-IN][RAW] topic=${topic} payload=${rawPreview}`);
+      const payload = JSON.parse(rawMessage);
 
       // Handle devices/{macAddress}/data topic
       if (topic.startsWith("devices/") && topic.endsWith("/data")) {
@@ -694,6 +700,17 @@ class MQTTGateway {
         // Extract client ID and original payload from EMQX republish rule
         const clientId = payload.sender_client_id;
         const originalPayload = payload.orginal_payload || payload.original_payload;
+        const originalPayloadStr =
+          originalPayload && typeof originalPayload === "object"
+            ? JSON.stringify(originalPayload)
+            : String(originalPayload || "");
+        const originalPreview =
+          originalPayloadStr.length > 1200
+            ? originalPayloadStr.substring(0, 1200) + "..."
+            : originalPayloadStr;
+        logger.info(
+          `[MQTT-IN][DEVICE] sender=${clientId || "na"} payload=${originalPreview}`
+        );
 
         if (!clientId || !originalPayload) {
           logger.error(
@@ -755,6 +772,16 @@ class MQTTGateway {
       if (originalPayload.type === "device_state") {
         logger.info(`[SETTINGS-SYNC][GW-IN] device_state mac=${deviceId} sender=${clientId} reason=${originalPayload.reason || "na"}`);
         await this.handleDeviceState(deviceId, originalPayload, clientId);
+        return;
+      }
+      if (originalPayload.type === "settings_changed") {
+        logger.info(`[SETTINGS-SYNC][GW-IN] settings_changed mac=${deviceId} sender=${clientId} reason=${originalPayload.reason || "na"}`);
+        await this.handleSettingsChanged(deviceId, originalPayload, clientId);
+        return;
+      }
+      if (originalPayload.type === "analytics_event") {
+        logger.info(`[ANALYTICS][GW-IN] analytics_event mac=${deviceId} sender=${clientId} event_id=${originalPayload.event_id || "na"} event=${originalPayload.event || "na"}`);
+        await this.handleAnalyticsEvent(deviceId, originalPayload, clientId);
         return;
       }
 
@@ -1432,6 +1459,45 @@ class MQTTGateway {
       logger.info(`[SETTINGS-SYNC][GW] forwarded device_state mac=${deviceId} sender=${clientId}`);
     } catch (error) {
       logger.error(`[SETTINGS-SYNC] device_state handling failed for ${deviceId}: ${error.message}`);
+    }
+  }
+
+  async handleSettingsChanged(deviceId, payload, clientId) {
+    try {
+      const response = await postDeviceSyncEvent("/device-sync/settings-changed", {
+        mac_address: deviceId,
+        sender_client_id: clientId,
+        device_id: payload.device_id || null,
+        payload,
+      });
+
+      const data = response?.data;
+      if (data?.shouldPublish && data?.mqttMessage) {
+        logger.info(
+          `[SETTINGS-SYNC][GW-OUT] publish settings_update (settings_changed) mac=${deviceId} sender=${clientId} version=${data?.mqttMessage?.version ?? "na"} topic=devices/p2p/${clientId} payload=${JSON.stringify(data.mqttMessage)}`
+        );
+        this.mqttPublish(`devices/p2p/${clientId}`, data.mqttMessage);
+      } else {
+        logger.info(`[SETTINGS-SYNC][GW-OUT] no publish needed after settings_changed mac=${deviceId} sender=${clientId}`);
+      }
+    } catch (error) {
+      logger.error(`[SETTINGS-SYNC] settings_changed handling failed for ${deviceId}: ${error.message}`);
+    }
+  }
+
+  async handleAnalyticsEvent(deviceId, payload, clientId) {
+    try {
+      const response = await postDeviceSyncEvent("/device-sync/analytics-event", {
+        mac_address: deviceId,
+        sender_client_id: clientId,
+        device_id: payload.device_id || null,
+        payload,
+      });
+      logger.info(
+        `[ANALYTICS][GW->API] stored mac=${deviceId} sender=${clientId} deduplicated=${response?.data?.deduplicated === true}`
+      );
+    } catch (error) {
+      logger.error(`[ANALYTICS][GW] analytics_event handling failed for ${deviceId}: ${error.message}`);
     }
   }
 

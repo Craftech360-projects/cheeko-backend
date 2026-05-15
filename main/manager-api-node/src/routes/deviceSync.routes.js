@@ -5,6 +5,7 @@ const { requireServiceKey } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { success, badRequest } = require('../utils/response');
 const deviceSettingsService = require('../services/deviceSettings.service');
+const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const logger = require('../utils/logger');
 
 router.use(requireServiceKey);
@@ -85,6 +86,65 @@ router.post('/device-state', asyncHandler(async (req, res) => {
     last_seen_at: result.last_seen_at,
     settings_version: result.settings_version,
   });
+}));
+
+router.post('/settings-changed', asyncHandler(async (req, res) => {
+  const { mac_address, sender_client_id, device_id, payload } = req.body || {};
+  logger.info(`[SETTINGS-SYNC][API] POST /device-sync/settings-changed mac=${mac_address || 'na'} sender=${sender_client_id || 'na'} reason=${payload?.reason || 'na'}`);
+
+  if (!mac_address) {
+    return badRequest(res, 'mac_address is required');
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return badRequest(res, 'payload object is required');
+  }
+
+  if (!payload.settings || typeof payload.settings !== 'object' || Array.isArray(payload.settings)) {
+    return badRequest(res, 'payload.settings object is required');
+  }
+
+  const result = await deviceSettingsService.onSettingsChanged({
+    mac_address,
+    sender_client_id: sender_client_id || null,
+    device_id: device_id || null,
+    payload,
+  });
+
+  success(res, result);
+}));
+
+router.post('/analytics-event', asyncHandler(async (req, res) => {
+  const { mac_address, sender_client_id, device_id, payload } = req.body || {};
+  logger.info(`[ANALYTICS][API] POST /device-sync/analytics-event mac=${mac_address || 'na'} sender=${sender_client_id || 'na'} event=${payload?.event || 'na'}`);
+
+  if (!mac_address) {
+    return badRequest(res, 'mac_address is required');
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return badRequest(res, 'payload object is required');
+  }
+  if (payload.type !== 'analytics_event') {
+    return badRequest(res, 'payload.type must be analytics_event');
+  }
+  if (!payload.device_id && !device_id) {
+    return badRequest(res, 'device_id is required');
+  }
+  if (!payload.event_id) {
+    return badRequest(res, 'payload.event_id is required');
+  }
+  if (!payload.event) {
+    return badRequest(res, 'payload.event is required');
+  }
+
+  const result = await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+    mac_address,
+    sender_client_id: sender_client_id || null,
+    device_id: device_id || null,
+    payload,
+  });
+
+  success(res, result);
 }));
 
 module.exports = router;
