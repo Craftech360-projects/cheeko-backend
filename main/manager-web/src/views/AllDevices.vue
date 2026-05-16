@@ -240,6 +240,7 @@
             <div><strong>AI Sessions:</strong> {{ analyticsOverview.aiTalk?.sessionCount || 0 }}</div>
             <div><strong>Game Launches:</strong> {{ analyticsOverview.games?.launchCount || 0 }}</div>
             <div><strong>AI Minutes:</strong> {{ formatMinutesFromMs(analyticsOverview.aiTalk?.totalDurationMs) }}</div>
+            <div><strong>Radio Minutes:</strong> {{ analyticsOverview.minutesByType?.radio || 0 }}</div>
             <div><strong>Game Minutes:</strong> {{ formatMinutesFromMs(analyticsOverview.games?.totalDurationMs) }}</div>
             <div><strong>Avg Score:</strong> {{ analyticsOverview.games?.averageScore || 0 }}</div>
             <div><strong>Latest Battery:</strong> {{ analyticsBattery?.latest?.battery != null ? (analyticsBattery.latest.battery + '%') : '-' }}</div>
@@ -256,6 +257,9 @@
             <el-table-column label="Card Taps" prop="cardTapCount" min-width="90" />
             <el-table-column label="AI (min)" min-width="90">
               <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.aiTalkDurationMs) }}</template>
+            </el-table-column>
+            <el-table-column label="Radio (min)" min-width="95">
+              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.radioDurationMs) }}</template>
             </el-table-column>
             <el-table-column label="Game (min)" min-width="90">
               <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.gameDurationMs) }}</template>

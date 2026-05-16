@@ -313,8 +313,8 @@ const normalizeContentItemRow = (item) => {
   if (!item) return null;
   return {
     ...item,
-    image_url: null,
-    content_text: null,
+    image_url: item.image_url ?? null,
+    content_text: item.content_text ?? null,
     story_number: item.story_number ?? null,
     story_title: item.story_title ?? null
   };
@@ -349,7 +349,7 @@ const listContentItemsCompat = async (contentPackId) => {
       create_date,
       updater,
       update_date,
-      NULL::text AS image_url,
+      image_url,
       NULL::text AS content_text,
       NULL::integer AS story_number,
       NULL::text AS story_title
@@ -379,7 +379,7 @@ const getContentItemCompat = async (contentPackId, itemNumber) => {
       create_date,
       updater,
       update_date,
-      NULL::text AS image_url,
+      image_url,
       NULL::text AS content_text,
       NULL::integer AS story_number,
       NULL::text AS story_title

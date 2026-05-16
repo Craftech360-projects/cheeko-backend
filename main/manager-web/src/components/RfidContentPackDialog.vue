@@ -82,10 +82,28 @@
                           <el-input v-model="item.title" placeholder="Title" size="small" class="mb-1"></el-input>
                           <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
                               <template slot="prepend"><i class="el-icon-headset"></i></template>
-                              <el-button slot="append" :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(item.audioUrl)" v-if="item.audioUrl"></el-button>
+                              <template slot="append">
+                                <el-button
+                                  icon="el-icon-upload2"
+                                  :loading="uploadingMedia"
+                                  @click="pickAudioFile(index)"
+                                ></el-button>
+                                <el-button
+                                  v-if="item.audioUrl"
+                                  :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'"
+                                  @click="toggleAudio(item.audioUrl)"
+                                ></el-button>
+                              </template>
                           </el-input>
                           <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small" class="mb-1">
                                <template slot="prepend"><i class="el-icon-picture"></i></template>
+                               <template slot="append">
+                                 <el-button
+                                   icon="el-icon-upload2"
+                                   :loading="uploadingMedia"
+                                   @click="pickImageFile(index)"
+                                 ></el-button>
+                               </template>
                           </el-input>
                           <el-input type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input">
                           </el-input>
@@ -149,10 +167,28 @@
                       <el-input v-model="item.title" placeholder="Track title" size="small" class="mb-1"></el-input>
                       <el-input v-model="item.audioUrl" placeholder="Audio URL (https://...)" size="small" class="mb-1">
                         <template slot="prepend"><i class="el-icon-headset"></i></template>
-                        <el-button slot="append" :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'" @click="toggleAudio(item.audioUrl)" v-if="item.audioUrl"></el-button>
+                        <template slot="append">
+                          <el-button
+                            icon="el-icon-upload2"
+                            :loading="uploadingMedia"
+                            @click="pickAudioFile(iIndex, sIndex)"
+                          ></el-button>
+                          <el-button
+                            v-if="item.audioUrl"
+                            :icon="playingUrl === item.audioUrl ? 'el-icon-video-pause' : 'el-icon-video-play'"
+                            @click="toggleAudio(item.audioUrl)"
+                          ></el-button>
+                        </template>
                       </el-input>
                       <el-input v-model="item.imageUrl" placeholder="Image URL (Thumbnail)" size="small" class="mb-1">
                         <template slot="prepend"><i class="el-icon-picture"></i></template>
+                        <template slot="append">
+                          <el-button
+                            icon="el-icon-upload2"
+                            :loading="uploadingMedia"
+                            @click="pickImageFile(iIndex, sIndex)"
+                          ></el-button>
+                        </template>
                       </el-input>
                       <el-input type="textarea" v-model="item.text" placeholder="Voice script / Text content" size="small" :rows="2" class="text-input"></el-input>
                     </div>
@@ -176,6 +212,21 @@
         </div>
       </el-form>
 
+      <input
+        ref="audioFilePicker"
+        type="file"
+        accept=".mp3,.wav,.ogg,.m4a,audio/*"
+        style="display: none"
+        @change="handleAudioFileSelected"
+      />
+      <input
+        ref="imageFilePicker"
+        type="file"
+        accept=".png,.jpg,.jpeg,.gif,.webp,.bin,image/*,application/octet-stream"
+        style="display: none"
+        @change="handleImageFileSelected"
+      />
+
       <div class="dialog-footer">
         <el-button
           type="primary"
@@ -194,6 +245,8 @@
 </template>
 
 <script>
+import Api from "@/apis/api";
+
 export default {
   props: {
     title: {
@@ -227,6 +280,8 @@ export default {
       playingUrl: null,
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
+      pendingUpload: null, // { mode: 'flat'|'story', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl' }
+      uploadingMedia: false,
       binLoading: {},
       binError: {},
       binCache: {},
@@ -288,6 +343,111 @@ export default {
     },
     removeStoryItem(sIndex, iIndex) {
       this.stories[sIndex].items.splice(iIndex, 1);
+    },
+    pickAudioFile(itemIndex, storyIndex = null) {
+      this.pendingUpload = {
+        mode: storyIndex === null ? 'flat' : 'story',
+        storyIndex,
+        itemIndex,
+        field: 'audioUrl'
+      };
+      if (this.$refs.audioFilePicker) {
+        this.$refs.audioFilePicker.click();
+      }
+    },
+    pickImageFile(itemIndex, storyIndex = null) {
+      this.pendingUpload = {
+        mode: storyIndex === null ? 'flat' : 'story',
+        storyIndex,
+        itemIndex,
+        field: 'imageUrl'
+      };
+      if (this.$refs.imageFilePicker) {
+        this.$refs.imageFilePicker.click();
+      }
+    },
+    getAuthToken() {
+      const storedToken = localStorage.getItem('token');
+      if (!storedToken) return null;
+      try {
+        const parsed = JSON.parse(storedToken);
+        return parsed.token || storedToken;
+      } catch (e) {
+        return storedToken;
+      }
+    },
+    getPendingTargetItem() {
+      if (!this.pendingUpload) return null;
+      const { mode, storyIndex, itemIndex } = this.pendingUpload;
+      if (mode === 'story') {
+        if (!this.stories[storyIndex] || !this.stories[storyIndex].items[itemIndex]) return null;
+        return this.stories[storyIndex].items[itemIndex];
+      }
+      if (!this.form.items[itemIndex]) return null;
+      return this.form.items[itemIndex];
+    },
+    async handleAudioFileSelected(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      await this.uploadFileToS3(file, 'audio');
+      event.target.value = '';
+    },
+    async handleImageFileSelected(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      await this.uploadFileToS3(file, 'image');
+      event.target.value = '';
+    },
+    async uploadFileToS3(file, type) {
+      if (!this.pendingUpload) {
+        this.$message.error('No target item selected for upload.');
+        return;
+      }
+
+      const targetItem = this.getPendingTargetItem();
+      if (!targetItem) {
+        this.$message.error('Target item not found. Please try again.');
+        return;
+      }
+
+      const token = this.getAuthToken();
+      if (!token) {
+        this.$message.error('Authentication token missing. Please login again.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('contentType', 'rfidcontent');
+      formData.append('category', type === 'audio' ? 'audio' : 'images');
+
+      this.uploadingMedia = true;
+      try {
+        const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`
+          },
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `Upload failed with status ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (result.code !== 0 || !result.data?.url) {
+          throw new Error(result.msg || 'Upload failed');
+        }
+
+        targetItem[this.pendingUpload.field] = result.data.url;
+        this.$message.success(`${type === 'audio' ? 'Audio' : 'Image'} uploaded successfully.`);
+      } catch (error) {
+        this.$message.error(`Upload failed: ${error.message}`);
+      } finally {
+        this.uploadingMedia = false;
+      }
     },
     toggleAudio(url) {
       if (!url) return;
@@ -494,6 +654,8 @@ export default {
     cancel() {
       this.stopAudio();
       this.saving = false;
+      this.pendingUpload = null;
+      this.uploadingMedia = false;
       this.$emit('cancel');
     }
   },
@@ -542,6 +704,8 @@ export default {
         this.binError = {};
         this.stories = [];
         this.storyMode = false;
+        this.pendingUpload = null;
+        this.uploadingMedia = false;
       }
     },
     'form.items': {
