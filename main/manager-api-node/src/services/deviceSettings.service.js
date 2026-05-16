@@ -483,25 +483,14 @@ async function onDeviceState({ mac_address, sender_client_id = null, device_id =
     updated_at: now,
   };
 
-  const existing = await prisma.device_runtime_state.findUnique({
+  const updated = await prisma.device_runtime_state.upsert({
     where: { mac_address: mac },
-    select: { id: true },
+    update: data,
+    create: {
+      mac_address: mac,
+      ...data,
+    },
   });
-
-  let updated;
-  if (existing) {
-    updated = await prisma.device_runtime_state.update({
-      where: { id: existing.id },
-      data,
-    });
-  } else {
-    updated = await prisma.device_runtime_state.create({
-      data: {
-        mac_address: mac,
-        ...data,
-      },
-    });
-  }
 
   await createSyncEvent({
     mac_address: mac,
