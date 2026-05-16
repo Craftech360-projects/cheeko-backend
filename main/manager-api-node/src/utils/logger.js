@@ -23,15 +23,18 @@ const LOGS_DIR = process.env.LOGS_DIR || 'logs';
 const LOG_MAX_SIZE = parseInt(process.env.LOG_MAX_SIZE) || 5242880; // 5MB
 const LOG_MAX_FILES = parseInt(process.env.LOG_MAX_FILES) || 5;
 
+const formatConsoleMeta = (meta = {}) => {
+  const { service, ...rest } = meta;
+  return Object.keys(rest).length ? ` ${JSON.stringify(rest)}` : '';
+};
+
 // Custom format for console output (includes request ID when available)
 const consoleFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.colorize(),
   winston.format.printf(({ timestamp, level, message, requestId, ...meta }) => {
     const reqIdStr = requestId ? `[${requestId.slice(0, 8)}]` : '';
-    const metaStr = Object.keys(meta).length && meta.service === undefined
-      ? ' ' + JSON.stringify(meta)
-      : '';
+    const metaStr = formatConsoleMeta(meta);
     return `${timestamp} ${reqIdStr}[${level}]: ${message}${metaStr}`;
   })
 );
@@ -109,5 +112,6 @@ module.exports = {
   debug: (message, meta = {}) => logger.debug(message, meta),
   silly: (message, meta = {}) => logger.silly(message, meta),
   createRequestLogger,
+  formatConsoleMetaForTest: formatConsoleMeta,
   logger // Export raw winston logger if needed
 };

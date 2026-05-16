@@ -43,9 +43,12 @@ const corsOptions = {
     : ['http://localhost:8080', 'http://localhost:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Service-Key', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Service-Key', 'X-Requested-With', 'X-Request-ID']
 };
 app.use(cors(corsOptions));
+
+// Add unique request ID to each request before any middleware can short-circuit.
+app.use(requestIdMiddleware());
 
 // Trust proxy - required when behind reverse proxy (nginx, load balancer, etc.)
 // This enables express-rate-limit to correctly identify clients via X-Forwarded-For
@@ -61,7 +64,24 @@ const limiter = rateLimit({
     data: null
   },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    const retryAfter = res.getHeader('Retry-After');
+    logger.warn('[RATE-LIMIT] Request blocked', {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.originalUrl || req.url,
+      ip: req.ip,
+      forwardedFor: req.get('x-forwarded-for') || null,
+      userAgent: req.get('user-agent') || null,
+      limit: req.rateLimit?.limit,
+      used: req.rateLimit?.used,
+      remaining: req.rateLimit?.remaining,
+      resetTime: req.rateLimit?.resetTime?.toISOString?.() || req.rateLimit?.resetTime || null,
+      retryAfter: retryAfter || null
+    });
+    res.status(options.statusCode).send(options.message);
+  }
 });
 app.use(limiter);
 
@@ -74,13 +94,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // XSS protection
 app.use(xssFilter());
-
-// ===========================================
-// Request Tracking Middleware
-// ===========================================
-
-// Add unique request ID to each request
-app.use(requestIdMiddleware());
 
 // ===========================================
 // Logging Middleware

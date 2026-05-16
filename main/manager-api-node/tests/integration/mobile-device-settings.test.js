@@ -45,4 +45,9 @@ describe('Mobile Device Settings Routes', () => {
     const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/analytics/battery`);
     expect(res.statusCode).toBe(401);
   });
+
+  it('requires Firebase auth for GET homepage activity details', async () => {
+    const res = await request(app).get(`${BASE}/homepage-activity/details?metric=games&period=week`);
+    expect(res.statusCode).toBe(401);
+  });
 });
