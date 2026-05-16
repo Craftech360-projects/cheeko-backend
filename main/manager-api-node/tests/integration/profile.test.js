@@ -104,6 +104,24 @@ describe('GET /toy/api/mobile/user-state', () => {
   });
 });
 
+describe('GET /toy/api/mobile/recommendations/homepage', () => {
+  it('returns 401 without auth', async () => {
+    const res = await request(app)
+      .get('/toy/api/mobile/recommendations/homepage')
+      .query({ kidId: 1, limit: 8 });
+    expectAuthRejection(res);
+  });
+});
+
+describe('GET /toy/api/mobile/homepage-recommendations', () => {
+  it('returns 401 without auth', async () => {
+    const res = await request(app)
+      .get('/toy/api/mobile/homepage-recommendations')
+      .query({ kidId: 1, limit: 8 });
+    expectAuthRejection(res);
+  });
+});
+
 describe('POST /toy/api/mobile/user-state', () => {
   it('returns 401 without auth', async () => {
     const res = await request(app)

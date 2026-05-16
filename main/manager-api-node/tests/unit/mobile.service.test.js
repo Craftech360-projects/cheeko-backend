@@ -12,11 +12,28 @@ jest.mock('../../src/config/database', () => ({
     ai_device: {
       findMany: jest.fn()
     },
+    kid_profile: {
+      findFirst: jest.fn()
+    },
+    content_library: {
+      findMany: jest.fn()
+    },
+    rfid_content_pack: {
+      findMany: jest.fn()
+    },
+    analytics_media_playback: {
+      findMany: jest.fn()
+    },
+    analytics_game_sessions: {
+      findMany: jest.fn()
+    },
     ai_agent_chat_history: {
-      count: jest.fn()
+      count: jest.fn(),
+      findMany: jest.fn()
     },
     rfid_card_tap_log: {
       count: jest.fn(),
+      findMany: jest.fn(),
       findFirst: jest.fn()
     }
   }
@@ -28,6 +45,14 @@ const mobileService = require('../../src/services/mobile.service');
 describe('mobile.service parent profile compatibility', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.kid_profile.findFirst.mockResolvedValue(null);
+    prisma.ai_device.findMany.mockResolvedValue([]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([]);
+    prisma.analytics_media_playback.findMany.mockResolvedValue([]);
+    prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
+    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
+    prisma.ai_agent_chat_history.count.mockResolvedValue(0);
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
   });
 
   it('returns mobile-friendly aliases for saved parent profile fields', async () => {
@@ -238,5 +263,402 @@ describe('mobile.service parent profile compatibility', () => {
     expect(result.today_progress.date).toBe('2026-05-13');
     expect(result.recent_activity.rfid_uid).toBe('ABC123');
     expect(result.recent_activity.content_pack_name).toBe('Bedtime Story');
+  });
+});
+
+describe('mobile.service homepage recommendations', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.kid_profile.findFirst.mockResolvedValue({
+      id: 10n,
+      user_id: 1n,
+      name: 'Aditi',
+      birth_date: new Date('2022-05-14T00:00:00.000Z'),
+      interests: ['Animals', 'Rhymes'],
+      language: 'en',
+      preferences: { aiModes: ['story'], contentTypes: ['music'] }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'FC:01:2C:CF:EB:54', agent_id: 'agent-1', kid_id: 10n }
+    ]);
+    prisma.analytics_media_playback.findMany.mockResolvedValue([]);
+    prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
+    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
+    prisma.content_library.findMany.mockResolvedValue([]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([]);
+  });
+
+  it('denies recommendations when the kid does not belong to the parent', async () => {
+    prisma.kid_profile.findFirst.mockResolvedValue(null);
+
+    await expect(mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '999',
+      limit: 8
+    })).rejects.toMatchObject({
+      statusCode: 403,
+      message: 'Access denied'
+    });
+  });
+
+  it('uses RFID content-card packs instead of music content library cards', async () => {
+    prisma.content_library.findMany.mockResolvedValue([
+      {
+        id: 99n,
+        title: 'Music Library Song',
+        content_type: 'music',
+        category: 'Songs',
+        status: 1
+      }
+    ]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 7n,
+        pack_code: 'ANIMAL-CARD',
+        name: 'Animal Content Card',
+        description: 'RFID content card pack',
+        content_type: 'story',
+        thumbnail_url: 'https://example.com/content-card.png',
+        total_items: 3,
+        language: 'en',
+        active: true,
+        status: 'active',
+        create_date: new Date('2026-05-10T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 4
+    });
+
+    expect(prisma.content_library.findMany).not.toHaveBeenCalled();
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        itemType: 'content',
+        id: '7',
+        contentId: '7',
+        title: 'Animal Content Card',
+        contentType: 'story',
+        category: 'RFID Content Card',
+        packCode: 'ANIMAL-CARD'
+      })
+    ]));
+    expect(result.items.map(item => item.title)).not.toContain('Music Library Song');
+  });
+
+  it('returns first-time preference-based content and AI cards', async () => {
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 1n,
+        title: 'Animal Song',
+        content_type: 'music',
+        category: 'Animals',
+        thumbnail_url: 'https://example.com/animal.png',
+        duration_seconds: 120,
+        language: 'en',
+        tags: ['animal'],
+        age_min: 3,
+        age_max: 6,
+        status: 1,
+        created_at: new Date('2026-05-10T00:00:00.000Z')
+      },
+      {
+        id: 2n,
+        title: 'Space Facts',
+        content_type: 'story',
+        category: 'Space',
+        thumbnail_url: null,
+        duration_seconds: 180,
+        language: 'en',
+        tags: [],
+        age_min: 7,
+        age_max: 10,
+        status: 1,
+        created_at: new Date('2026-05-09T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 4
+    });
+
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        itemType: 'content',
+        id: '1',
+        contentId: '1',
+        title: 'Animal Song',
+        subtitle: expect.any(String),
+        contentType: 'music',
+        category: 'Animals',
+        formattedDuration: '02:00'
+      }),
+      expect.objectContaining({
+        itemType: 'ai',
+        id: 'ai-story-mode',
+        title: 'Story AI',
+        aiMode: 'story',
+        routeName: 'aiStoryMode',
+        category: 'AI',
+        subtitle: expect.any(String)
+      })
+    ]));
+    expect(result.items[0].title).toBe('Animal Song');
+    expect(result.recommendationSource).toBe('profile');
+  });
+
+  it('rewrites stale Supabase thumbnail hosts to the configured project host', async () => {
+    const previousSupabaseUrl = process.env.SUPABASE_URL;
+    process.env.SUPABASE_URL = 'https://uprqkyiwuqribhfxzwhd.supabase.co';
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 1n,
+        title: 'Learning ABC',
+        content_type: 'music',
+        category: 'Alphabet',
+        thumbnail_url: 'https://popppjirsdedxhetcphs.supabase.co/storage/v1/object/public/songs_thumbnails/learning%20abc.png',
+        duration_seconds: 120,
+        language: 'en',
+        tags: ['abc'],
+        age_min: 3,
+        age_max: 6,
+        status: 1,
+        created_at: new Date('2026-05-10T00:00:00.000Z')
+      }
+    ]);
+
+    try {
+      const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+        kidId: '10',
+        limit: 1
+      });
+
+      expect(result.items[0].thumbnailUrl).toBe(
+        'https://uprqkyiwuqribhfxzwhd.supabase.co/storage/v1/object/public/songs_thumbnails/learning%20abc.png'
+      );
+    } finally {
+      process.env.SUPABASE_URL = previousSupabaseUrl;
+    }
+  });
+
+  it('uses recent card taps to rank similar content first', async () => {
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([
+      {
+        content_pack_name: 'Animal Adventure Pack',
+        content_pack_code: 'ANIMAL001',
+        card_type: 'story',
+        rfid_uid: 'ABC123',
+        created_at: new Date('2026-05-14T08:00:00.000Z')
+      }
+    ]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 1n,
+        title: 'Counting Numbers',
+        content_type: 'music',
+        category: 'Numbers',
+        language: 'en',
+        tags: [],
+        duration_seconds: 90,
+        status: 1,
+        created_at: new Date('2026-05-13T00:00:00.000Z')
+      },
+      {
+        id: 2n,
+        title: 'Jungle Animals Story',
+        content_type: 'story',
+        category: 'Animals',
+        language: 'en',
+        tags: ['jungle', 'animal'],
+        duration_seconds: 180,
+        status: 1,
+        created_at: new Date('2026-05-12T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 3
+    });
+
+    expect(result.items[0]).toEqual(expect.objectContaining({
+      itemType: 'content',
+      id: '2',
+      title: 'Jungle Animals Story'
+    }));
+    expect(result.items[0].reason).toContain('Animal');
+    expect(result.recommendationSource).toBe('personalized');
+  });
+
+  it('uses old rhyme card taps to rank rhyme content first even when the tap is not from today', async () => {
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([
+      {
+        content_pack_name: 'Rhyme Starter Pack',
+        content_pack_code: 'RHYME001',
+        card_type: 'rhyme',
+        rfid_uid: 'RHYME-CARD-1',
+        created_at: new Date('2026-05-12T08:00:00.000Z')
+      }
+    ]);
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 1n,
+        title: 'Animal Story',
+        content_type: 'story',
+        category: 'Animals',
+        language: 'en',
+        tags: ['animal'],
+        duration_seconds: 180,
+        status: 1,
+        created_at: new Date('2026-05-14T00:00:00.000Z')
+      },
+      {
+        id: 2n,
+        title: 'Rhyme Time',
+        content_type: 'rhyme',
+        category: 'Rhymes',
+        language: 'en',
+        tags: ['rhyme'],
+        metadata: { contentPackCode: 'RHYME001' },
+        duration_seconds: 60,
+        status: 1,
+        created_at: new Date('2026-05-10T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 2
+    });
+
+    expect(result.items[0]).toEqual(expect.objectContaining({
+      itemType: 'content',
+      id: '2',
+      title: 'Rhyme Time',
+      contentType: 'rhyme',
+      subtitle: expect.stringContaining('RHYME001')
+    }));
+  });
+
+  it('includes AI recommendations when recent card history indicates AI usage', async () => {
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([
+      {
+        content_pack_name: 'Story AI Card',
+        content_pack_code: 'AI-STORY',
+        card_type: 'ai',
+        rfid_uid: 'AI-CARD-1',
+        created_at: new Date('2026-05-14T08:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 4
+    });
+
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        itemType: 'ai',
+        id: 'ai-story-mode',
+        routeName: 'aiStoryMode',
+        subtitle: 'Because child used an AI card'
+      })
+    ]));
+  });
+
+  it('deduplicates content and respects limit', async () => {
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      { id: 1n, title: 'Animal Song', content_type: 'music', category: 'Animals', language: 'en', status: 1 },
+      { id: 1n, title: 'Animal Song', content_type: 'music', category: 'Animals', language: 'en', status: 1 },
+      { id: 2n, title: 'Animal Song', content_type: 'music', category: 'Animals', language: 'en', status: 1 },
+      { id: 3n, title: 'Rhyme Time', content_type: 'music', category: 'Rhymes', language: 'en', status: 1 }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 2
+    });
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items.map(item => item.id)).toEqual(['1', '3']);
+  });
+
+  it('returns safe default backend content and AI cards when there is no history and no preferences', async () => {
+    prisma.kid_profile.findFirst.mockResolvedValue({
+      id: 10n,
+      user_id: 1n,
+      name: 'Aditi',
+      birth_date: null,
+      interests: [],
+      language: null,
+      preferences: {}
+    });
+    prisma.rfid_content_pack.findMany.mockResolvedValue([
+      {
+        id: 44n,
+        title: 'Bedtime Story',
+        content_type: 'story',
+        category: 'Stories',
+        language: 'en',
+        duration_seconds: 180,
+        status: 1,
+        created_at: new Date('2026-05-11T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 8
+    });
+
+    expect(result.recommendationSource).toBe('default');
+    expect(result.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        itemType: 'content',
+        id: '44',
+        title: 'Bedtime Story',
+        subtitle: 'Popular content card'
+      }),
+      expect.objectContaining({
+        itemType: 'ai',
+        subtitle: 'Try a Cheeko AI experience'
+      })
+    ]));
+  });
+
+  it('keeps an AI card in default recommendations even when content fills the limit', async () => {
+    prisma.kid_profile.findFirst.mockResolvedValue({
+      id: 10n,
+      user_id: 1n,
+      name: 'Aditi',
+      birth_date: null,
+      interests: [],
+      language: null,
+      preferences: {}
+    });
+    prisma.rfid_content_pack.findMany.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({
+        id: BigInt(index + 1),
+        title: `Default Content ${index + 1}`,
+        content_type: 'music',
+        category: 'General',
+        language: 'en',
+        status: 1,
+        created_at: new Date(`2026-05-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`)
+      }))
+    );
+
+    const result = await mobileService.getHomepageRecommendations('firebase-user-1', {
+      kidId: '10',
+      limit: 8
+    });
+
+    expect(result.items).toHaveLength(8);
+    expect(result.recommendationSource).toBe('default');
+    expect(result.items.some(item => item.itemType === 'content')).toBe(true);
+    expect(result.items.some(item => item.itemType === 'ai')).toBe(true);
   });
 });
