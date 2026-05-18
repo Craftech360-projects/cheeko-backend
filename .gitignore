@@ -209,3 +209,4 @@ clerk-nextjs-guide
 *.xlsx
 .agents/
 .qwen/
+.tmp

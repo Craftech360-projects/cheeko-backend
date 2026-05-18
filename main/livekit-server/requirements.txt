@@ -1,9 +1,10 @@
-livekit-agents
-livekit-plugins-groq
-livekit-plugins-elevenlabs
-livekit-plugins-deepgram
-livekit-plugins-inworld
-livekit-plugins-google
+livekit-agents==1.5.10
+livekit-plugins-groq==1.5.10
+livekit-plugins-elevenlabs==1.5.10
+livekit-plugins-deepgram==1.5.10
+livekit-plugins-inworld==1.5.10
+livekit-plugins-google==1.5.10
+livekit-plugins-noise-cancellation==0.2.5
 google-genai
 python-dotenv
 pydub
@@ -26,7 +27,7 @@ sentence-transformers
 edge-tts==7.0.2
 
 # Room management and JWT for API calls
-livekit-api
+livekit-api==1.1.0
 PyJWT
 
 # Memory provider (optional - comment out if using local memory)

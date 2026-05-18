@@ -6,6 +6,7 @@
 
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const { testConnection } = require('../config/database');
 
 // Import route modules
@@ -122,6 +123,182 @@ router.get('/health/db', async (req, res) => {
       data: {
         database: 'error',
         message: error.message
+      }
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /health/deps/gemini:
+ *   get:
+ *     tags: [Health]
+ *     summary: Gemini API dependency health check
+ *     description: Validates connectivity/auth to Gemini API using models.list endpoint
+ *     responses:
+ *       200:
+ *         description: Gemini dependency is healthy
+ *       503:
+ *         description: Gemini dependency is unhealthy or not configured
+ */
+router.get('/health/deps/gemini', async (req, res) => {
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+
+  if (!apiKey) {
+    return res.status(503).json({
+      code: 1,
+      msg: 'Gemini API key is not configured',
+      data: {
+        status: 'not_configured',
+        provider: 'gemini',
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+
+  const start = Date.now();
+
+  try {
+    const response = await axios.get('https://generativelanguage.googleapis.com/v1beta/models', {
+      params: { key: apiKey, pageSize: 1 },
+      timeout: 6000,
+      validateStatus: () => true
+    });
+
+    const latencyMs = Date.now() - start;
+
+    if (response.status >= 200 && response.status < 300) {
+      return res.status(200).json({
+        code: 0,
+        msg: 'success',
+        data: {
+          status: 'healthy',
+          provider: 'gemini',
+          latencyMs,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    return res.status(503).json({
+      code: 1,
+      msg: `Gemini API returned status ${response.status}`,
+      data: {
+        status: 'unhealthy',
+        provider: 'gemini',
+        statusCode: response.status,
+        latencyMs,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    return res.status(503).json({
+      code: 1,
+      msg: 'Gemini API check failed',
+      data: {
+        status: 'unhealthy',
+        provider: 'gemini',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /health/deps/elevenlabs:
+ *   get:
+ *     tags: [Health]
+ *     summary: ElevenLabs API dependency health check
+ *     description: Validates connectivity/auth to ElevenLabs API using models endpoint
+ *     responses:
+ *       200:
+ *         description: ElevenLabs dependency is healthy
+ *       503:
+ *         description: ElevenLabs dependency is unhealthy or not configured
+ */
+router.get('/health/deps/elevenlabs', async (req, res) => {
+  const apiKey = process.env.ELEVENLABS_API_KEY || process.env.ELEVEN_API_KEY;
+  const voiceId = (process.env.ELEVENLABS_VOICE_ID || '').trim();
+
+  if (!apiKey) {
+    return res.status(503).json({
+      code: 1,
+      msg: 'ElevenLabs API key is not configured',
+      data: {
+        status: 'not_configured',
+        provider: 'elevenlabs',
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+  if (!voiceId) {
+    return res.status(503).json({
+      code: 1,
+      msg: 'ElevenLabs voice id is not configured',
+      data: {
+        status: 'not_configured',
+        provider: 'elevenlabs',
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+
+  const start = Date.now();
+
+  try {
+    // Some ElevenLabs keys only have TTS convert permission (no voices_read/models_read),
+    // so probe the actual synth endpoint used by the product.
+    const response = await axios.post(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+      text: 'ping',
+      model_id: process.env.ELEVENLABS_MODEL_ID || process.env.ELEVENLABS_TTS_MODEL || 'eleven_turbo_v2_5'
+    }, {
+      headers: {
+        'xi-api-key': apiKey,
+        accept: 'application/json',
+        'content-type': 'application/json'
+      },
+      timeout: 6000,
+      validateStatus: () => true
+    });
+
+    const latencyMs = Date.now() - start;
+
+    if (response.status >= 200 && response.status < 300) {
+      return res.status(200).json({
+        code: 0,
+        msg: 'success',
+        data: {
+          status: 'healthy',
+          provider: 'elevenlabs',
+          voiceId,
+          latencyMs,
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+
+    return res.status(503).json({
+      code: 1,
+      msg: `ElevenLabs API returned status ${response.status}`,
+      data: {
+        status: 'unhealthy',
+        provider: 'elevenlabs',
+        statusCode: response.status,
+        latencyMs,
+        timestamp: new Date().toISOString()
+      }
+    });
+  } catch (error) {
+    return res.status(503).json({
+      code: 1,
+      msg: 'ElevenLabs API check failed',
+      data: {
+        status: 'unhealthy',
+        provider: 'elevenlabs',
+        error: error.message,
+        timestamp: new Date().toISOString()
       }
     });
   }
