@@ -6,8 +6,8 @@ services:
     # On macOS, network_mode: host is not fully supported. We instead
     # expose the ports we actually need from the container.
     ports:
-      # HTTP/status/health endpoint (inside container: 8004)
-      - "8004:8004"
+      # Internal command/health endpoint used by manager-api-node
+      - "8091:8091"
       # UDP audio port used by ESP32 devices (inside container: 8884/udp)
       - "8884:8884/udp"
     # Allow the container to reach services running on the host (EMQX, LiveKit, etc.)

@@ -1,6 +1,7 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
+const { normalizeMacAddress } = require('../utils/helpers');
 
 // ─── Parent Profile ─────────────────────────────────────────────────────────
 
@@ -33,6 +34,144 @@ function formatLocalDate(value) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+}
+
+function positiveDurationMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.trunc(numeric);
+}
+
+function safeObject(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function humanizeKey(value) {
+    const raw = value == null ? '' : String(value).trim();
+    if (!raw) return 'Unknown';
+    const normalized = /^[A-Z0-9_:-]+$/.test(raw) ? raw.toLowerCase() : raw;
+    return normalized
+        .replace(/^game:/, '')
+        .replace(/^card:/, '')
+        .replace(/^content:/, '')
+        .replace(/^radio:/, '')
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function getActivityDetailsRange(period, now = new Date()) {
+    const days = period === 'week' ? 7 : 30;
+    const end = new Date(now);
+    const start = new Date(end.getTime() - (days * 24 * 60 * 60 * 1000));
+    return { start, end };
+}
+
+function incrementCount(grouped, key, name, amount = 1) {
+    const resolvedKey = key || 'unknown';
+    const current = grouped.get(resolvedKey) || { key: resolvedKey, name: name || humanizeKey(resolvedKey), count: 0 };
+    current.count += amount;
+    if ((!current.name || current.name === humanizeKey(resolvedKey)) && name) current.name = name;
+    grouped.set(resolvedKey, current);
+}
+
+function incrementDuration(grouped, key, name, durationMs) {
+    const resolvedKey = key || 'unknown';
+    const current = grouped.get(resolvedKey) || { key: resolvedKey, name: name || humanizeKey(resolvedKey), durationMs: 0 };
+    current.durationMs += durationMs;
+    if ((!current.name || current.name === humanizeKey(resolvedKey)) && name) current.name = name;
+    grouped.set(resolvedKey, current);
+}
+
+function sortCountItems(items) {
+    return items.sort((a, b) => b.count - a.count);
+}
+
+function sortDurationItems(items) {
+    return items.sort((a, b) => (b.durationMs - a.durationMs) || a.name.localeCompare(b.name));
+}
+
+function resolveGameKeyAndName(row) {
+    const data = safeObject(row.data);
+    const key = row.game_id || data.game_id || data.mode || data.game_mode || data.activity || data.activity_type || 'unknown_game';
+    const name = data.game_name || data.mode_name || data.activity_name || humanizeKey(key);
+    return { key: String(key), name };
+}
+
+function resolveCardKeyAndName(row) {
+    const data = safeObject(row.data);
+    const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id || row.content_id || data.content_id || 'unknown_card';
+    const name = data.card_name || data.content_name || data.title || data.pack_name || humanizeKey(key);
+    return { key: String(key), name };
+}
+
+function resolveUsageKeyAndName(row) {
+    const data = safeObject(row.data);
+    if (row.game_id || data.game_id) return resolveGameKeyAndName(row);
+    if (row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id) return resolveCardKeyAndName(row);
+    if (row.content_id || data.content_id) {
+        const key = row.content_id || data.content_id;
+        return { key: String(key), name: data.content_name || data.title || humanizeKey(key) };
+    }
+    if (row.station || data.station) {
+        const station = row.station || data.station;
+        return { key: `radio:${station}`, name: String(station) };
+    }
+    if (row.event_name === 'ai_talk_end') return { key: 'ai_talk', name: 'AI Talk' };
+    return { key: row.event_name || 'other', name: humanizeKey(row.event_name || 'other') };
+}
+
+function toCountResponse(metric, period, grouped) {
+    const items = sortCountItems(Array.from(grouped.values()));
+    const total = items.reduce((sum, item) => sum + item.count, 0);
+    return {
+        metric,
+        period,
+        total,
+        items,
+    };
+}
+
+function toDurationResponse(period, grouped) {
+    const sorted = sortDurationItems(Array.from(grouped.values()));
+    const items = sorted.map(item => {
+        const seconds = Math.floor(item.durationMs / 1000);
+        return {
+            name: item.name,
+            key: item.key,
+            duration_seconds: seconds,
+            durationSeconds: seconds,
+        };
+    });
+    const totalSeconds = items.reduce((sum, item) => sum + item.duration_seconds, 0);
+    return {
+        metric: 'usage',
+        period,
+        total_seconds: totalSeconds,
+        totalSeconds,
+        items,
+    };
+}
+
+async function getCardNameMap(keys) {
+    const rfidKeys = Array.from(new Set((keys || []).filter(Boolean)));
+    if (rfidKeys.length === 0) return new Map();
+
+    const mappings = await prisma.rfid_card_mapping.findMany({
+        where: { rfid_uid: { in: rfidKeys } },
+        select: {
+            rfid_uid: true,
+            rfid_content_pack: { select: { name: true } },
+            rfid_question: { select: { title: true } },
+            rfid_pack: { select: { pack_name: true } }
+        }
+    });
+
+    return new Map((mappings || []).map(mapping => [
+        mapping.rfid_uid,
+        mapping.rfid_content_pack?.name || mapping.rfid_question?.title || mapping.rfid_pack?.pack_name || null
+    ]).filter(([, name]) => Boolean(name)));
 }
 
 function formatRecentCardActivity(row) {
@@ -771,10 +910,9 @@ async function getHomepageActivity(firebaseUid, options = {}) {
 
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id },
-        select: { mac_address: true, agent_id: true },
+        select: { mac_address: true },
     });
     const macAddresses = (devices || []).map(device => device.mac_address).filter(Boolean);
-    const agentIds = (devices || []).map(device => device.agent_id).filter(Boolean);
     const ownershipFilters = [
         { user_id: user.id },
     ];
@@ -782,42 +920,37 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         ownershipFilters.push({ mac_address: { in: macAddresses } });
     }
     const ownedWhere = { OR: ownershipFilters };
-    const chatOwnershipFilters = [];
-    if (macAddresses.length > 0) {
-        chatOwnershipFilters.push({ mac_address: { in: macAddresses } });
-    }
-    if (agentIds.length > 0) {
-        chatOwnershipFilters.push({ agent_id: { in: agentIds } });
-    }
     const { start, end } = getDayRange(options.now || new Date());
 
-    const [todayCardTapCount, todayAiInteractionCount, recentCardTap] = await Promise.all([
-        prisma.rfid_card_tap_log.count({
+    const todayToyAnalyticsPromise = macAddresses.length > 0
+        ? prisma.device_analytics_event.findMany({
             where: {
-                ...ownedWhere,
-                created_at: {
+                mac_address: { in: macAddresses },
+                server_received_at: {
                     gte: start,
                     lte: end,
                 },
             },
-        }),
-        chatOwnershipFilters.length > 0
-            ? prisma.ai_agent_chat_history.count({
-                where: {
-                    chat_type: 1,
-                    OR: chatOwnershipFilters,
-                    created_at: {
-                        gte: start,
-                        lte: end,
-                    },
-                },
-            })
-            : Promise.resolve(0),
+            select: {
+                event_name: true,
+                duration_ms: true,
+            },
+        })
+        : Promise.resolve([]);
+
+    const [recentCardTap, todayToyAnalytics] = await Promise.all([
         prisma.rfid_card_tap_log.findFirst({
             where: ownedWhere,
             orderBy: { created_at: 'desc' },
         }),
+        todayToyAnalyticsPromise,
     ]);
+    const usageTimeSeconds = Math.floor((todayToyAnalytics || []).reduce((sum, event) => (
+        sum + positiveDurationMs(event.duration_ms)
+    ), 0) / 1000);
+    const gamesPlayed = (todayToyAnalytics || []).filter(event => event.event_name === 'game_start').length;
+    const todayCardTapCount = (todayToyAnalytics || []).filter(event => event.event_name === 'card_session_start').length;
+    const todayAiInteractionCount = (todayToyAnalytics || []).filter(event => event.event_name === 'ai_talk_start').length;
 
     return {
         today_progress: {
@@ -826,15 +959,132 @@ async function getHomepageActivity(firebaseUid, options = {}) {
             cardTapCount: todayCardTapCount || 0,
             ai_interaction_count: todayAiInteractionCount || 0,
             aiInteractionCount: todayAiInteractionCount || 0,
+            usage_time_seconds: usageTimeSeconds,
+            usageTimeSeconds,
+            games_played: gamesPlayed,
+            gamesPlayed,
         },
         todayProgress: {
             date: formatLocalDate(start),
             cardTapCount: todayCardTapCount || 0,
             aiInteractionCount: todayAiInteractionCount || 0,
+            usageTimeSeconds,
+            gamesPlayed,
         },
         recent_activity: formatRecentCardActivity(recentCardTap),
         recentActivity: formatRecentCardActivity(recentCardTap),
     };
+}
+
+async function getHomepageActivityDetails(firebaseUid, options = {}) {
+    const metric = String(options.metric || '').trim().toLowerCase();
+    const period = String(options.period || '').trim().toLowerCase();
+    if (!['games', 'usage', 'cards'].includes(metric)) {
+        throw new ApiError('metric must be one of: games, usage, cards', 400, 400);
+    }
+    if (!['week', 'month'].includes(period)) {
+        throw new ApiError('period must be one of: week, month', 400, 400);
+    }
+
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+        select: { id: true },
+    });
+    if (!user) throw new ApiError('Access denied', 403, 403);
+
+    const devices = await prisma.ai_device.findMany({
+        where: { user_id: user.id },
+        select: { id: true, mac_address: true },
+    });
+    const ownedMacAddresses = (devices || [])
+        .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
+        .filter(Boolean);
+    const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
+    let macAddresses = ownedMacAddresses;
+    if (options.mac || options.mac_address || options.macAddress) {
+        if (!requestedMac || !ownedMacAddresses.includes(requestedMac)) {
+            throw new ApiError('Device not found', 404, 404);
+        }
+        macAddresses = [requestedMac];
+    }
+
+    if (macAddresses.length === 0) {
+        return metric === 'usage'
+            ? toDurationResponse(period, new Map())
+            : toCountResponse(metric, period, new Map());
+    }
+
+    const { start, end } = getActivityDetailsRange(period, options.now || new Date());
+    const events = await prisma.device_analytics_event.findMany({
+        where: {
+            mac_address: { in: macAddresses },
+            server_received_at: {
+                gte: start,
+                lte: end,
+            }
+        },
+        select: {
+            event_name: true,
+            duration_ms: true,
+            rfid_uid: true,
+            content_id: true,
+            content_type: true,
+            game_id: true,
+            station: true,
+            data: true,
+        },
+        orderBy: { server_received_at: 'asc' },
+        take: 5000,
+    });
+
+    if (metric === 'games') {
+        const grouped = new Map();
+        for (const event of events || []) {
+            if (event.event_name !== 'game_start') continue;
+            const { key, name } = resolveGameKeyAndName(event);
+            incrementCount(grouped, key, name);
+        }
+        return toCountResponse('games', period, grouped);
+    }
+
+    if (metric === 'cards') {
+        const grouped = new Map();
+        const rawCardNames = new Map();
+        for (const event of events || []) {
+            if (event.event_name !== 'card_session_start') continue;
+            const { key, name } = resolveCardKeyAndName(event);
+            rawCardNames.set(key, name);
+            incrementCount(grouped, key, name);
+        }
+        const cardNameMap = await getCardNameMap(Array.from(grouped.keys()));
+        for (const [key, item] of grouped.entries()) {
+            item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
+        }
+        return toCountResponse('cards', period, grouped);
+    }
+
+    const grouped = new Map();
+    const rawCardNames = new Map();
+    const cardKeys = new Set();
+    for (const event of events || []) {
+        const durationMs = positiveDurationMs(event.duration_ms);
+        if (durationMs <= 0) continue;
+        const { key, name } = resolveUsageKeyAndName(event);
+        if (event.rfid_uid || safeObject(event.data).rfid_uid || safeObject(event.data).card_uid || safeObject(event.data).card_id) {
+            cardKeys.add(key);
+            rawCardNames.set(key, name);
+        }
+        incrementDuration(grouped, key, name, durationMs);
+    }
+    const cardNameMap = await getCardNameMap(Array.from(cardKeys));
+    for (const [key, item] of grouped.entries()) {
+        if (cardNameMap.has(key)) {
+            item.name = cardNameMap.get(key);
+        } else if (rawCardNames.has(key)) {
+            item.name = rawCardNames.get(key);
+        }
+    }
+    return toDurationResponse(period, grouped);
 }
 
 async function getHomepageRecommendations(firebaseUid, options = {}) {
@@ -1009,5 +1259,6 @@ module.exports = {
     checkEmailExists,
     deleteUserAccount,
     getHomepageActivity,
+    getHomepageActivityDetails,
     getHomepageRecommendations,
 };

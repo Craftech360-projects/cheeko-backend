@@ -42,6 +42,11 @@ function startInternalCommandServer(gateway) {
 
   const server = http.createServer(async (req, res) => {
     try {
+      if (req.method === 'GET' && (req.url || '').split('?')[0] === '/health') {
+        sendJson(res, 200, { status: 'healthy' });
+        return;
+      }
+
       if (req.method !== 'POST') {
         sendJson(res, 405, { code: 405, msg: 'Method not allowed', data: null });
         return;

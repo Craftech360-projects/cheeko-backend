@@ -97,6 +97,11 @@ router.get('/homepage-activity', asyncHandler(async (req, res) => {
     success(res, activity);
 }));
 
+router.get('/homepage-activity/details', asyncHandler(async (req, res) => {
+    const details = await mobileService.getHomepageActivityDetails(req.firebaseUser.uid, req.query);
+    success(res, details);
+}));
+
 router.get('/recommendations/homepage', asyncHandler(async (req, res) => {
     const { kidId, kid_id, limit } = req.query;
     const resolvedKidId = kidId || kid_id;
