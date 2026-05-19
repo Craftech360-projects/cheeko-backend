@@ -46,6 +46,23 @@ function safeObject(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function cleanKnownValue(value) {
+    if (value == null) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    const normalized = text.toLowerCase();
+    if (['unknown', 'null', 'undefined', 'n/a', 'na'].includes(normalized)) return null;
+    return text;
+}
+
+function firstKnownValue(...values) {
+    for (const value of values) {
+        const known = cleanKnownValue(value);
+        if (known) return known;
+    }
+    return null;
+}
+
 function humanizeKey(value) {
     const raw = value == null ? '' : String(value).trim();
     if (!raw) return 'Unknown';
@@ -472,8 +489,66 @@ async function getCardNameMap(keys) {
     ]).filter(([, name]) => Boolean(name)));
 }
 
-function formatRecentCardActivity(row) {
+function formatRecentCardActivity(row, mapping = null) {
     if (!row) return null;
+    const actionData = safeObject(mapping?.action_data);
+    const contentPack = row.rfid_content_pack || mapping?.rfid_content_pack || null;
+    const question = mapping?.rfid_question || null;
+    const pack = mapping?.rfid_pack || null;
+    const contentName = firstKnownValue(
+        row.content_pack_name,
+        contentPack?.name,
+        actionData.contentPackName,
+        actionData.content_pack_name,
+        actionData.packName,
+        actionData.pack_name
+    );
+    const contentCode = firstKnownValue(
+        row.content_pack_code,
+        contentPack?.pack_code,
+        mapping?.pack_code,
+        pack?.pack_code,
+        actionData.contentPackCode,
+        actionData.content_pack_code,
+        actionData.packCode,
+        actionData.pack_code
+    );
+    const title = firstKnownValue(
+        actionData.cardName,
+        actionData.card_name,
+        actionData.title,
+        actionData.name,
+        actionData.displayName,
+        actionData.display_name,
+        question?.title,
+        contentName,
+        pack?.pack_name
+    );
+    const description = firstKnownValue(
+        actionData.description,
+        actionData.prompt,
+        question?.prompt_text,
+        contentPack?.description,
+        pack?.description
+    );
+    const cardType = firstKnownValue(row.card_type, mapping?.card_type, actionData.cardType, actionData.card_type) || 'card';
+    const imageUrl = firstKnownValue(
+        actionData.imageUrl,
+        actionData.image_url,
+        actionData.thumbnailUrl,
+        actionData.thumbnail_url,
+        actionData.coverUrl,
+        actionData.cover_url,
+        contentPack?.thumbnail_url
+    );
+    const details = [
+        title ? `Card: ${title}` : null,
+        contentName ? `Content pack: ${contentName}` : null,
+        contentCode ? `Code: ${contentCode}` : null,
+        cardType ? `Type: ${cardType}` : null,
+        row.rfid_uid ? `RFID: ${row.rfid_uid}` : null,
+    ].filter(Boolean);
+    const usageSeconds = row.usage_seconds ?? row.usageSeconds ?? null;
 
     return {
         id: row.id != null ? row.id.toString() : null,
@@ -481,17 +556,71 @@ function formatRecentCardActivity(row) {
         macAddress: row.mac_address,
         rfid_uid: row.rfid_uid,
         rfidUid: row.rfid_uid,
-        card_type: row.card_type || 'unknown',
-        cardType: row.card_type || 'unknown',
+        title,
+        card_type: cardType,
+        cardType,
         content_pack_id: row.content_pack_id != null ? row.content_pack_id.toString() : null,
         contentPackId: row.content_pack_id != null ? row.content_pack_id.toString() : null,
-        content_pack_code: row.content_pack_code || null,
-        contentPackCode: row.content_pack_code || null,
-        content_pack_name: row.content_pack_name || null,
-        contentPackName: row.content_pack_name || null,
+        content_pack_code: contentCode,
+        contentPackCode: contentCode,
+        content_pack_name: contentName,
+        contentPackName: contentName,
+        description: description || (details.length > 0 ? details.join('\n') : null),
+        image_url: imageUrl,
+        imageUrl,
+        thumbnail_url: imageUrl,
+        thumbnailUrl: imageUrl,
+        usage_seconds: usageSeconds,
+        usageSeconds,
         created_at: row.created_at,
         createdAt: row.created_at,
     };
+}
+
+function dateTimeOrNull(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function getAnalyticsEventTime(event) {
+    return dateTimeOrNull(event?.event_timestamp) || dateTimeOrNull(event?.server_received_at);
+}
+
+function attachRecentCardDurations(taps, durationEvents) {
+    return (taps || []).map(tap => {
+        const tapTime = dateTimeOrNull(tap.created_at);
+        if (!tapTime || !tap.rfid_uid) return tap;
+
+        const matchingEvent = (durationEvents || [])
+            .filter(event => {
+                if (event.event_name !== 'card_session_end') return false;
+                if (event.rfid_uid !== tap.rfid_uid) return false;
+                if (positiveDurationMs(event.duration_ms) <= 0) return false;
+                const eventTime = getAnalyticsEventTime(event);
+                return eventTime && eventTime.getTime() >= tapTime.getTime();
+            })
+            .sort((left, right) => getAnalyticsEventTime(left).getTime() - getAnalyticsEventTime(right).getTime())[0];
+
+        if (!matchingEvent) return tap;
+        return {
+            ...tap,
+            usage_seconds: Math.floor(positiveDurationMs(matchingEvent.duration_ms) / 1000),
+        };
+    });
+}
+
+function uniqueRecentCardTaps(taps, limit = 3) {
+    const seen = new Set();
+    const unique = [];
+    for (const tap of taps || []) {
+        const key = cleanKnownValue(tap?.rfid_uid) || (tap?.id != null ? `tap:${tap.id}` : null);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        unique.push(tap);
+        if (unique.length >= limit) break;
+    }
+    return unique;
 }
 
 const HOMEPAGE_AI_CARDS = [
@@ -1210,7 +1339,9 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         where: { user_id: user.id },
         select: { mac_address: true },
     });
-    const macAddresses = (devices || []).map(device => device.mac_address).filter(Boolean);
+    const macAddresses = (devices || [])
+        .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
+        .filter(Boolean);
     const ownershipFilters = [
         { user_id: user.id },
     ];
@@ -1236,19 +1367,120 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         })
         : Promise.resolve([]);
 
-    const [recentCardTap, todayToyAnalytics] = await Promise.all([
-        prisma.rfid_card_tap_log.findFirst({
+    const todayRfidTapWhere = {
+        ...ownedWhere,
+        created_at: {
+            gte: start,
+            lte: end,
+        },
+    };
+    const todayAiRfidTapWhere = {
+        ...todayRfidTapWhere,
+        card_type: 'ai',
+    };
+
+    const [recentCardTaps, todayRfidTapCount, todayAiRfidTapCount, todayToyAnalytics] = await Promise.all([
+        prisma.rfid_card_tap_log.findMany({
             where: ownedWhere,
             orderBy: { created_at: 'desc' },
+            take: 25,
+            include: {
+                rfid_content_pack: {
+                    select: {
+                        name: true,
+                        pack_code: true,
+                        description: true,
+                        thumbnail_url: true,
+                    },
+                },
+            },
+        }),
+        prisma.rfid_card_tap_log.count({
+            where: todayRfidTapWhere,
+        }),
+        prisma.rfid_card_tap_log.count({
+            where: todayAiRfidTapWhere,
         }),
         todayToyAnalyticsPromise,
     ]);
+    const uniqueRecentTaps = uniqueRecentCardTaps(recentCardTaps, 3);
     const usageTimeSeconds = Math.floor((todayToyAnalytics || []).reduce((sum, event) => (
         sum + positiveDurationMs(event.duration_ms)
     ), 0) / 1000);
     const gamesPlayed = (todayToyAnalytics || []).filter(event => event.event_name === 'game_start').length;
-    const todayCardTapCount = (todayToyAnalytics || []).filter(event => event.event_name === 'card_session_start').length;
-    const todayAiInteractionCount = (todayToyAnalytics || []).filter(event => event.event_name === 'ai_talk_start').length;
+    const todayAnalyticsCardTapCount = (todayToyAnalytics || []).filter(event => event.event_name === 'card_session_start').length;
+    const todayCardTapCount = Math.max(todayAnalyticsCardTapCount, todayRfidTapCount || 0);
+    const todayAnalyticsAiInteractionCount = (todayToyAnalytics || []).filter(event => event.event_name === 'ai_talk_start').length;
+    const todayAiInteractionCount = Math.max(todayAnalyticsAiInteractionCount, todayAiRfidTapCount || 0);
+    const recentRfidUids = [...new Set((uniqueRecentTaps || []).map(tap => tap.rfid_uid).filter(Boolean))];
+    const recentTapTimes = (uniqueRecentTaps || [])
+        .map(tap => dateTimeOrNull(tap.created_at))
+        .filter(Boolean)
+        .sort((left, right) => left.getTime() - right.getTime());
+    const recentDurationStart = recentTapTimes[0] || null;
+    const recentDurationEnd = options.now || new Date();
+    const recentDurationEventsPromise = macAddresses.length > 0 && recentRfidUids.length > 0 && recentDurationStart
+        ? prisma.device_analytics_event.findMany({
+            where: {
+                mac_address: { in: macAddresses },
+                rfid_uid: { in: recentRfidUids },
+                event_name: 'card_session_end',
+                server_received_at: {
+                    gte: recentDurationStart,
+                    lte: recentDurationEnd,
+                },
+            },
+            orderBy: { server_received_at: 'asc' },
+            select: {
+                event_name: true,
+                duration_ms: true,
+                rfid_uid: true,
+                event_timestamp: true,
+                server_received_at: true,
+            },
+        })
+        : Promise.resolve([]);
+    const recentMappingsPromise = recentRfidUids.length > 0
+        ? prisma.rfid_card_mapping.findMany({
+            where: { rfid_uid: { in: recentRfidUids } },
+            select: {
+                rfid_uid: true,
+                card_type: true,
+                pack_code: true,
+                action_data: true,
+                rfid_content_pack: {
+                    select: {
+                        name: true,
+                        pack_code: true,
+                        description: true,
+                        thumbnail_url: true,
+                    },
+                },
+                rfid_question: {
+                    select: {
+                        title: true,
+                        prompt_text: true,
+                    },
+                },
+                rfid_pack: {
+                    select: {
+                        pack_name: true,
+                        pack_code: true,
+                        description: true,
+                    },
+                },
+            },
+        })
+        : [];
+    const [recentMappings, recentDurationEvents] = await Promise.all([
+        recentMappingsPromise,
+        recentDurationEventsPromise,
+    ]);
+    const recentCardTapsWithDurations = attachRecentCardDurations(uniqueRecentTaps, recentDurationEvents);
+    const recentMappingByUid = new Map((recentMappings || []).map(mapping => [mapping.rfid_uid, mapping]));
+    const recentActivities = (recentCardTapsWithDurations || [])
+        .map(tap => formatRecentCardActivity(tap, recentMappingByUid.get(tap.rfid_uid)))
+        .filter(Boolean);
 
     return {
         today_progress: {
@@ -1269,8 +1501,10 @@ async function getHomepageActivity(firebaseUid, options = {}) {
             usageTimeSeconds,
             gamesPlayed,
         },
-        recent_activity: formatRecentCardActivity(recentCardTap),
-        recentActivity: formatRecentCardActivity(recentCardTap),
+        recent_activities: recentActivities,
+        recentActivities,
+        recent_activity: recentActivities[0] || null,
+        recentActivity: recentActivities[0] || null,
     };
 }
 

@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const VALID_SYNC_STATUS = new Set(['synced', 'syncing', 'pending_offline', 'rejected', 'stale']);
+const ONLINE_TTL_MS = 2 * 60 * 1000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -200,19 +201,30 @@ async function findOrCreateSettingsByMac(macAddress, deviceId = null) {
 
 async function getRuntimeStateByMac(macAddress) {
   const mac = normalizeRequiredMac(macAddress);
-  return prisma.device_runtime_state.findUnique({
+  const runtime = await prisma.device_runtime_state.findUnique({
     where: { mac_address: mac },
   });
+
+  if (!runtime) return null;
+
+  return {
+    ...runtime,
+    online: isRuntimeStateFresh(runtime),
+  };
 }
 
-async function isDeviceOnline(macAddress) {
-  const runtime = await getRuntimeStateByMac(macAddress);
+function isRuntimeStateFresh(runtime) {
   if (!runtime || !runtime.online || !runtime.last_seen_at) {
     return false;
   }
 
   const ageMs = Date.now() - new Date(runtime.last_seen_at).getTime();
-  return ageMs <= 2 * 60 * 1000;
+  return ageMs <= ONLINE_TTL_MS;
+}
+
+async function isDeviceOnline(macAddress) {
+  const runtime = await getRuntimeStateByMac(macAddress);
+  return Boolean(runtime?.online);
 }
 
 async function getSettingsByMac(macAddress) {
