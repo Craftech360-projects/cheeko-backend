@@ -340,8 +340,19 @@ describe('mobile.service homepage activity details', () => {
   });
 
   it.each([
-    ['week', new Date('2026-05-09T10:00:00.000Z')],
-    ['month', new Date('2026-04-16T10:00:00.000Z')]
+    ['week', (() => {
+      const start = new Date('2026-05-16T10:00:00.000Z');
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      return start;
+    })()],
+    ['month', (() => {
+      const start = new Date('2026-05-16T10:00:00.000Z');
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      start.setMonth(start.getMonth() - 11);
+      return start;
+    })()]
   ])('returns games detail for period=%s', async (period, expectedStart) => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.device_analytics_event.findMany.mockResolvedValue([
@@ -374,7 +385,7 @@ describe('mobile.service homepage activity details', () => {
       orderBy: { server_received_at: 'asc' },
       take: 5000
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       metric: 'games',
       period,
       total: 4,
@@ -418,7 +429,7 @@ describe('mobile.service homepage activity details', () => {
         rfid_pack: { select: { pack_name: true } }
       }
     });
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       metric: 'cards',
       period,
       total: 3,
@@ -427,6 +438,300 @@ describe('mobile.service homepage activity details', () => {
         { name: 'Alphabet Card', key: 'CARD456', count: 1 }
       ]
     });
+  });
+
+  it.each(['week', 'month'])('returns ai interaction detail for period=%s', async (period) => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      { event_name: 'ai_talk_start', rfid_uid: 'AI123', data: {} },
+      { event_name: 'ai_talk_start', rfid_uid: 'AI123', data: {} },
+      { event_name: 'ai_talk_start', rfid_uid: 'AI456', data: { card_name: 'Story AI' } },
+      { event_name: 'ai_talk_end', rfid_uid: 'AI123', data: {} },
+      { event_name: 'card_session_start', rfid_uid: 'AI123', data: {} }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'AI123',
+        rfid_content_pack: { name: 'Cheeko Chat' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'ai_interaction',
+      period,
+      now: new Date('2026-05-16T10:00:00.000Z')
+    });
+
+    expect(prisma.rfid_card_mapping.findMany).toHaveBeenCalledWith({
+      where: { rfid_uid: { in: ['AI123', 'AI456'] } },
+      select: {
+        rfid_uid: true,
+        rfid_content_pack: { select: { name: true } },
+        rfid_question: { select: { title: true } },
+        rfid_pack: { select: { pack_name: true } }
+      }
+    });
+    expect(result).toMatchObject({
+      metric: 'ai_interaction',
+      period,
+      total: 3,
+      items: [
+        { name: 'Cheeko Chat', key: 'AI123', count: 2 },
+        { name: 'Story AI', key: 'AI456', count: 1 }
+      ]
+    });
+  });
+
+  it('returns month sections from current month backwards', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'MAY123',
+        server_received_at: new Date('2026-05-10T08:00:00.000Z'),
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'APR123',
+        server_received_at: new Date('2026-04-10T08:00:00.000Z'),
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'MAY123',
+        server_received_at: new Date('2026-05-11T08:00:00.000Z'),
+        data: {}
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'MAY123',
+        rfid_content_pack: { name: 'May Card' },
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'APR123',
+        rfid_content_pack: { name: 'April Card' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'month',
+      now: new Date('2026-05-16T10:00:00.000Z')
+    });
+
+    expect(result.month_sections).toEqual([
+      {
+        label: 'May, 2026',
+        month: '2026-05',
+        total: 2,
+        items: [
+          { name: 'May Card', key: 'MAY123', count: 2 }
+        ]
+      },
+      {
+        label: 'April, 2026',
+        month: '2026-04',
+        total: 1,
+        items: [
+          { name: 'April Card', key: 'APR123', count: 1 }
+        ]
+      }
+    ]);
+    expect(result.monthSections).toEqual(result.month_sections);
+  });
+
+  it('returns current month week sections for period=week', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'WEEK1',
+        server_received_at: new Date('2026-05-02T08:00:00.000Z'),
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'WEEK2',
+        server_received_at: new Date('2026-05-09T08:00:00.000Z'),
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'WEEK2',
+        server_received_at: new Date('2026-05-10T08:00:00.000Z'),
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'APRIL',
+        server_received_at: new Date('2026-04-30T08:00:00.000Z'),
+        data: {}
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'WEEK1',
+        rfid_content_pack: { name: 'Week One Card' },
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'WEEK2',
+        rfid_content_pack: { name: 'Week Two Card' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'week',
+      now: new Date('2026-05-16T10:00:00.000Z')
+    });
+
+    expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        server_received_at: {
+          gte: expect.any(Date),
+          lte: new Date('2026-05-16T10:00:00.000Z')
+        }
+      })
+    }));
+    expect(prisma.device_analytics_event.findMany.mock.calls[0][0].where.server_received_at.gte.getDate()).toBe(1);
+    expect(result.period_label).toBe('May, 2026');
+    expect(result.periodLabel).toBe('May, 2026');
+    expect(result.week_sections).toEqual([
+      {
+        label: 'Week 1',
+        week: 1,
+        total: 1,
+        items: [
+          { name: 'Week One Card', key: 'WEEK1', count: 1 }
+        ]
+      },
+      {
+        label: 'Week 2',
+        week: 2,
+        total: 2,
+        items: [
+          { name: 'Week Two Card', key: 'WEEK2', count: 2 }
+        ]
+      }
+    ]);
+    expect(result.weekSections).toEqual(result.week_sections);
+  });
+
+  it('returns enabled month tiles from first activity month through current month', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'MAY123',
+        server_received_at: new Date('2026-05-11T08:00:00.000Z'),
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'JUN123',
+        server_received_at: new Date('2026-06-01T08:00:00.000Z'),
+        data: {}
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'month',
+      now: new Date('2026-06-01T10:00:00.000Z')
+    });
+
+    expect(result.year).toBe(2026);
+    expect(result.first_activity_month).toBe('2026-05');
+    expect(result.current_month).toBe('2026-06');
+    expect(result.months).toHaveLength(12);
+    expect(result.months[0]).toMatchObject({
+      label: 'January',
+      month: '2026-01',
+      enabled: false,
+      is_current: false,
+      isCurrent: false
+    });
+    expect(result.months[4]).toMatchObject({
+      label: 'May',
+      month: '2026-05',
+      enabled: true,
+      is_current: false,
+      isCurrent: false
+    });
+    expect(result.months[5]).toMatchObject({
+      label: 'June',
+      month: '2026-06',
+      enabled: true,
+      is_current: true,
+      isCurrent: true
+    });
+    expect(result.months[6]).toMatchObject({
+      label: 'July',
+      month: '2026-07',
+      enabled: false,
+      is_current: false,
+      isCurrent: false
+    });
+  });
+
+  it('returns week sections for the selected month', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        rfid_uid: 'MAY123',
+        server_received_at: new Date('2026-05-11T08:00:00.000Z'),
+        data: {}
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'MAY123',
+        rfid_content_pack: { name: 'May Card' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'week',
+      month: '2026-05',
+      now: new Date('2026-07-01T10:00:00.000Z')
+    });
+
+    const range = prisma.device_analytics_event.findMany.mock.calls[0][0].where.server_received_at;
+    expect(range.gte.getFullYear()).toBe(2026);
+    expect(range.gte.getMonth()).toBe(4);
+    expect(range.gte.getDate()).toBe(1);
+    expect(range.gte.getHours()).toBe(0);
+    expect(range.lte.getFullYear()).toBe(2026);
+    expect(range.lte.getMonth()).toBe(4);
+    expect(range.lte.getDate()).toBe(31);
+    expect(range.lte.getHours()).toBe(23);
+    expect(result.period_label).toBe('May, 2026');
+    expect(result.week_sections).toEqual([
+      {
+        label: 'Week 2',
+        week: 2,
+        total: 1,
+        items: [
+          { name: 'May Card', key: 'MAY123', count: 1 }
+        ]
+      }
+    ]);
   });
 
   it.each(['week', 'month'])('returns usage detail for period=%s', async (period) => {
@@ -453,7 +758,7 @@ describe('mobile.service homepage activity details', () => {
       now: new Date('2026-05-16T10:00:00.000Z')
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       metric: 'usage',
       period,
       total_seconds: 2100,
@@ -472,7 +777,7 @@ describe('mobile.service homepage activity details', () => {
     await expect(mobileService.getHomepageActivityDetails('firebase-user-1', {
       metric: 'ai',
       period: 'week'
-    })).rejects.toMatchObject({ statusCode: 400, message: 'metric must be one of: games, usage, cards' });
+    })).rejects.toMatchObject({ statusCode: 400, message: 'metric must be one of: games, usage, cards, ai_interaction' });
   });
 
   it('rejects invalid period', async () => {
@@ -516,7 +821,7 @@ describe('mobile.service homepage activity details', () => {
       now: new Date('2026-05-16T10:00:00.000Z')
     });
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       metric: 'usage',
       period: 'week',
       total_seconds: 0,

@@ -61,11 +61,52 @@ function humanizeKey(value) {
         .replace(/\b\w/g, char => char.toUpperCase());
 }
 
-function getActivityDetailsRange(period, now = new Date()) {
-    const days = period === 'week' ? 7 : 30;
+function getMonthKeyFromReference(value) {
+    if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) return value;
+    return getEventMonthKey({ server_received_at: value || new Date() });
+}
+
+function dateForMonthStart(monthKey) {
+    const [year, month] = String(monthKey).split('-').map(Number);
+    if (!year || !month || month < 1 || month > 12) return null;
+    const date = new Date(year, month - 1, 1);
+    date.setHours(0, 0, 0, 0);
+    return date;
+}
+
+function dateForMonthEnd(monthKey) {
+    const [year, month] = String(monthKey).split('-').map(Number);
+    if (!year || !month || month < 1 || month > 12) return null;
+    const date = new Date(year, month, 0);
+    date.setHours(23, 59, 59, 999);
+    return date;
+}
+
+function getActivityDetailsRange(period, now = new Date(), selectedMonth = null) {
     const end = new Date(now);
+    if (period === 'week') {
+        const monthKey = getMonthKeyFromReference(selectedMonth || now);
+        const start = dateForMonthStart(monthKey);
+        const monthEnd = dateForMonthEnd(monthKey);
+        const currentMonthKey = getMonthKeyFromReference(now);
+        return {
+            start: start || end,
+            end: monthKey === currentMonthKey ? end : (monthEnd || end),
+            monthKey
+        };
+    }
+
+    if (period === 'month') {
+        const start = new Date(end);
+        start.setDate(1);
+        start.setHours(0, 0, 0, 0);
+        start.setMonth(start.getMonth() - 11);
+        return { start, end, monthKey: getMonthKeyFromReference(now) };
+    }
+
+    const days = period === 'week' ? 7 : 30;
     const start = new Date(end.getTime() - (days * 24 * 60 * 60 * 1000));
-    return { start, end };
+    return { start, end, monthKey: getMonthKeyFromReference(now) };
 }
 
 function incrementCount(grouped, key, name, amount = 1) {
@@ -103,6 +144,13 @@ function resolveCardKeyAndName(row) {
     const data = safeObject(row.data);
     const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id || row.content_id || data.content_id || 'unknown_card';
     const name = data.card_name || data.content_name || data.title || data.pack_name || humanizeKey(key);
+    return { key: String(key), name };
+}
+
+function resolveAiInteractionKeyAndName(row) {
+    const data = safeObject(row.data);
+    const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id || data.ai_card_id || data.agent_id || 'unknown_ai_card';
+    const name = data.ai_card_name || data.card_name || data.agent_name || data.title || data.content_name || humanizeKey(key);
     return { key: String(key), name };
 }
 
@@ -152,6 +200,256 @@ function toDurationResponse(period, grouped) {
         totalSeconds,
         items,
     };
+}
+
+const MONTH_NAMES = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December'
+];
+
+function getEventMonthKey(event) {
+    const value = event.server_received_at || event.created_at || event.timestamp || event.event_time;
+    const date = value ? new Date(value) : new Date();
+    if (Number.isNaN(date.getTime())) return null;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+}
+
+function getMonthLabel(monthKey) {
+    const [year, month] = String(monthKey).split('-');
+    const monthIndex = Number(month) - 1;
+    return `${MONTH_NAMES[monthIndex] || month}, ${year}`;
+}
+
+function groupEventsByMonth(events) {
+    const grouped = new Map();
+    for (const event of events || []) {
+        const monthKey = getEventMonthKey(event);
+        if (!monthKey) continue;
+        if (!grouped.has(monthKey)) grouped.set(monthKey, []);
+        grouped.get(monthKey).push(event);
+    }
+    return Array.from(grouped.entries()).sort(([left], [right]) => right.localeCompare(left));
+}
+
+function withMonthSections(response, sections, monthsMetadata = null) {
+    if (!sections && !monthsMetadata) return response;
+    return {
+        ...response,
+        ...(monthsMetadata || {}),
+        month_sections: sections,
+        monthSections: sections
+    };
+}
+
+function withWeekSections(response, monthReference, sections) {
+    if (!sections) return response;
+    const monthKey = getMonthKeyFromReference(monthReference);
+    const periodLabel = getMonthLabel(monthKey);
+    return {
+        ...response,
+        period_label: periodLabel,
+        periodLabel,
+        week_sections: sections,
+        weekSections: sections
+    };
+}
+
+function toCountSection(month, grouped) {
+    const response = toCountResponse('', '', grouped);
+    return {
+        label: getMonthLabel(month),
+        month,
+        total: response.total,
+        items: response.items
+    };
+}
+
+function toDurationSection(month, grouped) {
+    const response = toDurationResponse('', grouped);
+    return {
+        label: getMonthLabel(month),
+        month,
+        total_seconds: response.total_seconds,
+        totalSeconds: response.totalSeconds,
+        items: response.items
+    };
+}
+
+function getEventWeekInMonth(event) {
+    const value = event.server_received_at || event.created_at || event.timestamp || event.event_time;
+    const date = value ? new Date(value) : new Date();
+    if (Number.isNaN(date.getTime())) return null;
+    return Math.floor((date.getDate() - 1) / 7) + 1;
+}
+
+function groupEventsByWeekInMonth(events, now = new Date()) {
+    const currentMonthKey = getMonthKeyFromReference(now);
+    const grouped = new Map();
+    for (const event of events || []) {
+        if (getEventMonthKey(event) !== currentMonthKey) continue;
+        const week = getEventWeekInMonth(event);
+        if (!week) continue;
+        if (!grouped.has(week)) grouped.set(week, []);
+        grouped.get(week).push(event);
+    }
+    return Array.from(grouped.entries()).sort(([left], [right]) => left - right);
+}
+
+function buildMonthPicker(events, now = new Date()) {
+    const currentMonth = getMonthKeyFromReference(now);
+    const currentYear = new Date(now).getFullYear();
+    const monthKeys = (events || [])
+        .map(getEventMonthKey)
+        .filter(Boolean)
+        .sort();
+    const firstActivityMonth = monthKeys[0] || currentMonth;
+    const months = MONTH_NAMES.map((label, index) => {
+        const month = `${currentYear}-${String(index + 1).padStart(2, '0')}`;
+        const enabled = month >= firstActivityMonth && month <= currentMonth;
+        const isCurrent = month === currentMonth;
+        return {
+            label,
+            month,
+            enabled,
+            is_current: isCurrent,
+            isCurrent
+        };
+    });
+
+    return {
+        year: currentYear,
+        first_activity_month: firstActivityMonth,
+        firstActivityMonth,
+        current_month: currentMonth,
+        currentMonth,
+        months
+    };
+}
+
+function toCountWeekSection(week, grouped) {
+    const response = toCountResponse('', '', grouped);
+    return {
+        label: `Week ${week}`,
+        week,
+        total: response.total,
+        items: response.items
+    };
+}
+
+function toDurationWeekSection(week, grouped) {
+    const response = toDurationResponse('', grouped);
+    return {
+        label: `Week ${week}`,
+        week,
+        total_seconds: response.total_seconds,
+        totalSeconds: response.totalSeconds,
+        items: response.items
+    };
+}
+
+function buildGamesGrouped(events) {
+    const grouped = new Map();
+    for (const event of events || []) {
+        if (event.event_name !== 'game_start') continue;
+        const { key, name } = resolveGameKeyAndName(event);
+        incrementCount(grouped, key, name);
+    }
+    return grouped;
+}
+
+async function buildCardsGrouped(events) {
+    const grouped = new Map();
+    const rawCardNames = new Map();
+    for (const event of events || []) {
+        if (event.event_name !== 'card_session_start') continue;
+        const { key, name } = resolveCardKeyAndName(event);
+        rawCardNames.set(key, name);
+        incrementCount(grouped, key, name);
+    }
+    const cardNameMap = await getCardNameMap(Array.from(grouped.keys()));
+    for (const [key, item] of grouped.entries()) {
+        item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
+    }
+    return grouped;
+}
+
+async function buildAiInteractionGrouped(events) {
+    const grouped = new Map();
+    const rawCardNames = new Map();
+    const cardKeys = new Set();
+    for (const event of events || []) {
+        if (event.event_name !== 'ai_talk_start') continue;
+        const { key, name } = resolveAiInteractionKeyAndName(event);
+        const data = safeObject(event.data);
+        if (event.rfid_uid || data.rfid_uid || data.card_uid || data.card_id) {
+            cardKeys.add(key);
+            rawCardNames.set(key, name);
+        }
+        incrementCount(grouped, key, name);
+    }
+    const cardNameMap = await getCardNameMap(Array.from(cardKeys));
+    for (const [key, item] of grouped.entries()) {
+        item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
+    }
+    return grouped;
+}
+
+async function buildUsageGrouped(events) {
+    const grouped = new Map();
+    const rawCardNames = new Map();
+    const cardKeys = new Set();
+    for (const event of events || []) {
+        const durationMs = positiveDurationMs(event.duration_ms);
+        if (durationMs <= 0) continue;
+        const { key, name } = resolveUsageKeyAndName(event);
+        const data = safeObject(event.data);
+        if (event.rfid_uid || data.rfid_uid || data.card_uid || data.card_id) {
+            cardKeys.add(key);
+            rawCardNames.set(key, name);
+        }
+        incrementDuration(grouped, key, name, durationMs);
+    }
+    const cardNameMap = await getCardNameMap(Array.from(cardKeys));
+    for (const [key, item] of grouped.entries()) {
+        if (cardNameMap.has(key)) {
+            item.name = cardNameMap.get(key);
+        } else if (rawCardNames.has(key)) {
+            item.name = rawCardNames.get(key);
+        }
+    }
+    return grouped;
+}
+
+async function buildMonthSections(events, buildGrouped, sectionBuilder) {
+    const sections = [];
+    for (const [month, monthEvents] of groupEventsByMonth(events)) {
+        const grouped = await buildGrouped(monthEvents);
+        const section = sectionBuilder(month, grouped);
+        if (section.items.length > 0) sections.push(section);
+    }
+    return sections;
+}
+
+async function buildWeekSections(events, now, buildGrouped, sectionBuilder) {
+    const sections = [];
+    for (const [week, weekEvents] of groupEventsByWeekInMonth(events, now)) {
+        const grouped = await buildGrouped(weekEvents);
+        const section = sectionBuilder(week, grouped);
+        if (section.items.length > 0) sections.push(section);
+    }
+    return sections;
 }
 
 async function getCardNameMap(keys) {
@@ -979,8 +1277,8 @@ async function getHomepageActivity(firebaseUid, options = {}) {
 async function getHomepageActivityDetails(firebaseUid, options = {}) {
     const metric = String(options.metric || '').trim().toLowerCase();
     const period = String(options.period || '').trim().toLowerCase();
-    if (!['games', 'usage', 'cards'].includes(metric)) {
-        throw new ApiError('metric must be one of: games, usage, cards', 400, 400);
+    if (!['games', 'usage', 'cards', 'ai_interaction'].includes(metric)) {
+        throw new ApiError('metric must be one of: games, usage, cards, ai_interaction', 400, 400);
     }
     if (!['week', 'month'].includes(period)) {
         throw new ApiError('period must be one of: week, month', 400, 400);
@@ -1008,13 +1306,19 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
         macAddresses = [requestedMac];
     }
 
+    const now = options.now || new Date();
+    const selectedMonth = options.month || options.selected_month || options.selectedMonth;
+
     if (macAddresses.length === 0) {
-        return metric === 'usage'
+        const emptyResponse = metric === 'usage'
             ? toDurationResponse(period, new Map())
             : toCountResponse(metric, period, new Map());
+        return period === 'month'
+            ? withMonthSections(emptyResponse, [], buildMonthPicker([], now))
+            : withWeekSections(emptyResponse, selectedMonth || now, []);
     }
 
-    const { start, end } = getActivityDetailsRange(period, options.now || new Date());
+    const { start, end, monthKey } = getActivityDetailsRange(period, now, selectedMonth);
     const events = await prisma.device_analytics_event.findMany({
         where: {
             mac_address: { in: macAddresses },
@@ -1032,59 +1336,55 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
             game_id: true,
             station: true,
             data: true,
+            server_received_at: true,
         },
         orderBy: { server_received_at: 'asc' },
         take: 5000,
     });
+    const monthPicker = period === 'month' ? buildMonthPicker(events, now) : null;
+    const weekMonth = period === 'week' ? (monthKey || selectedMonth || now) : now;
 
     if (metric === 'games') {
-        const grouped = new Map();
-        for (const event of events || []) {
-            if (event.event_name !== 'game_start') continue;
-            const { key, name } = resolveGameKeyAndName(event);
-            incrementCount(grouped, key, name);
-        }
-        return toCountResponse('games', period, grouped);
+        const grouped = buildGamesGrouped(events);
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildGamesGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildGamesGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections(toCountResponse('games', period, grouped), sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'cards') {
-        const grouped = new Map();
-        const rawCardNames = new Map();
-        for (const event of events || []) {
-            if (event.event_name !== 'card_session_start') continue;
-            const { key, name } = resolveCardKeyAndName(event);
-            rawCardNames.set(key, name);
-            incrementCount(grouped, key, name);
-        }
-        const cardNameMap = await getCardNameMap(Array.from(grouped.keys()));
-        for (const [key, item] of grouped.entries()) {
-            item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
-        }
-        return toCountResponse('cards', period, grouped);
+        const grouped = await buildCardsGrouped(events);
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections(toCountResponse('cards', period, grouped), sections, monthPicker), weekMonth, weekSections);
     }
 
-    const grouped = new Map();
-    const rawCardNames = new Map();
-    const cardKeys = new Set();
-    for (const event of events || []) {
-        const durationMs = positiveDurationMs(event.duration_ms);
-        if (durationMs <= 0) continue;
-        const { key, name } = resolveUsageKeyAndName(event);
-        if (event.rfid_uid || safeObject(event.data).rfid_uid || safeObject(event.data).card_uid || safeObject(event.data).card_id) {
-            cardKeys.add(key);
-            rawCardNames.set(key, name);
-        }
-        incrementDuration(grouped, key, name, durationMs);
+    if (metric === 'ai_interaction') {
+        const grouped = await buildAiInteractionGrouped(events);
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections(toCountResponse('ai_interaction', period, grouped), sections, monthPicker), weekMonth, weekSections);
     }
-    const cardNameMap = await getCardNameMap(Array.from(cardKeys));
-    for (const [key, item] of grouped.entries()) {
-        if (cardNameMap.has(key)) {
-            item.name = cardNameMap.get(key);
-        } else if (rawCardNames.has(key)) {
-            item.name = rawCardNames.get(key);
-        }
-    }
-    return toDurationResponse(period, grouped);
+
+    const grouped = await buildUsageGrouped(events);
+    const sections = period === 'month'
+        ? await buildMonthSections(events, buildUsageGrouped, toDurationSection)
+        : null;
+    const weekSections = period === 'week'
+        ? await buildWeekSections(events, weekMonth, buildUsageGrouped, toDurationWeekSection)
+        : null;
+    return withWeekSections(withMonthSections(toDurationResponse(period, grouped), sections, monthPicker), weekMonth, weekSections);
 }
 
 async function getHomepageRecommendations(firebaseUid, options = {}) {
