@@ -156,7 +156,7 @@ class VirtualMQTTConnection {
 
         // Validate MAC address format
         if (!MacAddressRegex.test(this.macAddress)) {
-          console.error(`âŒ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
+          console.error(`❌ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
           this.close();
           return;
         }
@@ -170,13 +170,13 @@ class VirtualMQTTConnection {
         this.userData = null;
 
         if (!MacAddressRegex.test(this.macAddress)) {
-          console.error(`âŒ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
+          console.error(`❌ [VIRTUAL] Invalid macAddress: ${this.macAddress}`);
           this.close();
           return;
         }
       } else {
         console.error(
-          `âŒ [VIRTUAL] Invalid clientId format: ${helloPayload.clientId}`
+          `❌ [VIRTUAL] Invalid clientId format: ${helloPayload.clientId}`
         );
         this.close();
         return;
@@ -184,7 +184,7 @@ class VirtualMQTTConnection {
 
       this.replyTo = `devices/p2p/${parts[1]}`;
     } else {
-      console.error(`âŒ [VIRTUAL] No clientId provided in hello payload`);
+      console.error(`❌ [VIRTUAL] No clientId provided in hello payload`);
       this.close();
       return;
     }
@@ -196,7 +196,7 @@ class VirtualMQTTConnection {
     // CRITICAL FIX: Don't reset timer if connection is closing
     if (this.closing) {
       console.log(
-        `âš ï¸ [TIMER-IGNORE] Ignoring activity during cleanup for virtual device: ${this.deviceId}`
+        `⚠️ [TIMER-IGNORE] Ignoring activity during cleanup for virtual device: ${this.deviceId}`
       );
       return;
     }
@@ -211,7 +211,7 @@ class VirtualMQTTConnection {
       (!messageType || !allowedDuringEnding.includes(messageType))
     ) {
       console.log(
-        `ï¿½ [[ENDING-IGNORE] Activity during goodbye sequence ignored for virtual device: ${this.deviceId}`
+        `� [[ENDING-IGNORE] Activity during goodbye sequence ignored for virtual device: ${this.deviceId}`
       );
       return; // Don't log timer reset during ending
     }
@@ -219,7 +219,7 @@ class VirtualMQTTConnection {
     // If we reach here, either not ending OR it's an allowed message type
     if (this.isEnding && messageType) {
       console.log(
-        `ðŸ”„ [ENDING-RESET] Timer reset allowed for message type '${messageType}' during ending: ${this.deviceId}`
+        `🔄 [ENDING-RESET] Timer reset allowed for message type '${messageType}' during ending: ${this.deviceId}`
       );
       // Reset ending state since device is still active
       this.isEnding = false;
@@ -227,14 +227,14 @@ class VirtualMQTTConnection {
     }
 
     console.log(
-      `â° [TIMER-RESET] Virtual device ${this.deviceId} activity timer reset`
+      `⏰ [TIMER-RESET] Virtual device ${this.deviceId} activity timer reset`
     );
   }
 
   handlePublish(publishData) {
     // Update activity timestamp on any MQTT message receipt
     console.log(
-      `ðŸ“¨ [ACTIVITY] MQTT message received from virtual device ${this.deviceId}, resetting inactivity timer`
+      `📨 [ACTIVITY] MQTT message received from virtual device ${this.deviceId}, resetting inactivity timer`
     );
 
     // Parse message to get type before updating activity
@@ -244,7 +244,7 @@ class VirtualMQTTConnection {
       messageType = json.type || json.msg; // Handle both 'type' and 'msg' fields
     } catch (error) {
       console.log(
-        `âš ï¸ [PARSE] Could not parse message type for timer reset: ${error.message}`
+        `⚠️ [PARSE] Could not parse message type for timer reset: ${error.message}`
       );
     }
 
@@ -265,10 +265,10 @@ class VirtualMQTTConnection {
 
         this.parseHelloMessage(json).catch((error) => {
           console.error(
-            `âŒ [HELLO-ERROR] Failed to process hello message for ${this.deviceId}:`,
+            `❌ [HELLO-ERROR] Failed to process hello message for ${this.deviceId}:`,
             error
           );
-          console.error(`âŒ [HELLO-ERROR] Error stack:`, error.stack);
+          console.error(`❌ [HELLO-ERROR] Error stack:`, error.stack);
           debug("Failed to process hello message:", error);
           this.close();
         });
@@ -291,7 +291,7 @@ class VirtualMQTTConnection {
       this.gateway.publishToDevice(this.fullClientId, parsedPayload);
     } catch (error) {
       console.error(
-        `âŒ [VIRTUAL] Error in sendMqttMessage for device ${this.deviceId}:`,
+        `❌ [VIRTUAL] Error in sendMqttMessage for device ${this.deviceId}:`,
         error
       );
     }
@@ -300,7 +300,7 @@ class VirtualMQTTConnection {
   // Forward MCP response to LiveKit agent
   async forwardMcpResponse(mcpPayload, sessionId, requestId) {
     console.log(
-      `ðŸ”‹ [MCP-FORWARD] Forwarding MCP response for device ${this.deviceId}`
+      `🔋 [MCP-FORWARD] Forwarding MCP response for device ${this.deviceId}`
     );
 
     if (
@@ -309,7 +309,7 @@ class VirtualMQTTConnection {
       !this.bridge.room.localParticipant
     ) {
       console.error(
-        `âŒ [MCP-FORWARD] No LiveKit room available for device ${this.deviceId}`
+        `❌ [MCP-FORWARD] No LiveKit room available for device ${this.deviceId}`
       );
       return false;
     }
@@ -331,12 +331,12 @@ class VirtualMQTTConnection {
       });
 
       console.log(
-        `âœ… [MCP-FORWARD] Successfully forwarded MCP response to LiveKit agent`
+        `✅ [MCP-FORWARD] Successfully forwarded MCP response to LiveKit agent`
       );
-      console.log(`âœ… [MCP-FORWARD] Request ID: ${requestId}`);
+      console.log(`✅ [MCP-FORWARD] Request ID: ${requestId}`);
       return true;
     } catch (error) {
-      console.error(`âŒ [MCP-FORWARD] Error forwarding MCP response:`, error);
+      console.error(`❌ [MCP-FORWARD] Error forwarding MCP response:`, error);
       return false;
     }
   }
@@ -344,7 +344,7 @@ class VirtualMQTTConnection {
   sendUdpMessage(payload, timestamp) {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
-      // console.log(`âš ï¸ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
+      // console.log(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
       return;
     }
 
@@ -378,30 +378,30 @@ class VirtualMQTTConnection {
 
   async parseHelloMessage(json) {
     console.log(
-      `ðŸ” [PARSE-HELLO] Starting parseHelloMessage for ${this.deviceId}`
+      `🔍 [PARSE-HELLO] Starting parseHelloMessage for ${this.deviceId}`
     );
     console.log(
-      `ðŸ”„ [UDP-CHECK] Before UDP recreation, remoteAddress: ${this.udp.remoteAddress
+      `🔄 [UDP-CHECK] Before UDP recreation, remoteAddress: ${this.udp.remoteAddress
         ? `${this.udp.remoteAddress.address}:${this.udp.remoteAddress.port}`
         : "null"
       }`
     );
     console.log(
-      `ðŸ” [PARSE-HELLO] JSON version: ${json.version}, has bridge: ${!!this
+      `🔍 [PARSE-HELLO] JSON version: ${json.version}, has bridge: ${!!this
         .bridge}`
     );
 
     const macAddress = this.deviceId.replace(/:/g, "").toLowerCase();
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════
     // FAST PATH: Send hello response IMMEDIATELY (< 50ms)
     // Device exits "Connecting" state right away
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════
 
     // Extract language from hello message
     this.language = json.language || null;
 
-    // Use defaults â€” DB queries happen in background
+    // Use defaults — DB queries happen in background
     this.roomType = "conversation"; // Default, updated by deferred DB query
     this.deviceMode = "manual";     // Default, updated by deferred DB query
 
@@ -422,22 +422,22 @@ class VirtualMQTTConnection {
     const futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
     this.udp.session_id = futureSessionId;
 
-    console.log(`ðŸš€ [FAST-HELLO] Sending hello response immediately to device ${this.deviceId}`);
+    console.log(`🚀 [FAST-HELLO] Sending hello response immediately to device ${this.deviceId}`);
 
     // Close old bridge if exists
     if (this.bridge) {
       debug(
         `${this.deviceId} received duplicate hello message, closing previous bridge`
       );
-      // Don't await â€” let old bridge close in background
+      // Don't await — let old bridge close in background
       const oldBridge = this.bridge;
       this.bridge = null;
       oldBridge.close().catch((err) => {
-        console.warn(`âš ï¸ [OLD-BRIDGE] Close error (non-fatal):`, err.message);
+        console.warn(`⚠️ [OLD-BRIDGE] Close error (non-fatal):`, err.message);
       });
     }
 
-    // Send hello response to device IMMEDIATELY â€” device exits "Connecting" now!
+    // Send hello response to device IMMEDIATELY — device exits "Connecting" now!
     const helloResponseMsg = {
       type: "hello",
       version: json.version,
@@ -462,22 +462,22 @@ class VirtualMQTTConnection {
       },
     };
     this.sendMqttMessage(JSON.stringify(helloResponseMsg));
-    console.log(`ðŸ“¤ [FAST-HELLO] Hello response sent in < 50ms â€” device can start streaming`);
+    console.log(`📤 [FAST-HELLO] Hello response sent in < 50ms — device can start streaming`);
 
     // Reset activity timer
     this.lastActivityTime = Date.now();
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════
     // DEFERRED PATH: DB queries + LiveKit setup in background
     // Audio received before bridge is ready will be silently dropped
     // (acceptable: first 1-3s while user positions device)
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════════════════
 
     this.deferredSetupInProgress = true;
     this._deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId)
       .catch((error) => {
         this.deferredSetupInProgress = false;
-        console.error(`âŒ [DEFERRED-SETUP] Background setup failed for ${this.deviceId}:`, error);
+        console.error(`❌ [DEFERRED-SETUP] Background setup failed for ${this.deviceId}:`, error);
         // Send error to device so it knows something went wrong
         this.sendMqttMessage(
           JSON.stringify({
@@ -492,15 +492,15 @@ class VirtualMQTTConnection {
   }
 
   /**
-   * Deferred setup â€” runs in background after hello response is sent.
+   * Deferred setup — runs in background after hello response is sent.
    * Handles DB queries, LiveKit room creation, and agent dispatch.
    */
   async _deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId) {
     const deferredStart = Date.now();
     const baseUrl = process.env.MANAGER_API_URL.replace("/toy", "");
 
-    // â”€â”€ Step 1: ALL DB queries in parallel â”€â”€
-    console.log(`ðŸ”„ [DEFERRED] Starting parallel DB queries for ${this.deviceId}...`);
+    // ── Step 1: ALL DB queries in parallel ──
+    console.log(`🔄 [DEFERRED] Starting parallel DB queries for ${this.deviceId}...`);
 
     const [roomTypeResult, deviceModeResult, character, childProfile, memoryData] = await Promise.allSettled([
       // Room type (conversation/music/story)
@@ -526,7 +526,7 @@ class VirtualMQTTConnection {
     this.childProfile = childProfile.status === "fulfilled" ? childProfile.value : null;
     this.mem0Memories = memoryData.status === "fulfilled" ? memoryData.value : null;
 
-    // â”€â”€ AI Card agent override â”€â”€
+    // ── AI Card agent override ──
     // If the firmware hello includes rfid_uid (from a card tap that triggered the session),
     // look up the card in the DB to check if it maps to a specific agent.
     const helloRfidUid = json.rfid_uid || null;
@@ -539,7 +539,7 @@ class VirtualMQTTConnection {
           voiceId: null,
           agentName: null,
         };
-        logger.info(`ðŸŽ´ [AI-CARD] Hello contains rfid_uid=${helloRfidUid}, looking up agent mapping...`);
+        logger.info(`🎴 [AI-CARD] Hello contains rfid_uid=${helloRfidUid}, looking up agent mapping...`);
         const rfidResponse = await axios.get(lookupUrl, { timeout: 5000 });
 
         if (rfidResponse.data?.code === 0 && rfidResponse.data?.data) {
@@ -551,14 +551,14 @@ class VirtualMQTTConnection {
           const cardAgentName = cardData.agentName;
           if (cardAgentName) {
             const overrideCharacter = resolveCharacterFromCardAgent(cardAgentName);
-          logger.info(`ðŸŽ´ [AI-CARD] Card maps to agent: "${this.currentCharacter}" â†’ "${overrideCharacter}" (agent: ${cardAgentName})`);
+          logger.info(`🎴 [AI-CARD] Card maps to agent: "${this.currentCharacter}" → "${overrideCharacter}" (agent: ${cardAgentName})`);
             this.currentCharacter = overrideCharacter;
         } else {
-          logger.info(`ðŸŽ´ [AI-CARD] Card ${helloRfidUid} has no agent mapping, using default character`);
+          logger.info(`🎴 [AI-CARD] Card ${helloRfidUid} has no agent mapping, using default character`);
         }
       }
       } catch (rfidErr) {
-        logger.warn(`ðŸŽ´ [AI-CARD] Failed to lookup rfid_uid=${helloRfidUid}: ${rfidErr.message}`);
+        logger.warn(`🎴 [AI-CARD] Failed to lookup rfid_uid=${helloRfidUid}: ${rfidErr.message}`);
       }
     }
 
@@ -571,13 +571,13 @@ class VirtualMQTTConnection {
     }
 
     const dbTime = Date.now() - deferredStart;
-    console.log(`âœ… [DEFERRED] DB queries completed in ${dbTime}ms â€” roomType: ${this.roomType}, mode: ${this.deviceMode}, character: ${this.currentCharacter}`);
+    console.log(`✅ [DEFERRED] DB queries completed in ${dbTime}ms — roomType: ${this.roomType}, mode: ${this.deviceMode}, character: ${this.currentCharacter}`);
 
     // Update session_id if roomType changed from default
     if (this.roomType !== "conversation") {
       const updatedSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
       this.udp.session_id = updatedSessionId;
-      console.log(`ðŸ”„ [DEFERRED] Updated session_id for ${this.roomType}: ${updatedSessionId}`);
+      console.log(`🔄 [DEFERRED] Updated session_id for ${this.roomType}: ${updatedSessionId}`);
     }
 
     // Send mode_update to device with actual values from DB
@@ -592,20 +592,20 @@ class VirtualMQTTConnection {
       timestamp: Date.now(),
     };
     this.sendMqttMessage(JSON.stringify(modeUpdateMsg));
-    console.log(`ðŸ“¤ [DEFERRED] Sent mode_update: ${this.roomType}, listening_mode: ${this.deviceMode}`);
+    console.log(`📤 [DEFERRED] Sent mode_update: ${this.roomType}, listening_mode: ${this.deviceMode}`);
 
     if (this.currentCharacter) {
-      logger.info(`ðŸŽ­ [CHARACTER] Using character: "${this.currentCharacter}"`);
+      logger.info(`🎭 [CHARACTER] Using character: "${this.currentCharacter}"`);
     }
     if (this.childProfile) {
-      logger.info(`ðŸ‘¶ [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
+      logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
     }
     if (this.mem0Memories?.memories?.length > 0) {
-      logger.info(`ðŸ§  [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
+      logger.info(`🧠 [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
     }
 
-    // â”€â”€ Step 2: LiveKit room setup â”€â”€
-    console.log(`ðŸ—ï¸ [DEFERRED] Creating LiveKit room for ${this.deviceId}...`);
+    // ── Step 2: LiveKit room setup ──
+    console.log(`🏗️ [DEFERRED] Creating LiveKit room for ${this.deviceId}...`);
 
     // Clean up old sessions
     if (this.gateway.roomService) {
@@ -615,9 +615,9 @@ class VirtualMQTTConnection {
           this.gateway.roomService,
           this.udp.session_id
         );
-        console.log(`âœ… [CLEANUP] Old sessions cleaned up`);
+        console.log(`✅ [CLEANUP] Old sessions cleaned up`);
       } catch (err) {
-        console.warn(`âš ï¸ [CLEANUP] Cleanup error (non-fatal):`, err.message);
+        console.warn(`⚠️ [CLEANUP] Cleanup error (non-fatal):`, err.message);
       }
     }
 
@@ -642,7 +642,7 @@ class VirtualMQTTConnection {
       this.bridge = null;
     });
 
-    // â”€â”€ Step 3: Connect bridge to LiveKit room â”€â”€
+    // ── Step 3: Connect bridge to LiveKit room ──
     const roomCreationStart = Date.now();
     await this.bridge.connect(
       json.audio_params,
@@ -651,25 +651,25 @@ class VirtualMQTTConnection {
     );
     const roomCreationTime = Date.now() - roomCreationStart;
     this.deferredSetupInProgress = false;
-    console.log(`âœ… [DEFERRED] LiveKit room created in ${roomCreationTime}ms`);
+    console.log(`✅ [DEFERRED] LiveKit room created in ${roomCreationTime}ms`);
 
-    // Audio buffer is NOT flushed here â€” it continues buffering in onUdpMessage()
+    // Audio buffer is NOT flushed here — it continues buffering in onUdpMessage()
     // until the agent actually joins the room. The flush happens in livekit-bridge.js
     // ParticipantConnected handler to ensure the agent is present to receive the audio.
     if (this.audioBuffer && this.audioBuffer.length > 0) {
-      console.log(`ðŸ“¦ [DEFERRED] ${this.audioBuffer.length} audio frames buffered â€” will flush when agent joins`);
+      console.log(`📦 [DEFERRED] ${this.audioBuffer.length} audio frames buffered — will flush when agent joins`);
     }
 
     // Room type-specific initialization
     if (this.roomType === "music") {
-      console.log(`ðŸŽµ [MUSIC] Spawning music bot via Python API...`);
+      console.log(`🎵 [MUSIC] Spawning music bot via Python API...`);
       await this.spawnMusicBot(this.udp.session_id);
     } else if (this.roomType === "story") {
-      console.log(`ðŸ“– [STORY] Spawning story bot via Python API...`);
+      console.log(`📖 [STORY] Spawning story bot via Python API...`);
       await this.spawnStoryBot(this.udp.session_id);
     }
 
-    // â”€â”€ Step 4: Dispatch agent (conversation mode) â”€â”€
+    // ── Step 4: Dispatch agent (conversation mode) ──
     if (
       this.roomType === "conversation" &&
       this.gateway?.agentDispatchClient
@@ -681,7 +681,8 @@ class VirtualMQTTConnection {
 
       const roomName = this.bridge?.room?.name || this.udp.session_id;
       const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-xai";
-      logger.info(`ðŸš€ [AUTO-DEPLOY] Character: "${this.currentCharacter}" â†’ Agent: "${agentName}"`);
+      logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
+      this.bridge.expectedAgentName = agentName;
       const dispatchMetadata = buildDispatchMetadata({
         macAddress: this.macAddress,
         deviceId: this.deviceId,
@@ -697,11 +698,11 @@ class VirtualMQTTConnection {
           try {
             await roomService.updateRoomMetadata(roomName, dispatchMetadata);
             logger.info(
-              `ðŸ§© [ROOM-METADATA] Updated room metadata (${dispatchMetadata.length} bytes) for room: ${roomName}`
+              `🧩 [ROOM-METADATA] Updated room metadata (${dispatchMetadata.length} bytes) for room: ${roomName}`
             );
           } catch (roomMetadataError) {
             logger.warn(
-              `âš ï¸ [ROOM-METADATA] Failed to update room metadata for room ${roomName}: ${roomMetadataError.message}`
+              `⚠️ [ROOM-METADATA] Failed to update room metadata for room ${roomName}: ${roomMetadataError.message}`
             );
           }
         }
@@ -714,12 +715,12 @@ class VirtualMQTTConnection {
             metadata: dispatchMetadata,
           }
         );
-        logger.info(`âœ… [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
+        logger.info(`✅ [AUTO-DEPLOY] Agent "${agentName}" dispatched to room: ${roomName}`);
 
-        // Set hard timeout â€” if agent doesn't join within 25s, notify device
+        // Set hard timeout — if agent doesn't join within 25s, notify device
         this.agentJoinFailsafeTimeout = setTimeout(() => {
           if (this.bridge && !this.bridge.agentJoined && !this.closing) {
-            logger.error(`âŒ [AGENT-TIMEOUT] Agent "${agentName}" didn't join within 25s`);
+            logger.error(`❌ [AGENT-TIMEOUT] Agent "${agentName}" didn't join within 25s`);
             this.sendMqttMessage(JSON.stringify({
               type: "goodbye",
               session_id: this.udp?.session_id,
@@ -738,12 +739,12 @@ class VirtualMQTTConnection {
         }, 25000);
       } catch (dispatchError) {
         this.bridge.agentDeployed = false;
-        logger.error(`âŒ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
+        logger.error(`❌ [AUTO-DEPLOY] Failed to dispatch agent: ${dispatchError.message}`);
       }
     } else if (this.roomType !== "conversation") {
-      console.log(`ðŸŽµ [MODE] ${this.roomType} mode - no agent deployment needed`);
+      console.log(`🎵 [MODE] ${this.roomType} mode - no agent deployment needed`);
     } else {
-      console.log(`âš ï¸ [FALLBACK] No agentDispatchClient, sending ready_for_greeting`);
+      console.log(`⚠️ [FALLBACK] No agentDispatchClient, sending ready_for_greeting`);
       this.sendMqttMessage(JSON.stringify({
         type: "ready_for_greeting",
         session_id: this.udp.session_id,
@@ -752,7 +753,7 @@ class VirtualMQTTConnection {
     }
 
     const totalDeferredTime = Date.now() - deferredStart;
-    console.log(`âœ… [DEFERRED] Total background setup completed in ${totalDeferredTime}ms for ${this.deviceId}`)
+    console.log(`✅ [DEFERRED] Total background setup completed in ${totalDeferredTime}ms for ${this.deviceId}`)
   }
 
   async fetchPlaylist(mode) {
@@ -761,25 +762,25 @@ class VirtualMQTTConnection {
       const playlistUrl = `${baseUrl}/toy/device/${this.deviceId}/playlist/${mode}`;
 
       console.log(
-        `ðŸ“‹ [PLAYLIST] Fetching ${mode} playlist from: ${playlistUrl}`
+        `📋 [PLAYLIST] Fetching ${mode} playlist from: ${playlistUrl}`
       );
       const response = await axios.get(playlistUrl, { timeout: 5000 });
 
       if (response.data && response.data.code === 0 && response.data.data) {
         const playlist = response.data.data;
         console.log(
-          `âœ… [PLAYLIST] Fetched ${playlist.length} ${mode} items for device ${this.deviceId}`
+          `✅ [PLAYLIST] Fetched ${playlist.length} ${mode} items for device ${this.deviceId}`
         );
         return playlist;
       } else {
         console.log(
-          `â„¹ï¸ [PLAYLIST] No ${mode} playlist found for device ${this.deviceId}`
+          `ℹ️ [PLAYLIST] No ${mode} playlist found for device ${this.deviceId}`
         );
         return [];
       }
     } catch (error) {
       console.error(
-        `âŒ [PLAYLIST] Failed to fetch ${mode} playlist: ${error.message}`
+        `❌ [PLAYLIST] Failed to fetch ${mode} playlist: ${error.message}`
       );
       return []; // Return empty playlist on error
     }
@@ -790,11 +791,11 @@ class VirtualMQTTConnection {
       const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
       const apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${cleanMac}/current-character`;
 
-      logger.info(`ðŸŽ­ [CHARACTER] Fetching character for device: ${macAddress}`);
-      logger.info(`ðŸŽ­ [CHARACTER] API URL: ${apiUrl}`);
+      logger.info(`🎭 [CHARACTER] Fetching character for device: ${macAddress}`);
+      logger.info(`🎭 [CHARACTER] API URL: ${apiUrl}`);
 
       const response = await axios.get(apiUrl, { timeout: 5000 });
-      logger.info(`ðŸŽ­ [CHARACTER] API Response: ${JSON.stringify(response.data)}`);
+      logger.info(`🎭 [CHARACTER] API Response: ${JSON.stringify(response.data)}`);
 
       // Handle both response formats:
       // Format 1: { code: 0, data: "Math Tutor" }
@@ -808,15 +809,15 @@ class VirtualMQTTConnection {
         } else {
           character = "Cheeko";
         }
-        logger.info(`ðŸŽ­ [CHARACTER] âœ… Got character from DB: "${character}"`);
+        logger.info(`🎭 [CHARACTER] ✅ Got character from DB: "${character}"`);
         return character;
       } else {
-        logger.warn(`ðŸŽ­ [CHARACTER] âš ï¸ No character in response, using default: "Cheeko"`);
+        logger.warn(`🎭 [CHARACTER] ⚠️ No character in response, using default: "Cheeko"`);
         return "Cheeko";
       }
     } catch (error) {
-      logger.error(`ðŸŽ­ [CHARACTER] âŒ Failed to fetch: ${error.message}`);
-      logger.warn(`ðŸŽ­ [CHARACTER] Using default: "Cheeko"`);
+      logger.error(`🎭 [CHARACTER] ❌ Failed to fetch: ${error.message}`);
+      logger.warn(`🎭 [CHARACTER] Using default: "Cheeko"`);
       return "Cheeko"; // Default fallback
     }
   }
@@ -827,7 +828,7 @@ class VirtualMQTTConnection {
       const apiUrl = `${process.env.MANAGER_API_URL}/config/child-profile-by-mac`;
       const serverSecret = process.env.MANAGER_API_SECRET;
 
-      logger.info(`ðŸ‘¶ [CHILD-PROFILE] Fetching profile for device: ${macAddress}, secret: ${serverSecret ? 'SET(' + serverSecret.substring(0,8) + '...)' : 'NOT SET'}`);
+      logger.info(`👶 [CHILD-PROFILE] Fetching profile for device: ${macAddress}, secret: ${serverSecret ? 'SET(' + serverSecret.substring(0,8) + '...)' : 'NOT SET'}`);
 
       const response = await axios.post(
         apiUrl,
@@ -840,25 +841,25 @@ class VirtualMQTTConnection {
           }
         }
       );
-      logger.info(`ðŸ‘¶ [CHILD-PROFILE] API Response: ${JSON.stringify(response.data)}`);
+      logger.info(`👶 [CHILD-PROFILE] API Response: ${JSON.stringify(response.data)}`);
 
       if (response.data && response.data.code === 0 && response.data.data) {
         const profile = response.data.data;
-        logger.info(`ðŸ‘¶ [CHILD-PROFILE] âœ… Got profile: name="${profile.name}", age=${profile.age}`);
+        logger.info(`👶 [CHILD-PROFILE] ✅ Got profile: name="${profile.name}", age=${profile.age}`);
         return profile;
       } else {
-        logger.warn(`ðŸ‘¶ [CHILD-PROFILE] âš ï¸ No profile in response`);
+        logger.warn(`👶 [CHILD-PROFILE] ⚠️ No profile in response`);
         return null;
       }
     } catch (error) {
-      logger.error(`ðŸ‘¶ [CHILD-PROFILE] âŒ Failed to fetch: ${error.message}`);
+      logger.error(`👶 [CHILD-PROFILE] ❌ Failed to fetch: ${error.message}`);
       return null;
     }
   }
 
   // async spawnMusicBot(roomName, playlist = null) {
   //   try {
-  //     console.log(`ðŸŽµ [MUSIC-BOT] Calling Python API: ${roomName}`);
+  //     console.log(`🎵 [MUSIC-BOT] Calling Python API: ${roomName}`);
 
   //     // If no playlist provided, fetch it
   //     if (!playlist) {
@@ -877,9 +878,9 @@ class VirtualMQTTConnection {
   //     );
 
   //     if (response.data && response.data.status === "started") {
-  //       console.log(`âœ… [MUSIC-BOT] Music bot spawned successfully`);
+  //       console.log(`✅ [MUSIC-BOT] Music bot spawned successfully`);
   //       console.log(
-  //         `ðŸŽµ [MUSIC-BOT] Language: ${
+  //         `🎵 [MUSIC-BOT] Language: ${
   //           response.data.language
   //         }, Playlist items: ${playlist?.length || 0}`
   //       );
@@ -890,18 +891,18 @@ class VirtualMQTTConnection {
   //         deviceInfo.currentRoomName = roomName;
   //         deviceInfo.currentMode = "music";
   //         console.log(
-  //           `âœ… [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
+  //           `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
   //         );
   //       }
   //     }
   //   } catch (error) {
-  //     console.error(`âŒ [MUSIC-BOT] Failed: ${error.message}`);
+  //     console.error(`❌ [MUSIC-BOT] Failed: ${error.message}`);
   //   }
   // }
   async spawnMusicBot(roomName, playlist = null) {
     try {
       console.log(
-        `ðŸŽµ [MUSIC-BOT] Calling Python API to spawn music bot for room: ${roomName}`
+        `🎵 [MUSIC-BOT] Calling Python API to spawn music bot for room: ${roomName}`
       );
 
       // If no playlist provided, fetch it
@@ -924,10 +925,10 @@ class VirtualMQTTConnection {
 
       if (response.data && response.data.status === "started") {
         console.log(
-          `âœ… [MUSIC-BOT] Music bot spawned successfully for room: ${roomName}`
+          `✅ [MUSIC-BOT] Music bot spawned successfully for room: ${roomName}`
         );
         console.log(
-          `ðŸŽµ [MUSIC-BOT] Language: ${response.data.language
+          `🎵 [MUSIC-BOT] Language: ${response.data.language
           }, Playlist items: ${playlist?.length || 0}`
         );
 
@@ -937,25 +938,25 @@ class VirtualMQTTConnection {
           deviceInfo.currentRoomName = roomName;
           deviceInfo.currentMode = "music";
           console.log(
-            `âœ… [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
+            `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: music`
           );
         }
       } else if (response.data && response.data.status === "already_active") {
         console.log(
-          `â„¹ï¸ [MUSIC-BOT] Music bot already active for room: ${roomName}`
+          `ℹ️ [MUSIC-BOT] Music bot already active for room: ${roomName}`
         );
       } else {
         console.log(
-          `âš ï¸ [MUSIC-BOT] Unexpected response from Media API:`,
+          `⚠️ [MUSIC-BOT] Unexpected response from Media API:`,
           response.data
         );
       }
     } catch (error) {
       console.error(
-        `âŒ [MUSIC-BOT] Failed to spawn music bot: ${error.message}`
+        `❌ [MUSIC-BOT] Failed to spawn music bot: ${error.message}`
       );
       if (error.response) {
-        console.error(`âŒ [MUSIC-BOT] API response:`, error.response.data);
+        console.error(`❌ [MUSIC-BOT] API response:`, error.response.data);
       }
       // Don't throw - let the connection continue even if bot spawn fails
     }
@@ -964,7 +965,7 @@ class VirtualMQTTConnection {
   async spawnStoryBot(roomName, playlist = null) {
     try {
       console.log(
-        `ðŸ“– [STORY-BOT] Calling Python API to spawn story bot for room: ${roomName}`
+        `📖 [STORY-BOT] Calling Python API to spawn story bot for room: ${roomName}`
       );
 
       // If no playlist provided, fetch it
@@ -987,34 +988,34 @@ class VirtualMQTTConnection {
 
       if (response.data && response.data.status === "started") {
         console.log(
-          `âœ… [STORY-BOT] Story bot spawned successfully for room: ${roomName}`
+          `✅ [STORY-BOT] Story bot spawned successfully for room: ${roomName}`
         );
-        console.log(`ðŸ“– [STORY-BOT] Playlist items: ${playlist?.length || 0}`);
+        console.log(`📖 [STORY-BOT] Playlist items: ${playlist?.length || 0}`);
 
         const deviceInfo = this.gateway.deviceConnections.get(this.macAddress);
         if (deviceInfo) {
           deviceInfo.currentRoomName = roomName;
           deviceInfo.currentMode = "story";
           console.log(
-            `âœ… [CONTROL] Stored room info - Room: ${roomName}, Mode: story`
+            `✅ [CONTROL] Stored room info - Room: ${roomName}, Mode: story`
           );
         }
       } else if (response.data && response.data.status === "already_active") {
         console.log(
-          `â„¹ï¸ [STORY-BOT] Story bot already active for room: ${roomName}`
+          `ℹ️ [STORY-BOT] Story bot already active for room: ${roomName}`
         );
       } else {
         console.log(
-          `âš ï¸ [STORY-BOT] Unexpected response from Media API:`,
+          `⚠️ [STORY-BOT] Unexpected response from Media API:`,
           response.data
         );
       }
     } catch (error) {
       console.error(
-        `âŒ [STORY-BOT] Failed to spawn story bot: ${error.message}`
+        `❌ [STORY-BOT] Failed to spawn story bot: ${error.message}`
       );
       if (error.response) {
-        console.error(`âŒ [STORY-BOT] API response:`, error.response.data);
+        console.error(`❌ [STORY-BOT] API response:`, error.response.data);
       }
       // Don't throw - let the connection continue even if bot spawn fails
     }
@@ -1023,8 +1024,8 @@ class VirtualMQTTConnection {
   async parseOtherMessage(json) {
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
-        // Bridge not ready yet â€” deferred setup still running. Don't kill the session.
-        console.log(`â³ [DEFERRED] Message type=${json.type} received before bridge ready â€” ignoring`);
+        // Bridge not ready yet — deferred setup still running. Don't kill the session.
+        console.log(`⏳ [DEFERRED] Message type=${json.type} received before bridge ready — ignoring`);
         return;
       }
       if (json.type !== "goodbye") {
@@ -1037,7 +1038,7 @@ class VirtualMQTTConnection {
 
     if (json.type === "goodbye") {
       console.log(
-        `ðŸ”Œ [GOODBYE] Received goodbye from device: ${this.deviceId} - fully closing room`
+        `🔌 [GOODBYE] Received goodbye from device: ${this.deviceId} - fully closing room`
       );
 
       // Clear agent join failsafe timeout
@@ -1070,24 +1071,24 @@ class VirtualMQTTConnection {
             reliable: true,
           });
 
-          console.log(`âœ… [GOODBYE] Sent disconnect signal to agent`);
+          console.log(`✅ [GOODBYE] Sent disconnect signal to agent`);
         } catch (error) {
           console.warn(
-            `âš ï¸ [GOODBYE] Could not notify agent (non-fatal):`,
+            `⚠️ [GOODBYE] Could not notify agent (non-fatal):`,
             error.message
           );
         }
       }
 
-      // Fully close bridge and room â€” MQTT gateway creates a new room per hello,
+      // Fully close bridge and room — MQTT gateway creates a new room per hello,
       // so keeping the room alive only creates ghost rooms in LiveKit
       if (this.bridge) {
         const bridgeToClose = this.bridge;
         this.bridge = null;
         bridgeToClose.close().catch((err) => {
-          console.warn(`âš ï¸ [GOODBYE] Bridge close error (non-fatal):`, err.message);
+          console.warn(`⚠️ [GOODBYE] Bridge close error (non-fatal):`, err.message);
         });
-        console.log(`ðŸ—‘ï¸ [GOODBYE] Room fully closed for ${this.deviceId}`);
+        console.log(`🗑️ [GOODBYE] Room fully closed for ${this.deviceId}`);
       }
 
       return;
@@ -1097,21 +1098,21 @@ class VirtualMQTTConnection {
     if (json.type === "abort") {
       try {
         console.log(
-          `ðŸ›‘ [ABORT] Received abort signal from device: ${this.deviceId}`
+          `🛑 [ABORT] Received abort signal from device: ${this.deviceId}`
         );
         await this.bridge.sendAbortSignal(json.session_id);
         console.log(
-          `âœ… [ABORT] Successfully forwarded abort signal to LiveKit agent`
+          `✅ [ABORT] Successfully forwarded abort signal to LiveKit agent`
         );
 
         // Send TTS stop to device to return it to listening mode (red light)
         this.bridge.sendTtsStopMessage();
         console.log(
-          `ðŸ›‘ [ABORT] Sent TTS stop message to device: ${this.deviceId}`
+          `🛑 [ABORT] Sent TTS stop message to device: ${this.deviceId}`
         );
       } catch (error) {
         console.error(
-          `âŒ [ABORT] Failed to forward abort signal to LiveKit:`,
+          `❌ [ABORT] Failed to forward abort signal to LiveKit:`,
           error
         );
       }
@@ -1121,7 +1122,7 @@ class VirtualMQTTConnection {
     // Handle ready_for_greeting message - forward to LiveKit agent via data channel
     if (json.type === "ready_for_greeting") {
       console.log(
-        `ðŸŽ¤ [GREETING-TRIGGER] Device ${this.deviceId} ready for greeting`
+        `🎤 [GREETING-TRIGGER] Device ${this.deviceId} ready for greeting`
       );
 
       try {
@@ -1141,10 +1142,10 @@ class VirtualMQTTConnection {
           reliable: true,
         });
 
-        console.log(`âœ… [GREETING-TRIGGER] Forwarded to agent`);
+        console.log(`✅ [GREETING-TRIGGER] Forwarded to agent`);
       } catch (error) {
         console.error(
-          `âŒ [GREETING-TRIGGER] Failed to forward to agent:`,
+          `❌ [GREETING-TRIGGER] Failed to forward to agent:`,
           error
         );
       }
@@ -1155,11 +1156,11 @@ class VirtualMQTTConnection {
     if (json.type === "function_call" && json.source === "mobile_app") {
       try {
         console.log(
-          `ðŸŽµ [MOBILE] Function call received from mobile app: ${this.deviceId}`
+          `🎵 [MOBILE] Function call received from mobile app: ${this.deviceId}`
         );
-        console.log(`   ðŸŽ¯ Function: ${json.function_call?.name}`);
+        console.log(`   🎯 Function: ${json.function_call?.name}`);
         console.log(
-          `   ðŸ“ Arguments: ${JSON.stringify(json.function_call?.arguments)}`
+          `   📝 Arguments: ${JSON.stringify(json.function_call?.arguments)}`
         );
 
         const functionName = json.function_call?.name;
@@ -1170,11 +1171,11 @@ class VirtualMQTTConnection {
           functionName === "self_volume_down"
         ) {
           console.log(
-            `ðŸŽ›ï¸ [MOBILE-MCP] Volume control detected, using direct MCP adjust logic`
+            `🎛️ [MOBILE-MCP] Volume control detected, using direct MCP adjust logic`
           );
 
           if (!this.bridge) {
-            console.error(`âŒ [MOBILE-MCP] No bridge available`);
+            console.error(`❌ [MOBILE-MCP] No bridge available`);
             return;
           }
 
@@ -1188,10 +1189,10 @@ class VirtualMQTTConnection {
               300
             );
             console.log(
-              `âœ… [MOBILE-MCP] Volume adjusted successfully to ${newVolume}`
+              `✅ [MOBILE-MCP] Volume adjusted successfully to ${newVolume}`
             );
           } catch (error) {
-            console.error(`âŒ [MOBILE-MCP] Failed to adjust volume:`, error);
+            console.error(`❌ [MOBILE-MCP] Failed to adjust volume:`, error);
           }
 
           return;
@@ -1212,11 +1213,11 @@ class VirtualMQTTConnection {
         ) {
           if (mcpQueryFunctions.includes(functionName)) {
             console.log(
-              `ðŸ”‹ [MOBILE-MCP] ${this.roomType} mode detected - handling MCP query directly via gateway`
+              `🔋 [MOBILE-MCP] ${this.roomType} mode detected - handling MCP query directly via gateway`
             );
 
             if (!this.bridge) {
-              console.error(`âŒ [MOBILE-MCP] No bridge available`);
+              console.error(`❌ [MOBILE-MCP] No bridge available`);
               return;
             }
 
@@ -1228,14 +1229,14 @@ class VirtualMQTTConnection {
             });
 
             console.log(
-              `âœ… [MOBILE-MCP] MCP query sent directly to device (bypassing agent)`
+              `✅ [MOBILE-MCP] MCP query sent directly to device (bypassing agent)`
             );
             return;
           }
         }
 
         // For non-volume, non-MCP-query functions, forward to LiveKit agent (conversation mode only)
-        console.log(`ðŸŽµ [MOBILE] Forwarding to LiveKit agent for processing`);
+        console.log(`🎵 [MOBILE] Forwarding to LiveKit agent for processing`);
 
         // Check if bridge and room are available
         if (
@@ -1244,7 +1245,7 @@ class VirtualMQTTConnection {
           !this.bridge.room.localParticipant
         ) {
           console.error(
-            `âŒ [MOBILE] No bridge/room available to handle function call`
+            `❌ [MOBILE] No bridge/room available to handle function call`
           );
           return;
         }
@@ -1260,13 +1261,13 @@ class VirtualMQTTConnection {
         ];
 
         if (playbackFunctions.includes(functionName)) {
-          console.log(`ðŸ›‘ [MOBILE] Sending abort signal before new playback`);
+          console.log(`🛑 [MOBILE] Sending abort signal before new playback`);
           await this.bridge.sendAbortSignal(this.udp.session_id);
           // Wait a moment for abort to process
           await new Promise((resolve) => setTimeout(resolve, 100));
         } else {
           console.log(
-            `â„¹ï¸ [MOBILE] Query function detected, skipping abort signal`
+            `ℹ️ [MOBILE] Query function detected, skipping abort signal`
           );
         }
 
@@ -1284,9 +1285,9 @@ class VirtualMQTTConnection {
           reliable: true,
         });
 
-        console.log(`âœ… [MOBILE] Function call forwarded to LiveKit agent`);
+        console.log(`✅ [MOBILE] Function call forwarded to LiveKit agent`);
       } catch (error) {
-        console.error(`âŒ [MOBILE] Failed to handle function call:`, error);
+        console.error(`❌ [MOBILE] Failed to handle function call:`, error);
       }
       return;
     }
@@ -1295,16 +1296,16 @@ class VirtualMQTTConnection {
     if (json.type === "mobile_music_request") {
       try {
         console.log(
-          `ðŸŽµ [MOBILE] Mobile music request received from virtual device: ${this.deviceId}`
+          `🎵 [MOBILE] Mobile music request received from virtual device: ${this.deviceId}`
         );
-        console.log(`   ðŸŽµ Song: ${json.song_name}`);
-        console.log(`   ðŸ—‚ï¸ Type: ${json.content_type}`);
-        console.log(`   ðŸŒ Language: ${json.language || "Not specified"}`);
+        console.log(`   🎵 Song: ${json.song_name}`);
+        console.log(`   🗂️ Type: ${json.content_type}`);
+        console.log(`   🌐 Language: ${json.language || "Not specified"}`);
 
         // Mark this as a mobile-initiated connection
         this.isMobileConnection = true;
         console.log(
-          `   ðŸ“± Marked as mobile connection for MAC: ${this.macAddress}`
+          `   📱 Marked as mobile connection for MAC: ${this.macAddress}`
         );
 
         // Check if bridge and room are available
@@ -1314,7 +1315,7 @@ class VirtualMQTTConnection {
           !this.bridge.room.localParticipant
         ) {
           console.error(
-            `âŒ [MOBILE] No bridge/room available to handle music request`
+            `❌ [MOBILE] No bridge/room available to handle music request`
           );
           return;
         }
@@ -1362,12 +1363,12 @@ class VirtualMQTTConnection {
           reliable: true,
         });
 
-        console.log(`âœ… [MOBILE] Music request forwarded to LiveKit agent`);
-        console.log(`   ðŸŽ¯ Function: ${functionName}`);
-        console.log(`   ðŸ“ Arguments: ${JSON.stringify(functionArguments)}`);
+        console.log(`✅ [MOBILE] Music request forwarded to LiveKit agent`);
+        console.log(`   🎯 Function: ${functionName}`);
+        console.log(`   📝 Arguments: ${JSON.stringify(functionArguments)}`);
       } catch (error) {
         console.error(
-          `âŒ [MOBILE] Failed to handle mobile music request:`,
+          `❌ [MOBILE] Failed to handle mobile music request:`,
           error
         );
       }
@@ -1384,7 +1385,7 @@ class VirtualMQTTConnection {
       }
       const mode = json.mode || this.lastPttMode || "manual";
 
-      console.log(`ðŸŽ¤ [PTT] Listen message - State: ${state}, Mode: ${mode}`);
+      console.log(`🎤 [PTT] Listen message - State: ${state}, Mode: ${mode}`);
 
       // Forward PTT event to LiveKit agent for custom turn detection
       const pttMessage = {
@@ -1408,12 +1409,12 @@ class VirtualMQTTConnection {
             reliable: true,
           });
 
-          console.log(`âœ… [PTT] Forwarded ${state} event to LiveKit agent`);
+          console.log(`✅ [PTT] Forwarded ${state} event to LiveKit agent`);
         } else {
-          console.warn(`âš ï¸ [PTT] Cannot forward - no LiveKit connection`);
+          console.warn(`⚠️ [PTT] Cannot forward - no LiveKit connection`);
         }
       } catch (error) {
-        console.error(`âŒ [PTT] Failed to forward event:`, error);
+        console.error(`❌ [PTT] Failed to forward event:`, error);
       }
 
       return;
@@ -1422,7 +1423,7 @@ class VirtualMQTTConnection {
     // Handle RFID card_lookup messages - query Manager API and respond to device
     if (json.type === "card_lookup") {
       console.log(
-        `ðŸ·ï¸ [RFID] Card lookup received: uid=${json.rfid_uid} from device ${this.deviceId}`
+        `🏷️ [RFID] Card lookup received: uid=${json.rfid_uid} from device ${this.deviceId}`
       );
 
       try {
@@ -1449,7 +1450,7 @@ class VirtualMQTTConnection {
         try {
           tapAck = await postCardTapHandshake(tapPayload);
         } catch (tapErr) {
-          logger.warn(`âš ï¸ [RFID-TAP] Failed to persist lookup tap for uid=${rfidUid}: ${tapErr.message}`);
+          logger.warn(`⚠️ [RFID-TAP] Failed to persist lookup tap for uid=${rfidUid}: ${tapErr.message}`);
         }
 
         const isContentUpToDate =
@@ -1473,21 +1474,21 @@ class VirtualMQTTConnection {
             })
           );
           console.log(
-            `ðŸ“¤ [RFID] Sent card_up_to_date response to device ${this.deviceId} for uid=${rfidUid}`
+            `📤 [RFID] Sent card_up_to_date response to device ${this.deviceId} for uid=${rfidUid}`
           );
           return;
         }
 
         // Call Manager API RFID lookup endpoint
         const lookupUrl = `${baseUrl}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}`;
-        console.log(`ðŸ” [RFID] Looking up card at: ${lookupUrl}`);
+        console.log(`🔍 [RFID] Looking up card at: ${lookupUrl}`);
 
         const response = await axios.get(lookupUrl, { timeout: 5000 });
 
         if (response.data && response.data.code === 0 && response.data.data) {
           const cardData = response.data.data;
           console.log(
-            `âœ… [RFID] Card found: contentType=${cardData.contentType}, title="${cardData.title || cardData.packName || ""}"`
+            `✅ [RFID] Card found: contentType=${cardData.contentType}, title="${cardData.title || cardData.packName || ""}"`
           );
 
           // Treat AI session-config cards as card_ai even though the lookup
@@ -1519,12 +1520,12 @@ class VirtualMQTTConnection {
           }
           this.sendMqttMessage(JSON.stringify(responsePayload));
           console.log(
-            `ðŸ“¤ [RFID] Sent ${responseType} response to device ${this.deviceId}`
+            `📤 [RFID] Sent ${responseType} response to device ${this.deviceId}`
           );
         } else {
           // Card not found in database
           console.log(
-            `â„¹ï¸ [RFID] No card mapping found for uid=${rfidUid}`
+            `ℹ️ [RFID] No card mapping found for uid=${rfidUid}`
           );
           this.sendMqttMessage(
             JSON.stringify({
@@ -1536,7 +1537,7 @@ class VirtualMQTTConnection {
         }
       } catch (error) {
         console.error(
-          `âŒ [RFID] Card lookup failed: ${error.message}`
+          `❌ [RFID] Card lookup failed: ${error.message}`
         );
         // Fallback: tell device card is unknown so it doesn't hang
         this.sendMqttMessage(
@@ -1554,7 +1555,7 @@ class VirtualMQTTConnection {
     // Handle speech_end messages - forward to LiveKit agent for explicit turn detection
     if (json.type === "speech_end") {
       console.log(
-        `ðŸŽ¤ [SPEECH-END] User finished speaking, device: ${this.deviceId}`
+        `🎤 [SPEECH-END] User finished speaking, device: ${this.deviceId}`
       );
 
       try {
@@ -1576,16 +1577,16 @@ class VirtualMQTTConnection {
           });
 
           console.log(
-            `âœ… [SPEECH-END] Forwarded speech_end to LiveKit agent`
+            `✅ [SPEECH-END] Forwarded speech_end to LiveKit agent`
           );
         } else {
           console.warn(
-            `âš ï¸ [SPEECH-END] Cannot forward - no LiveKit connection`
+            `⚠️ [SPEECH-END] Cannot forward - no LiveKit connection`
           );
         }
       } catch (error) {
         console.error(
-          `âŒ [SPEECH-END] Failed to forward speech_end: ${error.message}`
+          `❌ [SPEECH-END] Failed to forward speech_end: ${error.message}`
         );
       }
       return;
@@ -1594,7 +1595,7 @@ class VirtualMQTTConnection {
     // Handle MCP response messages from device
     if (json.type === "mcp") {
       console.log(
-        `ðŸ”‹ [MCP] MCP message received from device ${this.deviceId}`
+        `🔋 [MCP] MCP message received from device ${this.deviceId}`
       );
       if (this.bridge) {
         const sessionId = json.session_id || this.udp?.session_id;
@@ -1612,7 +1613,7 @@ class VirtualMQTTConnection {
 
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
-        // Buffer audio during deferred setup â€” replay once bridge is ready
+        // Buffer audio during deferred setup — replay once bridge is ready
         if (!this.audioBuffer) this.audioBuffer = [];
         // Cap buffer at 5 seconds (~250 frames at 20ms each) to avoid memory issues
         if (this.audioBuffer.length < 250) {
@@ -1622,7 +1623,7 @@ class VirtualMQTTConnection {
       return;
     }
 
-    // Bridge exists but agent hasn't joined yet â€” keep buffering
+    // Bridge exists but agent hasn't joined yet — keep buffering
     // Audio sent to LiveKit room before agent subscribes is lost (real-time, no server buffering)
     if (this.bridge && !this.bridge.agentJoined) {
       if (!this.audioBuffer) this.audioBuffer = [];
@@ -1637,7 +1638,7 @@ class VirtualMQTTConnection {
     }
 
     if (this.udp.remoteAddress !== rinfo) {
-      // console.log(`âœ… [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
+      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
       this.udp.remoteAddress = rinfo;
     }
 
@@ -1658,7 +1659,7 @@ class VirtualMQTTConnection {
     const payloadStr = payload.toString();
     if (payloadStr.startsWith("ping:")) {
       console.log(
-        `ðŸ“ [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
+        `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
       );
       return;
     }
@@ -1666,7 +1667,7 @@ class VirtualMQTTConnection {
     this.bridge.sendAudio(payload, timestamp);
     this.udp.remoteSequence = sequence;
 
-    // Count packets â€” stats logged by checkKeepAlive every 10s
+    // Count packets — stats logged by checkKeepAlive every 10s
     this.audioStats.packetCount++;
     this.audioStats.totalBytes += payload.length;
   }
@@ -1688,11 +1689,11 @@ class VirtualMQTTConnection {
           const pps = Math.round(this.audioStats.packetCount / elapsed);
           const kbps = ((this.audioStats.totalBytes * 8) / elapsed / 1000).toFixed(1);
           console.log(
-            `ðŸŽ¤ [AUDIO-STATS] Device ${this.deviceId}: ${this.audioStats.packetCount} packets in ${elapsed.toFixed(0)}s (${pps} pkt/s, ${kbps} kbps)`
+            `🎤 [AUDIO-STATS] Device ${this.deviceId}: ${this.audioStats.packetCount} packets in ${elapsed.toFixed(0)}s (${pps} pkt/s, ${kbps} kbps)`
           );
         } else {
           console.log(
-            `ðŸ”‡ [AUDIO-STATS] Device ${this.deviceId}: NO audio packets received in ${elapsed.toFixed(0)}s`
+            `🔇 [AUDIO-STATS] Device ${this.deviceId}: NO audio packets received in ${elapsed.toFixed(0)}s`
           );
         }
         this.audioStats.packetCount = 0;
@@ -1705,7 +1706,7 @@ class VirtualMQTTConnection {
     const sessionDuration = now - this.sessionStartTime;
     if (sessionDuration > this.maxSessionDurationMs) {
       console.log(
-        `â° [MAX-DURATION] Session exceeded ${Math.round(
+        `⏰ [MAX-DURATION] Session exceeded ${Math.round(
           this.maxSessionDurationMs / 60000
         )} minutes - forcing close: ${this.deviceId}`
       );
@@ -1720,7 +1721,7 @@ class VirtualMQTTConnection {
 
       if (timeSinceEndPrompt > maxEndWaitTime) {
         console.log(
-          `ðŸ•’ [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${this.deviceId
+          `🕒 [END-TIMEOUT] End prompt timeout reached, force closing virtual connection: ${this.deviceId
           } (waited ${Math.round(timeSinceEndPrompt / 1000)}s)`
         );
 
@@ -1735,7 +1736,7 @@ class VirtualMQTTConnection {
             })
           );
           console.log(
-            `ðŸ‘‹ [GOODBYE-MQTT] Sent goodbye MQTT message to virtual device on timeout: ${this.deviceId}`
+            `👋 [GOODBYE-MQTT] Sent goodbye MQTT message to virtual device on timeout: ${this.deviceId}`
           );
         } catch (error) {
           console.error(
@@ -1753,7 +1754,7 @@ class VirtualMQTTConnection {
           (maxEndWaitTime - timeSinceEndPrompt) / 1000
         );
         console.log(
-          `â³ [END-WAIT] Virtual device ${this.deviceId}: ${remainingSeconds}s until force disconnect`
+          `⏳ [END-WAIT] Virtual device ${this.deviceId}: ${remainingSeconds}s until force disconnect`
         );
       }
       return; // Don't do normal timeout check while ending
@@ -1772,7 +1773,7 @@ class VirtualMQTTConnection {
       if (audioPlayingDuration < this.maxAudioPlayingDurationMs) {
         // Audio is playing normally - skip timeout check
         console.log(
-          `ðŸŽµ [AUDIO-ACTIVE] Audio is playing for virtual device: ${this.deviceId
+          `🎵 [AUDIO-ACTIVE] Audio is playing for virtual device: ${this.deviceId
           } (${Math.round(
             audioPlayingDuration / 1000
           )}s) - skipping timeout check`
@@ -1781,7 +1782,7 @@ class VirtualMQTTConnection {
       } else {
         // Audio has been "playing" for too long - likely stuck
         console.log(
-          `âš ï¸ [AUDIO-STUCK] Audio playing for ${Math.round(
+          `⚠️ [AUDIO-STUCK] Audio playing for ${Math.round(
             audioPlayingDuration / 1000
           )}s (>${Math.round(
             this.maxAudioPlayingDurationMs / 1000
@@ -1799,7 +1800,7 @@ class VirtualMQTTConnection {
         this.isEnding = true;
         this.endPromptSentTime = now;
         console.log(
-          `ðŸ‘‹ [END-PROMPT] Sending goodbye message before timeout: ${this.deviceId
+          `👋 [END-PROMPT] Sending goodbye message before timeout: ${this.deviceId
           } (inactive for ${Math.round(
             timeSinceLastActivity / 1000
           )}s) - Last activity: ${new Date(
@@ -1813,7 +1814,7 @@ class VirtualMQTTConnection {
           this.goodbyeSent = false; // Flag to track if goodbye MQTT was sent
           await this.bridge.sendEndPrompt(this.udp.session_id);
           console.log(
-            `ðŸ‘‹ [END-PROMPT-SENT] Waiting for TTS goodbye to complete before sending goodbye MQTT: ${this.deviceId}`
+            `👋 [END-PROMPT-SENT] Waiting for TTS goodbye to complete before sending goodbye MQTT: ${this.deviceId}`
           );
         } catch (error) {
           console.error(`Failed to send end prompt: ${error.message}`);
@@ -1824,7 +1825,7 @@ class VirtualMQTTConnection {
       } else {
         // No bridge available, send goodbye message and close immediately
         console.log(
-          `ðŸ•’ [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${this.deviceId
+          `🕒 [TIMEOUT] Closing virtual connection due to 2-minute inactivity: ${this.deviceId
           } (inactive for ${Math.round(timeSinceLastActivity / 1000)}s)`
         );
 
@@ -1839,7 +1840,7 @@ class VirtualMQTTConnection {
             })
           );
           console.log(
-            `ðŸ‘‹ [GOODBYE-MQTT] Sent goodbye MQTT message to virtual device: ${this.deviceId}`
+            `👋 [GOODBYE-MQTT] Sent goodbye MQTT message to virtual device: ${this.deviceId}`
           );
         } catch (error) {
           console.error(
@@ -1858,7 +1859,7 @@ class VirtualMQTTConnection {
         (this.inactivityTimeoutMs - timeSinceLastActivity) / 1000
       );
       console.log(
-        `â° [TIMER-CHECK] Virtual device ${this.deviceId}: ${remainingSeconds}s until timeout`
+        `⏰ [TIMER-CHECK] Virtual device ${this.deviceId}: ${remainingSeconds}s until timeout`
       );
     }
 
@@ -1869,7 +1870,7 @@ class VirtualMQTTConnection {
     // Prevent duplicate close calls
     if (this.closing) {
       console.log(
-        `âš ï¸ [CLEANUP] Already closing ${this.deviceId}, skipping duplicate close`
+        `⚠️ [CLEANUP] Already closing ${this.deviceId}, skipping duplicate close`
       );
       return;
     }
@@ -1879,9 +1880,9 @@ class VirtualMQTTConnection {
     const callerLine = stack.split("\n")[2]?.trim() || "Unknown caller";
 
     console.log(
-      `ðŸ›‘ [CLEANUP] Starting cleanup for virtual device: ${this.deviceId}`
+      `🛑 [CLEANUP] Starting cleanup for virtual device: ${this.deviceId}`
     );
-    console.log(`ðŸ“ [CLEANUP-TRACE] close() called from: ${callerLine}`);
+    console.log(`📍 [CLEANUP-TRACE] close() called from: ${callerLine}`);
     this.closing = true;
 
     // Clear agent join failsafe timeout
@@ -1899,7 +1900,7 @@ class VirtualMQTTConnection {
       const roomName = this.bridge.room.name;
       try {
         console.log(
-          `ðŸ›‘ [CLEANUP] Stopping ${this.roomType} bot for room: ${roomName}`
+          `🛑 [CLEANUP] Stopping ${this.roomType} bot for room: ${roomName}`
         );
         await axios.post(
           `${MEDIA_API_BASE}/stop-bot`,
@@ -1908,9 +1909,9 @@ class VirtualMQTTConnection {
           },
           mediaAxiosConfig({ timeout: 3000 })
         );
-        console.log(`âœ… [CLEANUP] ${this.roomType} bot stopped`);
+        console.log(`✅ [CLEANUP] ${this.roomType} bot stopped`);
       } catch (error) {
-        console.warn(`âš ï¸ [CLEANUP] Failed to stop bot:`, error.message);
+        console.warn(`⚠️ [CLEANUP] Failed to stop bot:`, error.message);
       }
     }
 
@@ -1922,7 +1923,7 @@ class VirtualMQTTConnection {
     // Remove from connections map immediately
     this.gateway.connections.delete(this.connectionId);
     console.log(
-      `ðŸ—‘ï¸ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`
+      `🗑️ [CLEANUP] Removed connectionId ${this.connectionId} from connections map`
     );
 
     // CRITICAL FIX: Only remove from deviceConnections if this entry still belongs
@@ -1936,11 +1937,11 @@ class VirtualMQTTConnection {
       if (current && current.connectionId === myConnectionId) {
         this.gateway.deviceConnections.delete(myDeviceId);
         console.log(
-          `ðŸ—‘ï¸ [CLEANUP] Removed ${myDeviceId} from deviceConnections map (conn: ${myConnectionId})`
+          `🗑️ [CLEANUP] Removed ${myDeviceId} from deviceConnections map (conn: ${myConnectionId})`
         );
       } else {
         console.log(
-          `ðŸ”’ [CLEANUP] Skipped removing ${myDeviceId} from deviceConnections â€” entry belongs to a newer connection`
+          `🔒 [CLEANUP] Skipped removing ${myDeviceId} from deviceConnections — entry belongs to a newer connection`
         );
       }
     }, 2000);
@@ -1952,4 +1953,3 @@ class VirtualMQTTConnection {
 }
 
 module.exports = { VirtualMQTTConnection, setConfigManager };
-

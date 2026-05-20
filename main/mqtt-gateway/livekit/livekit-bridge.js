@@ -60,6 +60,7 @@ class LiveKitBridge extends EventEmitter {
     this.agentJoinPromise = null;
     this.agentJoinResolve = null;
     this.agentJoinTimeout = null;
+    this.expectedAgentName = null;
 
     // PRIMARY AGENT TRACKING: Only subscribe to ONE agent's audio
     // This prevents audio from duplicate agents if they somehow join
@@ -133,6 +134,49 @@ class LiveKitBridge extends EventEmitter {
       });
 
     this.initializeLiveKit();
+  }
+
+  isAgentIdentity(identity) {
+    if (!identity) return false;
+    const participantIdentity = String(identity);
+    const lowerIdentity = participantIdentity.toLowerCase();
+    const lowerMac = this.macAddress ? String(this.macAddress).toLowerCase() : null;
+
+    if (lowerMac && lowerIdentity === lowerMac) return false;
+    if (this.expectedAgentName && participantIdentity === this.expectedAgentName) return true;
+    if (this.primaryAgentIdentity && participantIdentity === this.primaryAgentIdentity) return true;
+    if (participantIdentity.includes("agent")) return true;
+    if (participantIdentity === "cheeko-xai") return true;
+    if (participantIdentity.startsWith("cheeko-")) return true;
+
+    return false;
+  }
+
+  markAgentJoined(participantIdentity, source = "unknown") {
+    if (!participantIdentity) return;
+
+    if (!this.primaryAgentIdentity) {
+      this.primaryAgentIdentity = participantIdentity;
+      console.log(`🎯 [PRIMARY-AGENT] Set primary agent (${source}): ${participantIdentity}`);
+    }
+
+    if (!this.agentJoined) {
+      console.log(`🤖 [LIVEKIT] Agent joined via ${source}: ${participantIdentity}`);
+      this.agentJoined = true;
+      if (this.agentJoinResolve) {
+        this.agentJoinResolve();
+      }
+    }
+
+    if (this.agentJoinTimeout) {
+      clearTimeout(this.agentJoinTimeout);
+      this.agentJoinTimeout = null;
+    }
+
+    if (this.connection?.agentJoinFailsafeTimeout) {
+      clearTimeout(this.connection.agentJoinFailsafeTimeout);
+      this.connection.agentJoinFailsafeTimeout = null;
+    }
   }
 
   initializeLiveKit() {
@@ -353,6 +397,13 @@ class LiveKitBridge extends EventEmitter {
           }
           switch (data.type) {
             case "agent_state_changed":
+              if (this.connection?.agentJoinFailsafeTimeout) {
+                clearTimeout(this.connection.agentJoinFailsafeTimeout);
+                this.connection.agentJoinFailsafeTimeout = null;
+              }
+              if (participant?.identity && this.isAgentIdentity(participant.identity)) {
+                this.markAgentJoined(participant.identity, "data_event_state_changed");
+              }
               console.log(`🔄 [STATE] Agent state changed: ${data.data.old_state} → ${data.data.new_state} (device: ${this.macAddress})`);
               if (
                 data.data.old_state === "speaking" &&
@@ -412,6 +463,13 @@ class LiveKitBridge extends EventEmitter {
               }
               break;
             case "speech_created":
+              if (this.connection?.agentJoinFailsafeTimeout) {
+                clearTimeout(this.connection.agentJoinFailsafeTimeout);
+                this.connection.agentJoinFailsafeTimeout = null;
+              }
+              if (participant?.identity && this.isAgentIdentity(participant.identity)) {
+                this.markAgentJoined(participant.identity, "data_event_speech_created");
+              }
               // Set audio playing flag and reset inactivity timer
               this.isAudioPlaying = true;
               this.audioPlayingStartTime = Date.now(); // Track when audio started
@@ -515,6 +573,14 @@ class LiveKitBridge extends EventEmitter {
 
             // Re-use the same state-machine logic as the DataReceived handler
             if (type === "agent_state_changed" && event.data) {
+              if (this.connection?.agentJoinFailsafeTimeout) {
+                clearTimeout(this.connection.agentJoinFailsafeTimeout);
+                this.connection.agentJoinFailsafeTimeout = null;
+              }
+              const pIdentity = participantInfo?.identity ?? participantInfo ?? null;
+              if (pIdentity && this.isAgentIdentity(pIdentity)) {
+                this.markAgentJoined(pIdentity, "stream_event_state_changed");
+              }
               const { old_state, new_state } = event.data;
               console.log(`🔄 [STATE] Agent state changed: ${old_state} → ${new_state} (device: ${this.macAddress})`);
               if (old_state === "speaking" && new_state === "listening") {
@@ -540,6 +606,14 @@ class LiveKitBridge extends EventEmitter {
                 this.sendLLMThinkMessage();
               }
             } else if (type === "speech_created" && event.data) {
+              if (this.connection?.agentJoinFailsafeTimeout) {
+                clearTimeout(this.connection.agentJoinFailsafeTimeout);
+                this.connection.agentJoinFailsafeTimeout = null;
+              }
+              const pIdentity = participantInfo?.identity ?? participantInfo ?? null;
+              if (pIdentity && this.isAgentIdentity(pIdentity)) {
+                this.markAgentJoined(pIdentity, "stream_event_speech_created");
+              }
               this.isAudioPlaying = true;
               this.audioPlayingStartTime = Date.now();
               if (this.connection && this.connection.updateActivityTime) this.connection.updateActivityTime();
@@ -593,7 +667,7 @@ class LiveKitBridge extends EventEmitter {
             // Robust identity detection — participantInfo can be an object or plain string
             const identity = participantInfo?.identity ?? participantInfo ?? "unknown";
             const identityText = identity?.toString() || "";
-            const isAgent = identityText.includes("agent") || identityText === "cheeko-xai";
+            const isAgent = this.isAgentIdentity(identityText);
 
             console.log(`📝 [TRANSCRIPTION-STREAM] ${isAgent ? "Agent" : "User"} (final=${isFinal}): "${text.trim().substring(0, 80)}"`);
 
@@ -670,6 +744,10 @@ class LiveKitBridge extends EventEmitter {
             if (track.kind === "audio" || track.kind === TrackKind.KIND_AUDIO) {
               // PRIMARY AGENT CHECK: Only accept audio from the primary agent
               // If no primary agent set yet, this participant becomes the primary
+              if (this.isAgentIdentity(participant.identity)) {
+                this.markAgentJoined(participant.identity, "track_subscribed");
+              }
+
               if (!this.primaryAgentIdentity) {
                 this.primaryAgentIdentity = participant.identity;
                 console.log(`🎯 [PRIMARY-AGENT] Set primary agent: ${participant.identity}`);
@@ -857,7 +935,7 @@ class LiveKitBridge extends EventEmitter {
           // console.log(`👤 [PARTICIPANT] Connected: ${participant.identity} (${participant.sid})`);
 
           // Check if this is an agent joining (agent identity typically contains "agent")
-          if (participant.identity.includes("agent") || participant.identity === "cheeko-xai") {
+          if (this.isAgentIdentity(participant.identity)) {
             // DUPLICATE AGENT CHECK: If we already have a primary agent, this is a duplicate
             if (this.primaryAgentIdentity && this.primaryAgentIdentity !== participant.identity) {
               console.error(`🚨 [DUPLICATE-AGENT] DUPLICATE AGENT DETECTED!`);
@@ -878,31 +956,7 @@ class LiveKitBridge extends EventEmitter {
               return; // Don't process this agent further
             }
 
-            console.log(`🤖 [LIVEKIT] Agent joined: ${participant.identity}`);
-
-            // Set this as the primary agent if not already set
-            if (!this.primaryAgentIdentity) {
-              this.primaryAgentIdentity = participant.identity;
-              console.log(`🎯 [PRIMARY-AGENT] Set primary agent on join: ${participant.identity}`);
-            }
-
-            // Set agent joined flag and resolve promise
-            this.agentJoined = true;
-            if (this.agentJoinResolve) {
-              this.agentJoinResolve();
-            }
-
-            // Clear timeouts if set
-            if (this.agentJoinTimeout) {
-              clearTimeout(this.agentJoinTimeout);
-              this.agentJoinTimeout = null;
-            }
-
-            // Clear the failsafe timeout on the connection side
-            if (this.connection?.agentJoinFailsafeTimeout) {
-              clearTimeout(this.connection.agentJoinFailsafeTimeout);
-              this.connection.agentJoinFailsafeTimeout = null;
-            }
+            this.markAgentJoined(participant.identity, "participant_connected");
 
             // Flush any audio buffered during setup (before agent joined)
             const hasBufferedAudio = this.connection?.audioBuffer && this.connection.audioBuffer.length > 0;
@@ -2435,3 +2489,4 @@ class LiveKitBridge extends EventEmitter {
 }
 
 module.exports = { LiveKitBridge, setConfigManager };
+
