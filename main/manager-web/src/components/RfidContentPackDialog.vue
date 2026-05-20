@@ -32,6 +32,18 @@
           <el-input type="textarea" v-model="form.description" placeholder="Content pack description" :rows="2" class="custom-textarea"></el-input>
         </el-form-item>
 
+        <el-form-item label="Thumbnail Url" prop="thumbnailUrl" class="form-item">
+          <el-input v-model="form.thumbnailUrl" placeholder="https://..." class="custom-input">
+            <template slot="append">
+              <el-button
+                icon="el-icon-upload2"
+                :loading="uploadingMedia"
+                @click="pickPackThumbnailFile"
+              ></el-button>
+            </template>
+          </el-input>
+        </el-form-item>
+
         <el-form-item label="Content Type" prop="contentType" class="form-item">
           <el-select v-model="form.contentType" placeholder="Select type" class="custom-select">
             <el-option label="Story Pack" value="story_pack"/>
@@ -268,6 +280,7 @@ export default {
         status: 'draft',
         version: 1,
         active: true,
+        thumbnailUrl: '',
         items: [] // Structured Items
       })
     }
@@ -280,7 +293,7 @@ export default {
       playingUrl: null,
       storyMode: false,
       stories: [],  // [{title: '', items: [{title, audioUrl, imageUrl, text}]}]
-      pendingUpload: null, // { mode: 'flat'|'story', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl' }
+      pendingUpload: null, // { mode: 'flat'|'story'|'packThumbnail', storyIndex, itemIndex, field: 'audioUrl'|'imageUrl'|'thumbnailUrl' }
       uploadingMedia: false,
       binLoading: {},
       binError: {},
@@ -366,6 +379,15 @@ export default {
         this.$refs.imageFilePicker.click();
       }
     },
+    pickPackThumbnailFile() {
+      this.pendingUpload = {
+        mode: 'packThumbnail',
+        field: 'thumbnailUrl'
+      };
+      if (this.$refs.imageFilePicker) {
+        this.$refs.imageFilePicker.click();
+      }
+    },
     getAuthToken() {
       const storedToken = localStorage.getItem('token');
       if (!storedToken) return null;
@@ -379,6 +401,9 @@ export default {
     getPendingTargetItem() {
       if (!this.pendingUpload) return null;
       const { mode, storyIndex, itemIndex } = this.pendingUpload;
+      if (mode === 'packThumbnail') {
+        return this.form;
+      }
       if (mode === 'story') {
         if (!this.stories[storyIndex] || !this.stories[storyIndex].items[itemIndex]) return null;
         return this.stories[storyIndex].items[itemIndex];
@@ -420,6 +445,9 @@ export default {
       formData.append('file', file);
       formData.append('contentType', 'rfidcontent');
       formData.append('category', type === 'audio' ? 'audio' : 'images');
+      if (this.pendingUpload.mode === 'packThumbnail' && this.form.id) {
+        formData.append('contentPackId', this.form.id);
+      }
 
       this.uploadingMedia = true;
       try {

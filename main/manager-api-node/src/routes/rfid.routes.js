@@ -3596,6 +3596,14 @@ router.post('/content-pack/upload',
         category,
         req.file.mimetype
       );
+
+      if (req.body?.contentPackId) {
+        await rfidService.updateContentPack({
+          id: req.body.contentPackId,
+          thumbnailUrl: result.url
+        }, req.user?.id);
+      }
+
       success(res, result);
     } catch (error) {
       logger.error('RFID content pack upload failed:', { error: error.message });

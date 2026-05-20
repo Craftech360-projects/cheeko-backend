@@ -312,6 +312,14 @@
                                         <span class="uid-mono">{{ scope.row.rfidUid }}</span>
                                     </template>
                                 </el-table-column>
+                                <el-table-column label="Thumbnail" align="center" width="110">
+                                    <template slot-scope="scope">
+                                        <div v-if="scope.row.thumbnailUrl" class="ai-card-thumbnail">
+                                            <img :src="scope.row.thumbnailUrl" alt="AI card thumbnail" @error="handleThumbnailError" />
+                                        </div>
+                                        <span v-else class="text-muted">-</span>
+                                    </template>
+                                </el-table-column>
                                 <el-table-column label="Card Type" align="center" width="160">
                                     <template slot-scope="scope">
                                         <el-tag :type="getAiCardTypeStyle(scope.row)" size="small" class="content-badge">
@@ -1024,7 +1032,7 @@ export default {
             isAllCardsSelected: false,
             cardDialogVisible: false,
             cardDialogTitle: 'Add Card Mapping',
-            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', actionData: {}, notes: '', active: true },
+            cardForm: { id: null, rfidUid: '', questionPackId: null, contentPackId: null, packCode: '', packId: null, actionType: 'content', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', thumbnailUrl: '', actionData: {}, notes: '', active: true },
 
             // AI Cards
             aiCardsList: [],
@@ -1054,7 +1062,7 @@ export default {
             isAllContentPacksSelected: false,
             contentPackDialogVisible: false,
             contentPackDialogTitle: 'Add Content Pack',
-            contentPackForm: { id: null, packCode: '', name: '', description: '', contentType: 'story_pack', language: 'en', status: 'draft', version: 1, items: [], active: true },
+            contentPackForm: { id: null, packCode: '', name: '', description: '', thumbnailUrl: '', contentType: 'story_pack', language: 'en', status: 'draft', version: 1, items: [], active: true },
 
             // Question Packs (NEW)
             questionPacksList: [],
@@ -1220,6 +1228,10 @@ export default {
 
         headerCellClassName({ columnIndex }) {
             return columnIndex === 0 ? "custom-selection-header" : "";
+        },
+
+        handleThumbnailError(event) {
+            event.target.style.display = 'none';
         },
 
         switchTab(tab) {
@@ -1636,7 +1648,7 @@ export default {
 
         showAddCardDialog() {
             this.cardDialogTitle = 'Add Card Mapping';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'content', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', actionData: {}, notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'content', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', thumbnailUrl: '', actionData: {}, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1759,7 +1771,7 @@ export default {
 
         showAddAiCardDialog() {
             this.cardDialogTitle = 'Add AI Card';
-            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', actionData: {}, notes: '', active: true };
+            this.cardForm = { id: null, rfidUid: '', questionPackId: null, packCode: '', packId: null, contentPackId: null, actionType: 'ai', cardType: 'ai', aiAgentName: 'Cheeko', aiLanguageCode: 'en', aiLanguageName: 'English', aiVoiceId: '', thumbnailUrl: '', actionData: {}, notes: '', active: true };
             this.cardDialogVisible = true;
         },
 
@@ -1827,7 +1839,7 @@ export default {
 
         showAddContentPackDialog() {
             this.contentPackDialogTitle = 'Add Content Pack';
-            this.contentPackForm = { id: null, packCode: '', name: '', description: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, items: [], active: true };
+            this.contentPackForm = { id: null, packCode: '', name: '', description: '', thumbnailUrl: '', contentType: 'prompt', language: 'en', contentMd: '', totalItems: 0, items: [], active: true };
             this.contentPackDialogVisible = true;
         },
 
@@ -3732,6 +3744,21 @@ export default {
     border-radius: 12px;
     border: 2px dashed #e4e7ed;
     text-align: center;
+}
+.ai-card-thumbnail {
+    width: 56px;
+    height: 42px;
+    margin: 0 auto;
+    border-radius: 6px;
+    border: 1px solid #e4e7ed;
+    background: #fff;
+    overflow: hidden;
+}
+.ai-card-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
 }
 /* Stat Icons */
 .stat-icon.qa-packs {

@@ -542,6 +542,7 @@ model rfid_card_mapping {
   updater           BigInt?
   update_date       DateTime           @default(now()) @db.Timestamptz(6)
   card_type         String?            @default("content") @db.VarChar(20)
+  thumbnail_url     String?            @db.VarChar(500)
   rfid_card_tap_log rfid_card_tap_log[]
   rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onUpdate: NoAction)
   rfid_pack         rfid_pack?         @relation(fields: [pack_id], references: [id], onUpdate: NoAction)

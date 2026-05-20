@@ -454,6 +454,7 @@ const transformCardMappingToCamelCase = (card) => {
     actionType: card.action_type,
     actionData: card.action_data || {},
     cardType: card.card_type || null,
+    thumbnailUrl: card.thumbnail_url || null,
     notes: card.notes,
     active: card.active,
     status: card.status,
@@ -882,6 +883,7 @@ const lookupCardByUid = async (rfidUid) => {
       promptText: mapping.notes || 'The child tapped an AI card. Engage them in a fun, interactive conversation.',
       actionType: mapping.action_type || null,
       actionData: actionData,
+      thumbnailUrl: mapping.thumbnail_url || null,
       agentName: agentName,
       languageCode: languageCode,
       languageName: languageName,
@@ -1037,6 +1039,7 @@ const createCardMapping = async (data, _userId) => {
         action_type: data.actionType || null,
         action_data: data.actionData || {},
         card_type: data.cardType || 'content',
+        thumbnail_url: data.thumbnailUrl || data.thumbnail_url || null,
         notes: data.notes || null,
         active: data.active !== false,
         status: 1
@@ -1099,6 +1102,9 @@ const updateCardMapping = async (data, _userId) => {
   if (data.actionType !== undefined) updateData.action_type = data.actionType;
   if (data.actionData !== undefined) updateData.action_data = data.actionData;
   if (data.cardType !== undefined) updateData.card_type = data.cardType;
+  if (data.thumbnailUrl !== undefined || data.thumbnail_url !== undefined) {
+    updateData.thumbnail_url = data.thumbnailUrl || data.thumbnail_url || null;
+  }
   if (data.notes !== undefined) updateData.notes = data.notes;
   if (data.active !== undefined) updateData.active = data.active;
   if (data.status !== undefined) updateData.status = data.status != null ? Number(data.status) : null;
@@ -3617,6 +3623,7 @@ const transformContentPackToCamelCase = (pack) => {
     cachedAudioUrls: pack.cached_audio_urls,
     version: pack.version,
     contentHash: pack.content_hash,
+    thumbnailUrl: pack.thumbnail_url,
     status: pack.status,
     createDate: formatDate(pack.create_date),
     updateDate: formatDate(pack.update_date),
@@ -3808,6 +3815,7 @@ const createContentPack = async (data, userId) => {
     cached_audio_urls: data.cachedAudioUrls || null,
     version: data.version != null ? String(data.version) : null,
     content_hash: data.contentHash || null,
+    thumbnail_url: data.thumbnailUrl || data.thumbnail_url || null,
     status: data.status || null,
     creator: userId ? BigInt(userId) : null,
   };
@@ -3888,6 +3896,9 @@ const updateContentPack = async (data, userId) => {
   if (data.cachedAudioUrls !== undefined) updateData.cached_audio_urls = data.cachedAudioUrls;
   if (data.version !== undefined) updateData.version = data.version != null ? String(data.version) : null;
   if (data.contentHash !== undefined) updateData.content_hash = data.contentHash;
+  if (data.thumbnailUrl !== undefined || data.thumbnail_url !== undefined) {
+    updateData.thumbnail_url = data.thumbnailUrl || data.thumbnail_url || null;
+  }
   if (data.status !== undefined) updateData.status = data.status;
 
   try {
