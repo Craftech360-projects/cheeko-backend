@@ -558,6 +558,60 @@ describe('mobile.service homepage activity details', () => {
     prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
   });
 
+  it('filters homepage activity to selected device id', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF' },
+      { id: 'device-2', mac_address: '11:22:33:44:55:66' }
+    ]);
+    prisma.device_analytics_event.findMany.mockResolvedValue([]);
+    prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
+    prisma.rfid_card_tap_log.count.mockResolvedValue(0);
+
+    await mobileService.getHomepageActivity('firebase-user-1', {
+      deviceId: 'device-2',
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        mac_address: { in: ['11:22:33:44:55:66'] }
+      })
+    }));
+    expect(prisma.rfid_card_tap_log.count).toHaveBeenCalledWith({
+      where: {
+        OR: [
+          { mac_address: { in: ['11:22:33:44:55:66'] } }
+        ],
+        created_at: {
+          gte: new Date('2026-05-12T18:30:00.000Z'),
+          lte: new Date('2026-05-13T18:29:59.999Z')
+        }
+      }
+    });
+  });
+
+  it('filters homepage activity detail to selected device id', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF' },
+      { id: 'device-2', mac_address: '11:22:33:44:55:66' }
+    ]);
+
+    await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'games',
+      period: 'week',
+      deviceId: 'device-2',
+      now: new Date('2026-05-16T10:00:00.000Z')
+    });
+
+    expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        mac_address: { in: ['11:22:33:44:55:66'] }
+      })
+    }));
+  });
+
   it.each([
     ['week', (() => {
       const start = new Date('2026-05-16T10:00:00.000Z');

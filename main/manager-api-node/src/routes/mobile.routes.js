@@ -10,37 +10,48 @@ const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
 
-const formatMobileDevice = (device) => ({
-    id: device.id,
-    userId: device.user_id,
-    user_id: device.user_id,
-    macAddress: device.mac_address,
-    mac_address: device.mac_address,
-    deviceName: device.device_name || device.alias || 'Cheeko',
-    device_name: device.device_name || device.alias || 'Cheeko',
-    alias: device.alias,
-    status: device.user_id ? 'active' : 'unbound',
-    bindingStatus: device.user_id ? 'bound' : 'unbound',
-    binding_status: device.user_id ? 'bound' : 'unbound',
-    agentId: device.agent_id,
-    agent_id: device.agent_id,
-    kidId: device.kid_id,
-    kid_id: device.kid_id,
-    board: device.board,
-    mode: device.mode,
-    deviceMode: device.device_mode,
-    device_mode: device.device_mode,
-    appVersion: device.app_version,
-    app_version: device.app_version,
-    autoUpdate: device.auto_update,
-    auto_update: device.auto_update,
-    lastConnectedAt: device.last_connected_at,
-    last_connected_at: device.last_connected_at,
-    createdAt: device.create_date,
-    created_at: device.create_date,
-    updatedAt: device.update_date,
-    updated_at: device.update_date,
-});
+const defaultDeviceName = (index) => `Cheeko - ${index + 1}`;
+
+const mobileDeviceDisplayName = (device, index) => {
+    const rawName = device.device_name || device.alias;
+    const displayName = typeof rawName === 'string' ? rawName.trim() : rawName;
+    return displayName || defaultDeviceName(index);
+};
+
+const formatMobileDevice = (device, index = 0) => {
+    const displayName = mobileDeviceDisplayName(device, index);
+    return {
+        id: device.id,
+        userId: device.user_id,
+        user_id: device.user_id,
+        macAddress: device.mac_address,
+        mac_address: device.mac_address,
+        deviceName: displayName,
+        device_name: displayName,
+        alias: device.alias,
+        status: device.user_id ? 'active' : 'unbound',
+        bindingStatus: device.user_id ? 'bound' : 'unbound',
+        binding_status: device.user_id ? 'bound' : 'unbound',
+        agentId: device.agent_id,
+        agent_id: device.agent_id,
+        kidId: device.kid_id,
+        kid_id: device.kid_id,
+        board: device.board,
+        mode: device.mode,
+        deviceMode: device.device_mode,
+        device_mode: device.device_mode,
+        appVersion: device.app_version,
+        app_version: device.app_version,
+        autoUpdate: device.auto_update,
+        auto_update: device.auto_update,
+        lastConnectedAt: device.last_connected_at,
+        last_connected_at: device.last_connected_at,
+        createdAt: device.create_date,
+        created_at: device.create_date,
+        updatedAt: device.update_date,
+        updated_at: device.update_date,
+    };
+};
 
 // All mobile routes require a valid Firebase ID token
 router.use(requireFirebaseAuth);
@@ -93,7 +104,7 @@ router.get('/user-state', asyncHandler(async (req, res) => {
 }));
 
 router.get('/homepage-activity', asyncHandler(async (req, res) => {
-    const activity = await mobileService.getHomepageActivity(req.firebaseUser.uid);
+    const activity = await mobileService.getHomepageActivity(req.firebaseUser.uid, req.query);
     success(res, activity);
 }));
 

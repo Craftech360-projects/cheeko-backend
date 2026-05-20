@@ -1337,18 +1337,39 @@ async function getHomepageActivity(firebaseUid, options = {}) {
 
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id },
-        select: { mac_address: true },
+        select: { id: true, mac_address: true },
     });
-    const macAddresses = (devices || [])
+    const ownedDevices = devices || [];
+    const ownedMacAddresses = ownedDevices
         .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
         .filter(Boolean);
-    const ownershipFilters = [
-        { user_id: user.id },
-    ];
+    const requestedDeviceId = options.deviceId || options.device_id;
+    const hasRequestedMac = Boolean(options.mac || options.mac_address || options.macAddress);
+    const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
+    let macAddresses = ownedMacAddresses;
+    let restrictToSelectedDevice = false;
+
+    if (requestedDeviceId) {
+        const selectedDevice = ownedDevices.find(device => String(device.id) === String(requestedDeviceId));
+        if (!selectedDevice) throw new ApiError('Device not found', 404, 404);
+        const selectedMac = normalizeMacAddress(selectedDevice.mac_address) || selectedDevice.mac_address;
+        macAddresses = selectedMac ? [selectedMac] : [];
+        restrictToSelectedDevice = true;
+    } else if (hasRequestedMac) {
+        if (!requestedMac || !ownedMacAddresses.includes(requestedMac)) {
+            throw new ApiError('Device not found', 404, 404);
+        }
+        macAddresses = [requestedMac];
+        restrictToSelectedDevice = true;
+    }
+
+    const ownershipFilters = restrictToSelectedDevice ? [] : [{ user_id: user.id }];
     if (macAddresses.length > 0) {
         ownershipFilters.push({ mac_address: { in: macAddresses } });
     }
-    const ownedWhere = { OR: ownershipFilters };
+    const ownedWhere = ownershipFilters.length > 0
+        ? { OR: ownershipFilters }
+        : { mac_address: { in: [] } };
     const { start, end } = getDayRange(options.now || new Date());
 
     const todayToyAnalyticsPromise = macAddresses.length > 0
@@ -1531,9 +1552,16 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
     const ownedMacAddresses = (devices || [])
         .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
         .filter(Boolean);
+    const requestedDeviceId = options.deviceId || options.device_id;
+    const hasRequestedMac = Boolean(options.mac || options.mac_address || options.macAddress);
     const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
     let macAddresses = ownedMacAddresses;
-    if (options.mac || options.mac_address || options.macAddress) {
+    if (requestedDeviceId) {
+        const selectedDevice = (devices || []).find(device => String(device.id) === String(requestedDeviceId));
+        if (!selectedDevice) throw new ApiError('Device not found', 404, 404);
+        const selectedMac = normalizeMacAddress(selectedDevice.mac_address) || selectedDevice.mac_address;
+        macAddresses = selectedMac ? [selectedMac] : [];
+    } else if (hasRequestedMac) {
         if (!requestedMac || !ownedMacAddresses.includes(requestedMac)) {
             throw new ApiError('Device not found', 404, 404);
         }
