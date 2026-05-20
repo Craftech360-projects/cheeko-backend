@@ -1,4 +1,4 @@
-/**
+﻿/**
  * MQTT Gateway
  *
  * Main orchestrator class that manages all device connections.
@@ -30,7 +30,7 @@ const logger = require("../utils/logger");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-xai",
+  "Cheeko": "cheeko-agent",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -111,14 +111,14 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
   try {
     const trimmedUid = (rfidUid || "").trim();
     if (!trimmedUid) {
-      logger.warn(`⚠️ [RFID-LOOKUP] Empty rfidUid provided`);
+      logger.warn(`âš ï¸ [RFID-LOOKUP] Empty rfidUid provided`);
       return null;
     }
 
     const baseUrl = process.env.MANAGER_API_URL || "";
     if (!baseUrl) {
       logger.warn(
-        `⚠️ [RFID-LOOKUP] MANAGER_API_URL not set, cannot look up RFID content for UID ${trimmedUid}`
+        `âš ï¸ [RFID-LOOKUP] MANAGER_API_URL not set, cannot look up RFID content for UID ${trimmedUid}`
       );
       return null;
     }
@@ -130,7 +130,7 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     )}`;
 
     logger.info(
-      `🔍 [RFID-LOOKUP] Looking up content for RFID UID ${trimmedUid}, sequence=${sequence} via ${apiUrl}`
+      `ðŸ” [RFID-LOOKUP] Looking up content for RFID UID ${trimmedUid}, sequence=${sequence} via ${apiUrl}`
     );
 
     const response = await axios.get(apiUrl, { timeout: 5000 });
@@ -138,7 +138,7 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
 
     if (!body || body.code !== 0 || !body.data) {
       logger.warn(
-        `⚠️ [RFID-LOOKUP] Lookup failed for UID ${trimmedUid}: code=${body && body.code
+        `âš ï¸ [RFID-LOOKUP] Lookup failed for UID ${trimmedUid}: code=${body && body.code
         }, msg=${body && body.msg}`
       );
       return null;
@@ -157,13 +157,13 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     if (!hasContent) {
       if (contentType === "read_only" && !contentText) {
         logger.warn(
-          `⚠️ [RFID-LOOKUP] read_only mode but no contentText for UID ${trimmedUid}, sequence=${sequence}`
+          `âš ï¸ [RFID-LOOKUP] read_only mode but no contentText for UID ${trimmedUid}, sequence=${sequence}`
         );
         return null;
       }
       if (contentType === "prompt" && !promptText) {
         logger.warn(
-          `⚠️ [RFID-LOOKUP] prompt mode but no promptText for UID ${trimmedUid}`
+          `âš ï¸ [RFID-LOOKUP] prompt mode but no promptText for UID ${trimmedUid}`
         );
         return null;
       }
@@ -172,7 +172,7 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     const itemCount = hasPack ? data.items.length : (hasStories ? data.stories.length + ' stories' : 0);
     const displayText = contentType === "read_only" ? contentText : (promptText || title);
     logger.info(
-      `✅ [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", items=${itemCount}, text="${displayText.slice(
+      `âœ… [RFID-LOOKUP] Resolved UID ${trimmedUid} (seq=${sequence}) -> contentType=${contentType}, title="${title}", items=${itemCount}, text="${displayText.slice(
         0,
         80
       )}${displayText.length > 80 ? "..." : ""}"`
@@ -194,7 +194,7 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
     };
   } catch (error) {
     logger.error(
-      `❌ [RFID-LOOKUP] Error looking up RFID UID ${rfidUid}: ${error.message}`
+      `âŒ [RFID-LOOKUP] Error looking up RFID UID ${rfidUid}: ${error.message}`
     );
     return null;
   }
@@ -214,14 +214,14 @@ async function fetchContentDownloadManifest(rfidUid) {
   try {
     const trimmedUid = (rfidUid || "").trim();
     if (!trimmedUid) {
-      logger.warn(`⚠️ [CONTENT-DOWNLOAD] Empty rfidUid provided`);
+      logger.warn(`âš ï¸ [CONTENT-DOWNLOAD] Empty rfidUid provided`);
       return null;
     }
 
     const baseUrl = process.env.MANAGER_API_URL || "";
     if (!baseUrl) {
       logger.warn(
-        `⚠️ [CONTENT-DOWNLOAD] MANAGER_API_URL not set, cannot fetch content manifest for UID ${trimmedUid}`
+        `âš ï¸ [CONTENT-DOWNLOAD] MANAGER_API_URL not set, cannot fetch content manifest for UID ${trimmedUid}`
       );
       return null;
     }
@@ -231,7 +231,7 @@ async function fetchContentDownloadManifest(rfidUid) {
     )}`;
 
     logger.info(
-      `🔍 [CONTENT-DOWNLOAD] Fetching content manifest for RFID UID ${trimmedUid} via ${apiUrl}`
+      `ðŸ” [CONTENT-DOWNLOAD] Fetching content manifest for RFID UID ${trimmedUid} via ${apiUrl}`
     );
 
     const response = await axios.get(apiUrl, { timeout: 10000 });
@@ -239,26 +239,26 @@ async function fetchContentDownloadManifest(rfidUid) {
 
     if (!body || body.code !== 0) {
       logger.warn(
-        `⚠️ [CONTENT-DOWNLOAD] Fetch failed for UID ${trimmedUid}: code=${body && body.code}, msg=${body && body.msg}`
+        `âš ï¸ [CONTENT-DOWNLOAD] Fetch failed for UID ${trimmedUid}: code=${body && body.code}, msg=${body && body.msg}`
       );
       return null;
     }
 
     // data can be null if no content pack is linked to this card
     if (!body.data) {
-      logger.info(`📦 [CONTENT-DOWNLOAD] No content linked to RFID UID ${trimmedUid}`);
+      logger.info(`ðŸ“¦ [CONTENT-DOWNLOAD] No content linked to RFID UID ${trimmedUid}`);
       return null;
     }
 
     const manifest = body.data;
     logger.info(
-      `✅ [CONTENT-DOWNLOAD] Got manifest for UID ${trimmedUid} -> type=${manifest.contentType}, pack=${manifest.packCode}, version=${manifest.version}, items=${manifest.totalItems}`
+      `âœ… [CONTENT-DOWNLOAD] Got manifest for UID ${trimmedUid} -> type=${manifest.contentType}, pack=${manifest.packCode}, version=${manifest.version}, items=${manifest.totalItems}`
     );
 
     return manifest;
   } catch (error) {
     logger.error(
-      `❌ [CONTENT-DOWNLOAD] Error fetching content manifest for RFID UID ${rfidUid}: ${error.message}`
+      `âŒ [CONTENT-DOWNLOAD] Error fetching content manifest for RFID UID ${rfidUid}: ${error.message}`
     );
     return null;
   }
@@ -324,7 +324,7 @@ class MQTTGateway {
         this.agentDispatchClient = null;
         this.roomService = null;
         logger.warn(
-          "⚠️ [INIT] LiveKit credentials incomplete, clients not initialized"
+          "âš ï¸ [INIT] LiveKit credentials incomplete, clients not initialized"
         );
       } else {
         // Initialize LiveKit clients with valid credentials
@@ -338,11 +338,11 @@ class MQTTGateway {
           livekitConfig.api_key,
           livekitConfig.api_secret
         );
-        logger.info("✅ [INIT] LiveKit clients initialized successfully");
+        logger.info("âœ… [INIT] LiveKit clients initialized successfully");
       }
     } catch (error) {
       logger.error(
-        "❌ [INIT] Failed to initialize LiveKit clients:",
+        "âŒ [INIT] Failed to initialize LiveKit clients:",
         error.message
       );
       this.roomService = null;
@@ -393,12 +393,12 @@ class MQTTGateway {
     // Clear existing timer
     this.clearGhostCleanupTimer();
 
-    logger.info(`🧹 [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
+    logger.info(`ðŸ§¹ [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
 
     // Run cleanup immediately on startup (after 30 seconds to let things stabilize)
     setTimeout(() => {
       this.cleanupGhostRoomsAndSessions().catch(err => {
-        logger.error(`❌ [GHOST-CLEANUP] Initial cleanup failed:`, err.message);
+        logger.error(`âŒ [GHOST-CLEANUP] Initial cleanup failed:`, err.message);
       });
     }, 30000);
 
@@ -407,7 +407,7 @@ class MQTTGateway {
       try {
         await this.cleanupGhostRoomsAndSessions();
       } catch (error) {
-        logger.error(`❌ [GHOST-CLEANUP] Cleanup cycle failed:`, error.message);
+        logger.error(`âŒ [GHOST-CLEANUP] Cleanup cycle failed:`, error.message);
       }
     }, this.ghostCleanupInterval);
   }
@@ -436,13 +436,13 @@ class MQTTGateway {
     let sessionsCleaned = 0;
     let connectionsCleaned = 0;
 
-    logger.info(`🧹 [GHOST-CLEANUP] Starting cleanup cycle...`);
+    logger.info(`ðŸ§¹ [GHOST-CLEANUP] Starting cleanup cycle...`);
 
     // 1. Clean up ghost LiveKit rooms
     if (this.roomService) {
       try {
         const rooms = await this.roomService.listRooms();
-        logger.info(`🧹 [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
+        logger.info(`ðŸ§¹ [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
 
         for (const room of rooms) {
           try {
@@ -458,7 +458,7 @@ class MQTTGateway {
               participants = await this.roomService.listParticipants(roomName);
             } catch (err) {
               // Room might have been deleted already
-              logger.warn(`⚠️ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
+              logger.warn(`âš ï¸ [GHOST-CLEANUP] Could not list participants for ${roomName}: ${err.message}`);
             }
 
             // Check if room should be cleaned up
@@ -479,7 +479,7 @@ class MQTTGateway {
 
             if (shouldCleanup) {
               const reason = isEmpty ? 'empty' : hasOnlyAgents ? 'only-agents' : 'too-old';
-              logger.info(`🗑️ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
+              logger.info(`ðŸ—‘ï¸ [GHOST-CLEANUP] Deleting ${reason} room: ${roomName} (age: ${roomAgeMinutes}min, participants: ${numParticipants})`);
 
               // Stop any media bots first
               if (roomName.includes('_music') || roomName.includes('_story')) {
@@ -492,14 +492,14 @@ class MQTTGateway {
 
               await this.roomService.deleteRoom(roomName);
               roomsCleaned++;
-              logger.info(`✅ [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
+              logger.info(`âœ… [GHOST-CLEANUP] Deleted ghost room: ${roomName}`);
             }
           } catch (roomError) {
-            logger.warn(`⚠️ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
+            logger.warn(`âš ï¸ [GHOST-CLEANUP] Error processing room ${room.name}: ${roomError.message}`);
           }
         }
       } catch (error) {
-        logger.error(`❌ [GHOST-CLEANUP] Failed to list/cleanup LiveKit rooms:`, error.message);
+        logger.error(`âŒ [GHOST-CLEANUP] Failed to list/cleanup LiveKit rooms:`, error.message);
       }
     }
 
@@ -533,7 +533,7 @@ class MQTTGateway {
     }
 
     for (const deviceId of staleDevices) {
-      logger.info(`🗑️ [GHOST-CLEANUP] Removing stale deviceConnection: ${deviceId}`);
+      logger.info(`ðŸ—‘ï¸ [GHOST-CLEANUP] Removing stale deviceConnection: ${deviceId}`);
       const deviceInfo = this.deviceConnections.get(deviceId);
 
       // Try to close the connection properly first
@@ -573,7 +573,7 @@ class MQTTGateway {
     for (const connectionId of staleConnectionIds) {
       // Don't double-count if already cleaned via deviceConnections
       if (!staleDevices.some(d => this.deviceConnections.get(d)?.connectionId === connectionId)) {
-        logger.info(`🗑️ [GHOST-CLEANUP] Removing stale connection: ${connectionId}`);
+        logger.info(`ðŸ—‘ï¸ [GHOST-CLEANUP] Removing stale connection: ${connectionId}`);
         const connection = this.connections.get(connectionId);
         if (connection && !connection.closing) {
           try {
@@ -599,15 +599,15 @@ class MQTTGateway {
       }
     }
     if (clientConnectionsCleaned > 0) {
-      logger.info(`🗑️ [GHOST-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
+      logger.info(`ðŸ—‘ï¸ [GHOST-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
     }
 
     const duration = Date.now() - startTime;
     const memAfter = process.memoryUsage();
     const heapDiff = (memBefore.heapUsed - memAfter.heapUsed) / 1024 / 1024;
 
-    logger.info(`✅ [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}, ClientConns: ${clientConnectionsCleaned}`);
-    logger.info(`📊 [GHOST-CLEANUP] Memory: Heap ${(memAfter.heapUsed / 1024 / 1024).toFixed(1)}MB, Released: ${heapDiff.toFixed(1)}MB | Active: ${this.connections.size}, Devices: ${this.deviceConnections.size}`);
+    logger.info(`âœ… [GHOST-CLEANUP] Cleanup complete in ${duration}ms - Rooms: ${roomsCleaned}, Sessions: ${sessionsCleaned}, Connections: ${connectionsCleaned}, ClientConns: ${clientConnectionsCleaned}`);
+    logger.info(`ðŸ“Š [GHOST-CLEANUP] Memory: Heap ${(memAfter.heapUsed / 1024 / 1024).toFixed(1)}MB, Released: ${heapDiff.toFixed(1)}MB | Active: ${this.connections.size}, Devices: ${this.deviceConnections.size}`);
   }
 
   connectToEmqxBroker() {
@@ -641,7 +641,7 @@ class MQTTGateway {
     });
 
     this.mqttClient.on("connect", () => {
-      logger.info(`✅ Connected to EMQX broker: ${brokerUrl}`);
+      logger.info(`âœ… Connected to EMQX broker: ${brokerUrl}`);
       // Subscribe to the internal topic where EMQX republishes with client info
       // All device messages (hello, data, etc.) come through this single topic via EMQX republish rule
       this.mqttClient.subscribe(["internal/server-ingest", "devices/+/data"], (err) => {
@@ -650,7 +650,7 @@ class MQTTGateway {
             "Failed to subscribe to MQTT topics:",
             err
           );
-        else logger.info("📡 Subscribed to internal/server-ingest, devices/+/data");
+        else logger.info("ðŸ“¡ Subscribed to internal/server-ingest, devices/+/data");
       });
     });
 
@@ -685,12 +685,12 @@ class MQTTGateway {
       if (topic.startsWith("devices/") && topic.endsWith("/data")) {
         const topicParts = topic.split("/");
         const macAddress = topicParts[1]; // e.g. D0:CF:13:04:15:58
-        logger.info(`📨 [MQTT-IN] ${macAddress}: data (direct topic)`);
+        logger.info(`ðŸ“¨ [MQTT-IN] ${macAddress}: data (direct topic)`);
         const deviceInfo = this.deviceConnections.get(macAddress);
         if (deviceInfo && deviceInfo.connection) {
           deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
         } else {
-          logger.warn(`⚠️ [MQTT-IN] Received data for unknown device: ${macAddress}`);
+          logger.warn(`âš ï¸ [MQTT-IN] Received data for unknown device: ${macAddress}`);
         }
         return;
       }
@@ -714,12 +714,12 @@ class MQTTGateway {
 
         if (!clientId || !originalPayload) {
           logger.error(
-            `❌ [MQTT IN] Invalid republished message format - missing clientId or originalPayload`
+            `âŒ [MQTT IN] Invalid republished message format - missing clientId or originalPayload`
           );
           return;
         }
         if (typeof originalPayload !== "object" || Array.isArray(originalPayload)) {
-          logger.error(`❌ [MQTT IN] Invalid original payload type from ${clientId}`);
+          logger.error(`âŒ [MQTT IN] Invalid original payload type from ${clientId}`);
           return;
         }
 
@@ -735,14 +735,14 @@ class MQTTGateway {
           lastSeen: Date.now(),
         });
 
-        logger.info(`📨 [MQTT-IN] ${deviceId}: ${originalPayload.type}`);
+        logger.info(`ðŸ“¨ [MQTT-IN] ${deviceId}: ${originalPayload.type}`);
 
         // Process the message
         await this.processIngestLogic(deviceId, originalPayload, clientId);
       }
     } catch (error) {
       logger.error(
-        `❌ [MQTT IN] Error processing MQTT message: ${error.message}`,
+        `âŒ [MQTT IN] Error processing MQTT message: ${error.message}`,
         { stack: error.stack }
       );
     }
@@ -789,7 +789,7 @@ class MQTTGateway {
         originalPayload.type === "playback_control" &&
         originalPayload.action === "next"
       ) {
-        // logger.info(`⏭️ [PLAYBACK-CONTROL] Next action received from topic: ${topic}`);
+        // logger.info(`â­ï¸ [PLAYBACK-CONTROL] Next action received from topic: ${topic}`);
         // Topic is not available here easily if we want to be pure, but handleNextControl consumes topic primarily for Mac extraction if clientId is missing.
         // We pass clientId, so topic is ignored for Mac extraction.
         await this.handleNextControl("topic/ignored", clientId);
@@ -815,8 +815,8 @@ class MQTTGateway {
           await this.handleModeChange(deviceId, mode, clientId);
           return;
         } else {
-          // No mode specified - use cycle mode (conversation → music → story → conversation)
-          logger.info(`🔄 [MODE-CHANGE] No mode specified, using cycle mode for ${deviceId}`);
+          // No mode specified - use cycle mode (conversation â†’ music â†’ story â†’ conversation)
+          logger.info(`ðŸ”„ [MODE-CHANGE] No mode specified, using cycle mode for ${deviceId}`);
           await this.handleDeviceModeChange(deviceId, originalPayload);
           return;
         }
@@ -941,7 +941,7 @@ class MQTTGateway {
 
             if (!roomName) {
               logger.error(
-                `❌ [START-GREETING] Cannot dispatch agent - room name not available`
+                `âŒ [START-GREETING] Cannot dispatch agent - room name not available`
               );
               return;
             }
@@ -963,13 +963,13 @@ class MQTTGateway {
             return;
           } else {
             logger.error(
-              `❌ [START-GREETING] No bridge found for device ${deviceId} - room should have been created during hello!`
+              `âŒ [START-GREETING] No bridge found for device ${deviceId} - room should have been created during hello!`
             );
           }
         }
 
         if (!greetingSent) {
-          // logger.info(`⚠️ [START-GREETING] No bridge found or triggered`);
+          // logger.info(`âš ï¸ [START-GREETING] No bridge found or triggered`);
         }
       } else if (
         originalPayload.type === "start_greeting_text" ||
@@ -1072,17 +1072,17 @@ class MQTTGateway {
         const hasItems = rfidContent && Array.isArray(rfidContent.items) && rfidContent.items.length > 0;
         const hasStories = rfidContent && Array.isArray(rfidContent.stories) && rfidContent.stories.length > 0;
 
-        // Branch A: Content Pack — items with audioUrl OR grouped stories => send manifest to device
+        // Branch A: Content Pack â€” items with audioUrl OR grouped stories => send manifest to device
         const isContentPack = hasStories || (hasItems && rfidContent.items.some(item => item.audioUrl));
-        // Branch B: Q&A Pack — items with promptText => send prompt to agent
+        // Branch B: Q&A Pack â€” items with promptText => send prompt to agent
         const isQaPack = hasItems && !isContentPack && rfidContent.items.some(item => item.promptText);
 
-        // ====== BRANCH A: CONTENT PACK — send card_content directly via MQTT (no LiveKit needed) ======
+        // ====== BRANCH A: CONTENT PACK â€” send card_content directly via MQTT (no LiveKit needed) ======
         if (isContentPack) {
-          // Grouped content — stories[] present from API
+          // Grouped content â€” stories[] present from API
           if (hasStories) {
             logger.info(
-              `📦 [RFID-ROUTING] Grouped Content Pack detected (${rfidContent.contentType}, ${rfidContent.stories.length} stories). ` +
+              `ðŸ“¦ [RFID-ROUTING] Grouped Content Pack detected (${rfidContent.contentType}, ${rfidContent.stories.length} stories). ` +
               `Sending card_content with stories[] to device, bypassing Agent.`
             );
 
@@ -1109,7 +1109,7 @@ class MQTTGateway {
             };
 
             logger.info(
-              `📦 [RFID-ROUTING] Sending grouped card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
+              `ðŸ“¦ [RFID-ROUTING] Sending grouped card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
               `stories=${stories.length} to device ${deviceId}`
             );
 
@@ -1117,9 +1117,9 @@ class MQTTGateway {
             return;
           }
 
-          // Flat content — existing behavior
+          // Flat content â€” existing behavior
           logger.info(
-            `📦 [RFID-ROUTING] Flat Content Pack detected (${rfidContent.contentType}, ${rfidContent.items.length} items). ` +
+            `ðŸ“¦ [RFID-ROUTING] Flat Content Pack detected (${rfidContent.contentType}, ${rfidContent.items.length} items). ` +
             `Sending card_content directly to device, bypassing Agent.`
           );
 
@@ -1152,7 +1152,7 @@ class MQTTGateway {
           };
 
           logger.info(
-            `📦 [RFID-ROUTING] Sending card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
+            `ðŸ“¦ [RFID-ROUTING] Sending card_content: skill=${manifest.skill_id}, v=${manifest.version}, ` +
             `audio=${audio.length}, images=${images.length} to device ${deviceId}`
           );
 
@@ -1160,7 +1160,7 @@ class MQTTGateway {
           return;
         }
 
-        // ====== BRANCH C: AI PROMPT CARD — send prompt text directly via MQTT (no LiveKit needed) ======
+        // ====== BRANCH C: AI PROMPT CARD â€” send prompt text directly via MQTT (no LiveKit needed) ======
         const isAiPromptCard = !hasItems && rfidContent.contentType === "prompt";
         if (isAiPromptCard) {
           const deviceInfo = this.deviceConnections.get(deviceId);
@@ -1175,24 +1175,24 @@ class MQTTGateway {
               : null;
 
             if (targetCharacter && targetCharacter !== currentCharacter) {
-              // Card maps to a different agent — trigger character switch
+              // Card maps to a different agent â€” trigger character switch
               logger.info(
-                `🎴 [RFID-ROUTING] AI card wants agent "${targetCharacter}" but current is "${currentCharacter}" — switching`
+                `ðŸŽ´ [RFID-ROUTING] AI card wants agent "${targetCharacter}" but current is "${currentCharacter}" â€” switching`
               );
               await this.handleDeviceCharacterChange(deviceId, { characterName: targetCharacter });
               return;
             }
 
-            // Same agent or no agent mapped — route prompt to current agent
+            // Same agent or no agent mapped â€” route prompt to current agent
             logger.info(
-              `🤖 [RFID-ROUTING] AI Prompt card with active connection, routing to agent for device ${deviceId}`
+              `ðŸ¤– [RFID-ROUTING] AI Prompt card with active connection, routing to agent for device ${deviceId}`
             );
           } else {
-            // No active connection — send card_ai to set device into conversation mode
+            // No active connection â€” send card_ai to set device into conversation mode
             // Include agent_name so firmware can pass it back during session creation
             const cardAgentName = rfidContent.agentName || null;
             logger.info(
-              `🤖 [RFID-ROUTING] AI Prompt card (no active connection). Sending card_ai to device ${deviceId}, agent=${cardAgentName || 'default'}`
+              `ðŸ¤– [RFID-ROUTING] AI Prompt card (no active connection). Sending card_ai to device ${deviceId}, agent=${cardAgentName || 'default'}`
             );
 
             this.mqttPublish(`devices/p2p/${clientId}`, {
@@ -1204,7 +1204,7 @@ class MQTTGateway {
           }
         }
 
-        // ====== BRANCH B: Q&A — requires LiveKit connection ======
+        // ====== BRANCH B: Q&A â€” requires LiveKit connection ======
         const deviceInfo = this.deviceConnections.get(deviceId);
         if (!deviceInfo || !deviceInfo.connection || !deviceInfo.connection.bridge) {
           logger.warn(`[RFID-SCAN] No active connection for device ${deviceId}`);
@@ -1260,7 +1260,7 @@ class MQTTGateway {
             userTextMsg.sequence = sequence;
           }
 
-          // ====== Q&A PACK or SINGLE PROMPT — route to LiveKit Agent ======
+          // ====== Q&A PACK or SINGLE PROMPT â€” route to LiveKit Agent ======
           let selectedItem = null;
           if (isQaPack) {
             // Q&A Pack: find the specific question by sequence
@@ -1270,7 +1270,7 @@ class MQTTGateway {
             );
             if (!selectedItem) {
               logger.warn(
-                `⚠️ [RFID-ROUTING] Q&A Pack sequence ${targetSeq} not found in ${rfidContent.items.length} items. Falling back to first.`
+                `âš ï¸ [RFID-ROUTING] Q&A Pack sequence ${targetSeq} not found in ${rfidContent.items.length} items. Falling back to first.`
               );
               selectedItem = rfidContent.items[0];
             }
@@ -1351,7 +1351,7 @@ class MQTTGateway {
       }
     } catch (error) {
       logger.error(
-        `❌ [MQTT IN] Error in processIngestLogic: ${error.message}`,
+        `âŒ [MQTT IN] Error in processIngestLogic: ${error.message}`,
         { stack: error.stack }
       );
     }
@@ -1366,7 +1366,7 @@ class MQTTGateway {
   async checkAgentInRoom(roomName) {
     try {
       if (!this.roomService) {
-        // logger.warn(`⚠️ [AGENT-CHECK] RoomService not available, cannot check participants`);
+        // logger.warn(`âš ï¸ [AGENT-CHECK] RoomService not available, cannot check participants`);
         return { exists: false, identity: null };
       }
 
@@ -1381,7 +1381,7 @@ class MQTTGateway {
           (participant.identity.toLowerCase().includes("agent") ||
             participant.identity === "cheeko-xai")
         ) {
-          // logger.info(`✅ [AGENT-CHECK] Found existing agent: ${participant.identity}`);
+          // logger.info(`âœ… [AGENT-CHECK] Found existing agent: ${participant.identity}`);
           return { exists: true, identity: participant.identity };
         }
       }
@@ -1389,7 +1389,7 @@ class MQTTGateway {
       return { exists: false, identity: null };
     } catch (error) {
       logger.error(
-        `❌ [AGENT-CHECK] Error checking room participants:`,
+        `âŒ [AGENT-CHECK] Error checking room participants:`,
         error.message
       );
       // On error, return false to allow dispatch attempt (fail-safe)
@@ -1508,19 +1508,19 @@ class MQTTGateway {
 
     this.mqttClient.subscribe(nextTopic, (err) => {
       if (err) {
-        logger.error(`❌ [CONTROL] Failed to subscribe to ${nextTopic}:`, err);
+        logger.error(`âŒ [CONTROL] Failed to subscribe to ${nextTopic}:`, err);
       }
-      // else logger.info(`✅ [CONTROL] Subscribed to: ${nextTopic}`);
+      // else logger.info(`âœ… [CONTROL] Subscribed to: ${nextTopic}`);
     });
 
     this.mqttClient.subscribe(previousTopic, (err) => {
       if (err) {
         logger.error(
-          `❌ [CONTROL] Failed to subscribe to ${previousTopic}:`,
+          `âŒ [CONTROL] Failed to subscribe to ${previousTopic}:`,
           err
         );
       }
-      // else logger.info(`✅ [CONTROL] Subscribed to: ${previousTopic}`);
+      // else logger.info(`âœ… [CONTROL] Subscribed to: ${previousTopic}`);
     });
   }
 
@@ -1539,12 +1539,12 @@ class MQTTGateway {
       macAddress = topicParts[1];
     }
 
-    logger.info(`⏭️ [CONTROL] Next requested for device: ${macAddress}`);
+    logger.info(`â­ï¸ [CONTROL] Next requested for device: ${macAddress}`);
 
     // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
     if (!deviceInfo) {
-      logger.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
+      logger.warn(`âš ï¸ [CONTROL] Device not found: ${macAddress}`);
       return;
     }
 
@@ -1553,7 +1553,7 @@ class MQTTGateway {
 
     if (!roomName || !mode) {
       logger.warn(
-        `⚠️ [CONTROL] No active room or mode for device: ${macAddress}`
+        `âš ï¸ [CONTROL] No active room or mode for device: ${macAddress}`
       );
       return;
     }
@@ -1563,7 +1563,7 @@ class MQTTGateway {
         // Send data channel message to LiveKit agent
         const room = deviceInfo.connection?.bridge?.room;
         if (!room) {
-          logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
+          logger.error(`âŒ [CONTROL] No room available for ${macAddress}`);
           return;
         }
 
@@ -1589,7 +1589,7 @@ class MQTTGateway {
         );
         const label = mode === "music" ? "song" : "story";
         logger.info(
-          `✅ [CONTROL] Sent 'next' command via data channel to ${roomName}`
+          `âœ… [CONTROL] Sent 'next' command via data channel to ${roomName}`
         );
 
         // Send TTS start message
@@ -1606,12 +1606,12 @@ class MQTTGateway {
       } else {
         // Other modes not supported
         logger.warn(
-          `⚠️ [CONTROL] Next/Previous not supported for mode: ${mode}`
+          `âš ï¸ [CONTROL] Next/Previous not supported for mode: ${mode}`
         );
         return;
       }
     } catch (error) {
-      logger.error(`❌ [CONTROL] Failed to skip to next:`, error.message);
+      logger.error(`âŒ [CONTROL] Failed to skip to next:`, error.message);
 
       // Send error notification to device if possible
       if (clientId) {
@@ -1642,12 +1642,12 @@ class MQTTGateway {
       macAddress = topicParts[1];
     }
 
-    logger.info(`⏮️ [CONTROL] Previous requested for device: ${macAddress}`);
+    logger.info(`â®ï¸ [CONTROL] Previous requested for device: ${macAddress}`);
 
     // Find device info
     const deviceInfo = this.deviceConnections.get(macAddress);
     if (!deviceInfo) {
-      logger.warn(`⚠️ [CONTROL] Device not found: ${macAddress}`);
+      logger.warn(`âš ï¸ [CONTROL] Device not found: ${macAddress}`);
       return;
     }
 
@@ -1656,7 +1656,7 @@ class MQTTGateway {
 
     if (!roomName || !mode) {
       logger.warn(
-        `⚠️ [CONTROL] No active room or mode for device: ${macAddress}`
+        `âš ï¸ [CONTROL] No active room or mode for device: ${macAddress}`
       );
       return;
     }
@@ -1666,7 +1666,7 @@ class MQTTGateway {
         // Send data channel message to LiveKit agent
         const room = deviceInfo.connection?.bridge?.room;
         if (!room) {
-          logger.error(`❌ [CONTROL] No room available for ${macAddress}`);
+          logger.error(`âŒ [CONTROL] No room available for ${macAddress}`);
           return;
         }
 
@@ -1692,7 +1692,7 @@ class MQTTGateway {
         );
         const label = mode === "music" ? "song" : "story";
         logger.info(
-          `✅ [CONTROL] Sent 'previous' command via data channel to ${roomName}`
+          `âœ… [CONTROL] Sent 'previous' command via data channel to ${roomName}`
         );
 
         // Send TTS start message
@@ -1708,11 +1708,11 @@ class MQTTGateway {
         }
       } else {
         // Other modes not supported
-        logger.warn(`⚠️ [CONTROL] Previous not supported for mode: ${mode}`);
+        logger.warn(`âš ï¸ [CONTROL] Previous not supported for mode: ${mode}`);
         return;
       }
     } catch (error) {
-      logger.error(`❌ [CONTROL] Failed to skip to previous:`, error.message);
+      logger.error(`âŒ [CONTROL] Failed to skip to previous:`, error.message);
 
       // Send error notification to device if possible
       if (clientId) {
@@ -1740,7 +1740,7 @@ class MQTTGateway {
     const rfidUid = payload.rfid_uid;
     const currentVersion = payload.current_version || payload.version;
 
-    logger.info(`📥 [CONTENT-DOWNLOAD] Device ${deviceId} requesting content for RFID: ${rfidUid}`);
+    logger.info(`ðŸ“¥ [CONTENT-DOWNLOAD] Device ${deviceId} requesting content for RFID: ${rfidUid}`);
 
     try {
       // Fetch unified content manifest (works for habits, rhymes, stories, etc.)
@@ -1748,7 +1748,7 @@ class MQTTGateway {
 
       if (!manifest) {
         // No content linked to this card
-        logger.info(`📦 [CONTENT-DOWNLOAD] No content linked to RFID UID ${rfidUid}`);
+        logger.info(`ðŸ“¦ [CONTENT-DOWNLOAD] No content linked to RFID UID ${rfidUid}`);
         this.mqttPublish(`devices/p2p/${clientId}`, {
           type: "download_response",
           status: "not_found",
@@ -1759,11 +1759,11 @@ class MQTTGateway {
       }
 
       const contentType = manifest.contentType || "unknown";
-      logger.info(`📦 [CONTENT-DOWNLOAD] RFID ${rfidUid} is a ${contentType.toUpperCase()} card`);
+      logger.info(`ðŸ“¦ [CONTENT-DOWNLOAD] RFID ${rfidUid} is a ${contentType.toUpperCase()} card`);
 
       // Check if device already has this version
       if (currentVersion && manifest.version && currentVersion === manifest.version) {
-        logger.info(`✅ [CONTENT-DOWNLOAD] Device already has version ${currentVersion}`);
+        logger.info(`âœ… [CONTENT-DOWNLOAD] Device already has version ${currentVersion}`);
         this.mqttPublish(`devices/p2p/${clientId}`, {
           type: "download_response",
           status: "up_to_date",
@@ -1776,7 +1776,7 @@ class MQTTGateway {
 
       // Check if grouped content (stories[] present)
       if (Array.isArray(manifest.stories) && manifest.stories.length > 0) {
-        // Grouped download — build per-story file maps
+        // Grouped download â€” build per-story file maps
         const stories = manifest.stories.map(story => {
           const storyFiles = {};
           for (const item of story.items || []) {
@@ -1796,7 +1796,7 @@ class MQTTGateway {
         });
 
         const totalFiles = stories.reduce((sum, s) => sum + Object.keys(s.files).length, 0);
-        logger.info(`📦 [CONTENT-DOWNLOAD] Sending grouped ${contentType} download links for ${manifest.packCode} v${manifest.version} (${stories.length} stories, ${totalFiles} files)`);
+        logger.info(`ðŸ“¦ [CONTENT-DOWNLOAD] Sending grouped ${contentType} download links for ${manifest.packCode} v${manifest.version} (${stories.length} stories, ${totalFiles} files)`);
         this.mqttPublish(`devices/p2p/${clientId}`, {
           type: "download_response",
           status: "download_required",
@@ -1808,7 +1808,7 @@ class MQTTGateway {
           stories: stories
         });
       } else {
-        // Flat download — existing behavior
+        // Flat download â€” existing behavior
         const files = {};
         for (const item of manifest.items || []) {
           const itemNum = item.itemNumber;
@@ -1825,7 +1825,7 @@ class MQTTGateway {
         }
 
         // Send unified download response with content_type
-        logger.info(`📦 [CONTENT-DOWNLOAD] Sending ${contentType} download links for ${manifest.packCode} v${manifest.version} (${Object.keys(files).length} files)`);
+        logger.info(`ðŸ“¦ [CONTENT-DOWNLOAD] Sending ${contentType} download links for ${manifest.packCode} v${manifest.version} (${Object.keys(files).length} files)`);
         this.mqttPublish(`devices/p2p/${clientId}`, {
           type: "download_response",
           status: "download_required",
@@ -1839,7 +1839,7 @@ class MQTTGateway {
       }
 
     } catch (error) {
-      logger.error(`❌ [CONTENT-DOWNLOAD] Error handling request: ${error.message}`);
+      logger.error(`âŒ [CONTENT-DOWNLOAD] Error handling request: ${error.message}`);
       this.mqttPublish(`devices/p2p/${clientId}`, {
         type: "download_response",
         status: "error",
@@ -1860,37 +1860,37 @@ class MQTTGateway {
     const validModes = ["conversation", "music", "story"];
 
     if (!validModes.includes(mode)) {
-      logger.warn(`⚠️ [MODE-CHANGE] Invalid mode: ${mode}, valid modes: ${validModes.join(", ")}`);
+      logger.warn(`âš ï¸ [MODE-CHANGE] Invalid mode: ${mode}, valid modes: ${validModes.join(", ")}`);
       return;
     }
 
-    logger.info(`🔄 [MODE-CHANGE] Device ${deviceId} requesting mode: ${mode}`);
+    logger.info(`ðŸ”„ [MODE-CHANGE] Device ${deviceId} requesting mode: ${mode}`);
 
     try {
       const deviceInfo = this.deviceConnections.get(deviceId);
       if (!deviceInfo) {
-        logger.warn(`⚠️ [MODE-CHANGE] Device not found: ${deviceId}`);
+        logger.warn(`âš ï¸ [MODE-CHANGE] Device not found: ${deviceId}`);
         return;
       }
 
       const connection = deviceInfo.connection;
       if (!connection) {
-        logger.warn(`⚠️ [MODE-CHANGE] No connection for device: ${deviceId}`);
+        logger.warn(`âš ï¸ [MODE-CHANGE] No connection for device: ${deviceId}`);
         return;
       }
 
       // Check if already in the same mode
       if (connection.roomType === mode) {
-        logger.info(`ℹ️ [MODE-CHANGE] Device ${deviceId} already in ${mode} mode, skipping`);
+        logger.info(`â„¹ï¸ [MODE-CHANGE] Device ${deviceId} already in ${mode} mode, skipping`);
         return;
       }
 
       const previousMode = connection.roomType || null;
-      logger.info(`🔄 [MODE-CHANGE] Switching from ${previousMode} to ${mode}`);
+      logger.info(`ðŸ”„ [MODE-CHANGE] Switching from ${previousMode} to ${mode}`);
 
       // Step 1: Cleanup old room/agent if exists
       if (connection.bridge) {
-        logger.info(`🧹 [MODE-CHANGE] Cleaning up previous ${previousMode} session`);
+        logger.info(`ðŸ§¹ [MODE-CHANGE] Cleaning up previous ${previousMode} session`);
         await this.performRobustAgentCleanup(connection, 'mode_change');
       }
 
@@ -1898,7 +1898,7 @@ class MQTTGateway {
       const newSessionUuid = require("crypto").randomUUID();
       const macForRoom = deviceId.replace(/:/g, "");
       const newRoomName = `${newSessionUuid}_${macForRoom}_${mode}`;
-      logger.info(`🏠 [MODE-CHANGE] New room: ${newRoomName}`);
+      logger.info(`ðŸ  [MODE-CHANGE] New room: ${newRoomName}`);
 
       // Step 3: Update connection state
       connection.roomType = mode;
@@ -1919,9 +1919,9 @@ class MQTTGateway {
       try {
         await newBridge.connect();
         connection.bridge = newBridge;
-        logger.info(`✅ [MODE-CHANGE] Bridge connected to room: ${newRoomName}`);
+        logger.info(`âœ… [MODE-CHANGE] Bridge connected to room: ${newRoomName}`);
       } catch (bridgeError) {
-        logger.error(`❌ [MODE-CHANGE] Failed to connect bridge: ${bridgeError.message}`);
+        logger.error(`âŒ [MODE-CHANGE] Failed to connect bridge: ${bridgeError.message}`);
         return;
       }
 
@@ -1952,11 +1952,11 @@ class MQTTGateway {
                 childProfile = profileResponse.data.data;
               }
             } catch (fetchError) {
-              logger.warn(`⚠️ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
+              logger.warn(`âš ï¸ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
             }
 
             const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
-            logger.info(`🚀 [MODE-CHANGE] Dispatching: ${characterName} → ${agentName}`);
+            logger.info(`ðŸš€ [MODE-CHANGE] Dispatching: ${characterName} â†’ ${agentName}`);
 
             newBridge.agentDeployed = true;
 
@@ -1972,13 +1972,13 @@ class MQTTGateway {
             });
 
             connection.currentCharacter = characterName;
-            logger.info(`✅ [MODE-CHANGE] Agent ${agentName} dispatched to ${newRoomName}`);
+            logger.info(`âœ… [MODE-CHANGE] Agent ${agentName} dispatched to ${newRoomName}`);
           } catch (dispatchError) {
             newBridge.agentDeployed = false;
-            logger.error(`❌ [MODE-CHANGE] Failed to dispatch agent: ${dispatchError.message}`);
+            logger.error(`âŒ [MODE-CHANGE] Failed to dispatch agent: ${dispatchError.message}`);
           }
         } else {
-          logger.error(`❌ [MODE-CHANGE] AgentDispatchClient not initialized`);
+          logger.error(`âŒ [MODE-CHANGE] AgentDispatchClient not initialized`);
         }
       } else if (mode === "music") {
         // Start music bot - must call /start-music-bot to create bot first
@@ -1996,10 +1996,10 @@ class MQTTGateway {
             mediaAxiosConfig({ timeout: 10000 })
           );
           if (response.data?.status === "started" || response.data?.status === "already_active") {
-            logger.info(`✅ [MODE-CHANGE] Music bot started for ${newRoomName}`);
+            logger.info(`âœ… [MODE-CHANGE] Music bot started for ${newRoomName}`);
           }
         } catch (error) {
-          logger.error(`❌ [MODE-CHANGE] Failed to start music bot: ${error.message}`);
+          logger.error(`âŒ [MODE-CHANGE] Failed to start music bot: ${error.message}`);
         }
       } else if (mode === "story") {
         // Start story bot - must call /start-story-bot to create bot first
@@ -2017,10 +2017,10 @@ class MQTTGateway {
             mediaAxiosConfig({ timeout: 10000 })
           );
           if (response.data?.status === "started" || response.data?.status === "already_active") {
-            logger.info(`✅ [MODE-CHANGE] Story bot started for ${newRoomName}`);
+            logger.info(`âœ… [MODE-CHANGE] Story bot started for ${newRoomName}`);
           }
         } catch (error) {
-          logger.error(`❌ [MODE-CHANGE] Failed to start story bot: ${error.message}`);
+          logger.error(`âŒ [MODE-CHANGE] Failed to start story bot: ${error.message}`);
         }
       }
 
@@ -2036,13 +2036,13 @@ class MQTTGateway {
 
         const responseTopic = `devices/p2p/${clientId}`;
         this.mqttPublish(responseTopic, modeUpdateMsg);
-        logger.info(`📤 [MODE-CHANGE] Sent mode_update to device: ${mode}`);
+        logger.info(`ðŸ“¤ [MODE-CHANGE] Sent mode_update to device: ${mode}`);
       }
 
-      logger.info(`✅ [MODE-CHANGE] Successfully switched device ${deviceId} to ${mode} mode`);
+      logger.info(`âœ… [MODE-CHANGE] Successfully switched device ${deviceId} to ${mode} mode`);
 
     } catch (error) {
-      logger.error(`❌ [MODE-CHANGE] Error: ${error.message}`, { stack: error.stack });
+      logger.error(`âŒ [MODE-CHANGE] Error: ${error.message}`, { stack: error.stack });
     }
   }
 
@@ -2050,24 +2050,24 @@ class MQTTGateway {
     try {
       const sessionId = payload.session_id;
       if (!sessionId) {
-        logger.warn(`⚠️ [START-AGENT] No session_id in payload`);
+        logger.warn(`âš ï¸ [START-AGENT] No session_id in payload`);
         return;
       }
 
       const parts = sessionId.split("_");
       if (parts.length < 3) {
-        logger.warn(`⚠️ [START-AGENT] Invalid session_id format: ${sessionId}`);
+        logger.warn(`âš ï¸ [START-AGENT] Invalid session_id format: ${sessionId}`);
         return;
       }
 
       const roomType = parts[parts.length - 1];
       const roomName = sessionId;
 
-      // logger.info(`▶️ [START-AGENT] Processing start_agent for mode: ${roomType}`);
+      // logger.info(`â–¶ï¸ [START-AGENT] Processing start_agent for mode: ${roomType}`);
 
       const deviceInfo = this.deviceConnections.get(deviceId);
       if (!deviceInfo) {
-        logger.warn(`⚠️ [START-AGENT] Device not found: ${deviceId}`);
+        logger.warn(`âš ï¸ [START-AGENT] Device not found: ${deviceId}`);
         return;
       }
 
@@ -2103,7 +2103,7 @@ class MQTTGateway {
           }
         } catch (error) {
           logger.error(
-            `❌ [START-AGENT] Failed to start music bot:`,
+            `âŒ [START-AGENT] Failed to start music bot:`,
             error.message
           );
         }
@@ -2131,7 +2131,7 @@ class MQTTGateway {
           }
         } catch (error) {
           logger.error(
-            `❌ [START-AGENT] Failed to start story bot:`,
+            `âŒ [START-AGENT] Failed to start story bot:`,
             error.message
           );
         }
@@ -2175,19 +2175,19 @@ class MQTTGateway {
 
                     if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
                       characterName = charResponse.data.data.characterName;
-                      logger.info(`[START-AGENT] ✅ Character from DB: "${characterName}"`);
+                      logger.info(`[START-AGENT] âœ… Character from DB: "${characterName}"`);
                     }
 
                     if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
                       childProfile = profileResponse.data.data;
-                      logger.info(`[START-AGENT] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+                      logger.info(`[START-AGENT] âœ… Child profile: "${childProfile.name}", age: ${childProfile.age}`);
                     }
                   } catch (fetchError) {
-                    logger.warn(`[START-AGENT] ⚠️ Fetch error: ${fetchError.message}`);
+                    logger.warn(`[START-AGENT] âš ï¸ Fetch error: ${fetchError.message}`);
                   }
 
                   const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
-                  logger.info(`[START-AGENT] 🚀 Dispatching: Character "${characterName}" → Agent "${agentName}"`);
+                  logger.info(`[START-AGENT] ðŸš€ Dispatching: Character "${characterName}" â†’ Agent "${agentName}"`);
 
                   // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
                   connection.bridge.agentDeployed = true;
@@ -2213,7 +2213,7 @@ class MQTTGateway {
                   // Reset flag on failure so retry can work
                   connection.bridge.agentDeployed = false;
                   logger.error(
-                    `❌ [START-AGENT] Failed to dispatch agent:`,
+                    `âŒ [START-AGENT] Failed to dispatch agent:`,
                     dispatchError.message
                   );
                   connection.sendMqttMessage(
@@ -2228,7 +2228,7 @@ class MQTTGateway {
                 }
               } else {
                 logger.error(
-                  `❌ [START-AGENT] AgentDispatchClient not initialized`
+                  `âŒ [START-AGENT] AgentDispatchClient not initialized`
                 );
                 return;
               }
@@ -2240,14 +2240,14 @@ class MQTTGateway {
           // Agent will greet user via on_enter lifecycle hook
         } else {
           logger.error(
-            `❌ [START-AGENT] No active LiveKit room for device: ${deviceId}`
+            `âŒ [START-AGENT] No active LiveKit room for device: ${deviceId}`
           );
         }
       } else {
-        logger.warn(`⚠️ [START-AGENT] Unknown room type: ${roomType}`);
+        logger.warn(`âš ï¸ [START-AGENT] Unknown room type: ${roomType}`);
       }
     } catch (error) {
-      logger.error(`❌ [START-AGENT] Error:`, error.message);
+      logger.error(`âŒ [START-AGENT] Error:`, error.message);
     }
   }
 
@@ -2305,7 +2305,7 @@ class MQTTGateway {
         );
       } else {
         logger.error(
-          `❌ [SPECIFIC-MUSIC] No active LiveKit room for device: ${macAddress}`
+          `âŒ [SPECIFIC-MUSIC] No active LiveKit room for device: ${macAddress}`
         );
         await this.sendErrorResponse(
           clientId,
@@ -2315,7 +2315,7 @@ class MQTTGateway {
       }
     } catch (error) {
       logger.error(
-        `❌ [SPECIFIC-MUSIC] Error processing request: ${error.message}`
+        `âŒ [SPECIFIC-MUSIC] Error processing request: ${error.message}`
       );
       await this.sendErrorResponse(
         clientId,
@@ -2379,7 +2379,7 @@ class MQTTGateway {
         );
       } else {
         logger.error(
-          `❌ [SPECIFIC-STORY] No active LiveKit room for device: ${macAddress}`
+          `âŒ [SPECIFIC-STORY] No active LiveKit room for device: ${macAddress}`
         );
         await this.sendErrorResponse(
           clientId,
@@ -2389,7 +2389,7 @@ class MQTTGateway {
       }
     } catch (error) {
       logger.error(
-        `❌ [SPECIFIC-STORY] Error processing request: ${error.message}`
+        `âŒ [SPECIFIC-STORY] Error processing request: ${error.message}`
       );
       await this.sendErrorResponse(
         clientId,
@@ -2408,7 +2408,7 @@ class MQTTGateway {
       });
     } catch (error) {
       logger.error(
-        `❌ [DATA-CHANNEL] Failed to forward request: ${error.message}`
+        `âŒ [DATA-CHANNEL] Failed to forward request: ${error.message}`
       );
       throw error;
     }
@@ -2445,7 +2445,7 @@ class MQTTGateway {
   }
 
   handleDeviceHello(deviceId, payload) {
-    // logger.info(`📱 [HELLO] Device: ${deviceId}`);
+    // logger.info(`ðŸ“± [HELLO] Device: ${deviceId}`);
 
     // Close and remove old connection if exists
     const existingDeviceInfo = this.deviceConnections.get(deviceId);
@@ -2478,7 +2478,7 @@ class MQTTGateway {
       virtualConnection.handlePublish({ payload: JSON.stringify(payload) });
     } catch (error) {
       logger.error(
-        `❌ [HELLO] Error in handlePublish for device ${deviceId}:`,
+        `âŒ [HELLO] Error in handlePublish for device ${deviceId}:`,
         error
       );
     }
@@ -2490,7 +2490,7 @@ class MQTTGateway {
     if (deviceInfo && deviceInfo.connection) {
       deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
     } else {
-      logger.warn(`📱 Received data from unknown device: ${deviceId}`);
+      logger.warn(`ðŸ“± Received data from unknown device: ${deviceId}`);
     }
   }
 
@@ -2814,10 +2814,10 @@ class MQTTGateway {
           );
           if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
             childProfile = profileResponse.data.data;
-            logger.info(`[CHARACTER-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+            logger.info(`[CHARACTER-CHANGE] âœ… Child profile: "${childProfile.name}", age: ${childProfile.age}`);
           }
         } catch (error) {
-          logger.warn(`[CHARACTER-CHANGE] ⚠️ Failed to fetch child profile: ${error.message}`);
+          logger.warn(`[CHARACTER-CHANGE] âš ï¸ Failed to fetch child profile: ${error.message}`);
         }
 
         // Step 9: Dispatch agent to new room
@@ -2920,7 +2920,7 @@ class MQTTGateway {
 
       if (!connection) {
         logger.error(
-          `❌ [AUDIO-STREAM] No active connection for device: ${deviceId}`
+          `âŒ [AUDIO-STREAM] No active connection for device: ${deviceId}`
         );
         return;
       }
@@ -2928,14 +2928,14 @@ class MQTTGateway {
       const clientId = connection.clientId;
       if (!clientId) {
         logger.error(
-          `❌ [AUDIO-STREAM] No client ID found for device: ${deviceId}`
+          `âŒ [AUDIO-STREAM] No client ID found for device: ${deviceId}`
         );
         return;
       }
 
       const pcmFilePath = audioFilePath.replace(".opus", ".pcm");
       if (!fs.existsSync(pcmFilePath)) {
-        logger.error(`❌ [AUDIO-STREAM] PCM file not found: ${pcmFilePath}`);
+        logger.error(`âŒ [AUDIO-STREAM] PCM file not found: ${pcmFilePath}`);
         return;
       }
 
@@ -3012,13 +3012,13 @@ class MQTTGateway {
         this.mqttPublish(controlTopic, goodbyeMsg);
       }
     } catch (error) {
-      logger.error(`❌ [AUDIO-STREAM] Audio streaming error:`, error.message);
+      logger.error(`âŒ [AUDIO-STREAM] Audio streaming error:`, error.message);
     }
   }
 
   async handleDeviceModeChange(deviceId, payload) {
     try {
-      logger.info(`🔄 [MODE-CHANGE] START - Device ${deviceId} requesting mode change`);
+      logger.info(`ðŸ”„ [MODE-CHANGE] START - Device ${deviceId} requesting mode change`);
 
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
       const crypto = require("crypto");
@@ -3045,9 +3045,9 @@ class MQTTGateway {
               mediaAxiosConfig()
             );
             await new Promise((resolve) => setTimeout(resolve, 500));
-            logger.info(`[MODE-CHANGE] ✅ ${oldMode} bot stopped`);
+            logger.info(`[MODE-CHANGE] âœ… ${oldMode} bot stopped`);
           } catch (error) {
-            logger.warn(`[MODE-CHANGE] ⚠️ Failed to stop ${oldMode} bot: ${error.message}`);
+            logger.warn(`[MODE-CHANGE] âš ï¸ Failed to stop ${oldMode} bot: ${error.message}`);
             // Continue anyway
           }
         }
@@ -3057,7 +3057,7 @@ class MQTTGateway {
       if (existingConnection) {
         logger.info(`[MODE-CHANGE] Step 3: Performing robust cleanup`);
         await this.performRobustAgentCleanup(existingConnection, 'mode_change');
-        logger.info(`[MODE-CHANGE] ✅ Cleanup complete`);
+        logger.info(`[MODE-CHANGE] âœ… Cleanup complete`);
       }
 
       // Update mode in DB
@@ -3076,7 +3076,7 @@ class MQTTGateway {
       if (response.data.code === 0 && response.data.data) {
         const newMode = response.data.data.newMode || response.data.data.mode;
         const oldMode = response.data.data.oldMode || response.data.data.previousMode;
-        logger.info(`[MODE-CHANGE] Step 5: Mode change approved - ${oldMode} → ${newMode}`);
+        logger.info(`[MODE-CHANGE] Step 5: Mode change approved - ${oldMode} â†’ ${newMode}`);
 
         if (deviceInfo) {
           deviceInfo.previousMode = oldMode;
@@ -3085,7 +3085,7 @@ class MQTTGateway {
         let connection = deviceInfo?.connection;
         if (!connection) {
           logger.error(
-            `❌ [MODE-CHANGE] No connection found for device: ${deviceId}`
+            `âŒ [MODE-CHANGE] No connection found for device: ${deviceId}`
           );
           const senderClientId = payload.clientId;
           if (senderClientId) {
@@ -3151,7 +3151,7 @@ class MQTTGateway {
           connection.features || {},
           this.roomService
         );
-        logger.info(`[MODE-CHANGE] ✅ Connected to LiveKit`);
+        logger.info(`[MODE-CHANGE] âœ… Connected to LiveKit`);
 
         // Fetch character and child profile for conversation mode
         let currentCharacter = null;
@@ -3167,9 +3167,9 @@ class MQTTGateway {
           childProfile = profile;
           connection.currentCharacter = currentCharacter;
           if (childProfile) {
-            logger.info(`[MODE-CHANGE] ✅ Child profile: "${childProfile.name}", age: ${childProfile.age}`);
+            logger.info(`[MODE-CHANGE] âœ… Child profile: "${childProfile.name}", age: ${childProfile.age}`);
           }
-          logger.info(`[MODE-CHANGE] ✅ Character: ${currentCharacter || 'null'}`);
+          logger.info(`[MODE-CHANGE] âœ… Character: ${currentCharacter || 'null'}`);
         }
 
         logger.info(`[MODE-CHANGE] Step 10: Sending mode_update to device`);
@@ -3213,7 +3213,7 @@ class MQTTGateway {
               // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
               logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
               const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-xai";
-              logger.info(`[MODE-CHANGE] 🚀 Dispatching: Character "${currentCharacter || 'Cheeko'}" → Agent "${agentName}"`)
+              logger.info(`[MODE-CHANGE] ðŸš€ Dispatching: Character "${currentCharacter || 'Cheeko'}" â†’ Agent "${agentName}"`)
 
               // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
               newBridge.agentDeployed = true;
@@ -3232,31 +3232,31 @@ class MQTTGateway {
                   }),
                 }
               );
-              logger.info(`[MODE-CHANGE] ✅ Agent dispatched successfully`);
+              logger.info(`[MODE-CHANGE] âœ… Agent dispatched successfully`);
               // Agent will greet via on_enter lifecycle hook
             } catch (error) {
               // Reset flag on failure so retry can work
               newBridge.agentDeployed = false;
               logger.error(
-                `❌ [MODE-CHANGE] Failed to dispatch agent:`,
+                `âŒ [MODE-CHANGE] Failed to dispatch agent:`,
                 error.message
               );
               logger.error(`[MODE-CHANGE] Agent dispatch error stack:`, error.stack);
             }
           } else {
             logger.error(
-              `❌ [MODE-CHANGE] AgentDispatchClient not initialized`
+              `âŒ [MODE-CHANGE] AgentDispatchClient not initialized`
             );
           }
         }
 
-        logger.info(`✅ [MODE-CHANGE] Complete: ${oldMode} → ${newMode}`);
+        logger.info(`âœ… [MODE-CHANGE] Complete: ${oldMode} â†’ ${newMode}`);
       } else {
-        logger.error(`❌ [MODE-CHANGE] API error - Code: ${response.data?.code}, Data: ${JSON.stringify(response.data?.data)}`);
+        logger.error(`âŒ [MODE-CHANGE] API error - Code: ${response.data?.code}, Data: ${JSON.stringify(response.data?.data)}`);
         logger.error(`[MODE-CHANGE] Full API response:`, JSON.stringify(response.data));
       }
     } catch (error) {
-      logger.error(`❌ [MODE-CHANGE] Error: ${error.message}`);
+      logger.error(`âŒ [MODE-CHANGE] Error: ${error.message}`);
       logger.error(`[MODE-CHANGE] Error stack:`, error.stack);
       logger.error(`[MODE-CHANGE] Error details:`, {
         name: error.name,
@@ -3278,7 +3278,7 @@ class MQTTGateway {
   mqttPublish(topic, payload, options = {}, callback = null) {
     if (!this.mqttClient || !this.mqttClient.connected) {
       logger.error(
-        `❌ [MQTT-OUT] MQTT client not connected - Cannot publish to: ${topic}`
+        `âŒ [MQTT-OUT] MQTT client not connected - Cannot publish to: ${topic}`
       );
       if (callback) callback(new Error("MQTT client not connected"));
       return;
@@ -3320,7 +3320,7 @@ class MQTTGateway {
     const sessionId = payloadObj.session_id || "";
 
     logger.info(
-      `📤 [MQTT-OUT] ${deviceInfo || topic} | topic: ${topic} | type: ${msgType}${msgState ? ` | state: ${msgState}` : ""
+      `ðŸ“¤ [MQTT-OUT] ${deviceInfo || topic} | topic: ${topic} | type: ${msgType}${msgState ? ` | state: ${msgState}` : ""
       }${sessionId ? ` | session: ${sessionId.substring(0, 20)}...` : ""}`
     );
 
@@ -3341,12 +3341,12 @@ class MQTTGateway {
         `[SETTINGS-SYNC][GW-OUT][MQTT] topic=${topic} payload=${payloadPreview}`
       );
     }
-    logger.debug(`📤 [MQTT-OUT] Topic: ${topic} | Payload: ${payloadPreview}`);
+    logger.debug(`ðŸ“¤ [MQTT-OUT] Topic: ${topic} | Payload: ${payloadPreview}`);
 
     this.mqttClient.publish(topic, payloadStr, options, (err) => {
       if (err) {
         logger.error(
-          `❌ [MQTT-OUT] Publish failed - Topic: ${topic} | Error: ${err.message}`
+          `âŒ [MQTT-OUT] Publish failed - Topic: ${topic} | Error: ${err.message}`
         );
       }
       if (callback) callback(err);
@@ -3448,7 +3448,7 @@ class MQTTGateway {
         sequence
       );
     } catch (error) {
-      logger.error(`📡 [UDP] Message processing error:`, error);
+      logger.error(`ðŸ“¡ [UDP] Message processing error:`, error);
     }
   }
 
@@ -3466,7 +3466,7 @@ class MQTTGateway {
 
     // Clear ghost cleanup timer
     this.clearGhostCleanupTimer();
-    logger.info("🧹 [GHOST-CLEANUP] Stopped periodic cleanup");
+    logger.info("ðŸ§¹ [GHOST-CLEANUP] Stopped periodic cleanup");
 
     if (this.connections.size > 0) {
       logger.warn(`Waiting for ${this.connections.size} connections to close`);
@@ -3497,5 +3497,7 @@ class MQTTGateway {
 }
 
 module.exports = { MQTTGateway, setConfigManager };
+
+
 
 
