@@ -14,6 +14,12 @@ const {
   getWorkspaceSync,
   saveWorkspaceSync,
 } = require('../services/workspace.service');
+const {
+  acquireWorkspaceLock,
+  heartbeatWorkspaceLock,
+  releaseWorkspaceLock,
+  getWorkspaceLock,
+} = require('../services/workspace-lock.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireServiceKey, requireDualAuth } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
@@ -1550,6 +1556,53 @@ router.put('/device/:mac/workspace-sync',
       }
       throw error;
     }
+  })
+);
+
+router.post('/device/:mac/workspace-lock/acquire',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { holderId, leaseTTLSeconds, staleGraceSeconds } = req.body || {};
+    const result = await acquireWorkspaceLock(req.params.mac, holderId, {
+      leaseTTLSeconds,
+      staleGraceSeconds,
+    });
+    success(res, result, result.acquired ? 'Workspace lock acquired' : 'Workspace lock busy');
+  })
+);
+
+router.post('/device/:mac/workspace-lock/heartbeat',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const { holderId, fencingToken, leaseTTLSeconds } = req.body || {};
+      const result = await heartbeatWorkspaceLock(req.params.mac, holderId, fencingToken, {
+        leaseTTLSeconds,
+      });
+      success(res, result, 'Workspace lock heartbeat renewed');
+    } catch (error) {
+      if (error?.statusCode === 409) {
+        return conflict(res, error.message);
+      }
+      throw error;
+    }
+  })
+);
+
+router.post('/device/:mac/workspace-lock/release',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { holderId, fencingToken } = req.body || {};
+    const result = await releaseWorkspaceLock(req.params.mac, holderId, fencingToken);
+    success(res, result, result.released ? 'Workspace lock released' : 'Workspace lock not released');
+  })
+);
+
+router.get('/device/:mac/workspace-lock',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const lock = await getWorkspaceLock(req.params.mac);
+    success(res, { lock }, lock ? 'Workspace lock state retrieved' : 'Workspace lock does not exist');
   })
 );
 

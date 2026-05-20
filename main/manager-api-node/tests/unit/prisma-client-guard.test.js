@@ -7,7 +7,7 @@ describe('Prisma client startup guard', () => {
       voice_session_messages: {},
       voice_session_summaries: {},
       device_token_usage_session: {}
-    })).toThrow(/device_workspace_artifacts.*device_memory_documents.*device_memory_chunks.*npx prisma generate/s);
+    })).toThrow(/device_workspace_artifacts.*workspace_locks.*device_memory_documents.*device_memory_chunks.*npx prisma generate/s);
   });
 
   it('accepts a Prisma client that exposes all required runtime delegates', () => {
@@ -19,6 +19,7 @@ describe('Prisma client startup guard', () => {
       voice_session_summaries: {},
       device_token_usage_session: {},
       device_workspace_artifacts: {},
+      workspace_locks: {},
       device_memory_documents: {},
       device_memory_chunks: {}
     })).not.toThrow();
@@ -32,7 +33,8 @@ describe('Prisma client startup guard', () => {
         { table_name: 'voice_session_messages' },
         { table_name: 'voice_session_summaries' },
         { table_name: 'device_token_usage_session' },
-        { table_name: 'device_workspace_artifacts' }
+        { table_name: 'device_workspace_artifacts' },
+        { table_name: 'workspace_locks' }
       ])
     };
 

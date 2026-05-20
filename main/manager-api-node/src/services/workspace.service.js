@@ -289,25 +289,6 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
     throw new Error('newRevision is required');
   }
 
-  const manifestRow = await prisma.device_workspace_artifacts.findUnique({
-    where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
-        relative_path: MANIFEST_PATH,
-      },
-    },
-    select: { content: true },
-  });
-  const currentManifest = parseManifestContent(manifestRow?.content || '');
-  const currentRevision = typeof currentManifest.revision === 'string' ? currentManifest.revision.trim() : '';
-
-  if (baseRevision && currentRevision && baseRevision !== currentRevision) {
-    const conflict = new Error(`workspace revision conflict: expected ${baseRevision}, current ${currentRevision}`);
-    conflict.statusCode = 409;
-    conflict.serverRevision = currentRevision;
-    throw conflict;
-  }
-
   const rawFiles = Array.isArray(payload.files) ? payload.files : [];
   const rawDeleted = Array.isArray(payload.deleted) ? payload.deleted : [];
   const now = new Date();
@@ -347,26 +328,118 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
     }
   }
 
-  let savedCount = 0;
-  for (const file of normalizedFiles.values()) {
-    await prisma.device_workspace_artifacts.upsert({
+  return prisma.$transaction(async (tx) => {
+    const lockedDeviceRows = await tx.$queryRawUnsafe(
+      `SELECT id
+       FROM ai_device
+       WHERE mac_address = $1
+       FOR UPDATE`,
+      normalizedMac
+    );
+    if (!Array.isArray(lockedDeviceRows) || lockedDeviceRows.length === 0) {
+      throw new Error('Device not found');
+    }
+
+    const manifestRow = await tx.device_workspace_artifacts.findUnique({
       where: {
         mac_address_relative_path: {
           mac_address: normalizedMac,
+          relative_path: MANIFEST_PATH,
+        },
+      },
+      select: { content: true },
+    });
+    const currentManifest = parseManifestContent(manifestRow?.content || '');
+    const currentRevision = typeof currentManifest.revision === 'string' ? currentManifest.revision.trim() : '';
+
+    if (baseRevision && currentRevision && baseRevision !== currentRevision) {
+      const conflict = new Error(`workspace revision conflict: expected ${baseRevision}, current ${currentRevision}`);
+      conflict.statusCode = 409;
+      conflict.serverRevision = currentRevision;
+      throw conflict;
+    }
+
+    let savedCount = 0;
+    for (const file of normalizedFiles.values()) {
+      await tx.device_workspace_artifacts.upsert({
+        where: {
+          mac_address_relative_path: {
+            mac_address: normalizedMac,
+            relative_path: file.relativePath,
+          },
+        },
+        create: {
+          mac_address: normalizedMac,
+          device_id: device.id,
+          agent_id: device.agent_id || null,
           relative_path: file.relativePath,
+          content: file.content,
+          content_type: file.contentType,
+          size_bytes: file.sizeBytes,
+          sha256: file.sha256,
+          metadata: {
+            source: 'workspace-sync',
+            revision: newRevision,
+          },
+          created_at: now,
+          updated_at: now,
+        },
+        update: {
+          device_id: device.id,
+          agent_id: device.agent_id || null,
+          content: file.content,
+          content_type: file.contentType,
+          size_bytes: file.sizeBytes,
+          sha256: file.sha256,
+          metadata: {
+            source: 'workspace-sync',
+            revision: newRevision,
+          },
+          updated_at: now,
+        },
+      });
+      savedCount++;
+    }
+
+    let deletedCount = 0;
+    for (const relativePath of normalizedDeleted) {
+      const result = await tx.device_workspace_artifacts.deleteMany({
+        where: {
+          mac_address: normalizedMac,
+          relative_path: relativePath,
+        },
+      });
+      deletedCount += result.count || 0;
+    }
+
+    const manifestContent = {
+      ...(payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : {}),
+      revision: newRevision,
+      baseRevision: baseRevision || currentRevision || null,
+      generatedAt: now.toISOString(),
+      deleted: normalizedDeleted,
+    };
+    const manifestText = JSON.stringify(manifestContent, null, 2);
+    ensureNoNulBytes(manifestText, MANIFEST_PATH);
+
+    await tx.device_workspace_artifacts.upsert({
+      where: {
+        mac_address_relative_path: {
+          mac_address: normalizedMac,
+          relative_path: MANIFEST_PATH,
         },
       },
       create: {
         mac_address: normalizedMac,
         device_id: device.id,
         agent_id: device.agent_id || null,
-        relative_path: file.relativePath,
-        content: file.content,
-        content_type: file.contentType,
-        size_bytes: file.sizeBytes,
-        sha256: file.sha256,
+        relative_path: MANIFEST_PATH,
+        content: manifestText,
+        content_type: 'application/json',
+        size_bytes: Buffer.byteLength(manifestText, 'utf8'),
+        sha256: crypto.createHash('sha256').update(manifestText, 'utf8').digest('hex'),
         metadata: {
-          source: 'workspace-sync',
+          source: 'workspace-sync-manifest',
           revision: newRevision,
         },
         created_at: now,
@@ -375,85 +448,25 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
       update: {
         device_id: device.id,
         agent_id: device.agent_id || null,
-        content: file.content,
-        content_type: file.contentType,
-        size_bytes: file.sizeBytes,
-        sha256: file.sha256,
+        content: manifestText,
+        content_type: 'application/json',
+        size_bytes: Buffer.byteLength(manifestText, 'utf8'),
+        sha256: crypto.createHash('sha256').update(manifestText, 'utf8').digest('hex'),
         metadata: {
-          source: 'workspace-sync',
+          source: 'workspace-sync-manifest',
           revision: newRevision,
         },
         updated_at: now,
       },
     });
-    savedCount++;
-  }
 
-  let deletedCount = 0;
-  for (const relativePath of normalizedDeleted) {
-    const result = await prisma.device_workspace_artifacts.deleteMany({
-      where: {
-        mac_address: normalizedMac,
-        relative_path: relativePath,
-      },
-    });
-    deletedCount += result.count || 0;
-  }
-
-  const manifestContent = {
-    ...(payload.manifest && typeof payload.manifest === 'object' ? payload.manifest : {}),
-    revision: newRevision,
-    baseRevision: baseRevision || currentRevision || null,
-    generatedAt: now.toISOString(),
-    deleted: normalizedDeleted,
-  };
-  const manifestText = JSON.stringify(manifestContent, null, 2);
-  ensureNoNulBytes(manifestText, MANIFEST_PATH);
-
-  await prisma.device_workspace_artifacts.upsert({
-    where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
-        relative_path: MANIFEST_PATH,
-      },
-    },
-    create: {
-      mac_address: normalizedMac,
-      device_id: device.id,
-      agent_id: device.agent_id || null,
-      relative_path: MANIFEST_PATH,
-      content: manifestText,
-      content_type: 'application/json',
-      size_bytes: Buffer.byteLength(manifestText, 'utf8'),
-      sha256: crypto.createHash('sha256').update(manifestText, 'utf8').digest('hex'),
-      metadata: {
-        source: 'workspace-sync-manifest',
-        revision: newRevision,
-      },
-      created_at: now,
-      updated_at: now,
-    },
-    update: {
-      device_id: device.id,
-      agent_id: device.agent_id || null,
-      content: manifestText,
-      content_type: 'application/json',
-      size_bytes: Buffer.byteLength(manifestText, 'utf8'),
-      sha256: crypto.createHash('sha256').update(manifestText, 'utf8').digest('hex'),
-      metadata: {
-        source: 'workspace-sync-manifest',
-        revision: newRevision,
-      },
-      updated_at: now,
-    },
+    return {
+      appliedRevision: newRevision,
+      previousRevision: currentRevision || null,
+      savedCount,
+      deletedCount,
+    };
   });
-
-  return {
-    appliedRevision: newRevision,
-    previousRevision: currentRevision || null,
-    savedCount,
-    deletedCount,
-  };
 }
 
 module.exports = {

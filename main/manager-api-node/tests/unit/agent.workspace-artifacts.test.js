@@ -221,4 +221,15 @@ describe('agent workspace artifact routes', () => {
     expect(source).toMatch(/router\.get\('\/device\/:mac\/workspace-sync',\s*requireDualAuth,/);
     expect(source).toMatch(/router\.put\('\/device\/:mac\/workspace-sync',\s*requireDualAuth,/);
   });
+
+  it('protects workspace lock endpoints with service-key auth', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.join(__dirname, '../../src/routes/agent.routes.js'), 'utf8');
+
+    expect(source).toMatch(/router\.post\('\/device\/:mac\/workspace-lock\/acquire',\s*requireServiceKey,/);
+    expect(source).toMatch(/router\.post\('\/device\/:mac\/workspace-lock\/heartbeat',\s*requireServiceKey,/);
+    expect(source).toMatch(/router\.post\('\/device\/:mac\/workspace-lock\/release',\s*requireServiceKey,/);
+    expect(source).toMatch(/router\.get\('\/device\/:mac\/workspace-lock',\s*requireServiceKey,/);
+  });
 });

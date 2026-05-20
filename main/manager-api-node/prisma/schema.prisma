@@ -549,6 +549,18 @@ model device_workspace_artifacts {
   @@index([session_id], map: "idx_device_workspace_artifacts_session")
 }
 
+model workspace_locks {
+  device_mac       String   @id @db.VarChar(20)
+  holder_id        String
+  fencing_token    BigInt   @default(1)
+  lease_expires_at DateTime @db.Timestamptz(6)
+  heartbeat_at     DateTime @default(now()) @db.Timestamptz(6)
+  created_at       DateTime @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([lease_expires_at], map: "idx_workspace_locks_lease_expires_at")
+}
+
 model device_memory_documents {
   id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   mac_address   String    @db.VarChar(20)

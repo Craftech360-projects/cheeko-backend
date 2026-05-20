@@ -6,6 +6,8 @@ describe('workspace sync service', () => {
     jest.resetModules();
 
     prisma = {
+      $transaction: jest.fn(async (fn) => fn(prisma)),
+      $queryRawUnsafe: jest.fn().mockResolvedValue([{ id: 'device-id' }]),
       ai_device: {
         findFirst: jest.fn(),
         findUnique: jest.fn()
@@ -97,6 +99,7 @@ describe('workspace sync service', () => {
     });
 
     expect(prisma.device_workspace_artifacts.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.device_workspace_artifacts.deleteMany).toHaveBeenCalledWith({
       where: {
         mac_address: 'AA:BB:CC:DD:EE:FF',
@@ -135,5 +138,6 @@ describe('workspace sync service', () => {
     });
 
     expect(prisma.device_workspace_artifacts.upsert).not.toHaveBeenCalled();
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 });
