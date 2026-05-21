@@ -572,23 +572,46 @@ async function buildWeekSections(events, now, buildGrouped, sectionBuilder) {
 }
 
 async function getCardNameMap(keys) {
-    const rfidKeys = Array.from(new Set((keys || []).filter(Boolean)));
+    const rfidKeys = Array.from(new Set((keys || []).filter(Boolean).flatMap(key => {
+        const value = String(key);
+        return [value, value.toLowerCase(), value.toUpperCase()];
+    })));
     if (rfidKeys.length === 0) return new Map();
 
     const mappings = await prisma.rfid_card_mapping.findMany({
         where: { rfid_uid: { in: rfidKeys } },
         select: {
             rfid_uid: true,
+            card_type: true,
+            action_data: true,
             rfid_content_pack: { select: { name: true } },
             rfid_question: { select: { title: true } },
             rfid_pack: { select: { pack_name: true } }
         }
     });
 
-    return new Map((mappings || []).map(mapping => [
-        mapping.rfid_uid,
-        mapping.rfid_content_pack?.name || mapping.rfid_question?.title || mapping.rfid_pack?.pack_name || null
-    ]).filter(([, name]) => Boolean(name)));
+    const nameMap = new Map();
+    for (const mapping of mappings || []) {
+        const actionData = safeObject(mapping.action_data);
+        const name = mapping.rfid_content_pack?.name
+            || mapping.rfid_question?.title
+            || mapping.rfid_pack?.pack_name
+            || actionData.agent_name
+            || actionData.character_name
+            || actionData.ai_card_name
+            || actionData.card_name
+            || actionData.display_name
+            || actionData.displayName
+            || actionData.title
+            || actionData.name
+            || (mapping.card_type === 'ai' ? 'AI Card' : null);
+        if (!name || !mapping.rfid_uid) continue;
+        const key = String(mapping.rfid_uid);
+        nameMap.set(key, name);
+        nameMap.set(key.toLowerCase(), name);
+        nameMap.set(key.toUpperCase(), name);
+    }
+    return nameMap;
 }
 
 function formatRecentCardActivity(row, mapping = null) {
@@ -1436,25 +1459,8 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         period: 'today',
     });
     const scope = await resolveProgressScope(firebaseUid, options);
-    const recentCardEvent = scope.macAddresses.length > 0
-        ? await prisma.device_analytics_event.findFirst({
-            where: {
-                mac_address: { in: scope.macAddresses },
-                event_name: 'card_session_start',
-            },
-            select: {
-                id: true,
-                mac_address: true,
-                event_timestamp: true,
-                server_received_at: true,
-                rfid_uid: true,
-                content_id: true,
-                content_type: true,
-                data: true,
-            },
-            orderBy: { server_received_at: 'desc' },
-        })
-        : null;
+    const recentCardActivities = await getRecentAnalyticsCardActivities(scope.macAddresses, 3);
+    const recentCardActivity = recentCardActivities[0] || null;
 
     return {
         today_progress: {
@@ -1475,8 +1481,10 @@ async function getHomepageActivity(firebaseUid, options = {}) {
             usageTimeSeconds: summary.usageTimeSeconds,
             gamesPlayed: summary.gamesPlayed,
         },
-        recent_activity: formatRecentAnalyticsCardActivity(recentCardEvent),
-        recentActivity: formatRecentAnalyticsCardActivity(recentCardEvent),
+        recent_activity: recentCardActivity,
+        recentActivity: recentCardActivity,
+        recent_activities: recentCardActivities,
+        recentActivities: recentCardActivities,
     };
 }
 
@@ -1639,6 +1647,62 @@ function formatRecentAnalyticsCardActivity(row) {
         created_at: row.server_received_at || row.event_timestamp || null,
         createdAt: row.server_received_at || row.event_timestamp || null,
     };
+}
+
+function recentAnalyticsCardKey(row) {
+    if (!row) return null;
+    const data = safeObject(row.data);
+    const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id || row.content_id || data.content_id;
+    return key == null ? null : String(key).toLowerCase();
+}
+
+async function getRecentAnalyticsCardActivities(macAddresses, limit = 3) {
+    if (!macAddresses || macAddresses.length === 0) return [];
+    const rows = await prisma.device_analytics_event.findMany({
+        where: {
+            mac_address: { in: macAddresses },
+            event_name: 'card_session_start',
+        },
+        select: {
+            id: true,
+            mac_address: true,
+            event_timestamp: true,
+            server_received_at: true,
+            rfid_uid: true,
+            content_id: true,
+            content_type: true,
+            data: true,
+        },
+        orderBy: { server_received_at: 'desc' },
+        take: Math.max(limit * 4, limit),
+    });
+
+    const uniqueRows = [];
+    const seen = new Set();
+    for (const row of rows || []) {
+        const key = recentAnalyticsCardKey(row);
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        uniqueRows.push(row);
+        if (uniqueRows.length >= limit) break;
+    }
+
+    const cardKeys = uniqueRows
+        .map(row => row.rfid_uid || safeObject(row.data).rfid_uid || safeObject(row.data).card_uid || safeObject(row.data).card_id)
+        .filter(Boolean);
+    const cardNameMap = await getCardNameMap(cardKeys);
+
+    return uniqueRows.map(row => {
+        const activity = formatRecentAnalyticsCardActivity(row);
+        const data = safeObject(row.data);
+        const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id;
+        const mappedName = key ? cardNameMap.get(String(key)) || cardNameMap.get(String(key).toLowerCase()) || cardNameMap.get(String(key).toUpperCase()) : null;
+        if (mappedName) {
+            activity.content_pack_name = mappedName;
+            activity.contentPackName = mappedName;
+        }
+        return activity;
+    });
 }
 
 async function resolveProgressScope(firebaseUid, options = {}) {
