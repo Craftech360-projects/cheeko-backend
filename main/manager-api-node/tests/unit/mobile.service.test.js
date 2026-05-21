@@ -409,6 +409,58 @@ describe('mobile.service homepage activity details', () => {
     });
   });
 
+  it('returns game score details in week sections without changing progress summary', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'game_start',
+        game_id: 'math_tutor',
+        data: { game_name: 'Math Tutor' },
+        server_received_at: new Date('2026-05-16T08:00:00.000Z')
+      }
+    ]);
+    prisma.device_games_played.findMany.mockResolvedValue([
+      {
+        id: 'row-1',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        game_id: 'math_tutor',
+        game_name: 'Math Tutor',
+        level: 2,
+        difficulty_level: 'easy',
+        score: 10,
+        duration_ms: 120000,
+        played_at: new Date('2026-05-16T08:05:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
+      metric: 'games',
+      period: 'week',
+      now: new Date('2026-05-16T10:00:00.000Z')
+    });
+
+    const gameRowsQuery = prisma.device_games_played.findMany.mock.calls[0][0];
+    expect(gameRowsQuery).toEqual(expect.objectContaining({
+      where: expect.objectContaining({
+        mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        played_at: expect.objectContaining({
+          gte: expect.any(Date),
+          lte: new Date('2026-05-16T10:00:00.000Z')
+        })
+      }),
+      orderBy: { played_at: 'desc' }
+    }));
+    expect(gameRowsQuery.where.activity_date).toBeUndefined();
+    expect(result.week_sections[0].items).toEqual([
+      expect.objectContaining({
+        game_name: 'Math Tutor',
+        level: 2,
+        score: 10,
+        difficulty_level: 'easy'
+      })
+    ]);
+  });
+
   it.each(['week', 'month'])('returns cards detail for period=%s', async (period) => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.device_analytics_event.findMany.mockResolvedValue([

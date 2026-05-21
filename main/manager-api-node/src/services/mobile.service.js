@@ -419,6 +419,54 @@ function toCountWeekSection(week, grouped) {
     };
 }
 
+function getGamePlayedWeekInMonth(row) {
+    const date = row && row.played_at ? new Date(row.played_at) : null;
+    if (!date || Number.isNaN(date.getTime())) return null;
+    return Math.floor((date.getDate() - 1) / 7) + 1;
+}
+
+function formatGamePlayedDetail(row) {
+    return {
+        id: row.id,
+        mac_address: row.mac_address,
+        macAddress: row.mac_address,
+        game_id: row.game_id,
+        gameId: row.game_id,
+        game_name: row.game_name,
+        gameName: row.game_name,
+        level: row.level,
+        difficulty_level: row.difficulty_level,
+        difficultyLevel: row.difficulty_level,
+        score: row.score,
+        duration_ms: row.duration_ms,
+        durationMs: row.duration_ms,
+        played_at: row.played_at,
+        playedAt: row.played_at,
+        source_event_id: row.source_event_id,
+        sourceEventId: row.source_event_id,
+    };
+}
+
+function buildGamePlayedWeekSections(rows, monthReference) {
+    const monthKey = getMonthKeyFromReference(monthReference);
+    const grouped = new Map();
+    for (const row of rows || []) {
+        if (getMonthKeyFromReference(row.played_at) !== monthKey) continue;
+        const week = getGamePlayedWeekInMonth(row);
+        if (!week) continue;
+        if (!grouped.has(week)) grouped.set(week, []);
+        grouped.get(week).push(formatGamePlayedDetail(row));
+    }
+    return Array.from(grouped.entries())
+        .sort(([left], [right]) => left - right)
+        .map(([week, items]) => ({
+            label: `Week ${week}`,
+            week,
+            total: items.length,
+            items
+        }));
+}
+
 function toDurationWeekSection(week, grouped) {
     const response = toDurationResponse('', grouped);
     return {
@@ -1514,9 +1562,23 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
         const sections = period === 'month'
             ? await buildMonthSections(events, buildGamesGrouped, toCountSection)
             : null;
-        const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildGamesGrouped, toCountWeekSection)
-            : null;
+        let weekSections = null;
+        if (period === 'week') {
+            const gameRows = await prisma.device_games_played.findMany({
+                where: {
+                    mac_address: { in: macAddresses },
+                    played_at: {
+                        gte: start,
+                        lte: end,
+                    }
+                },
+                orderBy: { played_at: 'desc' },
+                take: 5000,
+            });
+            weekSections = (gameRows || []).length > 0
+                ? buildGamePlayedWeekSections(gameRows, weekMonth)
+                : await buildWeekSections(events, weekMonth, buildGamesGrouped, toCountWeekSection);
+        }
         return withWeekSections(withMonthSections(toCountResponse('games', period, grouped), sections, monthPicker), weekMonth, weekSections);
     }
 
