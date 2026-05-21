@@ -108,6 +108,13 @@
               <el-button
                 type="text"
                 size="small"
+                @click="openAnalyticsDialog(scope.row)"
+              >
+                Analytics
+              </el-button>
+              <el-button
+                type="text"
+                size="small"
                 @click="handleKidProfile(scope.row)"
                 :disabled="!scope.row.userId"
               >
@@ -232,38 +239,39 @@
         </el-card>
 
         <el-card shadow="never" class="settings-section-card">
-          <div slot="header" class="settings-section-title">Firmware Analytics Snapshot</div>
+          <div slot="header" class="settings-section-header">
+            <span class="settings-section-title">Progress Analytics</span>
+            <el-radio-group v-model="analyticsPeriod" size="mini" @change="onAnalyticsPeriodChange">
+              <el-radio-button label="today">Today</el-radio-button>
+              <el-radio-button label="week">Week</el-radio-button>
+              <el-radio-button label="month">Month</el-radio-button>
+            </el-radio-group>
+          </div>
           <el-skeleton :rows="4" animated v-if="analyticsLoading" />
           <div v-else class="analytics-grid">
-            <div><strong>Total Usage:</strong> {{ analyticsOverview.totalUsageMinutes || 0 }} min</div>
-            <div><strong>Card Taps:</strong> {{ analyticsOverview.cardTapCount || 0 }}</div>
-            <div><strong>AI Sessions:</strong> {{ analyticsOverview.aiTalk?.sessionCount || 0 }}</div>
-            <div><strong>Game Launches:</strong> {{ analyticsOverview.games?.launchCount || 0 }}</div>
-            <div><strong>AI Minutes:</strong> {{ formatMinutesFromMs(analyticsOverview.aiTalk?.totalDurationMs) }}</div>
-            <div><strong>Radio Minutes:</strong> {{ analyticsOverview.minutesByType?.radio || 0 }}</div>
-            <div><strong>Game Minutes:</strong> {{ formatMinutesFromMs(analyticsOverview.games?.totalDurationMs) }}</div>
-            <div><strong>Avg Score:</strong> {{ analyticsOverview.games?.averageScore || 0 }}</div>
+            <div><strong>Total Usage:</strong> {{ formatMinutesFromSeconds(progressSummary.usageTimeSeconds) }} min</div>
+            <div><strong>Card Taps:</strong> {{ progressSummary.cardTapCount || 0 }}</div>
+            <div><strong>AI Interactions:</strong> {{ progressSummary.aiInteractionCount || 0 }}</div>
+            <div><strong>Games Played:</strong> {{ progressSummary.gamesPlayed || 0 }}</div>
+            <div><strong>AI Minutes:</strong> {{ formatMinutesFromSeconds(getUsageDurationSeconds('ai_talk')) }}</div>
+            <div><strong>Radio Minutes:</strong> {{ formatMinutesFromSeconds(getUsageDurationSeconds('radio')) }}</div>
+            <div><strong>Game Minutes:</strong> {{ formatMinutesFromSeconds(getUsageDurationSeconds('game')) }}</div>
+            <div><strong>Card Minutes:</strong> {{ formatMinutesFromSeconds(getUsageDurationSeconds('card')) }}</div>
+            <div><strong>Usage Window:</strong> {{ progressSummary.startDate || '-' }} to {{ progressSummary.endDate || '-' }}</div>
             <div><strong>Latest Battery:</strong> {{ analyticsBattery?.latest?.battery != null ? (analyticsBattery.latest.battery + '%') : '-' }}</div>
           </div>
         </el-card>
 
-        <el-card shadow="never" class="settings-section-card">
-          <div slot="header" class="settings-section-title">Daily Usage (Last Period)</div>
-          <el-table :data="analyticsTimeseries.slice(-7).reverse()" size="mini" max-height="220" style="width: 100%">
+        <el-card shadow="never" class="settings-section-card" v-if="analyticsPeriod !== 'today'">
+          <div slot="header" class="settings-section-title">Daily Trend ({{ analyticsPeriod }})</div>
+          <el-table :data="progressTrend.slice().reverse()" size="mini" max-height="220" style="width: 100%">
             <el-table-column label="Date" prop="date" min-width="120" />
-            <el-table-column label="Usage (min)" min-width="100">
-              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.totalUsageMs) }}</template>
+            <el-table-column label="Usage (min)" min-width="95">
+              <template slot-scope="scope">{{ formatMinutesFromSeconds(scope.row.usageTimeSeconds) }}</template>
             </el-table-column>
             <el-table-column label="Card Taps" prop="cardTapCount" min-width="90" />
-            <el-table-column label="AI (min)" min-width="90">
-              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.aiTalkDurationMs) }}</template>
-            </el-table-column>
-            <el-table-column label="Radio (min)" min-width="95">
-              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.radioDurationMs) }}</template>
-            </el-table-column>
-            <el-table-column label="Game (min)" min-width="90">
-              <template slot-scope="scope">{{ formatMinutesFromMs(scope.row.gameDurationMs) }}</template>
-            </el-table-column>
+            <el-table-column label="AI Count" prop="aiInteractionCount" min-width="85" />
+            <el-table-column label="Games" prop="gamesPlayed" min-width="80" />
           </el-table>
         </el-card>
 
@@ -325,8 +333,10 @@ export default {
       runtimeState: {},
       syncEvents: [],
       analyticsLoading: false,
-      analyticsOverview: {},
-      analyticsTimeseries: [],
+      analyticsPeriod: 'today',
+      progressSummary: {},
+      progressUsageBreakdown: [],
+      progressTrend: [],
       analyticsEvents: [],
       analyticsBattery: null,
       settingsForm: {
@@ -518,8 +528,10 @@ export default {
       this.runtimeState = {};
       this.syncEvents = [];
       this.analyticsLoading = false;
-      this.analyticsOverview = {};
-      this.analyticsTimeseries = [];
+      this.analyticsPeriod = 'today';
+      this.progressSummary = {};
+      this.progressUsageBreakdown = [];
+      this.progressTrend = [];
       this.analyticsEvents = [];
       this.analyticsBattery = null;
       this.settingsForm = this.getDefaultSettingsForm();
@@ -548,8 +560,25 @@ export default {
       this.settingsDialogVisible = true;
       this.loadSettingsDialogData();
     },
+    openAnalyticsDialog(row) {
+      this.openSettingsDialog(row);
+      this.$nextTick(() => {
+        setTimeout(() => {
+          const sectionCards = this.$el.querySelectorAll('.settings-section-card');
+          const analyticsCard = Array.from(sectionCards).find((node) => {
+            return node.textContent && node.textContent.includes('Progress Analytics');
+          });
+          if (analyticsCard && typeof analyticsCard.scrollIntoView === 'function') {
+            analyticsCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 300);
+      });
+    },
     refreshSettingsDialog() {
       this.loadSettingsDialogData();
+    },
+    onAnalyticsPeriodChange() {
+      this.loadProgressAnalyticsForPeriod();
     },
     loadSettingsDialogData() {
       if (!this.selectedSettingsDevice || !this.selectedSettingsDevice.macAddress) {
@@ -565,16 +594,12 @@ export default {
         this.fetchDeviceSettings(mac),
         this.fetchDeviceRuntimeState(mac),
         this.fetchDeviceSyncEvents(mac, 20),
-        this.fetchDeviceAnalyticsOverview(mac),
-        this.fetchDeviceAnalyticsTimeseries(mac),
         this.fetchDeviceAnalyticsEvents(mac, 20),
         this.fetchDeviceAnalyticsBattery(mac)
-      ]).then(([settingsRes, stateRes, eventsRes, overviewRes, timeseriesRes, analyticsEventsRes, batteryRes]) => {
+      ]).then(([settingsRes, stateRes, eventsRes, analyticsEventsRes, batteryRes]) => {
         const settingsData = settingsRes?.data || {};
         const runtimeData = stateRes?.data?.state || {};
         const eventsData = eventsRes?.data?.events || [];
-        const overviewData = overviewRes?.data || {};
-        const timeseriesData = timeseriesRes?.data?.timeseries || [];
         const analyticsEventsData = analyticsEventsRes?.data?.events || [];
         const batteryData = batteryRes?.data || null;
 
@@ -587,15 +612,37 @@ export default {
         };
         this.runtimeState = runtimeData || {};
         this.syncEvents = Array.isArray(eventsData) ? eventsData : [];
-        this.analyticsOverview = overviewData || {};
-        this.analyticsTimeseries = Array.isArray(timeseriesData) ? timeseriesData : [];
         this.analyticsEvents = Array.isArray(analyticsEventsData) ? analyticsEventsData : [];
         this.analyticsBattery = batteryData;
         this.settingsForm = this.mapSettingsDataToForm(settingsData.settings || {});
+        return this.loadProgressAnalyticsForPeriod();
       }).catch((error) => {
         this.$message.error(error?.message || 'Failed to load settings sync data');
       }).finally(() => {
         this.settingsLoading = false;
+        this.analyticsLoading = false;
+      });
+    },
+    loadProgressAnalyticsForPeriod() {
+      if (!this.selectedSettingsDevice || !this.selectedSettingsDevice.macAddress) {
+        return Promise.resolve();
+      }
+      const mac = this.selectedSettingsDevice.macAddress;
+      const period = this.analyticsPeriod || 'today';
+      const trendPeriod = period === 'today' ? null : period;
+
+      this.analyticsLoading = true;
+      return Promise.all([
+        this.fetchDeviceProgressSummary(mac, period),
+        this.fetchDeviceProgressDetails(mac, 'usage', period),
+        trendPeriod ? this.fetchDeviceProgressTrend(mac, trendPeriod) : Promise.resolve({ data: { points: [] } }),
+      ]).then(([summaryRes, usageRes, trendRes]) => {
+        this.progressSummary = summaryRes?.data || {};
+        this.progressUsageBreakdown = Array.isArray(usageRes?.data?.items) ? usageRes.data.items : [];
+        this.progressTrend = Array.isArray(trendRes?.data?.points) ? trendRes.data.points : [];
+      }).catch((error) => {
+        this.$message.error(error?.message || 'Failed to load progress analytics');
+      }).finally(() => {
         this.analyticsLoading = false;
       });
     },
@@ -632,24 +679,35 @@ export default {
         });
       });
     },
-    fetchDeviceAnalyticsOverview(mac) {
+    fetchDeviceProgressSummary(mac, period = 'today') {
       return new Promise((resolve, reject) => {
-        Api.admin.getDeviceAnalyticsOverviewByMac(mac, {}, ({ data }) => {
+        Api.admin.getDeviceProgressSummaryByMac(mac, { period }, ({ data }) => {
           if (data && data.code === 0) {
             resolve(data);
           } else {
-            reject(new Error(data?.msg || 'Failed to fetch analytics overview'));
+            reject(new Error(data?.msg || 'Failed to fetch progress summary'));
           }
         });
       });
     },
-    fetchDeviceAnalyticsTimeseries(mac) {
+    fetchDeviceProgressDetails(mac, metric, period = 'today') {
       return new Promise((resolve, reject) => {
-        Api.admin.getDeviceAnalyticsTimeseriesByMac(mac, {}, ({ data }) => {
+        Api.admin.getDeviceProgressDetailsByMac(mac, { metric, period, page: 1, limit: 10 }, ({ data }) => {
           if (data && data.code === 0) {
             resolve(data);
           } else {
-            reject(new Error(data?.msg || 'Failed to fetch analytics timeseries'));
+            reject(new Error(data?.msg || 'Failed to fetch progress details'));
+          }
+        });
+      });
+    },
+    fetchDeviceProgressTrend(mac, period = 'week') {
+      return new Promise((resolve, reject) => {
+        Api.admin.getDeviceProgressTrendByMac(mac, { period }, ({ data }) => {
+          if (data && data.code === 0) {
+            resolve(data);
+          } else {
+            reject(new Error(data?.msg || 'Failed to fetch progress trend'));
           }
         });
       });
@@ -680,6 +738,17 @@ export default {
       const num = Number(value);
       if (!Number.isFinite(num) || num <= 0) return 0;
       return Math.round(num / 60000);
+    },
+    formatMinutesFromSeconds(value) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num <= 0) return 0;
+      return Math.round(num / 60);
+    },
+    getUsageDurationSeconds(key) {
+      if (!Array.isArray(this.progressUsageBreakdown)) return 0;
+      const row = this.progressUsageBreakdown.find(item => item && item.key === key);
+      if (!row) return 0;
+      return Number(row.durationSeconds || row.duration_seconds || 0) || 0;
     },
     mapSettingsDataToForm(settings) {
       const defaults = this.getDefaultSettingsForm();
@@ -888,7 +957,22 @@ export default {
   color: #303133;
 }
 
+.settings-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .runtime-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  font-size: 13px;
+  color: #606266;
+}
+
+.analytics-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 12px;

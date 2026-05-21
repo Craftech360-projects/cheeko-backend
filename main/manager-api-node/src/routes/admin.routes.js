@@ -33,6 +33,7 @@ const router = express.Router();
 const adminService = require('../services/admin.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
+const mobileService = require('../services/mobile.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -1578,6 +1579,67 @@ router.get('/device/:mac/analytics/battery',
     const { from, to } = req.query;
     const battery = await deviceAnalyticsService.getBatteryTrendByMac(mac, { from, to });
     success(res, battery);
+  })
+);
+
+/**
+ * Admin: Get progress summary by MAC (today/week/month).
+ */
+router.get('/device/:mac/progress/summary',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const period = req.query.period;
+    const summary = await mobileService.getProgressSummaryByMacAdmin(mac, { period });
+    success(res, summary);
+  })
+);
+
+/**
+ * Admin: Get progress details by MAC and metric.
+ */
+router.get('/device/:mac/progress/details',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const {
+      period,
+      metric,
+      page,
+      limit,
+    } = req.query;
+    const details = await mobileService.getProgressDetailsByMacAdmin(mac, {
+      period,
+      metric,
+      page,
+      limit,
+    });
+    success(res, details);
+  })
+);
+
+/**
+ * Admin: Get progress trend by MAC (week/month).
+ */
+router.get('/device/:mac/progress/trend',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const mac = (req.params.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const period = req.query.period;
+    const trend = await mobileService.getProgressTrendByMacAdmin(mac, { period });
+    success(res, trend);
   })
 );
 

@@ -26,6 +26,10 @@ const {
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
+const {
+  writeAnalyticsAuditLog,
+  shouldIncludePayload,
+} = require("../utils/analytics-audit-log");
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
@@ -1485,6 +1489,17 @@ class MQTTGateway {
   }
 
   async handleAnalyticsEvent(deviceId, payload, clientId) {
+    const payloadForLog = shouldIncludePayload() ? payload : undefined;
+    await writeAnalyticsAuditLog({
+      stage: "gateway_received",
+      mac_address: deviceId,
+      sender_client_id: clientId || null,
+      device_id: payload?.device_id || null,
+      event_id: payload?.event_id || null,
+      event: payload?.event || null,
+      payload: payloadForLog,
+    });
+
     try {
       const response = await postDeviceSyncEvent("/device-sync/analytics-event", {
         mac_address: deviceId,
@@ -1492,10 +1507,42 @@ class MQTTGateway {
         device_id: payload.device_id || null,
         payload,
       });
+      await writeAnalyticsAuditLog({
+        stage: "manager_api_response",
+        status: "success",
+        mac_address: deviceId,
+        sender_client_id: clientId || null,
+        device_id: payload?.device_id || null,
+        event_id: payload?.event_id || null,
+        event: payload?.event || null,
+        api_response: {
+          accepted: response?.data?.accepted,
+          deduplicated: response?.data?.deduplicated,
+          stored_event_id: response?.data?.stored_event_id || null,
+          projection_failed: response?.data?.projection_failed === true,
+          code: response?.code,
+          msg: response?.msg,
+        },
+      });
       logger.info(
         `[ANALYTICS][GW->API] stored mac=${deviceId} sender=${clientId} deduplicated=${response?.data?.deduplicated === true}`
       );
     } catch (error) {
+      await writeAnalyticsAuditLog({
+        stage: "manager_api_response",
+        status: "error",
+        mac_address: deviceId,
+        sender_client_id: clientId || null,
+        device_id: payload?.device_id || null,
+        event_id: payload?.event_id || null,
+        event: payload?.event || null,
+        error: {
+          message: error.message,
+          status: error?.response?.status || null,
+          code: error?.code || null,
+          response_body: error?.response?.data || null,
+        },
+      });
       logger.error(`[ANALYTICS][GW] analytics_event handling failed for ${deviceId}: ${error.message}`);
     }
   }

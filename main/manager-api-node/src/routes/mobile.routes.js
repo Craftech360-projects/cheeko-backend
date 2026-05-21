@@ -113,6 +113,21 @@ router.get('/homepage-activity/details', asyncHandler(async (req, res) => {
     success(res, details);
 }));
 
+router.get('/progress/summary', asyncHandler(async (req, res) => {
+    const summary = await mobileService.getProgressSummary(req.firebaseUser.uid, req.query);
+    success(res, summary);
+}));
+
+router.get('/progress/details', asyncHandler(async (req, res) => {
+    const details = await mobileService.getProgressDetails(req.firebaseUser.uid, req.query);
+    success(res, details);
+}));
+
+router.get('/progress/trend', asyncHandler(async (req, res) => {
+    const trend = await mobileService.getProgressTrend(req.firebaseUser.uid, req.query);
+    success(res, trend);
+}));
+
 router.get('/recommendations/homepage', asyncHandler(async (req, res) => {
     const { kidId, kid_id, limit } = req.query;
     const resolvedKidId = kidId || kid_id;
@@ -397,6 +412,16 @@ router.get('/devices/:mac/analytics/battery', asyncHandler(async (req, res) => {
         macAddress: device.mac_address,
         ...battery,
     });
+}));
+
+router.get('/devices/:mac/games-played', asyncHandler(async (req, res) => {
+    const details = await mobileService.getDeviceGamesPlayed(req.firebaseUser.uid, req.params.mac, req.query);
+    success(res, details);
+}));
+
+router.get('/devices/:mac/radio-played', asyncHandler(async (req, res) => {
+    const details = await mobileService.getDeviceRadioPlayed(req.firebaseUser.uid, req.params.mac, req.query);
+    success(res, details);
 }));
 
 router.get('/user-devices', asyncHandler(async (req, res) => {

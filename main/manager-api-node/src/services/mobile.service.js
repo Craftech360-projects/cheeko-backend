@@ -126,6 +126,60 @@ function getActivityDetailsRange(period, now = new Date(), selectedMonth = null)
     return { start, end, monthKey: getMonthKeyFromReference(now) };
 }
 
+const PROGRESS_PERIODS = ['today', 'week', 'month'];
+const PROGRESS_DETAIL_METRICS = ['usage', 'cards', 'games', 'ai', 'radio'];
+
+function formatDateInTimezone(value, timezone = 'UTC') {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone || 'UTC',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(date);
+    const year = parts.find(part => part.type === 'year')?.value;
+    const month = parts.find(part => part.type === 'month')?.value;
+    const day = parts.find(part => part.type === 'day')?.value;
+    if (!year || !month || !day) return null;
+    return `${year}-${month}-${day}`;
+}
+
+function shiftDateKey(dateKey, deltaDays) {
+    const date = new Date(`${dateKey}T00:00:00.000Z`);
+    date.setUTCDate(date.getUTCDate() + deltaDays);
+    return date.toISOString().slice(0, 10);
+}
+
+function dateOnlyFromKey(dateKey) {
+    return new Date(`${dateKey}T00:00:00.000Z`);
+}
+
+function buildProgressDateRange(period, timezone, now = new Date()) {
+    const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
+    const totalDays = period === 'today' ? 1 : (period === 'week' ? 7 : 30);
+    const dates = [];
+    for (let i = totalDays - 1; i >= 0; i -= 1) {
+        dates.push(shiftDateKey(today, -i));
+    }
+    return {
+        startDate: dates[0],
+        endDate: dates[dates.length - 1],
+        dates,
+    };
+}
+
+function parsePagination(options = {}) {
+    const page = Math.max(1, parseInt(options.page, 10) || 1);
+    const rawLimit = parseInt(options.limit, 10);
+    const limit = Math.min(200, Math.max(1, Number.isFinite(rawLimit) ? rawLimit : 20));
+    return { page, limit, offset: (page - 1) * limit };
+}
+
+function sumBy(rows, field) {
+    return (rows || []).reduce((total, row) => total + (Number(row[field]) || 0), 0);
+}
+
 function incrementCount(grouped, key, name, amount = 1) {
     const resolvedKey = key || 'unknown';
     const current = grouped.get(resolvedKey) || { key: resolvedKey, name: name || humanizeKey(resolvedKey), count: 0 };
@@ -1329,203 +1383,52 @@ async function deleteUserAccount(firebaseUid) {
 }
 
 async function getHomepageActivity(firebaseUid, options = {}) {
-    const user = await prisma.sys_user.findUnique({
-        where: { firebase_uid: firebaseUid },
-        select: { id: true },
+    const summary = await getProgressSummary(firebaseUid, {
+        ...options,
+        period: 'today',
     });
-    if (!user) throw new Error('User not found');
-
-    const devices = await prisma.ai_device.findMany({
-        where: { user_id: user.id },
-        select: { id: true, mac_address: true },
-    });
-    const ownedDevices = devices || [];
-    const ownedMacAddresses = ownedDevices
-        .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
-        .filter(Boolean);
-    const requestedDeviceId = options.deviceId || options.device_id;
-    const hasRequestedMac = Boolean(options.mac || options.mac_address || options.macAddress);
-    const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
-    let macAddresses = ownedMacAddresses;
-    let restrictToSelectedDevice = false;
-
-    if (requestedDeviceId) {
-        const selectedDevice = ownedDevices.find(device => String(device.id) === String(requestedDeviceId));
-        if (!selectedDevice) throw new ApiError('Device not found', 404, 404);
-        const selectedMac = normalizeMacAddress(selectedDevice.mac_address) || selectedDevice.mac_address;
-        macAddresses = selectedMac ? [selectedMac] : [];
-        restrictToSelectedDevice = true;
-    } else if (hasRequestedMac) {
-        if (!requestedMac || !ownedMacAddresses.includes(requestedMac)) {
-            throw new ApiError('Device not found', 404, 404);
-        }
-        macAddresses = [requestedMac];
-        restrictToSelectedDevice = true;
-    }
-
-    const ownershipFilters = restrictToSelectedDevice ? [] : [{ user_id: user.id }];
-    if (macAddresses.length > 0) {
-        ownershipFilters.push({ mac_address: { in: macAddresses } });
-    }
-    const ownedWhere = ownershipFilters.length > 0
-        ? { OR: ownershipFilters }
-        : { mac_address: { in: [] } };
-    const { start, end } = getDayRange(options.now || new Date());
-
-    const todayToyAnalyticsPromise = macAddresses.length > 0
-        ? prisma.device_analytics_event.findMany({
+    const scope = await resolveProgressScope(firebaseUid, options);
+    const recentCardEvent = scope.macAddresses.length > 0
+        ? await prisma.device_analytics_event.findFirst({
             where: {
-                mac_address: { in: macAddresses },
-                server_received_at: {
-                    gte: start,
-                    lte: end,
-                },
+                mac_address: { in: scope.macAddresses },
+                event_name: 'card_session_start',
             },
             select: {
-                event_name: true,
-                duration_ms: true,
-            },
-        })
-        : Promise.resolve([]);
-
-    const todayRfidTapWhere = {
-        ...ownedWhere,
-        created_at: {
-            gte: start,
-            lte: end,
-        },
-    };
-    const todayAiRfidTapWhere = {
-        ...todayRfidTapWhere,
-        card_type: 'ai',
-    };
-
-    const [recentCardTaps, todayRfidTapCount, todayAiRfidTapCount, todayToyAnalytics] = await Promise.all([
-        prisma.rfid_card_tap_log.findMany({
-            where: ownedWhere,
-            orderBy: { created_at: 'desc' },
-            take: 25,
-            include: {
-                rfid_content_pack: {
-                    select: {
-                        name: true,
-                        pack_code: true,
-                        description: true,
-                        thumbnail_url: true,
-                    },
-                },
-            },
-        }),
-        prisma.rfid_card_tap_log.count({
-            where: todayRfidTapWhere,
-        }),
-        prisma.rfid_card_tap_log.count({
-            where: todayAiRfidTapWhere,
-        }),
-        todayToyAnalyticsPromise,
-    ]);
-    const uniqueRecentTaps = uniqueRecentCardTaps(recentCardTaps, 3);
-    const usageTimeSeconds = Math.floor((todayToyAnalytics || []).reduce((sum, event) => (
-        sum + positiveDurationMs(event.duration_ms)
-    ), 0) / 1000);
-    const gamesPlayed = (todayToyAnalytics || []).filter(event => event.event_name === 'game_start').length;
-    const todayAnalyticsCardTapCount = (todayToyAnalytics || []).filter(event => event.event_name === 'card_session_start').length;
-    const todayCardTapCount = Math.max(todayAnalyticsCardTapCount, todayRfidTapCount || 0);
-    const todayAnalyticsAiInteractionCount = (todayToyAnalytics || []).filter(event => event.event_name === 'ai_talk_start').length;
-    const todayAiInteractionCount = Math.max(todayAnalyticsAiInteractionCount, todayAiRfidTapCount || 0);
-    const recentRfidUids = [...new Set((uniqueRecentTaps || []).map(tap => tap.rfid_uid).filter(Boolean))];
-    const recentTapTimes = (uniqueRecentTaps || [])
-        .map(tap => dateTimeOrNull(tap.created_at))
-        .filter(Boolean)
-        .sort((left, right) => left.getTime() - right.getTime());
-    const recentDurationStart = recentTapTimes[0] || null;
-    const recentDurationEnd = options.now || new Date();
-    const recentDurationEventsPromise = macAddresses.length > 0 && recentRfidUids.length > 0 && recentDurationStart
-        ? prisma.device_analytics_event.findMany({
-            where: {
-                mac_address: { in: macAddresses },
-                rfid_uid: { in: recentRfidUids },
-                event_name: 'card_session_end',
-                server_received_at: {
-                    gte: recentDurationStart,
-                    lte: recentDurationEnd,
-                },
-            },
-            orderBy: { server_received_at: 'asc' },
-            select: {
-                event_name: true,
-                duration_ms: true,
-                rfid_uid: true,
+                id: true,
+                mac_address: true,
                 event_timestamp: true,
                 server_received_at: true,
-            },
-        })
-        : Promise.resolve([]);
-    const recentMappingsPromise = recentRfidUids.length > 0
-        ? prisma.rfid_card_mapping.findMany({
-            where: { rfid_uid: { in: recentRfidUids } },
-            select: {
                 rfid_uid: true,
-                card_type: true,
-                pack_code: true,
-                action_data: true,
-                rfid_content_pack: {
-                    select: {
-                        name: true,
-                        pack_code: true,
-                        description: true,
-                        thumbnail_url: true,
-                    },
-                },
-                rfid_question: {
-                    select: {
-                        title: true,
-                        prompt_text: true,
-                    },
-                },
-                rfid_pack: {
-                    select: {
-                        pack_name: true,
-                        pack_code: true,
-                        description: true,
-                    },
-                },
+                content_id: true,
+                content_type: true,
+                data: true,
             },
+            orderBy: { server_received_at: 'desc' },
         })
-        : [];
-    const [recentMappings, recentDurationEvents] = await Promise.all([
-        recentMappingsPromise,
-        recentDurationEventsPromise,
-    ]);
-    const recentCardTapsWithDurations = attachRecentCardDurations(uniqueRecentTaps, recentDurationEvents);
-    const recentMappingByUid = new Map((recentMappings || []).map(mapping => [mapping.rfid_uid, mapping]));
-    const recentActivities = (recentCardTapsWithDurations || [])
-        .map(tap => formatRecentCardActivity(tap, recentMappingByUid.get(tap.rfid_uid)))
-        .filter(Boolean);
+        : null;
 
     return {
         today_progress: {
-            date: formatLocalDate(start),
-            card_tap_count: todayCardTapCount || 0,
-            cardTapCount: todayCardTapCount || 0,
-            ai_interaction_count: todayAiInteractionCount || 0,
-            aiInteractionCount: todayAiInteractionCount || 0,
-            usage_time_seconds: usageTimeSeconds,
-            usageTimeSeconds,
-            games_played: gamesPlayed,
-            gamesPlayed,
+            date: summary.endDate,
+            card_tap_count: summary.card_tap_count,
+            cardTapCount: summary.cardTapCount,
+            ai_interaction_count: summary.ai_interaction_count,
+            aiInteractionCount: summary.aiInteractionCount,
+            usage_time_seconds: summary.usage_time_seconds,
+            usageTimeSeconds: summary.usageTimeSeconds,
+            games_played: summary.games_played,
+            gamesPlayed: summary.gamesPlayed,
         },
         todayProgress: {
-            date: formatLocalDate(start),
-            cardTapCount: todayCardTapCount || 0,
-            aiInteractionCount: todayAiInteractionCount || 0,
-            usageTimeSeconds,
-            gamesPlayed,
+            date: summary.endDate,
+            cardTapCount: summary.cardTapCount,
+            aiInteractionCount: summary.aiInteractionCount,
+            usageTimeSeconds: summary.usageTimeSeconds,
+            gamesPlayed: summary.gamesPlayed,
         },
-        recent_activities: recentActivities,
-        recentActivities,
-        recent_activity: recentActivities[0] || null,
-        recentActivity: recentActivities[0] || null,
+        recent_activity: formatRecentAnalyticsCardActivity(recentCardEvent),
+        recentActivity: formatRecentAnalyticsCardActivity(recentCardEvent),
     };
 }
 
@@ -1647,6 +1550,786 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
         ? await buildWeekSections(events, weekMonth, buildUsageGrouped, toDurationWeekSection)
         : null;
     return withWeekSections(withMonthSections(toDurationResponse(period, grouped), sections, monthPicker), weekMonth, weekSections);
+}
+
+function formatRecentAnalyticsCardActivity(row) {
+    if (!row) return null;
+    const data = safeObject(row.data);
+    const cardType = data.card_type || row.content_type || 'unknown';
+    const contentPackCode = data.content_pack_code || null;
+    const contentPackName = data.content_pack_name || data.content_name || null;
+    const contentPackId = row.content_id ? String(row.content_id) : null;
+
+    return {
+        id: row.id != null ? row.id.toString() : null,
+        mac_address: row.mac_address,
+        macAddress: row.mac_address,
+        rfid_uid: row.rfid_uid || data.rfid_uid || null,
+        rfidUid: row.rfid_uid || data.rfid_uid || null,
+        card_type: cardType,
+        cardType,
+        content_pack_id: contentPackId,
+        contentPackId: contentPackId,
+        content_pack_code: contentPackCode,
+        contentPackCode,
+        content_pack_name: contentPackName,
+        contentPackName,
+        created_at: row.server_received_at || row.event_timestamp || null,
+        createdAt: row.server_received_at || row.event_timestamp || null,
+    };
+}
+
+async function resolveProgressScope(firebaseUid, options = {}) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+        select: {
+            id: true,
+            parent_profile: { select: { timezone: true } },
+        },
+    });
+    if (!user) throw new ApiError('Access denied', 403, 403);
+
+    const devices = await prisma.ai_device.findMany({
+        where: { user_id: user.id },
+        select: { mac_address: true },
+    });
+
+    const ownedMacAddresses = (devices || [])
+        .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
+        .filter(Boolean);
+    const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
+
+    if ((options.mac || options.mac_address || options.macAddress) && (!requestedMac || !ownedMacAddresses.includes(requestedMac))) {
+        throw new ApiError('Device not found', 404, 404);
+    }
+
+    return {
+        userId: user.id,
+        timezone: user.parent_profile?.timezone || 'UTC',
+        macAddresses: requestedMac ? [requestedMac] : ownedMacAddresses,
+    };
+}
+
+async function resolveAdminProgressScopeByMac(mac) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (!normalizedMac) throw new ApiError('Invalid mac address', 400, 400);
+
+    const device = await prisma.ai_device.findUnique({
+        where: { mac_address: normalizedMac },
+        select: { user_id: true },
+    });
+    if (!device) throw new ApiError('Device not found', 404, 404);
+
+    let timezone = 'UTC';
+    if (device.user_id != null) {
+        const profile = await prisma.parent_profile.findUnique({
+            where: { user_id: device.user_id },
+            select: { timezone: true },
+        });
+        timezone = profile?.timezone || 'UTC';
+    }
+
+    return {
+        userId: device.user_id || null,
+        timezone,
+        macAddresses: [normalizedMac],
+    };
+}
+
+async function getProgressSummary(firebaseUid, options = {}) {
+    const period = String(options.period || 'today').trim().toLowerCase();
+    if (!PROGRESS_PERIODS.includes(period)) {
+        throw new ApiError('period must be one of: today, week, month', 400, 400);
+    }
+
+    const scope = await resolveProgressScope(firebaseUid, options);
+    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    if (scope.macAddresses.length === 0) {
+        return {
+            period,
+            timezone: scope.timezone,
+            start_date: range.startDate,
+            startDate: range.startDate,
+            end_date: range.endDate,
+            endDate: range.endDate,
+            usage_time_seconds: 0,
+            usageTimeSeconds: 0,
+            card_tap_count: 0,
+            cardTapCount: 0,
+            games_played: 0,
+            gamesPlayed: 0,
+            ai_interaction_count: 0,
+            aiInteractionCount: 0,
+        };
+    }
+
+    const dateWhere = {
+        gte: dateOnlyFromKey(range.startDate),
+        lte: dateOnlyFromKey(range.endDate),
+    };
+
+    const [usageRows, cardRows, aiRows, gamesCount] = await Promise.all([
+        prisma.device_usage_daily.findMany({
+            where: {
+                mac_address: { in: scope.macAddresses },
+                date: dateWhere,
+            },
+            select: { usage_time_seconds: true },
+        }),
+        prisma.device_card_taps_daily.findMany({
+            where: {
+                mac_address: { in: scope.macAddresses },
+                date: dateWhere,
+            },
+            select: { card_tap_count: true },
+        }),
+        prisma.device_ai_interactions_daily.findMany({
+            where: {
+                mac_address: { in: scope.macAddresses },
+                date: dateWhere,
+            },
+            select: { ai_interaction_count: true },
+        }),
+        prisma.device_games_played.count({
+            where: {
+                mac_address: { in: scope.macAddresses },
+                activity_date: dateWhere,
+            },
+        }),
+    ]);
+
+    const usageTimeSeconds = sumBy(usageRows, 'usage_time_seconds');
+    const cardTapCount = sumBy(cardRows, 'card_tap_count');
+    const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
+
+    return {
+        period,
+        timezone: scope.timezone,
+        start_date: range.startDate,
+        startDate: range.startDate,
+        end_date: range.endDate,
+        endDate: range.endDate,
+        usage_time_seconds: usageTimeSeconds,
+        usageTimeSeconds,
+        card_tap_count: cardTapCount,
+        cardTapCount,
+        games_played: gamesCount,
+        gamesPlayed: gamesCount,
+        ai_interaction_count: aiInteractionCount,
+        aiInteractionCount,
+    };
+}
+
+async function getProgressTrend(firebaseUid, options = {}) {
+    const period = String(options.period || '').trim().toLowerCase();
+    if (!['week', 'month'].includes(period)) {
+        throw new ApiError('period must be one of: week, month', 400, 400);
+    }
+
+    const scope = await resolveProgressScope(firebaseUid, options);
+    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const trendMap = new Map(
+        range.dates.map(date => [date, {
+            date,
+            usage_time_seconds: 0,
+            usageTimeSeconds: 0,
+            card_tap_count: 0,
+            cardTapCount: 0,
+            games_played: 0,
+            gamesPlayed: 0,
+            ai_interaction_count: 0,
+            aiInteractionCount: 0,
+        }])
+    );
+
+    if (scope.macAddresses.length === 0) {
+        return { period, timezone: scope.timezone, points: Array.from(trendMap.values()) };
+    }
+
+    const dateWhere = {
+        gte: dateOnlyFromKey(range.startDate),
+        lte: dateOnlyFromKey(range.endDate),
+    };
+
+    const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
+        prisma.device_usage_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, usage_time_seconds: true },
+        }),
+        prisma.device_card_taps_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, card_tap_count: true },
+        }),
+        prisma.device_ai_interactions_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, ai_interaction_count: true },
+        }),
+        prisma.device_games_played.findMany({
+            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            select: { activity_date: true },
+        }),
+    ]);
+
+    for (const row of usageRows || []) {
+        const key = formatLocalDate(row.date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        const value = Number(row.usage_time_seconds) || 0;
+        point.usage_time_seconds += value;
+        point.usageTimeSeconds += value;
+    }
+    for (const row of cardRows || []) {
+        const key = formatLocalDate(row.date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        const value = Number(row.card_tap_count) || 0;
+        point.card_tap_count += value;
+        point.cardTapCount += value;
+    }
+    for (const row of aiRows || []) {
+        const key = formatLocalDate(row.date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        const value = Number(row.ai_interaction_count) || 0;
+        point.ai_interaction_count += value;
+        point.aiInteractionCount += value;
+    }
+    for (const row of gameRows || []) {
+        const key = formatLocalDate(row.activity_date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        point.games_played += 1;
+        point.gamesPlayed += 1;
+    }
+
+    return {
+        period,
+        timezone: scope.timezone,
+        points: Array.from(trendMap.values()),
+    };
+}
+
+async function getProgressDetails(firebaseUid, options = {}) {
+    const metric = String(options.metric || '').trim().toLowerCase();
+    const period = String(options.period || 'today').trim().toLowerCase();
+    if (!PROGRESS_DETAIL_METRICS.includes(metric)) {
+        throw new ApiError('metric must be one of: usage, cards, games, ai, radio', 400, 400);
+    }
+    if (!PROGRESS_PERIODS.includes(period)) {
+        throw new ApiError('period must be one of: today, week, month', 400, 400);
+    }
+
+    const scope = await resolveProgressScope(firebaseUid, options);
+    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const { page, limit, offset } = parsePagination(options);
+
+    if (scope.macAddresses.length === 0) {
+        return { metric, period, page, limit, total_items: 0, totalItems: 0, items: [] };
+    }
+
+    const dateWhere = {
+        gte: dateOnlyFromKey(range.startDate),
+        lte: dateOnlyFromKey(range.endDate),
+    };
+
+    if (metric === 'usage') {
+        const rows = await prisma.device_usage_daily.findMany({
+            where: {
+                mac_address: { in: scope.macAddresses },
+                date: dateWhere,
+            },
+            select: {
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
+        });
+        const totals = {
+            game: sumBy(rows, 'game_usage_seconds'),
+            card: sumBy(rows, 'card_usage_seconds'),
+            ai_talk: sumBy(rows, 'ai_talk_usage_seconds'),
+            radio: sumBy(rows, 'radio_usage_seconds'),
+        };
+        const items = [
+            { key: 'game', name: 'Game', duration_seconds: totals.game, durationSeconds: totals.game },
+            { key: 'card', name: 'Card', duration_seconds: totals.card, durationSeconds: totals.card },
+            { key: 'ai_talk', name: 'AI Talk', duration_seconds: totals.ai_talk, durationSeconds: totals.ai_talk },
+            { key: 'radio', name: 'Radio', duration_seconds: totals.radio, durationSeconds: totals.radio },
+        ];
+        const totalSeconds = items.reduce((sum, item) => sum + item.duration_seconds, 0);
+        const paged = items.slice(offset, offset + limit);
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total_items: items.length,
+            totalItems: items.length,
+            total_seconds: totalSeconds,
+            totalSeconds,
+            items: paged,
+        };
+    }
+
+    if (metric === 'cards') {
+        const rows = await prisma.device_card_taps_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, card_tap_count: true },
+            orderBy: { date: 'desc' },
+        });
+        const items = rows.map(row => ({
+            date: formatLocalDate(row.date),
+            card_tap_count: Number(row.card_tap_count) || 0,
+            cardTapCount: Number(row.card_tap_count) || 0,
+        }));
+        const total = items.reduce((sum, item) => sum + item.card_tap_count, 0);
+        const paged = items.slice(offset, offset + limit);
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total,
+            total_items: items.length,
+            totalItems: items.length,
+            items: paged,
+        };
+    }
+
+    if (metric === 'ai') {
+        const rows = await prisma.device_ai_interactions_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, ai_interaction_count: true },
+            orderBy: { date: 'desc' },
+        });
+        const items = rows.map(row => ({
+            date: formatLocalDate(row.date),
+            ai_interaction_count: Number(row.ai_interaction_count) || 0,
+            aiInteractionCount: Number(row.ai_interaction_count) || 0,
+        }));
+        const total = items.reduce((sum, item) => sum + item.ai_interaction_count, 0);
+        const paged = items.slice(offset, offset + limit);
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total,
+            total_items: items.length,
+            totalItems: items.length,
+            items: paged,
+        };
+    }
+
+    if (metric === 'games') {
+        const where = {
+            mac_address: { in: scope.macAddresses },
+            activity_date: dateWhere,
+        };
+        const [totalItems, rows] = await Promise.all([
+            prisma.device_games_played.count({ where }),
+            prisma.device_games_played.findMany({
+                where,
+                orderBy: { played_at: 'desc' },
+                skip: offset,
+                take: limit,
+            }),
+        ]);
+        const items = (rows || []).map(row => ({
+            id: row.id,
+            mac_address: row.mac_address,
+            macAddress: row.mac_address,
+            game_id: row.game_id,
+            gameId: row.game_id,
+            game_name: row.game_name,
+            gameName: row.game_name,
+            level: row.level,
+            difficulty_level: row.difficulty_level,
+            difficultyLevel: row.difficulty_level,
+            score: row.score,
+            duration_ms: row.duration_ms,
+            durationMs: row.duration_ms,
+            played_at: row.played_at,
+            playedAt: row.played_at,
+            source_event_id: row.source_event_id,
+            sourceEventId: row.source_event_id,
+        }));
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total_items: totalItems,
+            totalItems,
+            items,
+        };
+    }
+
+    const where = {
+        mac_address: { in: scope.macAddresses },
+        activity_date: dateWhere,
+    };
+    const [totalItems, rows] = await Promise.all([
+        prisma.device_radio_played.count({ where }),
+        prisma.device_radio_played.findMany({
+            where,
+            orderBy: { played_at: 'desc' },
+            skip: offset,
+            take: limit,
+        }),
+    ]);
+    const items = (rows || []).map(row => ({
+        id: row.id,
+        mac_address: row.mac_address,
+        macAddress: row.mac_address,
+        station: row.station,
+        duration_ms: row.duration_ms,
+        durationMs: row.duration_ms,
+        played_at: row.played_at,
+        playedAt: row.played_at,
+        source_event_id: row.source_event_id,
+        sourceEventId: row.source_event_id,
+    }));
+    return {
+        metric,
+        period,
+        page,
+        limit,
+        total_items: totalItems,
+        totalItems,
+        items,
+    };
+}
+
+async function getDeviceGamesPlayed(firebaseUid, mac, options = {}) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (!normalizedMac) throw new ApiError('Invalid mac address', 400, 400);
+    return getProgressDetails(firebaseUid, {
+        ...options,
+        mac: normalizedMac,
+        metric: 'games',
+    });
+}
+
+async function getDeviceRadioPlayed(firebaseUid, mac, options = {}) {
+    const normalizedMac = normalizeMacAddress(mac);
+    if (!normalizedMac) throw new ApiError('Invalid mac address', 400, 400);
+    return getProgressDetails(firebaseUid, {
+        ...options,
+        mac: normalizedMac,
+        metric: 'radio',
+    });
+}
+
+async function getProgressSummaryByMacAdmin(mac, options = {}) {
+    const period = String(options.period || 'today').trim().toLowerCase();
+    if (!PROGRESS_PERIODS.includes(period)) {
+        throw new ApiError('period must be one of: today, week, month', 400, 400);
+    }
+
+    const scope = await resolveAdminProgressScopeByMac(mac);
+    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const dateWhere = {
+        gte: dateOnlyFromKey(range.startDate),
+        lte: dateOnlyFromKey(range.endDate),
+    };
+
+    const [usageRows, cardRows, aiRows, gamesCount] = await Promise.all([
+        prisma.device_usage_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { usage_time_seconds: true },
+        }),
+        prisma.device_card_taps_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { card_tap_count: true },
+        }),
+        prisma.device_ai_interactions_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { ai_interaction_count: true },
+        }),
+        prisma.device_games_played.count({
+            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+        }),
+    ]);
+
+    const usageTimeSeconds = sumBy(usageRows, 'usage_time_seconds');
+    const cardTapCount = sumBy(cardRows, 'card_tap_count');
+    const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
+
+    return {
+        period,
+        timezone: scope.timezone,
+        start_date: range.startDate,
+        startDate: range.startDate,
+        end_date: range.endDate,
+        endDate: range.endDate,
+        usage_time_seconds: usageTimeSeconds,
+        usageTimeSeconds,
+        card_tap_count: cardTapCount,
+        cardTapCount,
+        games_played: gamesCount,
+        gamesPlayed: gamesCount,
+        ai_interaction_count: aiInteractionCount,
+        aiInteractionCount,
+    };
+}
+
+async function getProgressTrendByMacAdmin(mac, options = {}) {
+    const period = String(options.period || '').trim().toLowerCase();
+    if (!['week', 'month'].includes(period)) {
+        throw new ApiError('period must be one of: week, month', 400, 400);
+    }
+
+    const scope = await resolveAdminProgressScopeByMac(mac);
+    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const trendMap = new Map(
+        range.dates.map(date => [date, {
+            date,
+            usage_time_seconds: 0,
+            usageTimeSeconds: 0,
+            card_tap_count: 0,
+            cardTapCount: 0,
+            games_played: 0,
+            gamesPlayed: 0,
+            ai_interaction_count: 0,
+            aiInteractionCount: 0,
+        }])
+    );
+
+    const dateWhere = {
+        gte: dateOnlyFromKey(range.startDate),
+        lte: dateOnlyFromKey(range.endDate),
+    };
+
+    const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
+        prisma.device_usage_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, usage_time_seconds: true },
+        }),
+        prisma.device_card_taps_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, card_tap_count: true },
+        }),
+        prisma.device_ai_interactions_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, ai_interaction_count: true },
+        }),
+        prisma.device_games_played.findMany({
+            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            select: { activity_date: true },
+        }),
+    ]);
+
+    for (const row of usageRows || []) {
+        const key = formatLocalDate(row.date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        const value = Number(row.usage_time_seconds) || 0;
+        point.usage_time_seconds += value;
+        point.usageTimeSeconds += value;
+    }
+    for (const row of cardRows || []) {
+        const key = formatLocalDate(row.date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        const value = Number(row.card_tap_count) || 0;
+        point.card_tap_count += value;
+        point.cardTapCount += value;
+    }
+    for (const row of aiRows || []) {
+        const key = formatLocalDate(row.date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        const value = Number(row.ai_interaction_count) || 0;
+        point.ai_interaction_count += value;
+        point.aiInteractionCount += value;
+    }
+    for (const row of gameRows || []) {
+        const key = formatLocalDate(row.activity_date);
+        const point = trendMap.get(key);
+        if (!point) continue;
+        point.games_played += 1;
+        point.gamesPlayed += 1;
+    }
+
+    return {
+        period,
+        timezone: scope.timezone,
+        points: Array.from(trendMap.values()),
+    };
+}
+
+async function getProgressDetailsByMacAdmin(mac, options = {}) {
+    const metric = String(options.metric || '').trim().toLowerCase();
+    const period = String(options.period || 'today').trim().toLowerCase();
+    if (!PROGRESS_DETAIL_METRICS.includes(metric)) {
+        throw new ApiError('metric must be one of: usage, cards, games, ai, radio', 400, 400);
+    }
+    if (!PROGRESS_PERIODS.includes(period)) {
+        throw new ApiError('period must be one of: today, week, month', 400, 400);
+    }
+
+    const scope = await resolveAdminProgressScopeByMac(mac);
+    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const { page, limit, offset } = parsePagination(options);
+    const dateWhere = {
+        gte: dateOnlyFromKey(range.startDate),
+        lte: dateOnlyFromKey(range.endDate),
+    };
+
+    if (metric === 'usage') {
+        const rows = await prisma.device_usage_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: {
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
+        });
+        const totals = {
+            game: sumBy(rows, 'game_usage_seconds'),
+            card: sumBy(rows, 'card_usage_seconds'),
+            ai_talk: sumBy(rows, 'ai_talk_usage_seconds'),
+            radio: sumBy(rows, 'radio_usage_seconds'),
+        };
+        const items = [
+            { key: 'game', name: 'Game', duration_seconds: totals.game, durationSeconds: totals.game },
+            { key: 'card', name: 'Card', duration_seconds: totals.card, durationSeconds: totals.card },
+            { key: 'ai_talk', name: 'AI Talk', duration_seconds: totals.ai_talk, durationSeconds: totals.ai_talk },
+            { key: 'radio', name: 'Radio', duration_seconds: totals.radio, durationSeconds: totals.radio },
+        ];
+        const totalSeconds = items.reduce((sum, item) => sum + item.duration_seconds, 0);
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total_items: items.length,
+            totalItems: items.length,
+            total_seconds: totalSeconds,
+            totalSeconds,
+            items: items.slice(offset, offset + limit),
+        };
+    }
+
+    if (metric === 'cards') {
+        const rows = await prisma.device_card_taps_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, card_tap_count: true },
+            orderBy: { date: 'desc' },
+        });
+        const items = rows.map(row => ({
+            date: formatLocalDate(row.date),
+            card_tap_count: Number(row.card_tap_count) || 0,
+            cardTapCount: Number(row.card_tap_count) || 0,
+        }));
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total: items.reduce((sum, item) => sum + item.card_tap_count, 0),
+            total_items: items.length,
+            totalItems: items.length,
+            items: items.slice(offset, offset + limit),
+        };
+    }
+
+    if (metric === 'ai') {
+        const rows = await prisma.device_ai_interactions_daily.findMany({
+            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            select: { date: true, ai_interaction_count: true },
+            orderBy: { date: 'desc' },
+        });
+        const items = rows.map(row => ({
+            date: formatLocalDate(row.date),
+            ai_interaction_count: Number(row.ai_interaction_count) || 0,
+            aiInteractionCount: Number(row.ai_interaction_count) || 0,
+        }));
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total: items.reduce((sum, item) => sum + item.ai_interaction_count, 0),
+            total_items: items.length,
+            totalItems: items.length,
+            items: items.slice(offset, offset + limit),
+        };
+    }
+
+    if (metric === 'games') {
+        const where = { mac_address: { in: scope.macAddresses }, activity_date: dateWhere };
+        const [totalItems, rows] = await Promise.all([
+            prisma.device_games_played.count({ where }),
+            prisma.device_games_played.findMany({
+                where,
+                orderBy: { played_at: 'desc' },
+                skip: offset,
+                take: limit,
+            }),
+        ]);
+        return {
+            metric,
+            period,
+            page,
+            limit,
+            total_items: totalItems,
+            totalItems,
+            items: (rows || []).map(row => ({
+                id: row.id,
+                mac_address: row.mac_address,
+                macAddress: row.mac_address,
+                game_id: row.game_id,
+                gameId: row.game_id,
+                game_name: row.game_name,
+                gameName: row.game_name,
+                level: row.level,
+                difficulty_level: row.difficulty_level,
+                difficultyLevel: row.difficulty_level,
+                score: row.score,
+                duration_ms: row.duration_ms,
+                durationMs: row.duration_ms,
+                played_at: row.played_at,
+                playedAt: row.played_at,
+                source_event_id: row.source_event_id,
+                sourceEventId: row.source_event_id,
+            })),
+        };
+    }
+
+    const where = { mac_address: { in: scope.macAddresses }, activity_date: dateWhere };
+    const [totalItems, rows] = await Promise.all([
+        prisma.device_radio_played.count({ where }),
+        prisma.device_radio_played.findMany({
+            where,
+            orderBy: { played_at: 'desc' },
+            skip: offset,
+            take: limit,
+        }),
+    ]);
+    return {
+        metric,
+        period,
+        page,
+        limit,
+        total_items: totalItems,
+        totalItems,
+        items: (rows || []).map(row => ({
+            id: row.id,
+            mac_address: row.mac_address,
+            macAddress: row.mac_address,
+            station: row.station,
+            duration_ms: row.duration_ms,
+            durationMs: row.duration_ms,
+            played_at: row.played_at,
+            playedAt: row.played_at,
+            source_event_id: row.source_event_id,
+            sourceEventId: row.source_event_id,
+        })),
+    };
 }
 
 async function getHomepageRecommendations(firebaseUid, options = {}) {
@@ -1822,5 +2505,13 @@ module.exports = {
     deleteUserAccount,
     getHomepageActivity,
     getHomepageActivityDetails,
+    getProgressSummary,
+    getProgressDetails,
+    getProgressTrend,
+    getProgressSummaryByMacAdmin,
+    getProgressDetailsByMacAdmin,
+    getProgressTrendByMacAdmin,
+    getDeviceGamesPlayed,
+    getDeviceRadioPlayed,
     getHomepageRecommendations,
 };
