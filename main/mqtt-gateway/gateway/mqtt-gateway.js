@@ -3476,8 +3476,73 @@ class MQTTGateway {
     }
   }
 
-  sendUdpMessage(message, remoteAddress) {
-    this.udpServer.send(message, remoteAddress.port, remoteAddress.address);
+  sendUdpMessage(message, remoteAddress, context = {}) {
+    const direction = context.direction || "udp";
+    const deviceId = context.deviceId || "unknown";
+    const sessionId = context.sessionId || "unknown";
+    const sequence = context.sequence ?? "unknown";
+    const payloadBytes = context.payloadBytes ?? "unknown";
+    const udpBytes = context.udpBytes ?? message?.length ?? "unknown";
+
+    if (!this.udpServer) {
+      logger.error(
+        `❌ [LIVEKIT->UDP] Failed to send audio to device ${deviceId}: UDP server is not initialized ` +
+          `(direction=${direction}, session=${sessionId}, remote=${remoteAddress?.address || "unknown"}:${remoteAddress?.port || "unknown"}, ` +
+          `payloadBytes=${payloadBytes}, udpBytes=${udpBytes}, sequence=${sequence})`
+      );
+      return;
+    }
+
+    if (!remoteAddress?.address || !remoteAddress?.port) {
+      logger.error(
+        `❌ [LIVEKIT->UDP] Failed to send audio to device ${deviceId}: invalid UDP remote address ` +
+          `(direction=${direction}, session=${sessionId}, remote=${JSON.stringify(remoteAddress)}, ` +
+          `payloadBytes=${payloadBytes}, udpBytes=${udpBytes}, sequence=${sequence})`
+      );
+      return;
+    }
+
+    try {
+      this.udpServer.send(
+        message,
+        remoteAddress.port,
+        remoteAddress.address,
+        (error) => {
+          if (!error) {
+            if (direction === "livekit_to_device_audio") {
+              const now = Date.now();
+              this.lastLiveKitUdpStreamLogTime =
+                this.lastLiveKitUdpStreamLogTime || new Map();
+              const lastLogTime =
+                this.lastLiveKitUdpStreamLogTime.get(deviceId) || 0;
+
+              if (now - lastLogTime > 1000) {
+                this.lastLiveKitUdpStreamLogTime.set(deviceId, now);
+                logger.info(
+                  `📡 [LIVEKIT->UDP] Streaming audio to device ${deviceId} ` +
+                    `(session=${sessionId}, remote=${remoteAddress.address}:${remoteAddress.port}, ` +
+                    `payloadBytes=${payloadBytes}, udpBytes=${udpBytes}, sequence=${sequence})`
+                );
+              }
+            }
+            return;
+          }
+
+          logger.error(
+            `❌ [LIVEKIT->UDP] Failed to send audio to device ${deviceId}: ${error.message} ` +
+              `(code=${error.code || "unknown"}, direction=${direction}, session=${sessionId}, ` +
+              `remote=${remoteAddress.address}:${remoteAddress.port}, payloadBytes=${payloadBytes}, ` +
+              `udpBytes=${udpBytes}, sequence=${sequence})`
+          );
+        }
+      );
+    } catch (error) {
+      logger.error(
+        `❌ [LIVEKIT->UDP] Failed to send audio to device ${deviceId}: ${error.message} ` +
+          `(direction=${direction}, session=${sessionId}, remote=${remoteAddress.address}:${remoteAddress.port}, ` +
+          `payloadBytes=${payloadBytes}, udpBytes=${udpBytes}, sequence=${sequence})`
+      );
+    }
   }
 
   onUdpMessage(message, rinfo) {
@@ -3553,5 +3618,3 @@ class MQTTGateway {
 }
 
 module.exports = { MQTTGateway, setConfigManager };
-
-
