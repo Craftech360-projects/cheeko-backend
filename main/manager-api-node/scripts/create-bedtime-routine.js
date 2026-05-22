@@ -12,6 +12,7 @@ const PORT = 8002;
 const BASE_PATH = '/toy';
 const LOGIN_PATH = '/user/login';
 const RFID_BASE = '/admin/rfid';
+const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
 
 // Credentials
 const USERNAME = 'admin1';
@@ -89,71 +90,71 @@ async function createBedtimeRoutine() {
             sequence: 1,
             title: "Step 1",
             text: "Bed time routine step 1",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-01/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-01/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-01/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-01/image.png`
         },
         {
             sequence: 2,
             title: "Step 2",
             text: "Bed time routine step 2",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-02/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-02/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-02/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-02/image.png`
         },
         {
             sequence: 3,
             title: "Step 3",
             text: "Bed time routine step 3",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-03/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-03/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-03/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-03/image.png`
         },
         {
             sequence: 4,
             title: "Step 4",
             text: "Bed time routine step 4",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-04/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-04/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-04/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-04/image.png`
         },
         {
             sequence: 5,
             title: "Step 5",
             text: "Bed time routine step 5",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-05/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-05/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-05/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-05/image.png`
         },
         {
             sequence: 6,
             title: "Step 6",
             text: "Bed time routine step 6",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-06/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-06/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-06/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-06/image.png`
         },
         {
             sequence: 7,
             title: "Step 7",
             text: "Bed time routine step 7",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-07/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-07/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-07/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-07/image.png`
         },
         {
             sequence: 8,
             title: "Step 8",
             text: "Bed time routine step 8",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-08/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-08/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-08/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-08/image.png`
         },
         {
             sequence: 9,
             title: "Step 9",
             text: "Bed time routine step 9",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-09/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-09/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-09/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-09/image.png`
         },
         {
             sequence: 10,
             title: "Step 10",
             text: "Bed time routine step 10",
-            audioUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-10/audio.mp3",
-            imageUrl: "https://d23u4d6oyrni77.cloudfront.net/habits/bed-time/step-10/image.png"
+            audioUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-10/audio.mp3`,
+            imageUrl: `https://${CLOUDFRONT_DOMAIN}/habits/bed-time/step-10/image.png`
         }
     ];
 

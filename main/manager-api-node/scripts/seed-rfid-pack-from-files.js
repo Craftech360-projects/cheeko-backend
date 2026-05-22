@@ -62,7 +62,7 @@ async function main() {
   const contentType = getArg('content-type') || 'rfidcontent';
   const version = Number(getArg('version') || '1');
   const status = getArg('status') || 'active';
-  const cdnBase = getArg('cdn-base') || 'https://d23u4d6oyrni77.cloudfront.net/music';
+  const cdnBase = getArg('cdn-base') || `https://${process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net'}/music`;
   const files = splitFiles(requireArg('files'));
 
   if (!Number.isInteger(version) || version < 1) {

@@ -123,6 +123,14 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'healthy',
+    service: 'manager-api',
+    apiBase: CONTEXT_PATH
+  });
+});
+
 // ===========================================
 // API Routes (under /toy context path)
 // ===========================================
