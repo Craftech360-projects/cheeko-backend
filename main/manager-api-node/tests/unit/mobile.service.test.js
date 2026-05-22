@@ -422,6 +422,45 @@ describe('mobile.service parent profile compatibility', () => {
     expect(result.today_progress.aiInteractionCount).toBe(3);
     expect(result.todayProgress.aiInteractionCount).toBe(3);
   });
+
+  it('falls back to raw game_start events when games projection is empty', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      { server_received_at: new Date('2026-05-13T03:00:00.000Z') },
+      { server_received_at: new Date('2026-05-13T07:00:00.000Z') },
+      { server_received_at: new Date('2026-05-12T21:00:00.000Z') }
+    ]);
+    prisma.device_analytics_event.findFirst.mockResolvedValue(null);
+
+    const result = await mobileService.getProgressSummary('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.games_played).toBe(2);
+    expect(result.gamesPlayed).toBe(2);
+    expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith({
+      where: {
+        mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        event_name: 'game_start',
+        server_received_at: {
+          gte: new Date('2026-05-12T00:00:00.000Z'),
+          lte: new Date('2026-05-14T00:00:00.000Z')
+        }
+      },
+      select: { server_received_at: true }
+    });
+  });
 });
 
 describe('mobile.service homepage activity details', () => {

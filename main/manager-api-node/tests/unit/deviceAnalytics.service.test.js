@@ -23,6 +23,8 @@ jest.mock('../../src/config/database', () => ({
     },
     device_games_played: {
       upsert: jest.fn(),
+      findFirst: jest.fn(),
+      update: jest.fn(),
     },
     device_radio_played: {
       upsert: jest.fn(),
@@ -56,6 +58,7 @@ describe('deviceAnalytics.service ingest collision handling', () => {
     prisma.device_analytics_event.findFirst.mockResolvedValue(null);
     prisma.ai_device.findUnique.mockResolvedValue(null);
     prisma.parent_profile.findUnique.mockResolvedValue(null);
+    prisma.device_games_played.findFirst.mockResolvedValue(null);
   });
 
   it('stores raw event_id directly when unique', async () => {
@@ -120,5 +123,83 @@ describe('deviceAnalytics.service ingest collision handling', () => {
     expect(result.stored_event_id).toBeNull();
     expect(result.original_event_id).toBe('evt_ld_1115284639');
     expect(result.stored_event_key).toMatch(/^evt_ld_1115284639::[a-f0-9]{12}$/);
+  });
+
+  it('projects game_start into device_games_played', async () => {
+    prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+      id: 'raw-game-start-1',
+      server_received_at: new Date('2026-05-21T09:56:19.000Z'),
+      ...data,
+    }));
+
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'game-start-1',
+        event: 'game_start',
+        data: {
+          game_id: 'animal_match',
+          game_name: 'Animal Match',
+          level: '1',
+        },
+      }),
+    });
+
+    expect(prisma.device_games_played.upsert).toHaveBeenCalledWith({
+      where: { source_device_event_pk: 'raw-game-start-1' },
+      create: expect.objectContaining({
+        mac_address: 'FC:01:2C:CF:EB:54',
+        game_id: 'animal_match',
+        game_name: 'Animal Match',
+        level: '1',
+        duration_ms: null,
+        source_device_event_pk: 'raw-game-start-1',
+        source_event_id: 'game-start-1',
+      }),
+      update: expect.objectContaining({
+        user_id: null,
+        device_id: null,
+      }),
+    });
+  });
+
+  it('updates matching game_start projection when game_end arrives', async () => {
+    prisma.device_games_played.findFirst.mockResolvedValue({
+      id: 'played-row-1',
+      source_device_event_pk: 'raw-game-start-1',
+    });
+    prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+      id: 'raw-game-end-1',
+      server_received_at: new Date('2026-05-21T10:01:19.000Z'),
+      ...data,
+    }));
+
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'game-end-1',
+        event: 'game_end',
+        duration_ms: 300000,
+        data: {
+          game_id: 'animal_match',
+          game_name: 'Animal Match',
+          score: 84,
+          difficulty: 'easy',
+        },
+      }),
+    });
+
+    expect(prisma.device_games_played.findFirst).toHaveBeenCalled();
+    expect(prisma.device_games_played.update).toHaveBeenCalledWith({
+      where: { id: 'played-row-1' },
+      data: expect.objectContaining({
+        game_name: 'Animal Match',
+        difficulty_level: 'easy',
+        score: 84,
+        duration_ms: 300000,
+        source_event_id: 'game-end-1',
+      }),
+    });
+    expect(prisma.device_games_played.upsert).not.toHaveBeenCalled();
   });
 });

@@ -47,6 +47,23 @@ function safeObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+function gameProjectionData({ rawEventRow, data, userId, ownerDeviceId, activityDate, eventInstant, durationMs }) {
+  return {
+    user_id: userId,
+    device_id: ownerDeviceId,
+    mac_address: rawEventRow.mac_address,
+    activity_date: activityDate,
+    game_id: extractStringValue(rawEventRow.game_id, data.game_id),
+    game_name: extractStringValue(data.game_name, data.mode_name),
+    level: extractStringValue(data.level, data.stage),
+    difficulty_level: extractStringValue(data.difficulty_level, data.difficulty),
+    score: rawEventRow.score ?? parseIntOrNull(data.score),
+    duration_ms: durationMs,
+    played_at: eventInstant,
+    source_event_id: rawEventRow.event_id,
+  };
+}
+
 function formatDateInTimezone(value, timezone = 'UTC') {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -359,29 +376,81 @@ async function applyProjectionForEvent(rawEventRow) {
     });
   }
 
-  if (eventName === 'game_end') {
+  if (eventName === 'game_start') {
     await prisma.device_games_played.upsert({
       where: { source_device_event_pk: rawEventRow.id },
       create: {
-        user_id: userId,
-        device_id: ownerDeviceId,
-        mac_address: rawEventRow.mac_address,
-        activity_date: activityDate,
-        game_id: extractStringValue(rawEventRow.game_id, data.game_id),
-        game_name: extractStringValue(data.game_name, data.mode_name),
-        level: extractStringValue(data.level, data.stage),
-        difficulty_level: extractStringValue(data.difficulty_level, data.difficulty),
-        score: rawEventRow.score ?? parseIntOrNull(data.score),
-        duration_ms: durationMs,
-        played_at: eventInstant,
+        ...gameProjectionData({
+          rawEventRow,
+          data,
+          userId,
+          ownerDeviceId,
+          activityDate,
+          eventInstant,
+          durationMs: null,
+        }),
         source_device_event_pk: rawEventRow.id,
-        source_event_id: rawEventRow.event_id,
       },
       update: {
         user_id: userId,
         device_id: ownerDeviceId,
       },
     });
+  }
+
+  if (eventName === 'game_end') {
+    const gameId = extractStringValue(rawEventRow.game_id, data.game_id);
+    const startedAfter = new Date(eventInstant.getTime() - 6 * 60 * 60 * 1000);
+    const matchingStart = await prisma.device_games_played.findFirst({
+      where: {
+        mac_address: rawEventRow.mac_address,
+        activity_date: activityDate,
+        game_id: gameId,
+        duration_ms: null,
+        played_at: {
+          gte: startedAfter,
+          lte: eventInstant,
+        },
+      },
+      orderBy: { played_at: 'desc' },
+    });
+    const projectionData = gameProjectionData({
+      rawEventRow,
+      data,
+      userId,
+      ownerDeviceId,
+      activityDate,
+      eventInstant,
+      durationMs,
+    });
+
+    if (matchingStart) {
+      await prisma.device_games_played.update({
+        where: { id: matchingStart.id },
+        data: {
+          user_id: projectionData.user_id,
+          device_id: projectionData.device_id,
+          game_name: projectionData.game_name,
+          level: projectionData.level,
+          difficulty_level: projectionData.difficulty_level,
+          score: projectionData.score,
+          duration_ms: projectionData.duration_ms,
+          source_event_id: projectionData.source_event_id,
+        },
+      });
+    } else {
+      await prisma.device_games_played.upsert({
+        where: { source_device_event_pk: rawEventRow.id },
+        create: {
+          ...projectionData,
+          source_device_event_pk: rawEventRow.id,
+        },
+        update: {
+          user_id: userId,
+          device_id: ownerDeviceId,
+        },
+      });
+    }
   }
 
   if (eventName === 'radio_end') {

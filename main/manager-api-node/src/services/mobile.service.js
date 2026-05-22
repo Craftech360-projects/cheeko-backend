@@ -155,6 +155,28 @@ function dateOnlyFromKey(dateKey) {
     return new Date(`${dateKey}T00:00:00.000Z`);
 }
 
+async function countRawGameStartsForRange(scope, range) {
+    const dateKeys = new Set(range.dates || []);
+    if (!dateKeys.size || !scope.macAddresses || scope.macAddresses.length === 0) return 0;
+
+    const rows = await prisma.device_analytics_event.findMany({
+        where: {
+            mac_address: { in: scope.macAddresses },
+            event_name: 'game_start',
+            server_received_at: {
+                gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
+                lte: dateOnlyFromKey(shiftDateKey(range.endDate, 1)),
+            },
+        },
+        select: { server_received_at: true },
+    });
+
+    return (rows || []).filter(row => {
+        const dateKey = formatDateInTimezone(row.server_received_at, scope.timezone);
+        return dateKey && dateKeys.has(dateKey);
+    }).length;
+}
+
 function buildProgressDateRange(period, timezone, now = new Date()) {
     const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
     const totalDays = period === 'today' ? 1 : (period === 'week' ? 7 : 30);
@@ -1794,7 +1816,7 @@ async function getProgressSummary(firebaseUid, options = {}) {
         lte: dateOnlyFromKey(range.endDate),
     };
 
-    const [usageRows, cardRows, aiRows, gamesCount] = await Promise.all([
+    const [usageRows, cardRows, aiRows, projectedGamesCount] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: {
                 mac_address: { in: scope.macAddresses },
@@ -1823,6 +1845,9 @@ async function getProgressSummary(firebaseUid, options = {}) {
             },
         }),
     ]);
+    const gamesCount = projectedGamesCount > 0
+        ? projectedGamesCount
+        : await countRawGameStartsForRange(scope, range);
 
     const usageTimeSeconds = sumBy(usageRows, 'usage_time_seconds');
     const cardTapCount = sumBy(cardRows, 'card_tap_count');
