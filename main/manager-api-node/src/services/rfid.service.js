@@ -7,6 +7,7 @@
  * Migrated from Supabase to Prisma ORM.
  */
 
+const { Prisma } = require('@prisma/client');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
@@ -179,6 +180,7 @@ const buildSummaryDateRange = ({ dateFrom, dateTo, defaultDays = 7, maxDays = 31
 
 let rfidSeriesColumnsPromise = null;
 let rfidCardTapLogTableExistsPromise = null;
+let contentItemColumnsPromise = null;
 
 const getRfidSeriesColumns = async () => {
   if (!rfidSeriesColumnsPromise) {
@@ -196,6 +198,24 @@ const getRfidSeriesColumns = async () => {
   }
 
   return rfidSeriesColumnsPromise;
+};
+
+const getContentItemColumns = async () => {
+  if (!contentItemColumnsPromise) {
+    contentItemColumnsPromise = prisma.$queryRaw`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'content_item'
+    `
+      .then((rows) => new Set((rows || []).map((row) => row.column_name)))
+      .catch((error) => {
+        contentItemColumnsPromise = null;
+        throw error;
+      });
+  }
+
+  return contentItemColumnsPromise;
 };
 
 const buildRfidSeriesSelect = async () => {
@@ -332,6 +352,17 @@ const isActiveContentItem = (item) => {
 };
 
 const listContentItemsCompat = async (contentPackId) => {
+  const columns = await getContentItemColumns();
+  const contentTextSelect = columns.has('content_text')
+    ? Prisma.sql`content_text`
+    : Prisma.sql`NULL::text AS content_text`;
+  const storyNumberSelect = columns.has('story_number')
+    ? Prisma.sql`story_number`
+    : Prisma.sql`NULL::integer AS story_number`;
+  const storyTitleSelect = columns.has('story_title')
+    ? Prisma.sql`story_title`
+    : Prisma.sql`NULL::text AS story_title`;
+
   const rows = await prisma.$queryRaw`
     SELECT
       id,
@@ -350,9 +381,9 @@ const listContentItemsCompat = async (contentPackId) => {
       updater,
       update_date,
       image_url,
-      NULL::text AS content_text,
-      NULL::integer AS story_number,
-      NULL::text AS story_title
+      ${contentTextSelect},
+      ${storyNumberSelect},
+      ${storyTitleSelect}
     FROM content_item
     WHERE content_pack_id = ${BigInt(contentPackId)}
     ORDER BY item_number ASC
@@ -362,6 +393,17 @@ const listContentItemsCompat = async (contentPackId) => {
 };
 
 const getContentItemCompat = async (contentPackId, itemNumber) => {
+  const columns = await getContentItemColumns();
+  const contentTextSelect = columns.has('content_text')
+    ? Prisma.sql`content_text`
+    : Prisma.sql`NULL::text AS content_text`;
+  const storyNumberSelect = columns.has('story_number')
+    ? Prisma.sql`story_number`
+    : Prisma.sql`NULL::integer AS story_number`;
+  const storyTitleSelect = columns.has('story_title')
+    ? Prisma.sql`story_title`
+    : Prisma.sql`NULL::text AS story_title`;
+
   const rows = await prisma.$queryRaw`
     SELECT
       id,
@@ -380,9 +422,9 @@ const getContentItemCompat = async (contentPackId, itemNumber) => {
       updater,
       update_date,
       image_url,
-      NULL::text AS content_text,
-      NULL::integer AS story_number,
-      NULL::text AS story_title
+      ${contentTextSelect},
+      ${storyNumberSelect},
+      ${storyTitleSelect}
     FROM content_item
     WHERE content_pack_id = ${BigInt(contentPackId)}
       AND item_number = ${itemNumber}
@@ -3163,7 +3205,7 @@ const transformContentItemToDTO = (item) => {
     dto.audio = null;
   }
 
-  // Images info (parse JSONB)
+  // Images info (parse JSONB, with image_url fallback for the current schema)
   if (item.images_json) {
     try {
       const images = typeof item.images_json === 'string'
@@ -3174,6 +3216,8 @@ const transformContentItemToDTO = (item) => {
       logger.error('Failed to parse images_json for item:', { itemId: item.id, error: e.message });
       dto.images = [];
     }
+  } else if (item.image_url) {
+    dto.images = [{ url: item.image_url }];
   } else {
     dto.images = [];
   }
@@ -3630,6 +3674,58 @@ const transformContentPackToCamelCase = (pack) => {
   };
 };
 
+const getFirstDefined = (...values) => values.find(value => value !== undefined);
+
+const normalizeContentPackItemPayload = (item, index, existingItem = null) => {
+  const itemNumber = getFirstDefined(item.itemNumber, item.item_number, item.sequence, index + 1);
+  const audioUrl = getFirstDefined(item.audioUrl, item.audio_url, existingItem?.audio_url);
+  const imageUrl = getFirstDefined(item.imageUrl, item.image_url, existingItem?.image_url);
+
+  return {
+    itemNumber,
+    title: getFirstDefined(item.title, existingItem?.title),
+    description: getFirstDefined(item.description, existingItem?.description),
+    audioUrl: audioUrl || null,
+    imageUrl: imageUrl || null,
+    audioSizeBytes: getFirstDefined(item.audioSizeBytes, item.audio_size_bytes, existingItem?.audio_size_bytes),
+    audioDurationMs: getFirstDefined(item.audioDurationMs, item.audio_duration_ms, existingItem?.audio_duration_ms),
+    imagesJson: getFirstDefined(item.imagesJson, item.images_json, existingItem?.images_json),
+    text: getFirstDefined(item.text, item.lyricsText, item.lyrics_text, existingItem?.lyrics_text),
+    contentText: getFirstDefined(item.contentText, item.content_text, existingItem?.content_text),
+    storyNumber: getFirstDefined(item.storyNumber, item.story_number, existingItem?.story_number),
+    storyTitle: getFirstDefined(item.storyTitle, item.story_title, existingItem?.story_title)
+  };
+};
+
+const appendOptionalContentItemFields = (row, normalized, columns) => {
+  if (columns.has('content_text')) {
+    row.content_text = normalized.contentText || null;
+  }
+  if (columns.has('story_number')) {
+    row.story_number = normalized.storyNumber || null;
+  }
+  if (columns.has('story_title')) {
+    row.story_title = normalized.storyTitle || null;
+  }
+  return row;
+};
+
+const buildExistingContentItemMap = (items = []) => {
+  const byId = new Map();
+  const byItemNumber = new Map();
+
+  for (const item of items) {
+    if (item.id !== undefined && item.id !== null) {
+      byId.set(String(item.id), item);
+    }
+    if (item.item_number !== undefined && item.item_number !== null) {
+      byItemNumber.set(Number(item.item_number), item);
+    }
+  }
+
+  return { byId, byItemNumber };
+};
+
 /**
  * Get content packs with pagination (matches Java page endpoint)
  * @param {Object} params - Pagination and filter options
@@ -3834,19 +3930,26 @@ const createContentPack = async (data, userId) => {
   // Insert Items (if any)
   if (data.items && Array.isArray(data.items) && data.items.length > 0) {
     logger.info(`[createContentPack] Inserting ${data.items.length} items for pack ID ${newPack.id}`);
+    const contentItemColumns = await getContentItemColumns();
 
-    const itemsData = data.items.map((item, index) => ({
-      content_pack_id: newPack.id,
-      item_number: item.itemNumber || index + 1,
-      title: item.title,
-      audio_url: item.audioUrl || null,
-      image_url: item.imageUrl || null,
-      lyrics_text: item.text || item.lyricsText || null,
-      story_number: item.storyNumber || null,
-      story_title: item.storyTitle || null,
-      creator: userId ? BigInt(userId) : null,
-      active: true
-    }));
+    const itemsData = data.items.map((item, index) => {
+      const normalized = normalizeContentPackItemPayload(item, index);
+      const row = {
+        content_pack_id: newPack.id,
+        item_number: normalized.itemNumber,
+        title: normalized.title,
+        description: normalized.description || null,
+        audio_url: normalized.audioUrl,
+        audio_size_bytes: normalized.audioSizeBytes || null,
+        audio_duration_ms: normalized.audioDurationMs || null,
+        images_json: normalized.imagesJson || null,
+        image_url: normalized.imageUrl,
+        lyrics_text: normalized.text || null,
+        creator: userId ? BigInt(userId) : null,
+        active: true
+      };
+      return appendOptionalContentItemFields(row, normalized, contentItemColumns);
+    });
 
     logger.info('[createContentPack] Items data to insert:', JSON.stringify(itemsData.map(i => ({ ...i, content_pack_id: String(i.content_pack_id), creator: i.creator ? String(i.creator) : null })), null, 2));
 
@@ -3916,6 +4019,13 @@ const updateContentPack = async (data, userId) => {
 
   // Update Items (Delete All + Re-insert) — only if items array is provided
   if (data.items && Array.isArray(data.items)) {
+    let existingItemMap = { byId: new Map(), byItemNumber: new Map() };
+    try {
+      existingItemMap = buildExistingContentItemMap(await listContentItemsCompat(data.id));
+    } catch (existingErr) {
+      logger.error('Failed to load existing content items before update:', existingErr);
+    }
+
     // Delete existing
     try {
       await prisma.content_item.deleteMany({
@@ -3927,18 +4037,30 @@ const updateContentPack = async (data, userId) => {
 
     // Insert new
     if (data.items.length > 0) {
-      const itemsData = data.items.map((item, index) => ({
-        content_pack_id: BigInt(data.id),
-        item_number: item.itemNumber || index + 1,
-        title: item.title,
-        audio_url: item.audioUrl || null,
-        image_url: item.imageUrl || null,
-        lyrics_text: item.text || item.lyricsText || null,
-        story_number: item.storyNumber || null,
-        story_title: item.storyTitle || null,
-        updater: userId ? BigInt(userId) : null,
-        active: true
-      }));
+      const contentItemColumns = await getContentItemColumns();
+      const itemsData = data.items.map((item, index) => {
+        const payloadItemNumber = getFirstDefined(item.itemNumber, item.item_number, item.sequence, index + 1);
+        const existingItem = item.id !== undefined && item.id !== null
+          ? existingItemMap.byId.get(String(item.id))
+          : existingItemMap.byItemNumber.get(Number(payloadItemNumber));
+        const normalized = normalizeContentPackItemPayload(item, index, existingItem);
+
+        const row = {
+          content_pack_id: BigInt(data.id),
+          item_number: normalized.itemNumber,
+          title: normalized.title,
+          description: normalized.description || null,
+          audio_url: normalized.audioUrl,
+          audio_size_bytes: normalized.audioSizeBytes || null,
+          audio_duration_ms: normalized.audioDurationMs || null,
+          images_json: normalized.imagesJson || null,
+          image_url: normalized.imageUrl,
+          lyrics_text: normalized.text || null,
+          updater: userId ? BigInt(userId) : null,
+          active: true
+        };
+        return appendOptionalContentItemFields(row, normalized, contentItemColumns);
+      });
 
       try {
         await prisma.content_item.createMany({ data: itemsData });
