@@ -307,6 +307,15 @@ class MQTTGateway {
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
     this.clientConnections = new Map(); // clientId -> device info (for tracking EMQX clients)
+    this.senderRoutesByMac = new Map(); // macAddress -> latest sender clientId route
+    this.pendingDeviceMessages = new Map(); // macAddress -> queued outbound messages
+    this.senderRouteTtlMs =
+      parseInt(process.env.SENDER_ROUTE_TTL_MS, 10) || 24 * 60 * 60 * 1000; // 24h
+    this.pendingMessageTtlMs =
+      parseInt(process.env.PENDING_DEVICE_MESSAGE_TTL_MS, 10) ||
+      24 * 60 * 60 * 1000; // 24h
+    this.pendingMessageMaxPerDevice =
+      parseInt(process.env.PENDING_DEVICE_MESSAGE_MAX_PER_DEVICE, 10) || 50;
 
     // Initialize LiveKit RoomServiceClient for room management
     try {
@@ -591,18 +600,48 @@ class MQTTGateway {
       }
     }
 
-    // 4. Clean up stale clientConnections entries (these are never cleaned otherwise)
+    // 4. Clean up stale sender routing and queued outbound messages
     let clientConnectionsCleaned = 0;
+    let senderRoutesCleaned = 0;
+    let queuedMessagesCleaned = 0;
     for (const [clientId, info] of this.clientConnections.entries()) {
-      const deviceId = info?.deviceId;
-      // Remove if no deviceId or device no longer exists in deviceConnections
-      if (!deviceId || !this.deviceConnections.has(deviceId)) {
+      const lastSeen = info?.lastSeen || 0;
+      if (now - lastSeen > this.senderRouteTtlMs) {
         this.clientConnections.delete(clientId);
         clientConnectionsCleaned++;
       }
     }
-    if (clientConnectionsCleaned > 0) {
-      logger.info(`🗑️ [GHOST-CLEANUP] Cleaned ${clientConnectionsCleaned} stale clientConnections entries`);
+
+    for (const [macAddress, route] of this.senderRoutesByMac.entries()) {
+      const lastSeen = route?.lastSeen || 0;
+      if (now - lastSeen > this.senderRouteTtlMs) {
+        this.senderRoutesByMac.delete(macAddress);
+        senderRoutesCleaned++;
+      }
+    }
+
+    for (const [macAddress, queued] of this.pendingDeviceMessages.entries()) {
+      const freshMessages = queued.filter(
+        (entry) => now - entry.enqueuedAt <= this.pendingMessageTtlMs
+      );
+      const removedCount = queued.length - freshMessages.length;
+      queuedMessagesCleaned += removedCount;
+
+      if (freshMessages.length === 0) {
+        this.pendingDeviceMessages.delete(macAddress);
+      } else if (removedCount > 0) {
+        this.pendingDeviceMessages.set(macAddress, freshMessages);
+      }
+    }
+
+    if (
+      clientConnectionsCleaned > 0 ||
+      senderRoutesCleaned > 0 ||
+      queuedMessagesCleaned > 0
+    ) {
+      logger.info(
+        `🗑️ [GHOST-CLEANUP] Cleaned stale routes: clientIds=${clientConnectionsCleaned}, macRoutes=${senderRoutesCleaned}, queuedMessages=${queuedMessagesCleaned}`
+      );
     }
 
     const duration = Date.now() - startTime;
@@ -733,10 +772,7 @@ class MQTTGateway {
           deviceId = parts[1].replace(/_/g, ":").toUpperCase(); // Convert MAC format
         }
 
-        this.clientConnections.set(clientId, {
-          deviceId,
-          lastSeen: Date.now(),
-        });
+        this.touchSenderRoute(deviceId, clientId);
 
         logger.info(`📨 [MQTT-IN] ${deviceId}: ${originalPayload.type}`);
 
@@ -1401,12 +1437,177 @@ class MQTTGateway {
   }
 
   resolveSenderClientIdByMac(macAddress) {
+    const normalizedMac = this.normalizeMacAddress(macAddress);
+    if (!normalizedMac) return null;
+
+    const directRoute = this.senderRoutesByMac.get(normalizedMac);
+    if (directRoute?.clientId) {
+      directRoute.lastSeen = Date.now();
+      return directRoute.clientId;
+    }
+
+    let latestClientId = null;
+    let latestLastSeen = 0;
     for (const [clientId, info] of this.clientConnections.entries()) {
-      if ((info?.deviceId || "").toUpperCase() === (macAddress || "").toUpperCase()) {
-        return clientId;
+      if ((info?.deviceId || "").toUpperCase() === normalizedMac) {
+        const lastSeen = info?.lastSeen || 0;
+        if (!latestClientId || lastSeen >= latestLastSeen) {
+          latestClientId = clientId;
+          latestLastSeen = lastSeen;
+        }
       }
     }
+
+    if (latestClientId) {
+      this.senderRoutesByMac.set(normalizedMac, {
+        clientId: latestClientId,
+        lastSeen: latestLastSeen || Date.now(),
+      });
+      return latestClientId;
+    }
+
     return null;
+  }
+
+  normalizeMacAddress(macAddress) {
+    if (!macAddress || typeof macAddress !== "string") return "";
+    return macAddress.trim().replace(/_/g, ":").toUpperCase();
+  }
+
+  touchSenderRoute(macAddress, clientId) {
+    const normalizedMac = this.normalizeMacAddress(macAddress);
+    if (!normalizedMac || !clientId) return;
+
+    const now = Date.now();
+    this.clientConnections.set(clientId, {
+      deviceId: normalizedMac,
+      lastSeen: now,
+    });
+    this.senderRoutesByMac.set(normalizedMac, {
+      clientId,
+      lastSeen: now,
+    });
+
+    this.flushPendingDeviceMessages(normalizedMac);
+  }
+
+  queuePendingDeviceMessage(macAddress, message, source = "unknown") {
+    const normalizedMac = this.normalizeMacAddress(macAddress);
+    if (!normalizedMac) return;
+
+    const now = Date.now();
+    const queued = this.pendingDeviceMessages.get(normalizedMac) || [];
+    queued.push({
+      message,
+      source,
+      enqueuedAt: now,
+    });
+
+    if (queued.length > this.pendingMessageMaxPerDevice) {
+      const overflow = queued.length - this.pendingMessageMaxPerDevice;
+      queued.splice(0, overflow);
+      logger.warn(
+        `[MQTT-QUEUE] Dropped ${overflow} oldest queued message(s) for ${normalizedMac} due to max queue size=${this.pendingMessageMaxPerDevice}`
+      );
+    }
+
+    this.pendingDeviceMessages.set(normalizedMac, queued);
+  }
+
+  flushPendingDeviceMessages(macAddress) {
+    const normalizedMac = this.normalizeMacAddress(macAddress);
+    if (!normalizedMac) return 0;
+
+    const route = this.senderRoutesByMac.get(normalizedMac);
+    const queued = this.pendingDeviceMessages.get(normalizedMac);
+    if (!route?.clientId || !queued || queued.length === 0) return 0;
+
+    const now = Date.now();
+    const freshMessages = queued.filter(
+      (entry) => now - entry.enqueuedAt <= this.pendingMessageTtlMs
+    );
+    const droppedCount = queued.length - freshMessages.length;
+
+    if (droppedCount > 0) {
+      logger.warn(
+        `[MQTT-QUEUE] Dropped ${droppedCount} expired queued message(s) for ${normalizedMac}`
+      );
+    }
+
+    this.pendingDeviceMessages.delete(normalizedMac);
+    const topic = `devices/p2p/${route.clientId}`;
+    for (const entry of freshMessages) {
+      this.mqttPublish(topic, entry.message);
+    }
+
+    if (freshMessages.length > 0) {
+      logger.info(
+        `[MQTT-QUEUE] Flushed ${freshMessages.length} queued message(s) to ${normalizedMac} via ${route.clientId}`
+      );
+    }
+
+    return freshMessages.length;
+  }
+
+  publishToDeviceByMac(macAddress, message, options = {}) {
+    const normalizedMac = this.normalizeMacAddress(macAddress);
+    const explicitClientId = options.senderClientId || null;
+
+    if (!normalizedMac && explicitClientId) {
+      const topic = `devices/p2p/${explicitClientId}`;
+      this.mqttPublish(topic, message);
+      return {
+        published: true,
+        queued: false,
+        reason: null,
+        targetClientId: explicitClientId,
+        topic,
+      };
+    }
+
+    if (!normalizedMac) {
+      return {
+        published: false,
+        queued: false,
+        reason: "invalid_mac_address",
+        targetClientId: null,
+        topic: null,
+      };
+    }
+
+    if (explicitClientId) {
+      this.touchSenderRoute(normalizedMac, explicitClientId);
+    }
+
+    const targetClientId =
+      explicitClientId || this.resolveSenderClientIdByMac(normalizedMac);
+    if (targetClientId) {
+      const topic = `devices/p2p/${targetClientId}`;
+      this.mqttPublish(topic, message);
+      return {
+        published: true,
+        queued: false,
+        reason: null,
+        targetClientId,
+        topic,
+      };
+    }
+
+    this.queuePendingDeviceMessage(
+      normalizedMac,
+      message,
+      options.source || "unknown"
+    );
+    logger.warn(
+      `[MQTT-QUEUE] No sender_client_id route for ${normalizedMac}; queued outbound message`
+    );
+    return {
+      published: false,
+      queued: true,
+      reason: "no_sender_client_route",
+      targetClientId: null,
+      topic: null,
+    };
   }
 
   async handleSettingsGet(deviceId, payload, clientId) {
@@ -3410,6 +3611,12 @@ class MQTTGateway {
   }
 
   publishToDevice(clientIdOrDeviceId, message) {
+    if (clientIdOrDeviceId && !String(clientIdOrDeviceId).includes("@@@")) {
+      this.publishToDeviceByMac(clientIdOrDeviceId, message, {
+        source: "publishToDevice",
+      });
+      return;
+    }
     const topic = `devices/p2p/${clientIdOrDeviceId}`;
     this.mqttPublish(topic, message);
   }

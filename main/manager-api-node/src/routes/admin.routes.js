@@ -1446,8 +1446,11 @@ router.patch('/device/:mac/settings',
     const patchResult = await deviceSettingsService.patchSettingsByMac(mac, payloadSettings);
 
     let publishResult = null;
-    if (patchResult.changed && patchResult.publishRequired) {
+    if (patchResult.changed) {
       try {
+        if (!patchResult.publishRequired) {
+          logger.info(`[SETTINGS-SYNC][ADMIN] publish override mac=${patchResult.settings.mac_address} reason=stale_online_check`);
+        }
         publishResult = await deviceSettingsService.requestGatewaySettingsPublish({
           mac_address: patchResult.settings.mac_address,
           version: patchResult.settings.settings_version,
