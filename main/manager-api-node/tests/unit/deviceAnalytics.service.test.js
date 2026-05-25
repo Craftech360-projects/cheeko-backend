@@ -4,6 +4,7 @@ jest.mock('../../src/config/database', () => ({
   prisma: {
     device_analytics_event: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
     },
     ai_device: {
@@ -56,6 +57,7 @@ describe('deviceAnalytics.service ingest collision handling', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.device_analytics_event.findFirst.mockResolvedValue(null);
+    prisma.device_analytics_event.findMany.mockResolvedValue([]);
     prisma.ai_device.findUnique.mockResolvedValue(null);
     prisma.parent_profile.findUnique.mockResolvedValue(null);
     prisma.device_games_played.findFirst.mockResolvedValue(null);
@@ -201,5 +203,44 @@ describe('deviceAnalytics.service ingest collision handling', () => {
       }),
     });
     expect(prisma.device_games_played.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not increment daily card taps for repeated same-card reads within debounce window', async () => {
+    prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+      id: data.event_id,
+      server_received_at:
+        data.event_id === 'card-start-1'
+          ? new Date('2026-05-21T09:56:19.000Z')
+          : new Date('2026-05-21T09:56:39.000Z'),
+      ...data,
+    }));
+    prisma.device_analytics_event.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'card-start-1' }]);
+
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'card-start-1',
+        event: 'card_session_start',
+        data: { rfid_uid: 'D979470E' },
+      }),
+    });
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'card-start-2',
+        event: 'card_session_start',
+        timestamp: 1779357399,
+        data: { rfid_uid: 'D979470E' },
+      }),
+    });
+
+    expect(prisma.device_card_taps_daily.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.device_card_taps_daily.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ card_tap_count: 1 }),
+      })
+    );
   });
 });

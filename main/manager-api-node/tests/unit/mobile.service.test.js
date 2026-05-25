@@ -7,10 +7,12 @@ jest.mock('../../src/config/database', () => ({
     },
     parent_profile: {
       upsert: jest.fn(),
-      update: jest.fn()
+      update: jest.fn(),
+      findUnique: jest.fn()
     },
     ai_device: {
-      findMany: jest.fn()
+      findMany: jest.fn(),
+      findUnique: jest.fn()
     },
     kid_profile: {
       findFirst: jest.fn()
@@ -71,6 +73,8 @@ describe('mobile.service parent profile compatibility', () => {
     jest.clearAllMocks();
     prisma.kid_profile.findFirst.mockResolvedValue(null);
     prisma.ai_device.findMany.mockResolvedValue([]);
+    prisma.ai_device.findUnique.mockResolvedValue(null);
+    prisma.parent_profile.findUnique.mockResolvedValue(null);
     prisma.rfid_content_pack.findMany.mockResolvedValue([]);
     prisma.analytics_media_playback.findMany.mockResolvedValue([]);
     prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
@@ -79,6 +83,8 @@ describe('mobile.service parent profile compatibility', () => {
     prisma.device_usage_daily.findMany.mockResolvedValue([]);
     prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
     prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_analytics_event.findMany.mockResolvedValue([]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
     prisma.device_games_played.findMany.mockResolvedValue([]);
     prisma.device_games_played.count.mockResolvedValue(0);
     prisma.device_radio_played.findMany.mockResolvedValue([]);
@@ -382,6 +388,202 @@ describe('mobile.service parent profile compatibility', () => {
       'CARD789'
     ]);
     expect(result.recent_activity.content_pack_name).toBe('Cheeko AI');
+    const recentActivityQuery = prisma.device_analytics_event.findMany.mock.calls
+      .map(call => call[0])
+      .find(query => query?.where?.event_name === 'card_session_start' && query?.take);
+    expect(recentActivityQuery.take).toBeGreaterThanOrEqual(150);
+  });
+
+  it('returns three recent card activities without repeating the same pack title', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        id: 'evt-5',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'SLOKA-CARD-2',
+        content_type: 'content',
+        data: {},
+        server_received_at: new Date('2026-05-13T10:00:00.000Z')
+      },
+      {
+        id: 'evt-4',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'SLOKA-CARD-1',
+        content_type: 'content',
+        data: {},
+        server_received_at: new Date('2026-05-13T09:00:00.000Z')
+      },
+      {
+        id: 'evt-3',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'PHONICS-CARD',
+        content_type: 'content',
+        data: {},
+        server_received_at: new Date('2026-05-13T08:00:00.000Z')
+      },
+      {
+        id: 'evt-2',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'SLOKA-CARD-1',
+        content_type: 'content',
+        data: {},
+        server_received_at: new Date('2026-05-13T07:00:00.000Z')
+      },
+      {
+        id: 'evt-1',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'EXTRA-CARD',
+        content_type: 'content',
+        data: {},
+        server_received_at: new Date('2026-05-13T06:00:00.000Z')
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'SLOKA-CARD-2',
+        card_type: 'content',
+        thumbnail_url: 'https://cdn.example.com/cards/sloka-2.png',
+        action_data: {},
+        rfid_content_pack: { name: 'Slokas', thumbnail_url: null },
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'SLOKA-CARD-1',
+        card_type: 'content',
+        thumbnail_url: 'https://cdn.example.com/cards/sloka-1.png',
+        action_data: {},
+        rfid_content_pack: { name: 'Slokas', thumbnail_url: null },
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'PHONICS-CARD',
+        card_type: 'content',
+        thumbnail_url: null,
+        action_data: {},
+        rfid_content_pack: { name: 'Phonics', thumbnail_url: null },
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'EXTRA-CARD',
+        card_type: 'content',
+        thumbnail_url: null,
+        action_data: {},
+        rfid_content_pack: { name: 'Extra Card', thumbnail_url: null },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T11:00:00.000Z')
+    });
+
+    expect(result.recent_activities).toHaveLength(3);
+    expect(result.recent_activities.map(activity => activity.content_pack_name)).toEqual([
+      'Slokas',
+      'Phonics',
+      'Extra Card'
+    ]);
+    expect(result.recent_activities.map(activity => activity.rfid_uid)).toEqual([
+      'SLOKA-CARD-2',
+      'PHONICS-CARD',
+      'EXTRA-CARD'
+    ]);
+  });
+
+  it('returns card images for recent homepage activity from analytics event data', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        id: 'evt-card-image',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'CARD-IMG-1',
+        content_type: 'content',
+        data: {
+          content_pack_name: 'Animal Card',
+          card_image_url: 'https://cdn.example.com/cards/animal.png'
+        },
+        server_received_at: new Date('2026-05-13T09:00:00.000Z')
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.recent_activity.image_url).toBe('https://cdn.example.com/cards/animal.png');
+    expect(result.recent_activity.imageUrl).toBe('https://cdn.example.com/cards/animal.png');
+    expect(result.recent_activity.thumbnail_url).toBe('https://cdn.example.com/cards/animal.png');
+    expect(result.recent_activity.thumbnailUrl).toBe('https://cdn.example.com/cards/animal.png');
+  });
+
+  it('returns card images for recent homepage activity from RFID mapping thumbnails', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        id: 'evt-mapped-card-image',
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'CARD-IMG-2',
+        content_type: 'content',
+        data: {},
+        server_received_at: new Date('2026-05-13T09:00:00.000Z')
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'CARD-IMG-2',
+        card_type: 'content',
+        thumbnail_url: 'https://cdn.example.com/cards/mapped.png',
+        action_data: {},
+        rfid_content_pack: { name: 'Mapped Animal Card' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.recent_activity.content_pack_name).toBe('Mapped Animal Card');
+    expect(result.recent_activity.image_url).toBe('https://cdn.example.com/cards/mapped.png');
+    expect(result.recent_activity.imageUrl).toBe('https://cdn.example.com/cards/mapped.png');
   });
 
   it('returns today device usage time and game count from toy analytics events', async () => {
@@ -409,9 +611,9 @@ describe('mobile.service parent profile compatibility', () => {
       now: new Date('2026-05-13T10:00:00.000Z')
     });
 
-    expect(result.today_progress.usage_time_seconds).toBe(200);
-    expect(result.today_progress.usageTimeSeconds).toBe(200);
-    expect(result.todayProgress.usageTimeSeconds).toBe(200);
+    expect(result.today_progress.usage_time_seconds).toBe(180);
+    expect(result.today_progress.usageTimeSeconds).toBe(180);
+    expect(result.todayProgress.usageTimeSeconds).toBe(180);
     expect(result.today_progress.games_played).toBe(2);
     expect(result.today_progress.gamesPlayed).toBe(2);
     expect(result.todayProgress.gamesPlayed).toBe(2);
@@ -461,6 +663,76 @@ describe('mobile.service parent profile compatibility', () => {
       select: { server_received_at: true }
     });
   });
+
+  it('counts today card taps from daily projection rows', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([
+      { card_tap_count: 11 },
+      { card_tap_count: 2 }
+    ]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockImplementation(query => {
+      if (query?.where?.event_name === 'card_session_start') {
+        return Promise.resolve([
+          { server_received_at: new Date('2026-05-13T03:00:00.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' },
+          { server_received_at: new Date('2026-05-13T03:00:20.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' },
+          { server_received_at: new Date('2026-05-13T07:00:00.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' },
+          { server_received_at: new Date('2026-05-12T21:00:00.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' }
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await mobileService.getProgressSummary('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.card_tap_count).toBe(13);
+    expect(result.cardTapCount).toBe(13);
+  });
+
+  it('counts today card taps from daily projection rows for admin mac summary', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({
+      user_id: 1n
+    });
+    prisma.parent_profile.findUnique.mockResolvedValue({
+      timezone: 'UTC'
+    });
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([
+      { card_tap_count: 73 }
+    ]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockImplementation(query => {
+      if (query?.where?.event_name === 'card_session_start') {
+        return Promise.resolve([
+          { server_received_at: new Date('2026-05-13T03:00:00.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' },
+          { server_received_at: new Date('2026-05-13T03:00:20.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' },
+          { server_received_at: new Date('2026-05-13T07:00:00.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' },
+          { server_received_at: new Date('2026-05-12T21:00:00.000Z'), event_name: 'card_session_start', rfid_uid: 'CARD123' }
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await mobileService.getProgressSummaryByMacAdmin('AA:BB:CC:DD:EE:FF', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.card_tap_count).toBe(73);
+    expect(result.cardTapCount).toBe(73);
+  });
+
 });
 
 describe('mobile.service homepage activity details', () => {
@@ -489,8 +761,8 @@ describe('mobile.service homepage activity details', () => {
   });
 
   it.each([
-    ['week', new Date('2026-05-09T10:00:00.000Z')],
-    ['month', new Date('2026-04-16T10:00:00.000Z')]
+    ['week', new Date('2026-04-30T18:30:00.000Z')],
+    ['month', new Date('2025-05-31T18:30:00.000Z')]
   ])('returns games detail for period=%s', async (period, expectedStart) => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.device_analytics_event.findMany.mockResolvedValue([
@@ -523,7 +795,7 @@ describe('mobile.service homepage activity details', () => {
       orderBy: { server_received_at: 'asc' },
       take: 5000
     });
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       metric: 'games',
       period,
       total: 4,
@@ -532,7 +804,7 @@ describe('mobile.service homepage activity details', () => {
         { name: 'Riddle Solver', key: 'riddle_solver', count: 1 },
         { name: 'Animal', key: 'ANIMAL', count: 1 }
       ]
-    });
+    }));
   });
 
   it('returns game score details in week sections without changing progress summary', async () => {
@@ -542,7 +814,7 @@ describe('mobile.service homepage activity details', () => {
         event_name: 'game_start',
         game_id: 'math_tutor',
         data: { game_name: 'Math Tutor' },
-        server_received_at: new Date('2026-05-16T08:00:00.000Z')
+        server_received_at: new Date('2026-05-04T08:00:00.000Z')
       }
     ]);
     prisma.device_games_played.findMany.mockResolvedValue([
@@ -555,7 +827,7 @@ describe('mobile.service homepage activity details', () => {
         difficulty_level: 'easy',
         score: 10,
         duration_ms: 120000,
-        played_at: new Date('2026-05-16T08:05:00.000Z')
+        played_at: new Date('2026-05-04T08:05:00.000Z')
       }
     ]);
 
@@ -577,6 +849,10 @@ describe('mobile.service homepage activity details', () => {
       orderBy: { played_at: 'desc' }
     }));
     expect(gameRowsQuery.where.activity_date).toBeUndefined();
+    expect(result.week_sections[0]).toEqual(expect.objectContaining({
+      label: 'Week 2',
+      week: 2
+    }));
     expect(result.week_sections[0].items).toEqual([
       expect.objectContaining({
         game_name: 'Math Tutor',
@@ -590,10 +866,11 @@ describe('mobile.service homepage activity details', () => {
   it.each(['week', 'month'])('returns cards detail for period=%s', async (period) => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.device_analytics_event.findMany.mockResolvedValue([
-      { event_name: 'card_session_start', rfid_uid: 'CARD123', content_id: null, data: {} },
-      { event_name: 'card_session_start', rfid_uid: 'CARD123', content_id: null, data: {} },
-      { event_name: 'card_session_start', rfid_uid: 'CARD456', content_id: null, data: { card_name: 'Alphabet Card' } },
-      { event_name: 'ai_talk_start', rfid_uid: 'CARD123', data: {} }
+      { event_name: 'card_session_start', rfid_uid: 'CARD123', content_id: null, data: {}, server_received_at: new Date('2026-05-04T08:00:00.000Z') },
+      { event_name: 'card_session_start', rfid_uid: 'CARD123', content_id: null, data: {}, server_received_at: new Date('2026-05-05T08:00:00.000Z') },
+      { event_name: 'card_session_start', rfid_uid: 'CARD123', content_id: null, data: {}, server_received_at: new Date('2026-05-05T08:00:20.000Z') },
+      { event_name: 'card_session_start', rfid_uid: 'CARD456', content_id: null, data: { card_name: 'Alphabet Card' }, server_received_at: new Date('2026-05-05T09:00:00.000Z') },
+      { event_name: 'ai_talk_start', rfid_uid: 'CARD123', data: {}, server_received_at: new Date('2026-05-05T10:00:00.000Z') }
     ]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([
       {
@@ -611,15 +888,21 @@ describe('mobile.service homepage activity details', () => {
     });
 
     expect(prisma.rfid_card_mapping.findMany).toHaveBeenCalledWith({
-      where: { rfid_uid: { in: ['CARD123', 'CARD456'] } },
-      select: {
+      where: {
+        rfid_uid: {
+          in: expect.arrayContaining(['CARD123', 'card123', 'CARD456', 'card456'])
+        }
+      },
+      select: expect.objectContaining({
         rfid_uid: true,
+        card_type: true,
+        action_data: true,
         rfid_content_pack: { select: { name: true } },
         rfid_question: { select: { title: true } },
         rfid_pack: { select: { pack_name: true } }
-      }
+      })
     });
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       metric: 'cards',
       period,
       total: 3,
@@ -627,7 +910,32 @@ describe('mobile.service homepage activity details', () => {
         { name: 'Lion Card', key: 'CARD123', count: 2 },
         { name: 'Alphabet Card', key: 'CARD456', count: 1 }
       ]
-    });
+    }));
+    if (period === 'week') {
+      expect(result.week_sections).toEqual([
+        {
+          label: 'Week 2',
+          week: 2,
+          total: 3,
+          items: [
+            { name: 'Lion Card', key: 'CARD123', count: 2 },
+            { name: 'Alphabet Card', key: 'CARD456', count: 1 }
+          ]
+        }
+      ]);
+    } else {
+      expect(result.month_sections).toEqual([
+        {
+          label: 'May, 2026',
+          month: '2026-05',
+          total: 3,
+          items: [
+            { name: 'Lion Card', key: 'CARD123', count: 2 },
+            { name: 'Alphabet Card', key: 'CARD456', count: 1 }
+          ]
+        }
+      ]);
+    }
   });
 
   it.each(['week', 'month'])('returns usage detail for period=%s', async (period) => {
@@ -654,7 +962,7 @@ describe('mobile.service homepage activity details', () => {
       now: new Date('2026-05-16T10:00:00.000Z')
     });
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       metric: 'usage',
       period,
       total_seconds: 2100,
@@ -664,7 +972,7 @@ describe('mobile.service homepage activity details', () => {
         { name: 'Lion Card', key: 'CARD123', duration_seconds: 600, durationSeconds: 600 },
         { name: 'Fun Radio', key: 'radio:Fun Radio', duration_seconds: 300, durationSeconds: 300 }
       ]
-    });
+    }));
   });
 
   it('uses mapped card names for usage rows even when card id casing differs', async () => {
@@ -710,9 +1018,9 @@ describe('mobile.service homepage activity details', () => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
 
     await expect(mobileService.getHomepageActivityDetails('firebase-user-1', {
-      metric: 'ai',
+      metric: 'unknown',
       period: 'week'
-    })).rejects.toMatchObject({ statusCode: 400, message: 'metric must be one of: games, usage, cards' });
+    })).rejects.toMatchObject({ statusCode: 400, message: 'metric must be one of: games, usage, cards, ai_interaction' });
   });
 
   it('rejects invalid period', async () => {
@@ -756,13 +1064,13 @@ describe('mobile.service homepage activity details', () => {
       now: new Date('2026-05-16T10:00:00.000Z')
     });
 
-    expect(result).toEqual({
+    expect(result).toEqual(expect.objectContaining({
       metric: 'usage',
       period: 'week',
       total_seconds: 0,
       totalSeconds: 0,
       items: []
-    });
+    }));
   });
 });
 
@@ -809,7 +1117,7 @@ describe('mobile.service progress endpoints', () => {
       period: 'week',
       start_date: '2026-05-10',
       end_date: '2026-05-16',
-      usage_time_seconds: 200,
+      usage_time_seconds: 180,
       card_tap_count: 3,
       ai_interaction_count: 3,
       games_played: 4
@@ -819,10 +1127,10 @@ describe('mobile.service progress endpoints', () => {
   it('returns usage category details', async () => {
     prisma.device_usage_daily.findMany.mockResolvedValue([
       {
-        game_usage_seconds: 100,
-        card_usage_seconds: 50,
-        ai_talk_usage_seconds: 20,
-        radio_usage_seconds: 30
+        game_usage_seconds: 70,
+        card_usage_seconds: 1237,
+        ai_talk_usage_seconds: 34,
+        radio_usage_seconds: 0
       }
     ]);
 
@@ -838,15 +1146,504 @@ describe('mobile.service progress endpoints', () => {
       limit: 20,
       total_items: 4,
       totalItems: 4,
-      total_seconds: 200,
-      totalSeconds: 200,
+      total_seconds: 1260,
+      totalSeconds: 1260,
       items: [
-        { key: 'game', name: 'Game', duration_seconds: 100, durationSeconds: 100 },
-        { key: 'card', name: 'Card', duration_seconds: 50, durationSeconds: 50 },
-        { key: 'ai_talk', name: 'AI Talk', duration_seconds: 20, durationSeconds: 20 },
-        { key: 'radio', name: 'Radio', duration_seconds: 30, durationSeconds: 30 }
+        { key: 'game', name: 'Game', duration_seconds: 60, durationSeconds: 60 },
+        { key: 'card', name: 'Card', duration_seconds: 1200, durationSeconds: 1200 },
+        { key: 'ai_talk', name: 'AI Talk', duration_seconds: 0, durationSeconds: 0 },
+        { key: 'radio', name: 'Radio', duration_seconds: 0, durationSeconds: 0 }
       ]
     });
+  });
+
+  it('returns usage week sections from daily projection rows', async () => {
+    prisma.device_usage_daily.findMany
+      .mockResolvedValueOnce([
+        {
+          date: new Date('2026-05-17T00:00:00.000Z'),
+          game_usage_seconds: 70,
+          card_usage_seconds: 1237,
+          ai_talk_usage_seconds: 34,
+          radio_usage_seconds: 0
+        },
+        {
+          date: new Date('2026-05-23T00:00:00.000Z'),
+          game_usage_seconds: 180,
+          card_usage_seconds: 2340,
+          ai_talk_usage_seconds: 300,
+          radio_usage_seconds: 120
+        },
+        {
+          date: new Date('2026-05-25T00:00:00.000Z'),
+          game_usage_seconds: 0,
+          card_usage_seconds: 0,
+          ai_talk_usage_seconds: 0,
+          radio_usage_seconds: 60
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          date: new Date('2026-05-17T00:00:00.000Z'),
+          game_usage_seconds: 70,
+          card_usage_seconds: 1237,
+          ai_talk_usage_seconds: 34,
+          radio_usage_seconds: 0
+        },
+        {
+          date: new Date('2026-05-23T00:00:00.000Z'),
+          game_usage_seconds: 180,
+          card_usage_seconds: 2340,
+          ai_talk_usage_seconds: 300,
+          radio_usage_seconds: 120
+        },
+        {
+          date: new Date('2026-05-25T00:00:00.000Z'),
+          game_usage_seconds: 0,
+          card_usage_seconds: 0,
+          ai_talk_usage_seconds: 0,
+          radio_usage_seconds: 60
+        }
+      ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'usage',
+      period: 'week',
+      now: new Date('2026-05-25T12:00:00.000Z')
+    });
+
+    expect(result.week_sections).toEqual([
+      expect.objectContaining({
+        label: 'Week 3',
+        week: 3,
+        total_seconds: 1260,
+        items: expect.arrayContaining([
+          { key: 'card', name: 'Card', duration_seconds: 1200, durationSeconds: 1200 },
+          { key: 'game', name: 'Game', duration_seconds: 60, durationSeconds: 60 },
+          { key: 'ai_talk', name: 'AI Talk', duration_seconds: 0, durationSeconds: 0 },
+          { key: 'radio', name: 'Radio', duration_seconds: 0, durationSeconds: 0 }
+        ])
+      }),
+      expect.objectContaining({
+        label: 'Week 4',
+        week: 4,
+        total_seconds: 2940,
+        items: expect.arrayContaining([
+          { key: 'card', name: 'Card', duration_seconds: 2340, durationSeconds: 2340 },
+          { key: 'ai_talk', name: 'AI Talk', duration_seconds: 300, durationSeconds: 300 },
+          { key: 'game', name: 'Game', duration_seconds: 180, durationSeconds: 180 },
+          { key: 'radio', name: 'Radio', duration_seconds: 120, durationSeconds: 120 }
+        ])
+      }),
+      expect.objectContaining({
+        label: 'Week 5',
+        week: 5,
+        total_seconds: 60,
+        items: expect.arrayContaining([
+          { key: 'radio', name: 'Radio', duration_seconds: 60, durationSeconds: 60 }
+        ])
+      })
+    ]);
+    expect(result.items).toEqual([
+      { key: 'game', name: 'Game', duration_seconds: 240, durationSeconds: 240 },
+      { key: 'card', name: 'Card', duration_seconds: 3540, durationSeconds: 3540 },
+      { key: 'ai_talk', name: 'AI Talk', duration_seconds: 300, durationSeconds: 300 },
+      { key: 'radio', name: 'Radio', duration_seconds: 180, durationSeconds: 180 }
+    ]);
+  });
+
+  it('returns recent card names instead of daily date rows for card details', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        rfid_uid: 'OLD123',
+        content_id: null,
+        data: { card_name: 'Older Card' }
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T11:00:00.000Z'),
+        rfid_uid: 'NEW123',
+        content_id: null,
+        data: { card_name: 'Newest Card' }
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(prisma.device_card_taps_daily.findMany).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'cards',
+      period: 'today',
+      total: 2,
+      total_items: 2,
+      totalItems: 2,
+      items: [
+        expect.objectContaining({
+          key: 'NEW123',
+          name: 'Newest Card',
+          count: 1,
+          timestamp: new Date('2026-05-23T11:00:00.000Z')
+        }),
+        expect.objectContaining({
+          key: 'OLD123',
+          name: 'Older Card',
+          count: 1,
+          timestamp: new Date('2026-05-23T09:00:00.000Z')
+        })
+      ]
+    }));
+  });
+
+  it('returns recent card names instead of daily date rows for ai interaction details', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        rfid_uid: 'OLD123',
+        content_id: null,
+        data: { card_name: 'Older AI Card' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T11:00:00.000Z'),
+        rfid_uid: 'NEW123',
+        content_id: null,
+        data: { card_name: 'Newest AI Card' }
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(prisma.device_ai_interactions_daily.findMany).not.toHaveBeenCalled();
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      period: 'today',
+      total: 2,
+      total_items: 2,
+      totalItems: 2,
+      items: [
+        expect.objectContaining({
+          key: 'NEW123',
+          name: 'Newest AI Card',
+          count: 1,
+          timestamp: new Date('2026-05-23T11:00:00.000Z')
+        }),
+        expect.objectContaining({
+          key: 'OLD123',
+          name: 'Older AI Card',
+          count: 1,
+          timestamp: new Date('2026-05-23T09:00:00.000Z')
+        })
+      ]
+    }));
+  });
+
+  it('does not use non-ai recent card context when ai interaction events do not include card fields', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'RHYME123',
+        content_id: null,
+        data: { card_name: 'Rhymes' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: {}
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:10:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: {}
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'RHYME123',
+        card_type: 'content',
+        action_data: {},
+        rfid_content_pack: { name: 'Rhymes' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      total: 2,
+      total_items: 1,
+      items: [
+        expect.objectContaining({
+          key: 'unknown_ai_card',
+          name: 'Unknown Ai Card',
+          count: 2
+        })
+      ]
+    }));
+  });
+
+  it('uses recent ai card context when ai interaction events do not include card fields', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'AI123',
+        content_id: null,
+        data: { card_name: 'AI Buddy' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: {}
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'AI123',
+        card_type: 'ai',
+        action_data: { agent_name: 'AI Buddy' },
+        rfid_content_pack: null,
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      total: 1,
+      total_items: 1,
+      items: [
+        expect.objectContaining({
+          key: 'AI123',
+          name: 'AI Buddy',
+          count: 1
+        })
+      ]
+    }));
+  });
+
+  it('uses recent Cheeko card context as ai context even when card type is unknown', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'CHEEKO123',
+        content_id: null,
+        data: { card_name: 'Cheeko' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: {}
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'CHEEKO123',
+        card_type: 'unknown',
+        action_data: {},
+        rfid_content_pack: { name: 'Cheeko' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      total: 1,
+      total_items: 1,
+      items: [
+        expect.objectContaining({
+          key: 'CHEEKO123',
+          name: 'Cheeko',
+          count: 1
+        })
+      ]
+    }));
+  });
+
+  it('uses the card context from when each ai interaction happened, not the latest card of the day', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'CHEEKO123',
+        content_id: null,
+        data: { card_name: 'Cheeko' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: {}
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T10:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'SLOKAS123',
+        content_id: null,
+        data: { card_name: 'slokas' }
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'CHEEKO123',
+        card_type: 'unknown',
+        action_data: {},
+        rfid_content_pack: { name: 'Cheeko' },
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'SLOKAS123',
+        card_type: 'content',
+        action_data: {},
+        rfid_content_pack: { name: 'slokas' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      total: 1,
+      total_items: 1,
+      items: [
+        expect.objectContaining({
+          key: 'CHEEKO123',
+          name: 'Cheeko',
+          count: 1
+        })
+      ]
+    }));
+  });
+
+  it('labels menu-started ai interactions as Cheeko instead of unknown ai card', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'CHEEKO123',
+        content_id: null,
+        data: { card_name: 'Cheeko' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { source: 'rfid_card' }
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:10:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'RHYME123',
+        content_id: null,
+        data: { card_name: 'Rhymes' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:15:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { source: 'menu' }
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'CHEEKO123',
+        card_type: 'ai',
+        action_data: { agent_name: 'Cheeko' },
+        rfid_content_pack: null,
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'RHYME123',
+        card_type: 'content',
+        action_data: {},
+        rfid_content_pack: { name: 'Rhymes' },
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      total: 2,
+      total_items: 1,
+      items: [
+        expect.objectContaining({
+          key: 'CHEEKO123',
+          name: 'Cheeko',
+          count: 2
+        })
+      ]
+    }));
   });
 
   it('returns paginated games detail rows', async () => {
@@ -998,7 +1795,7 @@ describe('mobile.service homepage recommendations', () => {
     expect(result.items.map(item => item.title)).not.toContain('Music Library Song');
   });
 
-  it('returns first-time preference-based content and AI cards', async () => {
+  it('returns first-time preference-based content cards without AI cards', async () => {
     prisma.rfid_content_pack.findMany.mockResolvedValue([
       {
         id: 1n,
@@ -1045,17 +1842,9 @@ describe('mobile.service homepage recommendations', () => {
         contentType: 'music',
         category: 'Animals',
         formattedDuration: '02:00'
-      }),
-      expect.objectContaining({
-        itemType: 'ai',
-        id: 'ai-story-mode',
-        title: 'Story AI',
-        aiMode: 'story',
-        routeName: 'aiStoryMode',
-        category: 'AI',
-        subtitle: expect.any(String)
       })
     ]));
+    expect(result.items.some(item => item.itemType === 'ai')).toBe(false);
     expect(result.items[0].title).toBe('Animal Song');
     expect(result.recommendationSource).toBe('profile');
   });
@@ -1193,7 +1982,7 @@ describe('mobile.service homepage recommendations', () => {
     }));
   });
 
-  it('includes AI recommendations when recent card history indicates AI usage', async () => {
+  it('does not include AI recommendations when recent card history indicates AI usage', async () => {
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([
       {
         content_pack_name: 'Story AI Card',
@@ -1209,14 +1998,7 @@ describe('mobile.service homepage recommendations', () => {
       limit: 4
     });
 
-    expect(result.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        itemType: 'ai',
-        id: 'ai-story-mode',
-        routeName: 'aiStoryMode',
-        subtitle: 'Because child used an AI card'
-      })
-    ]));
+    expect(result.items.some(item => item.itemType === 'ai')).toBe(false);
   });
 
   it('deduplicates content and respects limit', async () => {
@@ -1236,7 +2018,7 @@ describe('mobile.service homepage recommendations', () => {
     expect(result.items.map(item => item.id)).toEqual(['1', '3']);
   });
 
-  it('returns safe default backend content and AI cards when there is no history and no preferences', async () => {
+  it('returns safe default backend content cards when there is no history and no preferences', async () => {
     prisma.kid_profile.findFirst.mockResolvedValue({
       id: 10n,
       user_id: 1n,
@@ -1271,15 +2053,12 @@ describe('mobile.service homepage recommendations', () => {
         id: '44',
         title: 'Bedtime Story',
         subtitle: 'Popular content card'
-      }),
-      expect.objectContaining({
-        itemType: 'ai',
-        subtitle: 'Try a Cheeko AI experience'
       })
     ]));
+    expect(result.items.some(item => item.itemType === 'ai')).toBe(false);
   });
 
-  it('keeps an AI card in default recommendations even when content fills the limit', async () => {
+  it('returns only content cards in default recommendations when content fills the limit', async () => {
     prisma.kid_profile.findFirst.mockResolvedValue({
       id: 10n,
       user_id: 1n,
@@ -1309,6 +2088,6 @@ describe('mobile.service homepage recommendations', () => {
     expect(result.items).toHaveLength(8);
     expect(result.recommendationSource).toBe('default');
     expect(result.items.some(item => item.itemType === 'content')).toBe(true);
-    expect(result.items.some(item => item.itemType === 'ai')).toBe(true);
+    expect(result.items.some(item => item.itemType === 'ai')).toBe(false);
   });
 });

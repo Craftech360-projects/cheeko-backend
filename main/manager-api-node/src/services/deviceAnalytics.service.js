@@ -5,6 +5,7 @@ const crypto = require('crypto');
 
 const DEFAULT_RANGE_DAYS = 30;
 const MAX_QUERY_LIMIT = 5000;
+const CARD_TAP_DEBOUNCE_MS = 60 * 1000;
 const USAGE_DURATION_EVENTS = new Set(['game_end', 'card_session_end', 'radio_end', 'ai_talk_end']);
 const EVENT_DURATION_BUCKET = {
   game_end: 'game_usage_seconds',
@@ -193,6 +194,38 @@ function eventTime(row) {
   return row.event_timestamp || row.server_received_at || null;
 }
 
+function cardTapIdentity(row) {
+  const data = safeObject(row?.data);
+  return extractStringValue(row?.rfid_uid, data.rfid_uid || data.card_uid || data.card_id || row?.content_id);
+}
+
+async function shouldProjectCardTap(rawEventRow) {
+  const identity = cardTapIdentity(rawEventRow);
+  if (!identity) return true;
+
+  const eventInstant = eventTime(rawEventRow) || new Date();
+  const start = new Date(new Date(eventInstant).getTime() - CARD_TAP_DEBOUNCE_MS);
+  const previousRows = await prisma.device_analytics_event.findMany({
+    where: {
+      mac_address: rawEventRow.mac_address,
+      event_name: 'card_session_start',
+      id: { not: rawEventRow.id },
+      server_received_at: {
+        gte: start,
+        lt: eventInstant,
+      },
+      OR: [
+        { rfid_uid: identity },
+        { content_id: identity },
+      ],
+    },
+    select: { id: true },
+    take: 1,
+  });
+
+  return previousRows.length === 0;
+}
+
 function dateKeyUtc(dateValue) {
   if (!dateValue) return null;
   return new Date(dateValue).toISOString().slice(0, 10);
@@ -304,6 +337,7 @@ async function applyProjectionForEvent(rawEventRow) {
   };
 
   if (eventName === 'card_session_start') {
+    if (!(await shouldProjectCardTap(rawEventRow))) return;
     await prisma.device_card_taps_daily.upsert({
       where: {
         date_mac_address: {
