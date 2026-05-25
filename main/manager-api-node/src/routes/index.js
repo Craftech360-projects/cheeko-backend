@@ -29,6 +29,7 @@ const dictRoutes = require('./dict.routes');
 const ttsVoiceRoutes = require('./ttsVoice.routes');
 const emailReportRoutes = require('./emailReport.routes');
 const deviceSyncRoutes = require('./deviceSync.routes');
+const livekitProvidersRoutes = require('./livekitProviders.routes');
 
 /**
  * @swagger
@@ -196,5 +197,6 @@ router.use('/admin/dict', dictRoutes);
 router.use('/ttsVoice', ttsVoiceRoutes);
 router.use('/admin/email-reports', emailReportRoutes);
 router.use('/device-sync', deviceSyncRoutes);
+router.use('/livekit', livekitProvidersRoutes);
 
 module.exports = router;

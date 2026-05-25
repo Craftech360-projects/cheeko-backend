@@ -1239,3 +1239,55 @@ model device_analytics_event {
   @@index([mac_address, server_received_at(sort: Desc)], map: "idx_device_analytics_event_mac_received")
   @@index([mac_address, event_name], map: "idx_device_analytics_event_mac_name")
 }
+
+model stt_providers {
+  id         BigInt    @id @default(autoincrement())
+  provider_name String @unique
+  api_key    String    @default("")
+  model      String    @default("")
+  language   String?
+  sample_rate Int      @default(16000)
+  is_active  Boolean   @default(false)
+  priority   Int       @default(0)
+  config_json Json?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([is_active], map: "idx_stt_active")
+  @@index([priority(sort: Desc)], map: "idx_stt_priority")
+}
+
+model tts_providers {
+  id            BigInt    @id @default(autoincrement())
+  provider_name String    @unique @db.VarChar(100)
+  api_key       String    @default("")
+  voice_id      String?   @db.VarChar(120)
+  model_id      String?   @db.VarChar(120)
+  output_format String?   @db.VarChar(80)
+  sample_rate_hz Int?
+  temperature   Decimal?  @db.Decimal(4, 2)
+  is_active     Boolean   @default(false)
+  priority      Int       @default(0)
+  config_json   Json?
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([is_active], map: "idx_tts_active")
+  @@index([priority(sort: Desc)], map: "idx_tts_priority")
+}
+
+model llm_providers {
+  id         BigInt    @id @default(autoincrement())
+  model_name String    @unique @db.VarChar(120)
+  model      String
+  api_base   String?
+  api_key    String    @default("")
+  is_active  Boolean   @default(false)
+  priority   Int       @default(0)
+  config_json Json?
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([is_active], map: "idx_llm_active")
+  @@index([priority(sort: Desc)], map: "idx_llm_priority")
+}
