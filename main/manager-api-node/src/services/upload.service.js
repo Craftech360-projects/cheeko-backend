@@ -10,7 +10,7 @@ const path = require('path');
 // S3 Configuration
 const AWS_REGION = process.env.AWS_DEFAULT_REGION || 'eu-north-1';
 const S3_BUCKET = process.env.S3_BUCKET_NAME || 'cheeko-music-files';
-const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'd23u4d6oyrni77.cloudfront.net';
+const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
 
 logger.info('S3 Upload Service initialized', {
   region: AWS_REGION,

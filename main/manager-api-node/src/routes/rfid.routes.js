@@ -21,6 +21,7 @@ const router = express.Router();
 const multer = require('multer');
 const rfidService = require('../services/rfid.service');
 const bulkImportService = require('../services/bulkImport.service');
+const uploadService = require('../services/upload.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -48,6 +49,26 @@ const upload = multer({
       cb(null, true);
     } else {
       cb(new Error('Only .xlsx and .xls files are allowed'));
+    }
+  },
+});
+
+// Multer config for media uploads used by RFID content pack editor
+const contentPackUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowedMimes = [
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a',
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'application/octet-stream', // .bin images
+    ];
+    const lowerName = (file.originalname || '').toLowerCase();
+    const isBinFile = lowerName.endsWith('.bin');
+    if (allowedMimes.includes(file.mimetype) || isBinFile) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only audio, image, and .bin files are allowed.'));
     }
   },
 });
@@ -3524,6 +3545,70 @@ router.get('/content-pack/code/:packCode',
       return notFound(res, 'Content pack not found');
     }
     success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/content-pack/upload:
+ *   post:
+ *     tags: [RFID Content Pack]
+ *     summary: Upload content pack media file to S3/CDN
+ *     description: Upload audio/image/bin file for content pack item and return CDN URL
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *               category:
+ *                 type: string
+ *                 description: Optional folder under rfidcontent (e.g., audio, images)
+ *     responses:
+ *       200:
+ *         description: Uploaded successfully
+ *       400:
+ *         description: Invalid file or upload error
+ */
+router.post('/content-pack/upload',
+  requireAdmin,
+  contentPackUpload.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return badRequest(res, 'No file uploaded');
+    }
+
+    const category = req.body?.category || 'uploads';
+
+    try {
+      const result = await uploadService.uploadContentFile(
+        req.file.buffer,
+        req.file.originalname,
+        'rfidcontent',
+        category,
+        req.file.mimetype
+      );
+
+      if (req.body?.contentPackId) {
+        await rfidService.updateContentPack({
+          id: req.body.contentPackId,
+          thumbnailUrl: result.url
+        }, req.user?.id);
+      }
+
+      success(res, result);
+    } catch (error) {
+      logger.error('RFID content pack upload failed:', { error: error.message });
+      return badRequest(res, error.message || 'Upload failed');
+    }
   })
 );
 

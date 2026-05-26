@@ -18,6 +18,7 @@ const { WorkerPoolManager } = require('./core/worker-pool-manager');
 const logger = require('./utils/logger');
 const { MQTTGateway, setConfigManager } = require('./gateway/mqtt-gateway');
 const { startInternalCommandServer } = require('./gateway/internal-command-server');
+const { startHealthServer } = require('./gateway/health-server');
 
 validateCerebriumToken();
 initializeOpus();
@@ -30,6 +31,7 @@ setConfigManager(configManager);
 let gateway = null;
 let globalWorkerPool = null;
 let internalCommandServer = null;
+let healthServer = null;
 
 async function main() {
   logger.info('Starting MQTT Gateway...');
@@ -41,6 +43,7 @@ async function main() {
     await gateway.start();
 
     internalCommandServer = startInternalCommandServer(gateway);
+    healthServer = startHealthServer(gateway);
 
     logger.info('MQTT Gateway started successfully');
   } catch (error) {
@@ -55,6 +58,10 @@ async function gracefulShutdown(signal) {
   if (internalCommandServer) {
     internalCommandServer.close();
     internalCommandServer = null;
+  }
+  if (healthServer) {
+    await new Promise((resolve) => healthServer.close(resolve));
+    healthServer = null;
   }
 
   if (gateway && gateway.stop) {

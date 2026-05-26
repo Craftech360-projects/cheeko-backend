@@ -36,13 +36,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install LiveKit agents with Google plugin (required for Gemini)
 RUN pip install --no-cache-dir \
-    'livekit-agents[openai,turn-detector,silero]~=1.2' \
-    'livekit-plugins-google' \
+    'livekit-agents[openai,turn-detector,silero]==1.5.10' \
+    'livekit-plugins-google==1.5.10' \
     'google-genai' \
-    'livekit-plugins-noise-cancellation~=0.2' \
-    'livekit-plugins-groq' \
-    'livekit-plugins-deepgram' \
-    'livekit-plugins-elevenlabs' \
+    'livekit-plugins-noise-cancellation==0.2.5' \
+    'livekit-plugins-groq==1.5.10' \
+    'livekit-plugins-deepgram==1.5.10' \
+    'livekit-plugins-elevenlabs==1.5.10' \
     'python-dotenv' \
     'aiohttp' \
     'pydub' \

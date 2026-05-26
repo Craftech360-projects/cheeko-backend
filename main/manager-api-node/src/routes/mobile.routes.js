@@ -10,37 +10,48 @@ const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
 
-const formatMobileDevice = (device) => ({
-    id: device.id,
-    userId: device.user_id,
-    user_id: device.user_id,
-    macAddress: device.mac_address,
-    mac_address: device.mac_address,
-    deviceName: device.device_name || device.alias || 'Cheeko',
-    device_name: device.device_name || device.alias || 'Cheeko',
-    alias: device.alias,
-    status: device.user_id ? 'active' : 'unbound',
-    bindingStatus: device.user_id ? 'bound' : 'unbound',
-    binding_status: device.user_id ? 'bound' : 'unbound',
-    agentId: device.agent_id,
-    agent_id: device.agent_id,
-    kidId: device.kid_id,
-    kid_id: device.kid_id,
-    board: device.board,
-    mode: device.mode,
-    deviceMode: device.device_mode,
-    device_mode: device.device_mode,
-    appVersion: device.app_version,
-    app_version: device.app_version,
-    autoUpdate: device.auto_update,
-    auto_update: device.auto_update,
-    lastConnectedAt: device.last_connected_at,
-    last_connected_at: device.last_connected_at,
-    createdAt: device.create_date,
-    created_at: device.create_date,
-    updatedAt: device.update_date,
-    updated_at: device.update_date,
-});
+const defaultDeviceName = (index) => `Cheeko - ${index + 1}`;
+
+const mobileDeviceDisplayName = (device, index) => {
+    const rawName = device.device_name || device.alias;
+    const displayName = typeof rawName === 'string' ? rawName.trim() : rawName;
+    return displayName || defaultDeviceName(index);
+};
+
+const formatMobileDevice = (device, index = 0) => {
+    const displayName = mobileDeviceDisplayName(device, index);
+    return {
+        id: device.id,
+        userId: device.user_id,
+        user_id: device.user_id,
+        macAddress: device.mac_address,
+        mac_address: device.mac_address,
+        deviceName: displayName,
+        device_name: displayName,
+        alias: device.alias,
+        status: device.user_id ? 'active' : 'unbound',
+        bindingStatus: device.user_id ? 'bound' : 'unbound',
+        binding_status: device.user_id ? 'bound' : 'unbound',
+        agentId: device.agent_id,
+        agent_id: device.agent_id,
+        kidId: device.kid_id,
+        kid_id: device.kid_id,
+        board: device.board,
+        mode: device.mode,
+        deviceMode: device.device_mode,
+        device_mode: device.device_mode,
+        appVersion: device.app_version,
+        app_version: device.app_version,
+        autoUpdate: device.auto_update,
+        auto_update: device.auto_update,
+        lastConnectedAt: device.last_connected_at,
+        last_connected_at: device.last_connected_at,
+        createdAt: device.create_date,
+        created_at: device.create_date,
+        updatedAt: device.update_date,
+        updated_at: device.update_date,
+    };
+};
 
 // All mobile routes require a valid Firebase ID token
 router.use(requireFirebaseAuth);
@@ -93,8 +104,52 @@ router.get('/user-state', asyncHandler(async (req, res) => {
 }));
 
 router.get('/homepage-activity', asyncHandler(async (req, res) => {
-    const activity = await mobileService.getHomepageActivity(req.firebaseUser.uid);
+    const activity = await mobileService.getHomepageActivity(req.firebaseUser.uid, req.query);
     success(res, activity);
+}));
+
+router.get('/homepage-activity/details', asyncHandler(async (req, res) => {
+    const details = await mobileService.getHomepageActivityDetails(req.firebaseUser.uid, req.query);
+    success(res, details);
+}));
+
+router.get('/progress/summary', asyncHandler(async (req, res) => {
+    const summary = await mobileService.getProgressSummary(req.firebaseUser.uid, req.query);
+    success(res, summary);
+}));
+
+router.get('/progress/details', asyncHandler(async (req, res) => {
+    const details = await mobileService.getProgressDetails(req.firebaseUser.uid, req.query);
+    success(res, details);
+}));
+
+router.get('/progress/trend', asyncHandler(async (req, res) => {
+    const trend = await mobileService.getProgressTrend(req.firebaseUser.uid, req.query);
+    success(res, trend);
+}));
+
+router.get('/recommendations/homepage', asyncHandler(async (req, res) => {
+    const { kidId, kid_id, limit } = req.query;
+    const resolvedKidId = kidId || kid_id;
+    if (!resolvedKidId) return badRequest(res, 'kidId is required');
+
+    const recommendations = await mobileService.getHomepageRecommendations(req.firebaseUser.uid, {
+        kidId: resolvedKidId,
+        limit,
+    });
+    success(res, recommendations);
+}));
+
+router.get('/homepage-recommendations', asyncHandler(async (req, res) => {
+    const { kidId, kid_id, limit } = req.query;
+    const resolvedKidId = kidId || kid_id;
+    if (!resolvedKidId) return badRequest(res, 'kidId is required');
+
+    const recommendations = await mobileService.getHomepageRecommendations(req.firebaseUser.uid, {
+        kidId: resolvedKidId,
+        limit,
+    });
+    success(res, recommendations);
 }));
 
 router.post('/user-state', asyncHandler(async (req, res) => {
@@ -229,8 +284,11 @@ router.patch('/devices/:mac/settings', asyncHandler(async (req, res) => {
     );
 
     let publishResult = null;
-    if (patchResult.changed && patchResult.publishRequired) {
+    if (patchResult.changed) {
         try {
+            if (!patchResult.publishRequired) {
+                logger.info(`[SETTINGS-SYNC][MOBILE] publish override mac=${device.mac_address} reason=stale_online_check`);
+            }
             publishResult = await deviceSettingsService.requestGatewaySettingsPublish({
                 mac_address: device.mac_address,
                 version: patchResult.settings.settings_version,
@@ -356,6 +414,15 @@ router.get('/devices/:mac/analytics/battery', asyncHandler(async (req, res) => {
     });
 }));
 
+router.get('/devices/:mac/games-played', asyncHandler(async (req, res) => {
+    const details = await mobileService.getDeviceGamesPlayed(req.firebaseUser.uid, req.params.mac, req.query);
+    success(res, details);
+}));
+
+router.get('/devices/:mac/radio-played', asyncHandler(async (req, res) => {
+    const details = await mobileService.getDeviceRadioPlayed(req.firebaseUser.uid, req.params.mac, req.query);
+    success(res, details);
+}));
 router.get('/user-devices', asyncHandler(async (req, res) => {
     const { page, limit } = req.query;
     const result = await deviceService.listDevices(req.mobileUser.id, {

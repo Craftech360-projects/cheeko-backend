@@ -98,6 +98,11 @@ Create `.env` file and set the following environment variables:
 MQTT_PORT=1883       # MQTT server port
 UDP_PORT=8884        # UDP server port
 PUBLIC_IP=your-ip    # Server public IP
+
+# Optional: analytics audit log (NDJSON) for gateway-vs-DB comparison
+ANALYTICS_AUDIT_LOG_ENABLED=false
+ANALYTICS_AUDIT_LOG_PATH=logs/analytics-events.ndjson
+ANALYTICS_AUDIT_LOG_INCLUDE_PAYLOAD=true
 ```
 
 ## Running the Service

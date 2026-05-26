@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dotenv import load_dotenv
 load_dotenv(".env")
+from google.genai import types as genai_types
 
 from livekit.agents import (
     AgentSession,
@@ -349,6 +350,80 @@ class NonResumableGeminiRealtimeModel(google.realtime.RealtimeModel):
         return conf
 
 
+def _build_realtime_input_config(realtime_config: dict):
+    """Build RealtimeInputConfig to disable server-side turn detection when requested."""
+    if not realtime_config.get("vad_disabled", True):
+        return None
+
+    def _pick_enum(enum_cls, *candidates):
+        for name in candidates:
+            member = getattr(enum_cls, name, None)
+            if member is not None:
+                return member
+        return None
+
+    start_medium = _pick_enum(
+        genai_types.StartSensitivity,
+        "START_SENSITIVITY_MEDIUM",
+        "START_SENSITIVITY_MID",
+        "START_SENSITIVITY_UNSPECIFIED",
+        "START_SENSITIVITY_HIGH",
+    )
+    end_medium = _pick_enum(
+        genai_types.EndSensitivity,
+        "END_SENSITIVITY_MEDIUM",
+        "END_SENSITIVITY_MID",
+        "END_SENSITIVITY_UNSPECIFIED",
+        "END_SENSITIVITY_HIGH",
+    )
+
+    start_sensitivity_map = {
+        "high": genai_types.StartSensitivity.START_SENSITIVITY_HIGH,
+        "medium": start_medium,
+        "mid": start_medium,
+        "low": genai_types.StartSensitivity.START_SENSITIVITY_LOW,
+    }
+    end_sensitivity_map = {
+        "high": genai_types.EndSensitivity.END_SENSITIVITY_HIGH,
+        "medium": end_medium,
+        "mid": end_medium,
+        "low": genai_types.EndSensitivity.END_SENSITIVITY_LOW,
+    }
+
+    start_sensitivity = start_sensitivity_map.get(
+        str(realtime_config.get("start_sensitivity", "high")).lower(),
+        genai_types.StartSensitivity.START_SENSITIVITY_HIGH,
+    )
+    end_sensitivity = end_sensitivity_map.get(
+        str(realtime_config.get("end_sensitivity", "high")).lower(),
+        genai_types.EndSensitivity.END_SENSITIVITY_HIGH,
+    )
+
+    return genai_types.RealtimeInputConfig(
+        automatic_activity_detection=genai_types.AutomaticActivityDetection(
+            disabled=True,
+            start_of_speech_sensitivity=start_sensitivity,
+            end_of_speech_sensitivity=end_sensitivity,
+            prefix_padding_ms=int(realtime_config.get("prefix_padding_ms", 10)),
+            silence_duration_ms=int(realtime_config.get("silence_duration_ms", 200)),
+        )
+    )
+
+
+def _validate_gemini_api_mode(model: str, use_vertexai: bool) -> None:
+    """Fail fast on obvious model/API mismatch before websocket connect."""
+    if use_vertexai and not model.startswith("gemini-live-"):
+        raise ValueError(
+            f"Model '{model}' is not a VertexAI Live model. "
+            "Use a 'gemini-live-*' model or disable VertexAI mode."
+        )
+    if not use_vertexai and model.startswith("gemini-live-"):
+        raise ValueError(
+            f"Model '{model}' is a VertexAI Live model. "
+            "Use a 'gemini-2.*' model or enable VertexAI mode."
+        )
+
+
 async def play_elevenlabs_audio(session: AgentSession, mp3_data: bytes, title: str = ""):
     """
     Play ElevenLabs MP3 audio via session.say() with pre-synthesized audio frames.
@@ -488,13 +563,19 @@ async def entrypoint(ctx: JobContext):
     gemini_model = realtime_config.get('model', DEFAULT_GEMINI_API_MODEL)
     gemini_voice = realtime_config.get('voice', 'Zephyr')
     gemini_temperature = realtime_config.get('temperature', 0.8)
-    use_vertexai = resolve_vertexai_mode(gemini_model)
+    vertexai_cfg = realtime_config.get('vertexai')
+    if vertexai_cfg is None:
+        gemini_use_vertexai = resolve_vertexai_mode(gemini_model)
+    else:
+        gemini_use_vertexai = bool(vertexai_cfg)
+    gemini_project = (realtime_config.get('project') or '').strip()
+    gemini_location = (realtime_config.get('location') or 'us-central1').strip()
 
-    # Vertex AI requires Google Application Default Credentials inside the container.
+    # Vertex AI requires ADC or an explicit project env.
     # If missing, gracefully fall back to Gemini API mode with a compatible model.
-    if use_vertexai:
+    if gemini_use_vertexai:
         has_adc = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        has_project = bool(os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT"))
+        has_project = bool(gemini_project or os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT"))
         if not has_adc and not has_project:
             fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", DEFAULT_GEMINI_API_MODEL)
             logger.warning(
@@ -502,9 +583,7 @@ async def entrypoint(ctx: JobContext):
                 f"Falling back to Gemini API model: {fallback_model}"
             )
             gemini_model = fallback_model
-            use_vertexai = False
-
-    logger.info(f"Realtime model: {gemini_model}, vertexai={use_vertexai}")
+            gemini_use_vertexai = False
 
     # Parse room name
     room_name = ctx.room.name
@@ -644,15 +723,34 @@ async def entrypoint(ctx: JobContext):
     # Debug: Show first 500 chars of prompt to verify child name
     logger.info(f"Prompt preview (first 500 chars): {agent_prompt[:500]}")
 
-    # Create Gemini Realtime model
-    realtime_model = NonResumableGeminiRealtimeModel(
-        model=gemini_model,
-        vertexai=use_vertexai,
-        voice=gemini_voice,
-        instructions=agent_prompt,
-        temperature=gemini_temperature,
-        modalities=["AUDIO"],
+    realtime_input_config = _build_realtime_input_config(realtime_config)
+    _validate_gemini_api_mode(gemini_model, gemini_use_vertexai)
+
+    logger.info(
+        "Gemini Realtime init: model=%s, vertexai=%s, project=%s, location=%s, vad_disabled=%s",
+        gemini_model,
+        gemini_use_vertexai,
+        gemini_project or "n/a",
+        gemini_location or "n/a",
+        realtime_config.get("vad_disabled", True),
     )
+
+    # Create Gemini Realtime model
+    realtime_model_kwargs = {
+        "model": gemini_model,
+        "voice": gemini_voice,
+        "instructions": agent_prompt,
+        "temperature": gemini_temperature,
+        "modalities": ["AUDIO"],
+    }
+    if realtime_input_config is not None:
+        realtime_model_kwargs["realtime_input_config"] = realtime_input_config
+    if gemini_use_vertexai:
+        realtime_model_kwargs["vertexai"] = True
+        realtime_model_kwargs["project"] = gemini_project
+        realtime_model_kwargs["location"] = gemini_location
+
+    realtime_model = NonResumableGeminiRealtimeModel(**realtime_model_kwargs)
     logger.info("Gemini Realtime model created with session resumption disabled")
 
     # Create ElevenLabs TTS for session.say() with pre-synthesized audio

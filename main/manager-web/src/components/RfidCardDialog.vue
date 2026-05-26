@@ -85,6 +85,21 @@
           <div class="field-hint">Optional. Saved as <code>actionData.voice_id</code>.</div>
         </el-form-item>
 
+        <el-form-item v-if="form.actionType === 'ai'" label="Thumbnail URL" class="form-item">
+          <el-input v-model="form.thumbnailUrl" placeholder="Paste image URL or upload" class="custom-input">
+            <template slot="append">
+              <el-button
+                icon="el-icon-upload2"
+                :loading="uploadingThumbnail"
+                @click="pickThumbnailFile"
+              ></el-button>
+            </template>
+          </el-input>
+          <div v-if="form.thumbnailUrl" class="thumbnail-preview">
+            <img :src="form.thumbnailUrl" alt="AI card thumbnail" @error="handleThumbnailError" />
+          </div>
+        </el-form-item>
+
         <!-- Content Pack Selector -->
         <el-form-item v-if="form.actionType === 'content'" label="Content Pack" prop="contentPackId" class="form-item">
           <el-select v-model="form.contentPackId" placeholder="Select content pack" class="custom-select" filterable clearable>
@@ -115,6 +130,14 @@
         </el-form-item>
       </el-form>
 
+      <input
+        ref="thumbnailFilePicker"
+        type="file"
+        accept=".png,.jpg,.jpeg,.gif,.webp,image/*"
+        style="display: none"
+        @change="handleThumbnailFileSelected"
+      />
+
       <div class="dialog-footer">
         <el-button
           type="primary"
@@ -133,6 +156,8 @@
 </template>
 
 <script>
+import Api from "@/apis/api";
+
 export default {
   props: {
     title: {
@@ -156,6 +181,7 @@ export default {
         aiLanguageCode: 'en',
         aiLanguageName: 'English',
         aiVoiceId: '',
+        thumbnailUrl: '',
         actionData: {},
         notes: '',
         active: true
@@ -178,6 +204,7 @@ export default {
     return {
       dialogKey: Date.now(),
       saving: false,
+      uploadingThumbnail: false,
       rules: {
         rfidUid: [
           { required: true, message: "Please enter RFID UID", trigger: "blur" }
@@ -202,6 +229,70 @@ export default {
         }
       });
     },
+    pickThumbnailFile() {
+      if (this.$refs.thumbnailFilePicker) {
+        this.$refs.thumbnailFilePicker.click();
+      }
+    },
+    async handleThumbnailFileSelected(event) {
+      const file = event?.target?.files?.[0];
+      if (!file) return;
+      await this.uploadThumbnailToS3(file);
+      event.target.value = '';
+    },
+    getAuthToken() {
+      const storedToken = localStorage.getItem('token');
+      if (!storedToken) return null;
+      try {
+        const parsed = JSON.parse(storedToken);
+        return parsed.token || storedToken;
+      } catch (e) {
+        return storedToken;
+      }
+    },
+    async uploadThumbnailToS3(file) {
+      const token = this.getAuthToken();
+      if (!token) {
+        this.$message.error('Authentication token missing. Please login again.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('contentType', 'rfidcontent');
+      formData.append('category', 'images');
+
+      this.uploadingThumbnail = true;
+      try {
+        const response = await fetch(`${Api.getServiceUrl()}/admin/rfid/content-pack/upload`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`
+          },
+          body: formData
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(errorText || `Upload failed with status ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (result.code !== 0 || !result.data?.url) {
+          throw new Error(result.msg || 'Upload failed');
+        }
+
+        this.$set(this.form, 'thumbnailUrl', result.data.url);
+        this.$message.success('Thumbnail uploaded successfully.');
+      } catch (error) {
+        this.$message.error(`Upload failed: ${error.message}`);
+      } finally {
+        this.uploadingThumbnail = false;
+      }
+    },
+    handleThumbnailError(event) {
+      event.target.style.display = 'none';
+    },
     setActionType(type) {
       this.form.actionType = type;
       if (type === 'ai') {
@@ -214,6 +305,9 @@ export default {
         if (!this.form.aiLanguageCode) {
           this.form.aiLanguageCode = 'en';
           this.form.aiLanguageName = 'English';
+        }
+        if (this.form.thumbnailUrl === undefined) {
+          this.$set(this.form, 'thumbnailUrl', '');
         }
       }
     },
@@ -260,6 +354,9 @@ export default {
         if (!this.form.aiLanguageCode) {
           this.form.aiLanguageCode = 'en';
           this.form.aiLanguageName = 'English';
+        }
+        if (this.form.thumbnailUrl === undefined) {
+          this.$set(this.form, 'thumbnailUrl', '');
         }
       }
     }
@@ -466,5 +563,22 @@ export default {
 }
 .type-option i {
   font-size: 16px;
+}
+
+.thumbnail-preview {
+  margin-top: 10px;
+  width: 96px;
+  height: 72px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.thumbnail-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 </style>

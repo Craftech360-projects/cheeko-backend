@@ -15,7 +15,7 @@
 require('dotenv').config();
 const { Client } = require('pg');
 
-const CDN_BASE = 'https://d23u4d6oyrni77.cloudfront.net/music';
+const CDN_BASE = `https://${process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net'}/music`;
 
 const PACKS = [
   {

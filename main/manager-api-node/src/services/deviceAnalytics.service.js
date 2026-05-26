@@ -1,9 +1,17 @@
 const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const crypto = require('crypto');
 
 const DEFAULT_RANGE_DAYS = 30;
 const MAX_QUERY_LIMIT = 5000;
+const USAGE_DURATION_EVENTS = new Set(['game_end', 'card_session_end', 'radio_end', 'ai_talk_end']);
+const EVENT_DURATION_BUCKET = {
+  game_end: 'game_usage_seconds',
+  card_session_end: 'card_usage_seconds',
+  radio_end: 'radio_usage_seconds',
+  ai_talk_end: 'ai_talk_usage_seconds',
+};
 
 function normalizeRequiredMac(macAddress) {
   const normalized = normalizeMacAddress(macAddress);
@@ -37,6 +45,141 @@ function parseIntOrNull(value) {
 
 function safeObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function gameProjectionData({ rawEventRow, data, userId, ownerDeviceId, activityDate, eventInstant, durationMs }) {
+  return {
+    user_id: userId,
+    device_id: ownerDeviceId,
+    mac_address: rawEventRow.mac_address,
+    activity_date: activityDate,
+    game_id: extractStringValue(rawEventRow.game_id, data.game_id),
+    game_name: extractStringValue(data.game_name, data.mode_name),
+    level: extractStringValue(data.level, data.stage),
+    difficulty_level: extractStringValue(data.difficulty_level, data.difficulty),
+    score: rawEventRow.score ?? parseIntOrNull(data.score),
+    duration_ms: durationMs,
+    played_at: eventInstant,
+    source_event_id: rawEventRow.event_id,
+  };
+}
+
+function formatDateInTimezone(value, timezone = 'UTC') {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const year = parts.find(part => part.type === 'year')?.value;
+  const month = parts.find(part => part.type === 'month')?.value;
+  const day = parts.find(part => part.type === 'day')?.value;
+  if (!year || !month || !day) return null;
+  return `${year}-${month}-${day}`;
+}
+
+function toDateOnlyValue(dateString) {
+  if (!dateString) return null;
+  return new Date(`${dateString}T00:00:00.000Z`);
+}
+
+function extractStringValue(primary, fallback) {
+  if (primary == null || primary === '') return fallback == null || fallback === '' ? null : String(fallback);
+  return String(primary);
+}
+
+function buildCollisionSafeEventId(baseEventId, row) {
+  const digestInput = [
+    baseEventId || '',
+    row.device_id || '',
+    row.event_name || '',
+    row.seq == null ? '' : String(row.seq),
+    row.event_timestamp ? String(new Date(row.event_timestamp).getTime()) : '',
+    row.duration_ms == null ? '' : String(row.duration_ms),
+    row.rfid_uid || '',
+    row.content_id || '',
+    row.content_type || '',
+    row.game_id || '',
+    row.station || '',
+    row.reason || '',
+  ].join('|');
+
+  const hashSuffix = crypto.createHash('sha1').update(digestInput).digest('hex').slice(0, 12);
+  const maxBaseLength = 120 - 2 - hashSuffix.length;
+  const trimmedBase = String(baseEventId || 'evt').slice(0, Math.max(1, maxBaseLength));
+  return `${trimmedBase}::${hashSuffix}`;
+}
+
+async function createAnalyticsEventRowWithCollisionHandling(row) {
+  const existingBase = await prisma.device_analytics_event.findFirst({
+    where: {
+      device_id: row.device_id,
+      event_id: row.event_id,
+    },
+    select: { id: true },
+  });
+
+  if (!existingBase) {
+    try {
+      const created = await prisma.device_analytics_event.create({ data: row });
+      return {
+        created,
+        deduplicated: false,
+        collisionHandled: false,
+        originalEventId: row.event_id,
+        storedEventId: row.event_id,
+      };
+    } catch (error) {
+      if (error?.code !== 'P2002') throw error;
+    }
+  }
+
+  const collisionEventId = buildCollisionSafeEventId(row.event_id, row);
+  const collisionRow = {
+    ...row,
+    event_id: collisionEventId,
+  };
+  const existingCollision = await prisma.device_analytics_event.findFirst({
+    where: {
+      device_id: row.device_id,
+      event_id: collisionEventId,
+    },
+    select: { id: true },
+  });
+  if (existingCollision) {
+    return {
+      created: null,
+      deduplicated: true,
+      collisionHandled: true,
+      originalEventId: row.event_id,
+      storedEventId: collisionEventId,
+    };
+  }
+
+  try {
+    const created = await prisma.device_analytics_event.create({ data: collisionRow });
+    logger.warn(`[ANALYTICS][INGEST] event_id collision resolved device_id=${row.device_id} original_event_id=${row.event_id} stored_event_id=${collisionEventId}`);
+    return {
+      created,
+      deduplicated: false,
+      collisionHandled: true,
+      originalEventId: row.event_id,
+      storedEventId: collisionEventId,
+    };
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      return {
+        created: null,
+        deduplicated: true,
+        collisionHandled: true,
+        originalEventId: row.event_id,
+        storedEventId: collisionEventId,
+      };
+    }
+    throw error;
+  }
 }
 
 function resolveTimeRange({ from = null, to = null, days = DEFAULT_RANGE_DAYS } = {}) {
@@ -118,6 +261,220 @@ async function fetchEventsByMac(mac, { from = null, to = null, limit = MAX_QUERY
   });
 }
 
+async function resolveProjectionContext(macAddress) {
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: macAddress },
+    select: { id: true, user_id: true },
+  });
+
+  let timezone = 'UTC';
+  if (device?.user_id != null) {
+    const profile = await prisma.parent_profile.findUnique({
+      where: { user_id: device.user_id },
+      select: { timezone: true },
+    });
+    timezone = profile?.timezone || 'UTC';
+  }
+
+  return {
+    userId: device?.user_id || null,
+    ownerDeviceId: device?.id || null,
+    timezone,
+  };
+}
+
+async function applyProjectionForEvent(rawEventRow) {
+  const data = safeObject(rawEventRow.data);
+  const eventName = rawEventRow.event_name;
+  const eventInstant = eventTime(rawEventRow) || new Date();
+  const { userId, ownerDeviceId, timezone } = await resolveProjectionContext(rawEventRow.mac_address);
+  const activityDateKey = formatDateInTimezone(eventInstant, timezone) || dateKeyUtc(eventInstant);
+  const activityDate = toDateOnlyValue(activityDateKey);
+  if (!activityDate) return;
+
+  const durationMs = parseIntOrNull(rawEventRow.duration_ms);
+  const durationSeconds = durationMs != null && durationMs > 0 ? Math.floor(durationMs / 1000) : 0;
+  const usageBucket = EVENT_DURATION_BUCKET[eventName] || null;
+
+  const dailyBase = {
+    user_id: userId,
+    device_id: ownerDeviceId,
+    mac_address: rawEventRow.mac_address,
+    date: activityDate,
+  };
+
+  if (eventName === 'card_session_start') {
+    await prisma.device_card_taps_daily.upsert({
+      where: {
+        date_mac_address: {
+          date: activityDate,
+          mac_address: rawEventRow.mac_address,
+        },
+      },
+      create: {
+        ...dailyBase,
+        card_tap_count: 1,
+      },
+      update: {
+        card_tap_count: { increment: 1 },
+        updated_at: new Date(),
+        user_id: userId,
+        device_id: ownerDeviceId,
+      },
+    });
+  }
+
+  if (eventName === 'ai_talk_start') {
+    await prisma.device_ai_interactions_daily.upsert({
+      where: {
+        date_mac_address: {
+          date: activityDate,
+          mac_address: rawEventRow.mac_address,
+        },
+      },
+      create: {
+        ...dailyBase,
+        ai_interaction_count: 1,
+      },
+      update: {
+        ai_interaction_count: { increment: 1 },
+        updated_at: new Date(),
+        user_id: userId,
+        device_id: ownerDeviceId,
+      },
+    });
+  }
+
+  if (USAGE_DURATION_EVENTS.has(eventName) && durationSeconds > 0) {
+    const usageUpdate = {
+      usage_time_seconds: { increment: durationSeconds },
+      updated_at: new Date(),
+      user_id: userId,
+      device_id: ownerDeviceId,
+    };
+    if (usageBucket) {
+      usageUpdate[usageBucket] = { increment: durationSeconds };
+    }
+
+    const usageCreate = {
+      ...dailyBase,
+      usage_time_seconds: durationSeconds,
+    };
+    if (usageBucket) {
+      usageCreate[usageBucket] = durationSeconds;
+    }
+
+    await prisma.device_usage_daily.upsert({
+      where: {
+        date_mac_address: {
+          date: activityDate,
+          mac_address: rawEventRow.mac_address,
+        },
+      },
+      create: usageCreate,
+      update: usageUpdate,
+    });
+  }
+
+  if (eventName === 'game_start') {
+    await prisma.device_games_played.upsert({
+      where: { source_device_event_pk: rawEventRow.id },
+      create: {
+        ...gameProjectionData({
+          rawEventRow,
+          data,
+          userId,
+          ownerDeviceId,
+          activityDate,
+          eventInstant,
+          durationMs: null,
+        }),
+        source_device_event_pk: rawEventRow.id,
+      },
+      update: {
+        user_id: userId,
+        device_id: ownerDeviceId,
+      },
+    });
+  }
+
+  if (eventName === 'game_end') {
+    const gameId = extractStringValue(rawEventRow.game_id, data.game_id);
+    const startedAfter = new Date(eventInstant.getTime() - 6 * 60 * 60 * 1000);
+    const matchingStart = await prisma.device_games_played.findFirst({
+      where: {
+        mac_address: rawEventRow.mac_address,
+        activity_date: activityDate,
+        game_id: gameId,
+        duration_ms: null,
+        played_at: {
+          gte: startedAfter,
+          lte: eventInstant,
+        },
+      },
+      orderBy: { played_at: 'desc' },
+    });
+    const projectionData = gameProjectionData({
+      rawEventRow,
+      data,
+      userId,
+      ownerDeviceId,
+      activityDate,
+      eventInstant,
+      durationMs,
+    });
+
+    if (matchingStart) {
+      await prisma.device_games_played.update({
+        where: { id: matchingStart.id },
+        data: {
+          user_id: projectionData.user_id,
+          device_id: projectionData.device_id,
+          game_name: projectionData.game_name,
+          level: projectionData.level,
+          difficulty_level: projectionData.difficulty_level,
+          score: projectionData.score,
+          duration_ms: projectionData.duration_ms,
+          source_event_id: projectionData.source_event_id,
+        },
+      });
+    } else {
+      await prisma.device_games_played.upsert({
+        where: { source_device_event_pk: rawEventRow.id },
+        create: {
+          ...projectionData,
+          source_device_event_pk: rawEventRow.id,
+        },
+        update: {
+          user_id: userId,
+          device_id: ownerDeviceId,
+        },
+      });
+    }
+  }
+
+  if (eventName === 'radio_end') {
+    await prisma.device_radio_played.upsert({
+      where: { source_device_event_pk: rawEventRow.id },
+      create: {
+        user_id: userId,
+        device_id: ownerDeviceId,
+        mac_address: rawEventRow.mac_address,
+        activity_date: activityDate,
+        station: extractStringValue(rawEventRow.station, data.station),
+        duration_ms: durationMs,
+        played_at: eventInstant,
+        source_device_event_pk: rawEventRow.id,
+        source_event_id: rawEventRow.event_id,
+      },
+      update: {
+        user_id: userId,
+        device_id: ownerDeviceId,
+      },
+    });
+  }
+}
+
 async function ingestFirmwareAnalyticsEvent({ mac_address, sender_client_id = null, device_id = null, payload = {} }) {
   const mac = normalizeRequiredMac(mac_address);
   const incoming = safeObject(payload);
@@ -157,36 +514,51 @@ async function ingestFirmwareAnalyticsEvent({ mac_address, sender_client_id = nu
     battery_percentage: batteryPercentage,
     charging: typeof incoming.charging === 'boolean' ? incoming.charging : null,
     discharging: typeof incoming.discharging === 'boolean' ? incoming.discharging : null,
-    duration_ms: parseIntOrNull(data.duration_ms),
+    duration_ms: parseIntOrNull(data.duration_ms ?? incoming.duration_ms),
     rfid_uid: data.rfid_uid ? String(data.rfid_uid) : null,
     content_id: data.content_id ? String(data.content_id) : null,
     content_type: data.content_type ? String(data.content_type) : null,
-    game_id: data.game_id ? String(data.game_id) : null,
-    score: parseIntOrNull(data.score),
-    reason: data.reason ? String(data.reason) : null,
-    station: data.station ? String(data.station) : null,
-    station_index: parseIntOrNull(data.station_index),
+    game_id: extractStringValue(incoming.game_id, data.game_id),
+    score: parseIntOrNull(data.score ?? incoming.score),
+    reason: extractStringValue(incoming.reason, data.reason),
+    station: extractStringValue(incoming.station, data.station),
+    station_index: parseIntOrNull(data.station_index ?? incoming.station_index),
     data,
     raw_payload: incoming,
   };
 
   try {
-    const created = await prisma.device_analytics_event.create({ data: row });
-    logger.info(`[ANALYTICS][INGEST] stored mac=${mac} device_id=${stableDeviceId} event_id=${row.event_id} event=${row.event_name}`);
-    return {
-      accepted: true,
-      deduplicated: false,
-      stored_event_id: created.id,
-    };
-  } catch (error) {
-    if (error?.code === 'P2002') {
+    const writeResult = await createAnalyticsEventRowWithCollisionHandling(row);
+    if (writeResult.deduplicated) {
       logger.info(`[ANALYTICS][INGEST] duplicate mac=${mac} device_id=${stableDeviceId} event_id=${row.event_id}`);
       return {
         accepted: true,
         deduplicated: true,
         stored_event_id: null,
+        stored_event_key: writeResult.storedEventId || null,
+        original_event_id: writeResult.originalEventId || row.event_id,
       };
     }
+
+    const created = writeResult.created;
+    let projectionFailed = false;
+    try {
+      await applyProjectionForEvent(created);
+    } catch (projectionError) {
+      projectionFailed = true;
+      logger.error(`[ANALYTICS][PROJECTION] failed raw_event_id=${created.id} mac=${mac} event=${row.event_name}: ${projectionError.message}`);
+    }
+    logger.info(`[ANALYTICS][INGEST] stored mac=${mac} device_id=${stableDeviceId} event_id=${row.event_id} event=${row.event_name}`);
+    return {
+      accepted: true,
+      deduplicated: false,
+      stored_event_id: created.id,
+      stored_event_key: writeResult.storedEventId || row.event_id,
+      original_event_id: writeResult.originalEventId || row.event_id,
+      event_id_collision_handled: writeResult.collisionHandled === true,
+      projection_failed: projectionFailed,
+    };
+  } catch (error) {
     throw error;
   }
 }

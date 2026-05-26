@@ -129,6 +129,7 @@ class VirtualMQTTConnection {
       lastLogTime: Date.now(),
       logIntervalMs: 10000,
     };
+    this.lastUdpSendFailureLogTime = 0;
 
     // Session duration tracking (max 60 minutes)
     this.sessionStartTime = Date.now();
@@ -344,7 +345,15 @@ class VirtualMQTTConnection {
   sendUdpMessage(payload, timestamp) {
     // Direct UDP implementation for virtual devices
     if (!this.udp.remoteAddress) {
-      // console.log(`⚠️ [UDP-DROP] Virtual device ${this.deviceId} UDP remoteAddress is null, dropping ${payload.length} bytes`);
+      const now = Date.now();
+      if (now - this.lastUdpSendFailureLogTime > 5000) {
+        this.lastUdpSendFailureLogTime = now;
+        logger.warn(
+          `❌ [LIVEKIT->UDP] Failed to send audio to device ${this.deviceId}: UDP remote address is not known yet ` +
+            `(session=${this.udp?.session_id || "unknown"}, bytes=${payload.length}, timestamp=${timestamp}). ` +
+            `Device has not sent a UDP packet for this session, so gateway cannot route audio.`
+        );
+      }
       return;
     }
 
@@ -356,14 +365,32 @@ class VirtualMQTTConnection {
     );
 
     // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
-    const encryptedPayload = streamingCrypto.encrypt(
-      payload,
-      this.udp.encryption,
-      this.udp.key,
-      header
-    );
+    let encryptedPayload;
+    try {
+      encryptedPayload = streamingCrypto.encrypt(
+        payload,
+        this.udp.encryption,
+        this.udp.key,
+        header
+      );
+    } catch (error) {
+      logger.error(
+        `❌ [LIVEKIT->UDP] Failed to encrypt audio for device ${this.deviceId}: ${error.message} ` +
+          `(session=${this.udp?.session_id || "unknown"}, bytes=${payload.length}, sequence=${this.udp.localSequence})`
+      );
+      return;
+    }
+
     const message = Buffer.concat([header, encryptedPayload]);
-    this.gateway.sendUdpMessage(message, this.udp.remoteAddress);
+    this.gateway.sendUdpMessage(message, this.udp.remoteAddress, {
+      direction: "livekit_to_device_audio",
+      deviceId: this.deviceId,
+      sessionId: this.udp?.session_id,
+      payloadBytes: payload.length,
+      udpBytes: message.length,
+      timestamp,
+      sequence: this.udp.localSequence,
+    });
   }
 
   generateUdpHeader(length, timestamp, sequence) {
@@ -1611,6 +1638,46 @@ class VirtualMQTTConnection {
   onUdpMessage(rinfo, message, payloadLength, timestamp, sequence) {
     // UDP messages do not reset inactivity timer - only MQTT messages do
 
+    if (!rinfo) {
+      return;
+    }
+
+    if (this.udp.remoteAddress !== rinfo) {
+      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
+      this.udp.remoteAddress = rinfo;
+    }
+
+    if (sequence < this.udp.remoteSequence) {
+      return;
+    }
+
+    // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
+    const header = message.slice(0, 16);
+    const encryptedPayload = message.slice(16, 16 + payloadLength);
+    let payload;
+    try {
+      payload = streamingCrypto.decrypt(
+        encryptedPayload,
+        this.udp.encryption,
+        this.udp.key,
+        header
+      );
+    } catch (error) {
+      logger.error(
+        `❌ [UDP] Failed to decrypt UDP packet from ${rinfo.address}:${rinfo.port} for device ${this.deviceId}: ${error.message} ` +
+          `(session=${this.udp?.session_id || "unknown"}, payloadLength=${payloadLength}, sequence=${sequence})`
+      );
+      return;
+    }
+
+    const payloadStr = payload.toString();
+    if (payloadStr.startsWith("ping:")) {
+      console.log(
+        `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
+      );
+      return;
+    }
+
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
         // Buffer audio during deferred setup — replay once bridge is ready
@@ -1630,37 +1697,6 @@ class VirtualMQTTConnection {
       if (this.audioBuffer.length < 250) {
         this.audioBuffer.push({ message: Buffer.from(message), payloadLength, timestamp, sequence });
       }
-      return;
-    }
-
-    if (!rinfo) {
-      return;
-    }
-
-    if (this.udp.remoteAddress !== rinfo) {
-      // console.log(`✅ [UDP-SAVE] Saved UDP remote address: ${rinfo.address}:${rinfo.port} for virtual device ${this.deviceId}`);
-      this.udp.remoteAddress = rinfo;
-    }
-
-    if (sequence < this.udp.remoteSequence) {
-      return;
-    }
-
-    // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
-    const header = message.slice(0, 16);
-    const encryptedPayload = message.slice(16, 16 + payloadLength);
-    const payload = streamingCrypto.decrypt(
-      encryptedPayload,
-      this.udp.encryption,
-      this.udp.key,
-      header
-    );
-
-    const payloadStr = payload.toString();
-    if (payloadStr.startsWith("ping:")) {
-      console.log(
-        `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
-      );
       return;
     }
 

@@ -16,7 +16,7 @@ class RhymeCacheService:
 
     S3_BUCKET = "cheeko-music-files"
     S3_PREFIX = "rhymes/"
-    CLOUDFRONT_DOMAIN = "d23u4d6oyrni77.cloudfront.net"
+    CLOUDFRONT_DOMAIN = os.getenv("CLOUDFRONT_DOMAIN", "dsmzc13oafp54.cloudfront.net")
 
     def __init__(self):
         self.s3_client = boto3.client(

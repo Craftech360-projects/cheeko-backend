@@ -178,13 +178,22 @@ class ConfigLoader:
         # Load from config.yaml first
         yaml_config = ConfigLoader.load_yaml_config()
         gemini_config = yaml_config.get('gemini_realtime', {})
+        vertexai_env = os.getenv('GOOGLE_GENAI_USE_VERTEXAI')
+        vertexai_enabled = (
+            vertexai_env.lower() in ('true', '1', 'yes')
+            if vertexai_env is not None
+            else bool(gemini_config.get('vertexai', False))
+        )
 
         # Environment variables can override yaml config
         return {
             'provider': os.getenv('REALTIME_PROVIDER', 'gemini').lower(),  # gemini or openai
-            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-09-2025')),
+            'model': os.getenv('GEMINI_REALTIME_MODEL', gemini_config.get('model', 'gemini-2.5-flash-native-audio-preview-12-2025')),
             'voice': os.getenv('GEMINI_REALTIME_VOICE', gemini_config.get('voice', 'Zephyr')),
             'temperature': float(os.getenv('GEMINI_REALTIME_TEMPERATURE', gemini_config.get('temperature', 0.6))),
+            'vertexai': vertexai_enabled,
+            'project': os.getenv('GOOGLE_CLOUD_PROJECT', gemini_config.get('project', '')),
+            'location': os.getenv('GOOGLE_CLOUD_LOCATION', gemini_config.get('location', 'us-central1')),
             'prompt': gemini_config.get('prompt', 'You are a helpful voice assistant.'),
             # VAD configuration for Gemini Realtime
             'vad_disabled': os.getenv('GEMINI_VAD_DISABLED', 'true').lower() == 'true',  # Default to disabled for PTT mode

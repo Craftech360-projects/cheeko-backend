@@ -735,6 +735,7 @@ model rfid_card_mapping {
   updater           BigInt?
   update_date       DateTime           @default(now()) @db.Timestamptz(6)
   card_type         String?            @default("content") @db.VarChar(20)
+  thumbnail_url     String?            @db.VarChar(500)
   rfid_card_tap_log rfid_card_tap_log[]
   rfid_content_pack rfid_content_pack? @relation(fields: [content_pack_id], references: [id], onUpdate: NoAction)
   rfid_pack         rfid_pack?         @relation(fields: [pack_id], references: [id], onUpdate: NoAction)
@@ -1290,4 +1291,94 @@ model llm_providers {
 
   @@index([is_active], map: "idx_llm_active")
   @@index([priority(sort: Desc)], map: "idx_llm_priority")
+}
+
+model device_usage_daily {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id               BigInt?
+  device_id             String?   @db.Uuid
+  mac_address           String    @db.VarChar(20)
+  date                  DateTime  @db.Date
+  usage_time_seconds    Int       @default(0)
+  game_usage_seconds    Int       @default(0)
+  card_usage_seconds    Int       @default(0)
+  ai_talk_usage_seconds Int       @default(0)
+  radio_usage_seconds   Int       @default(0)
+  created_at            DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([date, mac_address], map: "uq_device_usage_daily_date_mac")
+  @@index([user_id, date], map: "idx_device_usage_daily_user_date")
+  @@index([mac_address, date], map: "idx_device_usage_daily_mac_date")
+}
+
+model device_card_taps_daily {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id        BigInt?
+  device_id      String?   @db.Uuid
+  mac_address    String    @db.VarChar(20)
+  date           DateTime  @db.Date
+  card_tap_count Int       @default(0)
+  created_at     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([date, mac_address], map: "uq_device_card_taps_daily_date_mac")
+  @@index([user_id, date], map: "idx_device_card_taps_daily_user_date")
+  @@index([mac_address, date], map: "idx_device_card_taps_daily_mac_date")
+}
+
+model device_ai_interactions_daily {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id              BigInt?
+  device_id            String?   @db.Uuid
+  mac_address          String    @db.VarChar(20)
+  date                 DateTime  @db.Date
+  ai_interaction_count Int       @default(0)
+  created_at           DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([date, mac_address], map: "uq_device_ai_interactions_daily_date_mac")
+  @@index([user_id, date], map: "idx_device_ai_interactions_daily_user_date")
+  @@index([mac_address, date], map: "idx_device_ai_interactions_daily_mac_date")
+}
+
+model device_games_played {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                BigInt?
+  device_id              String?   @db.Uuid
+  mac_address            String    @db.VarChar(20)
+  activity_date          DateTime  @db.Date
+  game_id                String?   @db.VarChar(80)
+  game_name              String?   @db.VarChar(200)
+  level                  String?   @db.VarChar(80)
+  difficulty_level       String?   @db.VarChar(80)
+  score                  Int?
+  duration_ms            Int?
+  played_at              DateTime  @db.Timestamptz(6)
+  source_device_event_pk String    @unique(map: "uq_device_games_played_source_event_pk") @db.Uuid
+  source_event_id        String?   @db.VarChar(120)
+  created_at             DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address, played_at(sort: Desc)], map: "idx_device_games_played_mac_played")
+  @@index([user_id, played_at(sort: Desc)], map: "idx_device_games_played_user_played")
+  @@index([activity_date, mac_address], map: "idx_device_games_played_date_mac")
+}
+
+model device_radio_played {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                BigInt?
+  device_id              String?   @db.Uuid
+  mac_address            String    @db.VarChar(20)
+  activity_date          DateTime  @db.Date
+  station                String?   @db.VarChar(120)
+  duration_ms            Int?
+  played_at              DateTime  @db.Timestamptz(6)
+  source_device_event_pk String    @unique(map: "uq_device_radio_played_source_event_pk") @db.Uuid
+  source_event_id        String?   @db.VarChar(120)
+  created_at             DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address, played_at(sort: Desc)], map: "idx_device_radio_played_mac_played")
+  @@index([user_id, played_at(sort: Desc)], map: "idx_device_radio_played_user_played")
+  @@index([station, played_at(sort: Desc)], map: "idx_device_radio_played_station_played")
+  @@index([activity_date, mac_address], map: "idx_device_radio_played_date_mac")
 }

@@ -44,6 +44,15 @@ _entrypoint_registry = {}
 # ROOM DELETION
 # ============================================================================
 
+def is_livekit_room_not_found_error(error: Exception) -> bool:
+    """Return True when LiveKit says the room was already removed."""
+    code = str(getattr(error, "code", "")).lower()
+    message = str(error).lower()
+    return code == "not_found" or (
+        "not_found" in message and "room" in message and "does not exist" in message
+    )
+
+
 async def delete_livekit_room(room_name: str):
     """Delete a LiveKit room using the API"""
     try:
@@ -68,6 +77,9 @@ async def delete_livekit_room(room_name: str):
         logger.info(f"Successfully deleted room: {room_name}")
 
     except Exception as e:
+        if is_livekit_room_not_found_error(e):
+            logger.info(f"Room already deleted: {room_name}")
+            return
         logger.error(f"Failed to delete room: {e}")
 
 

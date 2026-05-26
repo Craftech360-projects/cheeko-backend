@@ -2291,4 +2291,6 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8003, log_level="info")
+    host = os.getenv("MEDIA_API_HOST", "127.0.0.1")
+    port = int(os.getenv("MEDIA_API_PORT", "8003"))
+    uvicorn.run(app, host=host, port=port, log_level="info")

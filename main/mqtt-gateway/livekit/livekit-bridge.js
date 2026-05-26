@@ -959,11 +959,20 @@ class LiveKitBridge extends EventEmitter {
             this.markAgentJoined(participant.identity, "participant_connected");
 
             // Flush any audio buffered during setup (before agent joined)
-            const hasBufferedAudio = this.connection?.audioBuffer && this.connection.audioBuffer.length > 0;
+            const bufferedAudioFrameCount = this.connection?.audioBuffer?.length || 0;
+            const minBufferedFramesToSkipGreeting = 3;
+            const hasBufferedAudio = bufferedAudioFrameCount >= minBufferedFramesToSkipGreeting;
+
+            if (bufferedAudioFrameCount > 0 && !hasBufferedAudio) {
+              console.log(
+                `🎤 [AGENT-JOIN] Discarding ${bufferedAudioFrameCount} pre-agent audio frame(s) as warmup/noise; sending greeting`
+              );
+              this.connection.audioBuffer = null;
+            }
 
             if (hasBufferedAudio) {
               // User was already speaking during setup — flush their audio, skip greeting
-              console.log(`🔊 [AGENT-JOIN] Flushing ${this.connection.audioBuffer.length} buffered audio frames (user already speaking, skipping greeting)`);
+              console.log(`🔊 [AGENT-JOIN] Flushing ${bufferedAudioFrameCount} buffered audio frames (user already speaking, skipping greeting)`);
               for (const frame of this.connection.audioBuffer) {
                 this.connection.onUdpMessage(
                   this.connection.udp.remoteAddress,

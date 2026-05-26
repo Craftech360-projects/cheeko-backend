@@ -352,6 +352,60 @@ export default {
                 callback({ data: { code: -1, msg: 'Network error', data: null } })
             }).send()
     },
+    // Get progress summary by MAC (Admin dashboard, aligned with parent app progress API)
+    getDeviceProgressSummaryByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            period: params?.period || 'today'
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/progress/summary?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device progress summary:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get progress details by MAC (Admin dashboard, aligned with parent app progress API)
+    getDeviceProgressDetailsByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            period: params?.period || 'today',
+            metric: params?.metric || 'usage',
+            page: params?.page || 1,
+            limit: params?.limit || 20
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/progress/details?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device progress details:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
+    // Get progress trend by MAC (Admin dashboard, aligned with parent app progress API)
+    getDeviceProgressTrendByMac(macAddress, params, callback) {
+        const queryParams = new URLSearchParams({
+            period: params?.period || 'week'
+        }).toString();
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/device/${encodeURIComponent(macAddress)}/progress/trend?${queryParams}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get device progress trend:', err)
+                callback({ data: { code: -1, msg: 'Network error', data: null } })
+            }).send()
+    },
     // Get WebSocket server list
     getWsServerList(params, callback) {
         RequestService.sendRequest()

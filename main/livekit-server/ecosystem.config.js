@@ -114,7 +114,7 @@ module.exports = {
     {
       name: "livekit-media-api",
       script: "env/bin/python",
-      args: "-m uvicorn media_api:app --host 0.0.0.0 --port 8003",
+      args: "-m uvicorn media_api:app --host 127.0.0.1 --port 8003",
       cwd: __dirname,
       interpreter: "none",
       instances: 1,

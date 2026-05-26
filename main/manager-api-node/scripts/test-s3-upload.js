@@ -10,7 +10,7 @@ const { S3Client, PutObjectCommand, GetBucketLocationCommand } = require('@aws-s
 
 // Configuration
 const S3_BUCKET = process.env.S3_BUCKET_NAME || 'cheeko-music-files';
-const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'd23u4d6oyrni77.cloudfront.net';
+const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
 
 // Test file path
 const testFilePath = path.join(__dirname, '..', 'Instrumental - Achyutam Keshavam  Krishna Bhajan.mp3');

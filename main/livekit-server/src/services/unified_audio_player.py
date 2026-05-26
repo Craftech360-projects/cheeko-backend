@@ -149,6 +149,7 @@ class UnifiedAudioPlayer:
 
     async def _play_via_session_say(self, url: str, title: str):
         """Play audio through session.say() with audio frames"""
+        audio_frames = None
         try:
             if not self.session:
                 logger.error("No session available for playback")
@@ -205,6 +206,12 @@ class UnifiedAudioPlayer:
         except Exception as e:
             logger.error(f"🎵 UNIFIED: Error playing audio: {e}")
         finally:
+            if audio_frames is not None and hasattr(audio_frames, 'aclose'):
+                try:
+                    await audio_frames.aclose()
+                except Exception as e:
+                    logger.debug(f"🎵 UNIFIED: Audio frame cleanup error: {e}")
+
             self.is_playing = False
             # Force clear music state to allow listening state transitions
             audio_state_manager.force_stop_music()
@@ -681,3 +688,7 @@ class StreamingAudioIterator:
                 logger.debug(f"🎵 STREAMING: Cleanup error: {e}")
 
             logger.info(f"🎵 STREAMING: Cleaned up resources for {self.title}")
+
+    async def aclose(self):
+        """Allow owners to close the streaming iterator on cancellation."""
+        await self._cleanup()

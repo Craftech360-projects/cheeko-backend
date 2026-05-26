@@ -5,7 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 require('dotenv').config();
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-const CLOUDFRONT_DOMAIN = 'd23u4d6oyrni77.cloudfront.net';
+const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
 
 async function fixUrls() {
   const { data: items, error } = await supabase

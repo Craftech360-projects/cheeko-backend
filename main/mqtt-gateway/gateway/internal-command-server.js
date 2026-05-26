@@ -42,6 +42,11 @@ function startInternalCommandServer(gateway) {
 
   const server = http.createServer(async (req, res) => {
     try {
+      if (req.method === 'GET' && (req.url || '').split('?')[0] === '/health') {
+        sendJson(res, 200, { status: 'healthy' });
+        return;
+      }
+
       if (req.method !== 'POST') {
         sendJson(res, 405, { code: 405, msg: 'Method not allowed', data: null });
         return;
@@ -74,29 +79,56 @@ function startInternalCommandServer(gateway) {
       }
 
       const resolvedMac = typeof mac_address === 'string' ? mac_address.trim().toUpperCase() : '';
-      const targetClientId = sender_client_id || gateway.resolveSenderClientIdByMac(resolvedMac);
-      if (!targetClientId) {
-        logger.warn(`[SETTINGS-SYNC][INTERNAL-CMD] No active sender_client_id for mac=${resolvedMac || 'na'}`);
-        sendJson(res, 404, {
-          code: 404,
-          msg: 'No active sender_client_id for device',
-          data: { mac_address: resolvedMac || null },
+      const publishResult = gateway.publishToDeviceByMac(resolvedMac, resolvedMessage, {
+        senderClientId: sender_client_id || null,
+        source: `internal-command:${route}`,
+      });
+
+      if (publishResult.published) {
+        logger.info(
+          `[SETTINGS-SYNC][INTERNAL-CMD] Published ${resolvedMessage.type || 'unknown'} to sender=${publishResult.targetClientId} topic=${publishResult.topic} payload=${JSON.stringify(resolvedMessage)}`
+        );
+        sendJson(res, 200, {
+          code: 0,
+          msg: 'success',
+          data: {
+            mac_address: resolvedMac || null,
+            target_client_id: publishResult.targetClientId,
+            topic: publishResult.topic,
+            queued: false,
+            message_type: resolvedMessage.type || 'unknown',
+          },
         });
         return;
       }
 
-      const outTopic = `devices/p2p/${targetClientId}`;
-      gateway.mqttPublish(outTopic, resolvedMessage);
-      logger.info(
-        `[SETTINGS-SYNC][INTERNAL-CMD] Published ${resolvedMessage.type || 'unknown'} to sender=${targetClientId} topic=${outTopic} payload=${JSON.stringify(resolvedMessage)}`
+      if (publishResult.queued) {
+        logger.warn(
+          `[SETTINGS-SYNC][INTERNAL-CMD] Queued ${resolvedMessage.type || 'unknown'} for mac=${resolvedMac || 'na'} (no active sender_client_id route)`
+        );
+        sendJson(res, 202, {
+          code: 0,
+          msg: 'queued',
+          data: {
+            mac_address: resolvedMac || null,
+            target_client_id: null,
+            topic: null,
+            queued: true,
+            message_type: resolvedMessage.type || 'unknown',
+          },
+        });
+        return;
+      }
+
+      logger.warn(
+        `[SETTINGS-SYNC][INTERNAL-CMD] Failed to route message for mac=${resolvedMac || 'na'} reason=${publishResult.reason || 'unknown'}`
       );
-      sendJson(res, 200, {
-        code: 0,
-        msg: 'success',
+      sendJson(res, 400, {
+        code: 400,
+        msg: publishResult.reason || 'Unable to route message',
         data: {
-          target_client_id: targetClientId,
-          topic: outTopic,
-          message_type: resolvedMessage.type || 'unknown',
+          mac_address: resolvedMac || null,
+          queued: false,
         },
       });
     } catch (error) {
