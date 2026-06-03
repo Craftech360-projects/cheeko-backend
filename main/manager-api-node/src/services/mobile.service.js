@@ -235,7 +235,22 @@ async function getProgressEventsForRange(scope, range, eventName) {
 
 function buildProgressDateRange(period, timezone, now = new Date()) {
     const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
-    const totalDays = period === 'today' ? 1 : (period === 'week' ? 7 : 30);
+    if (period === 'month') {
+        const monthKey = getMonthKeyFromReference(today);
+        const startDate = `${monthKey}-01`;
+        const dates = [];
+        for (let dateKey = startDate; dateKey <= today; dateKey = shiftDateKey(dateKey, 1)) {
+            dates.push(dateKey);
+        }
+        return {
+            startDate,
+            endDate: today,
+            dates,
+            monthKey,
+        };
+    }
+
+    const totalDays = period === 'today' ? 1 : 7;
     const dates = [];
     for (let i = totalDays - 1; i >= 0; i -= 1) {
         dates.push(shiftDateKey(today, -i));
@@ -244,6 +259,26 @@ function buildProgressDateRange(period, timezone, now = new Date()) {
         startDate: dates[0],
         endDate: dates[dates.length - 1],
         dates,
+    };
+}
+
+function buildProgressCalendarMonthRange(timezone, now = new Date(), selectedMonth = null) {
+    const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
+    const currentMonthKey = today.slice(0, 7);
+    const monthKey = getMonthKeyFromReference(selectedMonth || today);
+    const startDate = `${monthKey}-01`;
+    const endDate = monthKey === currentMonthKey
+        ? today
+        : formatLocalDate(dateForMonthEnd(monthKey) || now);
+    const dates = [];
+    for (let dateKey = startDate; dateKey <= endDate; dateKey = shiftDateKey(dateKey, 1)) {
+        dates.push(dateKey);
+    }
+    return {
+        startDate,
+        endDate,
+        dates,
+        monthKey,
     };
 }
 
@@ -2269,7 +2304,13 @@ async function getProgressTrend(firebaseUid, options = {}) {
     }
 
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const trendMap = new Map(
         range.dates.map(date => [date, {
             date,
@@ -2296,7 +2337,14 @@ async function getProgressTrend(firebaseUid, options = {}) {
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, usage_time_seconds: true },
+            select: {
+                date: true,
+                usage_time_seconds: true,
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
         }),
         prisma.device_card_taps_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
@@ -2316,7 +2364,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
         const key = formatLocalDate(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
-        const value = Number(row.usage_time_seconds) || 0;
+        const value = completedUsageSecondsFromRow(row);
         point.usage_time_seconds += value;
         point.usageTimeSeconds += value;
     }
@@ -2362,8 +2410,18 @@ async function getProgressDetails(firebaseUid, options = {}) {
     }
 
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const { page, limit, offset } = parsePagination(options);
+    const detailNow = options.now || new Date();
+    const weekMonth = period === 'week'
+        ? (options.month || options.selected_month || options.selectedMonth || detailNow)
+        : detailNow;
 
     if (scope.macAddresses.length === 0) {
         return { metric, period, page, limit, total_items: 0, totalItems: 0, items: [] };
@@ -2437,7 +2495,14 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const items = await buildCardProgressDetailItems(events);
         const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
-        return {
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
@@ -2446,7 +2511,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: paged,
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'ai') {
@@ -2454,7 +2519,14 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const items = await buildAiProgressDetailItems(events);
         const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
-        return {
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
@@ -2463,7 +2535,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: paged,
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'games') {
@@ -2635,7 +2707,13 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
     }
 
     const scope = await resolveAdminProgressScopeByMac(mac);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const trendMap = new Map(
         range.dates.map(date => [date, {
             date,
@@ -2658,7 +2736,14 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, usage_time_seconds: true },
+            select: {
+                date: true,
+                usage_time_seconds: true,
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
         }),
         prisma.device_card_taps_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
@@ -2678,7 +2763,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
         const key = formatLocalDate(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
-        const value = Number(row.usage_time_seconds) || 0;
+        const value = completedUsageSecondsFromRow(row);
         point.usage_time_seconds += value;
         point.usageTimeSeconds += value;
     }
@@ -2724,8 +2809,18 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     }
 
     const scope = await resolveAdminProgressScopeByMac(mac);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const { page, limit, offset } = parsePagination(options);
+    const detailNow = options.now || new Date();
+    const weekMonth = period === 'week'
+        ? (options.month || options.selected_month || options.selectedMonth || detailNow)
+        : detailNow;
     const dateWhere = {
         gte: dateOnlyFromKey(range.startDate),
         lte: dateOnlyFromKey(range.endDate),
@@ -2788,7 +2883,14 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     if (metric === 'cards') {
         const events = await getProgressEventsForRange(scope, range, 'card_session_start');
         const items = await buildCardProgressDetailItems(events);
-        return {
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
@@ -2797,13 +2899,20 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: items.slice(offset, offset + limit),
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'ai') {
         const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start']);
         const items = await buildAiProgressDetailItems(events);
-        return {
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
@@ -2812,7 +2921,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: items.slice(offset, offset + limit),
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'games') {

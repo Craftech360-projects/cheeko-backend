@@ -1124,6 +1124,32 @@ describe('mobile.service progress endpoints', () => {
     }));
   });
 
+  it('uses the current calendar month for month summary range', async () => {
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+
+    const result = await mobileService.getProgressSummary('firebase-user-1', {
+      period: 'month',
+      now: new Date('2026-06-02T10:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      period: 'month',
+      start_date: '2026-06-01',
+      end_date: '2026-06-02'
+    }));
+    expect(prisma.device_usage_daily.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        date: expect.objectContaining({
+          gte: new Date('2026-06-01T00:00:00.000Z'),
+          lte: new Date('2026-06-02T00:00:00.000Z')
+        })
+      })
+    }));
+  });
+
   it('returns usage category details', async () => {
     prisma.device_usage_daily.findMany.mockResolvedValue([
       {
@@ -1252,6 +1278,44 @@ describe('mobile.service progress endpoints', () => {
     ]);
   });
 
+  it('ignores previous-month usage rows for week details when the current month is empty', async () => {
+    prisma.device_usage_daily.findMany.mockImplementation(async ({ where }) => {
+      const startKey = where?.date?.gte?.toISOString?.().slice(0, 10);
+      if (startKey === '2026-05-27') {
+        return [
+          {
+            date: new Date('2026-05-31T00:00:00.000Z'),
+            game_usage_seconds: 70,
+            card_usage_seconds: 1237,
+            ai_talk_usage_seconds: 34,
+            radio_usage_seconds: 0
+          }
+        ];
+      }
+      return [];
+    });
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'usage',
+      period: 'week',
+      now: new Date('2026-06-02T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'usage',
+      period: 'week',
+      total_seconds: 0,
+      totalSeconds: 0,
+      items: [
+        { key: 'game', name: 'Game', duration_seconds: 0, durationSeconds: 0 },
+        { key: 'card', name: 'Card', duration_seconds: 0, durationSeconds: 0 },
+        { key: 'ai_talk', name: 'AI Talk', duration_seconds: 0, durationSeconds: 0 },
+        { key: 'radio', name: 'Radio', duration_seconds: 0, durationSeconds: 0 }
+      ],
+      week_sections: []
+    }));
+  });
+
   it('returns recent card names instead of daily date rows for card details', async () => {
     prisma.device_analytics_event.findMany.mockResolvedValue([
       {
@@ -1300,6 +1364,87 @@ describe('mobile.service progress endpoints', () => {
     }));
   });
 
+  it('returns week sections for card details without inventing missing weeks', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-09T11:00:00.000Z'),
+        rfid_uid: 'WEEK2',
+        content_id: null,
+        data: { card_name: 'Week 2 Card' }
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T11:00:00.000Z'),
+        rfid_uid: 'WEEK4',
+        content_id: null,
+        data: { card_name: 'Week 4 Card' }
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-24T11:00:00.000Z'),
+        rfid_uid: 'WEEK4',
+        content_id: null,
+        data: { card_name: 'Week 4 Card' }
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'week',
+      now: new Date('2026-05-25T12:00:00.000Z')
+    });
+
+    expect(result.week_sections).toEqual([
+      expect.objectContaining({
+        label: 'Week 2',
+        week: 2,
+        total: 1,
+        items: [expect.objectContaining({ key: 'WEEK2', name: 'Week 2 Card', count: 1 })]
+      }),
+      expect.objectContaining({
+        label: 'Week 4',
+        week: 4,
+        total: 2,
+        items: [expect.objectContaining({ key: 'WEEK4', name: 'Week 4 Card', count: 2 })]
+      })
+    ]);
+  });
+
+  it('returns month sections for card details only for the selected month activity', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-03-15T11:00:00.000Z'),
+        rfid_uid: 'MARCH1',
+        content_id: null,
+        data: { card_name: 'March Card' }
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-20T11:00:00.000Z'),
+        rfid_uid: 'MAY1',
+        content_id: null,
+        data: { card_name: 'May Card' }
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'month',
+      now: new Date('2026-05-25T12:00:00.000Z')
+    });
+
+    expect(result.month_sections).toEqual([
+      expect.objectContaining({
+        label: 'May, 2026',
+        month: '2026-05',
+        total: 1,
+        items: [expect.objectContaining({ key: 'MAY1', name: 'May Card', count: 1 })]
+      })
+    ]);
+  });
+
   it('returns recent card names instead of daily date rows for ai interaction details', async () => {
     prisma.device_analytics_event.findMany.mockResolvedValue([
       {
@@ -1346,6 +1491,46 @@ describe('mobile.service progress endpoints', () => {
         })
       ]
     }));
+  });
+
+  it('returns week sections for ai interaction details without padding empty weeks', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-08T09:00:00.000Z'),
+        rfid_uid: 'AIWEEK2',
+        content_id: null,
+        data: { card_name: 'Week 2 AI Card' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-22T09:00:00.000Z'),
+        rfid_uid: 'AIWEEK4',
+        content_id: null,
+        data: { card_name: 'Week 4 AI Card' }
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'week',
+      now: new Date('2026-05-25T12:00:00.000Z')
+    });
+
+    expect(result.week_sections).toEqual([
+      expect.objectContaining({
+        label: 'Week 2',
+        week: 2,
+        total: 1,
+        items: [expect.objectContaining({ key: 'AIWEEK2', name: 'Week 2 AI Card', count: 1 })]
+      }),
+      expect.objectContaining({
+        label: 'Week 4',
+        week: 4,
+        total: 1,
+        items: [expect.objectContaining({ key: 'AIWEEK4', name: 'Week 4 AI Card', count: 1 })]
+      })
+    ]);
   });
 
   it('does not use non-ai recent card context when ai interaction events do not include card fields', async () => {
@@ -1684,7 +1869,14 @@ describe('mobile.service progress endpoints', () => {
 
   it('returns trend points for all days in range', async () => {
     prisma.device_usage_daily.findMany.mockResolvedValue([
-      { date: new Date('2026-05-15T00:00:00.000Z'), usage_time_seconds: 100 }
+      {
+        date: new Date('2026-05-15T00:00:00.000Z'),
+        usage_time_seconds: 100,
+        game_usage_seconds: 70,
+        card_usage_seconds: 1237,
+        ai_talk_usage_seconds: 34,
+        radio_usage_seconds: 0
+      }
     ]);
     prisma.device_card_taps_daily.findMany.mockResolvedValue([
       { date: new Date('2026-05-15T00:00:00.000Z'), card_tap_count: 2 }
@@ -1702,10 +1894,12 @@ describe('mobile.service progress endpoints', () => {
     });
 
     expect(result.period).toBe('week');
-    expect(result.points).toHaveLength(7);
+    expect(result.points).toHaveLength(16);
+    expect(result.points[0].date).toBe('2026-05-01');
+    expect(result.points[result.points.length - 1].date).toBe('2026-05-16');
     expect(result.points).toContainEqual(expect.objectContaining({
       date: '2026-05-15',
-      usage_time_seconds: 100,
+      usage_time_seconds: 1260,
       card_tap_count: 2,
       ai_interaction_count: 1,
       games_played: 1
