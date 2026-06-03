@@ -1364,6 +1364,48 @@ describe('mobile.service progress endpoints', () => {
     }));
   });
 
+  it('uses device event timestamps for card detail debouncing so totals match progress summary counts', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-06-03T11:29:07.900Z'),
+        event_timestamp: new Date('2026-06-03T11:29:07.000Z'),
+        rfid_uid: 'CARD123',
+        content_id: null,
+        data: { card_name: 'Alphabet Card' }
+      },
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-06-03T11:30:08.547Z'),
+        event_timestamp: new Date('2026-06-03T11:30:07.000Z'),
+        rfid_uid: 'CARD123',
+        content_id: null,
+        data: { card_name: 'Alphabet Card' }
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'cards',
+      period: 'today',
+      now: new Date('2026-06-03T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'cards',
+      period: 'today',
+      total: 1,
+      total_items: 1,
+      totalItems: 1,
+      items: [
+        expect.objectContaining({
+          key: 'CARD123',
+          name: 'Alphabet Card',
+          count: 1
+        })
+      ]
+    }));
+  });
+
   it('returns week sections for card details without inventing missing weeks', async () => {
     prisma.device_analytics_event.findMany.mockResolvedValue([
       {
@@ -1450,16 +1492,34 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:00:00.000Z'),
         rfid_uid: 'OLD123',
         content_id: null,
         data: { card_name: 'Older AI Card' }
       },
       {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:00:30.000Z'),
+        event_timestamp: new Date('2026-05-23T09:00:30.000Z'),
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
+      },
+      {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T11:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T11:00:00.000Z'),
         rfid_uid: 'NEW123',
         content_id: null,
         data: { card_name: 'Newest AI Card' }
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T11:00:30.000Z'),
+        event_timestamp: new Date('2026-05-23T11:00:30.000Z'),
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       }
     ]);
 
@@ -1493,21 +1553,110 @@ describe('mobile.service progress endpoints', () => {
     }));
   });
 
+  it('counts completed ai sessions once in detail even when duplicate starts happen before an end', async () => {
+    prisma.device_analytics_event.findMany.mockResolvedValue([
+      {
+        event_name: 'card_session_start',
+        server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:00:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: 'CHEEKO123',
+        content_id: null,
+        data: { card_name: 'Cheeko' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:00.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { source: 'menu' }
+      },
+      {
+        event_name: 'ai_talk_start',
+        server_received_at: new Date('2026-05-23T09:05:05.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:05.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { source: 'menu' }
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:05:40.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:40.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
+      }
+    ]);
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'CHEEKO123',
+        card_type: 'ai',
+        action_data: { agent_name: 'Cheeko' },
+        rfid_content_pack: null,
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getProgressDetails('firebase-user-1', {
+      metric: 'ai',
+      period: 'today',
+      now: new Date('2026-05-23T12:00:00.000Z')
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      metric: 'ai',
+      total: 1,
+      total_items: 1,
+      totalItems: 1,
+      items: [
+        expect.objectContaining({
+          key: 'CHEEKO123',
+          name: 'Cheeko',
+          count: 1
+        })
+      ]
+    }));
+  });
+
   it('returns week sections for ai interaction details without padding empty weeks', async () => {
     prisma.device_analytics_event.findMany.mockResolvedValue([
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-08T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-08T09:00:00.000Z'),
         rfid_uid: 'AIWEEK2',
         content_id: null,
         data: { card_name: 'Week 2 AI Card' }
       },
       {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-08T09:01:00.000Z'),
+        event_timestamp: new Date('2026-05-08T09:01:00.000Z'),
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
+      },
+      {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-22T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-22T09:00:00.000Z'),
         rfid_uid: 'AIWEEK4',
         content_id: null,
         data: { card_name: 'Week 4 AI Card' }
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-22T09:01:00.000Z'),
+        event_timestamp: new Date('2026-05-22T09:01:00.000Z'),
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       }
     ]);
 
@@ -1604,10 +1753,20 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: {}
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:05:40.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:40.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       }
     ]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([
@@ -1770,10 +1929,20 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: { source: 'rfid_card' }
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:05:40.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:40.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       },
       {
         event_name: 'card_session_start',
@@ -1786,10 +1955,20 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:15:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:15:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: { source: 'menu' }
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:15:45.000Z'),
+        event_timestamp: new Date('2026-05-23T09:15:45.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       }
     ]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([

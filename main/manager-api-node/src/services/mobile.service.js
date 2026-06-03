@@ -294,7 +294,7 @@ function sumBy(rows, field) {
 }
 
 function getEventTimeMs(event) {
-    const value = event?.server_received_at || event?.event_timestamp;
+    const value = event?.event_timestamp || event?.server_received_at;
     const time = value ? new Date(value).getTime() : 0;
     return Number.isFinite(time) ? time : 0;
 }
@@ -708,6 +708,33 @@ async function buildCardsGrouped(events) {
     return grouped;
 }
 
+function getCompletedAiInteractionStartEvents(events) {
+    const completedStarts = [];
+    const openStartByMac = new Map();
+    const chronologicalEvents = [...(events || [])].sort((a, b) => {
+        return new Date(a.server_received_at || a.event_timestamp || 0) - new Date(b.server_received_at || b.event_timestamp || 0);
+    });
+
+    for (const event of chronologicalEvents) {
+        const macKey = event.mac_address || 'unknown_mac';
+        if (event.event_name === 'ai_talk_start') {
+            if (!openStartByMac.has(macKey)) {
+                openStartByMac.set(macKey, event);
+            }
+            continue;
+        }
+        if (event.event_name === 'ai_talk_end') {
+            const openStart = openStartByMac.get(macKey);
+            if (openStart) {
+                completedStarts.push(openStart);
+                openStartByMac.delete(macKey);
+            }
+        }
+    }
+
+    return completedStarts;
+}
+
 async function buildCardProgressDetailItems(events) {
     const grouped = new Map();
     const rawCardNames = new Map();
@@ -748,8 +775,7 @@ async function buildAiInteractionGrouped(events) {
     const grouped = new Map();
     const rawCardNames = new Map();
     const cardKeys = new Set();
-    for (const event of events || []) {
-        if (event.event_name !== 'ai_talk_start') continue;
+    for (const event of getCompletedAiInteractionStartEvents(events)) {
         const { key, name } = resolveAiInteractionKeyAndName(event);
         const data = safeObject(event.data);
         if (event.rfid_uid || data.rfid_uid || data.card_uid || data.card_id) {
@@ -774,6 +800,7 @@ async function buildAiProgressDetailItems(events) {
     const chronologicalEvents = [...(events || [])].sort((a, b) => {
         return new Date(a.server_received_at || a.event_timestamp || 0) - new Date(b.server_received_at || b.event_timestamp || 0);
     });
+    const completedStarts = new Set(getCompletedAiInteractionStartEvents(events));
     for (const event of chronologicalEvents) {
         if (event.event_name === 'card_session_start') {
             const card = resolveCardKeyAndName(event);
@@ -798,7 +825,7 @@ async function buildAiProgressDetailItems(events) {
             latestCardByMac.set(event.mac_address || 'unknown_mac', card);
             continue;
         }
-        if (event.event_name !== 'ai_talk_start') continue;
+        if (event.event_name !== 'ai_talk_start' || !completedStarts.has(event)) continue;
         const resolved = resolveAiInteractionKeyAndName(event);
         const hasDirectCard = Boolean(event.rfid_uid || data.rfid_uid || data.card_uid || data.card_id);
         const possibleFallbackCard = latestCardByMac.get(event.mac_address || 'unknown_mac');
@@ -2515,7 +2542,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
     }
 
     if (metric === 'ai') {
-        const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start']);
+        const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start', 'ai_talk_end']);
         const items = await buildAiProgressDetailItems(events);
         const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
@@ -2903,7 +2930,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     }
 
     if (metric === 'ai') {
-        const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start']);
+        const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start', 'ai_talk_end']);
         const items = await buildAiProgressDetailItems(events);
         const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
         const sections = period === 'month'

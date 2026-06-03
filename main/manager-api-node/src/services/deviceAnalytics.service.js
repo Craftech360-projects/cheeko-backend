@@ -226,6 +226,41 @@ async function shouldProjectCardTap(rawEventRow) {
   return previousRows.length === 0;
 }
 
+async function shouldProjectCompletedAiInteraction(rawEventRow) {
+  const eventInstant = eventTime(rawEventRow) || new Date();
+  const priorSessionEvents = await prisma.device_analytics_event.findMany({
+    where: {
+      mac_address: rawEventRow.mac_address,
+      event_name: {
+        in: ['ai_talk_start', 'ai_talk_end'],
+      },
+      id: { not: rawEventRow.id },
+      server_received_at: {
+        lt: eventInstant,
+      },
+    },
+    orderBy: { server_received_at: 'asc' },
+    select: {
+      event_name: true,
+      event_timestamp: true,
+      server_received_at: true,
+    },
+  });
+
+  let hasOpenSession = false;
+  for (const event of priorSessionEvents || []) {
+    if (event.event_name === 'ai_talk_start') {
+      hasOpenSession = true;
+      continue;
+    }
+    if (event.event_name === 'ai_talk_end') {
+      hasOpenSession = false;
+    }
+  }
+
+  return hasOpenSession;
+}
+
 function dateKeyUtc(dateValue) {
   if (!dateValue) return null;
   return new Date(dateValue).toISOString().slice(0, 10);
@@ -358,7 +393,8 @@ async function applyProjectionForEvent(rawEventRow) {
     });
   }
 
-  if (eventName === 'ai_talk_start') {
+  if (eventName === 'ai_talk_end') {
+    if (!(await shouldProjectCompletedAiInteraction(rawEventRow))) return;
     await prisma.device_ai_interactions_daily.upsert({
       where: {
         date_mac_address: {
