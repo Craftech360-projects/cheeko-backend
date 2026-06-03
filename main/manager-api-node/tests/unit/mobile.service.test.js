@@ -1687,6 +1687,7 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'card_session_start',
         server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:00:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: 'RHYME123',
         content_id: null,
@@ -1695,18 +1696,38 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: {}
       },
       {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:05:30.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:30.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
+      },
+      {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:10:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:10:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: {}
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:10:20.000Z'),
+        event_timestamp: new Date('2026-05-23T09:10:20.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       }
     ]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([
@@ -1805,6 +1826,7 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'card_session_start',
         server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:00:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: 'CHEEKO123',
         content_id: null,
@@ -1813,10 +1835,20 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: {}
+      },
+      {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:05:35.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:35.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
       }
     ]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([
@@ -1855,6 +1887,7 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'card_session_start',
         server_received_at: new Date('2026-05-23T09:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:00:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: 'CHEEKO123',
         content_id: null,
@@ -1863,14 +1896,25 @@ describe('mobile.service progress endpoints', () => {
       {
         event_name: 'ai_talk_start',
         server_received_at: new Date('2026-05-23T09:05:00.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: null,
         content_id: null,
         data: {}
       },
       {
+        event_name: 'ai_talk_end',
+        server_received_at: new Date('2026-05-23T09:05:25.000Z'),
+        event_timestamp: new Date('2026-05-23T09:05:25.000Z'),
+        mac_address: 'AA:BB:CC:DD:EE:FF',
+        rfid_uid: null,
+        content_id: null,
+        data: { reason: 'channel_closed' }
+      },
+      {
         event_name: 'card_session_start',
         server_received_at: new Date('2026-05-23T10:00:00.000Z'),
+        event_timestamp: new Date('2026-05-23T10:00:00.000Z'),
         mac_address: 'AA:BB:CC:DD:EE:FF',
         rfid_uid: 'SLOKAS123',
         content_id: null,
