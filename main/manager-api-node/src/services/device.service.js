@@ -17,14 +17,11 @@ const activationCodeCache = new Map();
 const activationMacCache = new Map(); // macAddress -> activationCode (reverse lookup)
 
 const buildOtaDownloadUrl = (otaUrl, firmwareId) => {
-  const baseUrl = (otaUrl || '').trim();
+  const baseUrl = normalizeOtaBaseUrl(otaUrl);
   if (!baseUrl) return null;
 
-  if (baseUrl.includes('/ota/')) {
-    return `${baseUrl.replace('/ota/', '/otaMag/download/')}${firmwareId}`;
-  }
-
-  return `${baseUrl.replace(/\/+$/, '')}/otaMag/download/${firmwareId}`;
+  const publicApiBaseUrl = baseUrl.replace(/\/ota(?:\/.*)?$/, '');
+  return `${publicApiBaseUrl}/otaMag/download/${firmwareId}`;
 };
 
 // Clean up expired activation codes (older than 24 hours)
@@ -527,8 +524,7 @@ const normalizeOtaBaseUrl = (otaUrl) => {
  */
 const buildFirmwareDownloadUrl = async (firmwareId) => {
   const otaUrl = (await getSystemParam('server.ota')) || '';
-  const baseUrl = normalizeOtaBaseUrl(otaUrl);
-  return `${baseUrl}/otaMag/download/${firmwareId}`;
+  return buildOtaDownloadUrl(otaUrl, firmwareId);
 };
 
 /**
