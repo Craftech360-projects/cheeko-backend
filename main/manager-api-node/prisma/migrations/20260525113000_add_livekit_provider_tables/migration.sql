@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS "tts_providers" (
 
 CREATE INDEX IF NOT EXISTS "idx_tts_active" ON "tts_providers"("is_active");
 CREATE INDEX IF NOT EXISTS "idx_tts_priority" ON "tts_providers"("priority" DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_tts_single_active" ON "tts_providers"("is_active") WHERE "is_active" = TRUE;
 
 -- Global active LLM provider runtime table
 CREATE TABLE IF NOT EXISTS "llm_providers" (
@@ -89,5 +90,24 @@ VALUES ('openrouter', 'google/gemma-4-31b-it', 'https://openrouter.ai/api/v1', '
 ON CONFLICT ("model_name") DO NOTHING;
 
 INSERT INTO "tts_providers" ("provider_name", "api_key", "voice_id", "model_id", "output_format", "sample_rate_hz", "temperature", "is_active", "priority")
-VALUES ('elevenlabs', '', NULL, NULL, NULL, NULL, NULL, FALSE, 1)
+VALUES
+  ('elevenlabs', '', NULL, NULL, NULL, NULL, NULL, FALSE, 1),
+  ('cartesia', '', NULL, 'sonic-3', 'pcm_24000', 24000, NULL, FALSE, 2)
 ON CONFLICT ("provider_name") DO NOTHING;
+
+DO $$
+BEGIN
+  IF to_regclass('public.ai_model_config') IS NOT NULL THEN
+    INSERT INTO "ai_model_config" ("id", "model_type", "model_code", "model_name", "is_default", "is_enabled", "config_json", "remark", "sort", "create_date", "update_date")
+    VALUES ('cartesia-tts-sonic-3', 'tts', 'cartesia', 'Cartesia Sonic', 0, 1, '{"provider":"cartesia","model_id":"sonic-3","output_format":"pcm_24000","sample_rate_hz":24000}'::jsonb, 'Cartesia Sonic text-to-speech', 2, NOW(), NOW())
+    ON CONFLICT ("id") DO UPDATE SET
+      "model_type" = EXCLUDED."model_type",
+      "model_code" = EXCLUDED."model_code",
+      "model_name" = EXCLUDED."model_name",
+      "is_enabled" = EXCLUDED."is_enabled",
+      "config_json" = EXCLUDED."config_json",
+      "remark" = EXCLUDED."remark",
+      "sort" = EXCLUDED."sort",
+      "update_date" = NOW();
+  END IF;
+END $$;

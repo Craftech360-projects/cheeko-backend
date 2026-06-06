@@ -311,8 +311,9 @@ INSERT INTO ai_model (model_type, model_name, model_code, provider, description,
 ('llm', 'Llama 3.3 70B', 'llama-3.3-70b-versatile', 'groq', 'Meta Llama 3.3 via Groq', 3),
 ('llm', 'Gemini 2.0 Flash', 'gemini-2.0-flash-exp', 'google', 'Google Gemini 2.0 Flash', 4),
 ('tts', 'ElevenLabs', 'elevenlabs', 'elevenlabs', 'ElevenLabs Text-to-Speech', 1),
-('tts', 'Edge TTS', 'edge-tts', 'microsoft', 'Microsoft Edge TTS (Free)', 2),
-('tts', 'Google TTS', 'google-tts', 'google', 'Google Cloud Text-to-Speech', 3),
+('tts', 'Cartesia Sonic', 'cartesia', 'cartesia', 'Cartesia Text-to-Speech', 2),
+('tts', 'Edge TTS', 'edge-tts', 'microsoft', 'Microsoft Edge TTS (Free)', 3),
+('tts', 'Google TTS', 'google-tts', 'google', 'Google Cloud Text-to-Speech', 4),
 ('mem', 'Mem0', 'mem0', 'mem0', 'Mem0 Memory System', 1)
 ON CONFLICT DO NOTHING;
 

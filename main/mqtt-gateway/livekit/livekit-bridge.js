@@ -6,6 +6,7 @@
  */
 
 const { EventEmitter } = require("events");
+const path = require("path");
 const JSON5 = require("json5");
 const {
   Room,
@@ -27,6 +28,7 @@ const {
   INCOMING_SAMPLE_RATE,
   CHANNELS,
 } = require("../constants/audio");
+const { WavRecorder } = require("./wav-recorder");
 
 // Global config manager reference (injected by app.js)
 let configManager = null;
@@ -49,6 +51,7 @@ class LiveKitBridge extends EventEmitter {
     this.roomService = null; // Store roomService for cleanup on disconnect
     this.roomName = null; // Store room name for deletion on disconnect
     this.audioSource = new AudioSource(16000, 1);
+    this.agentAudioRecorder = null;
     this.protocolVersion = protocolVersion;
     this.isAudioPlaying = false; // Track if audio is actively playing
     this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
@@ -185,6 +188,89 @@ class LiveKitBridge extends EventEmitter {
       throw new Error("LiveKit config not found");
     }
     this.livekitConfig = livekitConfig;
+    this.initializeAgentAudioRecorder();
+  }
+
+  initializeAgentAudioRecorder() {
+    const envEnabled = process.env.SAVE_AGENT_AUDIO_WAV;
+    const configEnabled = this.livekitConfig?.save_agent_audio_wav;
+    const isEnabled = envEnabled !== undefined
+      ? /^(1|true|yes)$/i.test(envEnabled)
+      : Boolean(configEnabled);
+
+    if (!isEnabled) {
+      return;
+    }
+
+    const parsedMaxSeconds = Number(
+      process.env.SAVE_AGENT_AUDIO_MAX_SECONDS ||
+        this.livekitConfig?.save_agent_audio_max_seconds ||
+        30
+    );
+    const maxDurationSeconds = Number.isFinite(parsedMaxSeconds)
+      ? Math.max(1, Math.min(300, parsedMaxSeconds))
+      : 30;
+
+    const outputDir =
+      process.env.SAVE_AGENT_AUDIO_DIR ||
+      this.livekitConfig?.save_agent_audio_dir ||
+      path.resolve(__dirname, "..", "logs", "agent-audio");
+
+    this.agentAudioRecorder = new WavRecorder({
+      enabled: true,
+      outputDir,
+      label: "agent-audio",
+      deviceId: this.macAddress,
+      sessionId: this.sessionId,
+      sampleRate: OUTGOING_SAMPLE_RATE,
+      channels: CHANNELS,
+      bitsPerSample: 16,
+      maxDurationSeconds,
+    });
+
+    console.log(
+      `🎙️ [AGENT-AUDIO-CAPTURE] WAV capture enabled for ${this.macAddress} (max ${maxDurationSeconds}s, dir=${outputDir})`
+    );
+  }
+
+  captureAgentPcm(pcmBuffer) {
+    if (!this.agentAudioRecorder || !pcmBuffer || pcmBuffer.length === 0) {
+      return;
+    }
+
+    try {
+      const finalizedSegment = this.agentAudioRecorder.appendPcmChunk(pcmBuffer);
+      if (finalizedSegment?.filePath) {
+        console.log(
+          `🎙️ [AGENT-AUDIO-CAPTURE] Saved ${finalizedSegment.durationSeconds.toFixed(2)}s WAV segment for ${this.macAddress}: ${finalizedSegment.filePath}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `⚠️ [AGENT-AUDIO-CAPTURE] Failed to append PCM chunk for ${this.macAddress}: ${error.message}`
+      );
+    }
+  }
+
+  finalizeAgentAudioCapture(reason = "manual") {
+    if (!this.agentAudioRecorder) {
+      return null;
+    }
+
+    try {
+      const captureInfo = this.agentAudioRecorder.finalize();
+      if (captureInfo?.filePath) {
+        console.log(
+          `🎙️ [AGENT-AUDIO-CAPTURE] Saved ${captureInfo.durationSeconds.toFixed(2)}s WAV (${reason}) for ${this.macAddress}: ${captureInfo.filePath}`
+        );
+      }
+      return captureInfo;
+    } catch (error) {
+      console.error(
+        `⚠️ [AGENT-AUDIO-CAPTURE] Failed to finalize WAV (${reason}) for ${this.macAddress}: ${error.message}`
+      );
+      return null;
+    }
   }
 
   /**
@@ -268,6 +354,8 @@ class LiveKitBridge extends EventEmitter {
           // }
           continue;
         }
+
+        this.captureAgentPcm(frameData);
 
         // TEMPORARY: Use synchronous encoding to avoid worker thread issues
         try {
@@ -2321,6 +2409,8 @@ class LiveKitBridge extends EventEmitter {
   }
 
   async close() {
+    this.finalizeAgentAudioCapture("connection_close");
+
     if (this.room) {
       console.log("[LiveKitBridge] Disconnecting from LiveKit room");
 
@@ -2498,4 +2588,3 @@ class LiveKitBridge extends EventEmitter {
 }
 
 module.exports = { LiveKitBridge, setConfigManager };
-

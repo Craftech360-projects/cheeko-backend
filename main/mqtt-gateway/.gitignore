@@ -7,3 +7,6 @@
 
 # Ignore config/mqtt.json (contains local MQTT credentials)
 config/mqtt.json
+
+# Runtime audio/debug captures
+logs/
