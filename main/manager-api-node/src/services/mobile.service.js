@@ -3,6 +3,8 @@ const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeMacAddress } = require('../utils/helpers');
 
+const CARD_TAP_DEBOUNCE_MS = 60 * 1000;
+
 // ─── Parent Profile ─────────────────────────────────────────────────────────
 
 function dateOrNull(value) {
@@ -40,6 +42,26 @@ function positiveDurationMs(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return 0;
     return Math.trunc(numeric);
+}
+
+function completedMinuteSeconds(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.floor(numeric / 60) * 60;
+}
+
+function completedUsageSecondsFromRow(row) {
+    const categoryKeys = [
+        'game_usage_seconds',
+        'card_usage_seconds',
+        'ai_talk_usage_seconds',
+        'radio_usage_seconds',
+    ];
+    const hasCategoryUsage = categoryKeys.some(key => row[key] != null);
+    if (hasCategoryUsage) {
+        return categoryKeys.reduce((sum, key) => sum + completedMinuteSeconds(row[key]), 0);
+    }
+    return completedMinuteSeconds(row.usage_time_seconds);
 }
 
 function safeObject(value) {
@@ -177,9 +199,58 @@ async function countRawGameStartsForRange(scope, range) {
     }).length;
 }
 
+async function getProgressEventsForRange(scope, range, eventName) {
+    const dateKeys = new Set(range.dates || []);
+    if (!dateKeys.size || !scope.macAddresses || scope.macAddresses.length === 0) return [];
+    const eventNameWhere = Array.isArray(eventName) ? { in: eventName } : eventName;
+
+    const rows = await prisma.device_analytics_event.findMany({
+        where: {
+            mac_address: { in: scope.macAddresses },
+            event_name: eventNameWhere,
+            server_received_at: {
+                gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
+                lte: dateOnlyFromKey(shiftDateKey(range.endDate, 1)),
+            },
+        },
+        select: {
+            mac_address: true,
+            event_name: true,
+            server_received_at: true,
+            event_timestamp: true,
+            rfid_uid: true,
+            content_id: true,
+            content_type: true,
+            data: true,
+        },
+        orderBy: { server_received_at: 'desc' },
+        take: 5000,
+    });
+
+    return (rows || []).filter(row => {
+        const dateKey = formatDateInTimezone(row.server_received_at, scope.timezone);
+        return dateKey && dateKeys.has(dateKey);
+    });
+}
+
 function buildProgressDateRange(period, timezone, now = new Date()) {
     const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
-    const totalDays = period === 'today' ? 1 : (period === 'week' ? 7 : 30);
+    if (period === 'month') {
+        const monthKey = getMonthKeyFromReference(today);
+        const startDate = `${monthKey}-01`;
+        const dates = [];
+        for (let dateKey = startDate; dateKey <= today; dateKey = shiftDateKey(dateKey, 1)) {
+            dates.push(dateKey);
+        }
+        return {
+            startDate,
+            endDate: today,
+            dates,
+            monthKey,
+        };
+    }
+
+    const totalDays = period === 'today' ? 1 : 7;
     const dates = [];
     for (let i = totalDays - 1; i >= 0; i -= 1) {
         dates.push(shiftDateKey(today, -i));
@@ -188,6 +259,26 @@ function buildProgressDateRange(period, timezone, now = new Date()) {
         startDate: dates[0],
         endDate: dates[dates.length - 1],
         dates,
+    };
+}
+
+function buildProgressCalendarMonthRange(timezone, now = new Date(), selectedMonth = null) {
+    const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
+    const currentMonthKey = today.slice(0, 7);
+    const monthKey = getMonthKeyFromReference(selectedMonth || today);
+    const startDate = `${monthKey}-01`;
+    const endDate = monthKey === currentMonthKey
+        ? today
+        : formatLocalDate(dateForMonthEnd(monthKey) || now);
+    const dates = [];
+    for (let dateKey = startDate; dateKey <= endDate; dateKey = shiftDateKey(dateKey, 1)) {
+        dates.push(dateKey);
+    }
+    return {
+        startDate,
+        endDate,
+        dates,
+        monthKey,
     };
 }
 
@@ -200,6 +291,91 @@ function parsePagination(options = {}) {
 
 function sumBy(rows, field) {
     return (rows || []).reduce((total, row) => total + (Number(row[field]) || 0), 0);
+}
+
+function getEventTimeMs(event) {
+    const value = event?.event_timestamp || event?.server_received_at;
+    const time = value ? new Date(value).getTime() : 0;
+    return Number.isFinite(time) ? time : 0;
+}
+
+function debounceCardTapEvents(events, debounceMs = CARD_TAP_DEBOUNCE_MS) {
+    const accepted = [];
+    const lastSeenByCard = new Map();
+    const sorted = [...(events || [])].sort((a, b) => getEventTimeMs(a) - getEventTimeMs(b));
+    for (const event of sorted) {
+        if (event.event_name !== 'card_session_start') continue;
+        const { key } = resolveCardKeyAndName(event);
+        const eventTime = getEventTimeMs(event);
+        const lastTime = lastSeenByCard.get(key);
+        lastSeenByCard.set(key, eventTime);
+        if (lastTime == null || eventTime - lastTime > debounceMs) {
+            accepted.push(event);
+        }
+    }
+    return accepted;
+}
+
+function usageCategoryItemsFromDailyRows(rows) {
+    const totals = {
+        game: completedMinuteSeconds(sumBy(rows, 'game_usage_seconds')),
+        card: completedMinuteSeconds(sumBy(rows, 'card_usage_seconds')),
+        ai_talk: completedMinuteSeconds(sumBy(rows, 'ai_talk_usage_seconds')),
+        radio: completedMinuteSeconds(sumBy(rows, 'radio_usage_seconds')),
+    };
+    const items = [
+        { key: 'game', name: 'Game', duration_seconds: totals.game, durationSeconds: totals.game },
+        { key: 'card', name: 'Card', duration_seconds: totals.card, durationSeconds: totals.card },
+        { key: 'ai_talk', name: 'AI Talk', duration_seconds: totals.ai_talk, durationSeconds: totals.ai_talk },
+        { key: 'radio', name: 'Radio', duration_seconds: totals.radio, durationSeconds: totals.radio },
+    ];
+    return {
+        items,
+        totalSeconds: items.reduce((sum, item) => sum + item.duration_seconds, 0),
+    };
+}
+
+function getDailyUsageRowDateKey(row) {
+    if (!row || !row.date) return null;
+    if (row.date instanceof Date && !Number.isNaN(row.date.getTime())) {
+        return row.date.toISOString().slice(0, 10);
+    }
+    const value = String(row.date).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
+
+function getWeekInMonthFromDateKey(dateKey) {
+    const day = Number(String(dateKey).slice(8, 10));
+    if (!day) return null;
+    const monthStart = new Date(`${String(dateKey).slice(0, 7)}-01T00:00:00.000Z`);
+    if (Number.isNaN(monthStart.getTime())) return null;
+    const leadingDaysBeforeFirstMonday = (monthStart.getUTCDay() + 6) % 7;
+    return Math.floor((day + leadingDaysBeforeFirstMonday - 1) / 7) + 1;
+}
+
+function buildUsageWeekSectionsFromDailyRows(rows, monthReference) {
+    const monthKey = getMonthKeyFromReference(monthReference);
+    const grouped = new Map();
+    for (const row of rows || []) {
+        const dateKey = getDailyUsageRowDateKey(row);
+        if (!dateKey || dateKey.slice(0, 7) !== monthKey) continue;
+        const week = getWeekInMonthFromDateKey(dateKey);
+        if (!week) continue;
+        if (!grouped.has(week)) grouped.set(week, []);
+        grouped.get(week).push(row);
+    }
+    return Array.from(grouped.entries())
+        .sort(([left], [right]) => left - right)
+        .map(([week, weekRows]) => {
+            const { items, totalSeconds } = usageCategoryItemsFromDailyRows(weekRows);
+            return {
+                label: `Week ${week}`,
+                week,
+                total_seconds: totalSeconds,
+                totalSeconds,
+                items,
+            };
+        });
 }
 
 function incrementCount(grouped, key, name, amount = 1) {
@@ -319,6 +495,15 @@ function getEventMonthKey(event) {
     return `${year}-${month}`;
 }
 
+function getDateKeyFromValue(value) {
+    const date = value ? new Date(value) : new Date();
+    if (Number.isNaN(date.getTime())) return null;
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 function getMonthLabel(monthKey) {
     const [year, month] = String(monthKey).split('-');
     const monthIndex = Number(month) - 1;
@@ -382,9 +567,8 @@ function toDurationSection(month, grouped) {
 
 function getEventWeekInMonth(event) {
     const value = event.server_received_at || event.created_at || event.timestamp || event.event_time;
-    const date = value ? new Date(value) : new Date();
-    if (Number.isNaN(date.getTime())) return null;
-    return Math.floor((date.getDate() - 1) / 7) + 1;
+    const dateKey = getDateKeyFromValue(value);
+    return dateKey ? getWeekInMonthFromDateKey(dateKey) : null;
 }
 
 function groupEventsByWeekInMonth(events, now = new Date()) {
@@ -442,9 +626,8 @@ function toCountWeekSection(week, grouped) {
 }
 
 function getGamePlayedWeekInMonth(row) {
-    const date = row && row.played_at ? new Date(row.played_at) : null;
-    if (!date || Number.isNaN(date.getTime())) return null;
-    return Math.floor((date.getDate() - 1) / 7) + 1;
+    const dateKey = getDateKeyFromValue(row && row.played_at);
+    return dateKey ? getWeekInMonthFromDateKey(dateKey) : null;
 }
 
 function formatGamePlayedDetail(row) {
@@ -513,8 +696,7 @@ function buildGamesGrouped(events) {
 async function buildCardsGrouped(events) {
     const grouped = new Map();
     const rawCardNames = new Map();
-    for (const event of events || []) {
-        if (event.event_name !== 'card_session_start') continue;
+    for (const event of debounceCardTapEvents(events)) {
         const { key, name } = resolveCardKeyAndName(event);
         rawCardNames.set(key, name);
         incrementCount(grouped, key, name);
@@ -526,12 +708,74 @@ async function buildCardsGrouped(events) {
     return grouped;
 }
 
+function getCompletedAiInteractionStartEvents(events) {
+    const completedStarts = [];
+    const openStartByMac = new Map();
+    const chronologicalEvents = [...(events || [])].sort((a, b) => {
+        return new Date(a.server_received_at || a.event_timestamp || 0) - new Date(b.server_received_at || b.event_timestamp || 0);
+    });
+
+    for (const event of chronologicalEvents) {
+        const macKey = event.mac_address || 'unknown_mac';
+        if (event.event_name === 'ai_talk_start') {
+            if (!openStartByMac.has(macKey)) {
+                openStartByMac.set(macKey, event);
+            }
+            continue;
+        }
+        if (event.event_name === 'ai_talk_end') {
+            const openStart = openStartByMac.get(macKey);
+            if (openStart) {
+                completedStarts.push(openStart);
+                openStartByMac.delete(macKey);
+            }
+        }
+    }
+
+    return completedStarts;
+}
+
+async function buildCardProgressDetailItems(events) {
+    const grouped = new Map();
+    const rawCardNames = new Map();
+    for (const event of debounceCardTapEvents(events)) {
+        const { key, name } = resolveCardKeyAndName(event);
+        const current = grouped.get(key) || {
+            key,
+            name,
+            count: 0,
+            timestamp: event.server_received_at || event.event_timestamp || null,
+        };
+        current.count += 1;
+        const eventTime = event.server_received_at || event.event_timestamp || null;
+        if (eventTime && (!current.timestamp || new Date(eventTime) > new Date(current.timestamp))) {
+            current.timestamp = eventTime;
+        }
+        rawCardNames.set(key, name);
+        grouped.set(key, current);
+    }
+
+    const cardNameMap = await getCardNameMap(Array.from(grouped.keys()));
+    for (const [key, item] of grouped.entries()) {
+        item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
+        item.card_title = item.name;
+        item.cardTitle = item.name;
+        item.rfid_uid = key;
+        item.rfidUid = key;
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => {
+        const timeCompare = new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+        if (timeCompare !== 0) return timeCompare;
+        return (b.count - a.count) || String(a.name).localeCompare(String(b.name));
+    });
+}
+
 async function buildAiInteractionGrouped(events) {
     const grouped = new Map();
     const rawCardNames = new Map();
     const cardKeys = new Set();
-    for (const event of events || []) {
-        if (event.event_name !== 'ai_talk_start') continue;
+    for (const event of getCompletedAiInteractionStartEvents(events)) {
         const { key, name } = resolveAiInteractionKeyAndName(event);
         const data = safeObject(event.data);
         if (event.rfid_uid || data.rfid_uid || data.card_uid || data.card_id) {
@@ -545,6 +789,92 @@ async function buildAiInteractionGrouped(events) {
         item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
     }
     return grouped;
+}
+
+async function buildAiProgressDetailItems(events) {
+    const grouped = new Map();
+    const rawCardNames = new Map();
+    const cardKeys = new Set();
+    const latestCardByMac = new Map();
+    const contextCardKeys = new Set();
+    const chronologicalEvents = [...(events || [])].sort((a, b) => {
+        return new Date(a.server_received_at || a.event_timestamp || 0) - new Date(b.server_received_at || b.event_timestamp || 0);
+    });
+    const completedStarts = new Set(getCompletedAiInteractionStartEvents(events));
+    for (const event of chronologicalEvents) {
+        if (event.event_name === 'card_session_start') {
+            const card = resolveCardKeyAndName(event);
+            contextCardKeys.add(card.key);
+        }
+    }
+
+    const contextCardMetadata = await getCardMetadataMap(Array.from(contextCardKeys));
+    let defaultAiCard = null;
+    for (const [key, metadata] of contextCardMetadata.entries()) {
+        if (!metadata?.isAiCard) continue;
+        defaultAiCard = {
+            key,
+            name: metadata.name || 'Cheeko',
+        };
+        if (normalizeText(metadata.name || '').includes('cheeko')) break;
+    }
+    for (const event of chronologicalEvents) {
+        const data = safeObject(event.data);
+        if (event.event_name === 'card_session_start') {
+            const card = resolveCardKeyAndName(event);
+            latestCardByMac.set(event.mac_address || 'unknown_mac', card);
+            continue;
+        }
+        if (event.event_name !== 'ai_talk_start' || !completedStarts.has(event)) continue;
+        const resolved = resolveAiInteractionKeyAndName(event);
+        const hasDirectCard = Boolean(event.rfid_uid || data.rfid_uid || data.card_uid || data.card_id);
+        const possibleFallbackCard = latestCardByMac.get(event.mac_address || 'unknown_mac');
+        const fallbackMetadata = possibleFallbackCard ? contextCardMetadata.get(possibleFallbackCard.key) : null;
+        const fallbackCard = fallbackMetadata?.isAiCard
+            ? {
+                key: possibleFallbackCard.key,
+                name: fallbackMetadata.name || possibleFallbackCard.name,
+            }
+            : null;
+        const isMenuAiChat = normalizeText(data.source || data.entry_point || data.entryPoint) === 'menu';
+        const menuFallbackCard = !hasDirectCard && !fallbackCard && isMenuAiChat
+            ? (defaultAiCard || { key: 'cheeko_ai_card', name: 'Cheeko' })
+            : null;
+        const { key, name } = !hasDirectCard && (fallbackCard || menuFallbackCard)
+            ? (fallbackCard || menuFallbackCard)
+            : resolved;
+        const current = grouped.get(key) || {
+            key,
+            name,
+            count: 0,
+            timestamp: event.server_received_at || event.event_timestamp || null,
+        };
+        current.count += 1;
+        const eventTime = event.server_received_at || event.event_timestamp || null;
+        if (eventTime && (!current.timestamp || new Date(eventTime) > new Date(current.timestamp))) {
+            current.timestamp = eventTime;
+        }
+        if (hasDirectCard || fallbackCard || menuFallbackCard) {
+            cardKeys.add(key);
+            rawCardNames.set(key, name);
+        }
+        grouped.set(key, current);
+    }
+
+    const cardNameMap = await getCardNameMap(Array.from(cardKeys));
+    for (const [key, item] of grouped.entries()) {
+        item.name = cardNameMap.get(key) || rawCardNames.get(key) || item.name;
+        item.card_title = item.name;
+        item.cardTitle = item.name;
+        item.rfid_uid = key;
+        item.rfidUid = key;
+    }
+
+    return Array.from(grouped.values()).sort((a, b) => {
+        const timeCompare = new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+        if (timeCompare !== 0) return timeCompare;
+        return (b.count - a.count) || String(a.name).localeCompare(String(b.name));
+    });
 }
 
 async function buildUsageGrouped(events) {
@@ -634,6 +964,126 @@ async function getCardNameMap(keys) {
         nameMap.set(key.toUpperCase(), name);
     }
     return nameMap;
+}
+
+async function getRecentCardActivityMetadataMap(keys) {
+    const rfidKeys = Array.from(new Set((keys || []).filter(Boolean).flatMap(key => {
+        const value = String(key);
+        return [value, value.toLowerCase(), value.toUpperCase()];
+    })));
+    if (rfidKeys.length === 0) return new Map();
+
+    const mappings = await prisma.rfid_card_mapping.findMany({
+        where: { rfid_uid: { in: rfidKeys } },
+        select: {
+            rfid_uid: true,
+            card_type: true,
+            thumbnail_url: true,
+            action_data: true,
+            rfid_content_pack: { select: { name: true, thumbnail_url: true } },
+            rfid_question: { select: { title: true } },
+            rfid_pack: { select: { pack_name: true } }
+        }
+    });
+
+    const metadataMap = new Map();
+    for (const mapping of mappings || []) {
+        if (!mapping.rfid_uid) continue;
+        const actionData = safeObject(mapping.action_data);
+        const name = mapping.rfid_content_pack?.name
+            || mapping.rfid_question?.title
+            || mapping.rfid_pack?.pack_name
+            || actionData.agent_name
+            || actionData.character_name
+            || actionData.ai_card_name
+            || actionData.card_name
+            || actionData.display_name
+            || actionData.displayName
+            || actionData.title
+            || actionData.name
+            || (mapping.card_type === 'ai' ? 'AI Card' : null);
+        const thumbnailUrl = firstKnownValue(
+            mapping.thumbnail_url,
+            actionData.imageUrl,
+            actionData.image_url,
+            actionData.thumbnailUrl,
+            actionData.thumbnail_url,
+            actionData.cardImageUrl,
+            actionData.card_image_url,
+            actionData.cardThumbnailUrl,
+            actionData.card_thumbnail_url,
+            actionData.coverUrl,
+            actionData.cover_url,
+            mapping.rfid_content_pack?.thumbnail_url
+        );
+        const metadata = { name, thumbnailUrl };
+        const key = String(mapping.rfid_uid);
+        metadataMap.set(key, metadata);
+        metadataMap.set(key.toLowerCase(), metadata);
+        metadataMap.set(key.toUpperCase(), metadata);
+    }
+    return metadataMap;
+}
+
+async function getCardMetadataMap(keys) {
+    const rfidKeys = Array.from(new Set((keys || []).filter(Boolean).flatMap(key => {
+        const value = String(key);
+        return [value, value.toLowerCase(), value.toUpperCase()];
+    })));
+    if (rfidKeys.length === 0) return new Map();
+
+    const mappings = await prisma.rfid_card_mapping.findMany({
+        where: { rfid_uid: { in: rfidKeys } },
+        select: {
+            rfid_uid: true,
+            card_type: true,
+            action_data: true,
+            rfid_content_pack: { select: { name: true } },
+            rfid_question: { select: { title: true } },
+            rfid_pack: { select: { pack_name: true } }
+        }
+    });
+
+    const metadataMap = new Map();
+    for (const mapping of mappings || []) {
+        const actionData = safeObject(mapping.action_data);
+        const name = mapping.rfid_content_pack?.name
+            || mapping.rfid_question?.title
+            || mapping.rfid_pack?.pack_name
+            || actionData.agent_name
+            || actionData.character_name
+            || actionData.ai_card_name
+            || actionData.card_name
+            || actionData.display_name
+            || actionData.displayName
+            || actionData.title
+            || actionData.name
+            || (mapping.card_type === 'ai' ? 'AI Card' : null);
+        if (!mapping.rfid_uid) continue;
+        const key = String(mapping.rfid_uid);
+        const searchableText = normalizeText([
+            mapping.card_type,
+            name,
+            actionData.agent_name,
+            actionData.character_name,
+            actionData.ai_card_name,
+            actionData.card_name,
+            actionData.title,
+            actionData.name,
+        ].filter(Boolean).join(' '));
+        const isAiCard = String(mapping.card_type || '').toLowerCase() === 'ai'
+            || searchableText.includes('cheeko')
+            || searchableText.includes('ai');
+        const metadata = {
+            name,
+            cardType: mapping.card_type || null,
+            isAiCard,
+        };
+        metadataMap.set(key, metadata);
+        metadataMap.set(key.toLowerCase(), metadata);
+        metadataMap.set(key.toUpperCase(), metadata);
+    }
+    return metadataMap;
 }
 
 function formatRecentCardActivity(row, mapping = null) {
@@ -769,54 +1219,6 @@ function uniqueRecentCardTaps(taps, limit = 3) {
     }
     return unique;
 }
-
-const HOMEPAGE_AI_CARDS = [
-    {
-        itemType: 'ai',
-        id: 'ai-story-mode',
-        title: 'Story AI',
-        aiMode: 'story',
-        category: 'AI',
-        routeName: 'aiStoryMode',
-        thumbnailUrl: null,
-    },
-    {
-        itemType: 'ai',
-        id: 'ai-music-mode',
-        title: 'Music AI',
-        aiMode: 'music',
-        category: 'AI',
-        routeName: 'aiMusicMode',
-        thumbnailUrl: null,
-    },
-    {
-        itemType: 'ai',
-        id: 'ai-learning-mode',
-        title: 'Learning AI',
-        aiMode: 'learning',
-        category: 'AI',
-        routeName: 'aiLearningMode',
-        thumbnailUrl: null,
-    },
-    {
-        itemType: 'ai',
-        id: 'ai-game-mode',
-        title: 'Game AI',
-        aiMode: 'game',
-        category: 'AI',
-        routeName: 'aiGameMode',
-        thumbnailUrl: null,
-    },
-    {
-        itemType: 'ai',
-        id: 'ai-chat-mode',
-        title: 'AI Chat',
-        aiMode: 'conversation',
-        category: 'AI',
-        routeName: 'aiChatMode',
-        thumbnailUrl: null,
-    },
-];
 
 function clampRecommendationLimit(value) {
     const parsed = parseInt(value, 10);
@@ -1108,34 +1510,6 @@ function normalizeSupabaseAssetUrl(url) {
 
 function hasSignals(...sets) {
     return sets.some(set => set && set.size > 0);
-}
-
-function scoreAiCard(card, profile, recommendationSource = null) {
-    let score = 0;
-    const aiMode = normalizeText(card.aiMode);
-
-    if (profile.aiCardUsed) score += 80;
-    if (profile.preferredAiModes.has(aiMode)) score += 70;
-    if (profile.recentModes.has(aiMode)) score += 20;
-    if (profile.recentContentTypes.has(aiMode)) score += 20;
-    const isDefaultFallback = recommendationSource === 'default';
-    if (score === 0 && !isDefaultFallback) return null;
-
-    const subtitle = isDefaultFallback
-        ? 'Try a Cheeko AI experience'
-        : (profile.aiCardUsed
-        ? 'Because child used an AI card'
-        : (profile.preferredAiModes.has(aiMode)
-            ? `Because ${card.title} is selected in the child profile preferences`
-            : `Because your child recently used ${card.title}`));
-
-    return {
-        ...card,
-        subtitle,
-        reason: subtitle,
-        _score: score,
-        _createdAt: 0,
-    };
 }
 
 function sortRecommendations(a, b) {
@@ -1651,6 +2025,18 @@ function formatRecentAnalyticsCardActivity(row) {
     const contentPackCode = data.content_pack_code || null;
     const contentPackName = data.content_pack_name || data.content_name || null;
     const contentPackId = row.content_id ? String(row.content_id) : null;
+    const imageUrl = firstKnownValue(
+        data.imageUrl,
+        data.image_url,
+        data.thumbnailUrl,
+        data.thumbnail_url,
+        data.cardImageUrl,
+        data.card_image_url,
+        data.cardThumbnailUrl,
+        data.card_thumbnail_url,
+        data.coverUrl,
+        data.cover_url
+    );
 
     return {
         id: row.id != null ? row.id.toString() : null,
@@ -1666,6 +2052,10 @@ function formatRecentAnalyticsCardActivity(row) {
         contentPackCode,
         content_pack_name: contentPackName,
         contentPackName,
+        image_url: imageUrl,
+        imageUrl,
+        thumbnail_url: imageUrl,
+        thumbnailUrl: imageUrl,
         created_at: row.server_received_at || row.event_timestamp || null,
         createdAt: row.server_received_at || row.event_timestamp || null,
     };
@@ -1676,6 +2066,19 @@ function recentAnalyticsCardKey(row) {
     const data = safeObject(row.data);
     const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id || row.content_id || data.content_id;
     return key == null ? null : String(key).toLowerCase();
+}
+
+function recentActivityPackTitleKey(activity) {
+    if (!activity) return null;
+    const title = cleanKnownValue(
+        activity.content_pack_name
+        || activity.contentPackName
+        || activity.title
+        || activity.name
+        || activity.rfid_uid
+        || activity.rfidUid
+    );
+    return title ? title.toLowerCase() : null;
 }
 
 async function getRecentAnalyticsCardActivities(macAddresses, limit = 3) {
@@ -1696,35 +2099,71 @@ async function getRecentAnalyticsCardActivities(macAddresses, limit = 3) {
             data: true,
         },
         orderBy: { server_received_at: 'desc' },
-        take: Math.max(limit * 4, limit),
+        take: Math.max(limit * 50, 150),
     });
 
-    const uniqueRows = [];
+    const candidateRows = [];
     const seen = new Set();
     for (const row of rows || []) {
         const key = recentAnalyticsCardKey(row);
         if (!key || seen.has(key)) continue;
         seen.add(key);
-        uniqueRows.push(row);
-        if (uniqueRows.length >= limit) break;
+        candidateRows.push(row);
     }
 
-    const cardKeys = uniqueRows
+    const cardKeys = candidateRows
         .map(row => row.rfid_uid || safeObject(row.data).rfid_uid || safeObject(row.data).card_uid || safeObject(row.data).card_id)
         .filter(Boolean);
-    const cardNameMap = await getCardNameMap(cardKeys);
+    const cardMetadataMap = await getRecentCardActivityMetadataMap(cardKeys);
 
-    return uniqueRows.map(row => {
+    const activities = candidateRows.map(row => {
         const activity = formatRecentAnalyticsCardActivity(row);
         const data = safeObject(row.data);
         const key = row.rfid_uid || data.rfid_uid || data.card_uid || data.card_id;
-        const mappedName = key ? cardNameMap.get(String(key)) || cardNameMap.get(String(key).toLowerCase()) || cardNameMap.get(String(key).toUpperCase()) : null;
-        if (mappedName) {
-            activity.content_pack_name = mappedName;
-            activity.contentPackName = mappedName;
+        const metadata = key
+            ? cardMetadataMap.get(String(key)) || cardMetadataMap.get(String(key).toLowerCase()) || cardMetadataMap.get(String(key).toUpperCase())
+            : null;
+        if (metadata?.name) {
+            activity.content_pack_name = metadata.name;
+            activity.contentPackName = metadata.name;
+        }
+        if (!activity.image_url && metadata?.thumbnailUrl) {
+            activity.image_url = metadata.thumbnailUrl;
+            activity.imageUrl = metadata.thumbnailUrl;
+            activity.thumbnail_url = metadata.thumbnailUrl;
+            activity.thumbnailUrl = metadata.thumbnailUrl;
         }
         return activity;
     });
+
+    const uniqueActivities = [];
+    const seenPackTitles = new Set();
+    for (const activity of activities) {
+        const key = recentActivityPackTitleKey(activity);
+        if (key && seenPackTitles.has(key)) continue;
+        if (key) seenPackTitles.add(key);
+        uniqueActivities.push(activity);
+        if (uniqueActivities.length >= limit) break;
+    }
+
+    logger.info('[HomeRecent] Recent card activity selected', {
+        macAddresses,
+        rawRows: rows?.length || 0,
+        candidateCards: candidateRows.length,
+        limit,
+        candidateTitles: activities.slice(0, 10).map(activity => ({
+            title: activity.content_pack_name || activity.contentPackName || activity.title || activity.rfid_uid,
+            rfid_uid: activity.rfid_uid,
+            created_at: activity.created_at,
+        })),
+        selectedTitles: uniqueActivities.map(activity => ({
+            title: activity.content_pack_name || activity.contentPackName || activity.title || activity.rfid_uid,
+            rfid_uid: activity.rfid_uid,
+            created_at: activity.created_at,
+        })),
+    });
+
+    return uniqueActivities;
 }
 
 async function resolveProgressScope(firebaseUid, options = {}) {
@@ -1816,13 +2255,24 @@ async function getProgressSummary(firebaseUid, options = {}) {
         lte: dateOnlyFromKey(range.endDate),
     };
 
-    const [usageRows, cardRows, aiRows, projectedGamesCount] = await Promise.all([
+    const [
+        usageRows,
+        cardRows,
+        aiRows,
+        projectedGamesCount,
+    ] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: {
                 mac_address: { in: scope.macAddresses },
                 date: dateWhere,
             },
-            select: { usage_time_seconds: true },
+            select: {
+                usage_time_seconds: true,
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
         }),
         prisma.device_card_taps_daily.findMany({
             where: {
@@ -1849,7 +2299,10 @@ async function getProgressSummary(firebaseUid, options = {}) {
         ? projectedGamesCount
         : await countRawGameStartsForRange(scope, range);
 
-    const usageTimeSeconds = sumBy(usageRows, 'usage_time_seconds');
+    const usageTimeSeconds = (usageRows || []).reduce(
+        (sum, row) => sum + completedUsageSecondsFromRow(row),
+        0
+    );
     const cardTapCount = sumBy(cardRows, 'card_tap_count');
     const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
 
@@ -1878,7 +2331,13 @@ async function getProgressTrend(firebaseUid, options = {}) {
     }
 
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const trendMap = new Map(
         range.dates.map(date => [date, {
             date,
@@ -1905,7 +2364,14 @@ async function getProgressTrend(firebaseUid, options = {}) {
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, usage_time_seconds: true },
+            select: {
+                date: true,
+                usage_time_seconds: true,
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
         }),
         prisma.device_card_taps_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
@@ -1925,7 +2391,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
         const key = formatLocalDate(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
-        const value = Number(row.usage_time_seconds) || 0;
+        const value = completedUsageSecondsFromRow(row);
         point.usage_time_seconds += value;
         point.usageTimeSeconds += value;
     }
@@ -1971,8 +2437,18 @@ async function getProgressDetails(firebaseUid, options = {}) {
     }
 
     const scope = await resolveProgressScope(firebaseUid, options);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const { page, limit, offset } = parsePagination(options);
+    const detailNow = options.now || new Date();
+    const weekMonth = period === 'week'
+        ? (options.month || options.selected_month || options.selectedMonth || detailNow)
+        : detailNow;
 
     if (scope.macAddresses.length === 0) {
         return { metric, period, page, limit, total_items: 0, totalItems: 0, items: [] };
@@ -1990,25 +2466,37 @@ async function getProgressDetails(firebaseUid, options = {}) {
                 date: dateWhere,
             },
             select: {
+                date: true,
                 game_usage_seconds: true,
                 card_usage_seconds: true,
                 ai_talk_usage_seconds: true,
                 radio_usage_seconds: true,
             },
         });
-        const totals = {
-            game: sumBy(rows, 'game_usage_seconds'),
-            card: sumBy(rows, 'card_usage_seconds'),
-            ai_talk: sumBy(rows, 'ai_talk_usage_seconds'),
-            radio: sumBy(rows, 'radio_usage_seconds'),
-        };
-        const items = [
-            { key: 'game', name: 'Game', duration_seconds: totals.game, durationSeconds: totals.game },
-            { key: 'card', name: 'Card', duration_seconds: totals.card, durationSeconds: totals.card },
-            { key: 'ai_talk', name: 'AI Talk', duration_seconds: totals.ai_talk, durationSeconds: totals.ai_talk },
-            { key: 'radio', name: 'Radio', duration_seconds: totals.radio, durationSeconds: totals.radio },
-        ];
-        const totalSeconds = items.reduce((sum, item) => sum + item.duration_seconds, 0);
+        const { items, totalSeconds } = usageCategoryItemsFromDailyRows(rows);
+        let weekSections = null;
+        if (period === 'week') {
+            const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date());
+            const monthStart = dateForMonthStart(monthKey);
+            const monthEnd = dateOnlyFromKey(range.endDate);
+            const sectionRows = await prisma.device_usage_daily.findMany({
+                where: {
+                    mac_address: { in: scope.macAddresses },
+                    date: {
+                        gte: monthStart || dateWhere.gte,
+                        lte: monthEnd,
+                    },
+                },
+                select: {
+                    date: true,
+                    game_usage_seconds: true,
+                    card_usage_seconds: true,
+                    ai_talk_usage_seconds: true,
+                    radio_usage_seconds: true,
+                },
+            });
+            weekSections = buildUsageWeekSectionsFromDailyRows(sectionRows, monthKey);
+        }
         const paged = items.slice(offset, offset + limit);
         return {
             metric,
@@ -2020,23 +2508,28 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_seconds: totalSeconds,
             totalSeconds,
             items: paged,
+            ...(weekSections ? {
+                period_label: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
+                periodLabel: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
+                week_sections: weekSections,
+                weekSections,
+            } : {}),
         };
     }
 
     if (metric === 'cards') {
-        const rows = await prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, card_tap_count: true },
-            orderBy: { date: 'desc' },
-        });
-        const items = rows.map(row => ({
-            date: formatLocalDate(row.date),
-            card_tap_count: Number(row.card_tap_count) || 0,
-            cardTapCount: Number(row.card_tap_count) || 0,
-        }));
-        const total = items.reduce((sum, item) => sum + item.card_tap_count, 0);
+        const events = await getProgressEventsForRange(scope, range, 'card_session_start');
+        const items = await buildCardProgressDetailItems(events);
+        const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
-        return {
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
@@ -2045,23 +2538,22 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: paged,
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'ai') {
-        const rows = await prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, ai_interaction_count: true },
-            orderBy: { date: 'desc' },
-        });
-        const items = rows.map(row => ({
-            date: formatLocalDate(row.date),
-            ai_interaction_count: Number(row.ai_interaction_count) || 0,
-            aiInteractionCount: Number(row.ai_interaction_count) || 0,
-        }));
-        const total = items.reduce((sum, item) => sum + item.ai_interaction_count, 0);
+        const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start', 'ai_talk_end']);
+        const items = await buildAiProgressDetailItems(events);
+        const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
-        return {
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
@@ -2070,7 +2562,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: paged,
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'games') {
@@ -2189,7 +2681,13 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
     const [usageRows, cardRows, aiRows, gamesCount] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { usage_time_seconds: true },
+            select: {
+                usage_time_seconds: true,
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
         }),
         prisma.device_card_taps_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
@@ -2204,7 +2702,10 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
         }),
     ]);
 
-    const usageTimeSeconds = sumBy(usageRows, 'usage_time_seconds');
+    const usageTimeSeconds = (usageRows || []).reduce(
+        (sum, row) => sum + completedUsageSecondsFromRow(row),
+        0
+    );
     const cardTapCount = sumBy(cardRows, 'card_tap_count');
     const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
 
@@ -2233,7 +2734,13 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
     }
 
     const scope = await resolveAdminProgressScopeByMac(mac);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const trendMap = new Map(
         range.dates.map(date => [date, {
             date,
@@ -2256,7 +2763,14 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, usage_time_seconds: true },
+            select: {
+                date: true,
+                usage_time_seconds: true,
+                game_usage_seconds: true,
+                card_usage_seconds: true,
+                ai_talk_usage_seconds: true,
+                radio_usage_seconds: true,
+            },
         }),
         prisma.device_card_taps_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
@@ -2276,7 +2790,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
         const key = formatLocalDate(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
-        const value = Number(row.usage_time_seconds) || 0;
+        const value = completedUsageSecondsFromRow(row);
         point.usage_time_seconds += value;
         point.usageTimeSeconds += value;
     }
@@ -2322,8 +2836,18 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     }
 
     const scope = await resolveAdminProgressScopeByMac(mac);
-    const range = buildProgressDateRange(period, scope.timezone, options.now || new Date());
+    const range = period === 'week'
+        ? buildProgressCalendarMonthRange(
+            scope.timezone,
+            options.now || new Date(),
+            options.month || options.selected_month || options.selectedMonth
+        )
+        : buildProgressDateRange(period, scope.timezone, options.now || new Date());
     const { page, limit, offset } = parsePagination(options);
+    const detailNow = options.now || new Date();
+    const weekMonth = period === 'week'
+        ? (options.month || options.selected_month || options.selectedMonth || detailNow)
+        : detailNow;
     const dateWhere = {
         gte: dateOnlyFromKey(range.startDate),
         lte: dateOnlyFromKey(range.endDate),
@@ -2333,25 +2857,37 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
         const rows = await prisma.device_usage_daily.findMany({
             where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
             select: {
+                date: true,
                 game_usage_seconds: true,
                 card_usage_seconds: true,
                 ai_talk_usage_seconds: true,
                 radio_usage_seconds: true,
             },
         });
-        const totals = {
-            game: sumBy(rows, 'game_usage_seconds'),
-            card: sumBy(rows, 'card_usage_seconds'),
-            ai_talk: sumBy(rows, 'ai_talk_usage_seconds'),
-            radio: sumBy(rows, 'radio_usage_seconds'),
-        };
-        const items = [
-            { key: 'game', name: 'Game', duration_seconds: totals.game, durationSeconds: totals.game },
-            { key: 'card', name: 'Card', duration_seconds: totals.card, durationSeconds: totals.card },
-            { key: 'ai_talk', name: 'AI Talk', duration_seconds: totals.ai_talk, durationSeconds: totals.ai_talk },
-            { key: 'radio', name: 'Radio', duration_seconds: totals.radio, durationSeconds: totals.radio },
-        ];
-        const totalSeconds = items.reduce((sum, item) => sum + item.duration_seconds, 0);
+        const { items, totalSeconds } = usageCategoryItemsFromDailyRows(rows);
+        let weekSections = null;
+        if (period === 'week') {
+            const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date());
+            const monthStart = dateForMonthStart(monthKey);
+            const monthEnd = dateOnlyFromKey(range.endDate);
+            const sectionRows = await prisma.device_usage_daily.findMany({
+                where: {
+                    mac_address: { in: scope.macAddresses },
+                    date: {
+                        gte: monthStart || dateWhere.gte,
+                        lte: monthEnd,
+                    },
+                },
+                select: {
+                    date: true,
+                    game_usage_seconds: true,
+                    card_usage_seconds: true,
+                    ai_talk_usage_seconds: true,
+                    radio_usage_seconds: true,
+                },
+            });
+            weekSections = buildUsageWeekSectionsFromDailyRows(sectionRows, monthKey);
+        }
         return {
             metric,
             period,
@@ -2362,53 +2898,57 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             total_seconds: totalSeconds,
             totalSeconds,
             items: items.slice(offset, offset + limit),
+            ...(weekSections ? {
+                period_label: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
+                periodLabel: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
+                week_sections: weekSections,
+                weekSections,
+            } : {}),
         };
     }
 
     if (metric === 'cards') {
-        const rows = await prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, card_tap_count: true },
-            orderBy: { date: 'desc' },
-        });
-        const items = rows.map(row => ({
-            date: formatLocalDate(row.date),
-            card_tap_count: Number(row.card_tap_count) || 0,
-            cardTapCount: Number(row.card_tap_count) || 0,
-        }));
-        return {
+        const events = await getProgressEventsForRange(scope, range, 'card_session_start');
+        const items = await buildCardProgressDetailItems(events);
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
             limit,
-            total: items.reduce((sum, item) => sum + item.card_tap_count, 0),
+            total: items.reduce((sum, item) => sum + item.count, 0),
             total_items: items.length,
             totalItems: items.length,
             items: items.slice(offset, offset + limit),
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'ai') {
-        const rows = await prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
-            select: { date: true, ai_interaction_count: true },
-            orderBy: { date: 'desc' },
-        });
-        const items = rows.map(row => ({
-            date: formatLocalDate(row.date),
-            ai_interaction_count: Number(row.ai_interaction_count) || 0,
-            aiInteractionCount: Number(row.ai_interaction_count) || 0,
-        }));
-        return {
+        const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start', 'ai_talk_end']);
+        const items = await buildAiProgressDetailItems(events);
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const sections = period === 'month'
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            : null;
+        const weekSections = period === 'week'
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            : null;
+        return withWeekSections(withMonthSections({
             metric,
             period,
             page,
             limit,
-            total: items.reduce((sum, item) => sum + item.ai_interaction_count, 0),
+            total: items.reduce((sum, item) => sum + item.count, 0),
             total_items: items.length,
             totalItems: items.length,
             items: items.slice(offset, offset + limit),
-        };
+        }, sections, monthPicker), weekMonth, weekSections);
     }
 
     if (metric === 'games') {
@@ -2610,16 +3150,7 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
 
     const nonConsumedContent = scoredContent.filter(item => !item._recentlyConsumed);
     const contentPool = nonConsumedContent.length >= limit ? nonConsumedContent : scoredContent;
-    const aiItems = HOMEPAGE_AI_CARDS
-        .map(card => scoreAiCard(card, profile, recommendationSource))
-        .filter(Boolean);
-
-    const rankedPool = recommendationSource === 'default' && aiItems.length > 0 && limit > 1
-        ? [
-            ...dedupeRecommendations(contentPool.sort(sortRecommendations)).slice(0, limit - 1),
-            ...dedupeRecommendations(aiItems.sort(sortRecommendations)).slice(0, 1),
-        ]
-        : [...contentPool, ...aiItems].sort(sortRecommendations);
+    const rankedPool = contentPool.sort(sortRecommendations);
 
     const ranked = dedupeRecommendations(rankedPool)
         .slice(0, limit)

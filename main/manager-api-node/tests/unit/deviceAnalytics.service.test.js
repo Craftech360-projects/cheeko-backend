@@ -4,6 +4,7 @@ jest.mock('../../src/config/database', () => ({
   prisma: {
     device_analytics_event: {
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
     },
     ai_device: {
@@ -56,6 +57,7 @@ describe('deviceAnalytics.service ingest collision handling', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.device_analytics_event.findFirst.mockResolvedValue(null);
+    prisma.device_analytics_event.findMany.mockResolvedValue([]);
     prisma.ai_device.findUnique.mockResolvedValue(null);
     prisma.parent_profile.findUnique.mockResolvedValue(null);
     prisma.device_games_played.findFirst.mockResolvedValue(null);
@@ -201,5 +203,112 @@ describe('deviceAnalytics.service ingest collision handling', () => {
       }),
     });
     expect(prisma.device_games_played.upsert).not.toHaveBeenCalled();
+  });
+
+  it('does not increment daily card taps for repeated same-card reads within debounce window', async () => {
+    prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+      id: data.event_id,
+      server_received_at:
+        data.event_id === 'card-start-1'
+          ? new Date('2026-05-21T09:56:19.000Z')
+          : new Date('2026-05-21T09:56:39.000Z'),
+      ...data,
+    }));
+    prisma.device_analytics_event.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'card-start-1' }]);
+
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'card-start-1',
+        event: 'card_session_start',
+        data: { rfid_uid: 'D979470E' },
+      }),
+    });
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'card-start-2',
+        event: 'card_session_start',
+        timestamp: 1779357399,
+        data: { rfid_uid: 'D979470E' },
+      }),
+    });
+
+    expect(prisma.device_card_taps_daily.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.device_card_taps_daily.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ card_tap_count: 1 }),
+      })
+    );
+  });
+
+  it('counts completed ai sessions only once and ignores duplicate starts until an end event', async () => {
+    prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+      id: data.event_id,
+      server_received_at:
+        data.event_id === 'ai-start-1'
+          ? new Date('2026-05-21T09:56:19.000Z')
+          : data.event_id === 'ai-start-2'
+          ? new Date('2026-05-21T09:56:39.000Z')
+          : new Date('2026-05-21T09:57:19.000Z'),
+      ...data,
+    }));
+    prisma.device_analytics_event.findMany.mockImplementation(async (query) => {
+      if (Array.isArray(query?.where?.event_name?.in)) {
+        return [
+          {
+            event_name: 'ai_talk_start',
+            event_timestamp: new Date('2026-05-21T09:56:19.000Z'),
+            server_received_at: new Date('2026-05-21T09:56:19.000Z'),
+          },
+          {
+            event_name: 'ai_talk_start',
+            event_timestamp: new Date('2026-05-21T09:56:39.000Z'),
+            server_received_at: new Date('2026-05-21T09:56:39.000Z'),
+          },
+        ];
+      }
+      if (query?.where?.event_name === 'card_session_start') {
+        return null;
+      }
+      return [];
+    });
+
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'ai-start-1',
+        event: 'ai_talk_start',
+        data: { source: 'menu' },
+      }),
+    });
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'ai-start-2',
+        event: 'ai_talk_start',
+        timestamp: 1779357399,
+        data: { source: 'menu' },
+      }),
+    });
+    await deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+      mac_address: 'FC:01:2C:CF:EB:54',
+      payload: buildPayload({
+        event_id: 'ai-end-1',
+        event: 'ai_talk_end',
+        timestamp: 1779357439,
+        duration_ms: 60000,
+        data: { reason: 'channel_closed' },
+      }),
+    });
+
+    expect(prisma.device_ai_interactions_daily.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.device_ai_interactions_daily.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ ai_interaction_count: 1 }),
+      })
+    );
   });
 });

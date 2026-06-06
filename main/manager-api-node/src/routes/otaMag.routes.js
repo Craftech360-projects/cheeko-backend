@@ -357,10 +357,10 @@ router.get('/download/:token',
 
       const stream = fs.createReadStream(filePath);
       res.on('finish', () => {
-        logger.info(`Firmware download complete: id=${firmwareLookupId}, bytes=${fileStat.size}`);
+        logger.info(`Firmware download complete: id=${firmwareId}, bytes=${fileStat.size}`);
       });
       res.on('close', () => {
-        logger.info(`Firmware download connection closed: id=${firmwareLookupId}`);
+        logger.info(`Firmware download connection closed: id=${firmwareId}`);
       });
       stream.on('error', (streamError) => {
         logger.error('Failed while streaming firmware file', streamError);

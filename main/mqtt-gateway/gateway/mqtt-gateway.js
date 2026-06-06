@@ -42,7 +42,6 @@ const CHARACTER_AGENT_MAP = {
   "Cheeko Astronaut": "cheeko-astronaut-agent",
   "Cheeko German": "cheeko-german-agent",
 };
-
 // Global config manager and debug reference (injected by app.js)
 let configManager = null;
 let debug = null;

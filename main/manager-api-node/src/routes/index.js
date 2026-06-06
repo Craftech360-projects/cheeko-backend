@@ -366,6 +366,7 @@ router.use('/system', systemRoutes);
 router.use('/admin', adminRoutes);
 router.use('/config', configRoutes);
 router.use('/usage', usageRoutes);
+router.use('/ota/otaMag', otaMagRoutes); // Backward compatibility for old nested OTA download URLs
 router.use('/ota', otaRoutes);
 router.use('/otaMag', otaMagRoutes);
 router.use('/admin/server', serverRoutes);
