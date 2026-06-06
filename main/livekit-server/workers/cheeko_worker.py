@@ -63,7 +63,7 @@ from src.features.mode_switching import update_agent_mode
 from src.services.mem0_service import mem0_service
 
 # Agent configuration
-AGENT_NAME = "cheeko-agent1"
+AGENT_NAME = "cheeko-agent"
 
 # Keywords that trigger context-aware memory search (high-value triggers only)
 # These are patterns where memory injection provides significant value
@@ -355,57 +355,9 @@ def _build_realtime_input_config(realtime_config: dict):
     if not realtime_config.get("vad_disabled", True):
         return None
 
-    def _pick_enum(enum_cls, *candidates):
-        for name in candidates:
-            member = getattr(enum_cls, name, None)
-            if member is not None:
-                return member
-        return None
-
-    start_medium = _pick_enum(
-        genai_types.StartSensitivity,
-        "START_SENSITIVITY_MEDIUM",
-        "START_SENSITIVITY_MID",
-        "START_SENSITIVITY_UNSPECIFIED",
-        "START_SENSITIVITY_HIGH",
-    )
-    end_medium = _pick_enum(
-        genai_types.EndSensitivity,
-        "END_SENSITIVITY_MEDIUM",
-        "END_SENSITIVITY_MID",
-        "END_SENSITIVITY_UNSPECIFIED",
-        "END_SENSITIVITY_HIGH",
-    )
-
-    start_sensitivity_map = {
-        "high": genai_types.StartSensitivity.START_SENSITIVITY_HIGH,
-        "medium": start_medium,
-        "mid": start_medium,
-        "low": genai_types.StartSensitivity.START_SENSITIVITY_LOW,
-    }
-    end_sensitivity_map = {
-        "high": genai_types.EndSensitivity.END_SENSITIVITY_HIGH,
-        "medium": end_medium,
-        "mid": end_medium,
-        "low": genai_types.EndSensitivity.END_SENSITIVITY_LOW,
-    }
-
-    start_sensitivity = start_sensitivity_map.get(
-        str(realtime_config.get("start_sensitivity", "high")).lower(),
-        genai_types.StartSensitivity.START_SENSITIVITY_HIGH,
-    )
-    end_sensitivity = end_sensitivity_map.get(
-        str(realtime_config.get("end_sensitivity", "high")).lower(),
-        genai_types.EndSensitivity.END_SENSITIVITY_HIGH,
-    )
-
     return genai_types.RealtimeInputConfig(
         automatic_activity_detection=genai_types.AutomaticActivityDetection(
             disabled=True,
-            start_of_speech_sensitivity=start_sensitivity,
-            end_of_speech_sensitivity=end_sensitivity,
-            prefix_padding_ms=int(realtime_config.get("prefix_padding_ms", 10)),
-            silence_duration_ms=int(realtime_config.get("silence_duration_ms", 200)),
         )
     )
 

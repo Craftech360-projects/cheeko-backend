@@ -52,7 +52,7 @@ async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent",
+  "Cheeko": "cheeko-agent1",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -707,7 +707,7 @@ class VirtualMQTTConnection {
       }
 
       const roomName = this.bridge?.room?.name || this.udp.session_id;
-      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || "cheeko-xai";
+      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || CHARACTER_AGENT_MAP["Cheeko"];
       logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
       this.bridge.expectedAgentName = agentName;
       const dispatchMetadata = buildDispatchMetadata({

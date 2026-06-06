@@ -34,7 +34,7 @@ const {
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent",
+  "Cheeko": "cheeko-agent1",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -2201,7 +2201,7 @@ class MQTTGateway {
               logger.warn(`âš ï¸ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
             }
 
-            const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
+            const agentName = CHARACTER_AGENT_MAP[characterName] || CHARACTER_AGENT_MAP["Cheeko"];
             logger.info(`ðŸš€ [MODE-CHANGE] Dispatching: ${characterName} â†’ ${agentName}`);
 
             newBridge.agentDeployed = true;
@@ -2432,7 +2432,7 @@ class MQTTGateway {
                     logger.warn(`[START-AGENT] âš ï¸ Fetch error: ${fetchError.message}`);
                   }
 
-                  const agentName = CHARACTER_AGENT_MAP[characterName] || "cheeko-xai";
+                  const agentName = CHARACTER_AGENT_MAP[characterName] || CHARACTER_AGENT_MAP["Cheeko"];
                   logger.info(`[START-AGENT] ðŸš€ Dispatching: Character "${characterName}" â†’ Agent "${agentName}"`);
 
                   // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
@@ -2970,7 +2970,7 @@ class MQTTGateway {
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
         // Step 1: Get agent name for the new character
-        const agentName = CHARACTER_AGENT_MAP[newModeName] || "cheeko-xai";
+        const agentName = CHARACTER_AGENT_MAP[newModeName] || CHARACTER_AGENT_MAP["Cheeko"];
         logger.info(`[CHARACTER-CHANGE] Dispatching agent: ${agentName}`);
 
         // Step 2: Get device connection
@@ -3458,7 +3458,7 @@ class MQTTGateway {
             try {
               // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
               logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
-              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || "cheeko-xai";
+              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || CHARACTER_AGENT_MAP["Cheeko"];
               logger.info(`[MODE-CHANGE] ðŸš€ Dispatching: Character "${currentCharacter || 'Cheeko'}" â†’ Agent "${agentName}"`)
 
               // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
