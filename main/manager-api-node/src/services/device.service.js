@@ -235,11 +235,18 @@ const updateDevice = async (userId, deviceId, data, isSuperAdmin = false) => {
 const assignKidToDevice = async (userId, deviceId, kidId) => {
   const device = await prisma.ai_device.findUnique({
     where: { id: deviceId },
-    select: { id: true, user_id: true },
+    select: { id: true, user_id: true, kid_id: true },
   });
 
   if (!device) throw new Error('Device not found');
   if (device.user_id !== BigInt(userId)) throw new Error('Device does not belong to user');
+  if (
+    kidId &&
+    device.kid_id &&
+    device.kid_id.toString() !== BigInt(kidId).toString()
+  ) {
+    throw new Error('Device already has a child assigned');
+  }
 
   if (kidId) {
     const kid = await prisma.kid_profile.findFirst({
@@ -275,9 +282,16 @@ const assignKidByMac = async (mac, kidId, userId = null) => {
 
   const device = await prisma.ai_device.findFirst({
     where: { mac_address: normalizedMac, ...(userId ? { user_id: BigInt(userId) } : {}) },
-    select: { id: true },
+    select: { id: true, kid_id: true },
   });
   if (!device) throw new Error('Device not found');
+  if (
+    kidId &&
+    device.kid_id &&
+    device.kid_id.toString() !== BigInt(kidId).toString()
+  ) {
+    throw new Error('Device already has a child assigned');
+  }
 
   const updated = await prisma.ai_device.update({
     where: { id: device.id },

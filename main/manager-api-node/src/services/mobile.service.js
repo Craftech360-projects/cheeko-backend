@@ -1819,7 +1819,13 @@ async function deleteKid(firebaseUid, kidId) {
     });
     if (!kid) throw new Error('Kid profile not found');
 
-    await prisma.kid_profile.delete({ where: { id: BigInt(kidId) } });
+    await prisma.$transaction([
+        prisma.ai_device.updateMany({
+            where: { kid_id: BigInt(kidId) },
+            data: { kid_id: null, update_date: new Date() },
+        }),
+        prisma.kid_profile.delete({ where: { id: BigInt(kidId) } }),
+    ]);
     return { success: true };
 }
 
