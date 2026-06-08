@@ -52,6 +52,7 @@ class LiveKitBridge extends EventEmitter {
     this.roomName = null; // Store room name for deletion on disconnect
     this.audioSource = new AudioSource(16000, 1);
     this.agentAudioRecorder = null;
+    this.deviceAudioRecorder = null;
     this.protocolVersion = protocolVersion;
     this.isAudioPlaying = false; // Track if audio is actively playing
     this.audioPlayingStartTime = null; // Track when audio started playing (for stuck detection)
@@ -189,6 +190,91 @@ class LiveKitBridge extends EventEmitter {
     }
     this.livekitConfig = livekitConfig;
     this.initializeAgentAudioRecorder();
+    this.initializeDeviceAudioRecorder();
+  }
+
+  initializeDeviceAudioRecorder() {
+    const envEnabled = process.env.SAVE_DEVICE_AUDIO_WAV;
+    const configEnabled = this.livekitConfig?.save_device_audio_wav;
+    const isEnabled = envEnabled !== undefined
+      ? /^(1|true|yes)$/i.test(envEnabled)
+      : configEnabled !== undefined
+        ? Boolean(configEnabled)
+        : true;
+
+    if (!isEnabled) {
+      return;
+    }
+
+    const parsedMaxSeconds = Number(
+      process.env.SAVE_DEVICE_AUDIO_MAX_SECONDS ||
+        this.livekitConfig?.save_device_audio_max_seconds ||
+        30
+    );
+    const maxDurationSeconds = Number.isFinite(parsedMaxSeconds)
+      ? Math.max(1, Math.min(30, parsedMaxSeconds))
+      : 30;
+
+    const outputDir =
+      process.env.SAVE_DEVICE_AUDIO_DIR ||
+      this.livekitConfig?.save_device_audio_dir ||
+      path.resolve(__dirname, "..", "logs", "device-audio");
+
+    this.deviceAudioRecorder = new WavRecorder({
+      enabled: true,
+      outputDir,
+      label: "device-audio",
+      deviceId: this.macAddress,
+      sessionId: this.sessionId,
+      sampleRate: INCOMING_SAMPLE_RATE,
+      channels: CHANNELS,
+      bitsPerSample: 16,
+      maxDurationSeconds,
+    });
+
+    console.log(
+      `🎙️ [DEVICE-AUDIO-CAPTURE] WAV capture enabled for ${this.macAddress} (max ${maxDurationSeconds}s, dir=${outputDir})`
+    );
+  }
+
+  captureDevicePcm(pcmBuffer) {
+    if (!this.deviceAudioRecorder || !pcmBuffer || pcmBuffer.length === 0) {
+      return;
+    }
+
+    try {
+      const finalizedSegment = this.deviceAudioRecorder.appendPcmChunk(pcmBuffer);
+      if (finalizedSegment?.filePath) {
+        console.log(
+          `🎙️ [DEVICE-AUDIO-CAPTURE] Saved ${finalizedSegment.durationSeconds.toFixed(2)}s WAV segment for ${this.macAddress}: ${finalizedSegment.filePath}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `⚠️ [DEVICE-AUDIO-CAPTURE] Failed to append PCM chunk for ${this.macAddress}: ${error.message}`
+      );
+    }
+  }
+
+  finalizeDeviceAudioCapture(reason = "manual") {
+    if (!this.deviceAudioRecorder || this.deviceAudioRecorder.isFinalized) {
+      return null;
+    }
+
+    try {
+      const captureInfo = this.deviceAudioRecorder.finalize();
+      if (captureInfo?.filePath) {
+        console.log(
+          `🎙️ [DEVICE-AUDIO-CAPTURE] Saved ${captureInfo.durationSeconds.toFixed(2)}s WAV (${reason}) for ${this.macAddress}: ${captureInfo.filePath}`
+        );
+      }
+      return captureInfo;
+    } catch (error) {
+      console.error(
+        `⚠️ [DEVICE-AUDIO-CAPTURE] Failed to finalize WAV (${reason}) for ${this.macAddress}: ${error.message}`
+      );
+      return null;
+    }
   }
 
   initializeAgentAudioRecorder() {
@@ -196,7 +282,9 @@ class LiveKitBridge extends EventEmitter {
     const configEnabled = this.livekitConfig?.save_agent_audio_wav;
     const isEnabled = envEnabled !== undefined
       ? /^(1|true|yes)$/i.test(envEnabled)
-      : Boolean(configEnabled);
+      : configEnabled !== undefined
+        ? Boolean(configEnabled)
+        : true;
 
     if (!isEnabled) {
       return;
@@ -497,6 +585,8 @@ class LiveKitBridge extends EventEmitter {
                 data.data.old_state === "speaking" &&
                 data.data.new_state === "listening"
               ) {
+                this.finalizeAgentAudioCapture("agent_state_speaking_stopped");
+
                 // Set audio playing flag to false
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
@@ -672,6 +762,7 @@ class LiveKitBridge extends EventEmitter {
               const { old_state, new_state } = event.data;
               console.log(`🔄 [STATE] Agent state changed: ${old_state} → ${new_state} (device: ${this.macAddress})`);
               if (old_state === "speaking" && new_state === "listening") {
+                this.finalizeAgentAudioCapture("agent_stream_speaking_stopped");
                 this.isAudioPlaying = false;
                 this.audioPlayingStartTime = null;
                 console.log(`🎵 [AUDIO-STOP] TTS stopped via stream, sending tts_stop in 500ms (device: ${this.macAddress})`);
@@ -1205,6 +1296,8 @@ class LiveKitBridge extends EventEmitter {
           // console.log(`✅ [WORKER DECODE] Decoded ${opusData.length}B Opus → ${pcmBuffer.length}B PCM`);
 
           if (pcmBuffer && pcmBuffer.length > 0) {
+            this.captureDevicePcm(pcmBuffer);
+
             // Convert Buffer to Int16Array
             const samples = new Int16Array(
               pcmBuffer.buffer,
@@ -1229,6 +1322,7 @@ class LiveKitBridge extends EventEmitter {
             opusData.byteOffset,
             opusData.length / 2
           );
+          this.captureDevicePcm(opusData);
           const frame = new AudioFrame(samples, 16000, 1, samples.length);
           this.safeCaptureFrame(frame).catch((err) => {
             // console.error(`❌ [AUDIO] PCM fallback failed: ${err.message}`);
@@ -1241,6 +1335,7 @@ class LiveKitBridge extends EventEmitter {
           opusData.byteOffset,
           opusData.length / 2
         );
+        this.captureDevicePcm(opusData);
         const frame = new AudioFrame(samples, 16000, 1, samples.length);
 
         // Safe capture with error handling
@@ -2409,6 +2504,7 @@ class LiveKitBridge extends EventEmitter {
   }
 
   async close() {
+    this.finalizeDeviceAudioCapture("connection_close");
     this.finalizeAgentAudioCapture("connection_close");
 
     if (this.room) {

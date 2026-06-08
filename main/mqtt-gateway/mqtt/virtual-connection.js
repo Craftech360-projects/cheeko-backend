@@ -1427,6 +1427,10 @@ class VirtualMQTTConnection {
       };
 
       try {
+        if (state === "stop" && this.bridge?.finalizeDeviceAudioCapture) {
+          this.bridge.finalizeDeviceAudioCapture("ptt_stop");
+        }
+
         if (this.bridge?.room?.localParticipant) {
           const messageData = new Uint8Array(
             Buffer.from(JSON.stringify(pttMessage), "utf8")
@@ -1586,6 +1590,10 @@ class VirtualMQTTConnection {
       );
 
       try {
+        if (this.bridge?.finalizeDeviceAudioCapture) {
+          this.bridge.finalizeDeviceAudioCapture("speech_end");
+        }
+
         if (this.bridge?.room?.localParticipant) {
           const speechEndMessage = {
             type: "speech_end",
