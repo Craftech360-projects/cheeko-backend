@@ -734,76 +734,25 @@ describe('Token Usage', () => {
 });
 
 // ===========================================================================
-// 5. Playlist
+// 5. Removed playlist routes
 // ===========================================================================
 
-describe('Playlist', () => {
+describe('Removed Playlist Routes', () => {
+  it('returns 404 for removed device music playlist route', async () => {
+    const res = await request(app)
+      .get(`/toy/device/${TEST_MAC_COLON}/playlist/music`);
 
-  // -------------------------------------------------------------------------
-  describe('GET /toy/device/:mac/playlist/music', () => {
-    it('returns 401 without an auth token', async () => {
-      const res = await request(app)
-        .get(`/toy/device/${TEST_MAC_COLON}/playlist/music`);
-
-      expect(res.statusCode).toBe(401);
-      assertEnvelope(res);
-    });
-
-    it('returns 401 with an invalid auth token', async () => {
-      const res = await request(app)
-        .get(`/toy/device/${TEST_MAC_COLON}/playlist/music`)
-        .set('Authorization', FAKE_TOKEN);
-
-      expect(res.statusCode).toBe(401);
-      assertEnvelope(res);
-    });
+    expect(res.statusCode).toBe(404);
+    assertEnvelope(res);
   });
 
-  // -------------------------------------------------------------------------
-  describe('POST /toy/device/:mac/playlist/music', () => {
-    it('returns 401 without an auth token', async () => {
-      const res = await request(app)
-        .post(`/toy/device/${TEST_MAC_COLON}/playlist/music`)
-        .send({ contentId: 1 });
+  it('returns 404 for removed device story playlist route', async () => {
+    const res = await request(app)
+      .get(`/toy/device/${TEST_MAC_COLON}/playlist/story`);
 
-      expect(res.statusCode).toBe(401);
-      assertEnvelope(res);
-    });
-
-    it('returns 401 with an invalid auth token', async () => {
-      const res = await request(app)
-        .post(`/toy/device/${TEST_MAC_COLON}/playlist/music`)
-        .set('Authorization', FAKE_TOKEN)
-        .send({ contentId: 1 });
-
-      expect(res.statusCode).toBe(401);
-      assertEnvelope(res);
-    });
+    expect(res.statusCode).toBe(404);
+    assertEnvelope(res);
   });
-
-  // -------------------------------------------------------------------------
-  describe('GET /toy/device/:mac/playlist/story', () => {
-    it('returns 401 without an auth token', async () => {
-      const res = await request(app)
-        .get(`/toy/device/${TEST_MAC_COLON}/playlist/story`);
-
-      expect(res.statusCode).toBe(401);
-      assertEnvelope(res);
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  describe('POST /toy/device/:mac/playlist/story', () => {
-    it('returns 401 without an auth token', async () => {
-      const res = await request(app)
-        .post(`/toy/device/${TEST_MAC_COLON}/playlist/story`)
-        .send({ contentId: 1 });
-
-      expect(res.statusCode).toBe(401);
-      assertEnvelope(res);
-    });
-  });
-
 });
 
 // ===========================================================================
@@ -822,7 +771,6 @@ describe('Response Envelope Consistency', () => {
     { method: 'get',    path: '/toy/device/ota/firmware' },
     { method: 'post',   path: '/toy/device/ota/firmware' },
     { method: 'get',    path: '/toy/device/token-usage/summary' },
-    { method: 'get',    path: `/toy/device/${TEST_MAC_COLON}/playlist/music` },
   ];
 
   endpoints.forEach(({ method, path }) => {

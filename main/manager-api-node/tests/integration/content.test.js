@@ -86,21 +86,16 @@ describe('GET /toy/content/music/list (library music)', () => {
 // ============================================================
 
 describe('GET /toy/content/story/list (library story)', () => {
-  it('is publicly accessible — no auth required', async () => {
+  it('returns 404 after Story Corner removal', async () => {
     const res = await request(app).get('/toy/content/story/list');
-    expect([200, 500]).toContain(res.status);
-    expectStandardBody(res);
+    expect(res.status).toBe(404);
   });
 
-  it('returns paginated data on success', async () => {
+  it('stays removed even with pagination params', async () => {
     const res = await request(app)
       .get('/toy/content/story/list')
       .query({ page: 1, limit: 5 });
-    expect([200, 500]).toContain(res.status);
-    if (res.status === 200) {
-      expect(res.body.data).toHaveProperty('list');
-      expect(res.body.data).toHaveProperty('total');
-    }
+    expect(res.status).toBe(404);
   });
 });
 
@@ -280,87 +275,24 @@ describe('GET /toy/content/library/search', () => {
 });
 
 // ============================================================
-// Playlist endpoints (requireAuth)
+// Removed playlist endpoints
 // ============================================================
 
-describe('Music Playlist Routes', () => {
+describe('Removed Playlist Routes', () => {
   const TEST_DEVICE_ID = 'test-device-id-123';
 
-  describe('GET /toy/content/playlist/music/:deviceId', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .get(`/toy/content/playlist/music/${TEST_DEVICE_ID}`);
-      expect(res.status).toBe(401);
-    });
+  it('returns 404 for removed music playlist route', async () => {
+    const res = await request(app)
+      .get(`/toy/content/playlist/music/${TEST_DEVICE_ID}`);
 
-    it('with auth returns 200, 401, or 500', async () => {
-      const res = await request(app)
-        .get(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
-        .set('Authorization', MOCK_TOKEN);
-      expect([200, 401, 500]).toContain(res.status);
-    });
+    expect(res.status).toBe(404);
   });
 
-  describe('POST /toy/content/playlist/music/:deviceId', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .post(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
-        .send({ contentId: TEST_CONTENT_ID });
-      expect(res.status).toBe(401);
-    });
+  it('returns 404 for removed story playlist route', async () => {
+    const res = await request(app)
+      .get(`/toy/content/playlist/story/${TEST_DEVICE_ID}`);
 
-    it('with auth but missing contentId returns 400 or 401', async () => {
-      const res = await request(app)
-        .post(`/toy/content/playlist/music/${TEST_DEVICE_ID}`)
-        .set('Authorization', MOCK_TOKEN)
-        .send({});
-      expect([400, 401]).toContain(res.status);
-    });
-  });
-
-  describe('DELETE /toy/content/playlist/music/:deviceId/:contentId', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .delete(`/toy/content/playlist/music/${TEST_DEVICE_ID}/${TEST_CONTENT_ID}`);
-      expect(res.status).toBe(401);
-    });
-  });
-
-  describe('DELETE /toy/content/playlist/music/:deviceId/clear', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .delete(`/toy/content/playlist/music/${TEST_DEVICE_ID}/clear`);
-      expect(res.status).toBe(401);
-    });
-  });
-});
-
-describe('Story Playlist Routes', () => {
-  const TEST_DEVICE_ID = 'test-device-id-456';
-
-  describe('GET /toy/content/playlist/story/:deviceId', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .get(`/toy/content/playlist/story/${TEST_DEVICE_ID}`);
-      expect(res.status).toBe(401);
-    });
-  });
-
-  describe('POST /toy/content/playlist/story/:deviceId', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .post(`/toy/content/playlist/story/${TEST_DEVICE_ID}`)
-        .send({ contentId: TEST_CONTENT_ID });
-      expect(res.status).toBe(401);
-    });
-  });
-
-  describe('DELETE /toy/content/playlist/story/:deviceId/clear', () => {
-    it('returns 401 without auth', async () => {
-      const res = await request(app)
-        .delete(`/toy/content/playlist/story/${TEST_DEVICE_ID}/clear`);
-      expect(res.status).toBe(401);
-    });
+    expect(res.status).toBe(404);
   });
 });
 
