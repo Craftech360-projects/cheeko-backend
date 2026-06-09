@@ -65,11 +65,11 @@
           Content Library
         </div>
         <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
-          :class="{ 'active-tab': $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' }"
+          :class="{ 'active-tab': isParameterRouteActive }"
           @visible-change="handleParamDropdownVisibleChange">
           <span class="el-dropdown-link">
             <img loading="lazy" alt="" src="@/assets/header/param_management.png"
-              :style="{ filter: $route.path === '/dict-management' || $route.path === '/params-management' || $route.path === '/server-side-management' || $route.path === '/template-management' || $route.path === '/email-reports' ? 'brightness(0) invert(1)' : 'None' }" />
+              :style="{ filter: isParameterRouteActive ? 'brightness(0) invert(1)' : 'None' }" />
             Parameter Dictionary
             <i class="el-icon-arrow-down el-icon--right" :class="{ 'rotate-down': paramDropdownVisible }"></i>
           </span>
@@ -88,6 +88,9 @@
             </el-dropdown-item>
             <el-dropdown-item @click.native="goEmailReports">
               Email Reports
+            </el-dropdown-item>
+            <el-dropdown-item @click.native="goRuntimeProviders">
+              Runtime Providers
             </el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown>
@@ -147,6 +150,16 @@ export default {
     ...mapGetters(['getIsSuperAdmin']),
     isSuperAdmin() {
       return this.getIsSuperAdmin;
+    },
+    isParameterRouteActive() {
+      return [
+        '/dict-management',
+        '/params-management',
+        '/server-side-management',
+        '/template-management',
+        '/email-reports',
+        '/runtime-providers'
+      ].includes(this.$route.path);
     }
   },
   mounted() {
@@ -201,6 +214,9 @@ export default {
     },
     goEmailReports() {
       this.$router.push('/email-reports')
+    },
+    goRuntimeProviders() {
+      this.$router.push('/runtime-providers')
     },
     // Get user information
     fetchUserInfo() {

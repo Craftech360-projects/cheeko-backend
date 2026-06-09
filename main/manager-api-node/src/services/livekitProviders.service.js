@@ -37,6 +37,145 @@ const pickLatestUpdatedAt = (rows) => {
   return latest ? new Date(latest).toISOString() : null;
 };
 
+const providerModels = {
+  llm: {
+    delegate: 'llm_providers',
+    updateFields: {
+      model_name: 'string',
+      model: 'string',
+      api_base: 'nullableString',
+      api_key: 'string',
+      priority: 'int',
+      config_json: 'json'
+    }
+  },
+  stt: {
+    delegate: 'stt_providers',
+    updateFields: {
+      provider_name: 'string',
+      model: 'string',
+      language: 'nullableString',
+      sample_rate: 'int',
+      api_key: 'string',
+      priority: 'int',
+      config_json: 'json'
+    }
+  },
+  tts: {
+    delegate: 'tts_providers',
+    updateFields: {
+      provider_name: 'string',
+      voice_id: 'nullableString',
+      model_id: 'nullableString',
+      output_format: 'nullableString',
+      sample_rate_hz: 'nullableInt',
+      temperature: 'float',
+      api_key: 'string',
+      priority: 'int',
+      config_json: 'json'
+    }
+  }
+};
+
+const getProviderModel = (type) => {
+  const model = providerModels[String(type || '').toLowerCase()];
+  if (!model) throw new Error('Invalid provider type');
+  return model;
+};
+
+const parseProviderId = (id) => {
+  const value = toRequiredString(id, 'id');
+  if (!/^\d+$/.test(value)) throw new Error('id must be a positive integer');
+  return BigInt(value);
+};
+
+const normalizeProviderRow = (row) => {
+  if (!row) return null;
+  const normalized = { ...row };
+  if (normalized.id !== undefined && normalized.id !== null) {
+    normalized.id = normalized.id.toString();
+  }
+  if (normalized.temperature !== undefined && normalized.temperature !== null) {
+    normalized.temperature = Number(normalized.temperature);
+  }
+  return normalized;
+};
+
+const coerceUpdateValue = (value, type, fieldName) => {
+  if (type === 'string') return toNullableString(value) || '';
+  if (type === 'nullableString') return toNullableString(value);
+  if (type === 'int') return toOptionalInt(value, fieldName) ?? 0;
+  if (type === 'nullableInt') return toOptionalInt(value, fieldName);
+  if (type === 'float') {
+    const parsed = toOptionalFloat(value, fieldName);
+    return parsed === null || parsed === undefined ? null : Number(parsed.toFixed(2));
+  }
+  if (type === 'json') {
+    if (value === undefined) return undefined;
+    if (value === null || typeof value === 'object') return value;
+    throw new Error(`${fieldName} must be an object`);
+  }
+  return value;
+};
+
+const buildProviderUpdateData = (model, payload = {}) => {
+  const data = { updated_at: new Date() };
+
+  for (const [fieldName, fieldType] of Object.entries(model.updateFields)) {
+    if (payload[fieldName] === undefined) continue;
+    data[fieldName] = coerceUpdateValue(payload[fieldName], fieldType, fieldName);
+  }
+
+  return data;
+};
+
+const listProviders = async () => {
+  const orderBy = [{ is_active: 'desc' }, { priority: 'desc' }, { updated_at: 'desc' }];
+  const [llm, stt, tts] = await Promise.all([
+    prisma.llm_providers.findMany({ orderBy }),
+    prisma.stt_providers.findMany({ orderBy }),
+    prisma.tts_providers.findMany({ orderBy })
+  ]);
+
+  return {
+    llm: (llm || []).map(normalizeProviderRow),
+    stt: (stt || []).map(normalizeProviderRow),
+    tts: (tts || []).map(normalizeProviderRow)
+  };
+};
+
+const updateProvider = async (type, id, payload = {}) => {
+  const model = getProviderModel(type);
+  const delegate = prisma[model.delegate];
+  const updateData = buildProviderUpdateData(model, payload);
+
+  const updated = await delegate.update({
+    where: { id: parseProviderId(id) },
+    data: updateData
+  });
+
+  return normalizeProviderRow(updated);
+};
+
+const activateProvider = async (type, id) => {
+  const model = getProviderModel(type);
+  const delegateName = model.delegate;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx[delegateName].updateMany({
+      where: { is_active: true },
+      data: { is_active: false, updated_at: new Date() }
+    });
+
+    return tx[delegateName].update({
+      where: { id: parseProviderId(id) },
+      data: { is_active: true, updated_at: new Date() }
+    });
+  });
+
+  return normalizeProviderRow(updated);
+};
+
 const getActiveProviders = async () => {
   const [llm, stt, tts] = await Promise.all([
     prisma.llm_providers.findFirst({
@@ -199,6 +338,9 @@ const setActiveTTSProvider = async (payload = {}) => {
 };
 
 module.exports = {
+  listProviders,
+  updateProvider,
+  activateProvider,
   getActiveProviders,
   setActiveLLMProvider,
   setActiveSTTProvider,

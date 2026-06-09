@@ -199,6 +199,17 @@ const routes = [
     }
   },
   {
+    path: '/runtime-providers',
+    name: 'RuntimeProviders',
+    component: function () {
+      return import('../views/RuntimeProviders.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Runtime Providers'
+    }
+  },
+  {
     path: '/game-analytics',
     name: 'GameAnalytics',
     component: function () {
@@ -230,7 +241,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'RuntimeProviders', 'GameAnalytics']
 
 // Route guard
 router.beforeEach((to, from, next) => {
