@@ -336,7 +336,7 @@ export default {
         return
       }
 
-      const searchRegex = new RegExp(query, 'i')
+      const searchRegex = new RegExp(this.escapeRegex(query), 'i')
       const promises = []
 
       // Reset results
@@ -347,7 +347,7 @@ export default {
         new Promise((resolve) => {
           Api.agent.getUserAgentList((res) => {
             if (res.data?.code === 0) {
-              const list = res.data.data || []
+              const list = this.getResponseList(res.data)
               this.results.agents = list.filter(a =>
                 searchRegex.test(a.agentName) ||
                 searchRegex.test(a.systemPrompt || '')
@@ -496,6 +496,16 @@ export default {
       } finally {
         this.isLoading = false
       }
+    },
+    getResponseList(payload) {
+      if (Array.isArray(payload)) return payload
+      if (Array.isArray(payload?.data)) return payload.data
+      if (Array.isArray(payload?.data?.list)) return payload.data.list
+      if (Array.isArray(payload?.list)) return payload.list
+      return []
+    },
+    escapeRegex(value) {
+      return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     },
     formatMac(mac) {
       if (!mac) return 'Unknown'

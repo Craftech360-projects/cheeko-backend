@@ -52,7 +52,7 @@ async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent-local64",
+  "Cheeko": "cheeko-agent",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -1427,10 +1427,6 @@ class VirtualMQTTConnection {
       };
 
       try {
-        if (state === "stop" && this.bridge?.finalizeDeviceAudioCapture) {
-          this.bridge.finalizeDeviceAudioCapture("ptt_stop");
-        }
-
         if (this.bridge?.room?.localParticipant) {
           const messageData = new Uint8Array(
             Buffer.from(JSON.stringify(pttMessage), "utf8")
@@ -1590,10 +1586,6 @@ class VirtualMQTTConnection {
       );
 
       try {
-        if (this.bridge?.finalizeDeviceAudioCapture) {
-          this.bridge.finalizeDeviceAudioCapture("speech_end");
-        }
-
         if (this.bridge?.room?.localParticipant) {
           const speechEndMessage = {
             type: "speech_end",

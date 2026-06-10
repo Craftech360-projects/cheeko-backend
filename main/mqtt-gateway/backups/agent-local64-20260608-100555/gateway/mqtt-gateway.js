@@ -34,7 +34,7 @@ const {
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent-local64",
+  "Cheeko": "cheeko-agent",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
@@ -42,6 +42,7 @@ const CHARACTER_AGENT_MAP = {
   "Cheeko Astronaut": "cheeko-astronaut-agent",
   "Cheeko German": "cheeko-german-agent",
 };
+
 // Global config manager and debug reference (injected by app.js)
 let configManager = null;
 let debug = null;

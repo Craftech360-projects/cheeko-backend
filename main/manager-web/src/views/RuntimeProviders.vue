@@ -3,12 +3,17 @@
     <HeaderBar />
 
     <div class="operation-bar">
-      <div>
+      <div class="title-block">
+        <span class="eyebrow">Voice Runtime Control</span>
         <h2 class="page-title">Runtime Providers</h2>
         <div class="page-subtitle">Manage active LLM, STT, and TTS services used by the voice runtime.</div>
       </div>
       <div class="right-operations">
-        <el-button class="btn-search" icon="el-icon-refresh" @click="fetchProviders">Refresh</el-button>
+        <div class="runtime-health">
+          <span class="health-dot"></span>
+          {{ activeServicesCount }}/3 services active
+        </div>
+        <el-button class="btn-search" icon="el-icon-refresh" :loading="loading" @click="fetchProviders">Refresh</el-button>
       </div>
     </div>
 
@@ -22,17 +27,33 @@
                 :key="`summary-${type.value}`"
                 class="summary-item"
                 :class="[type.value, { current: activeType === type.value }]"
+                role="button"
+                tabindex="0"
                 @click="activeType = type.value"
+                @keyup.enter="activeType = type.value"
+                @keydown.space.prevent="activeType = type.value"
               >
                 <div class="summary-top">
                   <span class="summary-icon"><i :class="type.icon"></i></span>
-                  <span class="summary-label">{{ type.label }}</span>
+                  <span>
+                    <span class="summary-label">{{ type.label }}</span>
+                    <span class="summary-caption">{{ type.caption }}</span>
+                  </span>
                 </div>
-                <strong>{{ providerLabel(type.value, activeProvider(type.value)) }}</strong>
-                <small>
-                  <span class="live-dot"></span>
-                  {{ providerCount(type.value) }} configured
-                </small>
+                <div class="summary-main">
+                  <strong>{{ providerLabel(type.value, activeProvider(type.value)) }}</strong>
+                  <span class="summary-status" :class="{ online: activeProvider(type.value) }">
+                    <i :class="activeProvider(type.value) ? 'el-icon-success' : 'el-icon-warning-outline'"></i>
+                    {{ activeProvider(type.value) ? 'Live' : 'Not set' }}
+                  </span>
+                </div>
+                <div class="summary-meta">
+                  <span>
+                    <span class="live-dot"></span>
+                    {{ providerCount(type.value) }} configured
+                  </span>
+                  <span>{{ activeProviderMeta(type.value) }}</span>
+                </div>
               </div>
             </div>
 
@@ -50,6 +71,7 @@
                   :data="providers[type.value]"
                   class="transparent-table"
                   :row-class-name="providerRowClassName"
+                  empty-text="No providers configured"
                   v-loading="loading"
                   element-loading-text="Loading..."
                   element-loading-spinner="el-icon-loading"
@@ -108,6 +130,11 @@
                     </template>
                   </el-table-column>
                 </el-table>
+
+                <div class="table-footer">
+                  <span>{{ providerCount(type.value) }} {{ type.label }} provider{{ providerCount(type.value) === 1 ? '' : 's' }}</span>
+                  <span>Active: {{ providerLabel(type.value, activeProvider(type.value)) }}</span>
+                </div>
               </el-tab-pane>
             </el-tabs>
           </el-card>
@@ -183,9 +210,9 @@ export default {
         tts: []
       },
       providerTypes: [
-        { value: "llm", label: "LLM", icon: "el-icon-cpu" },
-        { value: "stt", label: "STT", icon: "el-icon-microphone" },
-        { value: "tts", label: "TTS", icon: "el-icon-headset" }
+        { value: "llm", label: "LLM", caption: "Reasoning model", icon: "el-icon-cpu" },
+        { value: "stt", label: "STT", caption: "Speech to text", icon: "el-icon-microphone" },
+        { value: "tts", label: "TTS", caption: "Voice output", icon: "el-icon-headset" }
       ],
       tableColumns: {
         llm: [
@@ -241,6 +268,9 @@ export default {
     };
   },
   computed: {
+    activeServicesCount() {
+      return this.providerTypes.filter(type => this.activeProvider(type.value)).length;
+    },
     editFields() {
       return this.formFields[this.editType] || [];
     },
@@ -298,6 +328,13 @@ export default {
     },
     providerCount(type) {
       return (this.providers[type] || []).length;
+    },
+    activeProviderMeta(type) {
+      const provider = this.activeProvider(type);
+      if (!provider) return "Needs activation";
+      if (type === "llm") return provider.model || "Model configured";
+      if (type === "stt") return provider.model || provider.language || "STT configured";
+      return provider.model_id || provider.voice_id || "Voice configured";
     },
     providerRowClassName({ row }) {
       return row && row.is_active ? "active-provider-row" : "";
@@ -357,59 +394,112 @@ export default {
 .welcome {
   min-width: 900px;
   min-height: 506px;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   position: relative;
   flex-direction: column;
   background-size: cover;
   background:
-    linear-gradient(180deg, #fff7ec 0, #f7fbff 150px, #f6f8fb 100%);
-  overflow: hidden;
+    radial-gradient(circle at 12% 0%, rgba(217, 119, 6, 0.13), transparent 30%),
+    radial-gradient(circle at 88% 10%, rgba(59, 130, 246, 0.16), transparent 32%),
+    linear-gradient(180deg, #fffaf2 0, #f8fbff 190px, #f3f6fb 100%);
+  overflow-x: hidden;
 }
 
 .operation-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 24px 16px;
-  border-bottom: 1px solid rgba(255, 138, 0, 0.12);
+  gap: 18px;
+  padding: 18px 24px 16px;
+  border-bottom: 1px solid rgba(30, 64, 175, 0.08);
+}
+
+.title-block {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1e40af;
+  font-size: 11px;
+  font-weight: 800;
 }
 
 .page-title {
-  font-size: 26px;
-  margin: 0;
-  color: #16213e;
+  display: block;
+  font-size: 28px;
+  margin: 6px 0 0;
+  color: #0f172a;
   line-height: 1.2;
+  background: linear-gradient(90deg, #0f172a, #1e40af 55%, #d97706);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .page-subtitle {
-  margin-top: 5px;
-  color: #556070;
+  margin-top: 6px;
+  color: #475569;
   font-size: 13px;
 }
 
 .right-operations {
   display: flex;
+  align-items: center;
   gap: 10px;
   margin-left: auto;
 }
 
+.runtime-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #1e3a8a;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 8px 22px rgba(30, 64, 175, 0.08);
+}
+
+.health-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.15);
+}
+
 .btn-search {
-  background: linear-gradient(135deg, #ff8a00, #7c5cff);
+  min-width: 104px;
+  background: linear-gradient(135deg, #1e40af, #3b82f6 55%, #d97706);
   border: none;
   color: white;
-  border-radius: 6px;
+  border-radius: 8px;
   height: 36px;
   padding: 0 16px;
-  box-shadow: 0 8px 18px rgba(124, 92, 255, 0.24);
+  box-shadow: 0 10px 22px rgba(30, 64, 175, 0.24);
+
+  &:focus {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28), 0 10px 22px rgba(30, 64, 175, 0.24);
+  }
 }
 
 .main-wrapper {
   margin: 0 22px 18px;
-  border-radius: 8px;
-  min-height: calc(100vh - 170px);
+  border-radius: 10px;
+  min-height: 0;
   height: auto;
-  max-height: calc(100vh - 128px);
+  max-height: none;
   box-shadow: 0 14px 34px rgba(53, 72, 112, 0.12);
   position: relative;
   background: #fff;
@@ -421,17 +511,17 @@ export default {
   flex: 1;
   display: flex;
   overflow: hidden;
-  height: 100%;
-  border-radius: 8px;
+  height: auto;
+  border-radius: 10px;
   background: transparent;
-  border: 1px solid #e7ebf3;
+  border: 1px solid #dbeafe;
 }
 
 .content-area {
   flex: 1;
-  height: 100%;
+  height: auto;
   min-width: 600px;
-  overflow: auto;
+  overflow-x: auto;
   background-color: #fff;
   display: flex;
   flex-direction: column;
@@ -458,44 +548,70 @@ export default {
 .summary-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding: 14px;
-  border-bottom: 1px solid #e7ebf3;
-  background: linear-gradient(180deg, #ffffff, #fbfcff);
+  gap: 14px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid #dbeafe;
+  background:
+    linear-gradient(90deg, rgba(30, 64, 175, 0.04), rgba(217, 119, 6, 0.04)),
+    #ffffff;
 }
 
 .summary-item {
   min-width: 0;
-  padding: 15px 16px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid;
+  border-radius: 10px;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+
+  &::after {
+    content: "";
+    position: absolute;
+    right: -28px;
+    top: -36px;
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.08;
+  }
 
   &.llm {
-    background: linear-gradient(135deg, #fff3dd, #fffaf1);
-    border-color: #ffd69a;
-    color: #a35400;
+    background: linear-gradient(135deg, #fff7ed, #ffffff);
+    border-color: #fed7aa;
+    color: #c2410c;
   }
 
   &.stt {
-    background: linear-gradient(135deg, #e9f7ff, #f7fcff);
-    border-color: #a9ddff;
-    color: #0d6896;
+    background: linear-gradient(135deg, #eff6ff, #ffffff);
+    border-color: #bfdbfe;
+    color: #1d4ed8;
   }
 
   &.tts {
-    background: linear-gradient(135deg, #f3edff, #fff8ff);
-    border-color: #d5c2ff;
-    color: #6540b8;
+    background: linear-gradient(135deg, #f5f3ff, #ffffff);
+    border-color: #ddd6fe;
+    color: #6d28d9;
   }
 
   &:hover {
     transform: translateY(-1px);
   }
 
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28);
+  }
+
   &.current {
-    box-shadow: 0 10px 22px rgba(47, 65, 104, 0.14);
+    box-shadow: 0 14px 28px rgba(30, 64, 175, 0.14);
+    border-color: currentColor;
+  }
+
+  &.current:focus {
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.28), 0 14px 28px rgba(30, 64, 175, 0.14);
   }
 
   strong {
@@ -508,14 +624,52 @@ export default {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+}
 
-  small {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 6px;
-    color: #556070;
-    font-size: 12px;
+.summary-main {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.summary-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.1);
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+
+  &.online {
+    background: rgba(34, 197, 94, 0.15);
+    color: #15803d;
+  }
+}
+
+.summary-meta {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: #475569;
+  font-size: 12px;
+
+  span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -529,19 +683,28 @@ export default {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.8), 0 6px 14px rgba(15, 23, 42, 0.08);
 }
 
 .summary-label {
+  display: block;
   color: currentColor;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 900;
   letter-spacing: 0;
   text-transform: uppercase;
+}
+
+.summary-caption {
+  display: block;
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .live-dot {
@@ -561,7 +724,7 @@ export default {
   ::v-deep .el-tabs__header {
     margin: 0;
     padding: 0 16px;
-    background: linear-gradient(90deg, #fff8ef, #f7fbff 45%, #fbf7ff);
+    background: #f8fafc;
   }
 
   ::v-deep .el-tabs__nav-wrap::after {
@@ -570,20 +733,20 @@ export default {
   }
 
   ::v-deep .el-tabs__item {
-    height: 44px;
-    line-height: 44px;
+    height: 46px;
+    line-height: 46px;
     color: #4b5563;
-    font-weight: 600;
+    font-weight: 800;
   }
 
   ::v-deep .el-tabs__item.is-active {
-    color: #ff7a00;
+    color: #1e40af;
   }
 
   ::v-deep .el-tabs__active-bar {
     height: 3px;
     border-radius: 3px 3px 0 0;
-    background: linear-gradient(90deg, #ff8a00, #7c5cff);
+    background: linear-gradient(90deg, #1e40af, #3b82f6, #d97706);
   }
 
   ::v-deep .el-tabs__content {
@@ -597,28 +760,34 @@ export default {
   width: 100%;
 
   ::v-deep th {
-    background: #fbfcff;
-    color: #5a6575;
+    background: #f8fafc;
+    color: #475569;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 900;
     letter-spacing: 0;
   }
 
   ::v-deep td {
-    color: #293447;
+    color: #0f172a;
     font-size: 13px;
+    border-bottom-color: #e2e8f0;
   }
 
   ::v-deep .el-table__row {
-    height: 54px;
+    height: 56px;
+    transition: background-color 0.18s ease;
+  }
+
+  ::v-deep .el-table__row:hover > td {
+    background: #eff6ff !important;
   }
 
   ::v-deep .active-provider-row {
-    background: linear-gradient(90deg, #f0fbeb, #fffaf1);
+    background: linear-gradient(90deg, #ecfdf5, #fffbeb);
   }
 
   ::v-deep .active-provider-row:hover > td {
-    background: #f2faed !important;
+    background: #ecfdf5 !important;
   }
 }
 
@@ -636,8 +805,8 @@ export default {
   height: 20px;
   padding: 0 6px;
   border-radius: 10px;
-  background: #fff0db;
-  color: #d76200;
+  background: #dbeafe;
+  color: #1e40af;
   font-size: 12px;
   font-weight: 700;
 }
@@ -649,14 +818,14 @@ export default {
   height: 26px;
   padding: 0 9px;
   border-radius: 13px;
-  background: #eef2f7;
-  color: #697386;
+  background: #f1f5f9;
+  color: #475569;
   font-size: 12px;
   font-weight: 600;
 
   &.active {
-    background: linear-gradient(135deg, #dff8ce, #fff3cc);
-    color: #2d7b17;
+    background: linear-gradient(135deg, #dcfce7, #fef3c7);
+    color: #166534;
     box-shadow: 0 4px 10px rgba(45, 123, 23, 0.12);
   }
 }
@@ -680,29 +849,59 @@ export default {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: #1f2937;
-  background: #f6f8fc;
-  border: 1px solid #e5e9f2;
-  border-radius: 5px;
-  padding: 3px 7px;
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+  border-radius: 7px;
+  padding: 5px 8px;
 }
 
 .secret-toggle {
-  padding: 0;
+  min-width: 44px;
+  padding: 0 6px;
   font-weight: 700;
-  color: #4f63d9;
+  color: #1d4ed8;
 }
 
 .action-button {
   border-radius: 5px;
-  padding: 6px 9px;
+  min-height: 32px;
+  padding: 7px 10px;
   background: #fff;
-  border-color: #dbe3ef;
+  border-color: #cbd5e1;
+
+  &:hover,
+  &:focus {
+    color: #1e40af;
+    border-color: #93c5fd;
+    background: #eff6ff;
+  }
+
+  &:active {
+    transform: translateY(1px);
+  }
+
+  &.is-disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+  }
 }
 
 .activate-button:not(.is-disabled) {
-  color: #2f7d17;
-  border-color: #aee190;
-  background: linear-gradient(135deg, #f6ffef, #fffaf0);
+  color: #166534;
+  border-color: #86efac;
+  background: linear-gradient(135deg, #f0fdf4, #fffbeb);
+}
+
+.table-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .provider-form {
@@ -711,5 +910,34 @@ export default {
 
 .full-input {
   width: 100%;
+}
+
+@media (max-width: 1180px) {
+  .operation-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .right-operations {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .summary-strip {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summary-item,
+  .transparent-table ::v-deep .el-table__row,
+  .action-button {
+    transition: none;
+  }
+
+  .summary-item:hover,
+  .action-button:active {
+    transform: none;
+  }
 }
 </style>

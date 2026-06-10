@@ -8,63 +8,71 @@
       </div>
 
       <!-- Center navigation menu -->
-      <div class="header-center">
-        <div class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/home' || $route.path === '/role-config' || $route.path === '/device-management' }"
-          @click="goHome">
-          <img loading="lazy" alt="" src="@/assets/header/robot.png"
-            :style="{ filter: $route.path === '/home' || $route.path === '/role-config' || $route.path === '/device-management' ? 'brightness(0) invert(1)' : 'None' }" />
-         Agent Management
+      <div class="header-nav-shell">
+        <span class="nav-scroll-hint nav-scroll-left"><i class="el-icon-arrow-left"></i></span>
+        <div class="header-center">
+          <div class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/home' || $route.path === '/role-config' || $route.path === '/device-management' }"
+            @click="goHome">
+            <img loading="lazy" alt="" src="@/assets/header/robot.png"
+              :style="{ filter: $route.path === '/home' || $route.path === '/role-config' || $route.path === '/device-management' ? 'brightness(0) invert(1)' : 'None' }" />
+           Agent Management
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/user-management' }" @click="goUserManagement">
+            <img loading="lazy" alt="" src="@/assets/header/user_management.png"
+              :style="{ filter: $route.path === '/user-management' ? 'brightness(0) invert(1)' : 'None' }" />
+           User Management
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/all-devices' }" @click="goAllDevices">
+            <i class="el-icon-monitor"
+              :style="{ fontSize: '15px', color: $route.path === '/all-devices' ? '#fff' : '#3d4566' }"></i>
+            Device Management
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/ota-management' }" @click="goOtaManagement">
+            <img loading="lazy" alt="" src="@/assets/header/firmware_update.png"
+              :style="{ filter: $route.path === '/ota-management' ? 'brightness(0) invert(1)' : 'None' }" />
+            OTA Management
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/token-analytics' }" @click="goTokenAnalytics">
+            <i class="el-icon-data-analysis"
+              :style="{ fontSize: '15px', color: $route.path === '/token-analytics' ? '#fff' : '#3d4566' }"></i>
+            Token Analytics
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/game-analytics' }" @click="goGameAnalytics">
+            <i class="el-icon-trophy"
+              :style="{ fontSize: '15px', color: $route.path === '/game-analytics' ? '#fff' : '#3d4566' }"></i>
+            Game Analytics
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/rfid-management' }" @click="goRfidManagement">
+            <i class="el-icon-postcard"
+              :style="{ fontSize: '15px', color: $route.path === '/rfid-management' ? '#fff' : '#3d4566' }"></i>
+            RFID Management
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/bulk-import' }" @click="goBulkImport">
+            <i class="el-icon-upload2"
+              :style="{ fontSize: '15px', color: $route.path === '/bulk-import' ? '#fff' : '#3d4566' }"></i>
+            Bulk Import
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/content-library' }" @click="goContentLibrary">
+            <i class="el-icon-folder-opened"
+              :style="{ fontSize: '15px', color: $route.path === '/content-library' ? '#fff' : '#3d4566' }"></i>
+            Content Library
+          </div>
         </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/user-management' }" @click="goUserManagement">
-          <img loading="lazy" alt="" src="@/assets/header/user_management.png"
-            :style="{ filter: $route.path === '/user-management' ? 'brightness(0) invert(1)' : 'None' }" />
-         User Management
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/all-devices' }" @click="goAllDevices">
-          <i class="el-icon-monitor"
-            :style="{ fontSize: '15px', color: $route.path === '/all-devices' ? '#fff' : '#3d4566' }"></i>
-          Device Management
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/ota-management' }" @click="goOtaManagement">
-          <img loading="lazy" alt="" src="@/assets/header/firmware_update.png"
-            :style="{ filter: $route.path === '/ota-management' ? 'brightness(0) invert(1)' : 'None' }" />
-          OTA Management
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/token-analytics' }" @click="goTokenAnalytics">
-          <i class="el-icon-data-analysis"
-            :style="{ fontSize: '15px', color: $route.path === '/token-analytics' ? '#fff' : '#3d4566' }"></i>
-          Token Analytics
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/game-analytics' }" @click="goGameAnalytics">
-          <i class="el-icon-trophy"
-            :style="{ fontSize: '15px', color: $route.path === '/game-analytics' ? '#fff' : '#3d4566' }"></i>
-          Game Analytics
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/rfid-management' }" @click="goRfidManagement">
-          <i class="el-icon-postcard"
-            :style="{ fontSize: '15px', color: $route.path === '/rfid-management' ? '#fff' : '#3d4566' }"></i>
-          RFID Management
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/bulk-import' }" @click="goBulkImport">
-          <i class="el-icon-upload2"
-            :style="{ fontSize: '15px', color: $route.path === '/bulk-import' ? '#fff' : '#3d4566' }"></i>
-          Bulk Import
-        </div>
-        <div v-if="isSuperAdmin" class="equipment-management"
-          :class="{ 'active-tab': $route.path === '/content-library' }" @click="goContentLibrary">
-          <i class="el-icon-folder-opened"
-            :style="{ fontSize: '15px', color: $route.path === '/content-library' ? '#fff' : '#3d4566' }"></i>
-          Content Library
-        </div>
-        <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown"
+        <span class="nav-scroll-hint nav-scroll-right"><i class="el-icon-arrow-right"></i></span>
+      </div>
+
+      <!-- Right elements -->
+      <div class="header-right">
+        <el-dropdown v-if="isSuperAdmin" trigger="click" class="equipment-management more-dropdown pinned-dropdown"
           :class="{ 'active-tab': isParameterRouteActive }"
           @visible-change="handleParamDropdownVisibleChange">
           <span class="el-dropdown-link">
@@ -94,11 +102,7 @@
             </el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown>
-      </div>
-
-      <!-- Right elements -->
-      <div class="header-right">
-        <div class="search-container" v-if="!(isSuperAdmin && isSmallScreen)">
+        <div class="search-container" v-if="showSearch">
           <GlobalSearchDropdown />
         </div>
         <img loading="lazy" alt="" src="@/assets/home/avatar.png" class="avatar-img" />
@@ -143,7 +147,7 @@ export default {
       isChangePasswordDialogVisible: false, // Control change password dialog visibility
       userDropdownVisible: false,
       paramDropdownVisible: false,
-      isSmallScreen: false
+      isCompactHeader: false
     }
   },
   computed: {
@@ -160,6 +164,9 @@ export default {
         '/email-reports',
         '/runtime-providers'
       ].includes(this.$route.path);
+    },
+    showSearch() {
+      return !(this.isSuperAdmin && this.isCompactHeader);
     }
   },
   mounted() {
@@ -228,7 +235,7 @@ export default {
       })
     },
     checkScreenSize() {
-      this.isSmallScreen = window.innerWidth <= 1386;
+      this.isCompactHeader = window.innerWidth <= 1680;
     },
     // Handle search
     handleSearch() {
@@ -292,76 +299,167 @@ export default {
 @import '@/styles/theme.scss';
 
 .header {
-  background: rgba(255, 247, 240, 0.4);
-  border: 1px solid #fff;
-  height: 63px !important;
+  background: rgba(255, 250, 244, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  border-bottom-color: rgba($primary, 0.12);
+  height: 64px !important;
   min-width: 900px;
-  /* 设置最小宽度防止过度压缩 */
   overflow: hidden;
+  box-shadow: 0 8px 24px rgba(61, 69, 102, 0.07);
 }
 
 .header-container {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 12px;
   height: 100%;
-  padding: 0 10px;
+  padding: 0 14px;
+  min-width: 0;
 }
 
 .header-left {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 80px;
+  flex: 0 0 94px;
+  min-width: 94px;
+  cursor: pointer;
 }
 
 .logo-img {
-  width: 70px;
-  height: 70px;
+  width: 74px;
+  height: 74px;
+  object-fit: contain;
 }
 
 .brand-img {
   height: 20px;
 }
 
+.header-nav-shell {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 0;
+  align-items: center;
+}
+
+.header-nav-shell::before,
+.header-nav-shell::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  width: 34px;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.header-nav-shell::before {
+  left: 0;
+  background: linear-gradient(90deg, rgba(255, 250, 244, 0.98), rgba(255, 250, 244, 0));
+}
+
+.header-nav-shell::after {
+  right: 0;
+  background: linear-gradient(270deg, rgba(255, 250, 244, 0.98), rgba(255, 250, 244, 0));
+}
+
 .header-center {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-left: 20px;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 30px;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.header-center::-webkit-scrollbar {
+  display: none;
+}
+
+.nav-scroll-hint {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: $primary;
+  box-shadow: 0 3px 10px rgba(61, 69, 102, 0.16);
+  pointer-events: none;
+  animation: navHintPulse 1.8s ease-in-out infinite;
+}
+
+.nav-scroll-left {
+  left: 4px;
+}
+
+.nav-scroll-right {
+  right: 4px;
+}
+
+@keyframes navHintPulse {
+  0%, 100% {
+    opacity: 0.48;
+    transform: translateX(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(2px);
+  }
 }
 
 .header-right {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 250px;
+  flex: 0 0 auto;
+  min-width: 0;
   justify-content: flex-end;
 }
 
 .equipment-management {
-  height: 28px;
-  border-radius: 14px;
+  min-height: 32px;
+  height: 32px;
+  border-radius: 16px;
   background: rgba($primary, 0.15);
   display: flex;
   justify-content: center;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   gap: 5px;
   color: $text-dark;
   margin-left: 1px;
   align-items: center;
-  transition: all 0.3s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
   cursor: pointer;
   flex-shrink: 0;
-  /* 防止导航按钮被压缩 */
-  padding: 0 10px;
+  padding: 0 11px;
   position: relative;
+  white-space: nowrap;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.52);
+}
+
+.equipment-management:hover {
+  background: rgba($primary, 0.24);
 }
 
 .equipment-management.active-tab {
   background: $primary !important;
   color: #fff !important;
+  box-shadow: 0 7px 18px rgba($primary, 0.22);
 }
 
 .equipment-management img {
@@ -370,10 +468,11 @@ export default {
 }
 
 .search-container {
-  margin-right: 10px;
-  min-width: 200px;
-  flex-grow: 1;
-  max-width: 280px;
+  width: clamp(180px, 14vw, 260px);
+  margin-right: 8px;
+  flex: 0 1 260px;
+  min-width: 180px;
+  max-width: 260px;
 }
 
 .custom-search-input>>>.el-input__inner {
@@ -409,16 +508,26 @@ export default {
 
 .user-dropdown {
   flex-shrink: 0;
+  white-space: nowrap;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .more-dropdown {
-  padding-right: 20px;
+  padding-right: 12px;
+}
+
+.pinned-dropdown {
+  flex: 0 0 auto;
+  margin-left: 0;
 }
 
 .more-dropdown .el-dropdown-link {
   display: flex;
   align-items: center;
   gap: 7px;
+  white-space: nowrap;
 }
 
 .rotate-down {
@@ -430,15 +539,54 @@ export default {
   transition: transform 0.3s ease;
 }
 
-/* 响应式调整 */
-@media (max-width: 1200px) {
-  .header-center {
-    gap: 14px;
+@media (max-width: 1680px) {
+  .header-container {
+    gap: 10px;
   }
 
   .equipment-management {
-    width: 79px;
-    font-size: 9px;
+    min-height: 30px;
+    height: 30px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .pinned-dropdown {
+    padding: 0 11px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .header {
+    min-width: 760px;
+  }
+
+  .header-left {
+    flex-basis: 78px;
+    min-width: 78px;
+  }
+
+  .logo-img {
+    width: 62px;
+    height: 62px;
+  }
+
+  .equipment-management {
+    padding: 0 9px;
+  }
+
+  .pinned-dropdown .el-dropdown-link {
+    max-width: 150px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header-center {
+    scroll-behavior: auto;
+  }
+
+  .nav-scroll-hint {
+    animation: none;
   }
 }
 
