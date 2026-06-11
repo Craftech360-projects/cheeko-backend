@@ -14,7 +14,7 @@
 const admin = require('firebase-admin');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
-const { unauthorized } = require('../utils/response');
+const { serverError, unauthorized } = require('../utils/response');
 
 // ─── Firebase Admin SDK initialisation (lazy singleton) ───────────────────────
 let firebaseInitialized = false;
@@ -43,6 +43,23 @@ function ensureFirebaseInit() {
     }
 }
 
+async function linkExistingUserToFirebaseUid(existingUser, decoded) {
+    logger.info(`🔗 Linking Firebase uid ${decoded.uid} to existing sys_user email: ${existingUser.email}`);
+    return prisma.sys_user.update({
+        where: { id: existingUser.id },
+        data: {
+            firebase_uid: decoded.uid,
+            username: decoded.uid,
+        },
+    });
+}
+
+function isUniqueEmailConstraintError(error) {
+    if (error?.code !== 'P2002') return false;
+    const targets = Array.isArray(error?.meta?.target) ? error.meta.target : [];
+    return targets.includes('email');
+}
+
 /**
  * Middleware: verify Firebase ID token sent by the Flutter app.
  *
@@ -62,62 +79,72 @@ const requireFirebaseAuth = async (req, res, next) => {
 
     const idToken = authHeader.substring(7);
 
+    let decoded;
     try {
-        // 1. Verify the token with Firebase
         logger.debug(`🔑 [firebaseAuth] Verifying Firebase ID token...`);
-        const decoded = await admin.auth().verifyIdToken(idToken);
+        decoded = await admin.auth().verifyIdToken(idToken);
         logger.debug(`✅ [firebaseAuth] Token verified — uid: ${decoded.uid}, email: ${decoded.email}`);
+    } catch (error) {
+        logger.warn(`Firebase token verification failed: ${error.message}`);
+        logger.warn(`  code: ${error.code || 'n/a'} | type: ${error.constructor?.name || 'Error'}`);
+        if (error.cause) logger.warn(`  cause: ${error.cause.message || error.cause}`);
+        return unauthorized(res, 'Invalid or expired Firebase token');
+    }
 
+    try {
         req.firebaseUser = decoded; // uid, email, name, picture …
 
-        // 2. Find or create the corresponding sys_user record
         logger.debug(`🔍 [firebaseAuth] Looking up sys_user for uid: ${decoded.uid}`);
         let mobileUser = await prisma.sys_user.findFirst({
             where: { firebase_uid: decoded.uid },
         });
         logger.debug(`📋 [firebaseAuth] sys_user lookup result: ${mobileUser ? `found id=${mobileUser.id}` : 'not found'}`);
 
-        if (!mobileUser) {
-            if (decoded.email) {
-                mobileUser = await prisma.sys_user.findFirst({
-                    where: { email: decoded.email },
-                });
+        if (!mobileUser && decoded.email) {
+            mobileUser = await prisma.sys_user.findFirst({
+                where: { email: decoded.email },
+            });
 
-                if (mobileUser) {
-                    logger.info(`🔗 Linking Firebase uid ${decoded.uid} to existing sys_user email: ${decoded.email}`);
-                    mobileUser = await prisma.sys_user.update({
-                        where: { id: mobileUser.id },
-                        data: {
-                            firebase_uid: decoded.uid,
-                            username: decoded.uid,
-                        },
-                    });
-                }
+            if (mobileUser) {
+                mobileUser = await linkExistingUserToFirebaseUid(mobileUser, decoded);
             }
         }
 
         if (!mobileUser) {
-            // First login — create a sys_user record for this Firebase user
             logger.debug(`🆕 [firebaseAuth] Creating new sys_user for uid: ${decoded.uid}`);
-            mobileUser = await prisma.sys_user.create({
-                data: {
-                    firebase_uid: decoded.uid,
-                    email: decoded.email || '',
-                    username: decoded.uid,
-                    role: 'parent',
-                    status: 1,
-                },
-            });
-            logger.info(`🆕 Created sys_user for Firebase uid: ${decoded.uid}`);
+            try {
+                mobileUser = await prisma.sys_user.create({
+                    data: {
+                        firebase_uid: decoded.uid,
+                        email: decoded.email || null,
+                        username: decoded.uid,
+                        role: 'parent',
+                        status: 1,
+                    },
+                });
+                logger.info(`🆕 Created sys_user for Firebase uid: ${decoded.uid}`);
+            } catch (error) {
+                if (!isUniqueEmailConstraintError(error) || !decoded.email) {
+                    throw error;
+                }
+
+                logger.warn(`⚠️ [firebaseAuth] Email already exists during create, retrying lookup for ${decoded.email}`);
+                const existingUser = await prisma.sys_user.findFirst({
+                    where: { email: decoded.email },
+                });
+                if (!existingUser) {
+                    throw error;
+                }
+                mobileUser = await linkExistingUserToFirebaseUid(existingUser, decoded);
+            }
         }
 
         req.mobileUser = mobileUser;
         next();
     } catch (error) {
-        logger.warn(`Firebase token verification failed: ${error.message}`);
-        logger.warn(`  code: ${error.code || 'n/a'} | type: ${error.constructor?.name || 'Error'}`);
-        if (error.cause) logger.warn(`  cause: ${error.cause.message || error.cause}`);
-        return unauthorized(res, 'Invalid or expired Firebase token');
+        logger.error(`❌ [firebaseAuth] Failed to resolve sys_user for uid ${decoded.uid}: ${error.message}`);
+        logger.error(`  code: ${error.code || 'n/a'} | type: ${error.constructor?.name || 'Error'}`);
+        return serverError(res, 'Failed to resolve mobile user');
     }
 };
 
