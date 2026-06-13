@@ -102,7 +102,7 @@ const requireFirebaseAuth = async (req, res, next) => {
             mobileUser = await prisma.sys_user.create({
                 data: {
                     firebase_uid: decoded.uid,
-                    email: decoded.email || '',
+                    email: decoded.email || null,
                     username: decoded.uid,
                     role: 'parent',
                     status: 1,
