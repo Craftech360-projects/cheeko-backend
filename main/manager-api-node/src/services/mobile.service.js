@@ -735,6 +735,94 @@ function getCompletedAiInteractionStartEvents(events) {
     return completedStarts;
 }
 
+function extractAiQuestionText(data = {}) {
+    return firstKnownValue(
+        data.child_text,
+        data.childText,
+        data.question_text,
+        data.questionText,
+        data.question,
+        data.prompt_text,
+        data.promptText,
+        data.prompt,
+        data.summary
+    );
+}
+
+function extractAiReplyText(data = {}) {
+    return firstKnownValue(
+        data.device_reply,
+        data.deviceReply,
+        data.response_text,
+        data.responseText,
+        data.answer,
+        data.reply
+    );
+}
+
+function compareHomepageAiMomentCandidates(left, right) {
+    const leftHasReply = left.replyText ? 1 : 0;
+    const rightHasReply = right.replyText ? 1 : 0;
+    if (leftHasReply !== rightHasReply) return rightHasReply - leftHasReply;
+
+    const questionLengthDiff = (right.questionText || '').length - (left.questionText || '').length;
+    if (questionLengthDiff !== 0) return questionLengthDiff;
+
+    const replyLengthDiff = (right.replyText || '').length - (left.replyText || '').length;
+    if (replyLengthDiff !== 0) return replyLengthDiff;
+
+    return new Date(right.timestamp || 0) - new Date(left.timestamp || 0);
+}
+
+async function getHomepageAiMoment(scope, now = new Date()) {
+    const range = buildProgressDateRange('today', scope.timezone, now);
+    const events = await getProgressEventsForRange(scope, range, ['ai_talk_start', 'ai_talk_end']);
+    const completedStarts = getCompletedAiInteractionStartEvents(events);
+    if (!completedStarts.length) return null;
+
+    const candidates = [];
+    const cardKeys = new Set();
+    for (const event of completedStarts) {
+        const data = safeObject(event.data);
+        const questionText = extractAiQuestionText(data);
+        if (!questionText) continue;
+        const replyText = extractAiReplyText(data);
+        const resolved = resolveAiInteractionKeyAndName(event);
+        if (resolved.key) cardKeys.add(resolved.key);
+        candidates.push({
+            key: resolved.key,
+            questionText,
+            replyText,
+            timestamp: event.server_received_at || event.event_timestamp || null,
+        });
+    }
+
+    if (!candidates.length) return null;
+
+    candidates.sort(compareHomepageAiMomentCandidates);
+    const selected = candidates[0];
+    const metadataMap = await getRecentCardActivityMetadataMap(Array.from(cardKeys));
+    const metadata = selected.key
+        ? metadataMap.get(String(selected.key))
+            || metadataMap.get(String(selected.key).toLowerCase())
+            || metadataMap.get(String(selected.key).toUpperCase())
+        : null;
+    const imageUrl = normalizeSupabaseAssetUrl(metadata?.thumbnailUrl || '');
+
+    return {
+        question_text: selected.questionText,
+        questionText: selected.questionText,
+        reply_text: selected.replyText || null,
+        replyText: selected.replyText || null,
+        image_url: imageUrl,
+        imageUrl,
+        rfid_uid: selected.key || null,
+        rfidUid: selected.key || null,
+        created_at: selected.timestamp,
+        createdAt: selected.timestamp,
+    };
+}
+
 async function buildCardProgressDetailItems(events) {
     const grouped = new Map();
     const rawCardNames = new Map();
@@ -1819,7 +1907,13 @@ async function deleteKid(firebaseUid, kidId) {
     });
     if (!kid) throw new Error('Kid profile not found');
 
-    await prisma.kid_profile.delete({ where: { id: BigInt(kidId) } });
+    await prisma.$transaction([
+        prisma.ai_device.updateMany({
+            where: { kid_id: BigInt(kidId) },
+            data: { kid_id: null, update_date: new Date() },
+        }),
+        prisma.kid_profile.delete({ where: { id: BigInt(kidId) } }),
+    ]);
     return { success: true };
 }
 
@@ -1855,7 +1949,10 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         period: 'today',
     });
     const scope = await resolveProgressScope(firebaseUid, options);
-    const recentCardActivities = await getRecentAnalyticsCardActivities(scope.macAddresses, 3);
+    const [recentCardActivities, momentOfTheDay] = await Promise.all([
+        getRecentAnalyticsCardActivities(scope.macAddresses, 3),
+        getHomepageAiMoment(scope, options.now || new Date()),
+    ]);
     const recentCardActivity = recentCardActivities[0] || null;
 
     return {
@@ -1881,6 +1978,8 @@ async function getHomepageActivity(firebaseUid, options = {}) {
         recentActivity: recentCardActivity,
         recent_activities: recentCardActivities,
         recentActivities: recentCardActivities,
+        moment_of_the_day: momentOfTheDay,
+        momentOfTheDay: momentOfTheDay,
     };
 }
 

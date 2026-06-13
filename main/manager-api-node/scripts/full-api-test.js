@@ -304,68 +304,12 @@ async function runTests() {
     });
   }
 
-  // Legacy story endpoints
-  await test('get', '/content/story/list', { headers: authHeaders });
-  const storyResult = await test('post', '/content/story/create', {
-    headers: authHeaders,
-    body: { title: `Test Story ${timestamp}`, author: 'Test Author' }
-  });
-  const testStoryId = storyResult.data?.data?.id;
-  if (testStoryId) {
-    await test('get', `/content/story/${testStoryId}`, { headers: authHeaders });
-    await test('put', `/content/story/update/${testStoryId}`, {
-      headers: authHeaders,
-      body: { title: 'Updated Story' }
-    });
-  }
-
   // Textbook endpoints
   await test('get', '/content/textbook/list', { headers: authHeaders });
   await test('post', '/content/textbook/create', {
     headers: authHeaders,
     body: { title: `Test Textbook ${timestamp}`, subject: 'Math', grade: '1' },
     expectStatus: [200, 400]
-  });
-
-  // Playlist endpoints (music)
-  await test('get', `/content/playlist/music/${testDeviceId || 'test'}`, { headers: authHeaders, expectStatus: [200, 404] });
-  if (testContentId) {
-    await test('post', `/content/playlist/music/${testDeviceId || 'test'}`, {
-      headers: authHeaders,
-      body: { contentId: testContentId },
-      expectStatus: [200, 400, 404]
-    });
-  }
-  await test('put', `/content/playlist/music/${testDeviceId || 'test'}/reorder`, {
-    headers: authHeaders,
-    body: { itemIds: [] },
-    expectStatus: [200, 400]
-  });
-  await test('put', `/content/playlist/music/${testDeviceId || 'test'}/move`, {
-    headers: authHeaders,
-    body: { playlistItemId: 1, newPosition: 0 },
-    expectStatus: [200, 400, 404]
-  });
-  await test('delete', `/content/playlist/music/${testDeviceId || 'test'}/${testContentId || 'none'}/clear`, {
-    headers: authHeaders,
-    expectStatus: [200, 400, 404]
-  });
-
-  // Playlist endpoints (story)
-  await test('get', `/content/playlist/story/${testDeviceId || 'test'}`, { headers: authHeaders, expectStatus: [200, 404] });
-  await test('put', `/content/playlist/story/${testDeviceId || 'test'}/reorder`, {
-    headers: authHeaders,
-    body: { itemIds: [] },
-    expectStatus: [200, 400]
-  });
-  await test('put', `/content/playlist/story/${testDeviceId || 'test'}/move`, {
-    headers: authHeaders,
-    body: { playlistItemId: 1, newPosition: 0 },
-    expectStatus: [200, 400, 404]
-  });
-  await test('delete', `/content/playlist/story/${testDeviceId || 'test'}/clear`, {
-    headers: authHeaders,
-    expectStatus: [200, 400, 404]
   });
 
   // Random content & search
@@ -375,7 +319,6 @@ async function runTests() {
 
   // Cleanup content
   if (testMusicId) await test('delete', `/content/music/delete/${testMusicId}`, { headers: authHeaders });
-  if (testStoryId) await test('delete', `/content/story/delete/${testStoryId}`, { headers: authHeaders });
   if (testContentId) await test('delete', `/content/library/${testContentId}`, { headers: authHeaders });
 
   // ========================================

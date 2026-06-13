@@ -384,24 +384,9 @@ model content_library {
   status           Int?              @default(1)
   created_at       DateTime?         @default(now()) @db.Timestamptz(6)
   updated_at       DateTime?         @default(now()) @db.Timestamptz(6)
-  device_playlist  device_playlist[]
 
   @@index([category], map: "idx_content_library_category")
   @@index([content_type], map: "idx_content_library_type")
-}
-
-model device_playlist {
-  id              BigInt           @id @default(autoincrement())
-  device_id       BigInt?
-  mac_address     String?          @db.VarChar(50)
-  content_id      BigInt?
-  playlist_type   String?          @default("music") @db.VarChar(50)
-  position        Int?             @default(0)
-  created_at      DateTime?        @default(now()) @db.Timestamptz(6)
-  content_library content_library? @relation(fields: [content_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-
-  @@index([mac_address], map: "idx_device_playlist_mac")
-  @@index([playlist_type], map: "idx_device_playlist_type")
 }
 
 model device_token_usage {
@@ -679,17 +664,6 @@ model kid_profile {
 
   @@index([user_id], map: "idx_kid_profile_user")
   @@index([user_id], map: "idx_kid_profile_user_id")
-}
-
-model music_playlist {
-  id         BigInt    @id @default(autoincrement())
-  device_id  String    @db.Uuid
-  content_id BigInt
-  position   Int?      @default(0)
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([device_id, content_id])
 }
 
 model parent_profile {
@@ -972,17 +946,6 @@ model rfid_tags {
   creator      BigInt?
   created_at   DateTime? @default(now()) @db.Timestamptz(6)
   updated_at   DateTime? @default(now()) @db.Timestamptz(6)
-}
-
-model story_playlist {
-  id         BigInt    @id @default(autoincrement())
-  device_id  String    @db.Uuid
-  content_id BigInt
-  position   Int?      @default(0)
-  created_at DateTime? @default(now()) @db.Timestamptz(6)
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([device_id, content_id])
 }
 
 model sys_dict_data {

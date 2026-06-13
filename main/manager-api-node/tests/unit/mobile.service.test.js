@@ -394,6 +394,150 @@ describe('mobile.service parent profile compatibility', () => {
     expect(recentActivityQuery.take).toBeGreaterThanOrEqual(150);
   });
 
+  it('returns a same-day AI moment chosen from device analytics events', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([
+      { ai_interaction_count: 2 }
+    ]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockImplementation(query => {
+      if (query?.where?.event_name === 'card_session_start') {
+        return Promise.resolve([
+          {
+            id: 'card-1',
+            mac_address: 'AA:BB:CC:DD:EE:FF',
+            rfid_uid: 'CARD-123',
+            content_type: 'content',
+            data: { content_pack_name: 'Filo in Space' },
+            server_received_at: new Date('2026-05-13T09:00:00.000Z')
+          }
+        ]);
+      }
+      if (Array.isArray(query?.where?.event_name?.in)) {
+        return Promise.resolve([
+          {
+            mac_address: 'AA:BB:CC:DD:EE:FF',
+            event_name: 'ai_talk_start',
+            server_received_at: new Date('2026-05-13T08:00:00.000Z'),
+            event_timestamp: new Date('2026-05-13T08:00:00.000Z'),
+            rfid_uid: 'AI-1',
+            data: {
+              child_text: 'Hi',
+              device_reply: 'Hello there!'
+            }
+          },
+          {
+            mac_address: 'AA:BB:CC:DD:EE:FF',
+            event_name: 'ai_talk_end',
+            server_received_at: new Date('2026-05-13T08:01:00.000Z'),
+            event_timestamp: new Date('2026-05-13T08:01:00.000Z'),
+            rfid_uid: 'AI-1',
+            data: {}
+          },
+          {
+            mac_address: 'AA:BB:CC:DD:EE:FF',
+            event_name: 'ai_talk_start',
+            server_received_at: new Date('2026-05-13T09:30:00.000Z'),
+            event_timestamp: new Date('2026-05-13T09:30:00.000Z'),
+            rfid_uid: 'AI-2',
+            data: {
+              child_text: 'Why is the sky blue?',
+              device_reply: 'Because light scatters in the atmosphere and blue light spreads the most.'
+            }
+          },
+          {
+            mac_address: 'AA:BB:CC:DD:EE:FF',
+            event_name: 'ai_talk_end',
+            server_received_at: new Date('2026-05-13T09:31:00.000Z'),
+            event_timestamp: new Date('2026-05-13T09:31:00.000Z'),
+            rfid_uid: 'AI-2',
+            data: {}
+          }
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+    prisma.rfid_card_mapping.findMany.mockResolvedValue([
+      {
+        rfid_uid: 'AI-1',
+        card_type: 'ai',
+        thumbnail_url: 'https://cdn.example.com/ai-1.png',
+        action_data: { agent_name: 'Cheeko Magic' },
+        rfid_content_pack: null,
+        rfid_question: null,
+        rfid_pack: null
+      },
+      {
+        rfid_uid: 'AI-2',
+        card_type: 'ai',
+        thumbnail_url: 'https://cdn.example.com/ai-2.png',
+        action_data: { agent_name: 'Cheeko Science' },
+        rfid_content_pack: null,
+        rfid_question: null,
+        rfid_pack: null
+      }
+    ]);
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.moment_of_the_day.question_text).toBe('Why is the sky blue?');
+    expect(result.moment_of_the_day.reply_text).toContain('light scatters');
+    expect(result.moment_of_the_day.image_url).toBe('https://cdn.example.com/ai-2.png');
+  });
+
+  it('does not fall back the homepage moment to card activity when no AI interaction exists that day', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([
+      { card_tap_count: 1 }
+    ]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findMany.mockImplementation(query => {
+      if (query?.where?.event_name === 'card_session_start') {
+        return Promise.resolve([
+          {
+            id: 'card-1',
+            mac_address: 'AA:BB:CC:DD:EE:FF',
+            rfid_uid: 'CARD-123',
+            content_type: 'content',
+            data: { content_pack_name: 'Filo in Space' },
+            server_received_at: new Date('2026-05-13T09:00:00.000Z')
+          }
+        ]);
+      }
+      if (Array.isArray(query?.where?.event_name?.in)) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    expect(result.recent_activity.content_pack_name).toBe('Filo in Space');
+    expect(result.moment_of_the_day).toBeNull();
+  });
+
   it('returns three recent card activities without repeating the same pack title', async () => {
     prisma.sys_user.findUnique.mockResolvedValue({
       id: 1n,

@@ -451,8 +451,19 @@ router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) =
 
 router.put('/devices/assign-kid-by-mac', asyncHandler(async (req, res) => {
     const { mac, kidId } = req.body;
-    const device = await deviceService.assignKidByMac(mac, kidId, req.mobileUser.id);
-    success(res, formatMobileDevice(device), 'Kid assigned to device');
+    try {
+        const device = await deviceService.assignKidByMac(mac, kidId, req.mobileUser.id);
+        success(res, formatMobileDevice(device), 'Kid assigned to device');
+    } catch (error) {
+        if (error.message === 'Device already has a child assigned') {
+            return res.status(409).json({
+                code: 409,
+                msg: error.message,
+                data: null,
+            });
+        }
+        throw error;
+    }
 }));
 
 // ─── Chat History ────────────────────────────────────────────────────────────
