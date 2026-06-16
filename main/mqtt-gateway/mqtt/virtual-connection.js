@@ -107,6 +107,7 @@ class VirtualMQTTConnection {
       voiceId: null,
       agentName: null,
     };
+    this.boardType = "cheeko"; // Board type: "cheeko" (voice AI) or "ai_printer" (line art)
     this.udp = {
       remoteAddress: null,
       cookie: null,
@@ -425,8 +426,12 @@ class VirtualMQTTConnection {
     // Device exits "Connecting" state right away
     // ═══════════════════════════════════════════════════════════
 
-    // Extract language from hello message
+    // Extract language and board_type from hello message
     this.language = json.language || null;
+    const rawBoardType = json.board_type || "cheeko";
+    // Normalize: any board_type containing "printer" is treated as "ai_printer"
+    this.boardType = rawBoardType.includes("printer") ? "ai_printer" : rawBoardType;
+    console.log(`🔧 [BOARD-TYPE] Raw: "${rawBoardType}" → Normalized: "${this.boardType}"`);
 
     // Use defaults — DB queries happen in background
     this.roomType = "conversation"; // Default, updated by deferred DB query
@@ -631,7 +636,30 @@ class VirtualMQTTConnection {
       logger.info(`🧠 [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
     }
 
-    // ── Step 2: LiveKit room setup ──
+    // ══════════════════════════════════════════════════════════════
+    // board_type fork: ai_printer skips LiveKit entirely
+    // ══════════════════════════════════════════════════════════════
+    if (this.boardType === "ai_printer") {
+      this.printerBuffer = {
+        frames: [],
+        silenceTimer: null,
+        processing: false,
+      };
+      this.deferredSetupInProgress = false;
+
+      this.sendMqttMessage(JSON.stringify({
+        type: "ready",
+        board_type: "ai_printer",
+        session_id: this.udp.session_id,
+        timestamp: Date.now(),
+      }));
+
+      const totalDeferredTime = Date.now() - deferredStart;
+      console.log(`🎨 [AI-PRINTER] Ready for device ${this.deviceId} (setup: ${totalDeferredTime}ms)`);
+      return; // Skip LiveKit room, agent dispatch, everything below
+    }
+
+    // ── Step 2: LiveKit room setup (cheeko only from here) ──
     console.log(`🏗️ [DEFERRED] Creating LiveKit room for ${this.deviceId}...`);
 
     // Clean up old sessions
@@ -1049,6 +1077,34 @@ class VirtualMQTTConnection {
   }
 
   async parseOtherMessage(json) {
+    // ── ai_printer messages: handle before bridge check (ai_printer has no bridge) ──
+    if (this.boardType === "ai_printer") {
+      if (json.type === "audio_end") {
+        // Device signals it's done speaking — trigger processing
+        if (this.printerBuffer?.silenceTimer) {
+          clearTimeout(this.printerBuffer.silenceTimer);
+        }
+        this._processLineArtRequest();
+        return;
+      }
+      if (json.type === "draw") {
+        // Text-based draw request — skip STT
+        this._processLineArtTextRequest(json.text);
+        return;
+      }
+      if (json.type === "goodbye") {
+        console.log(`🔌 [GOODBYE] AI-Printer device goodbye: ${this.deviceId}`);
+        if (this.printerBuffer?.silenceTimer) {
+          clearTimeout(this.printerBuffer.silenceTimer);
+        }
+        this.close();
+        return;
+      }
+      // Ignore other messages for ai_printer
+      console.log(`⏳ [AI-PRINTER] Ignoring message type=${json.type} for ai_printer`);
+      return;
+    }
+
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
         // Bridge not ready yet — deferred setup still running. Don't kill the session.
@@ -1655,10 +1711,6 @@ class VirtualMQTTConnection {
       this.udp.remoteAddress = rinfo;
     }
 
-    if (sequence < this.udp.remoteSequence) {
-      return;
-    }
-
     // PHASE 1 OPTIMIZATION: Use StreamingCrypto for cipher caching
     const header = message.slice(0, 16);
     const encryptedPayload = message.slice(16, 16 + payloadLength);
@@ -1683,6 +1735,37 @@ class VirtualMQTTConnection {
       console.log(
         `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
       );
+      return;
+    }
+
+    // ── board_type fork: ai_printer accumulates audio with sequence numbers for PLC ──
+    // ai_printer skips LiveKit entirely — audio goes to the line-art accumulator, not the bridge.
+    if (this.boardType === "ai_printer") {
+      if (!this.printerBuffer || this.printerBuffer.processing) return;
+
+      // Accept out-of-order packets (don't drop) — we sort by sequence before decoding
+      // Cap at 250 frames (~5s audio) to prevent memory issues
+      if (this.printerBuffer.frames.length < 250) {
+        this.printerBuffer.frames.push({ seq: sequence, data: Buffer.from(payload) });
+      }
+
+      // Reset silence timer — 1.5s of no audio triggers processing
+      if (this.printerBuffer.silenceTimer) {
+        clearTimeout(this.printerBuffer.silenceTimer);
+      }
+      this.printerBuffer.silenceTimer = setTimeout(() => {
+        this._processLineArtRequest();
+      }, 1500);
+
+      this.udp.remoteSequence = sequence;
+      this.audioStats.packetCount++;
+      this.audioStats.totalBytes += payload.length;
+      return;
+    }
+
+    // ── cheeko (voice AI) path: forward to the LiveKit bridge ──
+    // Drop out-of-order packets (the printer path above intentionally keeps them)
+    if (sequence < this.udp.remoteSequence) {
       return;
     }
 
@@ -1714,6 +1797,179 @@ class VirtualMQTTConnection {
     // Count packets — stats logged by checkKeepAlive every 10s
     this.audioStats.packetCount++;
     this.audioStats.totalBytes += payload.length;
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // AI Printer: Line Art Processing Methods
+  // ══════════════════════════════════════════════════════════════
+
+  /**
+   * Process accumulated audio frames into line art.
+   * Decodes Opus → PCM → WAV, sends to line_art HTTP API, returns bitmap to device.
+   */
+  async _processLineArtRequest() {
+    if (!this.printerBuffer || this.printerBuffer.frames.length === 0) return;
+    if (this.printerBuffer.processing) return;
+
+    this.printerBuffer.processing = true;
+    const frames = this.printerBuffer.frames.splice(0);
+
+    // Minimum frame check — reject very short recordings (accidental taps)
+    if (frames.length < 5) {
+      console.log(`⚠️ [AI-PRINTER] Recording too short (${frames.length} frames), ignoring`);
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_error",
+        stage: "input",
+        message: "Recording too short. Please hold the button longer.",
+      }));
+      this.printerBuffer.processing = false;
+      return;
+    }
+
+    try {
+      // Progress: processing audio
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_progress",
+        stage: "processing",
+        message: "Processing audio...",
+      }));
+
+      // Sort frames by sequence number to handle UDP reordering
+      frames.sort((a, b) => a.seq - b.seq);
+
+      // Detect gaps and log stats
+      let totalGaps = 0;
+      for (let i = 1; i < frames.length; i++) {
+        const gap = frames[i].seq - frames[i - 1].seq - 1;
+        if (gap > 0) totalGaps += gap;
+      }
+      if (totalGaps > 0) {
+        console.log(`⚠️ [AI-PRINTER] Detected ${totalGaps} missing frames (packet loss) in ${frames.length} received frames`);
+      }
+
+      // Decode Opus frames with PLC (Packet Loss Concealment) for missing packets
+      const pcmChunks = [];
+      let expectedSeq = frames[0].seq;
+
+      for (const frame of frames) {
+        // Insert PLC frames for any gaps (missing packets)
+        while (expectedSeq < frame.seq) {
+          try {
+            const plcPcm = await this.workerPool.decodeOpusPLC(this.udp.session_id);
+            if (plcPcm) pcmChunks.push(plcPcm);
+          } catch (plcErr) {
+            // PLC failure is non-fatal — decoder state still advances
+            console.warn(`⚠️ [AI-PRINTER] PLC decode error: ${plcErr.message}`);
+          }
+          expectedSeq++;
+        }
+
+        // Decode the actual frame
+        try {
+          const pcm = await this.workerPool.decodeOpus(this.udp.session_id, frame.data);
+          if (pcm) pcmChunks.push(pcm);
+        } catch (decodeErr) {
+          console.warn(`⚠️ [AI-PRINTER] Opus decode error (skipping frame): ${decodeErr.message}`);
+        }
+        expectedSeq = frame.seq + 1;
+      }
+
+      if (pcmChunks.length === 0) {
+        this.sendMqttMessage(JSON.stringify({
+          type: "line_art_error",
+          stage: "stt",
+          message: "Could not decode audio. Please try again.",
+        }));
+        this.printerBuffer.processing = false;
+        return;
+      }
+
+      const pcmBuffer = Buffer.concat(pcmChunks);
+
+      // Wrap as WAV (16kHz, mono, 16-bit)
+      const { createWavBuffer } = require("../utils/wav-writer");
+      const wavBuffer = createWavBuffer(pcmBuffer, 16000, 1, 16);
+
+      console.log(`🎨 [AI-PRINTER] Sending ${wavBuffer.length} bytes WAV to line_art API`);
+
+      // Progress: generating
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_progress",
+        stage: "generating",
+        message: "Generating line art...",
+      }));
+
+      // Call line_art HTTP API
+      const result = await this.gateway.lineArtClient.generateFromAudio(wavBuffer);
+
+      // Send transcription
+      if (result.transcription) {
+        this.sendMqttMessage(JSON.stringify({
+          type: "line_art_transcription",
+          text: result.transcription,
+        }));
+      }
+
+      // Send bitmap result
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art",
+        raw_mono: result.raw_mono,
+        width: result.width,
+        height: result.height,
+      }));
+
+      console.log(`🎨 [AI-PRINTER] Generated ${result.width}x${result.height} for "${result.transcription}"`);
+    } catch (error) {
+      console.error(`❌ [AI-PRINTER] Generation failed:`, error.message);
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_error",
+        stage: "generation",
+        message: error.message || "Image generation failed. Please try again.",
+      }));
+    } finally {
+      this.printerBuffer.processing = false;
+    }
+  }
+
+  /**
+   * Process text-based draw request (skip STT).
+   * @param {string} text - Subject to draw (e.g., "cat")
+   */
+  async _processLineArtTextRequest(text) {
+    if (!text?.trim()) {
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_error",
+        stage: "input",
+        message: "Empty text input.",
+      }));
+      return;
+    }
+
+    try {
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_progress",
+        stage: "generating",
+        message: `Generating line art for "${text}"...`,
+      }));
+
+      const result = await this.gateway.lineArtClient.generateFromText(text.trim());
+
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art",
+        raw_mono: result.raw_mono,
+        width: result.width,
+        height: result.height,
+      }));
+
+      console.log(`🎨 [AI-PRINTER] Generated ${result.width}x${result.height} for "${text}"`);
+    } catch (error) {
+      console.error(`❌ [AI-PRINTER] Text generation failed:`, error.message);
+      this.sendMqttMessage(JSON.stringify({
+        type: "line_art_error",
+        stage: "generation",
+        message: error.message || "Image generation failed. Please try again.",
+      }));
+    }
   }
 
   async checkKeepAlive() {

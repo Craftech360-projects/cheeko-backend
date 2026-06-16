@@ -135,6 +135,36 @@ class AudioProcessor {
   }
 
   /**
+   * Packet Loss Concealment (PLC) — decode a missing frame.
+   * Calls the Opus decoder with null data so it can interpolate/extrapolate
+   * the missing audio and keep its internal state in sync.
+   * @param {string} sessionId - Logical session identifier
+   * @returns {Buffer} Interpolated PCM data for the missing frame
+   */
+  decodePLC(sessionId) {
+    const session = this.getOrCreateSession(sessionId);
+
+    if (!session.incomingDecoder) {
+      const cfg = this.decoderConfig || { sampleRate: 16000, channels: 1 };
+      session.incomingDecoder = new OpusEncoder(cfg.sampleRate, cfg.channels);
+      console.log(`🧵 [WORKER] Created incoming decoder for PLC session ${sessionId || 'default'}: ${cfg.sampleRate}Hz ${cfg.channels}ch`);
+    }
+
+    const startTime = process.hrtime.bigint();
+    // @discordjs/opus PLC: pass empty Buffer to trigger packet loss concealment
+    // libopus interprets zero-length input as a lost frame and interpolates
+    const pcmData = session.incomingDecoder.decode(Buffer.alloc(0));
+    const duration = Number(process.hrtime.bigint() - startTime) / 1000000;
+
+    return {
+      data: pcmData,
+      processingTime: duration,
+      inputSize: 0,
+      outputSize: pcmData.length
+    };
+  }
+
+  /**
    * Cleanup per-session codec state
    */
   cleanupSession(sessionId) {
@@ -186,6 +216,10 @@ parentPort.on('message', (message) => {
           data.byteOffset || 0,
           data.byteLength
         );
+        break;
+
+      case 'decode_plc':
+        result = processor.decodePLC(data.sessionId);
         break;
 
       case 'cleanup_session':

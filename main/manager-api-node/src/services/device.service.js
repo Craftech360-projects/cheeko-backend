@@ -38,6 +38,45 @@ const activationCleanupTimer = setInterval(() => {
 if (activationCleanupTimer.unref) activationCleanupTimer.unref();
 
 /**
+ * Normalize OTA base URL so firmware download links are always valid.
+ * Supports:
+ * - Host only: http://host -> http://host/<contextPath>
+ * - Legacy Java style: http://host/<contextPath>/ota/ -> http://host/<contextPath>
+ * - Current style: http://host/<contextPath>
+ * @param {string|null} rawOtaUrl
+ * @returns {string|null}
+ */
+const normalizeOtaBaseUrl = (rawOtaUrl) => {
+  if (!rawOtaUrl || rawOtaUrl === 'null') return null;
+
+  const contextPath = (process.env.CONTEXT_PATH || '/toy').replace(/\/+$/, '') || '/toy';
+  let otaUrl = String(rawOtaUrl).trim().replace(/\/+$/, '');
+
+  // Backward compatibility with Java config style ending in /ota or /ota/
+  if (otaUrl.endsWith('/ota')) {
+    otaUrl = otaUrl.slice(0, -4);
+  }
+
+  try {
+    const parsed = new URL(otaUrl);
+    const path = parsed.pathname.replace(/\/+$/, '');
+
+    // If only host/root is configured, append API context path.
+    if (!path || path === '/') {
+      parsed.pathname = contextPath;
+    }
+
+    return parsed.toString().replace(/\/+$/, '');
+  } catch (_) {
+    // Non-URL input fallback: keep behavior safe and deterministic.
+    if (!otaUrl.endsWith(contextPath)) {
+      otaUrl = `${otaUrl}${contextPath}`;
+    }
+    return otaUrl.replace(/\/+$/, '');
+  }
+};
+
+/**
  * Register a new device
  * @param {Object} data - Device data
  * @returns {Promise<Object>} Created device
@@ -511,23 +550,6 @@ const getFirmwareTypeCandidates = (boardValue, chipModelName) => {
   }
 
   return candidates;
-};
-
-/**
- * Normalize the public OTA base URL stored in system params.
- * Fixes malformed values like "http://host/:8002/path/" to "http://host:8002/path".
- * @param {string|null|undefined} otaUrl
- * @returns {string}
- */
-const normalizeOtaBaseUrl = (otaUrl) => {
-  const trimmed = String(otaUrl || '').trim();
-  if (!trimmed) {
-    return '';
-  }
-
-  return trimmed
-    .replace(/\/:(\d+)(?=\/|$)/, ':$1')
-    .replace(/\/+$/, '');
 };
 
 /**
