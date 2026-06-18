@@ -52,7 +52,7 @@ async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5
 
 // Character to Agent name mapping for multi-agent dispatch
 const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent-local64",
+  "Cheeko": "cheeko-agent",
   "Math Tutor": "math-tutor-agent",
   "Riddle Solver": "riddle-solver-agent",
   "Word Ladder": "word-ladder-agent",
