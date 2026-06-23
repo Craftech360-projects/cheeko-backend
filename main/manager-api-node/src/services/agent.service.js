@@ -8,6 +8,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
+const { resolveSessionForCharacter } = require('./character-resolver');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -1490,6 +1491,8 @@ const setCharacterByName = async (mac, characterName) => {
           intent_model_id: template.intent_model_id,
           chat_history_conf: template.chat_history_conf,
           system_prompt: template.system_prompt,
+          soul: template.soul,
+          runtime_agent_name: template.runtime_agent_name,
           summary_memory: template.summary_memory,
         }),
       },
@@ -1532,7 +1535,15 @@ const getCurrentCharacter = async (mac) => {
 
   const agent = await prisma.ai_agent.findUnique({
     where: { id: device.agent_id },
-    select: { id: true, agent_name: true, agent_code: true },
+    select: {
+      id: true,
+      agent_name: true,
+      agent_code: true,
+      runtime_agent_name: true,
+      system_prompt: true,
+      soul: true,
+      language: true,
+    },
   });
 
   if (!agent) {
@@ -1541,7 +1552,42 @@ const getCurrentCharacter = async (mac) => {
   }
 
   logger.info(`[getCurrentCharacter] Agent found: ${agent.agent_name}`);
-  return { agentId: agent.id, agentName: agent.agent_name, agentCode: agent.agent_code };
+  // Additive: keep legacy agentId/agentName/agentCode; add the worker session contract
+  // (characterId, characterName, runtimeAgentName, language, systemPrompt, soul).
+  return {
+    agentId: agent.id,
+    agentName: agent.agent_name,
+    agentCode: agent.agent_code,
+    ...resolveSessionForCharacter(agent),
+  };
+};
+
+/**
+ * Worker-facing: resolve the persona session contract for a Character by id.
+ * Used by the picoclaw-livekit worker to PULL persona on every session start
+ * (ADR-0003). Returns { characterId, characterName, runtimeAgentName, language,
+ * systemPrompt, soul } via the shared resolver — no hashes.
+ * @param {string} characterId - ai_agent.id
+ * @param {{language?: string}} [opts] - optional language override
+ */
+const getCharacterSession = async (characterId, { language } = {}) => {
+  const agent = await prisma.ai_agent.findUnique({
+    where: { id: characterId },
+    select: {
+      id: true,
+      agent_name: true,
+      runtime_agent_name: true,
+      system_prompt: true,
+      soul: true,
+      language: true,
+    },
+  });
+
+  if (!agent) {
+    throw new Error('Character not found');
+  }
+
+  return resolveSessionForCharacter(agent, { language });
 };
 
 /**
@@ -2920,6 +2966,7 @@ module.exports = {
   setCharacter,
   setCharacterByName,
   getCurrentCharacter,
+  getCharacterSession,
   // Memory integration
   getMemoriesByMac,
   addConversationToMemory,

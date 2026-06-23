@@ -820,8 +820,14 @@ router.get('/current-character/:mac',
   asyncHandler(async (req, res) => {
     try {
       const result = await agentService.getCurrentCharacter(req.params.mac);
-      // Return same format as /device/:mac/current-character for consistency
-      const response = { characterName: result.agentName || 'Cheeko' };
+      // Return same format as /device/:mac/current-character for consistency.
+      // Additive: carry the routing contract alongside characterName for the gateway.
+      const response = {
+        characterName: result.agentName || 'Cheeko',
+        characterId: result.characterId ?? null,
+        runtimeAgentName: result.runtimeAgentName ?? null,
+        language: result.language ?? null,
+      };
       logger.info(`[AGENT] GET /current-character/${req.params.mac} response: ${JSON.stringify(response)}`);
       success(res, response);
     } catch (error) {
@@ -855,11 +861,59 @@ router.get('/device/:mac/current-character',
       // Gateway expects either:
       // Format 1: { code: 0, data: "Character Name" }
       // Format 2: { code: 0, data: { characterName: "Character Name" } }
-      const response = { characterName: result.agentName || 'Cheeko' };
+      // Additive: carry the routing contract (runtimeAgentName/characterId/language)
+      // for Phase 2 dispatch; old gateway reads characterName and ignores the rest.
+      const response = {
+        characterName: result.agentName || 'Cheeko',
+        characterId: result.characterId ?? null,
+        runtimeAgentName: result.runtimeAgentName ?? null,
+        language: result.language ?? null,
+      };
       logger.info(`[AGENT] GET /device/${req.params.mac}/current-character response: ${JSON.stringify(response)}`);
       success(res, response);
     } catch (error) {
       logger.info(`[AGENT] GET /device/${req.params.mac}/current-character error: ${error.message}`);
+      notFound(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /agent/character/{id}/session:
+ *   get:
+ *     tags: [Agent]
+ *     summary: Resolve persona session contract for a Character (worker PULL)
+ *     description: Worker-facing. Returns the persona session contract by characterId
+ *       (runtimeAgentName, systemPrompt, soul, language). Service-key auth.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: language
+ *         required: false
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Persona session contract
+ *       404:
+ *         description: Character not found
+ */
+router.get('/character/:id/session',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getCharacterSession(req.params.id, {
+        language: req.query.language || undefined,
+      });
+      logger.info(`[AGENT] GET /character/${req.params.id}/session -> runtimeAgentName=${result.runtimeAgentName}`);
+      success(res, result);
+    } catch (error) {
+      logger.info(`[AGENT] GET /character/${req.params.id}/session error: ${error.message}`);
       notFound(res, error.message);
     }
   })

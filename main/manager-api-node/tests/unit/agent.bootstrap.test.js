@@ -258,9 +258,17 @@ describe('agent bootstrap route', () => {
     const path = require('path');
     const source = fs.readFileSync(path.join(__dirname, '../../src/routes/agent.routes.js'), 'utf8');
 
-    expect(source).toContain("const { requireAuth, requireServiceKey } = require('../middleware/auth');");
+    expect(source).toMatch(/const \{ requireAuth, requireServiceKey(, requireDualAuth)? \} = require\('\.\.\/middleware\/auth'\);/);
     expect(source).toMatch(/router\.get\('\/device\/:mac\/bootstrap',\s*requireServiceKey,/);
     expect(source).toMatch(/router\.put\('\/device\/:mac\/sessions\/:sessionId\/summary',\s*requireServiceKey,/);
     expect(source).toMatch(/router\.post\('\/device\/:mac\/sessions\/:sessionId\/end',\s*requireServiceKey,/);
+  });
+
+  it('protects the worker persona-pull endpoint with service-key auth', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.join(__dirname, '../../src/routes/agent.routes.js'), 'utf8');
+
+    expect(source).toMatch(/router\.get\('\/character\/:id\/session',\s*\n?\s*requireServiceKey,/);
   });
 });

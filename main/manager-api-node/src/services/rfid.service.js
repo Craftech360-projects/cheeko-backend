@@ -11,6 +11,7 @@ const { Prisma } = require('@prisma/client');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
+const { resolveRuntimeAgentName } = require('./character-resolver');
 const { extractBySequence, countItems } = require('../utils/mdParser');
 const qdrantService = require('./integrations/qdrant.service');
 
@@ -917,7 +918,12 @@ const lookupCardByUid = async (rfidUid) => {
     const languageCode = actionData.language_code || actionData.languageCode || null;
     const languageName = actionData.language_name || actionData.languageName || getLanguageName(languageCode);
     const voiceId = actionData.voice_id || actionData.voiceId || null;
-    logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}, language=${languageCode || 'default'}`);
+    // ponytail: card carries only a name (no user scope at this layer), so route via the
+    // resolver — explicit runtime_agent_name on the card wins, else LIVEKIT_DEFAULT_AGENT.
+    // Per locked decision #3 every character resolves to the default until specialized
+    // workers exist. Upgrade path: plumb device user_id in and resolve the ai_agent row by name.
+    const runtimeAgentName = resolveRuntimeAgentName({ runtime_agent_name: actionData.runtime_agent_name || null });
+    logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}, runtimeAgentName=${runtimeAgentName}, language=${languageCode || 'default'}`);
     return {
       rfid_uid: normalizedUid,
       contentType: 'prompt',
@@ -927,6 +933,8 @@ const lookupCardByUid = async (rfidUid) => {
       actionData: actionData,
       thumbnailUrl: mapping.thumbnail_url || null,
       agentName: agentName,
+      characterName: agentName,
+      runtimeAgentName: runtimeAgentName,
       languageCode: languageCode,
       languageName: languageName,
       voiceId: voiceId,
