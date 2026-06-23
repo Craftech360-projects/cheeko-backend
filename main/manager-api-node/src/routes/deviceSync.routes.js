@@ -114,6 +114,13 @@ router.post('/settings-changed', asyncHandler(async (req, res) => {
   success(res, result);
 }));
 
+router.post('/heartbeat', asyncHandler(async (req, res) => {
+  const { mac_address, sender_client_id, device_id } = req.body || {};
+  if (!mac_address) return badRequest(res, 'mac_address is required');
+  await deviceSettingsService.onHeartbeat({ mac_address, sender_client_id, device_id });
+  success(res, { mac_address, online: true });
+}));
+
 router.post('/analytics-event', asyncHandler(async (req, res) => {
   const { mac_address, sender_client_id, device_id, payload } = req.body || {};
   logger.info(`[ANALYTICS][API] POST /device-sync/analytics-event mac=${mac_address || 'na'} sender=${sender_client_id || 'na'} event=${payload?.event || 'na'}`);

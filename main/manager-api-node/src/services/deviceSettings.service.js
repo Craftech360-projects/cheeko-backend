@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const VALID_SYNC_STATUS = new Set(['synced', 'syncing', 'pending_offline', 'rejected', 'stale']);
-const ONLINE_TTL_MS = 2 * 60 * 1000;
+const ONLINE_TTL_MS = 10 * 60 * 1000;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HH_MM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -289,6 +289,14 @@ async function onSettingsGet({ mac_address, sender_client_id = null, device_id =
   const mac = normalizeRequiredMac(mac_address);
   const settings = await findOrCreateSettingsByMac(mac, device_id);
 
+  // Heartbeat: mark device online whenever it actively communicates with the backend
+  const nowHb = new Date();
+  await prisma.device_runtime_state.upsert({
+    where: { mac_address: mac },
+    update: { online: true, last_seen_at: nowHb, updated_at: nowHb, ...(device_id ? { device_id } : {}) },
+    create: { mac_address: mac, device_id: device_id || null, online: true, last_seen_at: nowHb, updated_at: nowHb },
+  });
+
   await createSyncEvent({
     mac_address: mac,
     device_id,
@@ -344,6 +352,14 @@ async function onSettingsGet({ mac_address, sender_client_id = null, device_id =
 async function onSettingsAck({ mac_address, sender_client_id = null, device_id = null, version = null, status = null, applied_version = null, reason = null, payload = {} }) {
   const mac = normalizeRequiredMac(mac_address);
   const settings = await findOrCreateSettingsByMac(mac, device_id);
+
+  // Heartbeat: mark device online whenever it actively communicates with the backend
+  const nowHb = new Date();
+  await prisma.device_runtime_state.upsert({
+    where: { mac_address: mac },
+    update: { online: true, last_seen_at: nowHb, updated_at: nowHb, ...(device_id ? { device_id } : {}) },
+    create: { mac_address: mac, device_id: device_id || null, online: true, last_seen_at: nowHb, updated_at: nowHb },
+  });
 
   const ackStatus = typeof status === 'string' ? status : 'unknown';
   const syncStatus = toSyncStatusFromAck(ackStatus);
@@ -521,6 +537,16 @@ async function onDeviceState({ mac_address, sender_client_id = null, device_id =
   return updated;
 }
 
+async function onHeartbeat({ mac_address, sender_client_id = null, device_id = null }) {
+  const mac = normalizeRequiredMac(mac_address);
+  const now = new Date();
+  await prisma.device_runtime_state.upsert({
+    where: { mac_address: mac },
+    update: { online: true, last_seen_at: now, updated_at: now, ...(device_id ? { device_id } : {}) },
+    create: { mac_address: mac, device_id: device_id || null, online: true, last_seen_at: now, updated_at: now },
+  });
+}
+
 async function markSyncStatusByMac(macAddress, syncStatus, reason = null) {
   const mac = normalizeRequiredMac(macAddress);
   if (!VALID_SYNC_STATUS.has(syncStatus)) {
@@ -644,4 +670,5 @@ module.exports = {
   listSyncEventsByMac,
   resolveOwnedDeviceForMobile,
   requestGatewaySettingsPublish,
+  onHeartbeat,
 };

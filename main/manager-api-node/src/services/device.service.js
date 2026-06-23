@@ -721,7 +721,7 @@ const buildMqttCredentials = async (macAddress) => {
     username: username,
     password: password,
     publish_topic: 'device-server',
-    subscribe_topic: 'null'
+    subscribe_topic: `devices/p2p/${clientId}`
   };
 };
 

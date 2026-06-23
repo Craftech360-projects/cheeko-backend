@@ -732,7 +732,15 @@ class MQTTGateway {
         if (deviceInfo && deviceInfo.connection) {
           deviceInfo.connection.handlePublish({ payload: JSON.stringify(payload) });
         } else {
-          logger.warn(`⚠️ [MQTT-IN] Received data for unknown device: ${macAddress}`);
+          // No active AI session — try to forward to device P2P topic so the device still receives it
+          const clientId = this.resolveSenderClientIdByMac(macAddress);
+          if (clientId) {
+            logger.info(`📨 [MQTT-IN] ${macAddress}: no active session, forwarding to P2P ${clientId}`);
+            this.mqttPublish(`devices/p2p/${clientId}`, payload);
+          } else {
+            logger.info(`📬 [MQTT-IN] ${macAddress}: device not registered yet, queuing message`);
+            this.queuePendingDeviceMessage(macAddress, payload, 'direct-data');
+          }
         }
         return;
       }
@@ -890,6 +898,14 @@ class MQTTGateway {
           );
           return;
         }
+      }
+
+      // Forward mcp_response (device replies to mobile app commands) to app/p2p/{mac}
+      if (originalPayload.type === "mcp_response") {
+        const appTopic = `app/p2p/${deviceId}`;
+        this.mqttPublish(appTopic, originalPayload);
+        logger.info(`📱 [MCP-RESP] Forwarded mcp_response to ${appTopic}`);
+        return;
       }
 
       // Handle MCP responses - check for pending promises first, then forward to LiveKit agent
@@ -1489,6 +1505,12 @@ class MQTTGateway {
     });
 
     this.flushPendingDeviceMessages(normalizedMac);
+
+    // Fire-and-forget heartbeat so any device message keeps last_seen_at fresh
+    postDeviceSyncEvent('/device-sync/heartbeat', {
+      mac_address: normalizedMac,
+      sender_client_id: clientId,
+    }).catch(() => {});
   }
 
   queuePendingDeviceMessage(macAddress, message, source = "unknown") {
