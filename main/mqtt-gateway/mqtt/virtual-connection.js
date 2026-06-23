@@ -17,7 +17,7 @@ const {
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
-const { fetchMemoriesWithTimeout, buildDispatchMetadata } = require("../core/mem0-integration");
+const { fetchMemoriesWithTimeout, buildDispatchMetadata, DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -50,29 +50,9 @@ async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5
   throw lastError || new Error("Tap handshake failed");
 }
 
-// Character to Agent name mapping for multi-agent dispatch
-const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent",
-  "Math Tutor": "math-tutor-agent",
-  "Riddle Solver": "riddle-solver-agent",
-  "Word Ladder": "word-ladder-agent",
-  "Cheeko Magic": "cheeko-magic-agent",
-  "Cheeko Astronaut": "cheeko-astronaut-agent",
-  "Cheeko German": "cheeko-german-agent",
-};
-
-function resolveCharacterFromCardAgent(agentOrCharacterName) {
-  if (!agentOrCharacterName) {
-    return null;
-  }
-
-  if (CHARACTER_AGENT_MAP[agentOrCharacterName]) {
-    return agentOrCharacterName;
-  }
-
-  return Object.entries(CHARACTER_AGENT_MAP)
-    .find(([, agentName]) => agentName === agentOrCharacterName)?.[0] || agentOrCharacterName;
-}
+// Character->Agent routing now comes from the Manager API (runtimeAgentName);
+// the old hardcoded CHARACTER_AGENT_MAP + reverse lookup are gone. DEFAULT_RUNTIME_AGENT
+// is the single fallback, imported from core/mem0-integration.
 
 // MAC address regex
 const MacAddressRegex = /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i;
@@ -549,7 +529,15 @@ class VirtualMQTTConnection {
     // Extract results from settled promises
     this.roomType = roomTypeResult.status === "fulfilled" ? roomTypeResult.value : "conversation";
     this.deviceMode = deviceModeResult.status === "fulfilled" ? deviceModeResult.value : "manual";
-    this.currentCharacter = character.status === "fulfilled" ? character.value : "Cheeko";
+    // fetchCurrentCharacter now returns the routing contract; keep currentCharacter as the
+    // display name and store runtimeAgentName/characterId/language for dispatch + metadata.
+    const characterResolution = character.status === "fulfilled" && character.value
+      ? character.value
+      : { characterName: "Cheeko", runtimeAgentName: DEFAULT_RUNTIME_AGENT, characterId: null, language: null };
+    this.currentCharacter = characterResolution.characterName || "Cheeko";
+    this.runtimeAgentName = characterResolution.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
+    this.characterId = characterResolution.characterId ?? null;
+    if (characterResolution.language) this.language = characterResolution.language;
     this.childProfile = childProfile.status === "fulfilled" ? childProfile.value : null;
     this.mem0Memories = memoryData.status === "fulfilled" ? memoryData.value : null;
 
@@ -577,12 +565,14 @@ class VirtualMQTTConnection {
           this.sessionConfig.agentName = cardData.agentName || null;
           const cardAgentName = cardData.agentName;
           if (cardAgentName) {
-            const overrideCharacter = resolveCharacterFromCardAgent(cardAgentName);
-          logger.info(`🎴 [AI-CARD] Card maps to agent: "${this.currentCharacter}" → "${overrideCharacter}" (agent: ${cardAgentName})`);
-            this.currentCharacter = overrideCharacter;
-        } else {
-          logger.info(`🎴 [AI-CARD] Card ${helloRfidUid} has no agent mapping, using default character`);
-        }
+            // Manager's RFID resolver supplies characterName + runtimeAgentName directly.
+            this.currentCharacter = cardData.characterName || cardAgentName;
+            this.runtimeAgentName = cardData.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
+            this.characterId = cardData.characterId ?? this.characterId ?? null;
+            logger.info(`🎴 [AI-CARD] Card override → character "${this.currentCharacter}", agent "${this.runtimeAgentName}"`);
+          } else {
+            logger.info(`🎴 [AI-CARD] Card ${helloRfidUid} has no agent mapping, using default character`);
+          }
       }
       } catch (rfidErr) {
         logger.warn(`🎴 [AI-CARD] Failed to lookup rfid_uid=${helloRfidUid}: ${rfidErr.message}`);
@@ -707,13 +697,15 @@ class VirtualMQTTConnection {
       }
 
       const roomName = this.bridge?.room?.name || this.udp.session_id;
-      const agentName = CHARACTER_AGENT_MAP[this.currentCharacter] || CHARACTER_AGENT_MAP["Cheeko"];
+      const agentName = this.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
       logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
       this.bridge.expectedAgentName = agentName;
       const dispatchMetadata = buildDispatchMetadata({
         macAddress: this.macAddress,
         deviceId: this.deviceId,
         character: this.currentCharacter,
+        characterId: this.characterId,
+        language: this.language,
         childProfile: this.childProfile,
         memoryData: this.mem0Memories,
         sessionConfig: this.sessionConfig,
@@ -824,28 +816,32 @@ class VirtualMQTTConnection {
       const response = await axios.get(apiUrl, { timeout: 5000 });
       logger.info(`🎭 [CHARACTER] API Response: ${JSON.stringify(response.data)}`);
 
-      // Handle both response formats:
-      // Format 1: { code: 0, data: "Math Tutor" }
-      // Format 2: { code: 0, data: { characterName: "Math Tutor" } }
+      // Returns the routing contract. The display name stays for logs/firmware;
+      // routing uses runtimeAgentName (Manager resolves NULL rows -> default).
+      // Handles both legacy formats:
+      //   Format 1: { code: 0, data: "Math Tutor" }            (name only -> default route)
+      //   Format 2: { code: 0, data: { characterName, runtimeAgentName, characterId, language } }
       if (response.data && response.data.code === 0 && response.data.data) {
-        let character;
-        if (typeof response.data.data === 'string') {
-          character = response.data.data;
-        } else if (response.data.data.characterName) {
-          character = response.data.data.characterName;
-        } else {
-          character = "Cheeko";
+        const data = response.data.data;
+        if (typeof data === 'string') {
+          return { characterName: data, runtimeAgentName: DEFAULT_RUNTIME_AGENT, characterId: null, language: null };
         }
-        logger.info(`🎭 [CHARACTER] ✅ Got character from DB: "${character}"`);
-        return character;
+        const resolution = {
+          characterName: data.characterName || "Cheeko",
+          runtimeAgentName: data.runtimeAgentName || DEFAULT_RUNTIME_AGENT,
+          characterId: data.characterId ?? null,
+          language: data.language ?? null,
+        };
+        logger.info(`🎭 [CHARACTER] ✅ Got character from DB: "${resolution.characterName}" → agent "${resolution.runtimeAgentName}"`);
+        return resolution;
       } else {
-        logger.warn(`🎭 [CHARACTER] ⚠️ No character in response, using default: "Cheeko"`);
-        return "Cheeko";
+        logger.warn(`🎭 [CHARACTER] ⚠️ No character in response, using default route`);
+        return { characterName: "Cheeko", runtimeAgentName: DEFAULT_RUNTIME_AGENT, characterId: null, language: null };
       }
     } catch (error) {
       logger.error(`🎭 [CHARACTER] ❌ Failed to fetch: ${error.message}`);
-      logger.warn(`🎭 [CHARACTER] Using default: "Cheeko"`);
-      return "Cheeko"; // Default fallback
+      logger.warn(`🎭 [CHARACTER] Using default route: "${DEFAULT_RUNTIME_AGENT}"`);
+      return { characterName: "Cheeko", runtimeAgentName: DEFAULT_RUNTIME_AGENT, characterId: null, language: null };
     }
   }
 

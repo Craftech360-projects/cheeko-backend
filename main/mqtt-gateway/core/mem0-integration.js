@@ -13,6 +13,11 @@ const logger = require('../utils/logger');
 const MEM0_TIMEOUT_MS = 2000;  // 2 second timeout
 const MEM0_MEMORY_LIMIT = 20;  // ~500 tokens max
 
+// Single source of truth for the routing fallback agent. Used ONLY when the
+// Manager API supplies no runtimeAgentName (failure/timeout, or an unset row).
+// Must match the deployed worker's --agent-name (deploy/k8s/livekit-deployment.yaml).
+const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent1";
+
 /**
  * Fetch memories for a device with timeout protection
  * @param {string} deviceId - Device MAC address
@@ -85,7 +90,7 @@ async function buildEnhancedContext(deviceId, childProfile) {
  * @param {object} params - Parameters for metadata
  * @returns {string} JSON string for dispatch metadata
  */
-function buildDispatchMetadata({ macAddress, deviceId, character, childProfile, memoryData, sessionConfig = {} }) {
+function buildDispatchMetadata({ macAddress, deviceId, character, characterId = null, language = null, childProfile, memoryData, sessionConfig = {} }) {
   // Handle both old format (array) and new format (object)
   let memories = [];
   let relations = [];
@@ -103,6 +108,8 @@ function buildDispatchMetadata({ macAddress, deviceId, character, childProfile, 
     device_mac: macAddress,
     device_uuid: deviceId,
     character: character || "Cheeko",
+    character_id: characterId,
+    language: language,
     child_profile: childProfile || null,
     session_language_code: sessionConfig.languageCode || null,
     session_language_name: sessionConfig.languageName || null,
@@ -154,6 +161,7 @@ module.exports = {
   buildEnhancedContext,
   buildDispatchMetadata,
   formatMemoriesForPrompt,
+  DEFAULT_RUNTIME_AGENT,
   MEM0_TIMEOUT_MS,
   MEM0_MEMORY_LIMIT
 };

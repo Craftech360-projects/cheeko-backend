@@ -25,23 +25,16 @@ const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
 } = require("../core/media-api-client");
-const { buildDispatchMetadata } = require("../core/mem0-integration");
+const { buildDispatchMetadata, DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
 const logger = require("../utils/logger");
 const {
   writeAnalyticsAuditLog,
   shouldIncludePayload,
 } = require("../utils/analytics-audit-log");
 
-// Character to Agent name mapping for multi-agent dispatch
-const CHARACTER_AGENT_MAP = {
-  "Cheeko": "cheeko-agent",
-  "Math Tutor": "math-tutor-agent",
-  "Riddle Solver": "riddle-solver-agent",
-  "Word Ladder": "word-ladder-agent",
-  "Cheeko Magic": "cheeko-magic-agent",
-  "Cheeko Astronaut": "cheeko-astronaut-agent",
-  "Cheeko German": "cheeko-german-agent",
-};
+// Character->Agent routing comes from the Manager API (runtimeAgentName); the old
+// hardcoded CHARACTER_AGENT_MAP is gone. DEFAULT_RUNTIME_AGENT (core/mem0-integration)
+// is the single fallback used only when the Manager supplies no runtimeAgentName.
 // Global config manager and debug reference (injected by app.js)
 let configManager = null;
 let debug = null;
@@ -1208,9 +1201,8 @@ class MQTTGateway {
             // If there IS an active connection, check if this card maps to a different agent
             const cardAgentName = rfidContent.agentName || null;
             const currentCharacter = deviceInfo.connection.currentCharacter || "Cheeko";
-            const targetCharacter = cardAgentName
-              ? (Object.entries(CHARACTER_AGENT_MAP).find(([, a]) => a === cardAgentName)?.[0] || null)
-              : null;
+            // Manager's RFID resolver returns characterName directly — no reverse map needed.
+            const targetCharacter = rfidContent.characterName || cardAgentName || null;
 
             if (targetCharacter && targetCharacter !== currentCharacter) {
               // Card maps to a different agent â€” trigger character switch
@@ -2178,6 +2170,9 @@ class MQTTGateway {
             // Fetch character name
             const macAddress = deviceId.replace(/:/g, "").toLowerCase();
             let characterName = "Cheeko";
+            let runtimeAgentName = DEFAULT_RUNTIME_AGENT;
+            let characterId = null;
+            let language = null;
             let childProfile = null;
 
             try {
@@ -2192,6 +2187,9 @@ class MQTTGateway {
 
               if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
                 characterName = charResponse.data.data.characterName;
+                runtimeAgentName = charResponse.data.data.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
+                characterId = charResponse.data.data.characterId ?? null;
+                language = charResponse.data.data.language ?? null;
               }
               if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
                 childProfile = profileResponse.data.data;
@@ -2200,7 +2198,7 @@ class MQTTGateway {
               logger.warn(`âš ï¸ [MODE-CHANGE] Fetch error: ${fetchError.message}`);
             }
 
-            const agentName = CHARACTER_AGENT_MAP[characterName] || CHARACTER_AGENT_MAP["Cheeko"];
+            const agentName = runtimeAgentName || DEFAULT_RUNTIME_AGENT;
             logger.info(`ðŸš€ [MODE-CHANGE] Dispatching: ${characterName} â†’ ${agentName}`);
 
             newBridge.agentDeployed = true;
@@ -2210,6 +2208,8 @@ class MQTTGateway {
                 macAddress: connection?.macAddress || deviceId,
                 deviceId: connection?.uuid || newSessionUuid,
                 character: characterName,
+                characterId,
+                language,
                 childProfile,
                 memoryData: connection?.mem0Memories,
                 sessionConfig: connection?.sessionConfig,
@@ -2404,6 +2404,9 @@ class MQTTGateway {
                   // Fetch current character and child profile from database
                   const macAddress = deviceId.replace(/:/g, "").toLowerCase();
                   let characterName = "Cheeko";
+                  let runtimeAgentName = DEFAULT_RUNTIME_AGENT;
+                  let characterId = null;
+                  let language = null;
                   let childProfile = null;
 
                   // Fetch character and child profile in parallel
@@ -2420,6 +2423,9 @@ class MQTTGateway {
 
                     if (charResponse.data?.code === 0 && charResponse.data?.data?.characterName) {
                       characterName = charResponse.data.data.characterName;
+                      runtimeAgentName = charResponse.data.data.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
+                      characterId = charResponse.data.data.characterId ?? null;
+                      language = charResponse.data.data.language ?? null;
                       logger.info(`[START-AGENT] âœ… Character from DB: "${characterName}"`);
                     }
 
@@ -2431,7 +2437,7 @@ class MQTTGateway {
                     logger.warn(`[START-AGENT] âš ï¸ Fetch error: ${fetchError.message}`);
                   }
 
-                  const agentName = CHARACTER_AGENT_MAP[characterName] || CHARACTER_AGENT_MAP["Cheeko"];
+                  const agentName = runtimeAgentName || DEFAULT_RUNTIME_AGENT;
                   logger.info(`[START-AGENT] ðŸš€ Dispatching: Character "${characterName}" â†’ Agent "${agentName}"`);
 
                   // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
@@ -2446,6 +2452,8 @@ class MQTTGateway {
                           macAddress: connection.macAddress,
                           deviceId: connection?.uuid || deviceId,
                           character: characterName,
+                          characterId,
+                          language,
                           childProfile,
                           memoryData: connection?.mem0Memories,
                           sessionConfig: connection?.sessionConfig,
@@ -2965,11 +2973,13 @@ class MQTTGateway {
       });
 
       if (response.data.code === 0 && response.data.data.success) {
-        const { newModeName } = response.data.data;
+        const { newModeName, runtimeAgentName, characterId, language } = response.data.data;
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
-        // Step 1: Get agent name for the new character
-        const agentName = CHARACTER_AGENT_MAP[newModeName] || CHARACTER_AGENT_MAP["Cheeko"];
+        // Step 1: Route via Manager's runtimeAgentName.
+        // ponytail: set-character/cycle-character don't return runtimeAgentName yet, so this
+        // is DEFAULT_RUNTIME_AGENT until those endpoints resolve it (see PHASE2-PENDING.md).
+        const agentName = runtimeAgentName || DEFAULT_RUNTIME_AGENT;
         logger.info(`[CHARACTER-CHANGE] Dispatching agent: ${agentName}`);
 
         // Step 2: Get device connection
@@ -3076,6 +3086,8 @@ class MQTTGateway {
                 macAddress: connection?.macAddress || deviceId,
                 deviceId: connection?.uuid || newSessionUuid,
                 character: newModeName,
+                characterId,
+                language,
                 childProfile,
                 memoryData: connection?.mem0Memories,
                 sessionConfig: connection?.sessionConfig,
@@ -3408,9 +3420,15 @@ class MQTTGateway {
             connection.fetchCurrentCharacter(macAddress),
             connection.fetchChildProfile ? connection.fetchChildProfile(macAddress) : Promise.resolve(null)
           ]);
-          currentCharacter = character;
+          // fetchCurrentCharacter now returns the routing contract; keep currentCharacter as
+          // the display name and stash runtimeAgentName/characterId/language on the connection.
+          const characterResolution = character || { characterName: "Cheeko", runtimeAgentName: DEFAULT_RUNTIME_AGENT, characterId: null, language: null };
+          currentCharacter = characterResolution.characterName || "Cheeko";
           childProfile = profile;
           connection.currentCharacter = currentCharacter;
+          connection.runtimeAgentName = characterResolution.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
+          connection.characterId = characterResolution.characterId ?? null;
+          if (characterResolution.language) connection.language = characterResolution.language;
           if (childProfile) {
             logger.info(`[MODE-CHANGE] âœ… Child profile: "${childProfile.name}", age: ${childProfile.age}`);
           }
@@ -3457,7 +3475,7 @@ class MQTTGateway {
             try {
               // Use currentCharacter (already fetched above via connection.fetchCurrentCharacter)
               logger.info(`[MODE-CHANGE] Character from DB: "${currentCharacter || 'null'}"`);
-              const agentName = CHARACTER_AGENT_MAP[currentCharacter] || CHARACTER_AGENT_MAP["Cheeko"];
+              const agentName = connection.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
               logger.info(`[MODE-CHANGE] ðŸš€ Dispatching: Character "${currentCharacter || 'Cheeko'}" â†’ Agent "${agentName}"`)
 
               // CRITICAL: Set flag BEFORE dispatch to prevent race conditions
@@ -3471,6 +3489,8 @@ class MQTTGateway {
                     macAddress: connection.macAddress,
                     deviceId: connection?.uuid || deviceId,
                     character: currentCharacter || "Cheeko",
+                    characterId: connection?.characterId ?? null,
+                    language: connection?.language ?? null,
                     childProfile,
                     memoryData: connection?.mem0Memories,
                     sessionConfig: connection?.sessionConfig,
