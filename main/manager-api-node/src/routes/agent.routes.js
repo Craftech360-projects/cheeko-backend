@@ -1628,10 +1628,11 @@ router.put('/device/:mac/workspace-sync',
 router.post('/device/:mac/workspace-lock/acquire',
   requireServiceKey,
   asyncHandler(async (req, res) => {
-    const { holderId, leaseTTLSeconds, staleGraceSeconds } = req.body || {};
+    const { holderId, leaseTTLSeconds, staleGraceSeconds, preempt } = req.body || {};
     const result = await acquireWorkspaceLock(req.params.mac, holderId, {
       leaseTTLSeconds,
       staleGraceSeconds,
+      preempt,
     });
     success(res, result, result.acquired ? 'Workspace lock acquired' : 'Workspace lock busy');
   })
@@ -1648,7 +1649,13 @@ router.post('/device/:mac/workspace-lock/heartbeat',
       success(res, result, 'Workspace lock heartbeat renewed');
     } catch (error) {
       if (error?.statusCode === 409) {
-        return conflict(res, error.message);
+        // Surface a machine-readable lock error code in `data` so the worker can
+        // tell "I was preempted" (LOCK_PREEMPTED) apart from a transient miss.
+        return res.status(409).json({
+          code: 409,
+          msg: error.message,
+          data: { lockErrorCode: error.lockErrorCode || 'LOCK_CONFLICT' },
+        });
       }
       throw error;
     }

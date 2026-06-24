@@ -83,7 +83,14 @@ async function acquireWorkspaceLock(macAddress, holderId, options = {}) {
   const { normalizedMac, owner } = validateMacAndHolder(macAddress, holderId);
   const leaseTTLSeconds = clampLeaseTTL(options.leaseTTLSeconds);
   const staleGraceSeconds = clampStaleGrace(options.staleGraceSeconds);
+  const preempt = options.preempt === true || options.preempt === 'true';
 
+  // Last-tap-wins preemption: a freshly dispatched session is by definition the
+  // newest, so when preempt=true we FORCE-acquire even from a live holder. The
+  // ON CONFLICT update drops its liveness guard (the WHERE clause) and always
+  // takes over a DIFFERENT holder, incrementing the fencing_token so the old
+  // holder is fenced out on its next heartbeat. If two new dispatches race, the
+  // fencing_token serializes them and the last writer wins.
   const rows = await prisma.$queryRawUnsafe(
     `INSERT INTO workspace_locks (device_mac, holder_id, fencing_token, lease_expires_at, heartbeat_at, created_at, updated_at)
      VALUES ($1, $2, 1, now() + ($3 * interval '1 second'), now(), now(), now())
@@ -97,8 +104,10 @@ async function acquireWorkspaceLock(macAddress, holderId, options = {}) {
        lease_expires_at = now() + ($3 * interval '1 second'),
        heartbeat_at = now(),
        updated_at = now()
-     WHERE workspace_locks.holder_id = EXCLUDED.holder_id
-       OR workspace_locks.lease_expires_at < (now() - ($4 * interval '1 second'))
+     ${preempt
+       ? ''
+       : `WHERE workspace_locks.holder_id = EXCLUDED.holder_id
+       OR workspace_locks.lease_expires_at < (now() - ($4 * interval '1 second'))`}
      RETURNING device_mac, holder_id, fencing_token, lease_expires_at, heartbeat_at, updated_at`,
     normalizedMac,
     owner,
@@ -109,6 +118,7 @@ async function acquireWorkspaceLock(macAddress, holderId, options = {}) {
   if (Array.isArray(rows) && rows.length > 0) {
     return {
       acquired: true,
+      preempted: preempt && Number(rows[0].fencing_token) > 1,
       lock: normalizeLockRow(rows[0]),
     };
   }
@@ -144,8 +154,22 @@ async function heartbeatWorkspaceLock(macAddress, holderId, fencingToken, option
   );
 
   if (!Array.isArray(rows) || rows.length === 0) {
-    const error = new Error('workspace lock heartbeat rejected: lock owner/token mismatch');
+    // Distinguish "fenced out by a newer holder/token" (the caller was preempted
+    // and must stop) from a transient miss. Read the current row so the worker
+    // gets a definitive, distinguishable signal it was preempted.
+    const current = await getWorkspaceLock(normalizedMac);
+    const fenced =
+      current !== null &&
+      (current.holderId !== owner ||
+        (token !== null && current.fencingToken !== null && current.fencingToken > token));
+    const error = new Error(
+      fenced
+        ? 'workspace lock heartbeat rejected: preempted by newer holder'
+        : 'workspace lock heartbeat rejected: lock owner/token mismatch'
+    );
     error.statusCode = 409;
+    error.lockErrorCode = fenced ? 'LOCK_PREEMPTED' : 'LOCK_NOT_HELD';
+    error.current = current;
     throw error;
   }
 

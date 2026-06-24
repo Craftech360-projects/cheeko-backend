@@ -75,12 +75,117 @@ describe('workspace lock service', () => {
     });
   });
 
-  it('throws 409 conflict on heartbeat when holder/token does not match', async () => {
-    prisma.$queryRawUnsafe.mockResolvedValueOnce([]);
+  it('preempt acquire force-takes the lock from a different live holder and bumps the fencing token', async () => {
+    // ON CONFLICT update returns the new row directly (preempt drops the liveness guard).
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([
+      {
+        device_mac: 'AA:BB:CC:DD:EE:FF',
+        holder_id: 'pod-new',
+        fencing_token: BigInt(5),
+        lease_expires_at: new Date('2026-05-19T10:05:00.000Z'),
+        heartbeat_at: new Date('2026-05-19T10:04:50.000Z'),
+        updated_at: new Date('2026-05-19T10:04:50.000Z'),
+      }
+    ]);
 
-    await expect(lockService.heartbeatWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-a', 9)).rejects.toMatchObject({
-      statusCode: 409
+    const result = await lockService.acquireWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-new', {
+      preempt: true,
     });
+
+    // Only ONE query (no busy fallback read), and the WHERE liveness guard is omitted.
+    expect(prisma.$queryRawUnsafe).toHaveBeenCalledTimes(1);
+    const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
+    expect(sql).not.toMatch(/WHERE\s+workspace_locks\.holder_id/);
+    expect(result).toMatchObject({
+      acquired: true,
+      preempted: true,
+      lock: { holderId: 'pod-new', fencingToken: 5 },
+    });
+  });
+
+  it('non-preempt acquire keeps the liveness guard in the WHERE clause', async () => {
+    prisma.$queryRawUnsafe.mockResolvedValueOnce([
+      {
+        device_mac: 'AA:BB:CC:DD:EE:FF',
+        holder_id: 'pod-a',
+        fencing_token: BigInt(1),
+        lease_expires_at: new Date('2026-05-19T10:00:20.000Z'),
+        heartbeat_at: new Date('2026-05-19T10:00:00.000Z'),
+        updated_at: new Date('2026-05-19T10:00:00.000Z'),
+      }
+    ]);
+
+    await lockService.acquireWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-a', { leaseTTLSeconds: 8 });
+
+    const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
+    expect(sql).toMatch(/WHERE\s+workspace_locks\.holder_id/);
+  });
+
+  it('throws 409 LOCK_PREEMPTED on heartbeat when a newer holder owns the lock', async () => {
+    prisma.$queryRawUnsafe
+      // UPDATE ... RETURNING matches nothing
+      .mockResolvedValueOnce([])
+      // getWorkspaceLock read: a DIFFERENT holder now owns it (preempted)
+      .mockResolvedValueOnce([
+        {
+          device_mac: 'AA:BB:CC:DD:EE:FF',
+          holder_id: 'pod-new',
+          fencing_token: BigInt(2),
+          lease_expires_at: new Date('2026-05-19T10:05:00.000Z'),
+          heartbeat_at: new Date('2026-05-19T10:04:50.000Z'),
+          updated_at: new Date('2026-05-19T10:04:50.000Z'),
+        }
+      ]);
+
+    await expect(
+      lockService.heartbeatWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-a', 1)
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      lockErrorCode: 'LOCK_PREEMPTED',
+    });
+  });
+
+  it('throws 409 LOCK_PREEMPTED on heartbeat when the fencing token advanced past ours', async () => {
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          device_mac: 'AA:BB:CC:DD:EE:FF',
+          holder_id: 'pod-a',
+          fencing_token: BigInt(7),
+          lease_expires_at: new Date('2026-05-19T10:05:00.000Z'),
+          heartbeat_at: new Date('2026-05-19T10:04:50.000Z'),
+          updated_at: new Date('2026-05-19T10:04:50.000Z'),
+        }
+      ]);
+
+    await expect(
+      lockService.heartbeatWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-a', 3)
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      lockErrorCode: 'LOCK_PREEMPTED',
+    });
+  });
+
+  it('throws 409 LOCK_NOT_HELD on heartbeat when the lock row is gone', async () => {
+    prisma.$queryRawUnsafe
+      .mockResolvedValueOnce([]) // UPDATE matches nothing
+      .mockResolvedValueOnce([]); // getWorkspaceLock: no row
+
+    await expect(
+      lockService.heartbeatWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-a', 9)
+    ).rejects.toMatchObject({
+      statusCode: 409,
+      lockErrorCode: 'LOCK_NOT_HELD',
+    });
+  });
+
+  it('stale-token release is a safe no-op (released:false), never throws', async () => {
+    prisma.$executeRawUnsafe.mockResolvedValueOnce(0);
+
+    const result = await lockService.releaseWorkspaceLock('aa-bb-cc-dd-ee-ff', 'pod-a', 1);
+
+    expect(result).toEqual({ released: false });
   });
 
   it('releases lock only when holder matches', async () => {
