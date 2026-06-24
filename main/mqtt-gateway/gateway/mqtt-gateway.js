@@ -1209,7 +1209,7 @@ class MQTTGateway {
               logger.info(
                 `ðŸŽ´ [RFID-ROUTING] AI card wants agent "${targetCharacter}" but current is "${currentCharacter}" â€” switching`
               );
-              await this.handleDeviceCharacterChange(deviceId, { characterName: targetCharacter, language: rfidContent.languageCode || null });
+              await this.handleDeviceCharacterChange(deviceId, { characterName: targetCharacter, language: rfidContent.languageName || rfidContent.languageCode || null });
               return;
             }
 
