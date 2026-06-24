@@ -2,7 +2,7 @@
 
 Phase 2 routing is committed. The gateway no longer maps character→agent locally;
 it routes via the Manager-supplied `runtimeAgentName` (single `DEFAULT_RUNTIME_AGENT`
-fallback = `cheeko-agent1`, env-overridable via `LIVEKIT_DEFAULT_AGENT`). Tests: 11 pass.
+fallback = `cheeko-agent`, env-overridable via `LIVEKIT_DEFAULT_AGENT`). Tests: 11 pass.
 
 ## 1. set-character / cycle-character don't return `runtimeAgentName` — DEFERRED
 
@@ -36,4 +36,4 @@ on Manager-down.
   hardcoded `CHARACTER_AGENT_MAP` lookup is gone from both files. `node --check` clean.
 - **To close:** run a device through Cheeko (no-card), a card tap, and a MODE-CHANGE;
   confirm dispatch logs show the Manager `runtimeAgentName`, and that killing the Manager
-  falls back to `cheeko-agent1`.
+  falls back to `cheeko-agent`.

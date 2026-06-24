@@ -19,9 +19,9 @@ describe('resolveRuntimeAgentName', () => {
     expect(resolveRuntimeAgentName({ runtime_agent_name: null })).toBe('cheeko-agent2');
   });
 
-  it('falls back to cheeko-agent1 when neither field nor env is set', () => {
+  it('falls back to cheeko-agent when neither field nor env is set', () => {
     delete process.env.LIVEKIT_DEFAULT_AGENT;
-    expect(resolveRuntimeAgentName({})).toBe('cheeko-agent1');
+    expect(resolveRuntimeAgentName({})).toBe('cheeko-agent');
   });
 });
 
@@ -40,7 +40,7 @@ describe('resolveSessionForCharacter', () => {
     expect(resolveSessionForCharacter(character, {})).toEqual({
       characterId: 'char-uuid',
       characterName: 'Cheeko',
-      runtimeAgentName: 'cheeko-agent1',
+      runtimeAgentName: 'cheeko-agent',
       language: 'English',
       systemPrompt: 'Be kind and playful.',
       soul: 'I am warm and curious.',

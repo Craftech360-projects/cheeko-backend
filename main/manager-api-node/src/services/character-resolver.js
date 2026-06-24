@@ -4,7 +4,7 @@
  */
 
 const resolveRuntimeAgentName = (character) =>
-  character.runtime_agent_name || (process.env.LIVEKIT_DEFAULT_AGENT || 'cheeko-agent1');
+  character.runtime_agent_name || (process.env.LIVEKIT_DEFAULT_AGENT || 'cheeko-agent');
 
 const resolveSessionForCharacter = (character, { language } = {}) => ({
   characterId: character.id,

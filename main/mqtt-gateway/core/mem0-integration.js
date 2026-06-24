@@ -16,7 +16,7 @@ const MEM0_MEMORY_LIMIT = 20;  // ~500 tokens max
 // Single source of truth for the routing fallback agent. Used ONLY when the
 // Manager API supplies no runtimeAgentName (failure/timeout, or an unset row).
 // Must match the deployed worker's --agent-name (deploy/k8s/livekit-deployment.yaml).
-const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent1";
+const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent";
 
 /**
  * Fetch memories for a device with timeout protection

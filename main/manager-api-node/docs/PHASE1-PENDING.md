@@ -2,7 +2,7 @@
 
 Multi-character Phase 1 (Manager API) is committed and unit-tested (271 pass).
 Two items are intentionally deferred. Both are safe to leave: present behavior is
-correct (every character resolves to `LIVEKIT_DEFAULT_AGENT=cheeko-agent1`).
+correct (every character resolves to `LIVEKIT_DEFAULT_AGENT=cheeko-agent`).
 
 ## 1. Migration smoke test — NOT RUN
 

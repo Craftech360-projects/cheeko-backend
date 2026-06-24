@@ -56,7 +56,7 @@ test("buildDispatchMetadata carries character_id and language but no persona tex
 
 test("DEFAULT_RUNTIME_AGENT matches the deployed worker default", () => {
   const { DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
-  assert.strictEqual(DEFAULT_RUNTIME_AGENT, process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent1");
+  assert.strictEqual(DEFAULT_RUNTIME_AGENT, process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent");
 });
 
 test("mqtt-gateway dispatch call sites use the shared metadata builder", () => {
