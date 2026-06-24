@@ -1558,7 +1558,28 @@ const getCurrentCharacter = async (mac) => {
     agentId: agent.id,
     agentName: agent.agent_name,
     agentCode: agent.agent_code,
-    ...resolveSessionForCharacter(agent),
+    ...resolveSessionForCharacter(await mergeTemplatePersona(agent)),
+  };
+};
+
+/**
+ * Persona (system_prompt + soul) is character-level, not per-instance. Source it from the
+ * shared ai_agent_template (matched by agent_name, the same link setCharacterByName uses) so
+ * the prompt is edited in ONE place for every device. Falls back to the instance's own fields
+ * when no template exists. Single source of persona for ALL contract paths (worker pull +
+ * current-character). Routing (runtime_agent_name): instance override wins, then template.
+ * @param {{agent_name: string, system_prompt?: string|null, soul?: string|null, runtime_agent_name?: string|null}} agent
+ */
+const mergeTemplatePersona = async (agent) => {
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: agent.agent_name, mode: 'insensitive' } },
+    select: { system_prompt: true, soul: true, runtime_agent_name: true },
+  });
+  return {
+    ...agent,
+    system_prompt: template?.system_prompt ?? agent.system_prompt,
+    soul: template?.soul ?? agent.soul,
+    runtime_agent_name: agent.runtime_agent_name ?? template?.runtime_agent_name ?? null,
   };
 };
 
@@ -1587,24 +1608,7 @@ const getCharacterSession = async (characterId, { language } = {}) => {
     throw new Error('Character not found');
   }
 
-  // Persona (system_prompt + soul) is character-level, not per-instance: source it from the
-  // shared ai_agent_template (matched by name, same link setCharacterByName uses) so the prompt
-  // is edited in ONE place for every device. Fall back to the instance's own fields if no
-  // template exists (e.g. a purely custom per-user agent).
-  const template = await prisma.ai_agent_template.findFirst({
-    where: { agent_name: { equals: agent.agent_name, mode: 'insensitive' } },
-    select: { system_prompt: true, soul: true, runtime_agent_name: true },
-  });
-
-  const merged = {
-    ...agent,
-    system_prompt: template?.system_prompt ?? agent.system_prompt,
-    soul: template?.soul ?? agent.soul,
-    // routing: instance override wins, else template, else default (resolver applies the default)
-    runtime_agent_name: agent.runtime_agent_name ?? template?.runtime_agent_name ?? null,
-  };
-
-  return resolveSessionForCharacter(merged, { language });
+  return resolveSessionForCharacter(await mergeTemplatePersona(agent), { language });
 };
 
 /**
