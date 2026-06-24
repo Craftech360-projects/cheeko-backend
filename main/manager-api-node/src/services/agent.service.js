@@ -1388,7 +1388,7 @@ const cycleCharacter = async (mac) => {
 
   const agents = await prisma.ai_agent.findMany({
     where: { user_id: device.user_id },
-    select: { id: true, agent_name: true },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true },
     orderBy: { sort: 'asc' },
   });
 
@@ -1408,7 +1408,8 @@ const cycleCharacter = async (mac) => {
   return {
     agentId: nextAgent.id,
     agentName: nextAgent.agent_name,
-    previousAgentId: device.agent_id
+    previousAgentId: device.agent_id,
+    ...resolveSessionForCharacter(await mergeTemplatePersona(nextAgent)),
   };
 };
 
@@ -1445,7 +1446,7 @@ const setCharacter = async (mac, agentId) => {
  * @param {string} characterName - Agent name to set
  * @returns {Promise<Object>} Agent info
  */
-const setCharacterByName = async (mac, characterName) => {
+const setCharacterByName = async (mac, characterName, { language } = {}) => {
   const normalizedMac = normalizeMacAddress(mac);
 
   const device = await prisma.ai_device.findUnique({
@@ -1457,7 +1458,7 @@ const setCharacterByName = async (mac, characterName) => {
   // Find existing agent by name (case-insensitive) for this user
   let agent = await prisma.ai_agent.findFirst({
     where: { user_id: device.user_id, agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true },
   });
 
   if (!agent) {
@@ -1496,15 +1497,27 @@ const setCharacterByName = async (mac, characterName) => {
           summary_memory: template.summary_memory,
         }),
       },
-      select: { id: true, agent_name: true },
+      select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true },
     });
     logger.info(`[setCharacterByName] Auto-created agent "${characterName}" for user ${device.user_id}`);
+  }
+
+  // Optional per-card/session language: persist it on the agent so the contract carries it.
+  if (language && language !== agent.language) {
+    await prisma.ai_agent.update({ where: { id: agent.id }, data: { language } });
+    agent.language = language;
   }
 
   await prisma.ai_device.update({ where: { id: device.id }, data: { agent_id: agent.id } });
 
   logger.info(`[setCharacterByName] Device ${normalizedMac} set to agent: ${agent.agent_name}`);
-  return { agentId: agent.id, agentName: agent.agent_name };
+  // Full routing+persona contract (template-sourced) so the gateway dispatches to the right
+  // worker with characterId + language, and the worker pulls the right persona.
+  return {
+    agentId: agent.id,
+    agentName: agent.agent_name,
+    ...resolveSessionForCharacter(await mergeTemplatePersona(agent), { language }),
+  };
 };
 
 /**

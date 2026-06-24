@@ -8,8 +8,8 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
     delete process.env.LIVEKIT_DEFAULT_AGENT; // exercise the cheeko-agent hard default
 
     prisma = {
-      ai_device: { findUnique: jest.fn() },
-      ai_agent: { findUnique: jest.fn() },
+      ai_device: { findUnique: jest.fn(), update: jest.fn() },
+      ai_agent: { findUnique: jest.fn(), findFirst: jest.fn(), update: jest.fn(), create: jest.fn() },
       // default: no template -> getCharacterSession falls back to the instance's own fields
       ai_agent_template: { findFirst: jest.fn().mockResolvedValue(null) },
     };
@@ -72,6 +72,32 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
     expect(result.systemPrompt).toBe('TEMPLATE PROMPT');
     expect(result.soul).toBe('TEMPLATE SOUL');
     expect(prisma.ai_agent_template.findFirst).toHaveBeenCalled();
+  });
+
+  it('setCharacterByName returns the full contract (template persona) and applies card language', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({ id: 'dev', user_id: 7n });
+    prisma.ai_agent.findFirst.mockResolvedValue({
+      id: 'tenali-id', agent_name: 'Tenali', runtime_agent_name: null,
+      system_prompt: 'instance prompt', soul: 'instance soul', language: 'English',
+    });
+    prisma.ai_agent_template.findFirst.mockResolvedValue({
+      system_prompt: 'TENALI PROMPT', soul: 'TENALI SOUL', runtime_agent_name: null,
+    });
+    prisma.ai_agent.update.mockResolvedValue({});
+    prisma.ai_device.update.mockResolvedValue({});
+
+    const result = await agentService.setCharacterByName('aa:bb', 'Tenali', { language: 'Tamil' });
+
+    expect(result).toMatchObject({
+      agentId: 'tenali-id', agentName: 'Tenali',          // legacy
+      characterId: 'tenali-id', characterName: 'Tenali',  // contract
+      runtimeAgentName: 'cheeko-agent', language: 'Tamil',
+      systemPrompt: 'TENALI PROMPT', soul: 'TENALI SOUL',
+    });
+    // language differed -> persisted on the agent
+    expect(prisma.ai_agent.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: { language: 'Tamil' },
+    }));
   });
 
   it('getCharacterSession throws when the character is missing', async () => {

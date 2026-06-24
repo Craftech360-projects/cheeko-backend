@@ -948,14 +948,20 @@ router.get('/character/:id/session',
 router.post('/device/:mac/set-character',
   asyncHandler(async (req, res) => {
     try {
-      const { characterName } = req.body;
+      const { characterName, language } = req.body;
       if (!characterName) {
         return badRequest(res, 'characterName is required');
       }
-      // Find agent by name
-      const result = await agentService.setCharacterByName(req.params.mac, characterName);
-      // Gateway expects: { success: true, newModeName: "Character Name" }
-      const response = { success: true, newModeName: result.agentName };
+      // Find/create agent by name; optional language switches the character's language.
+      const result = await agentService.setCharacterByName(req.params.mac, characterName, { language });
+      // Additive: carry the routing contract so the gateway dispatches with characterId+language.
+      const response = {
+        success: true,
+        newModeName: result.agentName,
+        characterId: result.characterId ?? null,
+        runtimeAgentName: result.runtimeAgentName ?? null,
+        language: result.language ?? null,
+      };
       logger.info(`[AGENT] POST /device/${req.params.mac}/set-character response: ${JSON.stringify(response)}`);
       success(res, response);
     } catch (error) {
@@ -986,8 +992,14 @@ router.post('/device/:mac/cycle-character',
   asyncHandler(async (req, res) => {
     try {
       const result = await agentService.cycleCharacter(req.params.mac);
-      // Gateway expects: { success: true, newModeName: "Character Name" }
-      const response = { success: true, newModeName: result.agentName };
+      // Additive: carry the routing contract so the gateway dispatches with characterId+language.
+      const response = {
+        success: true,
+        newModeName: result.agentName,
+        characterId: result.characterId ?? null,
+        runtimeAgentName: result.runtimeAgentName ?? null,
+        language: result.language ?? null,
+      };
       logger.info(`[AGENT] POST /device/${req.params.mac}/cycle-character response: ${JSON.stringify(response)}`);
       success(res, response);
     } catch (error) {
