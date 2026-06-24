@@ -91,7 +91,10 @@ async function acquireWorkspaceLock(macAddress, holderId, options = {}) {
   // takes over a DIFFERENT holder, incrementing the fencing_token so the old
   // holder is fenced out on its next heartbeat. If two new dispatches race, the
   // fencing_token serializes them and the last writer wins.
-  const rows = await prisma.$queryRawUnsafe(
+  // Only the non-preempt path references $4 (staleGraceSeconds) in the WHERE clause, so the
+  // bound params MUST match: 4 params with the WHERE, 3 without it (preempt). Mismatching
+  // counts triggers Postgres 08P01 "bind message supplies N parameters...".
+  const sql =
     `INSERT INTO workspace_locks (device_mac, holder_id, fencing_token, lease_expires_at, heartbeat_at, created_at, updated_at)
      VALUES ($1, $2, 1, now() + ($3 * interval '1 second'), now(), now(), now())
      ON CONFLICT (device_mac)
@@ -108,12 +111,11 @@ async function acquireWorkspaceLock(macAddress, holderId, options = {}) {
        ? ''
        : `WHERE workspace_locks.holder_id = EXCLUDED.holder_id
        OR workspace_locks.lease_expires_at < (now() - ($4 * interval '1 second'))`}
-     RETURNING device_mac, holder_id, fencing_token, lease_expires_at, heartbeat_at, updated_at`,
-    normalizedMac,
-    owner,
-    leaseTTLSeconds,
-    staleGraceSeconds
-  );
+     RETURNING device_mac, holder_id, fencing_token, lease_expires_at, heartbeat_at, updated_at`;
+  const args = preempt
+    ? [normalizedMac, owner, leaseTTLSeconds]
+    : [normalizedMac, owner, leaseTTLSeconds, staleGraceSeconds];
+  const rows = await prisma.$queryRawUnsafe(sql, ...args);
 
   if (Array.isArray(rows) && rows.length > 0) {
     return {

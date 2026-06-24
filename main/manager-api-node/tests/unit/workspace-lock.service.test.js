@@ -1,3 +1,13 @@
+// A $queryRawUnsafe call is [sql, ...args]. Postgres errors (08P01) if the number of bound
+// args != the highest $N placeholder in the SQL — assert they line up.
+function expectBoundArgsMatchPlaceholders(call) {
+  const sql = call[0];
+  const args = call.slice(1);
+  const placeholders = (sql.match(/\$\d+/g) || []).map((p) => parseInt(p.slice(1), 10));
+  const maxPlaceholder = placeholders.length ? Math.max(...placeholders) : 0;
+  expect(args.length).toBe(maxPlaceholder);
+}
+
 describe('workspace lock service', () => {
   let prisma;
   let lockService;
@@ -96,6 +106,8 @@ describe('workspace lock service', () => {
     expect(prisma.$queryRawUnsafe).toHaveBeenCalledTimes(1);
     const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
     expect(sql).not.toMatch(/WHERE\s+workspace_locks\.holder_id/);
+    // Regression guard (Postgres 08P01): bound args must equal the highest $N in the SQL.
+    expectBoundArgsMatchPlaceholders(prisma.$queryRawUnsafe.mock.calls[0]);
     expect(result).toMatchObject({
       acquired: true,
       preempted: true,
@@ -119,6 +131,7 @@ describe('workspace lock service', () => {
 
     const sql = prisma.$queryRawUnsafe.mock.calls[0][0];
     expect(sql).toMatch(/WHERE\s+workspace_locks\.holder_id/);
+    expectBoundArgsMatchPlaceholders(prisma.$queryRawUnsafe.mock.calls[0]);
   });
 
   it('throws 409 LOCK_PREEMPTED on heartbeat when a newer holder owns the lock', async () => {
