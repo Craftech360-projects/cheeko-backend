@@ -1209,7 +1209,7 @@ class MQTTGateway {
               logger.info(
                 `ðŸŽ´ [RFID-ROUTING] AI card wants agent "${targetCharacter}" but current is "${currentCharacter}" â€” switching`
               );
-              await this.handleDeviceCharacterChange(deviceId, { characterName: targetCharacter });
+              await this.handleDeviceCharacterChange(deviceId, { characterName: targetCharacter, language: rfidContent.languageCode || null });
               return;
             }
 
@@ -2954,6 +2954,7 @@ class MQTTGateway {
     try {
       const characterName =
         payload.characterName || payload.character_name || null;
+      const language = payload.language || payload.language_code || null;
       const macAddress = deviceId.replace(/:/g, "").toLowerCase();
       const crypto = require("crypto");
 
@@ -2962,7 +2963,8 @@ class MQTTGateway {
 
       if (characterName) {
         apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/set-character`;
-        requestBody = { characterName: characterName };
+        // Pass card/session language so the switched character speaks it (Manager persists it).
+        requestBody = { characterName, ...(language ? { language } : {}) };
       } else {
         apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/cycle-character`;
         requestBody = {};
