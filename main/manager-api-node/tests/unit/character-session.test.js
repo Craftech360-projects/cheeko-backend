@@ -5,11 +5,13 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
 
   beforeEach(() => {
     jest.resetModules();
-    delete process.env.LIVEKIT_DEFAULT_AGENT; // exercise the cheeko-agent1 hard default
+    delete process.env.LIVEKIT_DEFAULT_AGENT; // exercise the cheeko-agent hard default
 
     prisma = {
       ai_device: { findUnique: jest.fn() },
       ai_agent: { findUnique: jest.fn() },
+      // default: no template -> getCharacterSession falls back to the instance's own fields
+      ai_agent_template: { findFirst: jest.fn().mockResolvedValue(null) },
     };
 
     jest.doMock('../../src/config/database', () => ({ prisma }));
@@ -48,7 +50,7 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
     expect(result).toEqual({
       characterId: 'char-uuid',
       characterName: 'Cheeko',
-      runtimeAgentName: 'cheeko-agent1',
+      runtimeAgentName: 'cheeko-agent',
       language: 'English',
       systemPrompt: 'Be kind.',
       soul: 'I am warm.',
@@ -59,6 +61,17 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
     prisma.ai_agent.findUnique.mockResolvedValue(character);
     const result = await agentService.getCharacterSession('char-uuid', { language: 'German' });
     expect(result.language).toBe('German');
+  });
+
+  it('getCharacterSession sources persona from the template (single source), overriding the instance', async () => {
+    prisma.ai_agent.findUnique.mockResolvedValue(character); // instance: 'Be kind.' / 'I am warm.'
+    prisma.ai_agent_template.findFirst.mockResolvedValue({
+      system_prompt: 'TEMPLATE PROMPT', soul: 'TEMPLATE SOUL', runtime_agent_name: null,
+    });
+    const result = await agentService.getCharacterSession('char-uuid');
+    expect(result.systemPrompt).toBe('TEMPLATE PROMPT');
+    expect(result.soul).toBe('TEMPLATE SOUL');
+    expect(prisma.ai_agent_template.findFirst).toHaveBeenCalled();
   });
 
   it('getCharacterSession throws when the character is missing', async () => {

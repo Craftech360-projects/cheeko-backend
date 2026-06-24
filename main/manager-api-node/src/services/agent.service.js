@@ -1587,7 +1587,24 @@ const getCharacterSession = async (characterId, { language } = {}) => {
     throw new Error('Character not found');
   }
 
-  return resolveSessionForCharacter(agent, { language });
+  // Persona (system_prompt + soul) is character-level, not per-instance: source it from the
+  // shared ai_agent_template (matched by name, same link setCharacterByName uses) so the prompt
+  // is edited in ONE place for every device. Fall back to the instance's own fields if no
+  // template exists (e.g. a purely custom per-user agent).
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: agent.agent_name, mode: 'insensitive' } },
+    select: { system_prompt: true, soul: true, runtime_agent_name: true },
+  });
+
+  const merged = {
+    ...agent,
+    system_prompt: template?.system_prompt ?? agent.system_prompt,
+    soul: template?.soul ?? agent.soul,
+    // routing: instance override wins, else template, else default (resolver applies the default)
+    runtime_agent_name: agent.runtime_agent_name ?? template?.runtime_agent_name ?? null,
+  };
+
+  return resolveSessionForCharacter(merged, { language });
 };
 
 /**
