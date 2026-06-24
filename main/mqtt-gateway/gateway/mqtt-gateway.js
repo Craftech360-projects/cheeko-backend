@@ -398,7 +398,7 @@ class MQTTGateway {
     // Clear existing timer
     this.clearGhostCleanupTimer();
 
-    logger.info(`ðŸ§¹ [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
+    logger.info(` 🧹  [GHOST-CLEANUP] Starting ghost cleanup timer (interval: ${this.ghostCleanupInterval / 1000}s)`);
 
     // Run cleanup immediately on startup (after 30 seconds to let things stabilize)
     setTimeout(() => {
@@ -441,13 +441,13 @@ class MQTTGateway {
     let sessionsCleaned = 0;
     let connectionsCleaned = 0;
 
-    logger.info(`ðŸ§¹ [GHOST-CLEANUP] Starting cleanup cycle...`);
+    logger.info(` 🧹  [GHOST-CLEANUP] Starting cleanup cycle...`);
 
     // 1. Clean up ghost LiveKit rooms
     if (this.roomService) {
       try {
         const rooms = await this.roomService.listRooms();
-        logger.info(`ðŸ§¹ [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
+        logger.info(` 🧹  [GHOST-CLEANUP] Found ${rooms.length} LiveKit rooms to check`);
 
         for (const room of rooms) {
           try {
@@ -2127,7 +2127,7 @@ class MQTTGateway {
 
       // Step 1: Cleanup old room/agent if exists
       if (connection.bridge) {
-        logger.info(`ðŸ§¹ [MODE-CHANGE] Cleaning up previous ${previousMode} session`);
+        logger.info(` 🧹  [MODE-CHANGE] Cleaning up previous ${previousMode} session`);
         await this.performRobustAgentCleanup(connection, 'mode_change');
       }
 
@@ -3804,7 +3804,7 @@ class MQTTGateway {
 
     // Clear ghost cleanup timer
     this.clearGhostCleanupTimer();
-    logger.info("ðŸ§¹ [GHOST-CLEANUP] Stopped periodic cleanup");
+    logger.info(" 🧹  [GHOST-CLEANUP] Stopped periodic cleanup");
 
     if (this.connections.size > 0) {
       logger.warn(`Waiting for ${this.connections.size} connections to close`);
