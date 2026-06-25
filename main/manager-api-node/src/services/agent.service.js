@@ -9,6 +9,7 @@ const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
 const { resolveSessionForCharacter } = require('./character-resolver');
+const { validateAgentMd } = require('../utils/agent-md-validator');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -149,6 +150,7 @@ const formatChatHistoryMessages = (messages, getChatType) => {
  * @returns {Promise<Object>} Created agent
  */
 const createAgent = async (userId, data) => {
+  validateAgentMd(data.systemPrompt);
   const agent = await prisma.ai_agent.create({
     data: {
       user_id: BigInt(userId),
@@ -210,7 +212,10 @@ const updateAgent = async (agentId, _userId, data) => {
   if (data.memModelId !== undefined) updateData.mem_model_id = data.memModelId;
   if (data.intentModelId !== undefined) updateData.intent_model_id = data.intentModelId;
   if (data.chatHistoryConf !== undefined) updateData.chat_history_conf = data.chatHistoryConf;
-  if (data.systemPrompt !== undefined) updateData.system_prompt = data.systemPrompt;
+  if (data.systemPrompt !== undefined) {
+    validateAgentMd(data.systemPrompt);
+    updateData.system_prompt = data.systemPrompt;
+  }
   if (data.summaryMemory !== undefined) updateData.summary_memory = data.summaryMemory;
   if (data.langCode !== undefined) updateData.lang_code = data.langCode;
   if (data.language !== undefined) updateData.language = data.language;
@@ -2410,6 +2415,7 @@ const getTemplateById = async (templateId) => {
  * @returns {Promise<string>} Created template ID (matches Spring Boot Result<String>)
  */
 const createTemplate = async (data) => {
+  validateAgentMd(data.systemPrompt);
   const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
 
   const template = await prisma.ai_agent_template.create({
@@ -2469,7 +2475,10 @@ const updateTemplate = async (templateId, data) => {
   if (data.memModelId !== undefined) updateData.mem_model_id = toNullIfEmpty(data.memModelId);
   if (data.intentModelId !== undefined) updateData.intent_model_id = toNullIfEmpty(data.intentModelId);
   if (data.chatHistoryConf !== undefined) updateData.chat_history_conf = data.chatHistoryConf;
-  if (data.systemPrompt !== undefined) updateData.system_prompt = data.systemPrompt;
+  if (data.systemPrompt !== undefined) {
+    validateAgentMd(data.systemPrompt);
+    updateData.system_prompt = data.systemPrompt;
+  }
   if (data.summaryMemory !== undefined) updateData.summary_memory = data.summaryMemory;
   if (data.langCode !== undefined) updateData.lang_code = data.langCode;
   if (data.language !== undefined) updateData.language = data.language;
