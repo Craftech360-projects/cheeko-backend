@@ -187,6 +187,14 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
       stories: data.stories || null,
       audioUrl: data.audioUrl || null,
       allowCaching: data.allowCaching,
+      // AI character routing — RFID-ROUTING uses these to switch the live
+      // session's character. Must be carried through or the gateway can't
+      // tell which character an AI card wants.
+      agentName: data.agentName || null,
+      characterName: data.characterName || null,
+      runtimeAgentName: data.runtimeAgentName || null,
+      languageName: data.languageName || null,
+      languageCode: data.languageCode || null,
     };
   } catch (error) {
     logger.error(
