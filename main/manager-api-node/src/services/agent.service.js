@@ -1630,6 +1630,34 @@ const getCharacterSession = async (characterId, { language } = {}) => {
 };
 
 /**
+ * Worker-facing: resolve the persona session contract for a Character by NAME,
+ * straight from ai_agent_template (no ai_agent row, no device binding). The
+ * gateway puts the character name in room metadata and the worker pulls the
+ * persona by that name — template is the single source. Falls back nowhere:
+ * unknown name -> 404 (worker keeps last-rendered).
+ * @param {string} characterName
+ * @param {{language?: string}} [opts]
+ */
+const getCharacterSessionByName = async (characterName, { language } = {}) => {
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: characterName, mode: 'insensitive' } },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true },
+  });
+  if (!template) throw new Error('Character not found');
+  return resolveSessionForCharacter(
+    {
+      id: null, // template-only; no per-device ai_agent instance
+      agent_name: template.agent_name,
+      runtime_agent_name: template.runtime_agent_name,
+      system_prompt: template.system_prompt,
+      soul: template.soul,
+      language: template.language,
+    },
+    { language }
+  );
+};
+
+/**
  * Get memories for a device (for personalization)
  * @param {string} mac - Device MAC address
  * @param {Object} [options] - Options
@@ -3026,6 +3054,7 @@ module.exports = {
   setCharacterByName,
   getCurrentCharacter,
   getCharacterSession,
+  getCharacterSessionByName,
   // Memory integration
   getMemoriesByMac,
   addConversationToMemory,

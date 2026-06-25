@@ -903,6 +903,25 @@ router.get('/device/:mac/current-character',
  *       404:
  *         description: Character not found
  */
+// By-NAME persona pull (template-only). Worker reads the character name from
+// room metadata and pulls the persona straight from ai_agent_template.
+// Registered before /character/:id/session (different segment count, but explicit).
+router.get('/character/by-name/:name/session',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    try {
+      const result = await agentService.getCharacterSessionByName(req.params.name, {
+        language: req.query.language || undefined,
+      });
+      logger.info(`[AGENT] GET /character/by-name/${req.params.name}/session -> runtimeAgentName=${result.runtimeAgentName}`);
+      success(res, result);
+    } catch (error) {
+      logger.info(`[AGENT] GET /character/by-name/${req.params.name}/session error: ${error.message}`);
+      notFound(res, error.message);
+    }
+  })
+);
+
 router.get('/character/:id/session',
   requireServiceKey,
   asyncHandler(async (req, res) => {
