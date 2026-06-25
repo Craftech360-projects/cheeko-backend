@@ -1,0 +1,315 @@
+/* Cheeko Persona Admin — themed to match the Cheeko Pro brand site.
+   Palette + type pulled from cheeeko-pro-website: warm cream surfaces,
+   charcoal ink, a single warm-orange brand color + pastel accents,
+   DM Serif Display headings over Nunito body. UI-only re-theme. */
+
+:root {
+  /* surfaces */
+  --bg-primary:   #FAF7F2;
+  --bg-secondary: #F3EEE7;
+  --surface:      #FFFFFF;
+
+  /* text */
+  --text-primary:   #1C1C1C;
+  --text-secondary: #5C6166;
+  --text-muted:     #8A8F95;
+
+  /* brand */
+  --brand:         #E96B2C;
+  --brand-hover:   #D85A1A;
+  --brand-soft:    #FFE8DA;
+  --brand-glow:    rgba(233, 107, 44, 0.16);
+  --brand-border:  rgba(233, 107, 44, 0.20);
+
+  /* accents (pastel toy palette) */
+  --accent-green: #9BCB71;
+  --accent-pink:  #F08BA7;
+
+  /* status */
+  --ok:  #5a9e3a;
+  --err: #c0392b;
+
+  /* lines / shape */
+  --border:       #E8E1D9;
+  --radius:       14px;
+  --radius-lg:    20px;
+  --radius-pill:  999px;
+
+  /* elevation */
+  --shadow-sm: 0 1px 3px rgba(28, 28, 28, 0.06);
+  --shadow:    0 10px 30px rgba(69, 49, 31, 0.08);
+  --shadow-md: 0 16px 40px rgba(69, 49, 31, 0.12);
+
+  --maxw: 1080px;
+}
+
+* { box-sizing: border-box; }
+
+[hidden] { display: none !important; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: "Nunito", system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  /* soft warm glow, brand-tinted — subtle, not busy */
+  background-image:
+    radial-gradient(60rem 36rem at 85% -10%, var(--brand-glow), transparent 60%),
+    radial-gradient(48rem 30rem at -10% 110%, rgba(155, 203, 113, 0.14), transparent 60%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+/* ---------- top bar ---------- */
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px clamp(16px, 4vw, 40px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: "DM Serif Display", Georgia, serif;
+  font-size: clamp(1.1rem, 2.4vw, 1.5rem);
+  color: var(--text-primary);
+  letter-spacing: 0.2px;
+}
+.logo-mark {
+  width: 30px; height: 30px;
+  fill: var(--brand);
+  flex: none;
+}
+
+/* ---------- layout ---------- */
+main {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  padding: clamp(20px, 4vw, 40px) clamp(16px, 4vw, 32px) 64px;
+}
+
+/* ---------- cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: clamp(20px, 3vw, 28px);
+  margin-bottom: 22px;
+}
+
+/* ---------- headings ---------- */
+h1 {
+  font-family: "DM Serif Display", Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(1.7rem, 4vw, 2.2rem);
+  line-height: 1.15;
+  margin: 0 0 6px;
+  color: var(--text-primary);
+}
+
+label {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  background: var(--brand-soft);
+  color: var(--brand-hover);
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 0.82em;
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* ---------- form controls ---------- */
+input,
+select,
+textarea {
+  width: 100%;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+  min-height: 44px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+input::placeholder,
+textarea::placeholder { color: var(--text-muted); }
+
+input:hover,
+select:hover,
+textarea:hover { border-color: var(--brand-border); }
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--brand);
+  background: var(--surface);
+  box-shadow: 0 0 0 4px var(--brand-glow);
+}
+
+textarea {
+  min-height: 360px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+/* select with custom chevron */
+.select-wrap { position: relative; display: inline-block; min-width: 260px; max-width: 100%; }
+.select-wrap select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 40px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.select-arrow {
+  position: absolute;
+  right: 12px; top: 50%;
+  transform: translateY(-50%);
+  width: 18px; height: 18px;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--text-secondary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.field { display: block; }
+
+/* ---------- buttons ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  font-family: "Nunito", system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 1rem;
+  line-height: 1;
+  color: #fff;
+  background: var(--brand);
+  border: none;
+  padding: 12px 24px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  box-shadow: 0 6px 16px var(--brand-glow);
+  transition: background 0.15s ease, transform 0.06s ease, box-shadow 0.15s ease;
+}
+.btn .icn { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.btn:hover { background: var(--brand-hover); box-shadow: 0 8px 22px var(--brand-glow); }
+.btn:active { transform: translateY(1px); box-shadow: 0 4px 12px var(--brand-glow); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--brand-glow), 0 6px 16px var(--brand-glow); }
+
+.btn:disabled,
+.btn[aria-busy="true"] {
+  background: var(--text-muted);
+  box-shadow: none;
+  cursor: not-allowed;
+  transform: none;
+  opacity: 0.85;
+}
+
+.btn.block { width: 100%; }
+
+.btn.ghost {
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1.5px solid var(--border);
+  box-shadow: none;
+}
+.btn.ghost:hover { background: var(--bg-secondary); border-color: var(--brand-border); color: var(--text-primary); }
+.btn.ghost:active { transform: translateY(1px); }
+
+/* ---------- editor screen ---------- */
+.toolbar { padding: 18px clamp(20px, 3vw, 28px); }
+
+.editor-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 22px;
+}
+@media (min-width: 880px) {
+  .editor-grid { grid-template-columns: 1fr 1fr; }
+  .editor-grid .card { margin-bottom: 0; }
+}
+
+.actionbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* ---------- login screen ---------- */
+.login {
+  max-width: 440px;
+  margin: clamp(24px, 6vh, 64px) auto 0;
+  text-align: center;
+  padding: clamp(28px, 4vw, 40px);
+}
+.login-badge {
+  width: 64px; height: 64px;
+  margin: 0 auto 14px;
+  border-radius: 18px;
+  background: var(--brand-soft);
+  display: grid; place-items: center;
+}
+.login-badge svg { width: 34px; height: 34px; fill: var(--brand); }
+.login-sub { color: var(--text-secondary); margin: 0 0 22px; }
+.login input { margin-bottom: 16px; text-align: center; }
+.login .btn { margin-bottom: 4px; }
+
+/* ---------- status / errors ---------- */
+.status {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+.status.ok  { color: var(--ok); }
+.status.err { color: var(--err); }
+
+.err {
+  font-weight: 700;
+  color: var(--err);
+  margin: 14px 0 0;
+}
+
+/* ---------- motion preference ---------- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

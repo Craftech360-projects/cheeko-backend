@@ -2479,6 +2479,7 @@ const updateTemplate = async (templateId, data) => {
     validateAgentMd(data.systemPrompt);
     updateData.system_prompt = data.systemPrompt;
   }
+  if (data.soul !== undefined) updateData.soul = data.soul; // SOUL.md (admin dashboard edits this)
   if (data.summaryMemory !== undefined) updateData.summary_memory = data.summaryMemory;
   if (data.langCode !== undefined) updateData.lang_code = data.langCode;
   if (data.language !== undefined) updateData.language = data.language;
@@ -2489,6 +2490,21 @@ const updateTemplate = async (templateId, data) => {
     where: { id: templateId },
     data: updateData,
   });
+
+  // Read-back verify: don't report success unless the bytes actually landed.
+  // Makes the dashboard's "Saved" truthful instead of trusting a blind 200.
+  if (updateData.system_prompt !== undefined || updateData.soul !== undefined) {
+    const after = await prisma.ai_agent_template.findUnique({
+      where: { id: templateId },
+      select: { system_prompt: true, soul: true },
+    });
+    if (updateData.system_prompt !== undefined && after.system_prompt !== updateData.system_prompt) {
+      throw new Error('Save not persisted: system_prompt mismatch after write');
+    }
+    if (updateData.soul !== undefined && after.soul !== updateData.soul) {
+      throw new Error('Save not persisted: soul mismatch after write');
+    }
+  }
 
   return null;
 };

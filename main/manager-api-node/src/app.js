@@ -147,6 +147,10 @@ swaggerSetup(app, CONTEXT_PATH);
 // API routes
 app.use(CONTEXT_PATH, routes);
 
+// Admin dashboard (persona editor) — static UI + its own ADMIN_PASSWORD-gated
+// API. Lives at /admin-dashboard. Reuses the agent.service template layer.
+app.use('/admin-dashboard', require('../../admin-dashboard/admin-dashboard.routes')(express));
+
 // ===========================================
 // Error Handling
 // ===========================================
