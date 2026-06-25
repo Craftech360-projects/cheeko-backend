@@ -28,6 +28,13 @@ describe('validateAgentMd', () => {
     expect(validateAgentMd(FULL_VALID)).toBe(FULL_VALID);
   });
 
+  test('safety headings with a "(Critical)" qualifier still pass (real scaffold)', () => {
+    const withQualifier = FULL_VALID
+      .replace('## Child-Safety Rules', '## Child-Safety Rules (Critical)')
+      .replace('## Runtime Guardrails', '## Runtime Guardrails (Critical)');
+    expect(validateAgentMd(withQualifier)).toBe(withQualifier);
+  });
+
   test('full AGENT.md missing a safety heading throws 400', () => {
     const missingGuardrails = FULL_VALID.replace('## Runtime Guardrails', '## Other Section');
     expect.assertions(2);

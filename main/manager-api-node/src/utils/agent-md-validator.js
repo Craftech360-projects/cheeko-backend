@@ -46,10 +46,11 @@ function validateAgentMd(text) {
 
   const problems = [];
 
-  if (!/^##\s+Child-Safety Rules\s*$/m.test(text)) {
+  // Allow a trailing qualifier on the heading, e.g. "## Child-Safety Rules (Critical)".
+  if (!/^##\s+Child-Safety Rules\b/m.test(text)) {
     problems.push('missing a "## Child-Safety Rules" heading');
   }
-  if (!/^##\s+Runtime Guardrails\s*$/m.test(text)) {
+  if (!/^##\s+Runtime Guardrails\b/m.test(text)) {
     problems.push('missing a "## Runtime Guardrails" heading');
   }
   if (occurrences !== 1) {
