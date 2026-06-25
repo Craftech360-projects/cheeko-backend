@@ -967,12 +967,17 @@ router.get('/character/:id/session',
 router.post('/device/:mac/set-character',
   asyncHandler(async (req, res) => {
     try {
-      const { characterName, language } = req.body;
+      const { characterName, language, persist } = req.body;
       if (!characterName) {
         return badRequest(res, 'characterName is required');
       }
       // Find/create agent by name; optional language switches the character's language.
-      const result = await agentService.setCharacterByName(req.params.mac, characterName, { language });
+      // persist=false (e.g. RFID card taps) applies the character to this session only,
+      // without changing the device's default agent. Defaults to true (back-compat).
+      const result = await agentService.setCharacterByName(req.params.mac, characterName, {
+        language,
+        persist: persist !== false,
+      });
       // Additive: carry the routing contract so the gateway dispatches with characterId+language.
       const response = {
         success: true,

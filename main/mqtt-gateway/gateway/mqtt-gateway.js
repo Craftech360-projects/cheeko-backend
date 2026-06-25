@@ -2971,8 +2971,9 @@ class MQTTGateway {
 
       if (characterName) {
         apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/set-character`;
-        // Pass card/session language so the switched character speaks it (Manager persists it).
-        requestBody = { characterName, ...(language ? { language } : {}) };
+        // Session-scoped: persist=false so an RFID card tap switches the character for
+        // THIS session only and does not change the device's default agent.
+        requestBody = { characterName, persist: false, ...(language ? { language } : {}) };
       } else {
         apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${macAddress}/cycle-character`;
         requestBody = {};

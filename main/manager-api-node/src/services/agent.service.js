@@ -1451,7 +1451,7 @@ const setCharacter = async (mac, agentId) => {
  * @param {string} characterName - Agent name to set
  * @returns {Promise<Object>} Agent info
  */
-const setCharacterByName = async (mac, characterName, { language } = {}) => {
+const setCharacterByName = async (mac, characterName, { language, persist = true } = {}) => {
   const normalizedMac = normalizeMacAddress(mac);
 
   const device = await prisma.ai_device.findUnique({
@@ -1513,9 +1513,13 @@ const setCharacterByName = async (mac, characterName, { language } = {}) => {
     agent.language = language;
   }
 
-  await prisma.ai_device.update({ where: { id: device.id }, data: { agent_id: agent.id } });
+  // Session-scoped switches (e.g. RFID card taps) skip persisting the device's
+  // default agent — the character applies only to the dispatched session.
+  if (persist) {
+    await prisma.ai_device.update({ where: { id: device.id }, data: { agent_id: agent.id } });
+  }
 
-  logger.info(`[setCharacterByName] Device ${normalizedMac} set to agent: ${agent.agent_name}`);
+  logger.info(`[setCharacterByName] Device ${normalizedMac} -> agent: ${agent.agent_name} (persist=${persist})`);
   // Full routing+persona contract (template-sourced) so the gateway dispatches to the right
   // worker with characterId + language, and the worker pulls the right persona.
   return {
