@@ -83,12 +83,15 @@ const dbConnectionString = resolveDatabaseUrl(_rawUrl)
   .replace(/\?&/g, '?')                  // fix ?& → ?
   .replace(/[?&]$/g, '');               // remove trailing ? or &
 
+// Local Postgres doesn't speak SSL; set DATABASE_SSL=false to disable it.
+const useSsl = process.env.DATABASE_SSL !== 'false';
+
 logger.info(`🔌 DB connecting to: ${dbConnectionString.replace(/:[^@]*@/, ':***@')}`);
-logger.info(`🔐 SSL: rejectUnauthorized=false (DigitalOcean self-signed CA)`);
+logger.info(useSsl ? `🔐 SSL: rejectUnauthorized=false (DigitalOcean self-signed CA)` : `🔓 SSL disabled (DATABASE_SSL=false)`);
 
 const pgPool = new Pool({
   connectionString: dbConnectionString,
-  ssl: { rejectUnauthorized: false },
+  ssl: useSsl ? { rejectUnauthorized: false } : false,
 });
 
 pgPool.on('error', (err) => {

@@ -1,0 +1,16 @@
+services:
+  cheeko-postgres:
+    build: .
+    container_name: cheeko-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - cheeko-pgdata:/var/lib/postgresql
+    restart: unless-stopped
+
+volumes:
+  cheeko-pgdata:
