@@ -58,18 +58,13 @@ const getKidById = async (userId, kidId) => {
 const PARENT_RULE_MAX_LEN = 500;
 
 /**
- * Reduce free-text parent custom instructions to a single plain-text block.
- * Strips backticks/markdown fences and control chars, collapses whitespace, caps
- * length. Bounds input only — does NOT judge meaning (ADR-0004: precedence by
- * ordering at the worker, not a save-time gate). Returns null for empty input.
+ * Bound free-text parent custom instructions: trim + length cap. Bounds input
+ * only — does NOT judge meaning (ADR-0004). The worker re-sanitizes (strips
+ * fences/control chars, collapses whitespace) on every render. Null if empty.
  */
 const sanitizeParentRule = (value) => {
   if (value === undefined || value === null) return null;
-  const s = String(value)
-    .replace(/`/g, '')
-    .replace(/[\x00-\x1F\x7F]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const s = String(value).trim();
   return s === '' ? null : s.slice(0, PARENT_RULE_MAX_LEN);
 };
 
@@ -614,6 +609,7 @@ const acceptTerms = async (userId, data = {}) => {
 
 module.exports = {
   // Kid profile methods
+  sanitizeParentRule,
   getKidProfiles,
   getKidById,
   createKid,

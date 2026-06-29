@@ -10,6 +10,7 @@
 const { prisma } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
+const { sanitizeParentRule } = require('./profile.service');
 
 // ==================== USER MANAGEMENT ====================
 
@@ -912,7 +913,7 @@ const createKidProfileForUser = async (userId, data) => {
         interests: data.interests || [],
         language: data.language || 'en',
         timezone: data.timezone || null,
-        parent_rule: data.parent_rule == null ? null : String(data.parent_rule).slice(0, 500),
+        parent_rule: sanitizeParentRule(data.parent_rule),
         preferences: data.preferences || {}
       }
     });
@@ -943,7 +944,7 @@ const updateKidProfile = async (kidId, data) => {
   if (data.interests !== undefined) updateData.interests = data.interests;
   if (data.language !== undefined) updateData.language = data.language;
   if (data.timezone !== undefined) updateData.timezone = data.timezone;
-  if (data.parent_rule !== undefined) updateData.parent_rule = data.parent_rule == null ? null : String(data.parent_rule).slice(0, 500);
+  if (data.parent_rule !== undefined) updateData.parent_rule = sanitizeParentRule(data.parent_rule);
   if (data.preferences !== undefined) updateData.preferences = data.preferences;
 
   try {
