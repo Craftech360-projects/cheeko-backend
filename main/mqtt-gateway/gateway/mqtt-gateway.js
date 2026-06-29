@@ -2219,7 +2219,6 @@ class MQTTGateway {
                 characterId,
                 language,
                 childProfile,
-                memoryData: connection?.mem0Memories,
                 sessionConfig: connection?.sessionConfig,
               }),
             });
@@ -2463,7 +2462,6 @@ class MQTTGateway {
                           characterId,
                           language,
                           childProfile,
-                          memoryData: connection?.mem0Memories,
                           sessionConfig: connection?.sessionConfig,
                         }),
                       }
@@ -3100,7 +3098,6 @@ class MQTTGateway {
                 characterId,
                 language,
                 childProfile,
-                memoryData: connection?.mem0Memories,
                 sessionConfig: connection?.sessionConfig,
               }),
             });
@@ -3503,7 +3500,6 @@ class MQTTGateway {
                     characterId: connection?.characterId ?? null,
                     language: connection?.language ?? null,
                     childProfile,
-                    memoryData: connection?.mem0Memories,
                     sessionConfig: connection?.sessionConfig,
                   }),
                 }

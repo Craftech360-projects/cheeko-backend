@@ -17,7 +17,7 @@ const {
   mediaAxiosConfig,
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
-const { fetchMemoriesWithTimeout, buildDispatchMetadata, DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
+const { buildDispatchMetadata, DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -509,7 +509,7 @@ class VirtualMQTTConnection {
     // ── Step 1: ALL DB queries in parallel ──
     console.log(`🔄 [DEFERRED] Starting parallel DB queries for ${this.deviceId}...`);
 
-    const [roomTypeResult, deviceModeResult, character, childProfile, memoryData] = await Promise.allSettled([
+    const [roomTypeResult, deviceModeResult, character, childProfile] = await Promise.allSettled([
       // Room type (conversation/music/story)
       axios.get(`${baseUrl}/toy/device/${macAddress}/mode`, { timeout: 5000 })
         .then((r) => r.data?.code === 0 ? r.data.data : "conversation")
@@ -522,8 +522,6 @@ class VirtualMQTTConnection {
       this.fetchCurrentCharacter(this.deviceId),
       // Child profile
       this.fetchChildProfile(this.deviceId),
-      // Mem0 memories
-      fetchMemoriesWithTimeout(this.deviceId),
     ]);
 
     // Extract results from settled promises
@@ -539,7 +537,6 @@ class VirtualMQTTConnection {
     this.characterId = characterResolution.characterId ?? null;
     if (characterResolution.language) this.language = characterResolution.language;
     this.childProfile = childProfile.status === "fulfilled" ? childProfile.value : null;
-    this.mem0Memories = memoryData.status === "fulfilled" ? memoryData.value : null;
 
     // ── AI Card agent override ──
     // If the firmware hello includes rfid_uid (from a card tap that triggered the session),
@@ -616,9 +613,6 @@ class VirtualMQTTConnection {
     }
     if (this.childProfile) {
       logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
-    }
-    if (this.mem0Memories?.memories?.length > 0) {
-      logger.info(`🧠 [MEM0] Retrieved ${this.mem0Memories.memories.length} long-term memories`);
     }
 
     // ── Step 2: LiveKit room setup ──
@@ -707,7 +701,6 @@ class VirtualMQTTConnection {
         characterId: this.characterId,
         language: this.language,
         childProfile: this.childProfile,
-        memoryData: this.mem0Memories,
         sessionConfig: this.sessionConfig,
       });
       const roomService = this.server?.roomService || this.gateway?.roomService;
