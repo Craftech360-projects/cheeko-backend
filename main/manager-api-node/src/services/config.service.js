@@ -275,6 +275,7 @@ const getChildProfileByMac = async (macAddress) => {
     gender: kid.gender,
     interests: kid.interests,
     primaryLanguage: kid.language,
+    parent_rule: kid.parent_rule || null, // ADR-0004: subordinate parent custom instructions
     additionalNotes: null // not in current schema
   };
 };

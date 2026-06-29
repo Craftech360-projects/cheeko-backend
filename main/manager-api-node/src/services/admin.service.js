@@ -912,6 +912,7 @@ const createKidProfileForUser = async (userId, data) => {
         interests: data.interests || [],
         language: data.language || 'en',
         timezone: data.timezone || null,
+        parent_rule: data.parent_rule == null ? null : String(data.parent_rule).slice(0, 500),
         preferences: data.preferences || {}
       }
     });
@@ -942,6 +943,7 @@ const updateKidProfile = async (kidId, data) => {
   if (data.interests !== undefined) updateData.interests = data.interests;
   if (data.language !== undefined) updateData.language = data.language;
   if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.parent_rule !== undefined) updateData.parent_rule = data.parent_rule == null ? null : String(data.parent_rule).slice(0, 500);
   if (data.preferences !== undefined) updateData.preferences = data.preferences;
 
   try {

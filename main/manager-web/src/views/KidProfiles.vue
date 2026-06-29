@@ -107,6 +107,19 @@
             <el-option label="Chinese" value="zh" />
           </el-select>
         </el-form-item>
+        <el-form-item label="Parent Rules">
+          <el-input
+            v-model="form.parent_rule"
+            type="textarea"
+            :rows="3"
+            :maxlength="500"
+            show-word-limit
+            placeholder="Optional custom instructions for this child, e.g. 'Bedtime is 8pm. Encourage reading.' Cheeko's safety rules always take priority over these."
+          />
+          <div style="font-size: 12px; color: #909399; line-height: 1.4; margin-top: 4px;">
+            These guide your child's character but can never override Cheeko's built-in safety rules.
+          </div>
+        </el-form-item>
       </el-form>
       <span slot="footer" class="dialog-footer">
         <el-button @click="dialogVisible = false">Cancel</el-button>
@@ -146,7 +159,8 @@ export default {
         birthDate: '',
         gender: '',
         interests: [],
-        language: 'en'
+        language: 'en',
+        parent_rule: ''
       },
       rules: {
         name: [{ required: true, message: 'Please enter name', trigger: 'blur' }]
@@ -217,7 +231,8 @@ export default {
         birthDate: '',
         gender: '',
         interests: [],
-        language: 'en'
+        language: 'en',
+        parent_rule: ''
       }
       this.dialogVisible = true
     },
@@ -231,7 +246,8 @@ export default {
         birthDate: row.birth_date || row.birthDate || '',
         gender: row.gender || '',
         interests: row.interests || [],
-        language: row.language || 'en'
+        language: row.language || 'en',
+        parent_rule: row.parent_rule || ''
       }
       this.dialogVisible = true
     },

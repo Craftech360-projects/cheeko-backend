@@ -104,13 +104,21 @@ function buildDispatchMetadata({ macAddress, deviceId, character, characterId = 
     entities = memoryData.entities || [];
   }
 
+  // ADR-0004: confirm whether a parent rule is being placed into room metadata.
+  const _parentRule = (childProfile && childProfile.parent_rule) ? String(childProfile.parent_rule) : null;
+  logger.info(`[PARENT-RULE] dispatch metadata for mac=${macAddress}: parent_rule ${_parentRule ? `PRESENT (${_parentRule.length} chars): "${_parentRule.slice(0, 80)}"` : 'ABSENT'}`);
+
   return JSON.stringify({
     device_mac: macAddress,
     device_uuid: deviceId,
     character: character || "Cheeko",
     character_id: characterId,
     language: language,
-    child_profile: childProfile || null,
+    // Carry the whole child profile, explicitly surfacing parent_rule (ADR-0004)
+    // so the worker can compose subordinate parent custom instructions.
+    child_profile: childProfile
+      ? { ...childProfile, parent_rule: childProfile.parent_rule ?? null }
+      : null,
     session_language_code: sessionConfig.languageCode || null,
     session_language_name: sessionConfig.languageName || null,
     session_voice_id: sessionConfig.voiceId || null,

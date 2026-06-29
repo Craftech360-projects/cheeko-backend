@@ -55,6 +55,24 @@ const getKidById = async (userId, kidId) => {
  * @param {Object} data - Profile data
  * @returns {Promise<Object>} Created profile
  */
+const PARENT_RULE_MAX_LEN = 500;
+
+/**
+ * Reduce free-text parent custom instructions to a single plain-text block.
+ * Strips backticks/markdown fences and control chars, collapses whitespace, caps
+ * length. Bounds input only — does NOT judge meaning (ADR-0004: precedence by
+ * ordering at the worker, not a save-time gate). Returns null for empty input.
+ */
+const sanitizeParentRule = (value) => {
+  if (value === undefined || value === null) return null;
+  const s = String(value)
+    .replace(/`/g, '')
+    .replace(/[\x00-\x1F\x7F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s === '' ? null : s.slice(0, PARENT_RULE_MAX_LEN);
+};
+
 const createKid = async (userId, data) => {
   try {
     const profile = await prisma.kid_profile.create({
@@ -70,6 +88,7 @@ const createKid = async (userId, data) => {
         interests: data.interests || [],
         language: data.language || 'en',
         timezone: data.timezone || null,
+        parent_rule: sanitizeParentRule(data.parent_rule),
         preferences: data.preferences || {}
       }
     });
@@ -105,6 +124,7 @@ const updateKid = async (userId, kidId, data) => {
   if (data.interests !== undefined) updateData.interests = data.interests;
   if (data.language !== undefined) updateData.language = data.language;
   if (data.timezone !== undefined) updateData.timezone = data.timezone;
+  if (data.parent_rule !== undefined) updateData.parent_rule = sanitizeParentRule(data.parent_rule);
   if (data.preferences !== undefined) updateData.preferences = data.preferences;
 
   try {
