@@ -43,3 +43,32 @@ test('rejects on line_art_error', async () => {
   await assert.rejects(() => generateImagine([Buffer.from([1])], { lineArtWsUrl: url }));
   wss.close();
 });
+
+test('rejects on timeout if image never arrives', async () => {
+  const { wss, url } = await startFakeLineArt((ws) => {
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'hello') ws.send(JSON.stringify({ type: 'hello', session_id: 's' }));
+      // never send image; let timeout trigger
+    });
+  });
+  await assert.rejects(() => generateImagine([Buffer.from([1])], { lineArtWsUrl: url, timeoutMs: 100 }), /timeout/);
+  wss.close();
+});
+
+test('rejects if socket closes before image arrives', async () => {
+  const { wss, url } = await startFakeLineArt((ws) => {
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) return;
+      const msg = JSON.parse(data.toString());
+      if (msg.type === 'hello') ws.send(JSON.stringify({ type: 'hello', session_id: 's' }));
+      if (msg.type === 'listen' && msg.state === 'stop') {
+        // close without sending image
+        ws.close();
+      }
+    });
+  });
+  await assert.rejects(() => generateImagine([Buffer.from([1])], { lineArtWsUrl: url }), /closed before image/);
+  wss.close();
+});

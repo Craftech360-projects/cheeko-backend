@@ -10,7 +10,7 @@ function generateImagine(opusFrames, { lineArtWsUrl, timeoutMs = 20000 }) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { ws.close(); } catch (_) {}
+      try { if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(); } catch (_) {}
       err ? reject(err) : resolve(val);
     };
     const timer = setTimeout(() => finish(new Error('imagine timeout')), timeoutMs);
@@ -31,6 +31,7 @@ function generateImagine(opusFrames, { lineArtWsUrl, timeoutMs = 20000 }) {
         case 'line_art_transcription':
           caption = msg.text;
           break;
+        // image message caption takes precedence over line_art_transcription text
         case 'image':
           finish(null, { jpegBuffer: Buffer.from(msg.image, 'base64'), caption: msg.caption != null ? msg.caption : caption });
           break;
