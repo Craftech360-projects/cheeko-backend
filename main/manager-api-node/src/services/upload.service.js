@@ -4,6 +4,7 @@
  */
 
 const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const path = require('path');
 
@@ -144,7 +145,26 @@ const uploadThumbnail = async (fileBuffer, filename, contentType, mimeType) => {
   }
 };
 
+/**
+ * AI Imagine: upload a generated JPEG to S3 under imagine/<uuid>.jpg and return
+ * the public CloudFront URL. No DB persistence — caller (mqtt-gateway) owns the
+ * device-facing image{url} message.
+ */
+async function uploadImagineImage(fileBuffer) {
+  const s3Key = `imagine/${randomUUID()}.jpg`;
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: fileBuffer,
+    ContentType: 'image/jpeg',
+    CacheControl: 'max-age=31536000',
+  }));
+  const url = `https://${CLOUDFRONT_DOMAIN}/${s3Key}`;
+  return { success: true, url, s3Key };
+}
+
 module.exports = {
   uploadContentFile,
-  uploadThumbnail
+  uploadThumbnail,
+  uploadImagineImage
 };
