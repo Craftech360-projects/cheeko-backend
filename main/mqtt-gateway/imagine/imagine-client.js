@@ -1,7 +1,7 @@
 // imagine/imagine-client.js
 const WebSocket = require('ws');
 
-function generateImagine(opusFrames, { lineArtWsUrl, timeoutMs = 20000 }) {
+function generateImagine(opusFrames, { lineArtWsUrl, timeoutMs = Number(process.env.IMAGINE_TIMEOUT_MS) || 90000 }) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(lineArtWsUrl);
     let settled = false;
