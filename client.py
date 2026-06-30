@@ -21,9 +21,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.149"
+SERVER_IP = "192.168.0.193"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.149"
+MQTT_BROKER_HOST ="192.168.0.193"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
@@ -133,6 +133,9 @@ class TestClient:
         self.last_audio_received = 0
         self.session_active = True
         self.conversation_count = 0
+
+        # Cards for mid-session RFID mimic: list of (label, uid), tapped via number keys.
+        self.rfid_cards = []
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
@@ -284,6 +287,27 @@ class TestClient:
             {"card_up_to_date", "card_content", "card_ai", "card_unknown"},
             timeout=15,
         )
+
+    def mimic_rfid_scan(self, rfid_uid: str) -> None:
+        """Fire-and-forget card_lookup to mimic a mid-session RFID tap (character switch).
+
+        Unlike send_rfid_card_lookup, this does not block waiting for a reply — during a
+        live voice session the gateway handles the switch and dispatches a fresh room.
+        """
+        rfid_uid = (rfid_uid or "").strip()
+        if not rfid_uid:
+            logger.warning("[RFID] No card UID; skipping mimic scan.")
+            return
+        payload = {
+            "type": "card_lookup",
+            "event_id": f"lookup_{uuid.uuid4().hex[:12]}",
+            "session_id": udp_session_details.get("session_id"),
+            "rfid_uid": rfid_uid,
+            "mac_address": self.device_mac_formatted,
+            "tap_ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        logger.info("[RFID] Mimicking card tap for UID=%s", rfid_uid)
+        self.publish_device_message(payload)
 
     def request_content_download(
         self,
@@ -636,8 +660,12 @@ class TestClient:
             logger.error(f"   Broker: {mqtt_broker}:{mqtt_port}")
             return False
 
-    def send_hello_and_get_session(self) -> bool:
-        """Sends 'hello' message and waits for session details."""
+    def send_hello_and_get_session(self, feature: Optional[str] = None) -> bool:
+        """Sends 'hello' message and waits for session details.
+
+        `feature` (e.g. "ai_imagine") is added at the top level of the hello so the
+        gateway routes the whole session to that feature (spec Option A).
+        """
         logger.info("[STEP] STEP 3: Sending 'hello' and pinging UDP...")
         # Use the client_id from our generated MQTT credentials
         hello_message = {
@@ -652,6 +680,8 @@ class TestClient:
             },
             "features": ["tts", "asr", "vad"]
         }
+        if feature:
+            hello_message["feature"] = feature
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
             response = mqtt_message_queue.get(timeout=30)
@@ -906,8 +936,12 @@ class TestClient:
         self.mqtt_client.publish("device-server", json.dumps(listen_payload))
         logger.info(
             "[WAIT] Test running. Press Spacebar to abort TTS or Ctrl+C to stop.")
+        if self.rfid_cards:
+            logger.info("[RFID] Press a number key to mimic an RFID card tap (switch character):")
+            for i, (label, uid) in enumerate(self.rfid_cards, 1):
+                logger.info("   [%d] %s  (uid=%s)", i, label, uid)
 
-        # Start a thread to monitor spacebar press
+        # Start a thread to monitor spacebar (abort) and number keys (RFID mimic)
         def monitor_spacebar():
             while not stop_threads.is_set() and self.session_active:
                 if keyboard.is_pressed('space'):
@@ -923,6 +957,15 @@ class TestClient:
                     # Wait for the key to be released to avoid multiple sends
                     while keyboard.is_pressed('space') and not stop_threads.is_set():
                         time.sleep(0.01)
+
+                for i, (label, uid) in enumerate(self.rfid_cards):
+                    key = str(i + 1)
+                    if keyboard.is_pressed(key):
+                        logger.info("[RFID] Key %s -> tapping card %s", key, label)
+                        self.mimic_rfid_scan(uid)
+                        while keyboard.is_pressed(key) and not stop_threads.is_set():
+                            time.sleep(0.01)
+
                 time.sleep(0.01)
 
         spacebar_thread = threading.Thread(
@@ -1061,6 +1104,99 @@ class TestClient:
 
         self.cleanup()
 
+    def save_image_from_url(self, url: str, request_id: str = "") -> Optional[str]:
+        """Download the generated AI Imagine image and save it under imagine_outputs/.
+
+        Mimics the device fetching the image{url} over HTTPS. Returns the saved path.
+        """
+        try:
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            logger.error("[IMAGINE] Failed to download image from %s: %s", url, exc)
+            return None
+
+        os.makedirs("imagine_outputs", exist_ok=True)
+        name = request_id or uuid.uuid4().hex[:8]
+        path = os.path.join("imagine_outputs", f"{name}.jpg")
+        with open(path, "wb") as fh:
+            fh.write(resp.content)
+        logger.info("[IMAGINE] Saved image -> %s (%d bytes)", path, len(resp.content))
+        try:
+            os.startfile(path)  # Windows: open in the default image viewer
+        except Exception:
+            pass  # headless / non-Windows: just leave the file on disk
+        return path
+
+    def run_imagine_test(self, use_ota: bool = False) -> None:
+        """AI Imagine: speak a prompt, receive a generated image URL, download it.
+
+        Hold SPACE and speak your prompt; release to generate. Repeat for more images.
+        Ctrl+C to quit. No TTS playback — the response is an image, not audio.
+        """
+        if use_ota:
+            if not self.get_ota_config():
+                return
+        else:
+            self.setup_local_test_config()
+        if not self.connect_mqtt():
+            return
+        time.sleep(1)  # Give MQTT a moment to connect and subscribe
+        if not self.send_hello_and_get_session(feature="ai_imagine"):
+            self.cleanup()
+            return
+
+        global stop_threads, start_recording_event, stop_recording_event
+        stop_threads.clear()
+        start_recording_event.clear()
+        stop_recording_event.clear()
+
+        # Only the mic record/send thread is needed; there is no return audio to play.
+        self.audio_recording_thread = threading.Thread(
+            target=self._record_and_send_audio_thread, daemon=True)
+        self.audio_recording_thread.start()
+
+        session_id = udp_session_details["session_id"]
+        logger.info("[IMAGINE] Hold SPACE and speak your prompt; release to generate. Ctrl+C to quit.")
+        try:
+            while not stop_threads.is_set() and self.session_active:
+                if not keyboard.is_pressed('space'):
+                    time.sleep(0.02)
+                    continue
+
+                # SPACE down -> start capturing. The gateway taps the raw Opus frames
+                # for the session regardless of listen/start, so we just stream audio.
+                logger.info("[IMAGINE] Listening... (release SPACE to send)")
+                stop_recording_event.clear()
+                start_recording_event.set()
+                while keyboard.is_pressed('space') and not stop_threads.is_set():
+                    time.sleep(0.02)
+
+                # SPACE up -> stop capturing and signal end of utterance (the trigger).
+                stop_recording_event.set()
+                start_recording_event.clear()
+                self.mqtt_client.publish("device-server", json.dumps(
+                    {"type": "speech_end", "session_id": session_id}))
+                logger.info("[IMAGINE] Sent speech_end; waiting for image...")
+
+                result = self.wait_for_message({"image", "image_error"}, timeout=40)
+                if result is None:
+                    logger.error("[IMAGINE] Timed out waiting for image.")
+                elif result.get("type") == "image_error":
+                    logger.error("[IMAGINE] image_error: code=%s msg=%s",
+                                 result.get("code"), result.get("message"))
+                else:
+                    logger.info("[IMAGINE] image received:\n%s", json.dumps(result, indent=2))
+                    if result.get("url"):
+                        self.save_image_from_url(result["url"], result.get("request_id", ""))
+
+                time.sleep(0.3)  # debounce before the next prompt
+        except KeyboardInterrupt:
+            logger.info("Manual interruption detected. Cleaning up...")
+            stop_threads.set()
+            self.session_active = False
+        self.cleanup()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -1068,12 +1204,24 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--mode",
-        choices=["voice", "rfid"],
+        choices=["voice", "rfid", "imagine"],
         default="voice",
-        help="Test mode to run. RFID mode requires --rfid-uid.",
+        help="Test mode to run. RFID mode requires --rfid-uid. "
+             "imagine mode = AI Imagine (speak a prompt, get a generated image).",
+    )
+    parser.add_argument(
+        "--ota",
+        action="store_true",
+        help="imagine mode: use the OTA handshake instead of the local-gateway config.",
     )
     parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:ac:b5:38"))
     parser.add_argument("--rfid-uid", default=os.getenv("TEST_RFID_UID"))
+    parser.add_argument(
+        "--cards",
+        default=os.getenv("TEST_RFID_CARDS"),
+        help='Voice mode: cards to tap with number keys, e.g. "Tenali:E91C3E0E,Bheem:A1B2C3D4". '
+             '"label:uid" or bare "uid".',
+    )
     parser.add_argument("--local-version", default=os.getenv("TEST_LOCAL_VERSION"))
     parser.add_argument("--local-content-hash", default=os.getenv("TEST_LOCAL_CONTENT_HASH"))
     parser.add_argument("--local-skill-id", default=os.getenv("TEST_LOCAL_SKILL_ID"))
@@ -1085,10 +1233,25 @@ if __name__ == "__main__":
     print(f"[SEQ] Sequence logging: {'ENABLED' if ENABLE_SEQUENCE_LOGGING else 'DISABLED'}")
     print(f"[STATS] Log frequency: Every {LOG_SEQUENCE_EVERY_N_PACKETS} packets")
 
+    def parse_cards(spec, fallback_uid):
+        cards = []
+        for item in (spec or "").split(","):
+            item = item.strip()
+            if not item:
+                continue
+            label, uid = (item.split(":", 1) + [item])[:2] if ":" in item else (item, item)
+            cards.append((label.strip(), uid.strip()))
+        if not cards and fallback_uid:
+            cards.append((fallback_uid, fallback_uid))
+        return cards
+
     client = TestClient(device_mac=args.device_mac)
+    client.rfid_cards = parse_cards(args.cards, args.rfid_uid)
     try:
         if args.mode == "voice":
             client.run_test()
+        elif args.mode == "imagine":
+            client.run_imagine_test(use_ota=args.ota)
         else:
             if not args.rfid_uid:
                 raise SystemExit("--rfid-uid is required in --mode rfid")

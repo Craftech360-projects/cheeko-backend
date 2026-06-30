@@ -16,12 +16,16 @@ async function runImagine(conn, deps) {
   conn.imagineFrames = [];
   const sessionId = conn.udp && conn.udp.session_id;
   const requestId = deps.newRequestId();
+  console.log(`🖼️ [IMAGINE] ${requestId} start: frames=${frames.length}, lineArtWsUrl=${deps.lineArtWsUrl}, managerApiUrl=${deps.managerApiUrl}`);
   try {
     conn.sendMqttMessage(messages.imageStatus({ sessionId, requestId, state: 'generating' }));
     const { jpegBuffer, caption } = await deps.generateImagine(frames, { lineArtWsUrl: deps.lineArtWsUrl });
+    console.log(`🖼️ [IMAGINE] ${requestId} generated: jpeg=${jpegBuffer ? jpegBuffer.length : 0}B, caption="${caption || ''}" — uploading...`);
     const url = await deps.uploadImagineJpeg(jpegBuffer, { managerApiUrl: deps.managerApiUrl, serviceKey: deps.serviceKey });
+    console.log(`🖼️ [IMAGINE] ${requestId} uploaded -> ${url}`);
     conn.sendMqttMessage(messages.imageMessage({ sessionId, requestId, url, caption }));
   } catch (err) {
+    console.error(`🖼️ [IMAGINE] ${requestId} FAILED (${mapError(err)}): ${err && err.message}`, err && err.stack);
     conn.sendMqttMessage(messages.imageError({ sessionId, requestId, code: mapError(err), message: 'Could not create that picture.' }));
   } finally {
     conn.imagineInFlight = false;
