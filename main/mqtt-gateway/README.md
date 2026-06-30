@@ -103,6 +103,10 @@ PUBLIC_IP=your-ip    # Server public IP
 ANALYTICS_AUDIT_LOG_ENABLED=false
 ANALYTICS_AUDIT_LOG_PATH=logs/analytics-events.ndjson
 ANALYTICS_AUDIT_LOG_INCLUDE_PAYLOAD=true
+
+# AI Imagine: line_art WebSocket endpoint (raw Opus in, JPEG out).
+# Used only for sessions whose hello carries feature:"ai_imagine".
+LINE_ART_WS_URL=ws://127.0.0.1:8090/ws
 ```
 
 ## Running the Service

@@ -18,6 +18,10 @@ const {
 } = require("../core/media-api-client");
 const logger = require("../utils/logger");
 const { buildDispatchMetadata, DEFAULT_RUNTIME_AGENT } = require("../core/mem0-integration");
+const { runImagine } = require("../imagine/imagine-orchestrator");
+const { generateImagine } = require("../imagine/imagine-client");
+const { uploadImagineJpeg } = require("../imagine/imagine-upload");
+const { randomUUID } = require("crypto");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -268,7 +272,10 @@ class VirtualMQTTConnection {
     debug(`Sending message to ${this.deviceId}: ${payload}`);
 
     try {
-      const parsedPayload = JSON.parse(payload);
+      // Existing callers pass a JSON string; the imagine orchestrator passes an
+      // already-built object. Accept both without changing string behavior.
+      const parsedPayload =
+        typeof payload === "string" ? JSON.parse(payload) : payload;
       this.gateway.publishToDevice(this.fullClientId, parsedPayload);
     } catch (error) {
       console.error(
@@ -428,6 +435,12 @@ class VirtualMQTTConnection {
     const macForRoom = this.macAddress.replace(/:/g, "");
     const futureSessionId = `${newSessionUuid}_${macForRoom}_${this.roomType}`;
     this.udp.session_id = futureSessionId;
+
+    // AI Imagine: feature flag from hello (spec Option A — top-level json.feature).
+    // When enabled, this session bypasses the LiveKit/chat pipeline entirely.
+    this.imagineFeatureEnabled = json.feature === "ai_imagine";
+    this.imagineInFlight = false;
+    this.imagineFrames = [];
 
     console.log(`🚀 [FAST-HELLO] Sending hello response immediately to device ${this.deviceId}`);
 
@@ -613,6 +626,16 @@ class VirtualMQTTConnection {
     }
     if (this.childProfile) {
       logger.info(`👶 [CHILD-PROFILE] Child: "${this.childProfile.name}", age: ${this.childProfile.age}`);
+    }
+
+    if (this.imagineFeatureEnabled) {
+      // AI Imagine: no LiveKit bridge, no chat agent. Audio is forwarded to
+      // line_art on end-of-utterance (speech_end / listen:stop) instead.
+      this.deferredSetupInProgress = false;
+      logger.info(`🖼️ [IMAGINE] session in ai_imagine mode; skipping LiveKit bridge for ${this.deviceId}`);
+      const totalImagineDeferred = Date.now() - deferredStart;
+      console.log(`✅ [DEFERRED] Imagine background setup completed in ${totalImagineDeferred}ms for ${this.deviceId}`);
+      return;
     }
 
     // ── Step 2: LiveKit room setup ──
@@ -1038,6 +1061,28 @@ class VirtualMQTTConnection {
   }
 
   async parseOtherMessage(json) {
+    // AI Imagine: on end-of-utterance, hand the buffered Opus to the orchestrator.
+    // Guarded so normal (chat/music/story) sessions are completely unaffected.
+    // Placed before the `!this.bridge` guard because imagine sessions never have a bridge.
+    if (
+      this.imagineFeatureEnabled &&
+      (json.type === "speech_end" ||
+        (json.type === "listen" && json.state === "stop"))
+    ) {
+      // fire-and-forget; runImagine serializes + publishes image/image_status/image_error itself
+      runImagine(this, {
+        generateImagine,
+        uploadImagineJpeg,
+        lineArtWsUrl: process.env.LINE_ART_WS_URL,
+        managerApiUrl: process.env.MANAGER_API_URL,
+        serviceKey: process.env.MANAGER_API_SECRET,
+        newRequestId: () => `img_${randomUUID().slice(0, 8)}`,
+      }).catch((e) =>
+        logger.error(`❌ [IMAGINE] runImagine failed: ${e?.message}`)
+      );
+      return;
+    }
+
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
         // Bridge not ready yet — deferred setup still running. Don't kill the session.
@@ -1672,6 +1717,14 @@ class VirtualMQTTConnection {
       console.log(
         `🏓 [UDP PING] Received ping: ${payloadStr} from ${rinfo.address}:${rinfo.port}`
       );
+      return;
+    }
+
+    // AI Imagine: tap raw decrypted Opus frames into a per-session buffer instead of
+    // forwarding to a LiveKit bridge (imagine sessions never create a bridge).
+    if (this.imagineFeatureEnabled) {
+      this.imagineFrames.push(Buffer.from(payload));
+      this.udp.remoteSequence = sequence;
       return;
     }
 
