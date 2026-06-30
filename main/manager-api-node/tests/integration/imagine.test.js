@@ -28,6 +28,15 @@ describe('POST /toy/imagine/upload', () => {
     expect(uploadService.uploadImagineImage).not.toHaveBeenCalled();
   });
 
+  it('rejects with a wrong service key (401)', async () => {
+    const res = await request(app)
+      .post('/toy/imagine/upload')
+      .set('X-Service-Key', 'definitely-wrong-key')
+      .attach('file', JPEG, { filename: 'x.jpg', contentType: 'image/jpeg' });
+    expect(res.status).toBe(401);
+    expect(uploadService.uploadImagineImage).not.toHaveBeenCalled();
+  });
+
   it('uploads a JPEG and returns the URL (200)', async () => {
     const res = await request(app)
       .post('/toy/imagine/upload')
@@ -36,7 +45,9 @@ describe('POST /toy/imagine/upload', () => {
     expect(res.status).toBe(200);
     expect(res.body.code).toBe(0);
     expect(res.body.data.url).toBe('https://cdn.example.net/imagine/abc.jpg');
+    expect(res.body.data.s3Key).toBe('imagine/abc.jpg');
     expect(uploadService.uploadImagineImage).toHaveBeenCalledTimes(1);
+    expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(expect.any(Buffer));
   });
 
   it('rejects a non-JPEG file (400)', async () => {
