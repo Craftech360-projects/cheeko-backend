@@ -1089,6 +1089,13 @@ class VirtualMQTTConnection {
         console.log(`⏳ [DEFERRED] Message type=${json.type} received before bridge ready — ignoring`);
         return;
       }
+      // AI Imagine sessions intentionally have NO bridge. Ordinary control messages
+      // (e.g. listen/start) must NOT tear the session down — the image trigger
+      // (speech_end / listen-stop) is handled above; ignore everything else here.
+      if (this.imagineFeatureEnabled) {
+        console.log(`🖼️ [IMAGINE] ignoring ${json.type} (no bridge in imagine mode)`);
+        return;
+      }
       if (json.type !== "goodbye") {
         this.sendMqttMessage(
           JSON.stringify({ type: "goodbye", session_id: json.session_id })
