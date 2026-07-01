@@ -1,0 +1,11 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-ai-imagine-images",
+      "Filter": { "Prefix": "imagine/" },
+      "Status": "Enabled",
+      "Expiration": { "Days": 1 },
+      "AbortIncompleteMultipartUpload": { "DaysAfterInitiation": 1 }
+    }
+  ]
+}
