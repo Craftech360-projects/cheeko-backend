@@ -1100,6 +1100,9 @@ class VirtualMQTTConnection {
       // (e.g. listen/start) must NOT tear the session down — the image trigger
       // (speech_end / listen-stop) is handled above; ignore everything else here.
       if (this.imagineFeatureEnabled) {
+        // Mark closed so an in-flight generation drops its result instead of uploading
+        // and publishing to a session the device has already left.
+        if (json.type === "goodbye") this.imagineClosed = true;
         console.log(`🖼️ [IMAGINE] ignoring ${json.type} (no bridge in imagine mode)`);
         return;
       }

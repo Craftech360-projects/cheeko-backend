@@ -48,6 +48,18 @@ test('error mapping: no-speech', async () => {
   assert.strictEqual(conn.sent[1].code, 'no_speech');
 });
 
+test('closed session: drops result mid-generation, no upload or image', async () => {
+  const conn = fakeConn();
+  let uploaded = false;
+  await runImagine(conn, baseDeps({
+    generateImagine: async () => { conn.imagineClosed = true; return { jpegBuffer: Buffer.from([9]), caption: 'x' }; },
+    uploadImagineJpeg: async () => { uploaded = true; return 'https://cdn/x.jpg'; },
+  }));
+  assert.strictEqual(uploaded, false);
+  assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_status']);
+  assert.strictEqual(conn.imagineInFlight, false);
+});
+
 test('empty frames: no_speech without calling line_art', async () => {
   const conn = fakeConn();
   conn.imagineFrames = [];

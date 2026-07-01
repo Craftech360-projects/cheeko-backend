@@ -26,6 +26,11 @@ async function runImagine(conn, deps) {
   try {
     conn.sendMqttMessage(messages.imageStatus({ sessionId, requestId, state: 'generating' }));
     const { jpegBuffer, caption } = await deps.generateImagine(frames, { lineArtWsUrl: deps.lineArtWsUrl });
+    if (conn.imagineClosed) {
+      // Device left (goodbye/reconnect) while generating — don't upload or publish to a dead session.
+      console.log(`🖼️ [IMAGINE] ${requestId} session closed mid-generation — dropping result`);
+      return;
+    }
     console.log(`🖼️ [IMAGINE] ${requestId} generated: jpeg=${jpegBuffer ? jpegBuffer.length : 0}B, caption="${caption || ''}" — uploading...`);
     const url = await deps.uploadImagineJpeg(jpegBuffer, { managerApiUrl: deps.managerApiUrl, serviceKey: deps.serviceKey });
     console.log(`🖼️ [IMAGINE] ${requestId} uploaded -> ${url}`);
