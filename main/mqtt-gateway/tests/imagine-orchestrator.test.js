@@ -1,7 +1,7 @@
 // tests/imagine-orchestrator.test.js
 const test = require('node:test');
 const assert = require('assert');
-const { runImagine } = require('../imagine/imagine-orchestrator');
+const { runImagine, mapError } = require('../imagine/imagine-orchestrator');
 
 function fakeConn() {
   return { imagineInFlight: false, imagineFrames: [Buffer.from([1])], udp: { session_id: 'sess1' }, sent: [], sendMqttMessage(m) { this.sent.push(m); } };
@@ -58,6 +58,22 @@ test('closed session: drops result mid-generation, no upload or image', async ()
   assert.strictEqual(uploaded, false);
   assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_status']);
   assert.strictEqual(conn.imagineInFlight, false);
+});
+
+test('rate limit: second request within cooldown is rejected, line_art not called', async () => {
+  const conn = fakeConn();
+  conn.lastImagineAt = Date.now(); // a request just ran
+  await runImagine(conn, baseDeps({
+    cooldownMs: 5000,
+    generateImagine: async () => { throw new Error('must not run while rate-limited'); },
+  }));
+  assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_error']);
+  assert.strictEqual(conn.sent[0].code, 'rate_limited');
+  assert.strictEqual(conn.imagineInFlight, false);
+});
+
+test('mapError: HTTP 429 maps to rate_limited', () => {
+  assert.strictEqual(mapError(new Error('Request failed with status code 429')), 'rate_limited');
 });
 
 test('empty frames: no_speech without calling line_art', async () => {

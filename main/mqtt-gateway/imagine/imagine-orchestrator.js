@@ -5,17 +5,24 @@ function mapError(err) {
   const m = (err && err.message ? err.message : '').toLowerCase();
   if (/no speech|no usable|transcribe/.test(m)) return 'no_speech';
   if (/safety|blocked|filter/.test(m)) return 'safety_block';
-  if (/rate.?limit|too many/.test(m)) return 'rate_limited';
+  if (/rate.?limit|too many|429/.test(m)) return 'rate_limited';
   return 'generation_failed';
 }
 
 async function runImagine(conn, deps) {
   if (conn.imagineInFlight) return; // ponytail: one image per session; drop overlapping requests
+  const sessionId = conn.udp && conn.udp.session_id;
+  const requestId = deps.newRequestId();
+  // Per-session cooldown so rapid repeated knob-presses can't spam FLUX (cost/abuse).
+  const cooldownMs = deps.cooldownMs != null ? deps.cooldownMs : 2000;
+  if (conn.lastImagineAt && Date.now() - conn.lastImagineAt < cooldownMs) {
+    conn.sendMqttMessage(messages.imageError({ sessionId, requestId, code: 'rate_limited', message: 'One at a time — try again in a moment.' }));
+    return;
+  }
+  conn.lastImagineAt = Date.now();
   conn.imagineInFlight = true;
   const frames = conn.imagineFrames || [];
   conn.imagineFrames = [];
-  const sessionId = conn.udp && conn.udp.session_id;
-  const requestId = deps.newRequestId();
   if (!frames.length) {
     // Knob pressed but no audio captured — don't bother line_art.
     conn.sendMqttMessage(messages.imageError({ sessionId, requestId, code: 'no_speech', message: "I didn't hear anything." }));
