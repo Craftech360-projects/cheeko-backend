@@ -47,3 +47,14 @@ test('error mapping: no-speech', async () => {
   await runImagine(conn, baseDeps({ generateImagine: async () => { throw new Error('no speech detected'); } }));
   assert.strictEqual(conn.sent[1].code, 'no_speech');
 });
+
+test('empty frames: no_speech without calling line_art', async () => {
+  const conn = fakeConn();
+  conn.imagineFrames = [];
+  let called = false;
+  await runImagine(conn, baseDeps({ generateImagine: async () => { called = true; return {}; } }));
+  assert.strictEqual(called, false);
+  assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_error']);
+  assert.strictEqual(conn.sent[0].code, 'no_speech');
+  assert.strictEqual(conn.imagineInFlight, false);
+});

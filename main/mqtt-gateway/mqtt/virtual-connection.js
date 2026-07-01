@@ -1083,6 +1083,13 @@ class VirtualMQTTConnection {
       return;
     }
 
+    // AI Imagine: a fresh knob-press (listen/start) begins a new utterance — drop any
+    // stale audio buffered from a previous aborted press so prompts don't bleed together.
+    if (this.imagineFeatureEnabled && json.type === "listen" && json.state === "start") {
+      this.imagineFrames = [];
+      return;
+    }
+
     if (!this.bridge) {
       if (this.deferredSetupInProgress) {
         // Bridge not ready yet — deferred setup still running. Don't kill the session.
@@ -1730,7 +1737,8 @@ class VirtualMQTTConnection {
     // AI Imagine: tap raw decrypted Opus frames into a per-session buffer instead of
     // forwarding to a LiveKit bridge (imagine sessions never create a bridge).
     if (this.imagineFeatureEnabled) {
-      this.imagineFrames.push(Buffer.from(payload));
+      // Cap ~2 min of 60ms frames so a device that never sends speech_end can't OOM us.
+      if (this.imagineFrames.length < 2000) this.imagineFrames.push(Buffer.from(payload));
       this.udp.remoteSequence = sequence;
       return;
     }

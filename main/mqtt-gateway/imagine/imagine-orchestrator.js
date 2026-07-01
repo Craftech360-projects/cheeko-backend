@@ -16,6 +16,12 @@ async function runImagine(conn, deps) {
   conn.imagineFrames = [];
   const sessionId = conn.udp && conn.udp.session_id;
   const requestId = deps.newRequestId();
+  if (!frames.length) {
+    // Knob pressed but no audio captured — don't bother line_art.
+    conn.sendMqttMessage(messages.imageError({ sessionId, requestId, code: 'no_speech', message: "I didn't hear anything." }));
+    conn.imagineInFlight = false;
+    return;
+  }
   console.log(`🖼️ [IMAGINE] ${requestId} start: frames=${frames.length}, lineArtWsUrl=${deps.lineArtWsUrl}, managerApiUrl=${deps.managerApiUrl}`);
   try {
     conn.sendMqttMessage(messages.imageStatus({ sessionId, requestId, state: 'generating' }));
