@@ -12,6 +12,12 @@ const path = require('path');
 const AWS_REGION = process.env.AWS_DEFAULT_REGION || 'eu-north-1';
 const S3_BUCKET = process.env.S3_BUCKET_NAME || 'cheeko-music-files';
 const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN || 'dsmzc13oafp54.cloudfront.net';
+// Optional local S3-compatible endpoint (e.g. MinIO). When set, uploads use it with
+// path-style URLs instead of AWS. Leave unset for real AWS S3.
+const S3_ENDPOINT = process.env.S3_ENDPOINT || undefined;
+// Public base for AI Imagine image URLs. For MinIO set e.g.
+// http://192.168.0.186:9000/<bucket>; falls back to CloudFront for AWS.
+const IMAGINE_PUBLIC_BASE = process.env.IMAGINE_PUBLIC_BASE || `https://${CLOUDFRONT_DOMAIN}`;
 
 logger.info('S3 Upload Service initialized', {
   region: AWS_REGION,
@@ -23,6 +29,7 @@ logger.info('S3 Upload Service initialized', {
 
 const s3Client = new S3Client({
   region: AWS_REGION,
+  ...(S3_ENDPOINT ? { endpoint: S3_ENDPOINT, forcePathStyle: true } : {}),
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
@@ -159,7 +166,7 @@ async function uploadImagineImage(fileBuffer) {
     ContentType: 'image/jpeg',
     CacheControl: 'max-age=31536000',
   }));
-  const url = `https://${CLOUDFRONT_DOMAIN}/${s3Key}`;
+  const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
   return { success: true, url, s3Key };
 }
 
