@@ -203,7 +203,8 @@ const getActiveProviders = async () => {
     stt: stt ? {
       provider: stt.provider_name,
       model: stt.model || '',
-      language: stt.language || ''
+      language: stt.language || '',
+      api_key: stt.api_key || ''
     } : null,
     tts: tts ? {
       provider: tts.provider_name,
