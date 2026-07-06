@@ -1829,6 +1829,7 @@ async function getKids(firebaseUid) {
         gender: k.gender,
         interests: k.interests || [],
         language: k.language,
+        parent_rule: k.parent_rule || null,
         created_at: k.created_at,
         updated_at: k.updated_at,
     }));
@@ -1876,6 +1877,7 @@ async function updateKid(kidId, data) {
     if (data.interests) updates.interests = data.interests;
     if (data.language) updates.language = data.language;
     if (data.avatar_url) updates.avatar_url = data.avatar_url;
+    if (data.parent_rule !== undefined) updates.parent_rule = data.parent_rule || null;
 
     const kid = await prisma.kid_profile.update({
         where: { id: BigInt(kidId) },
@@ -1892,6 +1894,7 @@ async function updateKid(kidId, data) {
         isActive: true,
         gender: kid.gender,
         interests: kid.interests || [],
+        parent_rule: kid.parent_rule || null,
     };
 }
 
