@@ -4,6 +4,11 @@
 set -euo pipefail
 ROOT=/opt/cheeko-backend/main
 
+echo "==> pull latest main"
+cd /opt/cheeko-backend
+git fetch origin main
+git reset --hard origin/main
+
 echo "==> manager-api"
 cd "$ROOT/manager-api-node"
 npm ci --omit=dev || npm install --omit=dev
