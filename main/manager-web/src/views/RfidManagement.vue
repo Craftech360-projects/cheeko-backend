@@ -781,6 +781,45 @@
                                     </div>
                                 </div>
 
+                                <!-- Manual UID lookup (methods/data already existed; UI restored) -->
+                                <div class="console-input-section">
+                                    <div class="console-input">
+                                        <el-input
+                                            v-model="consoleLookupUid"
+                                            placeholder="Enter RFID UID (e.g. 5C42C905)"
+                                            clearable
+                                            @keyup.enter.native="handleConsoleLookup">
+                                            <template slot="prepend"><i class="el-icon-postcard"></i></template>
+                                        </el-input>
+                                        <div class="console-sequence">
+                                            <span>Seq</span>
+                                            <el-input-number v-model="consoleSequence" :min="1" size="small" controls-position="right"></el-input-number>
+                                        </div>
+                                    </div>
+                                    <div class="console-actions">
+                                        <el-button type="primary" icon="el-icon-search" :loading="consoleLookupLoading" @click="handleConsoleLookup">Lookup Card Mapping</el-button>
+                                        <el-button icon="el-icon-collection" :loading="consoleSeriesLoading" @click="handleSeriesLookup">Series</el-button>
+                                        <el-button icon="el-icon-document" :loading="consoleContentLoading" @click="handleContentLookup">Content (seq)</el-button>
+                                        <el-button icon="el-icon-download" :loading="consoleDownloadLoading" @click="handleDownloadLookup">Download</el-button>
+                                    </div>
+
+                                    <div v-if="consoleLookupResult" style="margin-top: 12px;">
+                                        <el-alert
+                                            :type="consoleLookupResult.success ? 'success' : 'error'"
+                                            :title="(consoleLookupResult.success ? 'Resolved' : 'Not resolved') + ' — ' + consoleLookupResult.type"
+                                            :closable="false"
+                                            show-icon>
+                                        </el-alert>
+                                        <div v-if="consoleLookupResult.success && consoleLookupResult.data" style="display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0; font-size: 13px;">
+                                            <span v-if="consoleLookupResult.data.contentType"><strong>Type:</strong> {{ consoleLookupResult.data.contentType }}</span>
+                                            <span v-if="consoleLookupResult.data.characterName || consoleLookupResult.data.agentName"><strong>Character:</strong> {{ consoleLookupResult.data.characterName || consoleLookupResult.data.agentName }}</span>
+                                            <span v-if="consoleLookupResult.data.title"><strong>Title:</strong> {{ consoleLookupResult.data.title }}</span>
+                                            <span v-if="consoleLookupResult.data.packCode"><strong>Pack:</strong> {{ consoleLookupResult.data.packCode }}</span>
+                                        </div>
+                                        <pre style="background: rgba(0,0,0,0.25); padding: 10px; border-radius: 6px; max-height: 320px; overflow: auto; font-size: 12px;">{{ JSON.stringify(consoleLookupResult.data, null, 2) }}</pre>
+                                    </div>
+                                </div>
+
                                 <!-- NFC Live Reader Panel -->
                                 <div class="nfc-live-panel" :class="{ connected: nfcConnected, scanning: nfcScanning }">
                                     <div class="nfc-status-row">
