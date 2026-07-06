@@ -27,5 +27,8 @@ npm ci || npm install
 npm run build
 pm2 startOrReload /opt/ecosystem.config.js --only dashboard --update-env
 
+echo "==> bootstrap EMQX rules (idempotent)"
+bash /opt/cheeko-backend/deploy/emqx-rules.sh || echo "WARN: EMQX rule bootstrap skipped"
+
 pm2 save
 echo "==> cheeko-backend deploy done"
