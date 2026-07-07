@@ -2,8 +2,9 @@
 const axios = require('axios');
 const FormData = require('form-data');
 
-async function uploadImagineJpeg(jpegBuffer, { managerApiUrl, serviceKey }) {
+async function uploadImagineJpeg(jpegBuffer, { managerApiUrl, serviceKey, deviceMac }) {
   const form = new FormData();
+  if (deviceMac) form.append('deviceMac', deviceMac); // buckets the image under the device in S3
   form.append('file', jpegBuffer, { filename: 'imagine.jpg', contentType: 'image/jpeg' });
   const res = await axios.post(`${managerApiUrl}/imagine/upload`, form, {
     headers: { ...form.getHeaders(), 'X-Service-Key': serviceKey },
