@@ -3,7 +3,7 @@
  * Handles file uploads to AWS S3
  */
 
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
 const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const path = require('path');
@@ -152,13 +152,24 @@ const uploadThumbnail = async (fileBuffer, filename, contentType, mimeType) => {
   }
 };
 
+// S3 keys are case-sensitive, so canonicalize the MAC (lowercase, colons->dashes)
+// in BOTH write and list paths so they always match regardless of caller casing.
+// Returns '' for a missing/malformed MAC so callers fall back to the flat prefix.
+function macKeySegment(deviceMac) {
+  if (!deviceMac || typeof deviceMac !== 'string') return '';
+  const m = deviceMac.trim().toLowerCase().replace(/:/g, '-');
+  return /^[0-9a-f]{2}(-[0-9a-f]{2}){5}$/.test(m) ? m : '';
+}
+
 /**
- * AI Imagine: upload a generated JPEG to S3 under imagine/<uuid>.jpg and return
- * the public CloudFront URL. No DB persistence — caller (mqtt-gateway) owns the
- * device-facing image{url} message.
+ * AI Imagine: upload a generated JPEG to S3 and return the public CloudFront URL.
+ * When deviceMac is provided the object is bucketed under imagine/<mac>/<uuid>.jpg
+ * so images can be listed per device; otherwise it falls back to imagine/<uuid>.jpg.
+ * No DB persistence — caller (mqtt-gateway) owns the device-facing image{url} message.
  */
-async function uploadImagineImage(fileBuffer) {
-  const s3Key = `imagine/${randomUUID()}.jpg`;
+async function uploadImagineImage(fileBuffer, deviceMac) {
+  const mac = macKeySegment(deviceMac);
+  const s3Key = `imagine/${mac ? `${mac}/` : ''}${randomUUID()}.jpg`;
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
@@ -170,8 +181,26 @@ async function uploadImagineImage(fileBuffer) {
   return { success: true, url, s3Key };
 }
 
+/**
+ * AI Imagine: list a device's generated images, newest first. Returns [] for an
+ * unknown/malformed MAC. ponytail: single ListObjectsV2 page (1000 max) — add a
+ * continuation token if a device ever exceeds 1000 images.
+ */
+async function listImagineImages(deviceMac) {
+  const mac = macKeySegment(deviceMac);
+  if (!mac) return [];
+  const out = await s3Client.send(new ListObjectsV2Command({
+    Bucket: S3_BUCKET,
+    Prefix: `imagine/${mac}/`,
+  }));
+  return (out.Contents || [])
+    .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+    .map((o) => ({ url: `${IMAGINE_PUBLIC_BASE}/${o.Key}`, createdAt: o.LastModified }));
+}
+
 module.exports = {
   uploadContentFile,
   uploadThumbnail,
-  uploadImagineImage
+  uploadImagineImage,
+  listImagineImages
 };

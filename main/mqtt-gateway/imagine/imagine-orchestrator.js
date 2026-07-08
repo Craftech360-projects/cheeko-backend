@@ -39,7 +39,7 @@ async function runImagine(conn, deps) {
       return;
     }
     console.log(`🖼️ [IMAGINE] ${requestId} generated: jpeg=${jpegBuffer ? jpegBuffer.length : 0}B, caption="${caption || ''}" — uploading...`);
-    const url = await deps.uploadImagineJpeg(jpegBuffer, { managerApiUrl: deps.managerApiUrl, serviceKey: deps.serviceKey });
+    const url = await deps.uploadImagineJpeg(jpegBuffer, { managerApiUrl: deps.managerApiUrl, serviceKey: deps.serviceKey, deviceMac: conn.macAddress });
     console.log(`🖼️ [IMAGINE] ${requestId} uploaded -> ${url}`);
     conn.sendMqttMessage(messages.imageMessage({ sessionId, requestId, url, caption }));
   } catch (err) {

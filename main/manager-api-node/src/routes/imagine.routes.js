@@ -31,7 +31,7 @@ const uploadJpeg = (req, res, next) => upload.single('file')(req, res, (err) => 
 
 router.post('/upload', requireServiceKey, uploadJpeg, asyncHandler(async (req, res) => {
   if (!req.file) return badRequest(res, 'No file uploaded');
-  const result = await uploadService.uploadImagineImage(req.file.buffer);
+  const result = await uploadService.uploadImagineImage(req.file.buffer, req.body.deviceMac);
   return success(res, result);
 }));
 
