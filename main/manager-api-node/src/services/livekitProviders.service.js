@@ -84,6 +84,16 @@ const providerModels = {
       priority: 'int',
       config_json: 'json'
     }
+  },
+  image: {
+    delegate: 'image_providers',
+    updateFields: {
+      provider_name: 'string',
+      model: 'string',
+      api_key: 'string',
+      priority: 'int',
+      config_json: 'json'
+    }
   }
 };
 
@@ -141,18 +151,20 @@ const buildProviderUpdateData = (model, payload = {}) => {
 
 const listProviders = async () => {
   const orderBy = [{ is_active: 'desc' }, { priority: 'desc' }, { updated_at: 'desc' }];
-  const [llm, stt, tts, moderation] = await Promise.all([
+  const [llm, stt, tts, moderation, image] = await Promise.all([
     prisma.llm_providers.findMany({ orderBy }),
     prisma.stt_providers.findMany({ orderBy }),
     prisma.tts_providers.findMany({ orderBy }),
-    prisma.moderation_providers.findMany({ orderBy })
+    prisma.moderation_providers.findMany({ orderBy }),
+    prisma.image_providers.findMany({ orderBy })
   ]);
 
   return {
     llm: (llm || []).map(normalizeProviderRow),
     stt: (stt || []).map(normalizeProviderRow),
     tts: (tts || []).map(normalizeProviderRow),
-    moderation: (moderation || []).map(normalizeProviderRow)
+    moderation: (moderation || []).map(normalizeProviderRow),
+    image: (image || []).map(normalizeProviderRow)
   };
 };
 
@@ -189,7 +201,7 @@ const activateProvider = async (type, id) => {
 };
 
 const getActiveProviders = async () => {
-  const [llm, stt, tts, moderation] = await Promise.all([
+  const [llm, stt, tts, moderation, image] = await Promise.all([
     prisma.llm_providers.findFirst({
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
@@ -205,11 +217,15 @@ const getActiveProviders = async () => {
     prisma.moderation_providers.findFirst({
       where: { is_active: true },
       orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
+    }),
+    prisma.image_providers.findFirst({
+      where: { is_active: true },
+      orderBy: [{ priority: 'desc' }, { updated_at: 'desc' }]
     })
   ]);
 
   return {
-    updated_at: pickLatestUpdatedAt([llm, stt, tts, moderation]),
+    updated_at: pickLatestUpdatedAt([llm, stt, tts, moderation, image]),
     llm: llm ? {
       model_name: llm.model_name,
       model: llm.model,
@@ -235,6 +251,11 @@ const getActiveProviders = async () => {
       provider: moderation.provider_name,
       model: moderation.model || '',
       api_key: moderation.api_key || ''
+    } : null,
+    image: image ? {
+      provider: image.provider_name,
+      model: image.model || '',
+      api_key: image.api_key || ''
     } : null
   };
 };
@@ -393,6 +414,40 @@ const setActiveModerationProvider = async (payload = {}) => {
   return updated;
 };
 
+const setActiveImageProvider = async (payload = {}) => {
+  const providerName = toRequiredString(payload.provider, 'provider');
+  const model = toNullableString(payload.model) || '';
+  const apiKey = toNullableString(payload.api_key) || '';
+  const priority = toOptionalInt(payload.priority, 'priority') ?? 0;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.image_providers.updateMany({
+      where: { is_active: true },
+      data: { is_active: false, updated_at: new Date() }
+    });
+
+    return tx.image_providers.upsert({
+      where: { provider_name: providerName },
+      create: {
+        provider_name: providerName,
+        model,
+        api_key: apiKey,
+        is_active: true,
+        priority
+      },
+      update: {
+        model,
+        api_key: apiKey,
+        is_active: true,
+        priority,
+        updated_at: new Date()
+      }
+    });
+  });
+
+  return updated;
+};
+
 module.exports = {
   listProviders,
   updateProvider,
@@ -401,5 +456,6 @@ module.exports = {
   setActiveLLMProvider,
   setActiveSTTProvider,
   setActiveTTSProvider,
-  setActiveModerationProvider
+  setActiveModerationProvider,
+  setActiveImageProvider
 };

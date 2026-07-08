@@ -22,6 +22,11 @@ jest.mock('../../src/config/database', () => ({
       update: jest.fn(),
       updateMany: jest.fn()
     },
+    image_providers: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+      updateMany: jest.fn()
+    },
     $transaction: jest.fn()
   }
 }));
@@ -46,6 +51,7 @@ describe('livekitProviders.service provider management', () => {
       { id: 3n, provider_name: 'cartesia', voice_id: 'voice-1', api_key: 'tts-key', is_active: true }
     ]);
     prisma.moderation_providers.findMany.mockResolvedValue([]);
+    prisma.image_providers.findMany.mockResolvedValue([]);
 
     const providers = await livekitProvidersService.listProviders();
 

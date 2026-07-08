@@ -74,6 +74,19 @@ router.put('/providers/active/moderation',
   })
 );
 
+router.put('/providers/active/image',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      await livekitProvidersService.setActiveImageProvider(req.body || {});
+      const data = await livekitProvidersService.getActiveProviders();
+      success(res, data, 'Image provider updated');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 router.put('/providers/:type/:id',
   requireAdmin,
   asyncHandler(async (req, res) => {
