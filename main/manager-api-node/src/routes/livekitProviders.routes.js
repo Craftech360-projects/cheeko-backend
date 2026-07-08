@@ -61,6 +61,19 @@ router.put('/providers/active/tts',
   })
 );
 
+router.put('/providers/active/moderation',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      await livekitProvidersService.setActiveModerationProvider(req.body || {});
+      const data = await livekitProvidersService.getActiveProviders();
+      success(res, data, 'Moderation provider updated');
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
 router.put('/providers/:type/:id',
   requireAdmin,
   asyncHandler(async (req, res) => {
