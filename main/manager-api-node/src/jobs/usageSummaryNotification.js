@@ -57,7 +57,7 @@ async function getNotifiableDevices() {
       sys_user: {
         parent_profile: {
           fcm_token: { not: null },
-          push_notifications: true,
+          push_notifications: { not: false },
         },
       },
     },
