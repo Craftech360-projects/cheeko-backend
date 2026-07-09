@@ -196,6 +196,11 @@
             <el-form-item label="Brightness">
               <el-slider v-model="settingsForm.brightness" :min="10" :max="100" :show-input="true" />
             </el-form-item>
+            <el-form-item label="Theme">
+              <el-select v-model="settingsForm.theme" style="width: 160px;">
+                <el-option v-for="(name, idx) in themeNames" :key="idx" :label="name" :value="idx" />
+              </el-select>
+            </el-form-item>
             <el-form-item label="Auto Listen">
               <el-switch v-model="settingsForm.auto_listen" />
             </el-form-item>
@@ -339,9 +344,11 @@ export default {
       progressTrend: [],
       analyticsEvents: [],
       analyticsBattery: null,
+      themeNames: ['Sunny', 'Night', 'Ocean', 'Candy', 'Orange', 'White', 'Pink'],
       settingsForm: {
         volume: 70,
         brightness: 80,
+        theme: 0,
         auto_listen: false,
         system_sound: true,
         system_prompt: true,
@@ -505,6 +512,7 @@ export default {
       return {
         volume: 70,
         brightness: 80,
+        theme: 0,
         auto_listen: false,
         system_sound: true,
         system_prompt: true,
@@ -778,6 +786,7 @@ export default {
         settings: {
           volume: Number(this.settingsForm.volume),
           brightness: Number(this.settingsForm.brightness),
+          theme: Number(this.settingsForm.theme),
           auto_listen: Boolean(this.settingsForm.auto_listen),
           system_sound: Boolean(this.settingsForm.system_sound),
           system_prompt: Boolean(this.settingsForm.system_prompt),

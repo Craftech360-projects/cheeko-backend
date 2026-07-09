@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import uuid
 import threading
@@ -21,9 +22,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.21"
+SERVER_IP = "192.168.0.20"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.21"
+MQTT_BROKER_HOST ="192.168.0.20"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
@@ -96,6 +97,32 @@ def generate_unique_mac() -> str:
     mac_bytes = [0x00, 0x16, 0x3E,  # OUI prefix
                  uuid.uuid4().bytes[0], uuid.uuid4().bytes[1], uuid.uuid4().bytes[2]]
     return '_'.join(f'{b:02x}' for b in mac_bytes)
+
+
+# --- Cheeko Face expression tags (mimics firmware parsing) ---
+FACE_EXPRESSIONS = {
+    "neutral", "happy", "excited", "laughing", "love", "silly", "curious",
+    "surprised", "confused", "shy", "sad", "crying", "angry", "scared", "sleepy",
+}
+FACE_TAG_RE = re.compile(r"^\[([a-z]{2,12})\]\s*")
+
+
+def parse_expression_tag(text):
+    """Mimic firmware: a leading [tag] is stripped from display text.
+
+    Returns (expression, display_text). Known tag drives the face, unknown
+    lowercase tag falls back to neutral, non-tag brackets are left untouched.
+    """
+    m = FACE_TAG_RE.match(text or "")
+    if not m:
+        return None, text or ""
+    tag = m.group(1)
+    return (tag if tag in FACE_EXPRESSIONS else "neutral"), text[m.end():]
+
+
+assert parse_expression_tag("[happy] Yay!") == ("happy", "Yay!")
+assert parse_expression_tag("[zzzz] hi") == ("neutral", "hi")
+assert parse_expression_tag("[OK!] hi") == (None, "[OK!] hi")
 
 
 class TestClient:
@@ -173,6 +200,12 @@ class TestClient:
             payload = json.loads(payload_str)
             logger.info(
                 f"[EMOJI] MQTT Message received on topic '{msg.topic}':\n{json.dumps(payload, indent=2)}")
+
+            # Mimic firmware Cheeko Face: parse expression tag on text-bearing messages
+            if payload.get("type") in ("tts", "llm") and payload.get("text"):
+                face, shown = parse_expression_tag(payload["text"])
+                if face:
+                    logger.info("[FACE] expression=%s | display text: %s", face, shown)
 
             # Handle TTS start signal (reset sequence tracking)
             if payload.get("type") == "tts" and payload.get("state") == "start":

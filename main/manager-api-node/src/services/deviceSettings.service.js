@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   system_prompt: true,
   vibration: true,
   sleep_enabled: true,
+  theme: 0,
   quiet_hours: {
     enabled: false,
     start: '21:00',
@@ -77,6 +78,7 @@ function mergeAndValidateSettings(currentSettings, patch) {
     'system_prompt',
     'vibration',
     'sleep_enabled',
+    'theme',
     'quiet_hours',
   ]);
 
@@ -94,6 +96,11 @@ function mergeAndValidateSettings(currentSettings, patch) {
   if (Object.prototype.hasOwnProperty.call(patch, 'brightness')) {
     ensureIntInRange(patch.brightness, 'brightness', 10, 100);
     next.brightness = patch.brightness;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(patch, 'theme')) {
+    ensureIntInRange(patch.theme, 'theme', 0, 6); // 0..6 -> Sunny..Pink, device clamps too
+    next.theme = patch.theme;
   }
 
   for (const boolKey of ['auto_listen', 'system_sound', 'system_prompt', 'vibration', 'sleep_enabled']) {
@@ -274,7 +281,7 @@ async function patchSettingsByMac(macAddress, patch, deviceId = null) {
   });
 
   logger.info(
-    `[SETTINGS-SYNC][PATCH] mac=${mac} version ${current.settings_version} -> ${nextVersion} sync_status=${targetSyncStatus} publishRequired=${online}`
+    `[SETTINGS-SYNC][PATCH] mac=${mac} version ${current.settings_version} -> ${nextVersion} theme=${merged.theme ?? 'na'} sync_status=${targetSyncStatus} publishRequired=${online}`
   );
 
   return {
@@ -458,7 +465,7 @@ async function onSettingsChanged({ mac_address, sender_client_id = null, device_
   });
 
   logger.info(
-    `[SETTINGS-SYNC][CHANGED] mac=${mac} sender=${sender_client_id || 'na'} reason=${payload.reason || 'na'} server_version=${nextVersion}`
+    `[SETTINGS-SYNC][CHANGED] mac=${mac} sender=${sender_client_id || 'na'} reason=${payload.reason || 'na'} theme=${snapshot.theme ?? 'na'} server_version=${nextVersion}`
   );
 
   return {
@@ -475,7 +482,32 @@ async function onSettingsChanged({ mac_address, sender_client_id = null, device_
 
 async function onDeviceState({ mac_address, sender_client_id = null, device_id = null, payload = {} }) {
   const mac = normalizeRequiredMac(mac_address);
-  await findOrCreateSettingsByMac(mac, device_id);
+  const settingsRow = await findOrCreateSettingsByMac(mac, device_id);
+
+  // Reconcile: if the device reports a settings snapshot AHEAD of the server row
+  // (local changes while offline, or a reset server DB), adopt the device as the
+  // source of truth. Without this the dashboard shows stale settings AND future
+  // server pushes are rejected by firmware (incoming_version <= current_version).
+  const deviceVersion = Number(payload.settings_version);
+  const snapshot = payload.settings;
+  if (
+    snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
+    && Number.isFinite(deviceVersion) && deviceVersion > settingsRow.settings_version
+  ) {
+    await prisma.device_settings.update({
+      where: { id: settingsRow.id },
+      data: {
+        settings: snapshot,
+        settings_version: deviceVersion,
+        sync_status: 'synced',
+        last_applied_version: deviceVersion,
+        updated_at: new Date(),
+      },
+    });
+    logger.info(
+      `[SETTINGS-SYNC][STATE] adopted device snapshot mac=${mac} version ${settingsRow.settings_version} -> ${deviceVersion} theme=${snapshot.theme ?? 'na'}`
+    );
+  }
 
   const now = new Date();
   const data = {

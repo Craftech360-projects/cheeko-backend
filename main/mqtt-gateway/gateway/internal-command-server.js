@@ -86,7 +86,7 @@ function startInternalCommandServer(gateway) {
 
       if (publishResult.published) {
         logger.info(
-          `[SETTINGS-SYNC][INTERNAL-CMD] Published ${resolvedMessage.type || 'unknown'} to sender=${publishResult.targetClientId} topic=${publishResult.topic} payload=${JSON.stringify(resolvedMessage)}`
+          `[SETTINGS-SYNC][INTERNAL-CMD] Published ${resolvedMessage.type || 'unknown'} theme=${resolvedMessage?.settings?.theme ?? 'na'} to sender=${publishResult.targetClientId} topic=${publishResult.topic} payload=${JSON.stringify(resolvedMessage)}`
         );
         sendJson(res, 200, {
           code: 0,
