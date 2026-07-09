@@ -33,6 +33,7 @@ const startServer = async () => {
     const { prisma } = require('./src/config/database');
     const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
     const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
+    const { startUsageSummaryCrons, stopUsageSummaryCrons } = require('./src/jobs/usageSummaryNotification');
     const shouldSkipRequiredTableGuard = process.env.SKIP_DB_SYNC === '1';
 
     assertRequiredPrismaModels(prisma);
@@ -67,6 +68,9 @@ const startServer = async () => {
       startEmailReportCron().catch(err => {
         logger.warn('Failed to start email report cron:', err.message);
       });
+      startUsageSummaryCrons().catch(err => {
+        logger.warn('Failed to start usage summary crons:', err.message);
+      });
     });
 
     // Graceful shutdown
@@ -75,6 +79,7 @@ const startServer = async () => {
 
       // Stop background jobs
       stopEmailReportCron();
+      stopUsageSummaryCrons();
 
       server.close(() => {
         logger.info('Server closed.');
