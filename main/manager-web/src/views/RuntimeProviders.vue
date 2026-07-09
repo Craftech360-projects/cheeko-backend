@@ -207,12 +207,16 @@ export default {
       providers: {
         llm: [],
         stt: [],
-        tts: []
+        tts: [],
+        moderation: [],
+        image: []
       },
       providerTypes: [
         { value: "llm", label: "LLM", caption: "Reasoning model", icon: "el-icon-cpu" },
         { value: "stt", label: "STT", caption: "Speech to text", icon: "el-icon-microphone" },
-        { value: "tts", label: "TTS", caption: "Voice output", icon: "el-icon-headset" }
+        { value: "tts", label: "TTS", caption: "Voice output", icon: "el-icon-headset" },
+        { value: "moderation", label: "Moderation", caption: "Content safety", icon: "el-icon-umbrella" },
+        { value: "image", label: "Image", caption: "AI Imagine generation", icon: "el-icon-picture-outline" }
       ],
       tableColumns: {
         llm: [
@@ -235,6 +239,16 @@ export default {
           { label: "Output", prop: "output_format", mono: true },
           { label: "Sample Rate", prop: "sample_rate_hz" },
           { label: "Temperature", prop: "temperature" },
+          { label: "API Key", prop: "api_key", secret: true }
+        ],
+        moderation: [
+          { label: "Provider", prop: "provider_name", mono: true },
+          { label: "Model", prop: "model", mono: true },
+          { label: "API Key", prop: "api_key", secret: true }
+        ],
+        image: [
+          { label: "Provider", prop: "provider_name", mono: true },
+          { label: "Model", prop: "model", mono: true },
           { label: "API Key", prop: "api_key", secret: true }
         ]
       },
@@ -261,6 +275,18 @@ export default {
           { label: "Output Format", prop: "output_format" },
           { label: "Sample Rate", prop: "sample_rate_hz", type: "number", min: 0 },
           { label: "Temperature", prop: "temperature", type: "number", min: 0, step: 0.01 },
+          { label: "API Key", prop: "api_key", secret: true },
+          { label: "Priority", prop: "priority", type: "number", min: 0 }
+        ],
+        moderation: [
+          { label: "Provider", prop: "provider_name" },
+          { label: "Model", prop: "model" },
+          { label: "API Key", prop: "api_key", secret: true },
+          { label: "Priority", prop: "priority", type: "number", min: 0 }
+        ],
+        image: [
+          { label: "Provider", prop: "provider_name" },
+          { label: "Model", prop: "model" },
           { label: "API Key", prop: "api_key", secret: true },
           { label: "Priority", prop: "priority", type: "number", min: 0 }
         ]
@@ -291,7 +317,9 @@ export default {
           this.providers = {
             llm: (data.data.llm || []).map(this.withUiState),
             stt: (data.data.stt || []).map(this.withUiState),
-            tts: (data.data.tts || []).map(this.withUiState)
+            tts: (data.data.tts || []).map(this.withUiState),
+            moderation: (data.data.moderation || []).map(this.withUiState),
+            image: (data.data.image || []).map(this.withUiState)
           };
           return;
         }
@@ -334,6 +362,7 @@ export default {
       if (!provider) return "Needs activation";
       if (type === "llm") return provider.model || "Model configured";
       if (type === "stt") return provider.model || provider.language || "STT configured";
+      if (type === "moderation" || type === "image") return provider.model || provider.provider_name || "Configured";
       return provider.model_id || provider.voice_id || "Voice configured";
     },
     providerRowClassName({ row }) {
@@ -594,6 +623,18 @@ export default {
     background: linear-gradient(135deg, #f5f3ff, #ffffff);
     border-color: #ddd6fe;
     color: #6d28d9;
+  }
+
+  &.moderation {
+    background: linear-gradient(135deg, #f0fdf4, #ffffff);
+    border-color: #bbf7d0;
+    color: #15803d;
+  }
+
+  &.image {
+    background: linear-gradient(135deg, #fdf2f8, #ffffff);
+    border-color: #fbcfe8;
+    color: #be185d;
   }
 
   &:hover {
