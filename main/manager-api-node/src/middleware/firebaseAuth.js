@@ -148,4 +148,4 @@ const requireFirebaseAuth = async (req, res, next) => {
     }
 };
 
-module.exports = { requireFirebaseAuth };
+module.exports = { requireFirebaseAuth, ensureFirebaseInit };
