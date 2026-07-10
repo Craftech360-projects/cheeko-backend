@@ -12,12 +12,14 @@ const logger = require('../utils/logger');
 const DEFAULT_SETTINGS = {
   volume: 70,
   brightness: 80,
+  theme: 0,
   auto_listen: false,
   system_sound: true,
   system_prompt: true,
   vibration: true,
   sleep_enabled: true,
   theme: 0,
+  autoplay: true,
   quiet_hours: {
     enabled: false,
     start: '21:00',
@@ -73,12 +75,14 @@ function mergeAndValidateSettings(currentSettings, patch) {
   const allowedTopLevel = new Set([
     'volume',
     'brightness',
+    'theme',
     'auto_listen',
     'system_sound',
     'system_prompt',
     'vibration',
     'sleep_enabled',
     'theme',
+    'autoplay',
     'quiet_hours',
   ]);
 
@@ -103,7 +107,7 @@ function mergeAndValidateSettings(currentSettings, patch) {
     next.theme = patch.theme;
   }
 
-  for (const boolKey of ['auto_listen', 'system_sound', 'system_prompt', 'vibration', 'sleep_enabled']) {
+  for (const boolKey of ['auto_listen', 'system_sound', 'system_prompt', 'vibration', 'sleep_enabled', 'autoplay']) {
     if (Object.prototype.hasOwnProperty.call(patch, boolKey)) {
       ensureBoolean(patch[boolKey], boolKey);
       next[boolKey] = patch[boolKey];
