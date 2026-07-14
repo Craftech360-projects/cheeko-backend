@@ -22,9 +22,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.20"
+SERVER_IP = "139.59.7.72"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.20"
+MQTT_BROKER_HOST ="139.59.7.72"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))

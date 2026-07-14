@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   system_prompt: true,
   vibration: true,
   sleep_enabled: true,
+  autoplay: false,
   theme: 0,
   quiet_hours: {
     enabled: false,
@@ -78,6 +79,7 @@ function mergeAndValidateSettings(currentSettings, patch) {
     'system_prompt',
     'vibration',
     'sleep_enabled',
+    'autoplay',
     'theme',
     'quiet_hours',
   ]);
@@ -103,7 +105,7 @@ function mergeAndValidateSettings(currentSettings, patch) {
     next.theme = patch.theme;
   }
 
-  for (const boolKey of ['auto_listen', 'system_sound', 'system_prompt', 'vibration', 'sleep_enabled']) {
+  for (const boolKey of ['auto_listen', 'system_sound', 'system_prompt', 'vibration', 'sleep_enabled', 'autoplay']) {
     if (Object.prototype.hasOwnProperty.call(patch, boolKey)) {
       ensureBoolean(patch[boolKey], boolKey);
       next[boolKey] = patch[boolKey];
