@@ -58,9 +58,13 @@ const uploadContentFile = async (fileBuffer, filename, contentType, category, mi
     const baseName = path.basename(filename, ext)
       .replace(/[^a-zA-Z0-9\s\-\_]/g, '')
       .trim();
-    const cleanFilename = `${baseName}${ext}`;
+    // Suffix a short unique token so re-uploading a same-named file produces a
+    // NEW key + URL. Without this the key is deterministic, S3 overwrites in
+    // place, the URL is unchanged, and CloudFront serves the year-cached old
+    // file forever ("updated but old file still served").
+    const cleanFilename = `${baseName}-${randomUUID().slice(0, 8)}${ext}`;
 
-    // S3 key: music/English/filename.mp3 or stories/Fantasy/filename.mp3
+    // S3 key: music/English/filename-a1b2c3d4.mp3 or stories/Fantasy/...
     const s3Key = `${folder}/${categoryFolder}/${cleanFilename}`;
 
     logger.info('Attempting S3 upload', {
