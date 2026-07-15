@@ -15,5 +15,5 @@ INSERT INTO "tts_providers" ("provider_name", "api_key", "voice_id", "model_id",
 VALUES
   ('sarvam', '', 'pooja', 'bulbul:v3', 'pcm_24000', 24000, NULL, FALSE, 40),
   ('edge', '', 'en-US-AnaNeural', NULL, 'pcm_24000', 24000, NULL, FALSE, 50),
-  ('azure', '', 'en-US-AnaNeural', NULL, 'pcm_24000', 24000, NULL, FALSE, 60)
+  ('azure', '', 'en-US-AnaNeural', 'centralindia', 'pcm_24000', 24000, NULL, FALSE, 60)
 ON CONFLICT ("provider_name") DO NOTHING;
