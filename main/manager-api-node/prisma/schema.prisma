@@ -1410,6 +1410,10 @@ model device_subscriptions {
   trial_started_at         DateTime?           @db.Timestamptz(6)
   trial_ends_at            DateTime?           @db.Timestamptz(6)
   trial_used               Boolean             @default(false)
+  /// Highest trial-reminder day already pushed (23/27/30). The reminder cron
+  /// claims a day with a conditional UPDATE, so exactly-once is enforced by the
+  /// database rather than by the job remembering anything.
+  last_reminder_day        Int?
   billing_cycle            String              @default("monthly")
   current_period_start     DateTime?           @db.Timestamptz(6)
   current_period_end       DateTime?           @db.Timestamptz(6)
