@@ -18,7 +18,7 @@
 
 const logger = require('../utils/logger');
 const { prisma } = require('../config/database');
-const { sendPushNotification } = require('../services/pushNotification.service');
+const { sendPushNotification, findParentFcmToken } = require('../services/pushNotification.service');
 
 const TIMEZONE = 'Asia/Kolkata';
 const TRIAL_DAYS = 30;
@@ -56,23 +56,6 @@ function buildCopy(day) {
     title: `Cheeko’s free trial ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
     body: 'Pick a plan in the Cheeko app so playtime carries on uninterrupted.',
   };
-}
-
-/** The bound parent's token, or null if there is nobody to notify. */
-async function findParentToken(macAddress) {
-  const device = await prisma.ai_device.findFirst({
-    where: {
-      mac_address: macAddress,
-      user_id: { not: null },
-      sys_user: {
-        parent_profile: { fcm_token: { not: null }, push_notifications: true },
-      },
-    },
-    select: {
-      sys_user: { select: { parent_profile: { select: { fcm_token: true } } } },
-    },
-  });
-  return device?.sys_user?.parent_profile?.fcm_token || null;
 }
 
 /**
@@ -113,7 +96,7 @@ async function runTrialReminders() {
 
       // Look the token up *before* claiming: claiming for a parent we cannot
       // reach would burn the milestone and they would never hear about it.
-      const fcmToken = await findParentToken(row.mac_address);
+      const fcmToken = await findParentFcmToken(row.mac_address);
       if (!fcmToken) {
         skipped++;
         continue;
@@ -129,15 +112,15 @@ async function runTrialReminders() {
       }
 
       const { title, body } = buildCopy(day);
-      try {
-        await sendPushNotification(fcmToken, title, body);
+      // sendPushNotification reports failure by returning false, it does not
+      // throw — counting an unsent push as sent would make this job lie.
+      const delivered = await sendPushNotification(fcmToken, title, body);
+      if (delivered) {
         sent++;
         logger.info(`[TRIAL-REMINDER] Day ${day} push sent for ${row.mac_address}`);
-      } catch (error) {
+      } else {
         // The day stays claimed on purpose — see above.
-        logger.error(
-          `[TRIAL-REMINDER] Day ${day} push FAILED for ${row.mac_address}: ${error.message}`
-        );
+        logger.error(`[TRIAL-REMINDER] Day ${day} push FAILED for ${row.mac_address}`);
       }
     }
 

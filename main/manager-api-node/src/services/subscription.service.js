@@ -10,6 +10,7 @@
 
 const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
+const { sendPushNotification, findParentFcmToken } = require('./pushNotification.service');
 const logger = require('../utils/logger');
 
 // Statuses that may start a session. `grace` is a failed renewal inside the
@@ -105,14 +106,49 @@ const applyLazyTrialExpiry = async (subscription, normalizedMac) => {
   if (!expired) return subscription.status;
 
   // Repair the row so the rest of the system (admin views, metrics) agrees.
-  // Idempotent: concurrent verdicts both land on 'lapsed'.
-  await prisma.device_subscriptions.update({
-    where: { mac_address: normalizedMac },
+  // Guarded on status='trial' so only one caller can win the transition:
+  // concurrent verdicts still both land on 'lapsed', but only the winner gets
+  // count > 0, which is what makes the plan-gate push fire exactly once
+  // instead of on every refused session (SUB-2 criterion 4).
+  const { count } = await prisma.device_subscriptions.updateMany({
+    where: { mac_address: normalizedMac, status: 'trial' },
     data: { status: 'lapsed', updated_at: new Date() },
   });
   logger.info(`[SUBSCRIPTION] Trial expired for ${normalizedMac}; row repaired to lapsed`);
 
+  if (count > 0) {
+    // Deliberately not awaited: the verdict is in the session hot path — the
+    // gateway is holding a hello open behind it — and a slow FCM round trip
+    // must not delay a child's toy. A lost push is better than a stalled toy.
+    sendPlanGatePush(normalizedMac).catch((error) =>
+      logger.error(`[SUBSCRIPTION] Plan-gate push failed for ${normalizedMac}: ${error.message}`)
+    );
+  }
+
   return 'lapsed';
+};
+
+/**
+ * Tell the parent why the toy just went quiet (SUB-2 criterion 4).
+ *
+ * Fires on the trial→lapsed transition rather than on every refusal, so a child
+ * pressing the button ten times does not push the parent ten times.
+ */
+const sendPlanGatePush = async (normalizedMac) => {
+  const fcmToken = await findParentFcmToken(normalizedMac);
+  if (!fcmToken) {
+    logger.info(`[SUBSCRIPTION] No FCM token for ${normalizedMac}; plan-gate push skipped`);
+    return;
+  }
+
+  const delivered = await sendPushNotification(
+    fcmToken,
+    'Cheeko’s free trial has ended',
+    'Choose a plan in the Cheeko app to start the conversations again.'
+  );
+  logger.info(
+    `[SUBSCRIPTION] Plan-gate push for ${normalizedMac}: ${delivered ? 'sent' : 'not delivered'}`
+  );
 };
 
 /**

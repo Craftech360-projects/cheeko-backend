@@ -1,9 +1,25 @@
 const mockPrisma = {
-  device_subscriptions: { findUnique: jest.fn(), upsert: jest.fn(), update: jest.fn() },
+  device_subscriptions: {
+    findUnique: jest.fn(),
+    upsert: jest.fn(),
+    update: jest.fn(),
+    // The lapse repair is a guarded updateMany: only the caller that wins the
+    // trial→lapsed transition gets count > 0, and only that one pushes.
+    updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+  },
   subscription_plans: { findUnique: jest.fn() }
 };
+const mockSendPush = jest.fn().mockResolvedValue(true);
+const mockFindToken = jest.fn().mockResolvedValue('tok-123');
 
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
+jest.mock('../../src/services/pushNotification.service', () => ({
+  sendPushNotification: (...a) => mockSendPush(...a),
+  findParentFcmToken: (...a) => mockFindToken(...a),
+}));
+
+/** The plan-gate push is fired without await, so let its microtasks settle. */
+const flushPush = () => new Promise((resolve) => setImmediate(resolve));
 
 const service = require('../../src/services/subscription.service');
 
@@ -110,12 +126,69 @@ describe('getSessionVerdict', () => {
 
       expect(verdict.allowed).toBe(false);
       expect(verdict.reason).toBe('no_plan');
-      expect(mockPrisma.device_subscriptions.update).toHaveBeenCalledWith(
+      expect(mockPrisma.device_subscriptions.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { mac_address: MAC },
+          // Guarded on status: two concurrent verdicts both land on 'lapsed',
+          // but only one wins the transition and pushes the parent.
+          where: { mac_address: MAC, status: 'trial' },
           data: expect.objectContaining({ status: 'lapsed' }),
         })
       );
+    });
+
+    test('the plan-gate push fires once, on the trial→lapsed transition', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+        status: 'trial',
+        trial_ends_at: new Date(Date.now() - DAY_MS),
+      });
+
+      await service.getSessionVerdict(MAC);
+      await flushPush();
+
+      expect(mockSendPush).toHaveBeenCalledWith(
+        'tok-123',
+        expect.stringMatching(/trial has ended/i),
+        expect.any(String)
+      );
+    });
+
+    test('a device already lapsed does not push again on every refusal', async () => {
+      // The child pressing the button ten times must not push Mum ten times.
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ status: 'lapsed' });
+
+      const verdict = await service.getSessionVerdict(MAC);
+      await flushPush();
+
+      expect(verdict.allowed).toBe(false);
+      expect(mockSendPush).not.toHaveBeenCalled();
+    });
+
+    test('losing the transition race pushes nothing', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+        status: 'trial',
+        trial_ends_at: new Date(Date.now() - DAY_MS),
+      });
+      mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.getSessionVerdict(MAC);
+      await flushPush();
+
+      expect(mockSendPush).not.toHaveBeenCalled();
+    });
+
+    test('a parent with no token still gets a correct verdict', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+        status: 'trial',
+        trial_ends_at: new Date(Date.now() - DAY_MS),
+      });
+      mockFindToken.mockResolvedValue(null);
+
+      const verdict = await service.getSessionVerdict(MAC);
+      await flushPush();
+
+      // Enforcement must never depend on whether a push could be delivered.
+      expect(verdict.allowed).toBe(false);
+      expect(mockSendPush).not.toHaveBeenCalled();
     });
 
     test('a trial still inside its window is allowed and left alone', async () => {

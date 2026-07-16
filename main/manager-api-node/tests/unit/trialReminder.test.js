@@ -8,7 +8,7 @@
 
 const mockUpdateMany = jest.fn();
 const mockFindMany = jest.fn();
-const mockFindFirst = jest.fn();
+const mockFindToken = jest.fn();
 const mockSendPush = jest.fn();
 
 jest.mock('../../src/config/database', () => ({
@@ -17,11 +17,11 @@ jest.mock('../../src/config/database', () => ({
       findMany: (...a) => mockFindMany(...a),
       updateMany: (...a) => mockUpdateMany(...a),
     },
-    ai_device: { findFirst: (...a) => mockFindFirst(...a) },
   },
 }));
 jest.mock('../../src/services/pushNotification.service', () => ({
   sendPushNotification: (...a) => mockSendPush(...a),
+  findParentFcmToken: (...a) => mockFindToken(...a),
 }));
 jest.mock('../../src/utils/logger', () => ({
   info: jest.fn(), warn: jest.fn(), error: jest.fn(),
@@ -37,13 +37,13 @@ const {
 const MAC = '00:16:3E:AC:B5:38';
 const daysAgo = (n) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
 
-const withToken = () => ({ sys_user: { parent_profile: { fcm_token: 'tok-123' } } });
-
 beforeEach(() => {
   jest.clearAllMocks();
-  mockFindFirst.mockResolvedValue(withToken());
+  mockFindToken.mockResolvedValue('tok-123');
   mockUpdateMany.mockResolvedValue({ count: 1 });
-  mockSendPush.mockResolvedValue(undefined);
+  // Mirrors the real contract: sendPushNotification RETURNS false on failure,
+  // it never throws. Mocking a rejection here would test a fiction.
+  mockSendPush.mockResolvedValue(true);
 });
 
 describe('dueReminderDay', () => {
@@ -138,7 +138,7 @@ describe('runTrialReminders', () => {
 
   test('a parent with no token is skipped without burning the milestone', async () => {
     mockFindMany.mockResolvedValue(candidate());
-    mockFindFirst.mockResolvedValue(null); // no token / push_notifications off
+    mockFindToken.mockResolvedValue(null); // no token / push_notifications off
 
     const result = await runTrialReminders();
 
@@ -148,17 +148,17 @@ describe('runTrialReminders', () => {
     expect(result.skipped).toBe(1);
   });
 
-  test('a push that throws does not abort the whole run', async () => {
+  test('a failed push is not counted as sent, and does not abort the run', async () => {
     mockFindMany.mockResolvedValue([
       { mac_address: 'AA:AA:AA:AA:AA:AA', trial_started_at: daysAgo(23), last_reminder_day: null },
       { mac_address: MAC, trial_started_at: daysAgo(27), last_reminder_day: 23 },
     ]);
-    mockSendPush.mockRejectedValueOnce(new Error('FCM unavailable'));
+    mockSendPush.mockResolvedValueOnce(false); // FCM rejected the first token
 
     const result = await runTrialReminders();
 
     expect(mockSendPush).toHaveBeenCalledTimes(2);
-    expect(result.sent).toBe(1); // the second one still went
+    expect(result.sent).toBe(1); // only the delivered one counts
   });
 
   test('a trial inside day 22 is left alone', async () => {
