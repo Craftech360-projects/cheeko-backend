@@ -3182,6 +3182,7 @@ class MQTTGateway {
   ) {
     try {
       const fs = require("fs");
+      const path = require("path");
       const connection = this.deviceConnections.get(deviceId)?.connection;
 
       if (!connection) {
@@ -3207,6 +3208,13 @@ class MQTTGateway {
 
       const pcmData = fs.readFileSync(pcmFilePath);
       const controlTopic = `devices/p2p/${clientId}`;
+      const streamStart = Date.now();
+
+      logger.info(
+        `🔊 [AUDIO-STREAM] ${deviceId}: ${path.basename(pcmFilePath)} ` +
+          `(${pcmData.length} bytes, ~${Math.ceil(pcmData.length / 2880)} frames, ` +
+          `${(pcmData.length / 2 / 24000).toFixed(2)}s) → topic ${controlTopic}`
+      );
 
       // Send TTS start via MQTT
       const ttsStartMsg = {
@@ -3222,7 +3230,8 @@ class MQTTGateway {
       // packet, and sendUdpMessage silently drops until it is set. A gate clip
       // on a fresh session can reach here first, losing the opening frames.
       // tts:start prompts the device to ping, so poll for it rather than guess.
-      const udpDeadline = Date.now() + 3000;
+      const waitStart = Date.now();
+      const udpDeadline = waitStart + 3000;
       while (!connection.udp?.remoteAddress && Date.now() < udpDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
@@ -3233,12 +3242,26 @@ class MQTTGateway {
         );
         return;
       }
+      const addr = connection.udp.remoteAddress;
+      logger.info(
+        `🔊 [AUDIO-STREAM] UDP ready for ${deviceId} → ${addr.address}:${addr.port} ` +
+          `(waited ${Date.now() - waitStart}ms past the 200ms tts:start settle)`
+      );
 
       // Stream PCM in 60ms frames
       const FRAME_SIZE_SAMPLES = 1440;
       const FRAME_SIZE_BYTES = FRAME_SIZE_SAMPLES * 2;
       let offset = 0;
       let frameCount = 0;
+      let opusBytes = 0;
+      let rawFallbacks = 0;
+
+      if (!opusEncoder) {
+        logger.warn(
+          `⚠️ [AUDIO-STREAM] No Opus encoder — sending raw PCM, which the device ` +
+            `cannot decode. Audio will not play.`
+        );
+      }
 
       const startTime = connection.udp?.startTime || Date.now();
       let baseTimestamp = (Date.now() - startTime) & 0xffffffff;
@@ -3263,11 +3286,22 @@ class MQTTGateway {
               frameTosend,
               FRAME_SIZE_SAMPLES
             );
+            opusBytes += opusBuffer.length;
             connection.sendUdpMessage(opusBuffer, timestamp);
           } catch (err) {
+            // Raw PCM on this path is undecodable by the device, so it is a
+            // corrupt frame, not a graceful fallback. Count it and say so.
+            if (rawFallbacks === 0) {
+              logger.warn(
+                `⚠️ [AUDIO-STREAM] Opus encode failed on frame ${frameCount} ` +
+                  `(${err.message}) — falling back to raw PCM, device cannot decode it`
+              );
+            }
+            rawFallbacks++;
             connection.sendUdpMessage(frameTosend, timestamp);
           }
         } else {
+          rawFallbacks++;
           connection.sendUdpMessage(frameTosend, timestamp);
         }
 
@@ -3277,6 +3311,13 @@ class MQTTGateway {
       }
 
       await new Promise((resolve) => setTimeout(resolve, 100));
+
+      logger.info(
+        `✅ [AUDIO-STREAM] ${deviceId}: sent ${frameCount} frames, ` +
+          `${opusBytes} opus bytes (avg ${frameCount ? Math.round(opusBytes / frameCount) : 0}/frame), ` +
+          `${rawFallbacks} raw fallbacks, ${Date.now() - streamStart}ms wall` +
+          `${rawFallbacks ? " ⚠️ AUDIO WILL NOT PLAY" : ""}`
+      );
 
       // Send TTS stop
       const ttsStopMsg = { type: "tts", state: "stop", timestamp: Date.now() };
