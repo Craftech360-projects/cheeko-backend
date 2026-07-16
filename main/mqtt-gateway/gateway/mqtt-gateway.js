@@ -3183,6 +3183,11 @@ class MQTTGateway {
     try {
       const fs = require("fs");
       const path = require("path");
+      // opusEncoder was never declared in this file, so the reference below threw
+      // ReferenceError on the first frame and the catch swallowed it — this
+      // function has never streamed audio. Same 24kHz/mono/60ms the clip uses.
+      const { getOpusEncoder } = require("../core/opus-initializer");
+      const opusEncoder = getOpusEncoder();
       const connection = this.deviceConnections.get(deviceId)?.connection;
 
       if (!connection) {
@@ -3335,7 +3340,7 @@ class MQTTGateway {
         this.mqttPublish(controlTopic, goodbyeMsg);
       }
     } catch (error) {
-      logger.error(`âŒ [AUDIO-STREAM] Audio streaming error:`, error.message);
+      logger.error(`âŒ [AUDIO-STREAM] Audio streaming error: ${error.message}\n${error.stack}`);
     }
   }
 
