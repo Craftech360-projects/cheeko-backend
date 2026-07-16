@@ -7,6 +7,7 @@
 
 const axios = require("axios");
 const crypto = require("crypto");
+const path = require("path");
 const {
   LiveKitBridge,
   setConfigManager: setLivekitConfigManager,
@@ -39,6 +40,11 @@ const FAIL_OPEN_VERDICT = Object.freeze({
     images_today: null,
   }),
 });
+
+// Must match audio/character_change/subscription_gate.pcm — the text rides the
+// tts:start signal for display; the PCM is what the child actually hears.
+const GATE_CLIP_TEXT =
+  "Ask Mumma or Papa to check the Cheeko app so we can keep playing.";
 
 async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5000 } = {}) {
   const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/$/, "");
@@ -574,7 +580,7 @@ class VirtualMQTTConnection {
     // ── Step 1: ALL DB queries in parallel ──
     console.log(`🔄 [DEFERRED] Starting parallel DB queries for ${this.deviceId}...`);
 
-    const [roomTypeResult, deviceModeResult, character, childProfile] = await Promise.allSettled([
+    const [roomTypeResult, deviceModeResult, character, childProfile, verdictResult] = await Promise.allSettled([
       // Room type (conversation/music/story)
       axios.get(`${baseUrl}/toy/device/${macAddress}/mode`, { timeout: 5000 })
         .then((r) => r.data?.code === 0 ? r.data.data : "conversation")
@@ -588,8 +594,6 @@ class VirtualMQTTConnection {
       // Child profile
       this.fetchChildProfile(this.deviceId),
       // Subscription verdict — rides this batch so it costs no extra wall-clock.
-      // Result is deliberately not destructured: SUB-1 only observes and logs
-      // it. SUB-2 reads it here to skip dispatch and stream the gate clip.
       this.fetchSessionVerdict(macAddress, baseUrl),
     ]);
 
@@ -691,6 +695,35 @@ class VirtualMQTTConnection {
       logger.info(`🖼️ [IMAGINE] session in ai_imagine mode; skipping LiveKit bridge for ${this.deviceId}`);
       const totalImagineDeferred = Date.now() - deferredStart;
       console.log(`✅ [DEFERRED] Imagine background setup completed in ${totalImagineDeferred}ms for ${this.deviceId}`);
+      return;
+    }
+
+    // ── Step 1.5: Subscription gate ──
+    // fetchSessionVerdict never rejects (it fails open), but treat a rejection
+    // as allowed anyway — a gate bug must not lock a paying child out.
+    const verdict = verdictResult.status === "fulfilled" ? verdictResult.value : null;
+    if (verdict && verdict.allowed === false) {
+      logger.info(
+        `🎟️ [GATE] Refusing session for ${this.deviceId}: reason=${verdict.reason} — ` +
+          `streaming gate clip, no LiveKit room`
+      );
+      this.deferredSetupInProgress = false;
+      await this.gateway.streamAudioViaUdp(
+        this.deviceId,
+        path.join(__dirname, "..", "audio", "character_change", "subscription_gate.pcm"),
+        "subscription_gate",
+        false,
+        GATE_CLIP_TEXT
+      );
+      this.sendMqttMessage(
+        JSON.stringify({
+          type: "goodbye",
+          session_id: this.udp?.session_id,
+          reason: verdict.reason || "no_plan",
+          timestamp: Date.now(),
+        })
+      );
+      this.close();
       return;
     }
 

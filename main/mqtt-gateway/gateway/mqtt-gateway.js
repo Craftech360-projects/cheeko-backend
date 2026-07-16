@@ -3177,7 +3177,8 @@ class MQTTGateway {
     deviceId,
     audioFilePath,
     modeName,
-    sendGoodbye = false
+    sendGoodbye = false,
+    text = null
   ) {
     try {
       const fs = require("fs");
@@ -3211,11 +3212,27 @@ class MQTTGateway {
       const ttsStartMsg = {
         type: "tts",
         state: "start",
-        text: `Switched to ${modeName} mode`,
-        timestamp: Date.Now(),
+        text: text || `Switched to ${modeName} mode`,
+        timestamp: Date.now(),
       };
       this.mqttPublish(controlTopic, ttsStartMsg);
       await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // ponytail: remoteAddress is only learned from the device's first UDP
+      // packet, and sendUdpMessage silently drops until it is set. A gate clip
+      // on a fresh session can reach here first, losing the opening frames.
+      // tts:start prompts the device to ping, so poll for it rather than guess.
+      const udpDeadline = Date.now() + 3000;
+      while (!connection.udp?.remoteAddress && Date.now() < udpDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (!connection.udp?.remoteAddress) {
+        logger.warn(
+          `⚠️ [AUDIO-STREAM] No UDP remote address after 3s for ${deviceId}; ` +
+            `every frame would be dropped, aborting stream`
+        );
+        return;
+      }
 
       // Stream PCM in 60ms frames
       const FRAME_SIZE_SAMPLES = 1440;
