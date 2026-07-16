@@ -9,8 +9,9 @@ const express = require('express');
 const router = express.Router();
 const deviceService = require('../services/device.service');
 const contentService = require('../services/content.service');
+const subscriptionService = require('../services/subscription.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth, optionalAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth, requireServiceKey } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
@@ -1478,6 +1479,42 @@ router.delete('/token-usage/:mac',
     } catch (error) {
       badRequest(res, error.message);
     }
+  })
+);
+
+/**
+ * @swagger
+ * /device/{mac}/session-verdict:
+ *   get:
+ *     tags: [Device]
+ *     summary: May this device start an AI session?
+ *     description: >
+ *       Called by the mqtt-gateway before LiveKit dispatch and before the
+ *       imagine handoff. Callers must fail open when this endpoint errors —
+ *       an outage here must never brick a toy.
+ *     security:
+ *       - ServiceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: Verdict
+ *       401:
+ *         description: Missing or invalid service key
+ */
+router.get('/:mac/session-verdict',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+
+    const verdict = await subscriptionService.getSessionVerdict(mac);
+    logger.info(`[DEVICE] Verdict ${mac}: allowed=${verdict.allowed} reason=${verdict.reason}`);
+    success(res, verdict);
   })
 );
 

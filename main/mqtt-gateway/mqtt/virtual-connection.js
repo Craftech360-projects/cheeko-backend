@@ -25,6 +25,21 @@ const { randomUUID } = require("crypto");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Verdict used whenever manager-api cannot answer. Never brick a toy because
+// our subscription check is down (spec §5) — allow, and log loudly enough that
+// the alert can be built on the string. `remaining` mirrors the endpoint's
+// all-null shape so callers never have to special-case this path.
+const FAIL_OPEN_VERDICT = Object.freeze({
+  allowed: true,
+  reason: "fail_open",
+  remaining: Object.freeze({
+    questions_month: null,
+    questions_today: null,
+    minutes_today: null,
+    images_today: null,
+  }),
+});
+
 async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5000 } = {}) {
   const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/$/, "");
   if (!baseUrl) {
@@ -512,6 +527,43 @@ class VirtualMQTTConnection {
   }
 
   /**
+   * Ask manager-api whether this device may start a session.
+   *
+   * Always resolves — on any error we fail open (SUB-1). SUB-2 adds the
+   * refusal branch that skips LiveKit dispatch and streams the gate clip;
+   * today the verdict is observed and logged only, so behavior is unchanged.
+   *
+   * @param {string} macAddress
+   * @param {string} baseUrl - manager-api base URL, without the /toy suffix
+   * @returns {Promise<{allowed: boolean, reason: string, remaining: Object}>}
+   */
+  async fetchSessionVerdict(macAddress, baseUrl) {
+    const serviceKey = process.env.MANAGER_API_SECRET || process.env.SERVICE_SECRET_KEY;
+
+    try {
+      const response = await axios.get(
+        `${baseUrl}/toy/device/${encodeURIComponent(macAddress)}/session-verdict`,
+        { headers: { "X-Service-Key": serviceKey }, timeout: 5000 }
+      );
+
+      const verdict = response.data?.code === 0 ? response.data.data : null;
+      if (!verdict) {
+        throw new Error(`unexpected response code ${response.data?.code}`);
+      }
+
+      logger.info(
+        `🎟️ [VERDICT] ${macAddress}: allowed=${verdict.allowed} reason=${verdict.reason}`
+      );
+      return verdict;
+    } catch (error) {
+      logger.warn(
+        `🎟️ [VERDICT-FAIL-OPEN] ${macAddress}: ${error.message} — allowing session`
+      );
+      return FAIL_OPEN_VERDICT;
+    }
+  }
+
+  /**
    * Deferred setup — runs in background after hello response is sent.
    * Handles DB queries, LiveKit room creation, and agent dispatch.
    */
@@ -535,6 +587,10 @@ class VirtualMQTTConnection {
       this.fetchCurrentCharacter(this.deviceId),
       // Child profile
       this.fetchChildProfile(this.deviceId),
+      // Subscription verdict — rides this batch so it costs no extra wall-clock.
+      // Result is deliberately not destructured: SUB-1 only observes and logs
+      // it. SUB-2 reads it here to skip dispatch and stream the gate clip.
+      this.fetchSessionVerdict(macAddress, baseUrl),
     ]);
 
     // Extract results from settled promises
