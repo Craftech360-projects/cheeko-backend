@@ -552,11 +552,11 @@ describe('getSubscriptionSummary', () => {
 });
 
 describe('recordImageGeneration', () => {
-  test('writes one row per generated image', async () => {
+  test('writes one row per generated image, carrying where it landed', async () => {
     jest.clearAllMocks();
-    await service.recordImageGeneration('aa-bb-cc-dd-ee-ff');
+    await service.recordImageGeneration('aa-bb-cc-dd-ee-ff', 'https://cdn/x.jpg');
     expect(mockPrisma.device_image_generations.create).toHaveBeenCalledWith({
-      data: { mac_address: MAC },
+      data: { mac_address: MAC, url: 'https://cdn/x.jpg' },
     });
   });
 

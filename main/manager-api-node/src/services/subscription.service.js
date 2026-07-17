@@ -428,15 +428,18 @@ const maybeSendBucketAlert = async (macAddress, { now = new Date() } = {}) => {
  * imagine-upload path — the image exists by now, so failures here are logged,
  * never thrown back into the delivery path.
  * @param {string} macAddress
+ * @param {string} [url] - where the image landed (S3/CDN), kept as the record
  */
-const recordImageGeneration = async (macAddress) => {
+const recordImageGeneration = async (macAddress, url) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) {
     // Loudly: an uncountable image is a metering hole, not a shrug (SUB-4 rule).
     logger.warn(`[SUBSCRIPTION] Image NOT counted — unusable MAC "${macAddress}"`);
     return;
   }
-  await prisma.device_image_generations.create({ data: { mac_address: normalizedMac } });
+  await prisma.device_image_generations.create({
+    data: { mac_address: normalizedMac, url: url ?? null },
+  });
 };
 
 /**

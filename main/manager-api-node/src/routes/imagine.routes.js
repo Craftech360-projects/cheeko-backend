@@ -37,7 +37,7 @@ router.post('/upload', requireServiceKey, uploadJpeg, asyncHandler(async (req, r
   // Count the image against the device's buckets (SUB-3). The image already
   // exists and the toy is waiting for it — a failed count must not fail delivery.
   try {
-    await subscriptionService.recordImageGeneration(req.body.deviceMac);
+    await subscriptionService.recordImageGeneration(req.body.deviceMac, result.url);
   } catch (error) {
     logger.error(`[IMAGINE] Image generated but not counted for ${req.body.deviceMac}: ${error.message}`);
   }

@@ -56,7 +56,10 @@ describe('POST /toy/imagine/upload', () => {
     expect(uploadService.uploadImagineImage).toHaveBeenCalledTimes(1);
     expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(expect.any(Buffer), 'AA:BB:CC:DD:EE:FF');
     // SUB-3: every delivered image is counted against the device's buckets.
-    expect(subscriptionService.recordImageGeneration).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
+    expect(subscriptionService.recordImageGeneration).toHaveBeenCalledWith(
+      'AA:BB:CC:DD:EE:FF',
+      'https://cdn.example.net/imagine/abc.jpg'
+    );
   });
 
   it('a failed count never fails the delivery', async () => {
