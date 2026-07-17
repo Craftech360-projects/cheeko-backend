@@ -627,3 +627,94 @@ describe('ensureTrialForMac', () => {
     expect(mockPrisma.device_subscriptions.upsert.mock.calls[0][0].create.plan_id).toBeNull();
   });
 });
+
+describe('heartbeatCutoff', () => {
+  const originalFlag = process.env.ENFORCEMENT_ENABLED;
+  const NOW = new Date('2026-07-17T10:00:00Z'); // IST day = 16T18:30Z .. 17T18:30Z
+
+  const planned = (daily_minutes_limit) =>
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+      subscription_plans: { daily_minutes_limit },
+    });
+  const minutesToday = (min, messageCount = 0) =>
+    mockPrisma.device_token_usage_session.aggregate.mockResolvedValue({
+      _sum: { session_duration_seconds: min * 60, message_count: messageCount },
+    });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.ENFORCEMENT_ENABLED = 'true';
+  });
+  afterEach(() => { process.env.ENFORCEMENT_ENABLED = originalFlag; });
+
+  test('kill-switch off: no cutoff, DB never consulted', async () => {
+    delete process.env.ENFORCEMENT_ENABLED;
+
+    expect(await service.heartbeatCutoff(MAC, { now: NOW })).toEqual({ cutoff: false });
+    expect(mockPrisma.device_subscriptions.findUnique).not.toHaveBeenCalled();
+  });
+
+  test('malformed MAC: no cutoff, no DB', async () => {
+    expect((await service.heartbeatCutoff('not-a-mac', { now: NOW })).cutoff).toBe(false);
+    expect(mockPrisma.device_subscriptions.findUnique).not.toHaveBeenCalled();
+  });
+
+  test('no subscription row: never cut a session the verdict let start', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+
+    expect((await service.heartbeatCutoff(MAC, { now: NOW })).cutoff).toBe(false);
+  });
+
+  test('live status but no plan row: fail open, no cutoff', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ subscription_plans: null });
+
+    expect((await service.heartbeatCutoff(MAC, { now: NOW })).cutoff).toBe(false);
+  });
+
+  test('under the daily minute cap: no cutoff', async () => {
+    planned(15);
+    minutesToday(10);
+
+    expect((await service.heartbeatCutoff(MAC, { now: NOW })).cutoff).toBe(false);
+  });
+
+  test('daily minute cap breached mid-session: cutoff with reason daily_minutes', async () => {
+    planned(15);
+    minutesToday(16);
+
+    expect(await service.heartbeatCutoff(MAC, { now: NOW }))
+      .toEqual({ cutoff: true, reason: 'daily_minutes' });
+  });
+
+  test('exactly at the cap cuts (>= mirrors the verdict breach test)', async () => {
+    planned(15);
+    minutesToday(15);
+
+    expect((await service.heartbeatCutoff(MAC, { now: NOW })).cutoff).toBe(true);
+  });
+
+  test('question buckets never cut mid-session', async () => {
+    planned(15);
+    minutesToday(1, 9999); // monthly/daily questions long gone; minutes fine
+
+    expect((await service.heartbeatCutoff(MAC, { now: NOW })).cutoff).toBe(false);
+  });
+
+  test('minutes are summed over the IST calendar day', async () => {
+    planned(15);
+    minutesToday(0);
+
+    await service.heartbeatCutoff(MAC, { now: NOW });
+
+    expect(mockPrisma.device_token_usage_session.aggregate).toHaveBeenCalledWith({
+      where: {
+        mac_address: MAC,
+        created_at: {
+          gte: new Date('2026-07-16T18:30:00Z'),
+          lt: new Date('2026-07-17T18:30:00Z'),
+        },
+      },
+      _sum: { session_duration_seconds: true },
+    });
+  });
+});

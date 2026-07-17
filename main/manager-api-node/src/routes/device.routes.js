@@ -1520,4 +1520,54 @@ router.get('/:mac/session-verdict',
   })
 );
 
+/**
+ * @swagger
+ * /device/{mac}/usage-heartbeat:
+ *   post:
+ *     tags: [Device]
+ *     summary: Mid-session usage heartbeat from the voice worker
+ *     description: >
+ *       Posted every 5 minutes per live session with cumulative usage so far
+ *       (same body shape as /device/token-usage). Upserts the in-flight
+ *       session row, then answers whether the daily minute cap is breached —
+ *       cutoff:true tells the worker to end the session gracefully. Only the
+ *       minute cap ever cuts; question buckets are start-gated (SUB-5).
+ *     security:
+ *       - ServiceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: "{ cutoff: boolean, reason?: 'daily_minutes' }"
+ *       401:
+ *         description: Missing or invalid service key
+ */
+router.post('/:mac/usage-heartbeat',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return badRequest(res, 'sessionId is required');
+    }
+
+    try {
+      // Cumulative totals overwrite the session row (idempotent by sessionId);
+      // only the delta since the last write rolls into the daily aggregate.
+      await deviceService.recordTokenUsage({ ...req.body, mac });
+      const result = await subscriptionService.heartbeatCutoff(mac);
+      logger.info(`[DEVICE] Heartbeat ${mac} session=${sessionId} cutoff=${result.cutoff}`);
+      success(res, result);
+    } catch (error) {
+      logger.error('Failed to record usage heartbeat:', error);
+      badRequest(res, error.message);
+    }
+  })
+);
+
 module.exports = router;

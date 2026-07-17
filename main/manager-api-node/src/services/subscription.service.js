@@ -345,6 +345,49 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 };
 
 /**
+ * Mid-session minute-cap check for the worker's 5-minute usage heartbeat
+ * (SUB-5). Cutoff applies ONLY to the daily minute cap — the abuse backstop.
+ * Question/image buckets are start-gated and never cut a running session,
+ * which is why this reads nothing but session_duration_seconds.
+ *
+ * Anything short of a confirmed breach answers "keep playing": kill-switch
+ * off, bad MAC, missing row/plan — same fail-open posture as the verdict.
+ *
+ * @param {string} macAddress
+ * @param {Object} [opts]
+ * @param {Date} [opts.now] - injectable clock for tests
+ * @returns {Promise<{cutoff: boolean, reason?: string}>}
+ */
+const heartbeatCutoff = async (macAddress, { now = new Date() } = {}) => {
+  if (!isEnforcementEnabled()) return { cutoff: false };
+
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) return { cutoff: false };
+
+  const subscription = await prisma.device_subscriptions.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { subscription_plans: { select: { daily_minutes_limit: true } } },
+  });
+  const plan = subscription?.subscription_plans;
+  if (!plan) return { cutoff: false };
+
+  const day = istDayWindow(now);
+  const agg = await prisma.device_token_usage_session.aggregate({
+    where: { mac_address: normalizedMac, created_at: { gte: day.start, lt: day.end } },
+    _sum: { session_duration_seconds: true },
+  });
+  const minutesToday = Number(agg._sum.session_duration_seconds || 0) / 60;
+  if (minutesToday < plan.daily_minutes_limit) return { cutoff: false };
+
+  // The gate-hit metric is this log line (same as the verdict's refusals).
+  logger.info(
+    `[SUBSCRIPTION] Heartbeat cutoff for ${normalizedMac}: daily_minutes ` +
+      `(${minutesToday.toFixed(1)}/${plan.daily_minutes_limit} min)`
+  );
+  return { cutoff: true, reason: 'daily_minutes' };
+};
+
+/**
  * Send the once-per-billing-period "80% of your monthly questions used" push.
  * Called fire-and-forget from the usage-write path — that write IS the
  * crossing, so the push lands when the bucket actually crosses, not when the
@@ -511,6 +554,7 @@ const getSubscriptionSummary = async (macAddress, { now = new Date() } = {}) => 
 module.exports = {
   isEnforcementEnabled,
   getSessionVerdict,
+  heartbeatCutoff,
   getSubscriptionSummary,
   maybeSendBucketAlert,
   recordImageGeneration,
