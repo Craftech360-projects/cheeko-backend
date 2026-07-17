@@ -7,7 +7,9 @@ const mockPrisma = {
     // trial→lapsed transition gets count > 0, and only that one pushes.
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
-  subscription_plans: { findUnique: jest.fn() }
+  subscription_plans: { findUnique: jest.fn() },
+  device_token_usage_session: { aggregate: jest.fn() },
+  device_image_generations: { count: jest.fn(), create: jest.fn() },
 };
 const mockSendPush = jest.fn().mockResolvedValue(true);
 const mockFindToken = jest.fn().mockResolvedValue('tok-123');
@@ -232,6 +234,336 @@ describe('getSessionVerdict', () => {
       expect((await service.getSessionVerdict(MAC)).allowed).toBe(true);
       expect(mockPrisma.device_subscriptions.update).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('istDayWindow', () => {
+  // IST is UTC+5:30, no DST. Midnight IST = 18:30 UTC the previous day.
+  test('just before IST midnight the window starts the previous 18:30Z', () => {
+    const { start, end } = service.istDayWindow(new Date('2026-07-17T18:29:00Z'));
+    expect(start.toISOString()).toBe('2026-07-16T18:30:00.000Z');
+    expect(end.toISOString()).toBe('2026-07-17T18:30:00.000Z');
+  });
+
+  test('just after IST midnight the window rolls over', () => {
+    const { start, end } = service.istDayWindow(new Date('2026-07-17T18:31:00Z'));
+    expect(start.toISOString()).toBe('2026-07-17T18:30:00.000Z');
+    expect(end.toISOString()).toBe('2026-07-18T18:30:00.000Z');
+  });
+});
+
+describe('bucket enforcement (SUB-3)', () => {
+  const PLAN = {
+    tier: 'family',
+    name: 'Family',
+    price_inr: 299,
+    monthly_question_limit: 300,
+    daily_question_limit: 60,
+    daily_minutes_limit: 15,
+    monthly_image_limit: null,
+    daily_image_limit: 25,
+  };
+  const PERIOD_START = new Date('2026-07-01T00:00:00Z');
+  const NOW = new Date('2026-07-17T10:00:00Z');
+
+  const subRow = (over = {}) => ({
+    status: 'active',
+    trial_ends_at: null,
+    trial_started_at: null,
+    current_period_start: PERIOD_START,
+    current_period_end: new Date('2026-08-01T00:00:00Z'),
+    bucket_alert_sent_at: null,
+    subscription_plans: PLAN,
+    ...over,
+  });
+
+  /** Route the two aggregate calls by shape: the daily window has an upper bound. */
+  const setUsage = ({ monthQuestions = 0, dayQuestions = 0, daySeconds = 0, imagesToday = 0, imagesMonth = 0 } = {}) => {
+    mockPrisma.device_token_usage_session.aggregate.mockImplementation(async ({ where }) =>
+      where.created_at?.lt
+        ? { _sum: { message_count: dayQuestions, session_duration_seconds: daySeconds } }
+        : { _sum: { message_count: monthQuestions } }
+    );
+    mockPrisma.device_image_generations.count.mockImplementation(async ({ where }) =>
+      where.created_at?.lt ? imagesToday : imagesMonth
+    );
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.ENFORCEMENT_ENABLED = 'true';
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow());
+    mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 1 });
+    setUsage();
+  });
+  afterEach(() => { delete process.env.ENFORCEMENT_ENABLED; });
+
+  test('monthly bucket empty refuses with monthly_bucket_empty', async () => {
+    setUsage({ monthQuestions: 300 });
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe('monthly_bucket_empty');
+  });
+
+  test('daily question cap refuses with daily_questions', async () => {
+    setUsage({ monthQuestions: 100, dayQuestions: 60 });
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe('daily_questions');
+  });
+
+  test('daily minute cap refuses with daily_minutes', async () => {
+    setUsage({ monthQuestions: 100, daySeconds: 15 * 60 });
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe('daily_minutes');
+  });
+
+  test('fractional minutes: an allowed verdict never displays 0 minutes left', async () => {
+    setUsage({ daySeconds: 14.5 * 60 }); // 0.5 min of 15 left
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.remaining.minutes_today).toBe(1); // ceil: 0 remaining ⇔ refused
+  });
+
+  test('null image limits skip the image COUNT queries entirely', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow({
+      subscription_plans: { ...PLAN, daily_image_limit: null, monthly_image_limit: null },
+    }));
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.remaining.images_today).toBeNull(); // unlimited
+    expect(mockPrisma.device_image_generations.count).not.toHaveBeenCalled();
+  });
+
+  test('under every bucket is allowed with real remaining numbers', async () => {
+    setUsage({ monthQuestions: 100, dayQuestions: 10, daySeconds: 5 * 60, imagesToday: 3 });
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict).toEqual({
+      allowed: true,
+      reason: 'ok',
+      remaining: { questions_month: 200, questions_today: 50, minutes_today: 10, images_today: 22 },
+    });
+  });
+
+  test('image caps gate the imagine flow, never voice', async () => {
+    setUsage({ imagesToday: 25 });
+
+    expect((await service.getSessionVerdict(MAC, { now: NOW })).allowed).toBe(true);
+
+    const imagine = await service.getSessionVerdict(MAC, { flow: 'imagine', now: NOW });
+    expect(imagine.allowed).toBe(false);
+    expect(imagine.reason).toBe('daily_images');
+  });
+
+  test('a monthly image limit also refuses the imagine flow', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow({
+      subscription_plans: { ...PLAN, monthly_image_limit: 150, daily_image_limit: null },
+    }));
+    setUsage({ imagesMonth: 150 });
+
+    const imagine = await service.getSessionVerdict(MAC, { flow: 'imagine', now: NOW });
+    expect(imagine.allowed).toBe(false);
+    expect(imagine.reason).toBe('daily_images');
+  });
+
+  test('a plan-less allowed row fails open instead of guessing limits', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow({ subscription_plans: null }));
+    const verdict = await service.getSessionVerdict(MAC, { now: NOW });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.remaining.questions_month).toBeNull();
+  });
+
+  test('a trial meters from trial_started_at, not current_period_start', async () => {
+    const trialStart = new Date('2026-07-10T00:00:00Z');
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow({
+      status: 'trial',
+      trial_started_at: trialStart,
+      trial_ends_at: new Date('2026-08-09T00:00:00Z'),
+      current_period_start: null,
+      current_period_end: null,
+    }));
+
+    await service.getSessionVerdict(MAC, { now: NOW });
+
+    const monthCall = mockPrisma.device_token_usage_session.aggregate.mock.calls
+      .map(([a]) => a).find((a) => !a.where.created_at.lt);
+    expect(monthCall.where.created_at.gte).toEqual(trialStart);
+  });
+
+  test('IST midnight rollover swaps the daily window', async () => {
+    await service.getSessionVerdict(MAC, { now: new Date('2026-07-17T18:29:00Z') });
+    await service.getSessionVerdict(MAC, { now: new Date('2026-07-17T18:31:00Z') });
+
+    const dayCalls = mockPrisma.device_token_usage_session.aggregate.mock.calls
+      .map(([a]) => a).filter((a) => a.where.created_at.lt);
+    expect(dayCalls[0].where.created_at.gte.toISOString()).toBe('2026-07-16T18:30:00.000Z');
+    expect(dayCalls[1].where.created_at.gte.toISOString()).toBe('2026-07-17T18:30:00.000Z');
+  });
+});
+
+describe('maybeSendBucketAlert (80% push)', () => {
+  const PLAN = { monthly_question_limit: 300 };
+  const PERIOD_START = new Date('2026-07-01T00:00:00Z');
+  const NOW = new Date('2026-07-17T10:00:00Z');
+
+  const subRow = (over = {}) => ({
+    status: 'active',
+    trial_started_at: null,
+    current_period_start: PERIOD_START,
+    bucket_alert_sent_at: null,
+    subscription_plans: PLAN,
+    ...over,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.ENFORCEMENT_ENABLED = 'true';
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow());
+    mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 1 });
+    mockPrisma.device_token_usage_session.aggregate.mockResolvedValue({ _sum: { message_count: 240 } });
+    mockFindToken.mockResolvedValue('tok-123');
+    mockSendPush.mockResolvedValue(true);
+  });
+  afterEach(() => { delete process.env.ENFORCEMENT_ENABLED; });
+
+  test('fires at the 80% crossing with the used/limit copy', async () => {
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    expect(mockSendPush).toHaveBeenCalledWith(
+      'tok-123',
+      expect.any(String),
+      expect.stringContaining('240 of 300')
+    );
+  });
+
+  test('the DB claim is what makes it once per period', async () => {
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    const claim = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    // Eligible only when never sent or sent before this period's anchor —
+    // a renewal re-arms the alert without any cron.
+    expect(claim.where.OR).toEqual([
+      { bucket_alert_sent_at: null },
+      { bucket_alert_sent_at: { lt: PERIOD_START } },
+    ]);
+
+    // Losing the claim (already sent this period) pushes nothing.
+    jest.clearAllMocks();
+    mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 0 });
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+    expect(mockSendPush).not.toHaveBeenCalled();
+  });
+
+  test('a missing FCM token defers instead of burning the once-per-period claim', async () => {
+    mockFindToken.mockResolvedValue(null);
+
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    // No claim written — when the parent registers later this period,
+    // the next usage write still gets to send the alert.
+    expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+    expect(mockSendPush).not.toHaveBeenCalled();
+  });
+
+  test('an alert already sent this period short-circuits before the usage SUM', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow({
+      bucket_alert_sent_at: new Date('2026-07-10T00:00:00Z'), // after PERIOD_START
+    }));
+
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    expect(mockPrisma.device_token_usage_session.aggregate).not.toHaveBeenCalled();
+    expect(mockSendPush).not.toHaveBeenCalled();
+  });
+
+  test('an expired-but-unrepaired trial never gets an 80% nudge', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(subRow({
+      status: 'trial',
+      trial_started_at: new Date('2026-06-10T00:00:00Z'),
+      trial_ends_at: new Date('2026-07-10T00:00:00Z'), // ended a week before NOW
+      current_period_start: null,
+    }));
+
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    expect(mockSendPush).not.toHaveBeenCalled();
+    expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('below 80% neither claims nor pushes', async () => {
+    mockPrisma.device_token_usage_session.aggregate.mockResolvedValue({ _sum: { message_count: 239 } });
+
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+    expect(mockSendPush).not.toHaveBeenCalled();
+  });
+
+  test('enforcement off means no usage pushes either', async () => {
+    delete process.env.ENFORCEMENT_ENABLED;
+
+    await service.maybeSendBucketAlert(MAC, { now: NOW });
+
+    expect(mockSendPush).not.toHaveBeenCalled();
+  });
+});
+
+describe('getSubscriptionSummary', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockPrisma.device_token_usage_session.aggregate.mockImplementation(async ({ where }) =>
+      where.created_at?.lt
+        ? { _sum: { message_count: 10, session_duration_seconds: 300 } }
+        : { _sum: { message_count: 100 } }
+    );
+    mockPrisma.device_image_generations.count.mockResolvedValue(3);
+  });
+
+  test('returns status, plan, period, usage and trial countdown', async () => {
+    const now = new Date('2026-07-17T10:00:00Z');
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+      status: 'trial',
+      trial_started_at: new Date('2026-07-10T00:00:00Z'),
+      trial_ends_at: new Date('2026-08-09T00:00:00Z'),
+      current_period_start: null,
+      current_period_end: null,
+      subscription_plans: {
+        tier: 'family', name: 'Family', price_inr: 299,
+        monthly_question_limit: 300, daily_question_limit: 60,
+        daily_minutes_limit: 15, monthly_image_limit: null, daily_image_limit: 25,
+      },
+    });
+
+    const summary = await service.getSubscriptionSummary(MAC, { now });
+
+    expect(summary.status).toBe('trial');
+    expect(summary.plan.tier).toBe('family');
+    expect(summary.trial.days_left).toBe(23);
+    expect(summary.usage.used.questions_month).toBe(100);
+    expect(summary.usage.remaining.questions_today).toBe(50);
+    expect(summary.usage.remaining.minutes_today).toBe(10);
+  });
+
+  test('unknown MAC returns null', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+    expect(await service.getSubscriptionSummary(MAC)).toBeNull();
+  });
+});
+
+describe('recordImageGeneration', () => {
+  test('writes one row per generated image', async () => {
+    jest.clearAllMocks();
+    await service.recordImageGeneration('aa-bb-cc-dd-ee-ff');
+    expect(mockPrisma.device_image_generations.create).toHaveBeenCalledWith({
+      data: { mac_address: MAC },
+    });
+  });
+
+  test('a malformed MAC writes nothing', async () => {
+    jest.clearAllMocks();
+    await service.recordImageGeneration('nope');
+    expect(mockPrisma.device_image_generations.create).not.toHaveBeenCalled();
   });
 });
 

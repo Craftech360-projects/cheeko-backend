@@ -1512,8 +1512,10 @@ router.get('/:mac/session-verdict',
   asyncHandler(async (req, res) => {
     const { mac } = req.params;
 
-    const verdict = await subscriptionService.getSessionVerdict(mac);
-    logger.info(`[DEVICE] Verdict ${mac}: allowed=${verdict.allowed} reason=${verdict.reason}`);
+    // flow=imagine adds the image buckets; anything else gates a voice session.
+    const flow = req.query.flow === 'imagine' ? 'imagine' : 'voice';
+    const verdict = await subscriptionService.getSessionVerdict(mac, { flow });
+    logger.info(`[DEVICE] Verdict ${mac} (${flow}): allowed=${verdict.allowed} reason=${verdict.reason}`);
     success(res, verdict);
   })
 );

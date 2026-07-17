@@ -541,14 +541,16 @@ class VirtualMQTTConnection {
    *
    * @param {string} macAddress
    * @param {string} baseUrl - manager-api base URL, without the /toy suffix
+   * @param {Object} [opts]
+   * @param {'voice'|'imagine'} [opts.flow] - imagine adds the image buckets (SUB-3)
    * @returns {Promise<{allowed: boolean, reason: string, remaining: Object}>}
    */
-  async fetchSessionVerdict(macAddress, baseUrl) {
+  async fetchSessionVerdict(macAddress, baseUrl, { flow } = {}) {
     const serviceKey = process.env.MANAGER_API_SECRET || process.env.SERVICE_SECRET_KEY;
 
     try {
       const response = await axios.get(
-        `${baseUrl}/toy/device/${encodeURIComponent(macAddress)}/session-verdict`,
+        `${baseUrl}/toy/device/${encodeURIComponent(macAddress)}/session-verdict${flow === "imagine" ? "?flow=imagine" : ""}`,
         { headers: { "X-Service-Key": serviceKey }, timeout: 5000 }
       );
 
@@ -1166,6 +1168,14 @@ class VirtualMQTTConnection {
         managerApiUrl: process.env.MANAGER_API_URL,
         serviceKey: process.env.MANAGER_API_SECRET,
         newRequestId: () => `img_${randomUUID().slice(0, 8)}`,
+        // SUB-3: same verdict as voice plus the image buckets; fail-open lives
+        // inside fetchSessionVerdict, so an outage never bricks imagine.
+        fetchVerdict: (conn) =>
+          conn.fetchSessionVerdict(
+            conn.macAddress,
+            (process.env.MANAGER_API_URL || "").replace("/toy", ""),
+            { flow: "imagine" }
+          ),
       }).catch((e) =>
         logger.error(`❌ [IMAGINE] runImagine failed: ${e?.message}`)
       );

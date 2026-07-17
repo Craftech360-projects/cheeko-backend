@@ -67,6 +67,7 @@ test('e2e: opus frames -> line_art WS -> upload -> image{url} published', async 
     managerApiUrl: api.url,
     serviceKey: 'e2e-secret',
     newRequestId: () => 'img_e2e',
+    fetchVerdict: async () => ({ allowed: true, reason: 'ok' }), // SUB-3: required dep
   });
 
   const types = conn.sent.map((m) => m.type);

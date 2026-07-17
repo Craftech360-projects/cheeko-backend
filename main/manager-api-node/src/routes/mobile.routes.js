@@ -8,6 +8,7 @@ const deviceService = require('../services/device.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
+const subscriptionService = require('../services/subscription.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
 
@@ -423,6 +424,20 @@ router.get('/devices/:mac/games-played', asyncHandler(async (req, res) => {
 router.get('/devices/:mac/radio-played', asyncHandler(async (req, res) => {
     const details = await mobileService.getDeviceRadioPlayed(req.firebaseUser.uid, req.params.mac, req.query);
     success(res, details);
+}));
+
+// ─── Subscription (SUB-3) ─────────────────────────────────────────────────────
+
+router.get('/devices/:mac/subscription', asyncHandler(async (req, res) => {
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+    const summary = await subscriptionService.getSubscriptionSummary(device.mac_address);
+    if (!summary) {
+        return res.status(404).json({ code: 404, msg: 'No subscription for this device', data: null });
+    }
+    success(res, summary);
 }));
 
 // ─── AI Imagine gallery ───────────────────────────────────────────────────────

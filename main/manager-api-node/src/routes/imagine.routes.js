@@ -11,6 +11,8 @@ const { requireServiceKey } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { success, badRequest } = require('../utils/response');
 const uploadService = require('../services/upload.service');
+const subscriptionService = require('../services/subscription.service');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -32,6 +34,13 @@ const uploadJpeg = (req, res, next) => upload.single('file')(req, res, (err) => 
 router.post('/upload', requireServiceKey, uploadJpeg, asyncHandler(async (req, res) => {
   if (!req.file) return badRequest(res, 'No file uploaded');
   const result = await uploadService.uploadImagineImage(req.file.buffer, req.body.deviceMac);
+  // Count the image against the device's buckets (SUB-3). The image already
+  // exists and the toy is waiting for it — a failed count must not fail delivery.
+  try {
+    await subscriptionService.recordImageGeneration(req.body.deviceMac);
+  } catch (error) {
+    logger.error(`[IMAGINE] Image generated but not counted for ${req.body.deviceMac}: ${error.message}`);
+  }
   return success(res, result);
 }));
 

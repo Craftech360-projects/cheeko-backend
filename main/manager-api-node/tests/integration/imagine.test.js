@@ -10,9 +10,15 @@ jest.mock('../../src/services/upload.service', () => ({
   }),
 }));
 
+// Mock the bucket counter so no real DB write happens (SUB-3).
+jest.mock('../../src/services/subscription.service', () => ({
+  recordImageGeneration: jest.fn().mockResolvedValue(undefined),
+}));
+
 const request = require('supertest');
 const app = require('../../src/app');
 const uploadService = require('../../src/services/upload.service');
+const subscriptionService = require('../../src/services/subscription.service');
 
 const SERVICE_KEY = process.env.SERVICE_SECRET_KEY || 'test-service-key';
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
@@ -41,13 +47,27 @@ describe('POST /toy/imagine/upload', () => {
     const res = await request(app)
       .post('/toy/imagine/upload')
       .set('X-Service-Key', SERVICE_KEY)
+      .field('deviceMac', 'AA:BB:CC:DD:EE:FF')
       .attach('file', JPEG, { filename: 'x.jpg', contentType: 'image/jpeg' });
     expect(res.status).toBe(200);
     expect(res.body.code).toBe(0);
     expect(res.body.data.url).toBe('https://cdn.example.net/imagine/abc.jpg');
     expect(res.body.data.s3Key).toBe('imagine/abc.jpg');
     expect(uploadService.uploadImagineImage).toHaveBeenCalledTimes(1);
-    expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(expect.any(Buffer));
+    expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(expect.any(Buffer), 'AA:BB:CC:DD:EE:FF');
+    // SUB-3: every delivered image is counted against the device's buckets.
+    expect(subscriptionService.recordImageGeneration).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
+  });
+
+  it('a failed count never fails the delivery', async () => {
+    subscriptionService.recordImageGeneration.mockRejectedValueOnce(new Error('db down'));
+    const res = await request(app)
+      .post('/toy/imagine/upload')
+      .set('X-Service-Key', SERVICE_KEY)
+      .field('deviceMac', 'AA:BB:CC:DD:EE:FF')
+      .attach('file', JPEG, { filename: 'x.jpg', contentType: 'image/jpeg' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.url).toBe('https://cdn.example.net/imagine/abc.jpg');
   });
 
   it('rejects a non-JPEG file (400)', async () => {

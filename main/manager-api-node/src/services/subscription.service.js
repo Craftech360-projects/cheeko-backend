@@ -3,9 +3,11 @@
  *
  * Session-start gating for AI voice + imagine.
  *
- * SUB-1 (walking skeleton) scope: the kill-switch and the "does this MAC have a
- * live plan" question. Trial expiry (SUB-2) and bucket maths (SUB-3) land later;
- * until then `remaining` is reported as unknown rather than faked.
+ * SUB-1 laid the kill-switch and "does this MAC have a live plan"; SUB-2 added
+ * lazy trial expiry + the plan-gate push; SUB-3 makes the verdict actually
+ * meter: live SUMs over device_token_usage_session (no counter columns),
+ * image counts over device_image_generations, IST day boundaries, and the
+ * once-per-period 80%-of-monthly-bucket push.
  */
 
 const { prisma } = require('../config/database');
@@ -21,14 +23,141 @@ const SESSION_ALLOWED_STATUSES = new Set(['trial', 'active', 'grace']);
 const TRIAL_DAYS = 30;
 const TRIAL_TIER = 'family';
 
-// ponytail: SUB-3 replaces these nulls with live SUMs over
-// device_token_usage_session. Null = "not computed yet", never "zero left".
+// Null = "not computed" (kill-switch off, refusals, plan-less rows), never
+// "zero left". Allowed verdicts carry real numbers since SUB-3.
 const REMAINING_UNKNOWN = Object.freeze({
   questions_month: null,
   questions_today: null,
   minutes_today: null,
   images_today: null,
 });
+
+const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000; // UTC+5:30, no DST
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const BUCKET_ALERT_THRESHOLD = 0.8;
+
+/**
+ * The current IST calendar day as UTC instants: [start, end). Day boundaries
+ * are IST midnight; everything is stored and compared in UTC (spec §5).
+ * @param {Date} [now] - injectable for tests
+ */
+const istDayWindow = (now = new Date()) => {
+  const startMs =
+    Math.floor((now.getTime() + IST_OFFSET_MS) / MS_PER_DAY) * MS_PER_DAY - IST_OFFSET_MS;
+  return { start: new Date(startMs), end: new Date(startMs + MS_PER_DAY) };
+};
+
+/**
+ * The instant this subscription's monthly buckets count from: trials meter
+ * from trial_started_at, paid plans from current_period_start.
+ * @returns {Date|null} null = unknown anchor, monthly buckets can't be metered
+ */
+const monthlyAnchor = (subscription) =>
+  (subscription.status === 'trial'
+    ? subscription.trial_started_at
+    : subscription.current_period_start) || null;
+
+/** SUM(message_count) since the period anchor — the one monthly-bucket number,
+ * shared by the verdict and the 80% alert so the two can never drift. */
+const monthlyQuestionsUsed = async (normalizedMac, anchor) => {
+  const agg = await prisma.device_token_usage_session.aggregate({
+    where: { mac_address: normalizedMac, created_at: { gte: anchor } },
+    _sum: { message_count: true },
+  });
+  return Number(agg._sum.message_count || 0);
+};
+
+/**
+ * Live usage SUMs for one device — only the queries the plan's limits can
+ * actually use (a null image limit means its COUNT is never read; skip it).
+ * The no-counter-columns rule (spec §5) at current fleet size.
+ *
+ * ponytail: windows filter on created_at (timestamptz, row created when the
+ * session's usage is first flushed) because usage_date is written as the UTC
+ * day. A session straddling IST midnight counts toward the day it flushed,
+ * and one straddling a period renewal keeps counting toward the old period;
+ * switch writers to window-aware attribution if either edge ever matters.
+ */
+const computeUsage = async (normalizedMac, anchor, plan, now) => {
+  const day = istDayWindow(now);
+  const dayWhere = { mac_address: normalizedMac, created_at: { gte: day.start, lt: day.end } };
+  const anyImageLimit = plan.daily_image_limit != null || plan.monthly_image_limit != null;
+
+  const [questionsMonth, dayAgg, imagesToday, imagesMonth] = await Promise.all([
+    anchor ? monthlyQuestionsUsed(normalizedMac, anchor) : null,
+    prisma.device_token_usage_session.aggregate({
+      where: dayWhere,
+      _sum: { message_count: true, session_duration_seconds: true },
+    }),
+    anyImageLimit ? prisma.device_image_generations.count({ where: dayWhere }) : null,
+    anchor && plan.monthly_image_limit != null
+      ? prisma.device_image_generations.count({
+          where: { mac_address: normalizedMac, created_at: { gte: anchor } },
+        })
+      : null,
+  ]);
+
+  return {
+    questionsMonth,
+    questionsToday: Number(dayAgg._sum.message_count || 0),
+    minutesToday: Number(dayAgg._sum.session_duration_seconds || 0) / 60,
+    imagesToday,
+    imagesMonth,
+  };
+};
+
+/** Refusal check + remaining maths for one plan. Buckets are start-gated only:
+ * this runs at session/imagine start, never against a running session. */
+const applyBuckets = (plan, usage, flow) => {
+  const remaining = {
+    questions_month:
+      usage.questionsMonth === null
+        ? null
+        : Math.max(0, plan.monthly_question_limit - usage.questionsMonth),
+    questions_today: Math.max(0, plan.daily_question_limit - usage.questionsToday),
+    // ceil, not floor: 14.5 of 15 minutes used is still an allowed session,
+    // so it must not display as "0 left" (0 remaining ⇔ refused, both ways).
+    minutes_today: Math.max(0, Math.ceil(plan.daily_minutes_limit - usage.minutesToday)),
+    images_today: imageRemaining(plan, usage),
+  };
+
+  let reason = null;
+  if (usage.questionsMonth !== null && usage.questionsMonth >= plan.monthly_question_limit) {
+    reason = 'monthly_bucket_empty';
+  } else if (usage.questionsToday >= plan.daily_question_limit) {
+    reason = 'daily_questions';
+  } else if (usage.minutesToday >= plan.daily_minutes_limit) {
+    reason = 'daily_minutes';
+  } else if (flow === 'imagine' && remaining.images_today === 0) {
+    reason = 'daily_images';
+  }
+
+  return { reason, remaining };
+};
+
+/** Images left today under the tightest applicable limit; null = unlimited. */
+const imageRemaining = (plan, usage) => {
+  const caps = [];
+  if (plan.daily_image_limit != null) {
+    caps.push(plan.daily_image_limit - usage.imagesToday);
+  }
+  if (plan.monthly_image_limit != null && usage.imagesMonth !== null) {
+    caps.push(plan.monthly_image_limit - usage.imagesMonth);
+  }
+  if (!caps.length) return null;
+  return Math.max(0, Math.min(...caps));
+};
+
+const PLAN_LIMIT_SELECT = {
+  tier: true,
+  name: true,
+  price_inr: true,
+  monthly_question_limit: true,
+  daily_question_limit: true,
+  daily_minutes_limit: true,
+  monthly_image_limit: true,
+  daily_image_limit: true,
+};
 
 /**
  * Is global enforcement on? Defaults to OFF, so a missing env var can never
@@ -152,12 +281,17 @@ const sendPlanGatePush = async (normalizedMac) => {
 };
 
 /**
- * Decide whether a device may start a session.
+ * Decide whether a device may start a session (or, flow='imagine', generate
+ * an image). Image buckets only ever gate the imagine flow — a device out of
+ * images can still talk.
  *
  * @param {string} macAddress - MAC in any separator format
+ * @param {Object} [opts]
+ * @param {'voice'|'imagine'} [opts.flow] - what is being gated
+ * @param {Date} [opts.now] - injectable clock for tests
  * @returns {Promise<{allowed: boolean, reason: string, remaining: Object}>}
  */
-const getSessionVerdict = async (macAddress) => {
+const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() } = {}) => {
   if (!isEnforcementEnabled()) {
     return { allowed: true, reason: 'ok', remaining: REMAINING_UNKNOWN };
   }
@@ -169,7 +303,13 @@ const getSessionVerdict = async (macAddress) => {
 
   const subscription = await prisma.device_subscriptions.findUnique({
     where: { mac_address: normalizedMac },
-    select: { status: true, trial_ends_at: true },
+    select: {
+      status: true,
+      trial_started_at: true,
+      trial_ends_at: true,
+      current_period_start: true,
+      subscription_plans: { select: PLAN_LIMIT_SELECT },
+    },
   });
 
   if (!subscription) {
@@ -184,13 +324,195 @@ const getSessionVerdict = async (macAddress) => {
     return { allowed: false, reason: 'no_plan', remaining: REMAINING_UNKNOWN };
   }
 
-  return { allowed: true, reason: 'ok', remaining: REMAINING_UNKNOWN };
+  const plan = subscription.subscription_plans;
+  if (!plan) {
+    // A live status with no plan row is data damage, not a lapsed customer —
+    // fail open rather than invent limits (spec §5 fail-open rule).
+    logger.warn(`[SUBSCRIPTION] ${normalizedMac} allowed without limits: status=${status} but no plan row`);
+    return { allowed: true, reason: 'ok', remaining: REMAINING_UNKNOWN };
+  }
+
+  const anchor = monthlyAnchor({ ...subscription, status });
+  const usage = await computeUsage(normalizedMac, anchor, plan, now);
+  const { reason, remaining } = applyBuckets(plan, usage, flow);
+
+  if (reason) {
+    logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: ${reason} (flow=${flow})`);
+    return { allowed: false, reason, remaining };
+  }
+
+  return { allowed: true, reason: 'ok', remaining };
+};
+
+/**
+ * Send the once-per-billing-period "80% of your monthly questions used" push.
+ * Called fire-and-forget from the usage-write path — that write IS the
+ * crossing, so the push lands when the bucket actually crosses, not when the
+ * next session starts. Exactly-once is the DB's job: the conditional UPDATE
+ * on bucket_alert_sent_at is the claim, and a new period re-arms it because
+ * the anchor moves past the old timestamp.
+ *
+ * @param {string} macAddress
+ * @param {Object} [opts]
+ * @param {Date} [opts.now]
+ */
+const maybeSendBucketAlert = async (macAddress, { now = new Date() } = {}) => {
+  // Pushing "240 of 300 used" while nothing is enforced would be a lie.
+  if (!isEnforcementEnabled()) return;
+
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) return;
+
+  const subscription = await prisma.device_subscriptions.findUnique({
+    where: { mac_address: normalizedMac },
+    select: {
+      status: true,
+      trial_started_at: true,
+      trial_ends_at: true,
+      current_period_start: true,
+      bucket_alert_sent_at: true,
+      subscription_plans: { select: { monthly_question_limit: true } },
+    },
+  });
+
+  const plan = subscription?.subscription_plans;
+  if (!plan || !SESSION_ALLOWED_STATUSES.has(subscription.status)) return;
+  // An expired-but-unrepaired trial is about to get the plan-gate push, not a
+  // "you're at 80%" nudge about a plan it no longer has. Read-only check —
+  // the row repair stays the verdict's job.
+  if (
+    subscription.status === 'trial' &&
+    subscription.trial_ends_at &&
+    now.getTime() > subscription.trial_ends_at.getTime()
+  ) return;
+
+  const anchor = monthlyAnchor(subscription);
+  if (!anchor) return;
+  // Already sent this period — skip before paying for the usage SUM. This is
+  // the common case for the rest of the period once a device crosses 80%.
+  if (subscription.bucket_alert_sent_at && subscription.bucket_alert_sent_at >= anchor) return;
+
+  const used = await monthlyQuestionsUsed(normalizedMac, anchor);
+  if (used < BUCKET_ALERT_THRESHOLD * plan.monthly_question_limit) return;
+
+  // Token BEFORE claim: a parent who hasn't registered the app yet must not
+  // burn the once-per-period claim — they should still get the alert when
+  // they register later in the period.
+  const fcmToken = await findParentFcmToken(normalizedMac);
+  if (!fcmToken) {
+    logger.info(`[SUBSCRIPTION] No FCM token for ${normalizedMac}; bucket alert deferred`);
+    return;
+  }
+
+  const { count } = await prisma.device_subscriptions.updateMany({
+    where: {
+      mac_address: normalizedMac,
+      OR: [{ bucket_alert_sent_at: null }, { bucket_alert_sent_at: { lt: anchor } }],
+    },
+    data: { bucket_alert_sent_at: now },
+  });
+  if (count === 0) return; // a concurrent flush won the claim
+
+  const delivered = await sendPushNotification(
+    fcmToken,
+    'Cheeko is close to this month’s limit',
+    `${used} of ${plan.monthly_question_limit} questions used — Cheeko will take a break when they run out.`
+  );
+  logger.info(
+    `[SUBSCRIPTION] 80% bucket alert for ${normalizedMac}: ${delivered ? 'sent' : 'not delivered'}`
+  );
+};
+
+/**
+ * Count one generated image against the device's buckets. Called from the
+ * imagine-upload path — the image exists by now, so failures here are logged,
+ * never thrown back into the delivery path.
+ * @param {string} macAddress
+ */
+const recordImageGeneration = async (macAddress) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) {
+    // Loudly: an uncountable image is a metering hole, not a shrug (SUB-4 rule).
+    logger.warn(`[SUBSCRIPTION] Image NOT counted — unusable MAC "${macAddress}"`);
+    return;
+  }
+  await prisma.device_image_generations.create({ data: { mac_address: normalizedMac } });
+};
+
+/**
+ * Everything the parent app's plan screen needs for one device (SUB-10
+ * consumes this via GET /api/mobile/devices/:mac/subscription).
+ *
+ * @param {string} macAddress
+ * @param {Object} [opts]
+ * @param {Date} [opts.now]
+ * @returns {Promise<Object|null>} null when the MAC has no subscription row
+ */
+const getSubscriptionSummary = async (macAddress, { now = new Date() } = {}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) return null;
+
+  const subscription = await prisma.device_subscriptions.findUnique({
+    where: { mac_address: normalizedMac },
+    select: {
+      status: true,
+      trial_started_at: true,
+      trial_ends_at: true,
+      current_period_start: true,
+      current_period_end: true,
+      subscription_plans: { select: PLAN_LIMIT_SELECT },
+    },
+  });
+  if (!subscription) return null;
+
+  const status = await applyLazyTrialExpiry(subscription, normalizedMac);
+  const plan = subscription.subscription_plans;
+
+  let usage = null;
+  if (plan) {
+    const anchor = monthlyAnchor({ ...subscription, status });
+    const u = await computeUsage(normalizedMac, anchor, plan, now);
+    // flow only affects the refusal reason, which the summary discards;
+    // remaining is flow-independent.
+    const { remaining } = applyBuckets(plan, u, 'imagine');
+    usage = {
+      used: {
+        questions_month: u.questionsMonth,
+        questions_today: u.questionsToday,
+        minutes_today: Math.floor(u.minutesToday),
+        images_today: u.imagesToday,
+      },
+      remaining,
+    };
+  }
+
+  return {
+    mac_address: normalizedMac,
+    status,
+    plan,
+    period: {
+      start: subscription.current_period_start,
+      end: subscription.current_period_end,
+    },
+    trial:
+      status === 'trial' && subscription.trial_ends_at
+        ? {
+            ends_at: subscription.trial_ends_at,
+            days_left: Math.max(0, Math.ceil((subscription.trial_ends_at.getTime() - now.getTime()) / MS_PER_DAY)),
+          }
+        : null,
+    usage,
+  };
 };
 
 module.exports = {
   isEnforcementEnabled,
   getSessionVerdict,
+  getSubscriptionSummary,
+  maybeSendBucketAlert,
+  recordImageGeneration,
   ensureTrialForMac,
+  istDayWindow,
   SESSION_ALLOWED_STATUSES,
   TRIAL_DAYS,
 };

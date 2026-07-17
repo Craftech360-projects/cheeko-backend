@@ -996,6 +996,13 @@ const recordTokenUsage = async ({
     } else {
       await prisma.device_token_usage_session.create({ data: sessionUsageData });
     }
+
+    // The write above is the bucket crossing (buckets SUM this table), so the
+    // 80% alert check lives here, not in the verdict. Fire-and-forget: a slow
+    // FCM round trip must not delay the usage ack.
+    subscriptionService.maybeSendBucketAlert(normalizedMac).catch((error) =>
+      logger.error(`[SUBSCRIPTION] Bucket alert check failed for ${normalizedMac}: ${error.message}`)
+    );
   }
 
   const existing = await prisma.device_token_usage.findFirst({
