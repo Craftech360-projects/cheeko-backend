@@ -131,7 +131,7 @@
 
             <!-- Chat Tab -->
             <el-tab-pane label="Chat" name="chat">
-              <div v-loading="chatLoading">
+              <div v-loading="chatLoading" class="tab-fill">
                 <div v-if="chatRows.length > 0" class="chat-list">
                   <template v-for="row in chatRows">
                     <div v-if="row.startsSession" :key="row.id + '-sep'" class="chat-session-sep">
@@ -419,8 +419,37 @@ export default {
   }
 }
 
+// The drawer is full-height, but Element's body wrapper does not pass that
+// height down, so the tab content collapsed to its natural size and left the
+// lower half of the drawer blank. Chain height through body -> tabs -> pane
+// so the chat list can flex into whatever space is left.
+::v-deep .el-drawer__body {
+  height: calc(100% - 60px);
+  overflow: hidden;
+}
+
 .drawer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   padding: 0 20px 20px;
+}
+
+::v-deep .el-tabs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+
+  .el-tabs__content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .el-tab-pane {
+    height: 100%;
+  }
 }
 
 .unresolved-pack {
@@ -487,11 +516,18 @@ export default {
   }
 }
 
-.chat-list {
+.tab-fill {
   display: flex;
   flex-direction: column;
+  height: 100%;
+}
+
+.chat-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   gap: 8px;
-  max-height: 60vh;
+  min-height: 0;
   overflow-y: auto;
   padding: 4px 8px 4px 4px;
 }
