@@ -133,26 +133,33 @@
             <el-tab-pane label="Chat" name="chat">
               <div v-loading="chatLoading">
                 <div v-if="chatRows.length > 0" class="chat-list">
-                  <div
-                    v-for="row in chatRows"
-                    :key="row.id"
-                    class="chat-message"
-                    :class="chatTypeClass(row.chat_type)"
-                  >
-                    <div class="chat-meta">
-                      <span class="chat-speaker">{{ chatTypeLabel(row.chat_type) }}</span>
-                      <span class="chat-time">{{ formatDateTime(row.created_at) }}</span>
+                  <template v-for="row in chatRows">
+                    <div v-if="row.startsSession" :key="row.id + '-sep'" class="chat-session-sep">
+                      <span>Session started {{ formatTime(row.created_at) }}</span>
                     </div>
-                    <div class="chat-content">{{ row.content }}</div>
-                  </div>
+                    <div
+                      :key="row.id"
+                      class="chat-row"
+                      :class="chatTypeClass(row.chat_type)"
+                    >
+                      <div class="chat-bubble">
+                        <div class="chat-meta">
+                          <span class="chat-speaker">{{ chatTypeLabel(row.chat_type) }}</span>
+                          <span class="chat-time">{{ formatTime(row.created_at) }}</span>
+                        </div>
+                        <div class="chat-content">
+                          <template v-for="(part, i) in chatParts(row.content)">
+                            <span v-if="part.tag" :key="i" class="chat-tag">{{ part.tag }}</span>
+                            <span v-else :key="i">{{ part.text }}</span>
+                          </template>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </div>
                 <div v-else class="empty-note">
                   <i class="el-icon-chat-dot-round"></i>
                   <p>No chat messages found for this date.</p>
-                  <p class="empty-note-sub">
-                    Local dev has no chat rows in <code>ai_agent_chat_history</code> — this is
-                    expected and not a bug.
-                  </p>
                 </div>
               </div>
             </el-tab-pane>
@@ -268,12 +275,29 @@ export default {
       this.chatLoading = true;
       Api.activeDevices.getDeviceChat(this.currentRow.mac_address, this.selectedDate, (res) => {
         if (res.data && res.data.code === 0) {
-          this.chatRows = res.data.data || [];
+          const rows = res.data.data || [];
+          let lastSession = null;
+          this.chatRows = rows.map((row) => {
+            const startsSession = row.session_id !== lastSession;
+            lastSession = row.session_id;
+            return { ...row, startsSession };
+          });
         }
         this.chatLoading = false;
       }, () => {
         this.chatLoading = false;
       });
+    },
+    // The agent emits face-expression tags inline, e.g. "[happy] Yes!".
+    // Split them out so they render as chips instead of cluttering the text.
+    chatParts(content) {
+      if (!content) return [];
+      return String(content)
+        .split(/(\[[a-z ]{2,20}\])/gi)
+        .filter((piece) => piece.trim() !== '')
+        .map((piece) => (/^\[[a-z ]{2,20}\]$/i.test(piece)
+          ? { tag: piece.slice(1, -1) }
+          : { text: piece }));
     },
     chatTypeLabel(chatType) {
       if (chatType === 1 || chatType === '1') return 'Child';
@@ -294,6 +318,16 @@ export default {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    },
+    formatTime(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '-';
+      return date.toLocaleTimeString('en-IN', {
+        timeZone: 'Asia/Kolkata',
         hour: '2-digit',
         minute: '2-digit'
       });
@@ -456,26 +490,63 @@ export default {
 .chat-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 4px 8px 4px 4px;
 }
 
-.chat-message {
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: #f7f7f7;
+.chat-session-sep {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: #a0a6bb;
+
+  &::before,
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #ebeef5;
+  }
+}
+
+.chat-row {
+  display: flex;
 
   &.chat-user {
-    background: rgba(#1890ff, 0.08);
+    justify-content: flex-end;
   }
 
   &.chat-assistant {
-    background: rgba($primary, 0.08);
+    justify-content: flex-start;
+  }
+}
+
+.chat-bubble {
+  max-width: 72%;
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: #f7f7f7;
+
+  .chat-user & {
+    background: rgba(#1890ff, 0.1);
+    border-bottom-right-radius: 4px;
+  }
+
+  .chat-assistant & {
+    background: rgba($primary, 0.1);
+    border-bottom-left-radius: 4px;
   }
 }
 
 .chat-meta {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
   font-size: 12px;
   color: #818cae;
   margin-bottom: 4px;
@@ -488,8 +559,21 @@ export default {
 
 .chat-content {
   font-size: 14px;
+  line-height: 1.5;
   color: #3d4566;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.chat-tag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: rgba(#3d4566, 0.08);
+  font-size: 11px;
+  line-height: 16px;
+  color: #6b7290;
+  vertical-align: 1px;
 }
 </style>
