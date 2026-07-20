@@ -895,6 +895,20 @@ model rfid_card_tap_log {
   @@index([created_at], map: "idx_rfid_card_tap_log_created_at")
 }
 
+model pending_card_pairing {
+  id              BigInt   @id @default(autoincrement())
+  mac_address     String   @db.VarChar(20)
+  content_pack_id BigInt
+  kid_id          BigInt?
+  user_id         BigInt
+  status          String   @default("pending") @db.VarChar(20) // pending | completed | expired
+  rfid_uid        String?  @db.VarChar(100)
+  expires_at      DateTime @db.Timestamptz(6)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address, status], map: "idx_pending_card_pairing_mac_status")
+}
+
 model rfid_series {
   id                 BigInt              @id @default(autoincrement())
   series_name        String              @db.VarChar(255)
