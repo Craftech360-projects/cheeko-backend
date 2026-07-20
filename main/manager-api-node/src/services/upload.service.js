@@ -187,19 +187,29 @@ async function uploadImagineImage(fileBuffer, deviceMac) {
 
 /**
  * AI Imagine: list a device's generated images, newest first. Returns [] for an
- * unknown/malformed MAC. ponytail: single ListObjectsV2 page (1000 max) — add a
- * continuation token if a device ever exceeds 1000 images.
+ * unknown/malformed MAC. Pass dateISO (YYYY-MM-DD) to filter to that IST calendar
+ * day — S3 has no server-side date filter, so this filters the listed page in memory.
+ * ponytail: single ListObjectsV2 page (1000 max) — add a continuation token if a
+ * device ever exceeds 1000 images.
  */
-async function listImagineImages(deviceMac) {
+async function listImagineImages(deviceMac, dateISO) {
   const mac = macKeySegment(deviceMac);
   if (!mac) return [];
   const out = await s3Client.send(new ListObjectsV2Command({
     Bucket: S3_BUCKET,
     Prefix: `imagine/${mac}/`,
   }));
-  return (out.Contents || [])
-    .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
-    .map((o) => ({ url: `${IMAGINE_PUBLIC_BASE}/${o.Key}`, createdAt: o.LastModified }));
+  let items = (out.Contents || []).map((o) => ({
+    key: o.Key,
+    url: `${IMAGINE_PUBLIC_BASE}/${o.Key}`,
+    size: o.Size,
+    createdAt: o.LastModified,
+  }));
+  if (dateISO) {
+    items = items.filter((i) =>
+      new Date(i.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === dateISO);
+  }
+  return items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 module.exports = {
