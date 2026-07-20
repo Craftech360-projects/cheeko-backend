@@ -486,6 +486,18 @@ const recordImageGeneration = async (macAddress, url) => {
 };
 
 /**
+ * The active plan catalog the portal's plans page renders (SUB-6). Public
+ * fields only — no ids (BigInt) and no razorpay_plan_id; tier is the key
+ * checkout takes.
+ */
+const getActivePlans = () =>
+  prisma.subscription_plans.findMany({
+    where: { is_active: true },
+    select: { ...PLAN_LIMIT_SELECT, features: true },
+    orderBy: { price_inr: 'asc' },
+  });
+
+/**
  * Everything the parent app's plan screen needs for one device (SUB-10
  * consumes this via GET /api/mobile/devices/:mac/subscription).
  *
@@ -553,6 +565,7 @@ const getSubscriptionSummary = async (macAddress, { now = new Date() } = {}) => 
 
 module.exports = {
   isEnforcementEnabled,
+  getActivePlans,
   getSessionVerdict,
   heartbeatCutoff,
   getSubscriptionSummary,

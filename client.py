@@ -22,9 +22,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.20"
+SERVER_IP = "64.227.170.31"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.20"
+MQTT_BROKER_HOST ="64.227.170.31"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
@@ -1142,11 +1142,14 @@ class TestClient:
 
         Mimics the device fetching the image{url} over HTTPS. Returns the saved path.
         """
+        start = time.monotonic()
         try:
             resp = requests.get(url, timeout=15)
+            headers_elapsed = time.monotonic() - start
             resp.raise_for_status()
         except requests.exceptions.RequestException as exc:
-            logger.error("[IMAGINE] Failed to download image from %s: %s", url, exc)
+            logger.error("[IMAGINE] Failed to download image from %s after %.2fs: %s",
+                         url, time.monotonic() - start, exc)
             return None
 
         os.makedirs("imagine_outputs", exist_ok=True)
@@ -1154,7 +1157,9 @@ class TestClient:
         path = os.path.join("imagine_outputs", f"{name}.jpg")
         with open(path, "wb") as fh:
             fh.write(resp.content)
-        logger.info("[IMAGINE] Saved image -> %s (%d bytes)", path, len(resp.content))
+        total_elapsed = time.monotonic() - start
+        logger.info("[IMAGINE] Saved image -> %s (%d bytes, headers=%.2fs, total=%.2fs)",
+                    path, len(resp.content), headers_elapsed, total_elapsed)
         try:
             os.startfile(path)  # Windows: open in the default image viewer
         except Exception:

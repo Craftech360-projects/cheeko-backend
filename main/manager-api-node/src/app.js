@@ -89,6 +89,10 @@ app.use(limiter);
 // Body Parsing Middleware
 // ===========================================
 
+// Razorpay webhook needs the raw body for HMAC verification, so it mounts
+// before the JSON parser (SUB-6).
+app.use('/webhooks/razorpay', require('./routes/razorpayWebhook.routes'));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
