@@ -107,6 +107,30 @@
                 </template>
               </el-table-column>
 
+              <!-- Parent contact (Admin only) — Apple sign-ups have an opaque
+                   UID as their Owner, so this is what identifies them -->
+              <el-table-column v-if="isAdmin" label="Parent Contact" min-width="220">
+                <template slot-scope="scope">
+                  <div v-if="scope.row.parentName" class="parent-name">{{ scope.row.parentName }}</div>
+                  <div v-if="scope.row.parentEmail" class="parent-contact">{{ scope.row.parentEmail }}</div>
+                  <div v-if="scope.row.parentPhone" class="parent-contact">{{ scope.row.parentPhone }}</div>
+                  <span
+                    v-if="!scope.row.parentName && !scope.row.parentEmail && !scope.row.parentPhone"
+                    class="parent-contact-empty"
+                  >No parent profile</span>
+                </template>
+              </el-table-column>
+
+              <!-- Child (Admin only) -->
+              <el-table-column v-if="isAdmin" label="Child" min-width="140">
+                <template slot-scope="scope">
+                  <span v-if="scope.row.kidNames && scope.row.kidNames.length">
+                    {{ scope.row.kidNames.join(', ') }}
+                  </span>
+                  <span v-else class="parent-contact-empty">—</span>
+                </template>
+              </el-table-column>
+
               <!-- MAC ID(s) -->
               <el-table-column label="MAC ID(s)" min-width="140" align="center">
                 <template slot-scope="scope">
@@ -557,7 +581,11 @@ export default {
           memModelId: item.memModelId || 'Memory_nomem',
           lastConnectedAt: item.lastConnectedAt || null,
           systemPrompt: item.systemPrompt || 'No system prompt configured',
-          ownerUsername: item.ownerUsername || null
+          ownerUsername: item.ownerUsername || null,
+          parentName: item.parentName || null,
+          parentEmail: item.parentEmail || null,
+          parentPhone: item.parentPhone || null,
+          kidNames: item.kidNames || []
         }));
 
       console.log('Basic devices processed:', basicDevices); // Debug log
@@ -711,6 +739,22 @@ export default {
 
 <style scoped lang="scss">
 @import '@/styles/theme.scss';
+
+.parent-name {
+  font-weight: 500;
+}
+
+.parent-contact {
+  font-size: 12px;
+  color: #818cae;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.parent-contact-empty {
+  color: #bfbfbf;
+  font-style: italic;
+}
 
 .welcome {
   min-width: 900px;
