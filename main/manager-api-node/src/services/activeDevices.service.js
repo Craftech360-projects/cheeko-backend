@@ -50,6 +50,10 @@ const listActiveDevices = async (dateISO) => {
            d.agent_id,
            k.name          AS kid_name,
            p.display_name  AS parent_name,
+           -- Owner fallback: many devices are bound directly to an admin
+           -- sys_user with no kid_profile. Without this the UI cannot tell an
+           -- admin/test device apart from a deleted one (both render blank).
+           u.username      AS owner_username,
            COALESCE(t.tap_count, 0)     AS tap_count,
            COALESCE(s.session_count, 0) AS session_count,
            LEAST(t.first_tap, s.first_sess) AS first_activity,
@@ -60,6 +64,7 @@ const listActiveDevices = async (dateISO) => {
     LEFT JOIN ai_device d ON d.mac_address = m.mac_address
     LEFT JOIN kid_profile k ON k.id = d.kid_id
     LEFT JOIN parent_profile p ON p.user_id = k.user_id
+    LEFT JOIN sys_user u ON u.id = d.user_id
     ORDER BY (COALESCE(t.tap_count,0) + COALESCE(s.session_count,0)) DESC;
   `;
 };

@@ -45,14 +45,14 @@
           <el-table-column label="Kid Name" min-width="130">
             <template slot-scope="scope">
               <span :class="{ 'deleted-device': !scope.row.device_id }">
-                {{ displayName(scope.row.kid_name, scope.row.device_id) }}
+                {{ displayName(scope.row.kid_name, scope.row.device_id, scope.row.owner_username) }}
               </span>
             </template>
           </el-table-column>
           <el-table-column label="Parent Name" min-width="160">
             <template slot-scope="scope">
               <span :class="{ 'deleted-device': !scope.row.device_id }">
-                {{ displayName(scope.row.parent_name, scope.row.device_id) }}
+                {{ displayName(scope.row.parent_name, scope.row.device_id, scope.row.owner_username) }}
               </span>
             </template>
           </el-table-column>
@@ -215,9 +215,15 @@ export default {
         this.isLoading = false;
       });
     },
-    displayName(name, deviceId) {
+    // Resolution order:
+    //   1. real kid/parent name
+    //   2. no ai_device row at all -> device deleted, activity orphaned
+    //   3. owner sys_user (device bound to admin with no kid_profile)
+    displayName(name, deviceId, ownerUsername) {
       if (name) return name;
-      return deviceId ? '—' : '(device deleted)';
+      if (!deviceId) return '(device deleted)';
+      if (ownerUsername) return `(owner: ${ownerUsername})`;
+      return '—';
     },
     openDetail(row) {
       this.currentRow = row;
