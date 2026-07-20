@@ -85,15 +85,25 @@ const deviceRfidBreakdown = async (mac, dateISO) => {
 
 /**
  * Date-scoped chat history for a device (Task 6, Option A).
- * ai_agent_chat_history has mac_address + created_at directly, so no join
- * to ai_device/agent is required.
+ *
+ * Reads voice_session_messages, NOT ai_agent_chat_history. The LiveKit agent
+ * posts to /agent/chat-history/report, which agent.service.js writes into
+ * voice_session_messages; ai_agent_chat_history is the legacy xiaozhi table
+ * and has had no new rows since 2026-06-06.
+ *
+ * role is aliased to the chat_type the UI expects (1=user, 2=agent).
  */
 const deviceChatHistory = async (mac, dateISO) => prisma.$queryRaw`
-  SELECT id, session_id, chat_type, content, audio_id, created_at
-  FROM ai_agent_chat_history
+  SELECT id,
+         session_id,
+         CASE WHEN role = 'user' THEN 1 ELSE 2 END AS chat_type,
+         content,
+         audio_id,
+         created_at
+  FROM voice_session_messages
   WHERE mac_address ILIKE ${mac}
     AND (created_at AT TIME ZONE ${IST})::date = ${dateISO}::date
-  ORDER BY created_at ASC
+  ORDER BY created_at ASC, sequence ASC
   LIMIT 500;
 `;
 
