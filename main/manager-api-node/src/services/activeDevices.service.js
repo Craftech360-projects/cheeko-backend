@@ -40,10 +40,32 @@ const listActiveDevices = async (dateISO) => {
       WHERE (v.started_at AT TIME ZONE ${IST})::date = ${dateISO}::date
       GROUP BY v.mac_address
     ),
+    games AS (
+      SELECT g.mac_address,
+             count(*)::int              AS game_count,
+             min(g.played_at)           AS first_game,
+             max(g.played_at)           AS last_game
+      FROM device_games_played g
+      WHERE (g.played_at AT TIME ZONE ${IST})::date = ${dateISO}::date
+      GROUP BY g.mac_address
+    ),
+    radio AS (
+      SELECT r.mac_address,
+             count(*)::int              AS radio_count,
+             min(r.played_at)           AS first_radio,
+             max(r.played_at)           AS last_radio
+      FROM device_radio_played r
+      WHERE (r.played_at AT TIME ZONE ${IST})::date = ${dateISO}::date
+      GROUP BY r.mac_address
+    ),
     macs AS (
       SELECT mac_address FROM taps
       UNION
       SELECT mac_address FROM sess
+      UNION
+      SELECT mac_address FROM games
+      UNION
+      SELECT mac_address FROM radio
     )
     SELECT m.mac_address,
            d.id            AS device_id,
@@ -56,16 +78,23 @@ const listActiveDevices = async (dateISO) => {
            u.username      AS owner_username,
            COALESCE(t.tap_count, 0)     AS tap_count,
            COALESCE(s.session_count, 0) AS session_count,
-           LEAST(t.first_tap, s.first_sess) AS first_activity,
-           GREATEST(t.last_tap, s.last_sess) AS last_activity
+           COALESCE(g.game_count, 0)    AS game_count,
+           COALESCE(r.radio_count, 0)   AS radio_count,
+           -- LEAST/GREATEST skip NULLs, so a device with only one kind of
+           -- activity still reports a sane first/last.
+           LEAST(t.first_tap, s.first_sess, g.first_game, r.first_radio)  AS first_activity,
+           GREATEST(t.last_tap, s.last_sess, g.last_game, r.last_radio)   AS last_activity
     FROM macs m
     LEFT JOIN taps t ON t.mac_address = m.mac_address
     LEFT JOIN sess s ON s.mac_address = m.mac_address
+    LEFT JOIN games g ON g.mac_address = m.mac_address
+    LEFT JOIN radio r ON r.mac_address = m.mac_address
     LEFT JOIN ai_device d ON d.mac_address = m.mac_address
     LEFT JOIN kid_profile k ON k.id = d.kid_id
     LEFT JOIN parent_profile p ON p.user_id = k.user_id
     LEFT JOIN sys_user u ON u.id = d.user_id
-    ORDER BY (COALESCE(t.tap_count,0) + COALESCE(s.session_count,0)) DESC;
+    ORDER BY (COALESCE(t.tap_count,0) + COALESCE(s.session_count,0)
+              + COALESCE(g.game_count,0) + COALESCE(r.radio_count,0)) DESC;
   `;
 };
 
@@ -107,4 +136,30 @@ const deviceChatHistory = async (mac, dateISO) => prisma.$queryRaw`
   LIMIT 500;
 `;
 
-module.exports = { listActiveDevices, deviceRfidBreakdown, deviceChatHistory };
+/** Per-device game plays for one IST date, newest first. */
+const deviceGames = async (mac, dateISO) => prisma.$queryRaw`
+  SELECT id, game_name, level, difficulty_level, score, duration_ms, played_at
+  FROM device_games_played
+  WHERE mac_address ILIKE ${mac}
+    AND (played_at AT TIME ZONE ${IST})::date = ${dateISO}::date
+  ORDER BY played_at DESC
+  LIMIT 500;
+`;
+
+/** Per-device radio plays for one IST date, newest first. */
+const deviceRadio = async (mac, dateISO) => prisma.$queryRaw`
+  SELECT id, station, duration_ms, played_at
+  FROM device_radio_played
+  WHERE mac_address ILIKE ${mac}
+    AND (played_at AT TIME ZONE ${IST})::date = ${dateISO}::date
+  ORDER BY played_at DESC
+  LIMIT 500;
+`;
+
+module.exports = {
+  listActiveDevices,
+  deviceRfidBreakdown,
+  deviceChatHistory,
+  deviceGames,
+  deviceRadio
+};

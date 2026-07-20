@@ -62,6 +62,46 @@ export default {
             }).send();
     },
 
+    // Get date-scoped game plays for a device
+    getDeviceGames(mac, date, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/active-devices/${mac}/games`)
+            .method('GET')
+            .data({ date })
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getDeviceGames(mac, date, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
+    // Get date-scoped radio plays for a device
+    getDeviceRadio(mac, date, callback, errorCallback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/analytics/active-devices/${mac}/radio`)
+            .method('GET')
+            .data({ date })
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getDeviceRadio(mac, date, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
     // Get AI-generated images for a device, optionally scoped to an IST date
     getDeviceImages(mac, date, callback, errorCallback) {
         RequestService.sendRequest()

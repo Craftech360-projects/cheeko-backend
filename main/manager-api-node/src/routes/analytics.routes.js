@@ -2550,7 +2550,7 @@ router.get('/active-devices/:mac/rfid', requireFlexAuth, asyncHandler(async (req
  *   get:
  *     tags: [Analytics]
  *     summary: Date-scoped chat history for a device
- *     description: Chat turns for the device on the given IST date (mac_address + created_at on ai_agent_chat_history, no agent join needed)
+ *     description: Chat turns for the device on the given IST date (mac_address + created_at on voice_session_messages, no agent join needed)
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -2577,6 +2577,76 @@ router.get('/active-devices/:mac/chat', requireFlexAuth, asyncHandler(async (req
   const date = (req.query.date || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return badRequest(res, 'date=YYYY-MM-DD required');
   success(res, await activeDevicesService.deviceChatHistory(req.params.mac, date));
+}));
+
+/**
+ * @swagger
+ * /analytics/active-devices/{mac}/games:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Date-scoped game plays for a device
+ *     description: Rows from device_games_played for the device on the given IST date
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Game plays for the date
+ *       400:
+ *         description: date=YYYY-MM-DD required
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/active-devices/:mac/games', requireFlexAuth, asyncHandler(async (req, res) => {
+  const date = (req.query.date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return badRequest(res, 'date=YYYY-MM-DD required');
+  success(res, await activeDevicesService.deviceGames(req.params.mac, date));
+}));
+
+/**
+ * @swagger
+ * /analytics/active-devices/{mac}/radio:
+ *   get:
+ *     tags: [Analytics]
+ *     summary: Date-scoped radio plays for a device
+ *     description: Rows from device_radio_played for the device on the given IST date
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Radio plays for the date
+ *       400:
+ *         description: date=YYYY-MM-DD required
+ *       401:
+ *         description: Unauthorized
+ */
+router.get('/active-devices/:mac/radio', requireFlexAuth, asyncHandler(async (req, res) => {
+  const date = (req.query.date || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return badRequest(res, 'date=YYYY-MM-DD required');
+  success(res, await activeDevicesService.deviceRadio(req.params.mac, date));
 }));
 
 module.exports = router;

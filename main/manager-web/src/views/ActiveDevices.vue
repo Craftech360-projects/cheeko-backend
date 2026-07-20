@@ -5,7 +5,7 @@
       <!-- Page Title -->
       <div class="page-header">
         <h1>Active Devices</h1>
-        <p class="subtitle">Devices with RFID taps or voice sessions on a given day</p>
+        <p class="subtitle">Devices with RFID taps, voice sessions, games or radio on a given day</p>
       </div>
 
       <!-- Date Filter -->
@@ -58,6 +58,8 @@
           </el-table-column>
           <el-table-column prop="tap_count" label="Taps" min-width="80" align="center" />
           <el-table-column prop="session_count" label="Sessions" min-width="90" align="center" />
+          <el-table-column prop="game_count" label="Games" min-width="80" align="center" />
+          <el-table-column prop="radio_count" label="Radio" min-width="80" align="center" />
           <el-table-column label="Last Activity" min-width="160">
             <template slot-scope="scope">
               {{ formatDateTime(scope.row.last_activity) }}
@@ -122,11 +124,54 @@
                   <i class="el-icon-picture-outline"></i>
                   <p>No images found for this date.</p>
                   <p class="empty-note-sub">
-                    Generated images are only retained for ~24 hours (S3 lifecycle rule), so
+                    Generated images are only retained for ~7 days (S3 lifecycle rule), so
                     this is expected for older dates.
                   </p>
                 </div>
               </div>
+            </el-tab-pane>
+
+            <!-- Games Tab -->
+            <el-tab-pane label="Games" name="games">
+              <el-table :data="gameRows" v-loading="gamesLoading" stripe style="width: 100%">
+                <el-table-column prop="game_name" label="Game" min-width="120" />
+                <el-table-column prop="level" label="Level" min-width="70" align="center" />
+                <el-table-column prop="difficulty_level" label="Difficulty" min-width="90" />
+                <el-table-column prop="score" label="Score" min-width="70" align="center" />
+                <el-table-column label="Duration" min-width="90" align="center">
+                  <template slot-scope="scope">
+                    {{ formatDuration(scope.row.duration_ms) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="Played At" min-width="90">
+                  <template slot-scope="scope">
+                    {{ formatTime(scope.row.played_at) }}
+                  </template>
+                </el-table-column>
+                <template slot="empty">
+                  <span>No games played on this date.</span>
+                </template>
+              </el-table>
+            </el-tab-pane>
+
+            <!-- Radio Tab -->
+            <el-tab-pane label="Radio" name="radio">
+              <el-table :data="radioRows" v-loading="radioLoading" stripe style="width: 100%">
+                <el-table-column prop="station" label="Station" min-width="160" />
+                <el-table-column label="Duration" min-width="90" align="center">
+                  <template slot-scope="scope">
+                    {{ formatDuration(scope.row.duration_ms) }}
+                  </template>
+                </el-table-column>
+                <el-table-column label="Played At" min-width="90">
+                  <template slot-scope="scope">
+                    {{ formatTime(scope.row.played_at) }}
+                  </template>
+                </el-table-column>
+                <template slot="empty">
+                  <span>No radio played on this date.</span>
+                </template>
+              </el-table>
             </el-tab-pane>
 
             <!-- Chat Tab -->
@@ -192,7 +237,11 @@ export default {
       images: [],
       imagesLoading: false,
       chatRows: [],
-      chatLoading: false
+      chatLoading: false,
+      gameRows: [],
+      gamesLoading: false,
+      radioRows: [],
+      radioLoading: false
     };
   },
   computed: {
@@ -239,12 +288,40 @@ export default {
       this.rfidRows = [];
       this.images = [];
       this.chatRows = [];
+      this.gameRows = [];
+      this.radioRows = [];
       this.fetchRfid();
     },
     handleTabClick(tab) {
       if (tab.name === 'rfid' && this.rfidRows.length === 0) this.fetchRfid();
       if (tab.name === 'images' && this.images.length === 0) this.fetchImages();
       if (tab.name === 'chat' && this.chatRows.length === 0) this.fetchChat();
+      if (tab.name === 'games' && this.gameRows.length === 0) this.fetchGames();
+      if (tab.name === 'radio' && this.radioRows.length === 0) this.fetchRadio();
+    },
+    fetchGames() {
+      if (!this.currentRow) return;
+      this.gamesLoading = true;
+      Api.activeDevices.getDeviceGames(this.currentRow.mac_address, this.selectedDate, (res) => {
+        if (res.data && res.data.code === 0) {
+          this.gameRows = res.data.data || [];
+        }
+        this.gamesLoading = false;
+      }, () => {
+        this.gamesLoading = false;
+      });
+    },
+    fetchRadio() {
+      if (!this.currentRow) return;
+      this.radioLoading = true;
+      Api.activeDevices.getDeviceRadio(this.currentRow.mac_address, this.selectedDate, (res) => {
+        if (res.data && res.data.code === 0) {
+          this.radioRows = res.data.data || [];
+        }
+        this.radioLoading = false;
+      }, () => {
+        this.radioLoading = false;
+      });
     },
     fetchRfid() {
       if (!this.currentRow) return;
@@ -321,6 +398,12 @@ export default {
         hour: '2-digit',
         minute: '2-digit'
       });
+    },
+    formatDuration(ms) {
+      if (!ms && ms !== 0) return '-';
+      const totalSeconds = Math.round(ms / 1000);
+      if (totalSeconds < 60) return `${totalSeconds}s`;
+      return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
     },
     formatTime(value) {
       if (!value) return '-';
