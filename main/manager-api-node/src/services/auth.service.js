@@ -301,7 +301,7 @@ setInterval(() => {
       captchaStore.delete(uuid);
     }
   }
-}, 5 * 60 * 1000);
+}, 5 * 60 * 1000).unref(); // don't hold the event loop open (jest exit hang)
 
 /**
  * Generate CAPTCHA image
