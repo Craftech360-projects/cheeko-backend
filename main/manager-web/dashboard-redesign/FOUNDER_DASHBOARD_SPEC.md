@@ -1,6 +1,6 @@
 # Founder Dashboard — Approved Design & Implementation Spec
 
-**Status:** Design approved by Ravi (20 Jul 2026). Ready for implementation.
+**Status:** Design approved by Ravi (20 Jul 2026); full page suite approved 21 Jul 2026 (see §8). Ready for implementation.
 **Design mockups:** open [`founder-dashboard-design.html`](./founder-dashboard-design.html) in a browser — it contains the full visual design (three explored directions, the approved one, family search/profile, mobile views, and a data-availability map). All numbers in the mockups are illustrative sample data.
 
 **Approved direction:** Option A "Morning Pulse" as the new post-login landing page, **plus** Family search + Family 360 profile, **plus** mobile-responsive layouts with PWA/add-to-home-screen — shipped together as Phase 1. Phase 2 is "The Daily Brief" (Option C, reuses the same aggregates + the existing email-report pipeline). Phase 3 folds a live "online now" strip (from Option B) into the Overview header.
@@ -125,7 +125,7 @@ Aggregator composing: kid + parent (display name only), devices w/ runtime state
 6. Mobile responsive pass + PWA manifest.
 7. (Phase 2) The Brief: template over the same aggregates + hook into the existing email-report cron. (Phase 3) live strip via `/admin/stats/active` polling.
 
-## 7. QA checklist
+## 7. QA checklist (Phase 1)
 
 - [ ] All date filters verified against IST boundary cases (activity at ~23:30 IST lands on the right day).
 - [ ] Tap joins by MAC; unresolved packs grouped as "Unresolved", not dropped.
@@ -134,3 +134,36 @@ Aggregator composing: kid + parent (display name only), devices w/ runtime state
 - [ ] Non-admin users don't see fleet analytics (same guards as `/admin/stats/*`).
 - [ ] Charts render with 0 rows (empty states designed, not blank).
 - [ ] Local dev (Supabase) vs prod (DigitalOcean) data differences understood — empty local ≠ bug.
+
+---
+
+## 8. Full-suite addendum — remaining pages (approved 21 Jul 2026)
+
+The complete page suite in the same Morning Pulse language was approved. Mockups for every page below are in `founder-dashboard-design.html` → **Part 2**. Each page is independently shippable, uses the shared components from §4, and follows §3's rules (admin auth, IST date bucketing, tap joins on `mac_address`).
+
+### 8.1 `/engagement`
+KPIs: active yesterday (DAU), weekly actives (WAU), monthly actives + % of fleet, stickiness (DAU/MAU), avg session length. Charts: 30-day DAU line with 7-day average; returning-vs-new split against last week's active cohort; 7×24 sessions-by-hour heatmap (IST); quiet-toys watchlist preview (full list = existing Active Devices page).
+
+### 8.2 `/content`
+KPIs: card taps, cards-in-use vs catalog size, game plays, avg completion, story/music plays. Pack leaderboard: taps, unique toys, **repeat rate (taps per toy — primary "like" proxy)**, WoW delta, 14-day sparkline — with an "Unresolved" row always shown, never dropped. Games table: plays, completion bar + status badge (completion drop = primary "dislike" proxy). Stories/music/radio most-played lists. "Losing steam" list = anything declining 2+ consecutive weeks.
+
+### 8.3 `/conversations`
+KPIs: AI-talk hours, talk sessions, avg turns/session, topics detected, moderation flags (with messages-screened count). Fleet topic chips with WoW arrows; session-summaries feed; transcript side panel (reuses the Active Devices chat drawer). Privacy: first names only, super-admin gate, no parent contacts.
+
+### 8.4 `/costs`
+**Zero new backend work** — served entirely by `/usage/analytics/*`. KPIs: month-to-date ₹, projected month vs budget, ₹ per active toy per day, ₹ per session, avg TTFT. Daily stacked input/output cost bars; token mix split; top toys by spend table. Required cleanup: move the hard-coded Gemini pricing + INR FX rate out of `device.service.js` into `sys_params` (budget value lives there too, editable in Settings).
+
+### 8.5 `/operate` (Fleet & Ops landing)
+KPIs: fleet size, online now, latest-firmware coverage %, avg battery + chronic-low count, device errors (7d). Firmware version distribution vs latest `ai_ota`; OTA rollout progress (staged/canary status); "needs a human" watchlist; recent device events feed from `device_sync_event` + `device_analytics_event`. Existing All Devices / OTA Management pages unchanged beneath.
+
+### 8.6 New endpoints (beyond §3)
+
+| Endpoint | Returns | Sources |
+|---|---|---|
+| `GET /analytics/fleet/actives` | DAU/WAU/MAU + stickiness, returning-vs-new split, 7×24 hourly histogram (IST) | `device_usage_daily`, `analytics_game_sessions` |
+| `GET /analytics/fleet/summaries` | Paged feed: kid first name, duration, turns, tags, summary, transcript ref | `voice_session_summaries` |
+| Moderation flag counter | Flags/day + messages screened | moderation pipeline; add a small `moderation_events` table at the gateway if flags aren't persisted yet |
+| `GET /admin/fleet/health` | Online count, firmware distribution, battery stats + chronic-low list, error/event counts (7d), OTA progress | `device_runtime_state`, `ai_ota`, `ai_device`, `device_sync_event` |
+
+### 8.7 Suite build order (after Phase 1 §6)
+Engagement → Content & Games → Conversations (needs the §3.3 nightly job) → Costs (free) → Fleet & Ops. The Daily Brief (Phase 2) and the Overview live strip (Phase 3) come after the suite.

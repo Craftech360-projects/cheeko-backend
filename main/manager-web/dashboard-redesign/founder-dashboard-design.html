@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>
-<title>Cheeko Founder Dashboard — Design Options</title>
+<title>Cheeko Dashboard — The Complete Design</title>
 <style>
   /* ---------- wrapper tokens ---------- */
   :root {
@@ -378,6 +378,86 @@
   .mv-prof b { font-size: 12px; }
   .mv-prof small { display: block; color: #A0917E; font-size: 9px; font-weight: 600; }
 
+  /* data table */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 10px; color: #241B12; }
+  .tbl th { text-align: left; font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: #A0917E; padding: 8px 10px; border-bottom: 1px solid #EFE6D8; font-weight: 750; }
+  .tbl td { padding: 9px 10px; border-bottom: 1px dashed #F0E7D9; vertical-align: middle; }
+  .tbl tr:last-child td { border-bottom: 0; }
+  .tbl td:first-child { font-weight: 650; }
+  .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tbl .mut { color: #A0917E; font-weight: 500; }
+  .tbl .up { color: #006300; font-weight: 700; } .tbl .dn { color: #B3261E; font-weight: 700; }
+  .tbl .mac { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #5E5142; font-weight: 500; }
+  .tbl svg { display: block; width: 90px; height: 22px; }
+  .cbar { background: #F4EBDD; border-radius: 5px; height: 8px; overflow: hidden; min-width: 90px; }
+  .cbar i { display: block; height: 100%; border-radius: 0 5px 5px 0; background: #008300; }
+  .cbar.warn i { background: #ec835a; }
+  .badge { font-size: 10px; font-weight: 750; letter-spacing: .05em; padding: 2px 8px; border-radius: 6px; }
+  .badge.ok { background: #E3F2E3; color: #1D6E1D; }
+  .badge.warn { background: #FFF3E2; color: #8A4B00; }
+  .badge.crit { background: #FCEFEA; color: #A4471B; }
+
+  /* heatmap 7x24 */
+  .heat7 { display: grid; grid-template-columns: 34px 1fr; gap: 6px; margin-top: 12px; }
+  .heat7 .dl { font-size: 10px; color: #A0917E; display: grid; align-items: center; font-variant-numeric: tabular-nums; }
+  .heat7 .cells { display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; }
+  .heat7 .r { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
+  .heat7 .r b { height: 16px; border-radius: 3px; background: #FF9100; }
+
+  /* topic chips */
+  .topics { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .topics span { border-radius: 999px; padding: 5px 12px; font-weight: 650; background: #FFF3E2; color: #8A4B00; border: 1px solid #F5DFBE; font-size: 12px; }
+  .topics span.big { font-size: 13.5px; padding: 7px 14px; }
+  .topics span b.tu { color: #006300; } .topics span b.td { color: #B3261E; }
+
+  /* conversation feed + transcript */
+  .conv { padding: 11px 0; border-top: 1px dashed #F0E7D9; font-size: 12.5px; color: #5E5142; }
+  .conv:first-of-type { border-top: 0; padding-top: 4px; }
+  .conv b.t { color: #241B12; display: block; margin-bottom: 2px; }
+  .conv .tg { font-size: 10px; font-weight: 750; background: #EFF5FE; color: #1D4FA1; padding: 2px 7px; border-radius: 5px; margin-left: 6px; }
+  .conv small { color: #A0917E; }
+  .conv .lnk { color: #B35C00; font-weight: 650; }
+  .chatpane { background: #FAF6F0; border: 1px solid #EFE6D8; border-radius: 12px; padding: 12px; }
+  .chatpane .hd { display: flex; gap: 8px; align-items: center; font-weight: 700; font-size: 12.5px; padding-bottom: 9px; border-bottom: 1px solid #EFE6D8; margin-bottom: 10px; }
+  .chatpane .hd small { color: #A0917E; font-weight: 500; margin-left: auto; }
+  .bub { max-width: 82%; padding: 8px 12px; border-radius: 13px; font-size: 12px; line-height: 1.45; margin: 6px 0; }
+  .bub.kid { background: #FFFFFF; border: 1px solid #EFE6D8; border-bottom-left-radius: 4px; }
+  .bub.toy { background: #FF9100; color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+  .bub small { display: block; opacity: .65; font-size: 9.5px; margin-top: 3px; }
+
+  /* meters & split bars */
+  .meter .track { height: 12px; border-radius: 7px; background: #F4EBDD; overflow: hidden; margin: 12px 0 8px; position: relative; }
+  .meter .track i { display: block; height: 100%; background: linear-gradient(90deg, #FF9100, #FFB300); border-radius: 7px; }
+  .meter .track em { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #241B12; opacity: .45; }
+  .meter .row { display: flex; justify-content: space-between; font-size: 11.5px; color: #8A7B6A; font-variant-numeric: tabular-nums; }
+  .split { display: flex; height: 22px; border-radius: 7px; overflow: hidden; margin: 12px 0 10px; }
+  .split b { height: 100%; }
+  .split b + b { border-left: 2px solid #fff; }
+  .li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 6px 0; border-top: 1px dashed #F0E7D9; color: #5E5142; }
+  .li:first-of-type { border-top: 0; }
+  .li::before { content: ""; width: 9px; height: 9px; border-radius: 3px; background: var(--c, #FF9100); }
+  .li.noc::before { display: none; }
+  .li b { margin-left: auto; color: #241B12; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .li small { color: #A0917E; }
+  .li .badge { margin-left: auto; }
+  .li .badge + b { margin-left: 8px; }
+
+  /* battery */
+  .batt { width: 30px; height: 10px; border: 1px solid #C9BBA6; border-radius: 3px; position: relative; flex: none; }
+  .batt i { position: absolute; inset: 1.5px; width: var(--p); background: #0ca30c; border-radius: 1.5px; }
+  .batt.low i { background: #d03b3b; } .batt.mid i { background: #fab219; }
+
+
+  .powered { font-size: 13px; color: var(--ink-3); margin-top: 14px; line-height: 1.7; }
+  .powered code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: var(--chip); border: 1px solid var(--line); padding: 1px 6px; border-radius: 5px; color: var(--ink-2); }
+  .powered .new { color: #1D4FA1; background: #E7F0FD; border-color: #CCDEF7; }
+  .meta code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+  .oa-kpis.four { grid-template-columns: repeat(4, 1fr); }
+  .oa-row.half { grid-template-columns: 1fr 1fr; }
+  .oa-axis { display: flex; justify-content: space-between; font-size: 10px; color: #A0917E; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  .oa-lb .li::before { content: none; }
+
   /* ---------- verdict / mapping ---------- */
   .verdict { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 14px; padding: 22px 24px; box-shadow: var(--shadow); }
   .verdict h3 { margin: 0 0 8px; font-size: 19px; }
@@ -412,25 +492,30 @@
 </style>
 
 <header class="hero wrap">
-  <div class="eyebrow">Cheeko · Dashboard redesign proposal</div>
-  <h1 class="disp">Three ways to see Cheeko at a glance</h1>
-  <p class="lede">I went through <b>manager-web</b> and <b>manager-api-node</b> on the <code>dashbaord_update</code> branch. The good news: most of the data a founder dashboard needs is already collected. Below are three design directions — all mocked with realistic sample numbers shaped like your real schema — plus what each takes to build.</p>
+  <div class="eyebrow">Cheeko · The complete dashboard design</div>
+  <h1 class="disp">The whole Cheeko dashboard, in one place</h1>
+  <p class="lede">Everything from both design rounds, merged into one document. <b>How to navigate:</b> use the sticky pill bar below — <b>Part 1</b> is the decision record (what I found, the three explored directions including <b>Mission Control</b> and <b>The Daily Brief</b>, and the verdict). <b>Part 2</b> is the approved build: every page of the new dashboard — Overview (shown as Option A), Families, Engagement, Content &amp; Games, Conversations, Costs, Fleet &amp; Ops — plus the mobile experience. <b>Part 3</b> is the data plan. All numbers are illustrative sample data.</p>
 </header>
 
 <nav class="jump"><div class="wrap row">
-  <a href="#findings">What I found</a>
-  <a href="#opt-a">A · Morning Pulse</a>
+  <a href="#findings">Part 1 · What I found</a>
+  <a href="#opt-a">A · Overview ✓</a>
   <a href="#opt-b">B · Mission Control</a>
-  <a href="#opt-c">C · The Daily Brief</a>
-  <a href="#profile">Find a family</a>
+  <a href="#opt-c">C · Daily Brief</a>
+  <a href="#verdict">Verdict</a>
+  <a href="#profile">Part 2 · Families</a>
+  <a href="#engagement">Engagement</a>
+  <a href="#content">Content &amp; Games</a>
+  <a href="#conversations">Conversations</a>
+  <a href="#costs">Costs</a>
+  <a href="#fleet">Fleet &amp; Ops</a>
   <a href="#mobile">Mobile</a>
-  <a href="#verdict">Comparison &amp; verdict</a>
-  <a href="#data">Data reality check</a>
+  <a href="#data">Part 3 · Data plan</a>
 </div></nav>
 
 <!-- ================= FINDINGS ================= -->
 <section id="findings" class="wrap">
-  <h2 class="disp">What I found in the current dashboard</h2>
+  <h2 class="disp">Part 1 · What I found in the current dashboard</h2>
   <p class="sub">Your instinct is right — it's an ops console, not a founder view. Four specific things explain the cluttered feel:</p>
   <div class="facts">
     <div class="fact"><div class="k">Fragmented</div><div class="v">Analytics lives in 4 different pages</div><p>Home KPI strip, Game Analytics, Token Analytics and Active Devices each tell a partial story. There is no single "how is Cheeko doing?" screen.</p></div>
@@ -450,7 +535,7 @@
     </div>
   </div>
   <div class="meta">
-    <span class="hot">Recommended</span><span>Medium build</span><span>3–4 small new API endpoints</span><span>Existing pages stay untouched</span><span>Nav regrouped into 6 sections</span>
+    <span class="hot">Approved · becomes the Overview page</span><span>Medium build</span><span>3–4 small new API endpoints</span><span>Existing pages stay untouched</span><span>Nav regrouped into 6 sections</span>
   </div>
 
   <div class="framewrap"><div class="frame" style="background:#FAF6F0">
@@ -757,10 +842,16 @@
   </div>
 </section>
 
+<section id="part2" class="wrap" style="padding-bottom:0;">
+  <div class="eyebrow">Part 2 · The approved build</div>
+  <h2 class="disp">Every page of the new dashboard</h2>
+  <p class="sub">The approved Morning Pulse language applied across the suite. The Overview itself is the Option A mockup above; below are all the other pages — <b>Families, Engagement, Content &amp; Games, Conversations, Costs, Fleet &amp; Ops</b> — and the mobile experience.</p>
+</section>
+
 <!-- ================= FAMILY PROFILE ================= -->
 <section id="profile" class="wrap">
   <h2 class="disp">Find any family in two keystrokes</h2>
-  <p class="sub">Ships with whichever option you pick. One search box that matches parents, kids, and device MACs — landing on a <b>Family 360</b> profile: who they are, whether the toy is alive, what the kid loves, and what they've been talking about. (Parent emails stay hidden — display names only.)</p>
+  <p class="sub">Part of the approved build. One search box that matches parents, kids, and device MACs — landing on a <b>Family 360</b> profile: who they are, whether the toy is alive, what the kid loves, and what they've been talking about. (Parent emails stay hidden — display names only.)</p>
 
   <div class="framewrap"><div class="frame" style="background:#FAF6F0">
     <div class="chrome" style="background:#F3ECE0; border-color:#E7DCC9;">
@@ -843,6 +934,385 @@
     </div>
   </div></div>
 </section>
+
+<!-- ============ ENGAGEMENT ============ -->
+<section id="engagement" class="wrap">
+  <h2 class="disp">Engagement</h2>
+  <p class="sub">The retention truth-teller: how many toys come alive, how often they return, and when kids actually play. This is where "are we sticky?" gets answered — the Overview shows the pulse, this page shows the pattern.</p>
+  <div class="meta"><span class="hot">Route <code>/engagement</code></span><span>Replaces: half of Game Analytics + Active Devices' summary role</span><span>Drill-down keeps the existing Active Devices day view</span></div>
+
+  <div class="framewrap"><div class="frame">
+    <div class="chrome"><div class="dots"><span style="background:#F26D5F"></span><span style="background:#F5BE4F"></span><span style="background:#5FC46A"></span></div><div class="urlbar">dashboard.cheeko.in / engagement</div><div class="sample-tag">Sample data</div></div>
+    <div class="oa">
+      <aside class="oa-side">
+        <div class="oa-logo"><span class="mark">🧸</span> Cheeko</div>
+        <a href="#engagement"><span class="ic">☀️</span> Overview</a>
+        <a class="on" href="#engagement"><span class="ic">📈</span> Engagement</a>
+        <a href="#engagement"><span class="ic">❤️</span> Content &amp; Games</a>
+        <a href="#engagement"><span class="ic">💬</span> Conversations</a>
+        <a href="#engagement"><span class="ic">👨‍👩‍👧</span> Families</a>
+        <a href="#engagement"><span class="ic">₹</span> Costs</a>
+        <div class="grp">Operate</div>
+        <a href="#engagement"><span class="ic">🔌</span> Fleet &amp; OTA</a>
+        <a href="#engagement"><span class="ic">🃏</span> RFID Studio</a>
+        <a href="#engagement"><span class="ic">📚</span> Content Library</a>
+        <a href="#engagement"><span class="ic">⚙️</span> Settings</a>
+        <div class="oa-user"><span class="av">R</span> Ravi · Founder</div>
+      </aside>
+      <div class="oa-main">
+        <div class="oa-top"><h3 class="disp">Engagement</h3><span class="date">Monday, 21 July 2026 · IST</span>
+          <div class="oa-range"><b>7 days</b><b class="on">30 days</b><b>90 days</b></div></div>
+
+        <div class="oa-kpis">
+          <div class="oa-kpi"><div class="lab">Active yesterday</div><div class="num">46</div><div class="dlt up">▲ 12% <small>vs prior Sunday</small></div></div>
+          <div class="oa-kpi"><div class="lab">Weekly actives</div><div class="num">71</div><div class="dlt up">▲ 4 <small>toys vs prior week</small></div></div>
+          <div class="oa-kpi"><div class="lab">Monthly actives</div><div class="num">112 <small>of 128</small></div><div class="dlt"><small>87% of fleet alive in July</small></div></div>
+          <div class="oa-kpi"><div class="lab">Stickiness · DAU/MAU</div><div class="num">41%</div><div class="dlt up">▲ 3 pts <small>vs June</small></div></div>
+          <div class="oa-kpi"><div class="lab">Avg session</div><div class="num">11.5 <small>min</small></div><div class="dlt up">▲ 0.8 <small>min vs June</small></div></div>
+        </div>
+
+        <div class="oa-row">
+          <div class="oa-card">
+            <h5>Daily active toys · last 30 days</h5><div class="hint">bold line = 7-day average</div>
+            <div class="oa-leg"><i style="--c:#eb6834">daily actives</i><i style="--c:#C9BBA6">7-day avg</i></div>
+            <svg id="dau30" viewBox="0 0 640 190" preserveAspectRatio="none" style="width:100%; height:190px; display:block" role="img" aria-label="Daily active toys over 30 days, rising from 29 to 46 with weekend peaks"></svg>
+            <div class="oa-axis"><span>Jun 22</span><span>Jul 6</span><span>Jul 20</span></div>
+          </div>
+          <div class="oa-card">
+            <h5>Coming back?</h5><div class="hint">this week vs last week's 67 actives</div>
+            <div class="split"><b style="width:83%; background:#008300"></b><b style="width:17%; background:#C9BBA6"></b></div>
+            <div class="li" style="--c:#008300">Returned this week <b>56 toys · 83%</b></div>
+            <div class="li" style="--c:#C9BBA6">Didn't return <b>11 toys</b></div>
+            <div class="li" style="--c:#2a78d6">New this week <b>9 toys</b></div>
+            <div class="hint" style="margin-top:10px;">Returning rate has held above 80% for 5 straight weeks — retention is healthy; growth is the lever.</div>
+          </div>
+        </div>
+
+        <div class="oa-row">
+          <div class="oa-card">
+            <h5>When kids play · sessions by hour</h5><div class="hint">last 7 days · IST · darker = more sessions</div>
+            <div class="heat7" id="heat7"></div>
+            <div class="oa-axis" style="margin-left:40px;"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>11p</span></div>
+            <div class="hint" style="margin-top:8px;">Two ridges: 8–9 am (before school) and 6–8 pm (play hour). Sunday is the biggest play day — schedule content drops Saturday night.</div>
+          </div>
+          <div class="oa-card">
+            <h5>Quiet toys watchlist</h5><div class="hint">active in June, silent 7+ days · full list in Active Devices</div>
+            <table class="tbl">
+              <tr><th>Toy / kid</th><th>Parent</th><th class="num">Quiet for</th></tr>
+              <tr><td>🧸 Advik · 5</td><td class="mut">Neha R.</td><td class="num"><span class="badge crit">12 days</span></td></tr>
+              <tr><td>🧸 Sara · 7</td><td class="mut">Imran K.</td><td class="num"><span class="badge crit">9 days</span></td></tr>
+              <tr><td>🧸 Reyansh · 4</td><td class="mut">Divya M.</td><td class="num"><span class="badge warn">8 days</span></td></tr>
+              <tr><td>🧸 Myra · 6</td><td class="mut">Rahul T.</td><td class="num"><span class="badge warn">7 days</span></td></tr>
+            </table>
+            <div class="hint" style="margin-top:8px;">12 total · 9 stopped within days of finishing the Phonics pack → "new pack" nudge is the obvious test.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="powered"><b>Powered by:</b> <code>GET /analytics/dashboard/sessions-per-day</code> (exists) · <code>GET /analytics/fleet/usage-daily</code> (spec §3.1) · <code class="new">new: GET /analytics/fleet/actives</code> (DAU/WAU/MAU + returning split + hourly histogram) · <code>GET /analytics/fleet/quiet-devices</code> (spec §3.4).</p>
+</section>
+
+<!-- ============ CONTENT & GAMES ============ -->
+<section id="content" class="wrap">
+  <h2 class="disp">Content &amp; Games</h2>
+  <p class="sub">The "what do kids love?" deep page. Every pack, game, story and station ranked by real behavior — taps, repeats, completions — with the dislike proxies surfaced honestly instead of hidden.</p>
+  <div class="meta"><span class="hot">Route <code>/content</code></span><span>Analytics layer above Content Library + RFID Studio</span><span>Catalog CRUD stays on existing pages</span></div>
+
+  <div class="framewrap"><div class="frame">
+    <div class="chrome"><div class="dots"><span style="background:#F26D5F"></span><span style="background:#F5BE4F"></span><span style="background:#5FC46A"></span></div><div class="urlbar">dashboard.cheeko.in / content</div><div class="sample-tag">Sample data</div></div>
+    <div class="oa">
+      <aside class="oa-side">
+        <div class="oa-logo"><span class="mark">🧸</span> Cheeko</div>
+        <a href="#content"><span class="ic">☀️</span> Overview</a>
+        <a href="#content"><span class="ic">📈</span> Engagement</a>
+        <a class="on" href="#content"><span class="ic">❤️</span> Content &amp; Games</a>
+        <a href="#content"><span class="ic">💬</span> Conversations</a>
+        <a href="#content"><span class="ic">👨‍👩‍👧</span> Families</a>
+        <a href="#content"><span class="ic">₹</span> Costs</a>
+        <div class="grp">Operate</div>
+        <a href="#content"><span class="ic">🔌</span> Fleet &amp; OTA</a>
+        <a href="#content"><span class="ic">🃏</span> RFID Studio</a>
+        <a href="#content"><span class="ic">📚</span> Content Library</a>
+        <a href="#content"><span class="ic">⚙️</span> Settings</a>
+        <div class="oa-user"><span class="av">R</span> Ravi · Founder</div>
+      </aside>
+      <div class="oa-main">
+        <div class="oa-top"><h3 class="disp">Content &amp; Games</h3><span class="date">Monday, 21 July 2026 · IST</span>
+          <div class="oa-range"><b class="on">7 days</b><b>30 days</b><b>90 days</b></div></div>
+
+        <div class="oa-kpis">
+          <div class="oa-kpi"><div class="lab">Card taps</div><div class="num">2,148</div><div class="dlt up">▲ 9% <small>vs prior week</small></div></div>
+          <div class="oa-kpi"><div class="lab">Cards in use</div><div class="num">142 <small>of 186</small></div><div class="dlt"><small>76% of catalog got played</small></div></div>
+          <div class="oa-kpi"><div class="lab">Game plays</div><div class="num">3,024</div><div class="dlt up">▲ 5% <small>vs prior week</small></div></div>
+          <div class="oa-kpi"><div class="lab">Avg completion</div><div class="num">76%</div><div class="dlt dn">▼ 2 pts <small>Word Ladder drags it</small></div></div>
+          <div class="oa-kpi"><div class="lab">Story &amp; music plays</div><div class="num">812</div><div class="dlt up">▲ 14% <small>bedtime slot growing</small></div></div>
+        </div>
+
+        <div class="oa-card" style="margin-top:12px;">
+          <h5>Card packs — ranked by love</h5><div class="hint">taps · unique toys · repeat rate (taps per toy — our strongest "like" proxy) · trend</div>
+          <table class="tbl">
+            <tr><th>Pack</th><th class="num">Taps · 7d</th><th class="num">Toys</th><th class="num">Repeat rate</th><th class="num">vs last week</th><th>14-day trend</th></tr>
+            <tr><td>Slokas Vol. 1</td><td class="num">412</td><td class="num">31</td><td class="num">13.3×</td><td class="num up">▲ 64%</td><td><svg id="pk1" viewBox="0 0 90 22" preserveAspectRatio="none"></svg></td></tr>
+            <tr><td>Panchatantra Tales</td><td class="num">388</td><td class="num">36</td><td class="num">10.8×</td><td class="num up">▲ 12%</td><td><svg id="pk2" viewBox="0 0 90 22" preserveAspectRatio="none"></svg></td></tr>
+            <tr><td>Phonics A–Z</td><td class="num">301</td><td class="num">28</td><td class="num">10.7×</td><td class="num dn">▼ 8%</td><td><svg id="pk3" viewBox="0 0 90 22" preserveAspectRatio="none"></svg></td></tr>
+            <tr><td>Rhymes Pack 2</td><td class="num">244</td><td class="num">33</td><td class="num">7.4×</td><td class="num up">▲ 4%</td><td><svg id="pk4" viewBox="0 0 90 22" preserveAspectRatio="none"></svg></td></tr>
+            <tr><td>Space Explorers</td><td class="num">198</td><td class="num">19</td><td class="num">10.4×</td><td class="num up">▲ 22%</td><td><svg id="pk5" viewBox="0 0 90 22" preserveAspectRatio="none"></svg></td></tr>
+            <tr><td class="mut">Unresolved cards ⚠️</td><td class="num mut">193</td><td class="num mut">22</td><td class="num mut">—</td><td class="num mut">9% of taps</td><td class="mut" style="font-size:11px;">fix mappings in RFID Studio</td></tr>
+          </table>
+        </div>
+
+        <div class="oa-row">
+          <div class="oa-card">
+            <h5>Games — played vs finished</h5><div class="hint">completion is the strongest dislike signal we have</div>
+            <table class="tbl">
+              <tr><th>Game</th><th class="num">Plays</th><th style="width:130px;">Completion</th><th class="num">Avg score</th><th class="num">Status</th></tr>
+              <tr><td>Math Blitz</td><td class="num">1,204</td><td><div class="cbar"><i style="width:82%"></i></div></td><td class="num">8.1/10</td><td class="num"><span class="badge ok">82% · healthy</span></td></tr>
+              <tr><td>Animal Sounds Quiz</td><td class="num">447</td><td><div class="cbar"><i style="width:91%"></i></div></td><td class="num">8.8/10</td><td class="num"><span class="badge ok">91% · loved</span></td></tr>
+              <tr><td>Riddle Time</td><td class="num">861</td><td><div class="cbar"><i style="width:74%"></i></div></td><td class="num">6.9/10</td><td class="num"><span class="badge ok">74% · fine</span></td></tr>
+              <tr><td>Word Ladder</td><td class="num">512</td><td><div class="cbar warn"><i style="width:58%"></i></div></td><td class="num">5.2/10</td><td class="num"><span class="badge crit">58% · kids quit at Q4</span></td></tr>
+            </table>
+            <div class="hint" style="margin-top:8px;">⚠️ Word Ladder completion fell 81% → 58% after the June difficulty change — revert pacing or add a hint at Q4.</div>
+          </div>
+          <div class="oa-card">
+            <h5>Stories, music &amp; radio</h5><div class="hint">most played · 7 days</div>
+            <div class="li" style="--c:#2a78d6">The Clever Crow <small>· story</small><b>96 plays</b></div>
+            <div class="li" style="--c:#2a78d6">Brush-Brush Song <small>· music</small><b>84 plays</b></div>
+            <div class="li" style="--c:#2a78d6">Volcano Adventure <small>· story</small><b>71 plays</b></div>
+            <div class="li" style="--c:#4a3aa7">Kids Bollywood <small>· radio</small><b>388 min</b></div>
+            <div class="li" style="--c:#4a3aa7">Lullaby FM <small>· radio · 8:30 pm spike</small><b>204 min</b></div>
+            <h5 style="margin-top:16px;">Losing steam</h5><div class="hint">falling 2+ weeks — candidates for refresh or retirement</div>
+            <div class="li noc">Phonics A–Z <small>· taps</small><b class="dn" style="color:#B3261E;">▼ 8% · 3rd week</b></div>
+            <div class="li noc">Word Ladder <small>· completion</small><b class="dn" style="color:#B3261E;">▼ 23 pts</b></div>
+            <div class="li noc">Radio overall <small>· minutes</small><b class="dn" style="color:#B3261E;">▼ 9%</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="powered"><b>Powered by:</b> <code>GET /analytics/fleet/content-leaderboard</code> (spec §3.2 — packs, games, media, radio in one call) · <code>rfid_card_tap_log</code> joined on MAC with unresolved shown, never dropped · completion from <code>analytics_game_sessions.completion_status</code> · catalog coverage vs <code>rfid_content_pack</code>.</p>
+</section>
+
+<!-- ============ CONVERSATIONS ============ -->
+<section id="conversations" class="wrap">
+  <h2 class="disp">Conversations</h2>
+  <p class="sub">What kids actually say to Cheeko — the product's soul. Topics trending across the fleet, session summaries you can skim in a minute, and the full transcript one click deep. First names only, everywhere.</p>
+  <div class="meta"><span class="hot">Route <code>/conversations</code></span><span>Topics need the nightly summaries job (spec §3.3)</span><span>Transcript viewer reuses the Active Devices chat drawer</span></div>
+
+  <div class="framewrap"><div class="frame">
+    <div class="chrome"><div class="dots"><span style="background:#F26D5F"></span><span style="background:#F5BE4F"></span><span style="background:#5FC46A"></span></div><div class="urlbar">dashboard.cheeko.in / conversations</div><div class="sample-tag">Sample data</div></div>
+    <div class="oa">
+      <aside class="oa-side">
+        <div class="oa-logo"><span class="mark">🧸</span> Cheeko</div>
+        <a href="#conversations"><span class="ic">☀️</span> Overview</a>
+        <a href="#conversations"><span class="ic">📈</span> Engagement</a>
+        <a href="#conversations"><span class="ic">❤️</span> Content &amp; Games</a>
+        <a class="on" href="#conversations"><span class="ic">💬</span> Conversations</a>
+        <a href="#conversations"><span class="ic">👨‍👩‍👧</span> Families</a>
+        <a href="#conversations"><span class="ic">₹</span> Costs</a>
+        <div class="grp">Operate</div>
+        <a href="#conversations"><span class="ic">🔌</span> Fleet &amp; OTA</a>
+        <a href="#conversations"><span class="ic">🃏</span> RFID Studio</a>
+        <a href="#conversations"><span class="ic">📚</span> Content Library</a>
+        <a href="#conversations"><span class="ic">⚙️</span> Settings</a>
+        <div class="oa-user"><span class="av">R</span> Ravi · Founder</div>
+      </aside>
+      <div class="oa-main">
+        <div class="oa-top"><h3 class="disp">Conversations</h3><span class="date">Monday, 21 July 2026 · IST</span>
+          <div class="oa-range"><b class="on">7 days</b><b>30 days</b><b>90 days</b></div></div>
+
+        <div class="oa-kpis">
+          <div class="oa-kpi"><div class="lab">AI talk time</div><div class="num">39.4 <small>hrs</small></div><div class="dlt up">▲ 11% <small>vs prior week</small></div></div>
+          <div class="oa-kpi"><div class="lab">Talk sessions</div><div class="num">486</div><div class="dlt up">▲ 7% <small>vs prior week</small></div></div>
+          <div class="oa-kpi"><div class="lab">Avg turns / session</div><div class="num">12.4</div><div class="dlt up">▲ 1.1 <small>kids talk longer</small></div></div>
+          <div class="oa-kpi"><div class="lab">Topics detected</div><div class="num">38</div><div class="dlt"><small>from nightly summary mining</small></div></div>
+          <div class="oa-kpi"><div class="lab">Moderation flags</div><div class="num">0</div><div class="dlt up">clean week <small>· 3,041 msgs screened</small></div></div>
+        </div>
+
+        <div class="oa-card" style="margin-top:12px;">
+          <h5>What the fleet is talking about</h5><div class="hint">topic size = mentions across session summaries · arrow = week-over-week</div>
+          <div class="topics">
+            <span class="big">Dinosaurs · 34 <b class="tu">▲</b></span>
+            <span class="big">Space &amp; rockets · 29 <b class="tu">▲</b></span>
+            <span class="big">Cricket · 24 <b class="tu">▲</b></span>
+            <span>Peppa Pig · 21 <b class="td">▼</b></span>
+            <span>"Why…?" questions · 19</span>
+            <span>Homework help · 16 <b class="tu">▲</b></span>
+            <span>Birthdays · 12</span>
+            <span>Drawing ideas · 11</span>
+            <span>Volcanoes · 9 <b class="tu">▲</b></span>
+            <span>Brushing songs · 7</span>
+          </div>
+        </div>
+
+        <div class="oa-row half">
+          <div class="oa-card">
+            <h5>Session summaries</h5><div class="hint">skim the fleet's day in a minute · AI-written per session</div>
+            <div style="margin-top:6px;">
+              <div class="conv"><b class="t">Aarav asked 12 questions about volcanoes <span class="tg">science</span><span class="tg">curious</span></b>Fourth volcano session this week; retold the eruption story back to the toy. <small>· Sun 7:12 pm · 14 min · 23 turns</small> · <span class="lnk">Transcript →</span></div>
+              <div class="conv"><b class="t">Meera practised additions to 20 <span class="tg">math</span></b>9/10 first try, asked for "one more" twice, told the toy to tell her mom. <small>· Sun 5:40 pm · 11 min · 18 turns</small> · <span class="lnk">Transcript →</span></div>
+              <div class="conv"><b class="t">Kabir wanted a cricket story with him as captain <span class="tg">creative</span><span class="tg">sports</span></b>Toy improvised a match-winning six; Kabir narrated the celebration. <small>· Sun 4:22 pm · 9 min · 15 turns</small> · <span class="lnk">Transcript →</span></div>
+              <div class="conv"><b class="t">Anaya asked why the moon follows her <span class="tg">science</span><span class="tg">bedtime</span></b>Gentle explanation, then requested Lullaby FM. <small>· Sun 8:35 pm · 6 min · 9 turns</small> · <span class="lnk">Transcript →</span></div>
+            </div>
+          </div>
+          <div class="oa-card">
+            <h5>Transcript</h5><div class="hint">opens in a side panel · admin-only · audio linked where available</div>
+            <div class="chatpane" style="margin-top:10px;">
+              <div class="hd">🧸 Aarav · volcano session <small>Sun 7:12 pm · 14 min · 23 turns</small></div>
+              <div class="bub kid">Cheeko, what's inside a volcano? Is it fire or is it soup? 🌋<small>Aarav · 7:12 pm</small></div>
+              <div class="bub toy">It's melted rock called magma — like very, very hot orange dosa batter deep under the mountain!<small>Cheeko · 7:12 pm</small></div>
+              <div class="bub kid">Does it come out fast? Tell the story again, but louder!<small>Aarav · 7:13 pm</small></div>
+              <div class="bub toy">Okay, captain — LOUD version! 🌋 Rumble rumble… the mountain cleared its throat…<small>Cheeko · 7:13 pm</small></div>
+            </div>
+            <div class="hint" style="margin-top:10px;">Privacy: first names only, parent contacts never shown, transcripts restricted to super-admins (same guard as today's chat history).</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="powered"><b>Powered by:</b> <code>voice_session_summaries</code> via <code class="new">new: GET /analytics/fleet/summaries</code> (paged feed) · topics from the nightly job (spec §3.3) · transcripts via existing <code>GET /analytics/active-devices/:mac/chat</code> · flags via <code class="new">new: moderation counter</code> on the existing moderation-provider pipeline.</p>
+</section>
+
+<!-- ============ COSTS ============ -->
+<section id="costs" class="wrap">
+  <h2 class="disp">Costs</h2>
+  <p class="sub">Every rupee of AI spend, tied to usage — with a monthly budget line so "are we on pace?" is answered before you ask. This page needs <b>zero new backend work</b>; every number already exists in the usage endpoints.</p>
+  <div class="meta"><span class="hot">Route <code>/costs</code></span><span>Restyled Token Analytics — same data, founder framing</span><span>No new endpoints</span></div>
+
+  <div class="framewrap"><div class="frame">
+    <div class="chrome"><div class="dots"><span style="background:#F26D5F"></span><span style="background:#F5BE4F"></span><span style="background:#5FC46A"></span></div><div class="urlbar">dashboard.cheeko.in / costs</div><div class="sample-tag">Sample data</div></div>
+    <div class="oa">
+      <aside class="oa-side">
+        <div class="oa-logo"><span class="mark">🧸</span> Cheeko</div>
+        <a href="#costs"><span class="ic">☀️</span> Overview</a>
+        <a href="#costs"><span class="ic">📈</span> Engagement</a>
+        <a href="#costs"><span class="ic">❤️</span> Content &amp; Games</a>
+        <a href="#costs"><span class="ic">💬</span> Conversations</a>
+        <a href="#costs"><span class="ic">👨‍👩‍👧</span> Families</a>
+        <a class="on" href="#costs"><span class="ic">₹</span> Costs</a>
+        <div class="grp">Operate</div>
+        <a href="#costs"><span class="ic">🔌</span> Fleet &amp; OTA</a>
+        <a href="#costs"><span class="ic">🃏</span> RFID Studio</a>
+        <a href="#costs"><span class="ic">📚</span> Content Library</a>
+        <a href="#costs"><span class="ic">⚙️</span> Settings</a>
+        <div class="oa-user"><span class="av">R</span> Ravi · Founder</div>
+      </aside>
+      <div class="oa-main">
+        <div class="oa-top"><h3 class="disp">Costs</h3><span class="date">Monday, 21 July 2026 · IST</span>
+          <div class="oa-range"><b>7 days</b><b class="on">This month</b><b>90 days</b></div></div>
+
+        <div class="oa-kpis">
+          <div class="oa-kpi"><div class="lab">July so far</div><div class="num">₹10,358</div><div class="dlt"><small>day 21 of 31</small></div></div>
+          <div class="oa-kpi"><div class="lab">Projected month</div><div class="num">₹15.3k</div><div class="dlt up">on pace <small>· budget ₹15.5k</small></div></div>
+          <div class="oa-kpi"><div class="lab">Per active toy</div><div class="num">₹9.1 <small>/ day</small></div><div class="dlt dn">▲ ₹0.4 <small>longer sessions</small></div></div>
+          <div class="oa-kpi"><div class="lab">Per session</div><div class="num">₹1.95</div><div class="dlt up">▼ ₹0.11 <small>vs June</small></div></div>
+          <div class="oa-kpi"><div class="lab">Avg response time</div><div class="num">1.42 <small>s</small></div><div class="dlt"><small>Thursday spike resolved</small></div></div>
+        </div>
+
+        <div class="oa-row">
+          <div class="oa-card">
+            <h5>Daily AI spend · last 30 days</h5><div class="hint">₹ per day · input vs output tokens</div>
+            <div class="oa-leg"><i style="--c:#eb6834">output (audio + text)</i><i style="--c:#2a78d6">input (audio + text)</i></div>
+            <svg id="cost30" viewBox="0 0 640 190" preserveAspectRatio="none" style="width:100%; height:190px; display:block" role="img" aria-label="Stacked daily cost bars over 30 days, 280 to 520 rupees"></svg>
+            <div class="oa-axis"><span>Jun 22</span><span>Jul 6</span><span>Jul 20</span></div>
+          </div>
+          <div class="oa-card meter">
+            <h5>July budget</h5><div class="hint">₹15,500 · alert at 90%</div>
+            <div class="track"><i style="width:67%"></i><em style="left:68%"></em></div>
+            <div class="row"><span>₹10,358 used · 67%</span><span>day 68% of month</span></div>
+            <div class="hint" style="margin-top:10px;">Spend is tracking usage growth, not waste: cost per session is <b style="color:#241B12;">down 5%</b> while sessions are up 7%.</div>
+            <h5 style="margin-top:16px;">Token mix · July</h5>
+            <div class="split"><b style="width:41%; background:#eb6834"></b><b style="width:38%; background:#2a78d6"></b><b style="width:21%; background:#C9BBA6"></b></div>
+            <div class="li" style="--c:#eb6834">Output audio <small>· the toy speaking</small><b>41%</b></div>
+            <div class="li" style="--c:#2a78d6">Input audio <small>· kids speaking</small><b>38%</b></div>
+            <div class="li" style="--c:#C9BBA6">Text · prompts &amp; tools<b>21%</b></div>
+          </div>
+        </div>
+
+        <div class="oa-card" style="margin-top:12px;">
+          <h5>Where the money goes · top toys by spend</h5><div class="hint">July · top 10 toys = 38% of spend — heavy users, not leaks (cost tracks minutes)</div>
+          <table class="tbl">
+            <tr><th>Toy / kid</th><th>Parent</th><th class="num">Sessions</th><th class="num">Talk time</th><th class="num">Tokens</th><th class="num">Cost · July</th><th class="num">% of fleet</th></tr>
+            <tr><td><span class="mac">A4:9C:…:2E</span> · Aarav</td><td class="mut">Sunita V.</td><td class="num">64</td><td class="num">9.1 h</td><td class="num">1.84 M</td><td class="num">₹612</td><td class="num">5.9%</td></tr>
+            <tr><td><span class="mac">7B:E2:…:91</span> · Meera</td><td class="mut">Priya S.</td><td class="num">58</td><td class="num">8.2 h</td><td class="num">1.61 M</td><td class="num">₹534</td><td class="num">5.2%</td></tr>
+            <tr><td><span class="mac">98:A1:…:C3</span> · Kabir</td><td class="mut">Farah A.</td><td class="num">51</td><td class="num">7.4 h</td><td class="num">1.42 M</td><td class="num">₹471</td><td class="num">4.5%</td></tr>
+            <tr><td><span class="mac">3D:44:…:B7</span> · Anaya</td><td class="mut">Rahul T.</td><td class="num">44</td><td class="num">6.1 h</td><td class="num">1.18 M</td><td class="num">₹389</td><td class="num">3.8%</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="powered"><b>Powered by:</b> <code>GET /usage/analytics/totals</code> · <code>GET /usage/analytics/daily-summary</code> · <code>GET /usage/analytics/per-device</code> — all exist today. Budget value lives in <code>sys_params</code> (editable in Settings). Pricing note: the ₹ conversion is currently hard-coded in <code>device.service.js</code> — move rate + FX to params so finance can tune it.</p>
+</section>
+
+<!-- ============ FLEET & OPS ============ -->
+<section id="fleet" class="wrap">
+  <h2 class="disp">Fleet &amp; Ops</h2>
+  <p class="sub">The "is anything on fire?" page — one health view over every toy in the wild: firmware coverage, batteries, OTA rollouts, and device events. The deep tools (All Devices, OTA Management) stay one click away for surgery.</p>
+  <div class="meta"><span class="hot">Route <code>/operate</code></span><span>Landing page of the Operate group</span><span>Existing admin pages unchanged beneath it</span></div>
+
+  <div class="framewrap"><div class="frame">
+    <div class="chrome"><div class="dots"><span style="background:#F26D5F"></span><span style="background:#F5BE4F"></span><span style="background:#5FC46A"></span></div><div class="urlbar">dashboard.cheeko.in / operate</div><div class="sample-tag">Sample data</div></div>
+    <div class="oa">
+      <aside class="oa-side">
+        <div class="oa-logo"><span class="mark">🧸</span> Cheeko</div>
+        <a href="#fleet"><span class="ic">☀️</span> Overview</a>
+        <a href="#fleet"><span class="ic">📈</span> Engagement</a>
+        <a href="#fleet"><span class="ic">❤️</span> Content &amp; Games</a>
+        <a href="#fleet"><span class="ic">💬</span> Conversations</a>
+        <a href="#fleet"><span class="ic">👨‍👩‍👧</span> Families</a>
+        <a href="#fleet"><span class="ic">₹</span> Costs</a>
+        <div class="grp">Operate</div>
+        <a class="on" href="#fleet"><span class="ic">🔌</span> Fleet &amp; OTA</a>
+        <a href="#fleet"><span class="ic">🃏</span> RFID Studio</a>
+        <a href="#fleet"><span class="ic">📚</span> Content Library</a>
+        <a href="#fleet"><span class="ic">⚙️</span> Settings</a>
+        <div class="oa-user"><span class="av">R</span> Ravi · Founder</div>
+      </aside>
+      <div class="oa-main">
+        <div class="oa-top"><h3 class="disp">Fleet &amp; Ops</h3><span class="date">Monday, 21 July 2026 · 10:05 IST</span>
+          <div class="oa-range"><b class="on">Live</b><b>7 days</b><b>30 days</b></div></div>
+
+        <div class="oa-kpis">
+          <div class="oa-kpi"><div class="lab">Fleet size</div><div class="num">128</div><div class="dlt up">▲ 6 <small>this month</small></div></div>
+          <div class="oa-kpi"><div class="lab">Online now</div><div class="num">17</div><div class="dlt"><small>morning lull · peak 41 at 6 pm</small></div></div>
+          <div class="oa-kpi"><div class="lab">On latest firmware</div><div class="num">89%</div><div class="dlt"><small>v2.4.0 · 14 toys behind</small></div></div>
+          <div class="oa-kpi"><div class="lab">Battery health</div><div class="num">64% <small>avg</small></div><div class="dlt dn">3 toys <small>chronically low</small></div></div>
+          <div class="oa-kpi"><div class="lab">Device errors · 7d</div><div class="num">3</div><div class="dlt up">▼ 5 <small>vs prior week</small></div></div>
+        </div>
+
+        <div class="oa-row half">
+          <div class="oa-card">
+            <h5>Firmware coverage</h5><div class="hint">fleet by version · target: 95% on latest within 14 days of release</div>
+            <div class="split"><b style="width:89%; background:#008300"></b><b style="width:8%; background:#fab219"></b><b style="width:3%; background:#d03b3b"></b></div>
+            <div class="li" style="--c:#008300">v2.4.0 · latest <b>114 toys · 89%</b></div>
+            <div class="li" style="--c:#fab219">v2.3.1 · one behind <b>10 toys</b></div>
+            <div class="li" style="--c:#d03b3b">v2.2.x · missing games telemetry <b>4 toys</b></div>
+            <h5 style="margin-top:16px;">OTA rollout · v2.4.1 staged</h5>
+            <div class="meter"><div class="track"><i style="width:9%"></i></div><div class="row"><span>12 of 128 updated · canary cohort</span><span>force update: off</span></div></div>
+            <div class="hint" style="margin-top:8px;">No canary regressions after 48h → widen to 25% tonight. Manage in OTA Management →</div>
+          </div>
+          <div class="oa-card">
+            <h5>Needs a human</h5><div class="hint">watchlist from runtime state + device events</div>
+            <table class="tbl">
+              <tr><th>Toy</th><th>Issue</th><th class="num">Since</th></tr>
+              <tr><td><span class="mac">C1:0F:…:5A</span> · Vihaan</td><td><span class="badge crit">battery 3× &lt;15% mid-play</span></td><td class="num mut">3 days</td></tr>
+              <tr><td><span class="mac">E0:7D:…:44</span> · Ishaan</td><td><span class="badge warn">wifi drops · 6 reconnects/day</span></td><td class="num mut">5 days</td></tr>
+              <tr><td><span class="mac">55:B2:…:9F</span> · Zara</td><td><span class="badge warn">stuck on v2.2.3 · OTA fails</span></td><td class="num mut">2 wks</td></tr>
+              <tr><td><span class="mac">88:C4:…:D1</span> · demo unit</td><td><span class="badge ok">unresolved-card spike · 41 taps</span></td><td class="num mut">today</td></tr>
+            </table>
+            <h5 style="margin-top:14px;">Recent device events</h5>
+            <div class="li noc"><small>09:58</small> · <span class="mac">3D:44:…:B7</span> settings sync ok <b class="mut" style="font-weight:500;">theme → 3</b></div>
+            <div class="li noc"><small>09:41</small> · <span class="mac">C1:0F:…:5A</span> low-battery shutdown <b style="color:#B3261E;">18% → off</b></div>
+            <div class="li noc"><small>09:12</small> · <span class="mac">55:B2:…:9F</span> OTA retry failed <b style="color:#B3261E;">timeout</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <p class="powered"><b>Powered by:</b> <code>device_runtime_state</code> (online/battery/firmware) · <code>GET /admin/stats/active</code> (exists) · <code>ai_ota</code> catalog + <code>ai_device.app_version</code> · <code>device_sync_event</code> + <code>device_analytics_event</code> feed · <code class="new">new: GET /admin/fleet/health</code> (one rollup for the KPIs + watchlist).</p>
+</section>
+
 
 <!-- ================= MOBILE ================= -->
 <section id="mobile" class="wrap">
@@ -950,7 +1420,7 @@
 
 <!-- ================= VERDICT ================= -->
 <section id="verdict" class="wrap">
-  <h2 class="disp">Comparison &amp; my recommendation</h2>
+  <h2 class="disp">Comparison &amp; the decision</h2>
   <div class="tblwrap"><table class="cmp">
     <tr><th></th><th>A · Morning Pulse</th><th>B · Mission Control</th><th>C · The Daily Brief</th></tr>
     <tr><td>Core question</td><td>"How is Cheeko doing, and where should I look?"</td><td>"What is happening right now?"</td><td>"What changed, and what should I do?"</td></tr>
@@ -970,7 +1440,7 @@
 
 <!-- ================= DATA MAP ================= -->
 <section id="data" class="wrap">
-  <h2 class="disp">Data reality check — what powers each widget</h2>
+  <h2 class="disp">Part 3 · Data reality check — what powers each widget</h2>
   <p class="sub">Grounded in <code>manager-api-node</code> as it exists on this branch. Green is wired today; blue is a small new endpoint over data you already store; orange needs new instrumentation.</p>
   <div class="map-grid">
     <div class="map"><span class="st ready">Ready today</span><h4>Active toys, sessions, accuracy, TTFT, cost</h4><p><code>/analytics/today|month/device-count</code>, <code>/analytics/dashboard/summary</code>, <code>/sessions-per-day</code>, <code>/game-accuracy</code>, <code>/ttft-trend</code>, <code>/usage/analytics/totals</code> — plus the per-device drill-down (RFID / chat / games / radio) already behind Active Devices.</p></div>
@@ -986,6 +1456,21 @@
     <div class="map"><span class="st newep">Frontend build</span><h4>Mobile &amp; add-to-home-screen</h4><p>Responsive layouts for the new pages (bottom tab bar under 768px) + enabling the PWA plumbing (workbox is already in the build) with a manifest and icons. No backend work.</p></div>
   </div>
 </section>
+
+<!-- ============ ENDPOINTS ============ -->
+<section id="endpoints" class="wrap">
+  <h2 class="disp">Endpoint additions beyond the Phase 1 spec</h2>
+  <p class="sub">Phase 1's six endpoints (spec §3.1–3.6) already power most of these pages. The full suite adds four small ones — same auth, same IST + join-on-MAC rules.</p>
+  <div class="map-grid">
+    <div class="map"><span class="st newep">Small new endpoint</span><h4>GET /analytics/fleet/actives</h4><p>DAU/WAU/MAU + stickiness, returning-vs-new split, and a by-hour histogram (7×24, IST) — from <code>device_usage_daily</code> + <code>analytics_game_sessions</code>. Powers Engagement.</p></div>
+    <div class="map"><span class="st newep">Small new endpoint</span><h4>GET /analytics/fleet/summaries</h4><p>Paged fleet-wide feed over <code>voice_session_summaries</code> (kid first name, duration, turns, tags, summary, transcript link). Powers Conversations; the topics list itself comes from the §3.3 nightly job.</p></div>
+    <div class="map"><span class="st newep">Small new endpoint</span><h4>Moderation flag counter</h4><p>Count of flagged messages per day from the existing moderation-provider pipeline — surfaces the "0 flags · 3,041 screened" trust KPI. If flags aren't persisted yet, add a tiny <code>moderation_events</code> table at the gateway.</p></div>
+    <div class="map"><span class="st newep">Small new endpoint</span><h4>GET /admin/fleet/health</h4><p>One rollup: online count, firmware version distribution vs latest <code>ai_ota</code>, battery stats + chronic-low list, error/event counts (7d), OTA rollout progress. Powers Fleet &amp; Ops.</p></div>
+    <div class="map"><span class="st ready">Zero new work</span><h4>Costs page</h4><p>Entirely served by existing <code>/usage/analytics/*</code>. Only change: move the hard-coded Gemini pricing + ₹ FX rate from <code>device.service.js</code> into <code>sys_params</code> and read the budget from there.</p></div>
+    <div class="map"><span class="st ready">Reuse</span><h4>Drill-downs stay</h4><p>Active Devices day view, chat drawer, All Devices, OTA Management, RFID Studio and Content Library remain the deep tools under each new page — no rewrite, just relocation in the nav.</p></div>
+  </div>
+</section>
+
 
 <footer class="end wrap"><div class="prose">
   All numbers on this page are illustrative sample data, shaped to match your real schema and API. Mockups are design intent, not pixel-final builds — the real implementation would use your existing Vue 2 + Element UI stack with ECharts, matching <code>theme.scss</code> tokens.
@@ -1132,6 +1617,99 @@
     el.innerHTML = html;
   })();
 
+  function spark(id, data, color) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var p = pts(data, 90, 22, 2), last = p[p.length - 1];
+    el.innerHTML = '<polyline points="' + poly(p) + '" fill="none" stroke="' + color + '" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.2" fill="' + color + '"/>';
+  }
+
+  /* Engagement: DAU 30d line + 7-day avg */
+  (function () {
+    var el = document.getElementById("dau30");
+    if (!el) return;
+    var W = 640, H = 190, PAD = 8;
+    var d = [29,31,33,34,30,26,28,31,33,35,36,32,27,30,34,36,38,37,31,29,35,38,40,41,38,32,34,40,44,46];
+    var avg = d.map(function (_, i) {
+      var s = d.slice(Math.max(0, i - 6), i + 1);
+      return s.reduce(function (a, b) { return a + b; }, 0) / s.length;
+    });
+    var lo = 22, hi = 50;
+    var p = pts(d, W, H, PAD, lo, hi), pa = pts(avg, W, H, PAD, lo, hi);
+    var html = "";
+    [0.25, 0.5, 0.75].forEach(function (g) {
+      var y = (PAD + (H - 2 * PAD) * g).toFixed(1);
+      html += '<line x1="' + PAD + '" y1="' + y + '" x2="' + (W - PAD) + '" y2="' + y + '" stroke="#F0E7D9" stroke-width="1"/>';
+    });
+    var last = p[p.length - 1];
+    var area = poly([[p[0][0], H - PAD]].concat(p).concat([[last[0], H - PAD]]));
+    html += '<polygon points="' + area + '" fill="#eb6834" opacity="0.07"/>';
+    html += '<polyline points="' + poly(pa) + '" fill="none" stroke="#C9BBA6" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>';
+    html += '<polyline points="' + poly(p) + '" fill="none" stroke="#eb6834" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+    html += '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="3.2" fill="#eb6834"/>';
+    html += '<text x="' + (last[0] - 8) + '" y="' + (last[1] - 9) + '" text-anchor="end" fill="#8A7B6A" font-size="11" font-family="system-ui">46 yesterday</text>';
+    el.innerHTML = html;
+  })();
+
+  /* Engagement: 7x24 heatmap */
+  (function () {
+    var el = document.getElementById("heat7");
+    if (!el) return;
+    var base = [1,0,0,0,0,1,3,8,12,7,5,4,5,4,3,4,6,9,13,15,11,6,3,1];
+    var mult = [0.8, 0.85, 0.9, 0.85, 0.95, 1.15, 1.3];
+    var days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    var wkday = function (h, m) {
+      var v = base[h] * m;
+      if (m > 1.1 && h >= 10 && h <= 17) v = v + 5;
+      return v;
+    };
+    var max = 20, labels = "", rows = "";
+    for (var d = 0; d < 7; d++) {
+      labels += '<div class="dl" style="grid-row:' + (d + 1) + '">' + days[d] + "</div>";
+      var cells = "";
+      for (var h = 0; h < 24; h++) {
+        var v = Math.min(wkday(h, mult[d]), max);
+        var op = v <= 0.5 ? 0.05 : (0.1 + 0.9 * v / max);
+        cells += '<b style="opacity:' + op.toFixed(2) + '" title="' + days[d] + " " + h + ':00"></b>';
+      }
+      rows += '<div class="r">' + cells + "</div>";
+    }
+    el.innerHTML = '<div style="display:grid; grid-template-rows:repeat(7,1fr); gap:3px;">' + labels + "</div>" + '<div class="cells">' + rows + "</div>";
+  })();
+
+  /* Content: pack trend sparks */
+  spark("pk1", [18,22,25,24,30,36,41,44,50,55,58,61,60,64], "#006300");
+  spark("pk2", [46,48,45,50,52,49,53,55,54,56,55,57,56,55], "#006300");
+  spark("pk3", [58,56,57,53,52,50,48,47,45,44,43,44,42,43], "#B3261E");
+  spark("pk4", [30,32,31,33,34,32,35,34,33,35,36,34,35,35], "#006300");
+  spark("pk5", [14,15,17,16,19,21,20,23,25,24,27,28,27,28], "#006300");
+
+  /* Costs: 30d stacked bars (input + output ₹) */
+  (function () {
+    var el = document.getElementById("cost30");
+    if (!el) return;
+    var W = 640, H = 190, PAD = 8;
+    var out = [180,196,188,210,232,206,166,186,224,240,236,254,214,246,190,204,196,220,238,214,172,194,230,248,242,262,222,252,232,258];
+    var inp = [120,132,126,142,158,140,112,126,152,164,160,174,146,168,128,138,132,150,162,146,116,132,156,170,166,180,150,172,158,176];
+    var n = out.length, max = 520;
+    var bw = (W - 2 * PAD) / n;
+    var html = "";
+    [0.33, 0.66].forEach(function (g) {
+      var y = (PAD + (H - 2 * PAD) * g).toFixed(1);
+      html += '<line x1="' + PAD + '" y1="' + y + '" x2="' + (W - PAD) + '" y2="' + y + '" stroke="#F0E7D9" stroke-width="1"/>';
+    });
+    for (var i = 0; i < n; i++) {
+      var x = PAD + i * bw + bw * 0.18, w = bw * 0.64;
+      var hOut = (H - 2 * PAD) * out[i] / max, hIn = (H - 2 * PAD) * inp[i] / max;
+      var yIn = H - PAD - hIn, yOut = yIn - 2 - hOut;
+      html += '<rect x="' + x.toFixed(1) + '" y="' + yIn.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hIn.toFixed(1) + '" fill="#2a78d6"/>';
+      html += '<rect x="' + x.toFixed(1) + '" y="' + yOut.toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hOut.toFixed(1) + '" rx="2" fill="#eb6834"/>';
+    }
+    el.innerHTML = html;
+  })();
+
+
   /* ---- scrollspy for jump nav ---- */
   var links = Array.prototype.slice.call(document.querySelectorAll("nav.jump a"));
   var map = {};
@@ -1146,7 +1724,7 @@
         }
       });
     }, { rootMargin: "-20% 0px -70% 0px" });
-    ["findings", "opt-a", "opt-b", "opt-c", "profile", "mobile", "verdict", "data"].forEach(function (id) {
+    ["findings", "opt-a", "opt-b", "opt-c", "verdict", "profile", "engagement", "content", "conversations", "costs", "fleet", "mobile", "data"].forEach(function (id) {
       var s = document.getElementById(id);
       if (s) io.observe(s);
     });
