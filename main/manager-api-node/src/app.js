@@ -96,6 +96,9 @@ app.use('/webhooks/razorpay', require('./routes/razorpayWebhook.routes'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// RevenueCat webhook (SUB-15, IAP rails) — plain JSON, static-header auth.
+app.use('/webhooks/revenuecat', require('./routes/revenuecatWebhook.routes'));
+
 // XSS protection
 app.use(xssFilter({
   // Workspace markdown files are trusted service-to-service payloads and
