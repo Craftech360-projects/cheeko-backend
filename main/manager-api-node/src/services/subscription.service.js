@@ -508,7 +508,7 @@ const recordImageGeneration = async (macAddress, url) => {
 const getActivePlans = () =>
   prisma.subscription_plans.findMany({
     where: { is_active: true },
-    select: { ...PLAN_LIMIT_SELECT, features: true },
+    select: { ...PLAN_LIMIT_SELECT, features: true, store_product_id: true },
     orderBy: { price_inr: 'asc' },
   });
 
@@ -534,6 +534,7 @@ const getSubscriptionSummary = async (macAddress, { now = new Date() } = {}) => 
       grace_until: true,
       current_period_start: true,
       current_period_end: true,
+      cancel_at_period_end: true,
       subscription_plans: { select: PLAN_LIMIT_SELECT },
     },
   });
@@ -563,6 +564,7 @@ const getSubscriptionSummary = async (macAddress, { now = new Date() } = {}) => 
   return {
     mac_address: normalizedMac,
     status,
+    cancel_at_period_end: subscription.cancel_at_period_end,
     plan,
     period: {
       start: subscription.current_period_start,

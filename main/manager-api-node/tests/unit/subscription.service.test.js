@@ -7,7 +7,7 @@ const mockPrisma = {
     // trial→lapsed transition gets count > 0, and only that one pushes.
     updateMany: jest.fn().mockResolvedValue({ count: 1 }),
   },
-  subscription_plans: { findUnique: jest.fn() },
+  subscription_plans: { findUnique: jest.fn(), findMany: jest.fn() },
   device_token_usage_session: { aggregate: jest.fn() },
   device_image_generations: { count: jest.fn(), create: jest.fn() },
 };
@@ -753,5 +753,27 @@ describe('heartbeatCutoff', () => {
       },
       _sum: { session_duration_seconds: true },
     });
+  });
+});
+
+describe('SUB-16 contract additions', () => {
+  test('getActivePlans selects store_product_id', async () => {
+    mockPrisma.subscription_plans.findMany = jest.fn().mockResolvedValue([]);
+    await service.getActivePlans();
+    const call = mockPrisma.subscription_plans.findMany.mock.calls[0][0];
+    expect(call.select.store_product_id).toBe(true);
+  });
+
+  test('getSubscriptionSummary returns cancel_at_period_end', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+      status: 'active',
+      cancel_at_period_end: true,
+      trial_started_at: null, trial_ends_at: null, grace_until: null,
+      current_period_start: new Date('2026-07-01T00:00:00Z'),
+      current_period_end: new Date('2026-08-01T00:00:00Z'),
+      subscription_plans: null,
+    });
+    const summary = await service.getSubscriptionSummary('AA:BB:CC:DD:EE:FF');
+    expect(summary.cancel_at_period_end).toBe(true);
   });
 });
