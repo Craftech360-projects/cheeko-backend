@@ -1380,3 +1380,97 @@ model device_radio_played {
   @@index([station, played_at(sort: Desc)], map: "idx_device_radio_played_station_played")
   @@index([activity_date, mac_address], map: "idx_device_radio_played_date_mac")
 }
+
+model subscription_plans {
+  id                     BigInt                 @id @default(autoincrement())
+  tier                   String                 @unique
+  name                   String
+  price_inr              Int
+  monthly_question_limit Int
+  daily_question_limit   Int
+  daily_minutes_limit    Int
+  monthly_image_limit    Int?
+  daily_image_limit      Int?
+  features               Json?
+  razorpay_plan_id       String?
+  /// IAP product id, identical on both stores (SUB-17 seeds it), e.g. cheeko_family_monthly
+  store_product_id       String?                @unique
+  is_active              Boolean                @default(true)
+  created_at             DateTime?              @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime?              @default(now()) @db.Timestamptz(6)
+  device_subscriptions   device_subscriptions[]
+
+  @@index([is_active], map: "idx_subscription_plans_active")
+}
+
+model device_subscriptions {
+  id                       BigInt              @id @default(autoincrement())
+  mac_address              String              @unique @db.VarChar(50)
+  status                   String
+  plan_id                  BigInt?
+  user_id                  BigInt?
+  trial_started_at         DateTime?           @db.Timestamptz(6)
+  trial_ends_at            DateTime?           @db.Timestamptz(6)
+  trial_used               Boolean             @default(false)
+  /// Highest trial-reminder day already pushed (23/27/30). The reminder cron
+  /// claims a day with a conditional UPDATE, so exactly-once is enforced by the
+  /// database rather than by the job remembering anything.
+  last_reminder_day        Int?
+  /// When the 80%-of-monthly-bucket push was last sent. Re-armed each period:
+  /// eligible when NULL or older than the current period anchor.
+  bucket_alert_sent_at     DateTime?           @db.Timestamptz(6)
+  billing_cycle            String              @default("monthly")
+  current_period_start     DateTime?           @db.Timestamptz(6)
+  current_period_end       DateTime?           @db.Timestamptz(6)
+  grace_until              DateTime?           @db.Timestamptz(6)
+  cancel_at_period_end     Boolean             @default(false)
+  razorpay_customer_id     String?
+  razorpay_subscription_id String?
+  /// Which rails activated this row: app_store | play_store (null = razorpay-era/trial)
+  store                    String?
+  rc_original_transaction_id String?
+  created_at               DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime?           @default(now()) @db.Timestamptz(6)
+  subscription_plans       subscription_plans? @relation(fields: [plan_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([status], map: "idx_device_subscriptions_status")
+  @@index([razorpay_subscription_id], map: "idx_device_subscriptions_razorpay_sub")
+}
+
+/// One row per AI-imagine image, written from the imagine-upload path (SUB-3).
+/// The image buckets are live COUNTs over this table — same no-counter-columns
+/// rule as question/minute buckets.
+model device_image_generations {
+  id          BigInt   @id @default(autoincrement())
+  mac_address String   @db.VarChar(50)
+  url         String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address, created_at(sort: Desc)], map: "idx_device_image_generations_mac_created")
+}
+
+model subscription_events {
+  id                       BigInt    @id @default(autoincrement())
+  razorpay_event_id        String    @unique
+  event_type               String
+  mac_address              String?   @db.VarChar(50)
+  razorpay_subscription_id String?
+  payload                  Json?
+  processed_at             DateTime? @db.Timestamptz(6)
+  created_at               DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address], map: "idx_subscription_events_mac")
+}
+
+model subscription_admin_audit {
+  id           BigInt    @id @default(autoincrement())
+  admin_user   String
+  action       String
+  mac_address  String?   @db.VarChar(50)
+  reason       String?
+  before_state Json?
+  after_state  Json?
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([mac_address], map: "idx_subscription_admin_audit_mac")
+}

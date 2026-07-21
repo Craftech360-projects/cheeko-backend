@@ -9,7 +9,34 @@
 
 const admin = require('firebase-admin');
 const { ensureFirebaseInit } = require('../middleware/firebaseAuth');
+const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
+
+/**
+ * The bound parent's FCM token for a device, or null if there is nobody to
+ * notify — unbound, no token registered, or push notifications turned off.
+ *
+ * Lives here so the trial reminder cron and the plan gate cannot drift apart on
+ * what "a notifiable parent" means.
+ *
+ * @param {string} macAddress - normalised, colon-separated uppercase
+ * @returns {Promise<string|null>}
+ */
+const findParentFcmToken = async (macAddress) => {
+  const device = await prisma.ai_device.findFirst({
+    where: {
+      mac_address: macAddress,
+      user_id: { not: null },
+      sys_user: {
+        parent_profile: { fcm_token: { not: null }, push_notifications: true },
+      },
+    },
+    select: {
+      sys_user: { select: { parent_profile: { select: { fcm_token: true } } } },
+    },
+  });
+  return device?.sys_user?.parent_profile?.fcm_token || null;
+};
 
 /**
  * Send a push notification to a single FCM token.
@@ -37,4 +64,4 @@ const sendPushNotification = async (fcmToken, title, body) => {
   }
 };
 
-module.exports = { sendPushNotification };
+module.exports = { sendPushNotification, findParentFcmToken };

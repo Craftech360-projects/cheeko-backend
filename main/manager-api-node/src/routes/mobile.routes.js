@@ -8,6 +8,8 @@ const deviceService = require('../services/device.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
+const subscriptionService = require('../services/subscription.service');
+const razorpayService = require('../services/razorpay.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
 
@@ -423,6 +425,53 @@ router.get('/devices/:mac/games-played', asyncHandler(async (req, res) => {
 router.get('/devices/:mac/radio-played', asyncHandler(async (req, res) => {
     const details = await mobileService.getDeviceRadioPlayed(req.firebaseUser.uid, req.params.mac, req.query);
     success(res, details);
+}));
+
+// ─── Subscription (SUB-3, SUB-6) ─────────────────────────────────────────────
+
+router.get('/subscription/plans', asyncHandler(async (req, res) => {
+    success(res, await subscriptionService.getActivePlans());
+}));
+
+router.post('/devices/:mac/subscription/checkout', asyncHandler(async (req, res) => {
+    // IAP pivot (2026-07-21): Razorpay purchase rails are retired. Keep the
+    // code dormant but unreachable so the two rails can't write conflicting
+    // subscription state for one device. Flip the env only to resurrect.
+    if (process.env.RAZORPAY_CHECKOUT_ENABLED !== 'true') {
+        return res.status(410).json({ code: 410, msg: 'Checkout moved in-app (IAP)', data: null });
+    }
+    const tier = req.body?.tier;
+    if (!tier || typeof tier !== 'string') {
+        return badRequest(res, 'tier is required');
+    }
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+    try {
+        const checkout = await razorpayService.createCheckout(device.mac_address, req.mobileUser.id, tier, {
+            name: req.firebaseUser.name,
+            email: req.firebaseUser.email,
+        });
+        success(res, checkout);
+    } catch (err) {
+        if (err.statusCode) {
+            return res.status(err.statusCode).json({ code: err.statusCode, msg: err.message, data: null });
+        }
+        throw err;
+    }
+}));
+
+router.get('/devices/:mac/subscription', asyncHandler(async (req, res) => {
+    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
+    if (!device) {
+        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
+    }
+    const summary = await subscriptionService.getSubscriptionSummary(device.mac_address);
+    if (!summary) {
+        return res.status(404).json({ code: 404, msg: 'No subscription for this device', data: null });
+    }
+    success(res, summary);
 }));
 
 // ─── AI Imagine gallery ───────────────────────────────────────────────────────

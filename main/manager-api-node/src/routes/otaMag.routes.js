@@ -40,7 +40,7 @@ setInterval(() => {
       otaDownloadCache.delete(key);
     }
   }
-}, 60000);
+}, 60000).unref(); // don't hold the event loop open (jest exit hang)
 
 /**
  * Transform snake_case firmware to camelCase for Spring Boot compatibility

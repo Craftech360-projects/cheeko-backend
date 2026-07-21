@@ -11,6 +11,7 @@ const baseDeps = (over) => Object.assign({
   newRequestId: () => 'img_test',
   generateImagine: async () => ({ jpegBuffer: Buffer.from([9]), caption: 'a cat' }),
   uploadImagineJpeg: async () => 'https://cdn/x.jpg',
+  fetchVerdict: async () => ({ allowed: true, reason: 'ok' }), // SUB-3: required dep
 }, over);
 
 test('happy path: status then image', async () => {
@@ -70,6 +71,36 @@ test('rate limit: second request within cooldown is rejected, line_art not calle
   assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_error']);
   assert.strictEqual(conn.sent[0].code, 'rate_limited');
   assert.strictEqual(conn.imagineInFlight, false);
+});
+
+test('plan gate: refused verdict publishes plan_limit, line_art never called', async () => {
+  const conn = fakeConn();
+  let generated = false;
+  await runImagine(conn, baseDeps({
+    fetchVerdict: async () => ({ allowed: false, reason: 'daily_images' }),
+    generateImagine: async () => { generated = true; return {}; },
+  }));
+  assert.strictEqual(generated, false);
+  assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_error']);
+  assert.strictEqual(conn.sent[0].code, 'plan_limit');
+  assert.strictEqual(conn.imagineInFlight, false);
+});
+
+test('plan gate: allowed verdict proceeds to generation', async () => {
+  const conn = fakeConn();
+  await runImagine(conn, baseDeps({
+    fetchVerdict: async () => ({ allowed: true, reason: 'ok' }),
+  }));
+  assert.deepStrictEqual(conn.sent.map((m) => m.type), ['image_status', 'image']);
+});
+
+test('plan gate: a throwing verdict dep still clears the in-flight lock', async () => {
+  const conn = fakeConn();
+  await runImagine(conn, baseDeps({
+    fetchVerdict: async () => { throw new Error('boom'); },
+  }));
+  assert.strictEqual(conn.imagineInFlight, false);
+  assert.strictEqual(conn.sent.at(-1).code, 'generation_failed');
 });
 
 test('mapError: HTTP 429 maps to rate_limited', () => {

@@ -7,6 +7,26 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
+const subscriptionService = require('./subscription.service');
+
+/**
+ * Start the device's trial on bind, without ever failing the bind.
+ *
+ * A parent pairing their toy must succeed even if the subscription write does
+ * not — the bind is what they paid for; the trial is ours to repair. A device
+ * left without a row is simply refused once enforcement is on, which the admin
+ * trial re-grant path (SUB-11) exists to fix.
+ *
+ * @param {string} macAddress
+ * @param {number|string} userId
+ */
+const grantTrialOnBind = async (macAddress, userId) => {
+  try {
+    await subscriptionService.ensureTrialForMac(macAddress, userId);
+  } catch (error) {
+    logger.error(`[SUBSCRIPTION] Trial grant failed for ${macAddress} (bind still succeeded):`, error);
+  }
+};
 
 /**
  * In-memory activation code cache
@@ -35,7 +55,7 @@ const activationCleanupTimer = setInterval(() => {
     }
   }
 }, 60 * 60 * 1000); // Clean up every hour
-if (activationCleanupTimer.unref) activationCleanupTimer.unref();
+if (activationCleanupTimer.unref) activationCleanupTimer.unref(); // don't hold the event loop open (jest exit hang)
 
 /**
  * Register a new device
@@ -114,6 +134,7 @@ const bindDevice = async (userId, agentId, deviceCode) => {
       activationMacCache.delete(macAddress);
       logger.info(`Device ${macAddress} activated and bound to agent ${agentId}`);
     }
+    await grantTrialOnBind(macAddress, userId);
     return updated;
   } else {
     const now = new Date();
@@ -137,6 +158,7 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     activationCodeCache.delete(deviceCode);
     activationMacCache.delete(macAddress);
     logger.info(`New device ${macAddress} created and bound to agent ${agentId}`);
+    await grantTrialOnBind(macAddress, userId);
     return newDevice;
   }
 };
@@ -974,6 +996,13 @@ const recordTokenUsage = async ({
     } else {
       await prisma.device_token_usage_session.create({ data: sessionUsageData });
     }
+
+    // The write above is the bucket crossing (buckets SUM this table), so the
+    // 80% alert check lives here, not in the verdict. Fire-and-forget: a slow
+    // FCM round trip must not delay the usage ack.
+    subscriptionService.maybeSendBucketAlert(normalizedMac).catch((error) =>
+      logger.error(`[SUBSCRIPTION] Bucket alert check failed for ${normalizedMac}: ${error.message}`)
+    );
   }
 
   const existing = await prisma.device_token_usage.findFirst({

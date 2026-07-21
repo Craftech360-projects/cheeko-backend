@@ -170,6 +170,7 @@ Each UDP datagram = **16-byte header** + **AES-128-CTR-encrypted Opus payload**.
 | `safety_block` | prompt not child-safe | "Let's imagine something else!" |
 | `generation_failed` | model/internal/timeout | "Hmm, that didn't work. Try again!" |
 | `rate_limited` | too fast / upstream 429 | "One at a time — try again in a moment." |
+| `plan_limit` | subscription refused (image bucket empty / no plan) | "Ask Mumma or Papa to check the Cheeko app." |
 
 ---
 

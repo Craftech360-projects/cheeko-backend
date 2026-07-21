@@ -7,6 +7,7 @@
 
 const axios = require("axios");
 const crypto = require("crypto");
+const path = require("path");
 const {
   LiveKitBridge,
   setConfigManager: setLivekitConfigManager,
@@ -24,6 +25,26 @@ const { uploadImagineJpeg } = require("../imagine/imagine-upload");
 const { randomUUID } = require("crypto");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Verdict used whenever manager-api cannot answer. Never brick a toy because
+// our subscription check is down (spec §5) — allow, and log loudly enough that
+// the alert can be built on the string. `remaining` mirrors the endpoint's
+// all-null shape so callers never have to special-case this path.
+const FAIL_OPEN_VERDICT = Object.freeze({
+  allowed: true,
+  reason: "fail_open",
+  remaining: Object.freeze({
+    questions_month: null,
+    questions_today: null,
+    minutes_today: null,
+    images_today: null,
+  }),
+});
+
+// Must match audio/character_change/subscription_gate.pcm — the text rides the
+// tts:start signal for display; the PCM is what the child actually hears.
+const GATE_CLIP_TEXT =
+  "Ask Mumma or Papa to check the Cheeko app so we can keep playing.";
 
 async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5000 } = {}) {
   const baseUrl = (process.env.MANAGER_API_URL || "").replace(/\/$/, "");
@@ -512,6 +533,45 @@ class VirtualMQTTConnection {
   }
 
   /**
+   * Ask manager-api whether this device may start a session.
+   *
+   * Always resolves — on any error we fail open (SUB-1). SUB-2 adds the
+   * refusal branch that skips LiveKit dispatch and streams the gate clip;
+   * today the verdict is observed and logged only, so behavior is unchanged.
+   *
+   * @param {string} macAddress
+   * @param {string} baseUrl - manager-api base URL, without the /toy suffix
+   * @param {Object} [opts]
+   * @param {'voice'|'imagine'} [opts.flow] - imagine adds the image buckets (SUB-3)
+   * @returns {Promise<{allowed: boolean, reason: string, remaining: Object}>}
+   */
+  async fetchSessionVerdict(macAddress, baseUrl, { flow } = {}) {
+    const serviceKey = process.env.MANAGER_API_SECRET || process.env.SERVICE_SECRET_KEY;
+
+    try {
+      const response = await axios.get(
+        `${baseUrl}/toy/device/${encodeURIComponent(macAddress)}/session-verdict${flow === "imagine" ? "?flow=imagine" : ""}`,
+        { headers: { "X-Service-Key": serviceKey }, timeout: 5000 }
+      );
+
+      const verdict = response.data?.code === 0 ? response.data.data : null;
+      if (!verdict) {
+        throw new Error(`unexpected response code ${response.data?.code}`);
+      }
+
+      logger.info(
+        `🎟️ [VERDICT] ${macAddress}: allowed=${verdict.allowed} reason=${verdict.reason}`
+      );
+      return verdict;
+    } catch (error) {
+      logger.warn(
+        `🎟️ [VERDICT-FAIL-OPEN] ${macAddress}: ${error.message} — allowing session`
+      );
+      return FAIL_OPEN_VERDICT;
+    }
+  }
+
+  /**
    * Deferred setup — runs in background after hello response is sent.
    * Handles DB queries, LiveKit room creation, and agent dispatch.
    */
@@ -522,7 +582,7 @@ class VirtualMQTTConnection {
     // ── Step 1: ALL DB queries in parallel ──
     console.log(`🔄 [DEFERRED] Starting parallel DB queries for ${this.deviceId}...`);
 
-    const [roomTypeResult, deviceModeResult, character, childProfile] = await Promise.allSettled([
+    const [roomTypeResult, deviceModeResult, character, childProfile, verdictResult] = await Promise.allSettled([
       // Room type (conversation/music/story)
       axios.get(`${baseUrl}/toy/device/${macAddress}/mode`, { timeout: 5000 })
         .then((r) => r.data?.code === 0 ? r.data.data : "conversation")
@@ -535,6 +595,8 @@ class VirtualMQTTConnection {
       this.fetchCurrentCharacter(this.deviceId),
       // Child profile
       this.fetchChildProfile(this.deviceId),
+      // Subscription verdict — rides this batch so it costs no extra wall-clock.
+      this.fetchSessionVerdict(macAddress, baseUrl),
     ]);
 
     // Extract results from settled promises
@@ -635,6 +697,35 @@ class VirtualMQTTConnection {
       logger.info(`🖼️ [IMAGINE] session in ai_imagine mode; skipping LiveKit bridge for ${this.deviceId}`);
       const totalImagineDeferred = Date.now() - deferredStart;
       console.log(`✅ [DEFERRED] Imagine background setup completed in ${totalImagineDeferred}ms for ${this.deviceId}`);
+      return;
+    }
+
+    // ── Step 1.5: Subscription gate ──
+    // fetchSessionVerdict never rejects (it fails open), but treat a rejection
+    // as allowed anyway — a gate bug must not lock a paying child out.
+    const verdict = verdictResult.status === "fulfilled" ? verdictResult.value : null;
+    if (verdict && verdict.allowed === false) {
+      logger.info(
+        `🎟️ [GATE] Refusing session for ${this.deviceId}: reason=${verdict.reason} — ` +
+          `streaming gate clip, no LiveKit room`
+      );
+      this.deferredSetupInProgress = false;
+      await this.gateway.streamAudioViaUdp(
+        this.deviceId,
+        path.join(__dirname, "..", "audio", "character_change", "subscription_gate.pcm"),
+        "subscription_gate",
+        false,
+        GATE_CLIP_TEXT
+      );
+      this.sendMqttMessage(
+        JSON.stringify({
+          type: "goodbye",
+          session_id: this.udp?.session_id,
+          reason: verdict.reason || "no_plan",
+          timestamp: Date.now(),
+        })
+      );
+      this.close();
       return;
     }
 
@@ -1077,6 +1168,14 @@ class VirtualMQTTConnection {
         managerApiUrl: process.env.MANAGER_API_URL,
         serviceKey: process.env.MANAGER_API_SECRET,
         newRequestId: () => `img_${randomUUID().slice(0, 8)}`,
+        // SUB-3: same verdict as voice plus the image buckets; fail-open lives
+        // inside fetchSessionVerdict, so an outage never bricks imagine.
+        fetchVerdict: (conn) =>
+          conn.fetchSessionVerdict(
+            conn.macAddress,
+            (process.env.MANAGER_API_URL || "").replace("/toy", ""),
+            { flow: "imagine" }
+          ),
       }).catch((e) =>
         logger.error(`❌ [IMAGINE] runImagine failed: ${e?.message}`)
       );

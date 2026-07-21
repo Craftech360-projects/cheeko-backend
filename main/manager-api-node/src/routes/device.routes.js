@@ -9,8 +9,9 @@ const express = require('express');
 const router = express.Router();
 const deviceService = require('../services/device.service');
 const contentService = require('../services/content.service');
+const subscriptionService = require('../services/subscription.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireAuth, optionalAuth } = require('../middleware/auth');
+const { requireAuth, optionalAuth, requireServiceKey } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const { success, badRequest, notFound } = require('../utils/response');
 const logger = require('../utils/logger');
@@ -1476,6 +1477,94 @@ router.delete('/token-usage/:mac',
       });
       success(res, { deletedCount: count }, 'Token usage records deleted');
     } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /device/{mac}/session-verdict:
+ *   get:
+ *     tags: [Device]
+ *     summary: May this device start an AI session?
+ *     description: >
+ *       Called by the mqtt-gateway before LiveKit dispatch and before the
+ *       imagine handoff. Callers must fail open when this endpoint errors —
+ *       an outage here must never brick a toy.
+ *     security:
+ *       - ServiceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: Verdict
+ *       401:
+ *         description: Missing or invalid service key
+ */
+router.get('/:mac/session-verdict',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+
+    // flow=imagine adds the image buckets; anything else gates a voice session.
+    const flow = req.query.flow === 'imagine' ? 'imagine' : 'voice';
+    const verdict = await subscriptionService.getSessionVerdict(mac, { flow });
+    logger.info(`[DEVICE] Verdict ${mac} (${flow}): allowed=${verdict.allowed} reason=${verdict.reason}`);
+    success(res, verdict);
+  })
+);
+
+/**
+ * @swagger
+ * /device/{mac}/usage-heartbeat:
+ *   post:
+ *     tags: [Device]
+ *     summary: Mid-session usage heartbeat from the voice worker
+ *     description: >
+ *       Posted every 5 minutes per live session with cumulative usage so far
+ *       (same body shape as /device/token-usage). Upserts the in-flight
+ *       session row, then answers whether the daily minute cap is breached —
+ *       cutoff:true tells the worker to end the session gracefully. Only the
+ *       minute cap ever cuts; question buckets are start-gated (SUB-5).
+ *     security:
+ *       - ServiceKey: []
+ *     parameters:
+ *       - in: path
+ *         name: mac
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Device MAC address
+ *     responses:
+ *       200:
+ *         description: "{ cutoff: boolean, reason?: 'daily_minutes' }"
+ *       401:
+ *         description: Missing or invalid service key
+ */
+router.post('/:mac/usage-heartbeat',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const { mac } = req.params;
+    const { sessionId } = req.body;
+    if (!sessionId) {
+      return badRequest(res, 'sessionId is required');
+    }
+
+    try {
+      // Cumulative totals overwrite the session row (idempotent by sessionId);
+      // only the delta since the last write rolls into the daily aggregate.
+      await deviceService.recordTokenUsage({ ...req.body, mac });
+      const result = await subscriptionService.heartbeatCutoff(mac);
+      logger.info(`[DEVICE] Heartbeat ${mac} session=${sessionId} cutoff=${result.cutoff}`);
+      success(res, result);
+    } catch (error) {
+      logger.error('Failed to record usage heartbeat:', error);
       badRequest(res, error.message);
     }
   })

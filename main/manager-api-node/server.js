@@ -34,6 +34,8 @@ const startServer = async () => {
     const { assertRequiredPrismaModels, assertRequiredDatabaseTables } = require('./src/config/prisma-client-guard');
     const { startEmailReportCron, stopEmailReportCron } = require('./src/jobs/dailyEmailReport');
     const { startUsageSummaryCrons, stopUsageSummaryCrons } = require('./src/jobs/usageSummaryNotification');
+    const { startTrialReminderCron, stopTrialReminderCron } = require('./src/jobs/trialReminderNotification');
+    const { startRcReconciliationCron, stopRcReconciliationCron } = require('./src/jobs/rcReconciliation');
     const shouldSkipRequiredTableGuard = process.env.SKIP_DB_SYNC === '1';
 
     assertRequiredPrismaModels(prisma);
@@ -71,6 +73,12 @@ const startServer = async () => {
       startUsageSummaryCrons().catch(err => {
         logger.warn('Failed to start usage summary crons:', err.message);
       });
+      startTrialReminderCron().catch(err => {
+        logger.warn('Failed to start trial reminder cron:', err.message);
+      });
+      startRcReconciliationCron().catch(err => {
+        logger.warn('Failed to start RC reconciliation cron:', err.message);
+      });
     });
 
     // Graceful shutdown
@@ -80,6 +88,8 @@ const startServer = async () => {
       // Stop background jobs
       stopEmailReportCron();
       stopUsageSummaryCrons();
+      stopTrialReminderCron();
+      stopRcReconciliationCron();
 
       server.close(() => {
         logger.info('Server closed.');

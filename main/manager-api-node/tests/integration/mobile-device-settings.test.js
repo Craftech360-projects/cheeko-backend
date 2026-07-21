@@ -66,6 +66,11 @@ describe('Mobile Device Settings Routes', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('requires Firebase auth for GET device subscription', async () => {
+    const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/subscription`);
+    expect(res.statusCode).toBe(401);
+  });
+
   it('requires Firebase auth for GET device games-played', async () => {
     const res = await request(app).get(`${BASE}/devices/AA:BB:CC:DD:EE:FF/games-played`);
     expect(res.statusCode).toBe(401);

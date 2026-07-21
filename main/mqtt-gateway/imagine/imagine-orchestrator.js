@@ -31,6 +31,16 @@ async function runImagine(conn, deps) {
   }
   console.log(`🖼️ [IMAGINE] ${requestId} start: frames=${frames.length}, lineArtWsUrl=${deps.lineArtWsUrl}, managerApiUrl=${deps.managerApiUrl}`);
   try {
+    // SUB-3 plan gate, before any line_art work. fetchVerdict is a REQUIRED
+    // dep — a missing one throws here (mapped to generation_failed) rather
+    // than silently disabling billing. Fail-open on manager-api outages lives
+    // inside fetchSessionVerdict, so this only refuses on a real verdict.
+    const verdict = await deps.fetchVerdict(conn);
+    if (!verdict.allowed) {
+      console.log(`🖼️ [IMAGINE] ${requestId} refused by plan gate: ${verdict.reason}`);
+      conn.sendMqttMessage(messages.imageError({ sessionId, requestId, code: 'plan_limit', message: 'Ask Mumma or Papa to check the Cheeko app.' }));
+      return;
+    }
     conn.sendMqttMessage(messages.imageStatus({ sessionId, requestId, state: 'generating' }));
     const { jpegBuffer, caption } = await deps.generateImagine(frames, { lineArtWsUrl: deps.lineArtWsUrl });
     if (conn.imagineClosed) {
