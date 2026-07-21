@@ -5,10 +5,16 @@
  * purchases_flutter with appUserID = device MAC; RevenueCat validates store
  * receipts and delivers ONE normalized webhook here. Same delivery contract
  * defenses as the Razorpay handler (SUB-6): at-least-once → ledger dedupe,
- * unordered → period anchors only ever advance. There is no checkout race at
- * all — no server-side checkout exists on these rails.
+ * unordered → period anchors only ever advance (EXPIRATION guards on
+ * current_period_end the same way). Ledger + transition commit in ONE
+ * transaction, so a failed transition rolls the ledger row back and RC's
+ * retry re-processes instead of hitting the dedupe.
  *
  * BILLING_ISSUE / refunds are ledgered only (SUB-7 owns grace).
+ * PRODUCT_CHANGE is ledgered only: RC fires it when the user COMMITS a
+ * change, not when it takes effect — the store's transaction event
+ * (RENEWAL/INITIAL_PURCHASE) carries the new product_id at effective time
+ * and swaps the plan then (SUB-9 owns richer plan-change UX).
  * ponytail: no live re-derive on a rejected stale write — a newer anchor is
  * already in place, which IS the derived state; SUB-7's nightly RC
  * reconciliation covers real drift.
@@ -16,20 +22,12 @@
 
 const crypto = require('crypto');
 const { prisma } = require('../config/database');
-const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeMacAddress, isValidMacAddress } = require('../utils/helpers');
 const logger = require('../utils/logger');
 
-/** RC store field → our device_subscriptions.store value. */
-const STORE_MAP = { APP_STORE: 'app_store', PLAY_STORE: 'play_store' };
-
-/**
- * app_user_id → MAC, or null. normalizeMacAddress only length-checks, so an
- * RC anonymous id could slip through it — require real hex pairs too.
- */
-const macFromAppUserId = (appUserId) => {
-  const mac = normalizeMacAddress(appUserId);
-  return mac && /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac) ? mac : null;
-};
+/** app_user_id → MAC, or null (RC anonymous ids fail the hex check). */
+const macFromAppUserId = (appUserId) =>
+  appUserId && isValidMacAddress(appUserId) ? normalizeMacAddress(appUserId) : null;
 
 /**
  * RC sends the configured value verbatim in the Authorization header.
@@ -46,10 +44,10 @@ const verifyWebhookAuth = (headerValue) => {
   return provided.length === wanted.length && crypto.timingSafeEqual(provided, wanted);
 };
 
-/** Our plan row id for an RC product id; null when unknown (keep existing). */
-const planIdForProduct = async (productId) => {
+/** Our plan row id for an RC product id; null when unknown. */
+const planIdForProduct = async (tx, productId) => {
   if (!productId) return null;
-  const plan = await prisma.subscription_plans.findFirst({
+  const plan = await tx.subscription_plans.findFirst({
     where: { store_product_id: productId },
     select: { id: true },
   });
@@ -59,18 +57,39 @@ const planIdForProduct = async (productId) => {
 /**
  * INITIAL_PURCHASE / RENEWAL: the row becomes active with the store's billing
  * period as the bucket anchor. Anchor guard = out-of-order defense.
- * Returns false when the guard rejected the write (stale event).
+ * Returns false when nothing was applied (stale event, degraded payload, or
+ * an unknown product that would leave an active row with no plan — that
+ * would fail open to unlimited usage downstream, so refuse instead).
  */
-const applyActiveState = async (normalizedMac, event) => {
+const applyActiveState = async (tx, normalizedMac, event) => {
   const periodStart = event.purchased_at_ms ? new Date(event.purchased_at_ms) : null;
+  if (!periodStart) {
+    // No anchor ⇒ the out-of-order guard can't run; never write blind.
+    logger.warn(`[REVENUECAT] ${event.type} for ${normalizedMac} has no purchased_at_ms — not applied`);
+    return false;
+  }
   const periodEnd = event.expiration_at_ms ? new Date(event.expiration_at_ms) : null;
-  const planId = await planIdForProduct(event.product_id);
+  const planId = await planIdForProduct(tx, event.product_id);
+
+  const existing = await tx.device_subscriptions.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { plan_id: true },
+  });
+  if (planId == null && existing?.plan_id == null) {
+    // Active + plan-less fails open to unlimited usage (subscription.service).
+    logger.error(
+      `[REVENUECAT] Unknown product_id "${event.product_id}" for ${normalizedMac} — not activating (check SUB-17 store/plan seeding)`
+    );
+    return false;
+  }
 
   const data = {
     status: 'active',
     current_period_start: periodStart,
     current_period_end: periodEnd,
-    store: STORE_MAP[event.store] || null,
+    // RC store values map 1:1 by lowercasing (APP_STORE → app_store); never
+    // overwrite with null — null means razorpay-era/trial in the schema.
+    store: event.store ? String(event.store).toLowerCase() : undefined,
     rc_original_transaction_id: event.original_transaction_id || undefined,
     grace_until: null,
     cancel_at_period_end: false,
@@ -78,19 +97,16 @@ const applyActiveState = async (normalizedMac, event) => {
     updated_at: new Date(),
   };
 
-  // Upsert first so a webhook that beats the bind still lands a row.
-  await prisma.device_subscriptions.upsert({
-    where: { mac_address: normalizedMac },
-    create: { mac_address: normalizedMac, ...data },
-    update: {},
-  });
+  if (!existing) {
+    // Webhook beat the device bind — still land a row.
+    await tx.device_subscriptions.create({ data: { mac_address: normalizedMac, ...data } });
+    return true;
+  }
 
-  const { count } = await prisma.device_subscriptions.updateMany({
+  const { count } = await tx.device_subscriptions.updateMany({
     where: {
       mac_address: normalizedMac,
-      ...(periodStart
-        ? { OR: [{ current_period_start: null }, { current_period_start: { lte: periodStart } }] }
-        : {}),
+      OR: [{ current_period_start: null }, { current_period_start: { lte: periodStart } }],
     },
     data,
   });
@@ -98,9 +114,9 @@ const applyActiveState = async (normalizedMac, event) => {
 };
 
 /**
- * Process one RC webhook event: ledger it (dupe ⇒ stop), then transition.
- * Ledger key reuses subscription_events.razorpay_event_id with an 'rc:'
- * prefix — one unique column, two rails, zero collision.
+ * Process one RC webhook event: ledger it (dupe ⇒ stop), then transition —
+ * atomically. Ledger key reuses subscription_events.razorpay_event_id with an
+ * 'rc:' prefix — one unique column, two rails, zero collision.
  *
  * @param {Object} event - body.event from the RC webhook payload
  * @returns {Promise<{outcome: 'duplicate'|'processed'|'ledgered'}>}
@@ -108,90 +124,89 @@ const applyActiveState = async (normalizedMac, event) => {
 const processWebhookEvent = async (event) => {
   const normalizedMac = macFromAppUserId(event?.app_user_id);
 
-  const { count } = await prisma.subscription_events.createMany({
-    data: [
-      {
-        razorpay_event_id: `rc:${event.id}`,
-        event_type: event?.type || 'unknown',
-        mac_address: normalizedMac,
-        payload: event,
-      },
-    ],
-    skipDuplicates: true,
-  });
-  if (count === 0) {
-    logger.info(`[REVENUECAT] Duplicate webhook rc:${event.id} — no-op`);
-    return { outcome: 'duplicate' };
-  }
+  return prisma.$transaction(async (tx) => {
+    const { count } = await tx.subscription_events.createMany({
+      data: [
+        {
+          razorpay_event_id: `rc:${event.id}`,
+          event_type: event?.type || 'unknown',
+          mac_address: normalizedMac,
+          payload: event,
+          // The whole handler commits atomically, so ledgered == processed.
+          processed_at: new Date(),
+        },
+      ],
+      skipDuplicates: true,
+    });
+    if (count === 0) {
+      logger.info(`[REVENUECAT] Duplicate webhook rc:${event.id} — no-op`);
+      return { outcome: 'duplicate' };
+    }
 
-  let handled = false;
-  if (normalizedMac) {
-    switch (event?.type) {
-      case 'INITIAL_PURCHASE':
-      case 'RENEWAL': {
-        const applied = await applyActiveState(normalizedMac, event);
-        handled = applied;
-        logger.info(
-          `[REVENUECAT] ${event.type} for ${normalizedMac}: ${applied ? 'applied' : 'stale — anchor guard rejected'}`
-        );
-        break;
-      }
+    let handled = false;
+    if (normalizedMac) {
+      switch (event?.type) {
+        case 'INITIAL_PURCHASE':
+        case 'RENEWAL': {
+          const applied = await applyActiveState(tx, normalizedMac, event);
+          handled = applied;
+          logger.info(
+            `[REVENUECAT] ${event.type} for ${normalizedMac}: ${applied ? 'applied' : 'not applied (stale/degraded/unknown product)'}`
+          );
+          break;
+        }
 
-      case 'CANCELLATION':
-        // Auto-renew turned off; entitlement runs to period end (spec state machine).
-        await prisma.device_subscriptions.updateMany({
-          where: { mac_address: normalizedMac },
-          data: { cancel_at_period_end: true, updated_at: new Date() },
-        });
-        handled = true;
-        break;
-
-      case 'UNCANCELLATION':
-        await prisma.device_subscriptions.updateMany({
-          where: { mac_address: normalizedMac },
-          data: { cancel_at_period_end: false, updated_at: new Date() },
-        });
-        handled = true;
-        break;
-
-      case 'PRODUCT_CHANGE': {
-        // Store-native upgrade/downgrade (SUB-9): swap the plan; anchors move
-        // with the next RENEWAL, which encodes the store's effective timing.
-        const planId = await planIdForProduct(event.new_product_id || event.product_id);
-        if (planId != null) {
-          await prisma.device_subscriptions.updateMany({
+        case 'CANCELLATION':
+          // Auto-renew turned off; entitlement runs to period end (spec state machine).
+          await tx.device_subscriptions.updateMany({
             where: { mac_address: normalizedMac },
-            data: { plan_id: planId, updated_at: new Date() },
+            data: { cancel_at_period_end: true, updated_at: new Date() },
           });
           handled = true;
+          break;
+
+        case 'UNCANCELLATION':
+          await tx.device_subscriptions.updateMany({
+            where: { mac_address: normalizedMac },
+            data: { cancel_at_period_end: false, updated_at: new Date() },
+          });
+          handled = true;
+          break;
+
+        case 'EXPIRATION': {
+          // Guard mirrors the anchor guard: only lapse periods that have
+          // actually ended — a delayed EXPIRATION for an old period must not
+          // lapse a row a newer purchase re-activated.
+          const expiresAtMs = event.expiration_at_ms || event.event_timestamp_ms;
+          if (expiresAtMs) {
+            const { count: lapsed } = await tx.device_subscriptions.updateMany({
+              where: {
+                mac_address: normalizedMac,
+                OR: [
+                  { current_period_end: null },
+                  { current_period_end: { lte: new Date(expiresAtMs) } },
+                ],
+              },
+              data: { status: 'lapsed', updated_at: new Date() },
+            });
+            handled = lapsed > 0;
+          }
+          break;
         }
-        break;
+
+        default:
+          // BILLING_ISSUE / TRANSFER / PRODUCT_CHANGE / future types →
+          // ledgered for SUB-7 / the effective-time transaction event.
+          break;
       }
-
-      case 'EXPIRATION':
-        await prisma.device_subscriptions.updateMany({
-          where: { mac_address: normalizedMac },
-          data: { status: 'lapsed', updated_at: new Date() },
-        });
-        handled = true;
-        break;
-
-      default:
-        // BILLING_ISSUE / TRANSFER / future types → ledgered for SUB-7.
-        break;
+    } else if (event?.app_user_id) {
+      logger.warn(
+        `[REVENUECAT] Webhook rc:${event.id} app_user_id "${event.app_user_id}" is not a MAC — ledgered only`
+      );
     }
-  } else if (event?.app_user_id) {
-    logger.warn(
-      `[REVENUECAT] Webhook rc:${event.id} app_user_id "${event.app_user_id}" is not a MAC — ledgered only`
-    );
-  }
 
-  await prisma.subscription_events.updateMany({
-    where: { razorpay_event_id: `rc:${event.id}` },
-    data: { processed_at: new Date() },
+    return { outcome: handled ? 'processed' : 'ledgered' };
   });
-
-  return { outcome: handled ? 'processed' : 'ledgered' };
 };
 
 module.exports = { verifyWebhookAuth, processWebhookEvent };

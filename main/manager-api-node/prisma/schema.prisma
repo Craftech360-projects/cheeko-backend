@@ -1394,7 +1394,7 @@ model subscription_plans {
   features               Json?
   razorpay_plan_id       String?
   /// IAP product id, identical on both stores (SUB-17 seeds it), e.g. cheeko_family_monthly
-  store_product_id       String?
+  store_product_id       String?                @unique
   is_active              Boolean                @default(true)
   created_at             DateTime?              @default(now()) @db.Timestamptz(6)
   updated_at             DateTime?              @default(now()) @db.Timestamptz(6)

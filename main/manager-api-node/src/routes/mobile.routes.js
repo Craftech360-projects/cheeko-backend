@@ -434,6 +434,12 @@ router.get('/subscription/plans', asyncHandler(async (req, res) => {
 }));
 
 router.post('/devices/:mac/subscription/checkout', asyncHandler(async (req, res) => {
+    // IAP pivot (2026-07-21): Razorpay purchase rails are retired. Keep the
+    // code dormant but unreachable so the two rails can't write conflicting
+    // subscription state for one device. Flip the env only to resurrect.
+    if (process.env.RAZORPAY_CHECKOUT_ENABLED !== 'true') {
+        return res.status(410).json({ code: 410, msg: 'Checkout moved in-app (IAP)', data: null });
+    }
     const tier = req.body?.tier;
     if (!tier || typeof tier !== 'string') {
         return badRequest(res, 'tier is required');

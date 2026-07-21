@@ -55,8 +55,7 @@ const activationCleanupTimer = setInterval(() => {
     }
   }
 }, 60 * 60 * 1000); // Clean up every hour
-activationCleanupTimer.unref(); // don't hold the event loop open (jest exit hang)
-if (activationCleanupTimer.unref) activationCleanupTimer.unref();
+if (activationCleanupTimer.unref) activationCleanupTimer.unref(); // don't hold the event loop open (jest exit hang)
 
 /**
  * Register a new device
