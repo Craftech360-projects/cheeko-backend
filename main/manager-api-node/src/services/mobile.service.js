@@ -1935,15 +1935,42 @@ async function deleteUserAccount(firebaseUid) {
     });
     if (!user) throw new Error('User not found');
 
-    // Delete all user references (Cascade should handle most if set up, but doing it explicitly for safety)
-    await prisma.$transaction([
+    // SUB-7: store subscriptions cannot be cancelled server-side (Apple/Google
+    // own the mandate). Mark period-end cancel so the paid period runs out,
+    // and tell the parent to cancel in their store settings. Rows match by
+    // payer OR currently-bound device — webhook-created rows have no user_id.
+    // The subscription row itself has no FK and survives the deletes below.
+    const deviceMacs = (
+        await prisma.ai_device.findMany({
+            where: { user_id: user.id },
+            select: { mac_address: true },
+        })
+    ).map((d) => d.mac_address).filter(Boolean);
+
+    // Delete all user references (Cascade should handle most if set up, but doing it explicitly for safety).
+    // The subscription marking rides the same transaction: a failed deletion
+    // must not leave a surviving account flagged cancel_at_period_end.
+    const [liveSubs] = await prisma.$transaction([
+        prisma.device_subscriptions.updateMany({
+            where: {
+                status: { in: ['active', 'grace'] },
+                OR: [{ user_id: user.id }, { mac_address: { in: deviceMacs } }],
+            },
+            data: { cancel_at_period_end: true, updated_at: new Date() },
+        }),
         prisma.kid_profile.deleteMany({ where: { user_id: user.id } }),
         prisma.parent_profile.deleteMany({ where: { user_id: user.id } }),
         prisma.ai_device.deleteMany({ where: { user_id: user.id } }),
         prisma.sys_user.delete({ where: { id: user.id } })
     ]);
 
-    return { success: true, user_id: firebaseUid, deleted_at: new Date().toISOString() };
+    const result = { success: true, user_id: firebaseUid, deleted_at: new Date().toISOString() };
+    if (liveSubs.count > 0) {
+        result.subscription_notice =
+            'Your Cheeko subscription is billed by the App Store / Google Play. ' +
+            'Deleting your account does not stop billing — cancel the subscription in your store settings.';
+    }
+    return result;
 }
 
 async function getHomepageActivity(firebaseUid, options = {}) {

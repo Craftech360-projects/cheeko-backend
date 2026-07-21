@@ -22,6 +22,12 @@ const mockPrisma = {
 mockPrisma.$transaction = jest.fn((fn) => fn(mockPrisma));
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
 
+const mockPush = {
+  findParentFcmToken: jest.fn().mockResolvedValue('fcm-token-1'),
+  sendPushNotification: jest.fn().mockResolvedValue(true),
+};
+jest.mock('../../src/services/pushNotification.service', () => mockPush);
+
 const service = require('../../src/services/revenuecat.service');
 
 const MAC = 'AA:BB:CC:DD:EE:FF';
@@ -45,8 +51,10 @@ beforeEach(() => {
   mockPrisma.$transaction.mockImplementation((fn) => fn(mockPrisma));
   mockPrisma.subscription_events.createMany.mockResolvedValue({ count: 1 });
   mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 1 });
-  mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ plan_id: 1n });
+  mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ plan_id: 1n, cancel_at_period_end: false });
   mockPrisma.subscription_plans.findFirst.mockResolvedValue({ id: 2n });
+  mockPush.findParentFcmToken.mockResolvedValue('fcm-token-1');
+  mockPush.sendPushNotification.mockResolvedValue(true);
   process.env.REVENUECAT_WEBHOOK_AUTH = AUTH;
 });
 
@@ -186,7 +194,7 @@ describe('INITIAL_PURCHASE / RENEWAL → active', () => {
 });
 
 describe('ledger-only default', () => {
-  test.each(['BILLING_ISSUE', 'TRANSFER', 'PRODUCT_CHANGE', 'SOME_FUTURE_TYPE'])(
+  test.each(['TRANSFER', 'PRODUCT_CHANGE', 'SOME_FUTURE_TYPE'])(
     '%s is ledgered without transition',
     async (type) => {
       const { outcome } = await service.processWebhookEvent(rcEvent({ type }));
@@ -218,9 +226,9 @@ describe('lifecycle transitions', () => {
 
   test('EXPIRATION lapses the row with a period-end guard', async () => {
     await service.processWebhookEvent(rcEvent({ type: 'EXPIRATION' }));
-    const call = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
-    expect(call.data).toMatchObject({ status: 'lapsed' });
-    expect(call.where.OR).toEqual([
+    const lapse = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    expect(lapse.data).toMatchObject({ status: 'lapsed', grace_until: null });
+    expect(lapse.where.OR).toEqual([
       { current_period_end: null },
       { current_period_end: { lte: new Date(1755378400000) } },
     ]);
@@ -238,5 +246,153 @@ describe('lifecycle transitions', () => {
     );
     expect(outcome).toBe('ledgered');
     expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('SUB-7 unhappy paths', () => {
+  const T = 1755378400000;
+  const DAY = 24 * 60 * 60 * 1000;
+
+  test('BILLING_ISSUE moves an active row to grace (+3d) and pushes fix-payment', async () => {
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'BILLING_ISSUE', event_timestamp_ms: T })
+    );
+    expect(outcome).toBe('processed');
+    const call = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    expect(call.where).toMatchObject({ mac_address: MAC, status: 'active' });
+    expect(call.where.OR).toEqual([
+      { current_period_end: null },
+      { current_period_end: { lte: new Date(T + DAY) } },
+    ]);
+    expect(call.data).toMatchObject({ status: 'grace', grace_until: new Date(T + 3 * DAY) });
+    expect(mockPush.sendPushNotification).toHaveBeenCalledWith(
+      'fcm-token-1',
+      'Cheeko subscription payment failed',
+      expect.any(String)
+    );
+  });
+
+  test('the store grace window wins when it runs later than +3d', async () => {
+    await service.processWebhookEvent(
+      rcEvent({ type: 'BILLING_ISSUE', event_timestamp_ms: T, grace_period_expiration_at_ms: T + 5 * DAY })
+    );
+    const call = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    expect(call.data.grace_until).toEqual(new Date(T + 5 * DAY));
+  });
+
+  test('stale BILLING_ISSUE rejected by the guard is ledgered without a push', async () => {
+    mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 0 });
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'BILLING_ISSUE', event_timestamp_ms: T })
+    );
+    expect(outcome).toBe('ledgered');
+    expect(mockPush.sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  test('BILLING_ISSUE without event_timestamp_ms is ledgered, not applied blind', async () => {
+    const { outcome } = await service.processWebhookEvent(rcEvent({ type: 'BILLING_ISSUE' }));
+    expect(outcome).toBe('ledgered');
+    expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('full refund (CANCELLATION / CUSTOMER_SUPPORT) lapses paid rows immediately, guarded', async () => {
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', event_timestamp_ms: T })
+    );
+    expect(outcome).toBe('processed');
+    const call = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    // Never a trial row, never a newer subscription.
+    expect(call.where).toMatchObject({ status: { in: ['active', 'grace'] } });
+    expect(call.where.OR).toEqual([
+      { current_period_start: null },
+      { current_period_start: { lte: new Date(T) } },
+    ]);
+    expect(call.data).toMatchObject({ status: 'lapsed', grace_until: null });
+    expect(mockPush.sendPushNotification).toHaveBeenCalledWith(
+      'fcm-token-1',
+      'Cheeko’s plan has ended',
+      expect.any(String)
+    );
+  });
+
+  test('a refund that cannot land falls back to the plain-cancel floor', async () => {
+    // Guard rejects the lapse (e.g. newer subscription) — auto-renew must
+    // still stop, and no plan-gate push fires.
+    mockPrisma.device_subscriptions.updateMany
+      .mockResolvedValueOnce({ count: 0 })
+      .mockResolvedValueOnce({ count: 1 });
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', event_timestamp_ms: T })
+    );
+    expect(outcome).toBe('processed');
+    const fallback = mockPrisma.device_subscriptions.updateMany.mock.calls[1][0];
+    expect(fallback.data).toMatchObject({ cancel_at_period_end: true });
+    expect(mockPush.sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  test('a refund without event_timestamp_ms still stops auto-renew', async () => {
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT' })
+    );
+    expect(outcome).toBe('processed');
+    const call = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    expect(call.data).toMatchObject({ cancel_at_period_end: true });
+  });
+
+  test('a fully stale refund (newer subscription) touches nothing', async () => {
+    // Both the lapse and the guarded cancel floor miss — the newer row is
+    // never flagged, the event is only ledgered.
+    mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 0 });
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'CANCELLATION', cancel_reason: 'CUSTOMER_SUPPORT', event_timestamp_ms: T })
+    );
+    expect(outcome).toBe('ledgered');
+    const floor = mockPrisma.device_subscriptions.updateMany.mock.calls[1][0];
+    expect(floor.where.OR).toEqual([
+      { current_period_start: null },
+      { current_period_start: { lte: new Date(T) } },
+    ]);
+    expect(mockPush.sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  test('EXPIRATION after a user cancel relabels to cancelled, without the plan-gate push', async () => {
+    // Lapse-then-relabel: the relabel (keyed on the row just written) wins.
+    const { outcome } = await service.processWebhookEvent(rcEvent({ type: 'EXPIRATION' }));
+    expect(outcome).toBe('processed');
+    const relabel = mockPrisma.device_subscriptions.updateMany.mock.calls[1][0];
+    expect(relabel.where).toMatchObject({ status: 'lapsed', cancel_at_period_end: true });
+    expect(relabel.data.status).toBe('cancelled');
+    expect(mockPush.sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  test('involuntary EXPIRATION sends the plan-gate push', async () => {
+    // Lapse lands, relabel misses (cancel_at_period_end was false).
+    mockPrisma.device_subscriptions.updateMany
+      .mockResolvedValueOnce({ count: 1 })
+      .mockResolvedValueOnce({ count: 0 });
+    const { outcome } = await service.processWebhookEvent(rcEvent({ type: 'EXPIRATION' }));
+    expect(outcome).toBe('processed');
+    expect(mockPush.sendPushNotification).toHaveBeenCalledWith(
+      'fcm-token-1',
+      'Cheeko’s plan has ended',
+      expect.any(String)
+    );
+  });
+
+  test('RENEWAL during grace restores active and clears grace_until', async () => {
+    const { outcome } = await service.processWebhookEvent(rcEvent({ type: 'RENEWAL' }));
+    expect(outcome).toBe('processed');
+    const data = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0].data;
+    expect(data.status).toBe('active');
+    expect(data.grace_until).toBeNull();
+    expect(data.cancel_at_period_end).toBe(false);
+  });
+
+  test('a failed push never fails the webhook', async () => {
+    mockPush.sendPushNotification.mockResolvedValue(false);
+    const { outcome } = await service.processWebhookEvent(
+      rcEvent({ type: 'BILLING_ISSUE', event_timestamp_ms: T })
+    );
+    expect(outcome).toBe('processed');
   });
 });

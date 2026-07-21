@@ -216,40 +216,54 @@ const ensureTrialForMac = async (macAddress, userId) => {
 };
 
 /**
- * Expire a trial the moment it is asked about, not when a cron gets round to it.
+ * Expire a trial — or an overrun grace window (SUB-7) — the moment it is
+ * asked about, not when a cron gets round to it.
  *
- * The verdict is the enforcer; the reminder job only ever sends pushes (spec
- * §4). Without this, a device whose trial ended while the cron was down would
+ * The verdict is the enforcer; crons and webhooks only ever get there first
+ * (spec §4). Without this, a device whose trial/grace ended while the
+ * EXPIRATION webhook was lost and the reconciliation cron was down would
  * keep playing.
  *
- * @param {Object} subscription - row with status + trial_ends_at
+ * @param {Object} subscription - row with status + trial_ends_at + grace_until
  * @param {string} normalizedMac
  * @returns {Promise<string>} the effective status
  */
 const applyLazyTrialExpiry = async (subscription, normalizedMac) => {
-  const expired =
+  const now = Date.now();
+  const trialExpired =
     subscription.status === 'trial' &&
     subscription.trial_ends_at &&
-    Date.now() > subscription.trial_ends_at.getTime();
+    now > subscription.trial_ends_at.getTime();
+  const graceExpired =
+    subscription.status === 'grace' &&
+    subscription.grace_until &&
+    now > subscription.grace_until.getTime();
 
-  if (!expired) return subscription.status;
+  if (!trialExpired && !graceExpired) return subscription.status;
 
   // Repair the row so the rest of the system (admin views, metrics) agrees.
-  // Guarded on status='trial' so only one caller can win the transition:
+  // Guarded on the source status so only one caller can win the transition:
   // concurrent verdicts still both land on 'lapsed', but only the winner gets
   // count > 0, which is what makes the plan-gate push fire exactly once
   // instead of on every refused session (SUB-2 criterion 4).
+  const fromStatus = trialExpired ? 'trial' : 'grace';
   const { count } = await prisma.device_subscriptions.updateMany({
-    where: { mac_address: normalizedMac, status: 'trial' },
-    data: { status: 'lapsed', updated_at: new Date() },
+    where: { mac_address: normalizedMac, status: fromStatus },
+    data: { status: 'lapsed', grace_until: null, updated_at: new Date() },
   });
-  logger.info(`[SUBSCRIPTION] Trial expired for ${normalizedMac}; row repaired to lapsed`);
+  logger.info(`[SUBSCRIPTION] ${fromStatus} expired for ${normalizedMac}; row repaired to lapsed`);
 
   if (count > 0) {
     // Deliberately not awaited: the verdict is in the session hot path — the
     // gateway is holding a hello open behind it — and a slow FCM round trip
     // must not delay a child's toy. A lost push is better than a stalled toy.
-    sendPlanGatePush(normalizedMac).catch((error) =>
+    const copy = trialExpired
+      ? undefined
+      : {
+          title: 'Cheeko’s plan has ended',
+          body: 'Choose a plan in the Cheeko app to keep the conversations going.',
+        };
+    sendPlanGatePush(normalizedMac, copy).catch((error) =>
       logger.error(`[SUBSCRIPTION] Plan-gate push failed for ${normalizedMac}: ${error.message}`)
     );
   }
@@ -263,7 +277,7 @@ const applyLazyTrialExpiry = async (subscription, normalizedMac) => {
  * Fires on the trial→lapsed transition rather than on every refusal, so a child
  * pressing the button ten times does not push the parent ten times.
  */
-const sendPlanGatePush = async (normalizedMac) => {
+const sendPlanGatePush = async (normalizedMac, copy) => {
   const fcmToken = await findParentFcmToken(normalizedMac);
   if (!fcmToken) {
     logger.info(`[SUBSCRIPTION] No FCM token for ${normalizedMac}; plan-gate push skipped`);
@@ -272,8 +286,8 @@ const sendPlanGatePush = async (normalizedMac) => {
 
   const delivered = await sendPushNotification(
     fcmToken,
-    'Cheeko’s free trial has ended',
-    'Choose a plan in the Cheeko app to start the conversations again.'
+    copy?.title ?? 'Cheeko’s free trial has ended',
+    copy?.body ?? 'Choose a plan in the Cheeko app to start the conversations again.'
   );
   logger.info(
     `[SUBSCRIPTION] Plan-gate push for ${normalizedMac}: ${delivered ? 'sent' : 'not delivered'}`
@@ -307,6 +321,7 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
       status: true,
       trial_started_at: true,
       trial_ends_at: true,
+      grace_until: true,
       current_period_start: true,
       subscription_plans: { select: PLAN_LIMIT_SELECT },
     },
@@ -516,6 +531,7 @@ const getSubscriptionSummary = async (macAddress, { now = new Date() } = {}) => 
       status: true,
       trial_started_at: true,
       trial_ends_at: true,
+      grace_until: true,
       current_period_start: true,
       current_period_end: true,
       subscription_plans: { select: PLAN_LIMIT_SELECT },

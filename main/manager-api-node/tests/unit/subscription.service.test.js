@@ -225,6 +225,43 @@ describe('getSessionVerdict', () => {
       expect(mockPrisma.device_subscriptions.update).not.toHaveBeenCalled();
     });
 
+    test('an overrun grace window is refused and repaired to lapsed (SUB-7)', async () => {
+      mockFindToken.mockResolvedValue('tok-123');
+      mockPrisma.device_subscriptions.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+        status: 'grace',
+        grace_until: new Date(Date.now() - DAY_MS), // ran out yesterday
+      });
+
+      const verdict = await service.getSessionVerdict(MAC);
+      await flushPush();
+
+      expect(verdict.allowed).toBe(false);
+      expect(mockPrisma.device_subscriptions.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { mac_address: MAC, status: 'grace' },
+          data: expect.objectContaining({ status: 'lapsed', grace_until: null }),
+        })
+      );
+      expect(mockSendPush).toHaveBeenCalledWith(
+        'tok-123',
+        expect.stringMatching(/plan has ended/i),
+        expect.any(String)
+      );
+    });
+
+    test('a grace window still running is allowed and left alone', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+        status: 'grace',
+        grace_until: new Date(Date.now() + DAY_MS),
+      });
+
+      const verdict = await service.getSessionVerdict(MAC);
+
+      expect(verdict.allowed).toBe(true);
+      expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+    });
+
     test('a non-trial status is never touched by expiry repair', async () => {
       mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
         status: 'active',

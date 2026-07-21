@@ -10,7 +10,12 @@
  * transaction, so a failed transition rolls the ledger row back and RC's
  * retry re-processes instead of hitting the dedupe.
  *
- * BILLING_ISSUE / refunds are ledgered only (SUB-7 owns grace).
+ * Unhappy paths (SUB-7): BILLING_ISSUE → grace (+3d or the store's grace
+ * window, whichever is later) + fix-payment push; EXPIRATION → cancelled
+ * when the user had cancelled, else lapsed + plan-gate push; CANCELLATION
+ * with cancel_reason=CUSTOMER_SUPPORT (full refund) → lapsed immediately.
+ * Pushes fire AFTER the transaction commits — at-most-once, same posture as
+ * the trial reminder cron.
  * PRODUCT_CHANGE is ledgered only: RC fires it when the user COMMITS a
  * change, not when it takes effect — the store's transaction event
  * (RENEWAL/INITIAL_PURCHASE) carries the new product_id at effective time
@@ -23,7 +28,38 @@
 const crypto = require('crypto');
 const { prisma } = require('../config/database');
 const { normalizeMacAddress, isValidMacAddress } = require('../utils/helpers');
+const { sendPushNotification, findParentFcmToken } = require('./pushNotification.service');
 const logger = require('../utils/logger');
+
+const GRACE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+// A BILLING_ISSUE can land slightly before the period actually ends (store
+// retry windows open early) — allow that day, reject anything staler.
+const BILLING_GUARD_SLACK_MS = 24 * 60 * 60 * 1000;
+
+const PUSH_FIX_PAYMENT = {
+  title: 'Cheeko subscription payment failed',
+  body: 'Update your payment method in your store settings — Cheeko keeps playing for now.',
+};
+const PUSH_PLAN_GATED = {
+  title: 'Cheeko’s plan has ended',
+  body: 'Choose a plan in the Cheeko app to keep the conversations going.',
+};
+
+/**
+ * Fire-and-forget parent push; a lost push never fails the webhook.
+ * ponytail: mirrors subscription.service sendPlanGatePush — consolidate into
+ * pushNotification.service if a third copy appears.
+ */
+const sendLifecyclePush = async (normalizedMac, copy) => {
+  try {
+    const fcmToken = await findParentFcmToken(normalizedMac);
+    if (!fcmToken) return;
+    const delivered = await sendPushNotification(fcmToken, copy.title, copy.body);
+    if (!delivered) logger.error(`[REVENUECAT] Push "${copy.title}" FAILED for ${normalizedMac}`);
+  } catch (err) {
+    logger.error(`[REVENUECAT] Push "${copy.title}" errored for ${normalizedMac}: ${err.message}`);
+  }
+};
 
 /** app_user_id → MAC, or null (RC anonymous ids fail the hex check). */
 const macFromAppUserId = (appUserId) =>
@@ -43,6 +79,11 @@ const verifyWebhookAuth = (headerValue) => {
   const wanted = Buffer.from(secret);
   return provided.length === wanted.length && crypto.timingSafeEqual(provided, wanted);
 };
+
+/** Out-of-order guard: match only rows whose anchor is unset or ≤ the event's cutoff. */
+const notStale = (field, cutoffMs) => ({
+  OR: [{ [field]: null }, { [field]: { lte: new Date(cutoffMs) } }],
+});
 
 /** Our plan row id for an RC product id; null when unknown. */
 const planIdForProduct = async (tx, productId) => {
@@ -104,10 +145,7 @@ const applyActiveState = async (tx, normalizedMac, event) => {
   }
 
   const { count } = await tx.device_subscriptions.updateMany({
-    where: {
-      mac_address: normalizedMac,
-      OR: [{ current_period_start: null }, { current_period_start: { lte: periodStart } }],
-    },
+    where: { mac_address: normalizedMac, ...notStale('current_period_start', periodStart.getTime()) },
     data,
   });
   return count > 0;
@@ -124,7 +162,7 @@ const applyActiveState = async (tx, normalizedMac, event) => {
 const processWebhookEvent = async (event) => {
   const normalizedMac = macFromAppUserId(event?.app_user_id);
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const { count } = await tx.subscription_events.createMany({
       data: [
         {
@@ -144,6 +182,7 @@ const processWebhookEvent = async (event) => {
     }
 
     let handled = false;
+    let push = null;
     if (normalizedMac) {
       switch (event?.type) {
         case 'INITIAL_PURCHASE':
@@ -156,14 +195,68 @@ const processWebhookEvent = async (event) => {
           break;
         }
 
-        case 'CANCELLATION':
+        case 'BILLING_ISSUE': {
+          // Renewal attempt failed → grace (spec §4): +3d, or the store's own
+          // grace window when it runs later. Guard: a BILLING_ISSUE older than
+          // the row's period end (minus slack) is stale — a later RENEWAL
+          // already succeeded.
+          const issuedAtMs = event.event_timestamp_ms;
+          if (!issuedAtMs) break; // degraded payload — never write blind
+          const { count: graced } = await tx.device_subscriptions.updateMany({
+            where: {
+              mac_address: normalizedMac,
+              status: 'active',
+              ...notStale('current_period_end', issuedAtMs + BILLING_GUARD_SLACK_MS),
+            },
+            data: {
+              status: 'grace',
+              grace_until: new Date(Math.max(issuedAtMs + GRACE_DAYS_MS, event.grace_period_expiration_at_ms || 0)),
+              updated_at: new Date(),
+            },
+          });
+          handled = graced > 0;
+          if (handled) push = PUSH_FIX_PAYMENT;
+          break;
+        }
+
+        case 'CANCELLATION': {
+          const isRefund = event.cancel_reason === 'CUSTOMER_SUPPORT';
+          if (isRefund && event.event_timestamp_ms) {
+            // Full refund via store support → entitlement ends now. Only a
+            // paid row whose period started before the refund can lapse —
+            // never a trial row (its purchase webhook may not have landed
+            // yet), never a newer subscription.
+            const { count: refunded } = await tx.device_subscriptions.updateMany({
+              where: {
+                mac_address: normalizedMac,
+                status: { in: ['active', 'grace'] },
+                ...notStale('current_period_start', event.event_timestamp_ms),
+              },
+              data: { status: 'lapsed', grace_until: null, updated_at: new Date() },
+            });
+            if (refunded > 0) {
+              handled = true;
+              push = PUSH_PLAN_GATED;
+              break;
+            }
+            // No paid row matched — fall through to the plain-cancel floor so
+            // auto-renew still stops. The floor keeps the staleness guard: a
+            // refund for an OLD period must not flag a newer subscription
+            // (trial rows have a null anchor and still match).
+          }
           // Auto-renew turned off; entitlement runs to period end (spec state machine).
-          await tx.device_subscriptions.updateMany({
-            where: { mac_address: normalizedMac },
+          const { count: flagged } = await tx.device_subscriptions.updateMany({
+            where: {
+              mac_address: normalizedMac,
+              ...(isRefund && event.event_timestamp_ms
+                ? notStale('current_period_start', event.event_timestamp_ms)
+                : {}),
+            },
             data: { cancel_at_period_end: true, updated_at: new Date() },
           });
-          handled = true;
+          handled = flagged > 0;
           break;
+        }
 
         case 'UNCANCELLATION':
           await tx.device_subscriptions.updateMany({
@@ -176,27 +269,31 @@ const processWebhookEvent = async (event) => {
         case 'EXPIRATION': {
           // Guard mirrors the anchor guard: only lapse periods that have
           // actually ended — a delayed EXPIRATION for an old period must not
-          // lapse a row a newer purchase re-activated.
+          // lapse a row a newer purchase re-activated. Lapse first (the event
+          // can never be dropped), then relabel to 'cancelled' when the
+          // parent had cancelled — the relabel keys on the row we just wrote,
+          // so a concurrent CANCELLATION can't make both writes miss.
           const expiresAtMs = event.expiration_at_ms || event.event_timestamp_ms;
-          if (expiresAtMs) {
-            const { count: lapsed } = await tx.device_subscriptions.updateMany({
-              where: {
-                mac_address: normalizedMac,
-                OR: [
-                  { current_period_end: null },
-                  { current_period_end: { lte: new Date(expiresAtMs) } },
-                ],
-              },
-              data: { status: 'lapsed', updated_at: new Date() },
-            });
-            handled = lapsed > 0;
-          }
+          if (!expiresAtMs) break;
+          const { count: lapsed } = await tx.device_subscriptions.updateMany({
+            where: { mac_address: normalizedMac, ...notStale('current_period_end', expiresAtMs) },
+            data: { status: 'lapsed', grace_until: null, updated_at: new Date() },
+          });
+          if (lapsed === 0) break; // stale — ledgered
+          handled = true;
+          const { count: relabelled } = await tx.device_subscriptions.updateMany({
+            where: { mac_address: normalizedMac, status: 'lapsed', cancel_at_period_end: true },
+            data: { status: 'cancelled', updated_at: new Date() },
+          });
+          // The cancelling parent chose this — only the involuntary lapse
+          // gets the plan-gate push.
+          if (relabelled === 0) push = PUSH_PLAN_GATED;
           break;
         }
 
         default:
-          // BILLING_ISSUE / TRANSFER / PRODUCT_CHANGE / future types →
-          // ledgered for SUB-7 / the effective-time transaction event.
+          // TRANSFER / PRODUCT_CHANGE / future types → ledgered only
+          // (PRODUCT_CHANGE swaps plans via the effective-time transaction event).
           break;
       }
     } else if (event?.app_user_id) {
@@ -205,8 +302,12 @@ const processWebhookEvent = async (event) => {
       );
     }
 
-    return { outcome: handled ? 'processed' : 'ledgered' };
+    return { outcome: handled ? 'processed' : 'ledgered', push };
   });
+
+  // After commit only — a rolled-back transition must not push.
+  if (result.push) await sendLifecyclePush(normalizedMac, result.push);
+  return { outcome: result.outcome };
 };
 
 module.exports = { verifyWebhookAuth, processWebhookEvent };
