@@ -100,6 +100,31 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
     }));
   });
 
+  it('getCharacterSession normalizes a numeric-suffix name ("Cheeko 2") to the base persona + spoken name', async () => {
+    prisma.ai_agent.findUnique.mockResolvedValue({ ...character, agent_name: 'Cheeko 2' });
+    prisma.ai_agent_template.findFirst.mockResolvedValue({
+      system_prompt: 'CHEEKO PROMPT', soul: 'CHEEKO SOUL', runtime_agent_name: null,
+    });
+    const result = await agentService.getCharacterSession('char-uuid');
+    // template matched on the BASE name, persona resolved (not null)
+    expect(prisma.ai_agent_template.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { agent_name: { equals: 'Cheeko', mode: 'insensitive' } },
+    }));
+    expect(result.systemPrompt).toBe('CHEEKO PROMPT');
+    // spoken name collapses to the base character, not "Cheeko 2"
+    expect(result.characterName).toBe('Cheeko');
+  });
+
+  it('setCharacterByName rejects an unknown name instead of creating a null-persona agent', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({ id: 'dev', user_id: 7n });
+    prisma.ai_agent.findFirst.mockResolvedValue(null);      // no existing agent for this user
+    prisma.ai_agent_template.findFirst.mockResolvedValue(null); // no template matches "Cheeko 2"
+
+    await expect(agentService.setCharacterByName('aa:bb', 'Cheeko 2'))
+      .rejects.toThrow('Unknown character');
+    expect(prisma.ai_agent.create).not.toHaveBeenCalled();
+  });
+
   it('getCharacterSession throws when the character is missing', async () => {
     prisma.ai_agent.findUnique.mockResolvedValue(null);
     await expect(agentService.getCharacterSession('nope')).rejects.toThrow('Character not found');
