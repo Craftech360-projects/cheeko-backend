@@ -107,6 +107,15 @@ describe('GET /toy/health', () => {
     // Must not return 401.
     expect(res.status).not.toBe(401);
   });
+
+  it('should allow the Vite dev origin on 127.0.0.1 for standalone dashboard requests', async () => {
+    const res = await request(app)
+      .get(`${BASE}/health`)
+      .set('Origin', 'http://127.0.0.1:5173');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['access-control-allow-origin']).toBe('http://127.0.0.1:5173');
+  });
 });
 
 // ===========================================================================
