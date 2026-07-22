@@ -199,6 +199,17 @@ const routes = [
     }
   },
   {
+    path: '/subscription-admin',
+    name: 'SubscriptionAdmin',
+    component: function () {
+      return import('../views/SubscriptionAdmin.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Subscription Admin'
+    }
+  },
+  {
     path: '/runtime-providers',
     name: 'RuntimeProviders',
     component: function () {

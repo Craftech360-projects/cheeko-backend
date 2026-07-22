@@ -16,6 +16,7 @@ const mockPrisma = {
   },
   subscription_events: {
     createMany: jest.fn().mockResolvedValue({ count: 1 }),
+    count: jest.fn().mockResolvedValue(0), // billing-spike check (SUB-11)
   },
 };
 // Interactive transaction: run the callback against the same mock client.
@@ -27,6 +28,11 @@ const mockPush = {
   sendPushNotification: jest.fn().mockResolvedValue(true),
 };
 jest.mock('../../src/services/pushNotification.service', () => mockPush);
+
+const mockOpsAlert = jest.fn().mockResolvedValue(true);
+jest.mock('../../src/services/opsAlert.service', () => ({
+  sendOpsAlert: (...a) => mockOpsAlert(...a),
+}));
 
 const service = require('../../src/services/revenuecat.service');
 
@@ -270,6 +276,22 @@ describe('SUB-7 unhappy paths', () => {
       'Cheeko subscription payment failed',
       expect.any(String)
     );
+  });
+
+  test('a billing-issue spike over threshold fires the ops alert (SUB-11)', async () => {
+    mockPrisma.subscription_events.count.mockResolvedValue(5); // default threshold
+    await service.processWebhookEvent(rcEvent({ type: 'BILLING_ISSUE', event_timestamp_ms: T }));
+    expect(mockOpsAlert).toHaveBeenCalledWith(
+      'billing_spike',
+      expect.stringContaining('5 BILLING_ISSUE'),
+      expect.objectContaining({ oncePerDayKey: 'billing_spike' })
+    );
+  });
+
+  test('below-threshold billing issues stay quiet', async () => {
+    mockPrisma.subscription_events.count.mockResolvedValue(2);
+    await service.processWebhookEvent(rcEvent({ type: 'BILLING_ISSUE', event_timestamp_ms: T }));
+    expect(mockOpsAlert).not.toHaveBeenCalled();
   });
 
   test('the store grace window wins when it runs later than +3d', async () => {

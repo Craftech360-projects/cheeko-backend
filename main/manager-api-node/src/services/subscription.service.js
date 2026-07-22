@@ -13,6 +13,7 @@
 const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { sendPushNotification, findParentFcmToken } = require('./pushNotification.service');
+const { sendOpsAlert } = require('./opsAlert.service');
 const logger = require('../utils/logger');
 
 // Statuses that may start a session. `grace` is a failed renewal inside the
@@ -297,6 +298,17 @@ const sendPlanGatePush = async (normalizedMac, copy, reason = 'trial_ended') => 
 };
 
 /**
+ * Ledger a refused verdict so the admin metrics page can count gate hits by
+ * reason (SUB-11). Fire-and-forget: the verdict is in the session hot path,
+ * and a lost count is better than a slowed toy.
+ */
+const recordGateHit = (normalizedMac, reason, flow) => {
+  prisma.subscription_gate_hits
+    .create({ data: { mac_address: normalizedMac, reason, flow } })
+    .catch((err) => logger.warn(`[SUBSCRIPTION] gate-hit ledger failed for ${normalizedMac}: ${err.message}`));
+};
+
+/**
  * Decide whether a device may start a session (or, flow='imagine', generate
  * an image). Image buckets only ever gate the imagine flow — a device out of
  * images can still talk.
@@ -331,6 +343,7 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 
   if (!subscription) {
     logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: no subscription row`);
+    recordGateHit(normalizedMac, 'no_plan', flow);
     return { allowed: false, reason: 'no_plan', remaining: REMAINING_UNKNOWN };
   }
 
@@ -338,14 +351,18 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 
   if (!SESSION_ALLOWED_STATUSES.has(status)) {
     logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: status=${status}`);
+    recordGateHit(normalizedMac, 'no_plan', flow);
     return { allowed: false, reason: 'no_plan', remaining: REMAINING_UNKNOWN };
   }
 
   const plan = subscription.subscription_plans;
   if (!plan) {
     // A live status with no plan row is data damage, not a lapsed customer —
-    // fail open rather than invent limits (spec §5 fail-open rule).
+    // fail open rather than invent limits (spec §5 fail-open rule + alert).
     logger.warn(`[SUBSCRIPTION] ${normalizedMac} allowed without limits: status=${status} but no plan row`);
+    sendOpsAlert('fail_open', `${normalizedMac} allowed without limits: status=${status} but no plan row`, {
+      oncePerDayKey: `fail_open:${normalizedMac}`,
+    });
     return { allowed: true, reason: 'ok', remaining: REMAINING_UNKNOWN };
   }
 
@@ -355,6 +372,7 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 
   if (reason) {
     logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: ${reason} (flow=${flow})`);
+    recordGateHit(normalizedMac, reason, flow);
     return { allowed: false, reason, remaining };
   }
 

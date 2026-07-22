@@ -9,6 +9,7 @@
 const express = require('express');
 const asyncHandler = require('express-async-handler');
 const revenuecatService = require('../services/revenuecat.service');
+const { sendOpsAlert } = require('../services/opsAlert.service');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -18,11 +19,17 @@ router.post(
   asyncHandler(async (req, res) => {
     if (!process.env.REVENUECAT_WEBHOOK_AUTH) {
       logger.error('[REVENUECAT] REVENUECAT_WEBHOOK_AUTH not set — webhook rejected');
+      sendOpsAlert('rc_webhook', 'REVENUECAT_WEBHOOK_AUTH not set — deliveries bouncing 503', {
+        oncePerDayKey: 'rc_webhook_unconfigured',
+      });
       return res.status(503).json({ code: 503, msg: 'Webhook auth not configured' });
     }
 
     if (!revenuecatService.verifyWebhookAuth(req.headers.authorization)) {
       logger.warn('[REVENUECAT] Webhook Authorization mismatch');
+      sendOpsAlert('rc_webhook', 'Webhook Authorization mismatch — check the RC dashboard secret', {
+        oncePerDayKey: 'rc_webhook_auth_mismatch',
+      });
       return res.status(401).json({ code: 401, msg: 'Invalid authorization' });
     }
 
@@ -32,8 +39,17 @@ router.post(
       return res.status(400).json({ code: 400, msg: 'Missing event.id' });
     }
 
-    const { outcome } = await revenuecatService.processWebhookEvent(event);
-    return res.status(200).json({ code: 0, msg: outcome });
+    try {
+      const { outcome } = await revenuecatService.processWebhookEvent(event);
+      return res.status(200).json({ code: 0, msg: outcome });
+    } catch (err) {
+      // RC will retry (5xx via the error handler) — but a persistent processing
+      // failure means subscriptions aren't flipping; that's page-worthy.
+      sendOpsAlert('rc_webhook', `Webhook processing failed for event ${event.id} (${event.type}): ${err.message}`, {
+        oncePerDayKey: 'rc_webhook_processing',
+      });
+      throw err;
+    }
   })
 );
 
