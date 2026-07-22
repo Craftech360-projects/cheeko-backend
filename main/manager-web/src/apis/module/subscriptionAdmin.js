@@ -18,6 +18,21 @@ export default {
                 })
             }).send()
     },
+    listByStatus(status, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/list?status=${encodeURIComponent(status)}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Subscription list failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.listByStatus(status, callback)
+                })
+            }).send()
+    },
     compExtend(mac, payload, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/admin/subscriptions/${encodeURIComponent(mac)}/comp`)

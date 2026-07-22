@@ -148,6 +148,37 @@ describe('searchSubscriptions', () => {
   });
 });
 
+describe('listByStatus', () => {
+  test('lists rows in a status joined to their devices', async () => {
+    mockPrisma.device_subscriptions.findMany.mockResolvedValue([baseRow({ status: 'lapsed' })]);
+    mockPrisma.ai_device.findMany.mockResolvedValue([
+      { mac_address: MAC, alias: 'Toy', sys_user: { email: 'p@x.in', nickname: 'P', phone: '9' } },
+    ]);
+
+    const out = await service.listByStatus('lapsed');
+
+    expect(mockPrisma.device_subscriptions.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: 'lapsed' } })
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].status).toBe('lapsed');
+    expect(out[0].device.parent_email).toBe('p@x.in');
+  });
+
+  test('device row missing from ai_device still returns the subscription', async () => {
+    mockPrisma.device_subscriptions.findMany.mockResolvedValue([baseRow()]);
+    mockPrisma.ai_device.findMany.mockResolvedValue([]);
+
+    const out = await service.listByStatus('active');
+    expect(out[0].device).toBeNull();
+  });
+
+  test('unknown status is rejected with 400', async () => {
+    await expect(service.listByStatus('paid')).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockPrisma.device_subscriptions.findMany).not.toHaveBeenCalled();
+  });
+});
+
 describe('getMetrics', () => {
   test('assembles funnel, churn, MRR and gate hits', async () => {
     mockPrisma.ai_device.count.mockResolvedValue(100);

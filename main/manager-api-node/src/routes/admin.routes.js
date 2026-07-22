@@ -1687,6 +1687,16 @@ router.post('/subscriptions/:mac/regrant-trial',
   })
 );
 
+// GET /admin/subscriptions/list?status=trial|active|grace|lapsed|cancelled&limit=
+router.get('/subscriptions/list',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    success(res, await subscriptionAdminService.listByStatus((req.query.status || '').trim(), { limit }));
+  })
+);
+
 // GET /admin/subscriptions/audit?mac=&limit=
 router.get('/subscriptions/audit',
   requireAuth,
