@@ -8,7 +8,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
-const { resolveSessionForCharacter } = require('./character-resolver');
+const { resolveSessionForCharacter, normalizeCharacterName } = require('./character-resolver');
 const { validateAgentMd } = require('../utils/agent-md-validator');
 const crypto = require('crypto');
 const path = require('path');
@@ -151,11 +151,21 @@ const formatChatHistoryMessages = (messages, getChatType) => {
  */
 const createAgent = async (userId, data) => {
   validateAgentMd(data.systemPrompt);
+
+  // Clients (the mobile app) create character instances by name, often with a numeric
+  // suffix ("Cheeko 2") and no persona. Source persona from the matching character
+  // template so we never persist a null-persona, unknown-name agent, and store the
+  // canonical character name so persona resolves and it is spoken correctly.
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: normalizeCharacterName(data.agentName), mode: 'insensitive' } },
+    select: { agent_name: true, system_prompt: true, soul: true, runtime_agent_name: true },
+  });
+
   const agent = await prisma.ai_agent.create({
     data: {
       user_id: BigInt(userId),
       agent_code: data.agentCode || null,
-      agent_name: data.agentName,
+      agent_name: template?.agent_name || data.agentName,
       asr_model_id: data.asrModelId || null,
       vad_model_id: data.vadModelId || null,
       llm_model_id: data.llmModelId || null,
@@ -165,7 +175,9 @@ const createAgent = async (userId, data) => {
       mem_model_id: data.memModelId || null,
       intent_model_id: data.intentModelId || null,
       chat_history_conf: data.chatHistoryConf || 0,
-      system_prompt: data.systemPrompt || null,
+      system_prompt: data.systemPrompt || template?.system_prompt || null,
+      soul: data.soul || template?.soul || null,
+      runtime_agent_name: data.runtimeAgentName || template?.runtime_agent_name || null,
       summary_memory: data.summaryMemory || null,
       lang_code: data.langCode || 'en',
       language: data.language || 'English',
@@ -1472,11 +1484,14 @@ const setCharacterByName = async (mac, characterName, { language, persist = true
       where: { agent_name: { equals: characterName, mode: 'insensitive' } },
     });
 
-    if (template) {
-      logger.info(`[setCharacterByName] Found template for "${characterName}", applying to new agent`);
-    } else {
-      logger.warn(`[setCharacterByName] No template found for "${characterName}", creating minimal agent`);
+    if (!template) {
+      // Guard: never auto-create a persona-less agent from an unknown name.
+      // A name matching no template (e.g. a typo like "Cheeko 2") produced an agent
+      // with null system_prompt/soul that ALSO gets spoken literally as its own name
+      // (TTS: "Cheeko two" / "Cheeko do"). Reject so the caller falls back to default.
+      throw new Error(`Unknown character "${characterName}" (no matching ai_agent_template)`);
     }
+    logger.info(`[setCharacterByName] Found template for "${characterName}", applying to new agent`);
 
     agent = await prisma.ai_agent.create({
       data: {
@@ -1594,7 +1609,7 @@ const getCurrentCharacter = async (mac) => {
  */
 const mergeTemplatePersona = async (agent) => {
   const template = await prisma.ai_agent_template.findFirst({
-    where: { agent_name: { equals: agent.agent_name, mode: 'insensitive' } },
+    where: { agent_name: { equals: normalizeCharacterName(agent.agent_name), mode: 'insensitive' } },
     select: { system_prompt: true, soul: true, runtime_agent_name: true },
   });
   return {
