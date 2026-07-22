@@ -10,6 +10,7 @@ const router = express.Router();
 const deviceService = require('../services/device.service');
 const contentService = require('../services/content.service');
 const subscriptionService = require('../services/subscription.service');
+const { sendOpsAlert } = require('../services/opsAlert.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, optionalAuth, requireServiceKey } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
@@ -1514,7 +1515,17 @@ router.get('/:mac/session-verdict',
 
     // flow=imagine adds the image buckets; anything else gates a voice session.
     const flow = req.query.flow === 'imagine' ? 'imagine' : 'voice';
-    const verdict = await subscriptionService.getSessionVerdict(mac, { flow });
+    let verdict;
+    try {
+      verdict = await subscriptionService.getSessionVerdict(mac, { flow });
+    } catch (err) {
+      // The gateway fails open on a verdict error (see swagger note above) —
+      // page ops, since enforcement is silently off while this throws.
+      sendOpsAlert('fail_open', `session-verdict errored for ${mac}: ${err.message} — gateway failing open`, {
+        oncePerDayKey: 'fail_open:verdict_error',
+      });
+      throw err;
+    }
     logger.info(`[DEVICE] Verdict ${mac} (${flow}): allowed=${verdict.allowed} reason=${verdict.reason}`);
     success(res, verdict);
   })

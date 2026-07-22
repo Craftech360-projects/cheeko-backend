@@ -100,6 +100,9 @@
             <el-dropdown-item @click.native="goRuntimeProviders">
               Runtime Providers
             </el-dropdown-item>
+            <el-dropdown-item @click.native="goSubscriptionAdmin">
+              Subscriptions
+            </el-dropdown-item>
           </el-dropdown-menu>
         </el-dropdown>
         <div class="search-container" v-if="showSearch">
@@ -224,6 +227,9 @@ export default {
     },
     goRuntimeProviders() {
       this.$router.push('/runtime-providers')
+    },
+    goSubscriptionAdmin() {
+      this.$router.push('/subscription-admin')
     },
     // Get user information
     fetchUserInfo() {

@@ -29,6 +29,7 @@ const crypto = require('crypto');
 const { prisma } = require('../config/database');
 const { normalizeMacAddress, isValidMacAddress } = require('../utils/helpers');
 const { sendPushNotification, findParentFcmToken } = require('./pushNotification.service');
+const { sendOpsAlert } = require('./opsAlert.service');
 const logger = require('../utils/logger');
 
 const GRACE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
@@ -307,7 +308,31 @@ const processWebhookEvent = async (event) => {
 
   // After commit only — a rolled-back transition must not push.
   if (result.push) await sendLifecyclePush(normalizedMac, result.push);
+  if (event.type === 'BILLING_ISSUE') await maybeAlertBillingSpike();
   return { outcome: result.outcome };
+};
+
+// N distinct billing issues in one UTC day = something systemic (store outage,
+// bank mandate wave), not one parent's expired card. Once-per-day dedupe lives
+// in opsAlert. SUB-11.
+const BILLING_SPIKE_N = parseInt(process.env.BILLING_ISSUE_SPIKE_N || '5', 10);
+
+const maybeAlertBillingSpike = async () => {
+  try {
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const count = await prisma.subscription_events.count({
+      where: { event_type: 'BILLING_ISSUE', created_at: { gte: dayStart } },
+    });
+    if (count < BILLING_SPIKE_N) return;
+    await sendOpsAlert(
+      'billing_spike',
+      `${count} BILLING_ISSUE events today (threshold ${BILLING_SPIKE_N}) — check store/bank status`,
+      { oncePerDayKey: 'billing_spike' }
+    );
+  } catch (err) {
+    logger.warn(`[REVENUECAT] billing-spike check failed: ${err.message}`);
+  }
 };
 
 module.exports = { verifyWebhookAuth, processWebhookEvent };

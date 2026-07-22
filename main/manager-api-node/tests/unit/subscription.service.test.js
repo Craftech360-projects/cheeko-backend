@@ -10,14 +10,20 @@ const mockPrisma = {
   subscription_plans: { findUnique: jest.fn(), findMany: jest.fn() },
   device_token_usage_session: { aggregate: jest.fn() },
   device_image_generations: { count: jest.fn(), create: jest.fn() },
+  // SUB-11 gate-hit ledger — fire-and-forget writes from refusal paths.
+  subscription_gate_hits: { create: jest.fn().mockResolvedValue({}) },
 };
 const mockSendPush = jest.fn().mockResolvedValue(true);
 const mockFindToken = jest.fn().mockResolvedValue('tok-123');
+const mockOpsAlert = jest.fn().mockResolvedValue(true);
 
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
 jest.mock('../../src/services/pushNotification.service', () => ({
   sendPushNotification: (...a) => mockSendPush(...a),
   findParentFcmToken: (...a) => mockFindToken(...a),
+}));
+jest.mock('../../src/services/opsAlert.service', () => ({
+  sendOpsAlert: (...a) => mockOpsAlert(...a),
 }));
 
 /** The plan-gate push is fired without await, so let its microtasks settle. */
@@ -86,6 +92,30 @@ describe('getSessionVerdict', () => {
       expect(verdict.reason).toBe('no_plan');
     });
 
+    test('a refusal ledgers a gate hit (SUB-11)', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ status: 'lapsed' });
+
+      await service.getSessionVerdict(MAC);
+      expect(mockPrisma.subscription_gate_hits.create).toHaveBeenCalledWith({
+        data: { mac_address: MAC, reason: 'no_plan', flow: 'voice' },
+      });
+    });
+
+    test('live status without a plan row fails open AND fires the ops alert (SUB-11)', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+        status: 'active',
+        subscription_plans: null,
+      });
+
+      const verdict = await service.getSessionVerdict(MAC);
+      expect(verdict.allowed).toBe(true);
+      expect(mockOpsAlert).toHaveBeenCalledWith(
+        'fail_open',
+        expect.stringContaining(MAC),
+        expect.objectContaining({ oncePerDayKey: expect.stringContaining('fail_open') })
+      );
+    });
+
     test('malformed MAC is refused without hitting the DB', async () => {
       const verdict = await service.getSessionVerdict('not-a-mac');
 
@@ -150,7 +180,8 @@ describe('getSessionVerdict', () => {
       expect(mockSendPush).toHaveBeenCalledWith(
         'tok-123',
         expect.stringMatching(/trial has ended/i),
-        expect.any(String)
+        expect.any(String),
+        { type: 'plan_gate', reason: 'trial_ended', mac: MAC }
       );
     });
 
@@ -246,7 +277,8 @@ describe('getSessionVerdict', () => {
       expect(mockSendPush).toHaveBeenCalledWith(
         'tok-123',
         expect.stringMatching(/plan has ended/i),
-        expect.any(String)
+        expect.any(String),
+        { type: 'plan_gate', reason: 'plan_ended', mac: MAC }
       );
     });
 

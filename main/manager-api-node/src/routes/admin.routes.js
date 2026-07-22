@@ -1645,4 +1645,65 @@ router.get('/device/:mac/progress/trend',
     success(res, trend);
   })
 );
+
+// ---------------------------------------------------------------------------
+// Subscription admin (SUB-11) — search / comp / trial re-grant / audit /
+// metrics. Super admin only; every override writes subscription_admin_audit.
+// ---------------------------------------------------------------------------
+
+const subscriptionAdminService = require('../services/subscriptionAdmin.service');
+
+/** Who to blame in the audit trail. */
+const adminName = (req) => req.user?.username || req.user?.email || `user:${req.user?.id}`;
+
+// GET /admin/subscriptions/search?q=<mac fragment | parent email/name/phone>
+router.get('/subscriptions/search',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const q = (req.query.q || '').trim();
+    if (!q) return badRequest(res, 'q is required');
+    success(res, await subscriptionAdminService.searchSubscriptions(q));
+  })
+);
+
+// POST /admin/subscriptions/:mac/comp  { days, reason }
+router.post('/subscriptions/:mac/comp',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { days, reason } = req.body || {};
+    success(res, await subscriptionAdminService.compExtend(req.params.mac, days, adminName(req), reason));
+  })
+);
+
+// POST /admin/subscriptions/:mac/regrant-trial  { days?, reason }
+router.post('/subscriptions/:mac/regrant-trial',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { days, reason } = req.body || {};
+    success(res, await subscriptionAdminService.regrantTrial(req.params.mac, days, adminName(req), reason));
+  })
+);
+
+// GET /admin/subscriptions/audit?mac=&limit=
+router.get('/subscriptions/audit',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    success(res, await subscriptionAdminService.getAuditLog({ mac: req.query.mac, limit }));
+  })
+);
+
+// GET /admin/subscriptions/metrics
+router.get('/subscriptions/metrics',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await subscriptionAdminService.getMetrics());
+  })
+);
+
 module.exports = router;
