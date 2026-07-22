@@ -43,9 +43,12 @@ const findParentFcmToken = async (macAddress) => {
  * @param {string} fcmToken
  * @param {string} title
  * @param {string} body
+ * @param {Object<string,string>} [data] - optional FCM data payload for app-side
+ *   deep-linking (e.g. { type: 'plan_gate', reason: 'trial_ended' }). FCM
+ *   requires all data values to be strings.
  * @returns {Promise<boolean>} true if the send succeeded
  */
-const sendPushNotification = async (fcmToken, title, body) => {
+const sendPushNotification = async (fcmToken, title, body, data) => {
   if (!fcmToken) return false;
   if (!ensureFirebaseInit()) {
     logger.warn('Firebase Admin SDK not initialised — skipping push notification');
@@ -56,6 +59,7 @@ const sendPushNotification = async (fcmToken, title, body) => {
     await admin.messaging().send({
       token: fcmToken,
       notification: { title, body },
+      ...(data ? { data } : {}),
     });
     return true;
   } catch (error) {

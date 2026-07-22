@@ -150,7 +150,8 @@ describe('getSessionVerdict', () => {
       expect(mockSendPush).toHaveBeenCalledWith(
         'tok-123',
         expect.stringMatching(/trial has ended/i),
-        expect.any(String)
+        expect.any(String),
+        { type: 'plan_gate', reason: 'trial_ended', mac: MAC }
       );
     });
 
@@ -246,7 +247,8 @@ describe('getSessionVerdict', () => {
       expect(mockSendPush).toHaveBeenCalledWith(
         'tok-123',
         expect.stringMatching(/plan has ended/i),
-        expect.any(String)
+        expect.any(String),
+        { type: 'plan_gate', reason: 'plan_ended', mac: MAC }
       );
     });
 

@@ -263,7 +263,7 @@ const applyLazyTrialExpiry = async (subscription, normalizedMac) => {
           title: 'Cheeko’s plan has ended',
           body: 'Choose a plan in the Cheeko app to keep the conversations going.',
         };
-    sendPlanGatePush(normalizedMac, copy).catch((error) =>
+    sendPlanGatePush(normalizedMac, copy, trialExpired ? 'trial_ended' : 'plan_ended').catch((error) =>
       logger.error(`[SUBSCRIPTION] Plan-gate push failed for ${normalizedMac}: ${error.message}`)
     );
   }
@@ -277,7 +277,7 @@ const applyLazyTrialExpiry = async (subscription, normalizedMac) => {
  * Fires on the trial→lapsed transition rather than on every refusal, so a child
  * pressing the button ten times does not push the parent ten times.
  */
-const sendPlanGatePush = async (normalizedMac, copy) => {
+const sendPlanGatePush = async (normalizedMac, copy, reason = 'trial_ended') => {
   const fcmToken = await findParentFcmToken(normalizedMac);
   if (!fcmToken) {
     logger.info(`[SUBSCRIPTION] No FCM token for ${normalizedMac}; plan-gate push skipped`);
@@ -287,7 +287,9 @@ const sendPlanGatePush = async (normalizedMac, copy) => {
   const delivered = await sendPushNotification(
     fcmToken,
     copy?.title ?? 'Cheeko’s free trial has ended',
-    copy?.body ?? 'Choose a plan in the Cheeko app to start the conversations again.'
+    copy?.body ?? 'Choose a plan in the Cheeko app to start the conversations again.',
+    // Deep-links the app to the gate screen; reason picks the copy there.
+    { type: 'plan_gate', reason, mac: normalizedMac }
   );
   logger.info(
     `[SUBSCRIPTION] Plan-gate push for ${normalizedMac}: ${delivered ? 'sent' : 'not delivered'}`
