@@ -59,6 +59,15 @@
         >
           <el-button slot="append" icon="el-icon-search" @click="search">Search</el-button>
         </el-input>
+        <el-select
+          v-model="statusFilter"
+          placeholder="Browse by status"
+          clearable
+          style="width: 180px; margin-left: 12px"
+          @change="browseStatus"
+        >
+          <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
+        </el-select>
 
         <el-table v-if="results.length" :data="results" size="small" class="results-table">
           <el-table-column prop="mac_address" label="MAC" width="170" />
@@ -155,6 +164,8 @@ export default {
     return {
       metrics: null,
       query: '',
+      statusFilter: '',
+      statuses: ['trial', 'active', 'grace', 'lapsed', 'cancelled'],
       results: [],
       audit: [],
       compVisible: false,
@@ -197,12 +208,25 @@ export default {
     search() {
       const q = this.query.trim()
       if (!q) return
+      this.statusFilter = ''
       subscriptionAdminApi.searchSubscriptions(q, ({ data }) => {
         if (data.code === 0) {
           this.results = data.data
           if (!this.results.length) this.$message.info('No devices matched')
         } else {
           this.$message.error(data.msg || 'Search failed')
+        }
+      })
+    },
+    browseStatus(status) {
+      if (!status) return
+      this.query = ''
+      subscriptionAdminApi.listByStatus(status, ({ data }) => {
+        if (data.code === 0) {
+          this.results = data.data
+          if (!this.results.length) this.$message.info(`No devices in "${status}"`)
+        } else {
+          this.$message.error(data.msg || 'List failed')
         }
       })
     },
@@ -245,7 +269,11 @@ export default {
       })
     },
     afterAction() {
-      this.search()
+      if (this.statusFilter) {
+        this.browseStatus(this.statusFilter)
+      } else {
+        this.search()
+      }
       this.loadAudit()
       this.loadMetrics()
     },

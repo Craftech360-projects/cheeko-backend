@@ -98,6 +98,36 @@ const searchSubscriptions = async (q, { limit = 25 } = {}) => {
   });
 };
 
+/** Statuses the admin page can browse by. */
+const LISTABLE_STATUSES = ['trial', 'active', 'grace', 'lapsed', 'cancelled'];
+
+/** List subscriptions in a given status, most recently updated first. */
+const listByStatus = async (status, { limit = 100 } = {}) => {
+  if (!LISTABLE_STATUSES.includes(status)) {
+    throw Object.assign(new Error(`status must be one of: ${LISTABLE_STATUSES.join(', ')}`), { statusCode: 400 });
+  }
+
+  const subs = await prisma.device_subscriptions.findMany({
+    where: { status },
+    include: { subscription_plans: { select: { tier: true, name: true, price_inr: true } } },
+    orderBy: { updated_at: 'desc' },
+    take: limit,
+  });
+  if (subs.length === 0) return [];
+
+  const devices = await prisma.ai_device.findMany({
+    where: { mac_address: { in: subs.map((s) => s.mac_address) } },
+    select: {
+      mac_address: true,
+      alias: true,
+      sys_user: { select: { email: true, nickname: true, phone: true } },
+    },
+  });
+  const byMac = new Map(devices.map((d) => [d.mac_address, d]));
+
+  return subs.map((s) => toApi(s, byMac.get(s.mac_address) || null));
+};
+
 /**
  * Comp/extend: push the row's governing end date forward by `days`.
  * Trial rows extend trial_ends_at; paid rows extend current_period_end.
@@ -265,4 +295,4 @@ const getMetrics = async ({ now = new Date() } = {}) => {
   };
 };
 
-module.exports = { searchSubscriptions, compExtend, regrantTrial, getAuditLog, getMetrics };
+module.exports = { searchSubscriptions, listByStatus, compExtend, regrantTrial, getAuditLog, getMetrics };
