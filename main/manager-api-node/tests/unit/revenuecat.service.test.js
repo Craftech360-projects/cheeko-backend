@@ -210,6 +210,36 @@ describe('ledger-only default', () => {
   );
 });
 
+describe('plan change (SUB-9)', () => {
+  test('PRODUCT_CHANGE commit then the effective-time RENEWAL: distinct ledger ids, plan swapped only by the renewal', async () => {
+    // Commit-time PRODUCT_CHANGE (up- or downgrade) is ledgered, state untouched.
+    const commit = rcEvent({ id: 'evt_change', type: 'PRODUCT_CHANGE', new_product_id: 'cheeko_premium_monthly' });
+    expect((await service.processWebhookEvent(commit)).outcome).toBe('ledgered');
+    expect(mockPrisma.device_subscriptions.updateMany).not.toHaveBeenCalled();
+
+    // Effective-time transaction carries the new product_id and swaps the plan
+    // (Apple: immediate for upgrades, period-end RENEWAL for downgrades — same path).
+    mockPrisma.subscription_plans.findFirst.mockResolvedValue({ id: 3n });
+    const effective = rcEvent({
+      id: 'evt_renewal_after_change',
+      type: 'RENEWAL',
+      product_id: 'cheeko_premium_monthly',
+      purchased_at_ms: 1755378400000,
+      expiration_at_ms: 1758056800000,
+    });
+    expect((await service.processWebhookEvent(effective)).outcome).toBe('processed');
+
+    const ledgeredIds = mockPrisma.subscription_events.createMany.mock.calls.map(
+      (c) => c[0].data[0].razorpay_event_id
+    );
+    expect(ledgeredIds).toEqual(['rc:evt_change', 'rc:evt_renewal_after_change']);
+
+    const update = mockPrisma.device_subscriptions.updateMany.mock.calls[0][0];
+    expect(update.data.plan_id).toBe(3n);
+    expect(update.data.current_period_start).toEqual(new Date(1755378400000));
+  });
+});
+
 describe('lifecycle transitions', () => {
   test('CANCELLATION sets cancel_at_period_end only', async () => {
     const { outcome } = await service.processWebhookEvent(rcEvent({ type: 'CANCELLATION' }));
