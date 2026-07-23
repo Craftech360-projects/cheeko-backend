@@ -14,6 +14,7 @@
 const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const subscriptionService = require('./subscription.service');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TRIAL_TIER = 'family'; // mirrors subscription.service TRIAL_TIER
@@ -58,29 +59,55 @@ const toApi = (row, device) => ({
 });
 
 /**
- * Search subscriptions by MAC fragment or parent (email / name / phone).
+ * Search subscriptions by MAC fragment, parent (email / name / phone), or the
+ * RevenueCat original-transaction id (SUB-18 refund lookup — that id lives on
+ * device_subscriptions, so it's matched separately and the MAC folded in).
  * Returns devices even when they have no subscription row yet.
  */
 const searchSubscriptions = async (q, { limit = 25 } = {}) => {
   const term = (q || '').trim();
   if (!term) return [];
 
-  const devices = await prisma.ai_device.findMany({
-    where: {
-      OR: [
-        { mac_address: { contains: term, mode: 'insensitive' } },
-        { sys_user: { email: { contains: term, mode: 'insensitive' } } },
-        { sys_user: { nickname: { contains: term, mode: 'insensitive' } } },
-        { sys_user: { phone: { contains: term } } },
-      ],
-    },
-    select: {
-      mac_address: true,
-      alias: true,
-      sys_user: { select: { email: true, nickname: true, phone: true } },
-    },
-    take: limit,
-  });
+  const [devices, rcSubs] = await Promise.all([
+    prisma.ai_device.findMany({
+      where: {
+        OR: [
+          { mac_address: { contains: term, mode: 'insensitive' } },
+          { sys_user: { email: { contains: term, mode: 'insensitive' } } },
+          { sys_user: { nickname: { contains: term, mode: 'insensitive' } } },
+          { sys_user: { phone: { contains: term } } },
+        ],
+      },
+      select: {
+        mac_address: true,
+        alias: true,
+        sys_user: { select: { email: true, nickname: true, phone: true } },
+      },
+      take: limit,
+    }),
+    prisma.device_subscriptions.findMany({
+      where: { rc_original_transaction_id: { contains: term, mode: 'insensitive' } },
+      select: { mac_address: true },
+      take: limit,
+    }),
+  ]);
+
+  // Fold in devices matched only by their RC txn id. The device row may be gone
+  // (unbound), so keep the MAC even when ai_device has nothing for it.
+  const known = new Set(devices.map((d) => d.mac_address));
+  const extraMacs = rcSubs.map((s) => s.mac_address).filter((m) => !known.has(m));
+  if (extraMacs.length) {
+    const rcDevices = await prisma.ai_device.findMany({
+      where: { mac_address: { in: extraMacs } },
+      select: {
+        mac_address: true,
+        alias: true,
+        sys_user: { select: { email: true, nickname: true, phone: true } },
+      },
+    });
+    const byMac = new Map(rcDevices.map((d) => [d.mac_address, d]));
+    for (const m of extraMacs) devices.push(byMac.get(m) || { mac_address: m, alias: null, sys_user: null });
+  }
   if (devices.length === 0) return [];
 
   const macs = devices.map((d) => d.mac_address);
@@ -228,6 +255,99 @@ const regrantTrial = async (macAddress, days, adminUser, reason) => {
   });
 };
 
+/**
+ * Full support view for one device (SUB-18 detail drawer). The status, plan,
+ * metered usage and gate reason are pulled straight from subscription.service
+ * (getSubscriptionSummary + a dry-run verdict) so the drawer's numbers can
+ * never drift from what actually gates the device. The raw billing/store
+ * fields, the webhook event ledger, and this MAC's override history are added
+ * on top.
+ *
+ * Unknown MAC (no device *and* no subscription row) → 404. A bound device with
+ * no subscription row → 200 with an empty (status 'none') shell.
+ */
+const getDetail = async (macAddress, { now = new Date() } = {}) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw Object.assign(new Error('Invalid MAC'), { statusCode: 400 });
+
+  // Shared helpers first: both repair a lazily-expired row, so the raw read
+  // below reflects the post-repair state (e.g. grace_until cleared).
+  const summary = await subscriptionService.getSubscriptionSummary(normalizedMac, { now });
+  const verdict = await subscriptionService.getSessionVerdict(normalizedMac, {
+    flow: 'voice',
+    now,
+    dryRun: true,
+  });
+
+  const [row, device] = await Promise.all([
+    prisma.device_subscriptions.findUnique({
+      where: { mac_address: normalizedMac },
+      select: {
+        trial_started_at: true,
+        trial_ends_at: true,
+        trial_used: true,
+        current_period_start: true,
+        current_period_end: true,
+        grace_until: true,
+        cancel_at_period_end: true,
+        billing_cycle: true,
+        store: true,
+        rc_original_transaction_id: true,
+      },
+    }),
+    prisma.ai_device.findFirst({
+      where: { mac_address: normalizedMac },
+      select: { alias: true, sys_user: { select: { email: true, nickname: true, phone: true } } },
+    }),
+  ]);
+
+  if (!row && !device) throw Object.assign(new Error('Unknown MAC'), { statusCode: 404 });
+
+  const [events, audit] = await Promise.all([
+    prisma.subscription_events.findMany({
+      where: { mac_address: normalizedMac },
+      // id is the deterministic tiebreaker: created_at is nullable, so it alone
+      // can't guarantee "newest first".
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      take: 50,
+      select: { id: true, event_type: true, processed_at: true, created_at: true },
+    }),
+    getAuditLog({ mac: normalizedMac, limit: 50 }),
+  ]);
+
+  return {
+    mac_address: normalizedMac,
+    enforcement_enabled: subscriptionService.isEnforcementEnabled(),
+    status: summary ? summary.status : 'none',
+    gate: { allowed: verdict.allowed, reason: verdict.reason },
+    plan: summary ? summary.plan : null,
+    period: row ? { start: row.current_period_start, end: row.current_period_end } : null,
+    trial: row
+      ? { started_at: row.trial_started_at, ends_at: row.trial_ends_at, used: row.trial_used }
+      : null,
+    grace_until: row ? row.grace_until : null,
+    cancel_at_period_end: row ? row.cancel_at_period_end : false,
+    billing_cycle: row ? row.billing_cycle : null,
+    store: row ? { store: row.store, rc_original_transaction_id: row.rc_original_transaction_id } : null,
+    usage: summary ? summary.usage : null,
+    device: device
+      ? {
+          alias: device.alias || null,
+          parent_email: device.sys_user?.email || null,
+          parent_name: device.sys_user?.nickname || null,
+          parent_phone: device.sys_user?.phone || null,
+        }
+      : null,
+    events: events.map((e) => ({
+      id: Number(e.id),
+      event_type: e.event_type,
+      processed_at: e.processed_at,
+      created_at: e.created_at,
+    })),
+    audit,
+  };
+};
+
 /** Recent audit rows, optionally filtered to one MAC. */
 const getAuditLog = async ({ mac, limit = 50 } = {}) => {
   const normalizedMac = mac ? normalizeMacAddress(mac) : null;
@@ -295,4 +415,4 @@ const getMetrics = async ({ now = new Date() } = {}) => {
   };
 };
 
-module.exports = { searchSubscriptions, listByStatus, compExtend, regrantTrial, getAuditLog, getMetrics };
+module.exports = { searchSubscriptions, listByStatus, getDetail, compExtend, regrantTrial, getAuditLog, getMetrics };

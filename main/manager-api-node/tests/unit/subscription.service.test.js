@@ -65,6 +65,29 @@ describe('getSessionVerdict', () => {
     });
   });
 
+  describe('dryRun (SUB-18 admin drawer)', () => {
+    // Admin reads want the TRUE verdict regardless of the kill-switch, and must
+    // not pollute the gate-hit ledger.
+    beforeEach(() => { delete process.env.ENFORCEMENT_ENABLED; });
+
+    test('computes the real refusal even with the kill-switch off', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ status: 'lapsed' });
+
+      const verdict = await service.getSessionVerdict(MAC, { dryRun: true });
+
+      expect(verdict.allowed).toBe(false);
+      expect(verdict.reason).toBe('no_plan');
+    });
+
+    test('records no gate hit', async () => {
+      mockPrisma.device_subscriptions.findUnique.mockResolvedValue({ status: 'lapsed' });
+
+      await service.getSessionVerdict(MAC, { dryRun: true });
+
+      expect(mockPrisma.subscription_gate_hits.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('kill-switch on', () => {
     beforeEach(() => { process.env.ENFORCEMENT_ENABLED = 'true'; });
 

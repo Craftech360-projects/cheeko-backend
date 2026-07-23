@@ -317,10 +317,12 @@ const recordGateHit = (normalizedMac, reason, flow) => {
  * @param {Object} [opts]
  * @param {'voice'|'imagine'} [opts.flow] - what is being gated
  * @param {Date} [opts.now] - injectable clock for tests
+ * @param {boolean} [opts.dryRun] - admin read: compute the true verdict even
+ *   when the kill-switch is off, and don't ledger a gate hit (SUB-18 drawer).
  * @returns {Promise<{allowed: boolean, reason: string, remaining: Object}>}
  */
-const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() } = {}) => {
-  if (!isEnforcementEnabled()) {
+const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date(), dryRun = false } = {}) => {
+  if (!dryRun && !isEnforcementEnabled()) {
     return { allowed: true, reason: 'ok', remaining: REMAINING_UNKNOWN };
   }
 
@@ -343,7 +345,7 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 
   if (!subscription) {
     logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: no subscription row`);
-    recordGateHit(normalizedMac, 'no_plan', flow);
+    if (!dryRun) recordGateHit(normalizedMac, 'no_plan', flow);
     return { allowed: false, reason: 'no_plan', remaining: REMAINING_UNKNOWN };
   }
 
@@ -351,7 +353,7 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 
   if (!SESSION_ALLOWED_STATUSES.has(status)) {
     logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: status=${status}`);
-    recordGateHit(normalizedMac, 'no_plan', flow);
+    if (!dryRun) recordGateHit(normalizedMac, 'no_plan', flow);
     return { allowed: false, reason: 'no_plan', remaining: REMAINING_UNKNOWN };
   }
 
@@ -372,7 +374,7 @@ const getSessionVerdict = async (macAddress, { flow = 'voice', now = new Date() 
 
   if (reason) {
     logger.info(`[SUBSCRIPTION] Verdict refused for ${normalizedMac}: ${reason} (flow=${flow})`);
-    recordGateHit(normalizedMac, reason, flow);
+    if (!dryRun) recordGateHit(normalizedMac, reason, flow);
     return { allowed: false, reason, remaining };
   }
 

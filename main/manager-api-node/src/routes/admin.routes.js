@@ -5,7 +5,7 @@
  * - User management
  * - System statistics
  *
- * Base path: /admin
+ * Base path: /admin 
  *
  * Endpoints:
  * - GET /admin/users/page - List users (paginated, super admin)
@@ -1664,6 +1664,15 @@ router.get('/subscriptions/search',
     const q = (req.query.q || '').trim();
     if (!q) return badRequest(res, 'q is required');
     success(res, await subscriptionAdminService.searchSubscriptions(q));
+  })
+);
+
+// GET /admin/subscriptions/:mac/detail — full support view for one device (SUB-18)
+router.get('/subscriptions/:mac/detail',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await subscriptionAdminService.getDetail(req.params.mac));
   })
 );
 

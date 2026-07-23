@@ -1,5 +1,5 @@
 const mockPrisma = {
-  ai_device: { findMany: jest.fn(), count: jest.fn() },
+  ai_device: { findMany: jest.fn(), findFirst: jest.fn(), count: jest.fn() },
   device_subscriptions: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -9,13 +9,22 @@ const mockPrisma = {
   },
   subscription_plans: { findUnique: jest.fn() },
   subscription_admin_audit: { create: jest.fn(), findMany: jest.fn() },
-  subscription_events: { groupBy: jest.fn() },
+  subscription_events: { groupBy: jest.fn(), findMany: jest.fn() },
   subscription_gate_hits: { groupBy: jest.fn() },
 };
 // $transaction(cb) runs the callback with the same mock as tx.
 mockPrisma.$transaction = jest.fn((cb) => cb(mockPrisma));
 
 jest.mock('../../src/config/database', () => ({ prisma: mockPrisma }));
+
+// getDetail reuses the real metering helpers — mock them so the drawer's
+// numbers come straight from subscription.service (no bucket math re-run here).
+const mockSubService = {
+  getSubscriptionSummary: jest.fn(),
+  getSessionVerdict: jest.fn(),
+  isEnforcementEnabled: jest.fn(() => true),
+};
+jest.mock('../../src/services/subscription.service', () => mockSubService);
 
 const service = require('../../src/services/subscriptionAdmin.service');
 
@@ -145,6 +154,105 @@ describe('searchSubscriptions', () => {
   test('empty query returns []', async () => {
     expect(await service.searchSubscriptions('  ')).toEqual([]);
     expect(mockPrisma.ai_device.findMany).not.toHaveBeenCalled();
+  });
+
+  test('finds a device by its RevenueCat txn id (SUB-18 refund lookup)', async () => {
+    // No parent/MAC hit, but the RC txn id matches a subscription row.
+    mockPrisma.ai_device.findMany
+      .mockResolvedValueOnce([]) // main search
+      .mockResolvedValueOnce([
+        { mac_address: MAC, alias: 'Toy', sys_user: { email: 'p@x.in', nickname: 'P', phone: '9' } },
+      ]); // rc-matched macs
+    mockPrisma.device_subscriptions.findMany
+      .mockResolvedValueOnce([{ mac_address: MAC }]) // rc match
+      .mockResolvedValueOnce([baseRow()]); // sub join
+
+    const out = await service.searchSubscriptions('1000000999');
+
+    expect(mockPrisma.device_subscriptions.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: { rc_original_transaction_id: { contains: '1000000999', mode: 'insensitive' } },
+      })
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].mac_address).toBe(MAC);
+    expect(out[0].device.parent_email).toBe('p@x.in');
+  });
+});
+
+describe('getDetail', () => {
+  const summary = {
+    status: 'active',
+    plan: { tier: 'family', name: 'Family', price_inr: 499, monthly_question_limit: 300, daily_question_limit: 30, daily_minutes_limit: 60, monthly_image_limit: null, daily_image_limit: 10 },
+    usage: { used: { questions_month: 120, questions_today: 5, minutes_today: 12, images_today: 2 }, remaining: { questions_month: 180 } },
+  };
+
+  test('assembles verdict + metered usage + raw fields + events + audit', async () => {
+    mockSubService.getSubscriptionSummary.mockResolvedValue(summary);
+    mockSubService.getSessionVerdict.mockResolvedValue({ allowed: false, reason: 'daily_questions' });
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue({
+      trial_started_at: new Date('2026-06-01T00:00:00Z'),
+      trial_ends_at: new Date('2026-07-01T00:00:00Z'),
+      trial_used: true,
+      current_period_start: new Date('2026-07-01T00:00:00Z'),
+      current_period_end: new Date('2026-08-01T00:00:00Z'),
+      grace_until: null,
+      cancel_at_period_end: true,
+      billing_cycle: 'monthly',
+      store: 'app_store',
+      rc_original_transaction_id: '1000000999',
+    });
+    mockPrisma.ai_device.findFirst.mockResolvedValue({
+      alias: 'Toy',
+      sys_user: { email: 'p@x.in', nickname: 'P', phone: '99999' },
+    });
+    mockPrisma.subscription_events.findMany.mockResolvedValue([
+      { id: 7n, event_type: 'CANCELLATION', processed_at: new Date(), created_at: new Date() },
+    ]);
+    mockPrisma.subscription_admin_audit.findMany.mockResolvedValue([]);
+
+    const out = await service.getDetail(MAC);
+
+    expect(mockSubService.getSessionVerdict).toHaveBeenCalledWith(
+      MAC,
+      expect.objectContaining({ dryRun: true })
+    );
+    expect(out.status).toBe('active');
+    expect(out.gate).toEqual({ allowed: false, reason: 'daily_questions' });
+    expect(out.plan).toBe(summary.plan);
+    expect(out.usage).toBe(summary.usage);
+    expect(out.store).toEqual({ store: 'app_store', rc_original_transaction_id: '1000000999' });
+    expect(out.cancel_at_period_end).toBe(true);
+    expect(out.events[0].id).toBe(7); // BigInt serialised
+    expect(out.device.parent_phone).toBe('99999');
+  });
+
+  test('unknown MAC (no device and no sub row) 404s', async () => {
+    mockSubService.getSubscriptionSummary.mockResolvedValue(null);
+    mockSubService.getSessionVerdict.mockResolvedValue({ allowed: false, reason: 'no_plan' });
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+    mockPrisma.ai_device.findFirst.mockResolvedValue(null);
+
+    await expect(service.getDetail(MAC)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  test('bound device with no subscription row → empty (status none) shell', async () => {
+    mockSubService.getSubscriptionSummary.mockResolvedValue(null);
+    mockSubService.getSessionVerdict.mockResolvedValue({ allowed: false, reason: 'no_plan' });
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+    mockPrisma.ai_device.findFirst.mockResolvedValue({ alias: 'Toy', sys_user: { email: 'p@x.in', nickname: 'P', phone: '9' } });
+    mockPrisma.subscription_events.findMany.mockResolvedValue([]);
+    mockPrisma.subscription_admin_audit.findMany.mockResolvedValue([]);
+
+    const out = await service.getDetail(MAC);
+
+    expect(out.status).toBe('none');
+    expect(out.plan).toBeNull();
+    expect(out.usage).toBeNull();
+    expect(out.gate.reason).toBe('no_plan');
+    expect(out.device.parent_email).toBe('p@x.in');
+    expect(out.events).toEqual([]);
   });
 });
 

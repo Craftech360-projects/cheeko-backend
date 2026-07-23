@@ -33,6 +33,21 @@ export default {
                 })
             }).send()
     },
+    getDetail(mac, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/${encodeURIComponent(mac)}/detail`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Subscription detail failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getDetail(mac, callback)
+                })
+            }).send()
+    },
     compExtend(mac, payload, callback) {
         RequestService.sendRequest()
             .url(`${getServiceUrl()}/admin/subscriptions/${encodeURIComponent(mac)}/comp`)
