@@ -1652,6 +1652,7 @@ router.get('/device/:mac/progress/trend',
 // ---------------------------------------------------------------------------
 
 const subscriptionAdminService = require('../services/subscriptionAdmin.service');
+const subscriptionService = require('../services/subscription.service');
 
 /** Who to blame in the audit trail. */
 const adminName = (req) => req.user?.username || req.user?.email || `user:${req.user?.id}`;
@@ -1693,6 +1694,47 @@ router.post('/subscriptions/:mac/regrant-trial',
   asyncHandler(async (req, res) => {
     const { days, reason } = req.body || {};
     success(res, await subscriptionAdminService.regrantTrial(req.params.mac, days, adminName(req), reason));
+  })
+);
+
+// --- Phase-2 write actions (SUB-19): all audited, reason mandatory ---
+
+// POST /admin/subscriptions/:mac/cancel  { cancel: true|false, reason }
+router.post('/subscriptions/:mac/cancel',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { cancel, reason } = req.body || {};
+    success(res, await subscriptionAdminService.setCancelAtPeriodEnd(req.params.mac, cancel, adminName(req), reason));
+  })
+);
+
+// POST /admin/subscriptions/:mac/status  { status: active|trial|lapsed, reason }
+router.post('/subscriptions/:mac/status',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { status, reason } = req.body || {};
+    success(res, await subscriptionAdminService.setStatusOverride(req.params.mac, status, adminName(req), reason));
+  })
+);
+
+// POST /admin/subscriptions/:mac/plan  { tier, reason }
+router.post('/subscriptions/:mac/plan',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { tier, reason } = req.body || {};
+    success(res, await subscriptionAdminService.changePlan(req.params.mac, tier, adminName(req), reason));
+  })
+);
+
+// GET /admin/subscriptions/plans — active plan catalog for the change-plan picker
+router.get('/subscriptions/plans',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await subscriptionService.getActivePlans());
   })
 );
 

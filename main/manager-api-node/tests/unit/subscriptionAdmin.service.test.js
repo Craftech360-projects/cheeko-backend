@@ -135,6 +135,155 @@ describe('regrantTrial', () => {
   });
 });
 
+describe('setCancelAtPeriodEnd (SUB-19)', () => {
+  test('cancel=true sets the flag and audits cancel_set:on with the reason', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow());
+    mockPrisma.device_subscriptions.update.mockImplementation(({ data }) =>
+      Promise.resolve(baseRow({ ...data }))
+    );
+
+    const out = await service.setCancelAtPeriodEnd(MAC, true, 'admin', 'store desync');
+
+    expect(mockPrisma.device_subscriptions.update.mock.calls[0][0].data.cancel_at_period_end).toBe(true);
+    const audit = mockPrisma.subscription_admin_audit.create.mock.calls[0][0].data;
+    expect(audit.action).toBe('cancel_set:on');
+    expect(audit.reason).toBe('store desync');
+    expect(audit.before_state.cancel_at_period_end).toBe(false);
+    expect(out.cancel_at_period_end).toBe(true);
+  });
+
+  test('cancel=false clears the flag and audits cancel_set:off', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow({ cancel_at_period_end: true }));
+    mockPrisma.device_subscriptions.update.mockImplementation(({ data }) =>
+      Promise.resolve(baseRow({ ...data }))
+    );
+
+    await service.setCancelAtPeriodEnd(MAC, false, 'admin', 'parent changed mind');
+
+    expect(mockPrisma.device_subscriptions.update.mock.calls[0][0].data.cancel_at_period_end).toBe(false);
+    expect(mockPrisma.subscription_admin_audit.create.mock.calls[0][0].data.action).toBe('cancel_set:off');
+  });
+
+  test('blank reason is rejected with 400 and nothing is written', async () => {
+    await expect(service.setCancelAtPeriodEnd(MAC, true, 'admin', '  ')).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockPrisma.device_subscriptions.update).not.toHaveBeenCalled();
+    expect(mockPrisma.subscription_admin_audit.create).not.toHaveBeenCalled();
+  });
+
+  test('non-boolean cancel is rejected with 400', async () => {
+    await expect(service.setCancelAtPeriodEnd(MAC, 'yes', 'admin', 'r')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('unknown MAC 404s', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+    await expect(service.setCancelAtPeriodEnd(MAC, true, 'admin', 'r')).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe('setStatusOverride (SUB-19)', () => {
+  test('forces lapsed, clears grace_until, audits with before/after', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(
+      baseRow({ status: 'grace', grace_until: new Date('2026-07-25T00:00:00Z') })
+    );
+    mockPrisma.device_subscriptions.update.mockImplementation(({ data }) =>
+      Promise.resolve(baseRow({ ...data }))
+    );
+
+    await service.setStatusOverride(MAC, 'lapsed', 'admin', 'refund confirmed');
+
+    const data = mockPrisma.device_subscriptions.update.mock.calls[0][0].data;
+    expect(data.status).toBe('lapsed');
+    expect(data.grace_until).toBeNull();
+    const audit = mockPrisma.subscription_admin_audit.create.mock.calls[0][0].data;
+    expect(audit.action).toBe('status_override:lapsed');
+    expect(audit.before_state.status).toBe('grace');
+    expect(audit.after_state.status).toBe('lapsed');
+  });
+
+  test('reactivates a lapsed row to active', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow({ status: 'lapsed' }));
+    mockPrisma.device_subscriptions.update.mockImplementation(({ data }) =>
+      Promise.resolve(baseRow({ ...data }))
+    );
+
+    await service.setStatusOverride(MAC, 'active', 'admin', 'missed RENEWAL webhook');
+
+    expect(mockPrisma.device_subscriptions.update.mock.calls[0][0].data.status).toBe('active');
+  });
+
+  test('forcing trial with an ended trial window is refused (use re-grant)', async () => {
+    // baseRow trial_ends_at is 2026-07-01, already past.
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow({ status: 'lapsed' }));
+
+    await expect(service.setStatusOverride(MAC, 'trial', 'admin', 'r')).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockPrisma.device_subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test('forcing trial with a live trial window works', async () => {
+    const future = new Date(Date.now() + 10 * DAY_MS);
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(
+      baseRow({ status: 'lapsed', trial_ends_at: future })
+    );
+    mockPrisma.device_subscriptions.update.mockImplementation(({ data }) =>
+      Promise.resolve(baseRow({ ...data }))
+    );
+
+    await service.setStatusOverride(MAC, 'trial', 'admin', 'webhook lapsed it wrongly');
+
+    expect(mockPrisma.device_subscriptions.update.mock.calls[0][0].data.status).toBe('trial');
+  });
+
+  test('disallowed target status is rejected with 400', async () => {
+    await expect(service.setStatusOverride(MAC, 'grace', 'admin', 'r')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('blank reason is rejected with 400', async () => {
+    await expect(service.setStatusOverride(MAC, 'active', 'admin', '')).rejects.toMatchObject({ statusCode: 400 });
+  });
+});
+
+describe('changePlan (SUB-19)', () => {
+  test('re-points plan_id to the tier and audits plan_change', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow());
+    mockPrisma.subscription_plans.findUnique.mockResolvedValue({ id: 9n, tier: 'premium', is_active: true });
+    mockPrisma.device_subscriptions.update.mockImplementation(({ data }) =>
+      Promise.resolve(baseRow({ ...data }))
+    );
+
+    await service.changePlan(MAC, 'premium', 'admin', 'mis-mapped product');
+
+    expect(mockPrisma.subscription_plans.findUnique).toHaveBeenCalledWith({ where: { tier: 'premium' } });
+    expect(mockPrisma.device_subscriptions.update.mock.calls[0][0].data.plan_id).toBe(9n);
+    const audit = mockPrisma.subscription_admin_audit.create.mock.calls[0][0].data;
+    expect(audit.action).toBe('plan_change:premium');
+    expect(audit.reason).toBe('mis-mapped product');
+  });
+
+  test('unknown tier is rejected with 400 and no update happens', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow());
+    mockPrisma.subscription_plans.findUnique.mockResolvedValue(null);
+
+    await expect(service.changePlan(MAC, 'platinum', 'admin', 'r')).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockPrisma.device_subscriptions.update).not.toHaveBeenCalled();
+  });
+
+  test('inactive tier is rejected with 400', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(baseRow());
+    mockPrisma.subscription_plans.findUnique.mockResolvedValue({ id: 9n, tier: 'starter', is_active: false });
+
+    await expect(service.changePlan(MAC, 'starter', 'admin', 'r')).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('blank reason is rejected with 400', async () => {
+    await expect(service.changePlan(MAC, 'family', 'admin', null)).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  test('unknown MAC 404s', async () => {
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+    await expect(service.changePlan(MAC, 'family', 'admin', 'r')).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
 describe('searchSubscriptions', () => {
   test('joins devices to subscriptions and marks sub-less devices as none', async () => {
     mockPrisma.ai_device.findMany.mockResolvedValue([

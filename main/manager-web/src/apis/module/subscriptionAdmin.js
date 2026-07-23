@@ -80,6 +80,69 @@ export default {
                 })
             }).send()
     },
+    setCancel(mac, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/${encodeURIComponent(mac)}/cancel`)
+            .method('POST')
+            .data(payload)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Set-cancel failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.setCancel(mac, payload, callback)
+                })
+            }).send()
+    },
+    setStatus(mac, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/${encodeURIComponent(mac)}/status`)
+            .method('POST')
+            .data(payload)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Status override failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.setStatus(mac, payload, callback)
+                })
+            }).send()
+    },
+    changePlan(mac, payload, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/${encodeURIComponent(mac)}/plan`)
+            .method('POST')
+            .data(payload)
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Change-plan failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.changePlan(mac, payload, callback)
+                })
+            }).send()
+    },
+    getPlans(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/plans`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Plans fetch failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getPlans(callback)
+                })
+            }).send()
+    },
     getAuditLog(params, callback) {
         const query = new URLSearchParams(params).toString()
         RequestService.sendRequest()

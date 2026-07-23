@@ -181,6 +181,15 @@
             <span v-if="!detail.enforcement_enabled" class="muted ml8">(enforcement off — verdict is advisory)</span>
           </div>
 
+          <!-- Support actions (SUB-19) — all audited, reason mandatory -->
+          <div class="drawer-section">
+            <el-button size="mini" :disabled="detail.status === 'none'" @click="openAction('cancel')">
+              {{ detail.cancel_at_period_end ? 'Undo cancel' : 'Cancel at period end' }}
+            </el-button>
+            <el-button size="mini" :disabled="detail.status === 'none'" @click="openAction('status')">Force status</el-button>
+            <el-button size="mini" :disabled="detail.status === 'none'" @click="openAction('plan')">Change plan</el-button>
+          </div>
+
           <!-- Plan & limits -->
           <div v-if="detail.plan" class="drawer-section">
             <h4>Plan</h4>
@@ -244,6 +253,34 @@
         </template>
       </div>
     </el-drawer>
+
+    <!-- Write-action confirm dialog (SUB-19) -->
+    <el-dialog :title="actionTitle" :visible.sync="actionVisible" width="440px" append-to-body>
+      <p v-if="actionType === 'cancel'" class="regrant-note">
+        {{ detail && detail.cancel_at_period_end
+          ? 'Clears the cancel flag — the subscription keeps renewing.'
+          : 'Marks the subscription to end at the current period. No refund is issued here.' }}
+      </p>
+      <el-form label-width="80px">
+        <el-form-item v-if="actionType === 'status'" label="Status">
+          <el-select v-model="actionStatus" placeholder="Target status">
+            <el-option v-for="s in overrideStatuses" :key="s" :label="s" :value="s" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="actionType === 'plan'" label="Plan">
+          <el-select v-model="actionTier" placeholder="Target plan">
+            <el-option v-for="p in plans" :key="p.tier" :label="`${p.name} (${p.tier}) · ₹${p.price_inr}`" :value="p.tier" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="Reason">
+          <el-input v-model="actionReason" placeholder="Required — goes to the audit trail" />
+        </el-form-item>
+      </el-form>
+      <span slot="footer">
+        <el-button @click="actionVisible = false">Cancel</el-button>
+        <el-button type="primary" :loading="actionBusy" :disabled="!actionReady" @click="doAction">Confirm</el-button>
+      </span>
+    </el-dialog>
   </div>
 </template>
 
@@ -272,6 +309,14 @@ export default {
       detail: null,
       detailVisible: false,
       detailLoading: false,
+      actionType: null,
+      actionVisible: false,
+      actionReason: '',
+      actionStatus: 'active',
+      actionTier: '',
+      actionBusy: false,
+      overrideStatuses: ['active', 'trial', 'lapsed'],
+      plans: [],
     }
   },
   computed: {
@@ -295,6 +340,20 @@ export default {
       return bars
         .filter((b) => b.limit != null && b.used != null)
         .map((b) => ({ ...b, pct: b.limit > 0 ? Math.min(100, Math.round((b.used / b.limit) * 100)) : 0 }))
+    },
+    actionTitle() {
+      const mac = this.detail ? this.detail.mac_address : ''
+      if (this.actionType === 'cancel') {
+        return `${this.detail && this.detail.cancel_at_period_end ? 'Undo cancel' : 'Cancel at period end'} — ${mac}`
+      }
+      if (this.actionType === 'status') return `Force status — ${mac}`
+      if (this.actionType === 'plan') return `Change plan — ${mac}`
+      return ''
+    },
+    actionReady() {
+      if (!this.actionReason.trim()) return false
+      if (this.actionType === 'plan') return !!this.actionTier
+      return true
     },
   },
   mounted() {
@@ -366,6 +425,48 @@ export default {
         this.detailLoading = false
         if (data.code === 0) this.detail = data.data
         else this.$message.error(data.msg || 'Detail failed')
+      })
+    },
+    openAction(type) {
+      this.actionType = type
+      this.actionReason = ''
+      this.actionStatus = 'active'
+      this.actionTier = ''
+      if (type === 'plan' && !this.plans.length) {
+        subscriptionAdminApi.getPlans(({ data }) => {
+          if (data.code === 0) this.plans = data.data
+        })
+      }
+      this.actionVisible = true
+    },
+    doAction() {
+      const mac = this.detail.mac_address
+      const reason = this.actionReason.trim()
+      const done = ({ data }) => {
+        this.actionBusy = false
+        if (data.code === 0) {
+          this.$message.success('Done')
+          this.actionVisible = false
+          this.refreshDetail(mac)
+          this.afterAction()
+        } else {
+          this.$message.error(data.msg || 'Action failed')
+        }
+      }
+      this.actionBusy = true
+      if (this.actionType === 'cancel') {
+        subscriptionAdminApi.setCancel(mac, { cancel: !this.detail.cancel_at_period_end, reason }, done)
+      } else if (this.actionType === 'status') {
+        subscriptionAdminApi.setStatus(mac, { status: this.actionStatus, reason }, done)
+      } else {
+        subscriptionAdminApi.changePlan(mac, { tier: this.actionTier, reason }, done)
+      }
+    },
+    refreshDetail(mac) {
+      this.detailLoading = true
+      subscriptionAdminApi.getDetail(mac, ({ data }) => {
+        this.detailLoading = false
+        if (data.code === 0) this.detail = data.data
       })
     },
     openComp(row) {

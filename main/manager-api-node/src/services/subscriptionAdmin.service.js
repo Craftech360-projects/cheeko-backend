@@ -255,6 +255,159 @@ const regrantTrial = async (macAddress, days, adminUser, reason) => {
   });
 };
 
+// ---------------------------------------------------------------------------
+// Phase-2 write actions (SUB-19). All three follow the compExtend contract:
+// transaction, 404 on a missing row, audit row with before/after in the same
+// transaction. Reason is MANDATORY here (unlike comp/regrant) — these override
+// billing state directly, so the accountability record can't be blank.
+// ---------------------------------------------------------------------------
+
+/** @returns {string} the trimmed reason, or throws 400 when blank */
+const requireReason = (reason) => {
+  const why = (reason || '').trim();
+  if (!why) throw Object.assign(new Error('reason is required'), { statusCode: 400 });
+  return why;
+};
+
+const PLAN_JOIN = { subscription_plans: { select: { tier: true, name: true, price_inr: true } } };
+
+/**
+ * Toggle cancel_at_period_end — manual repair for a store desync (e.g. the
+ * RevenueCat CANCELLATION webhook was missed, or a support un-cancel).
+ */
+const setCancelAtPeriodEnd = async (macAddress, cancel, adminUser, reason) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw Object.assign(new Error('Invalid MAC'), { statusCode: 400 });
+  if (typeof cancel !== 'boolean') throw Object.assign(new Error('cancel must be true or false'), { statusCode: 400 });
+  const why = requireReason(reason);
+
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.device_subscriptions.findUnique({
+      where: { mac_address: normalizedMac },
+      include: PLAN_JOIN,
+    });
+    if (!row) throw Object.assign(new Error('No subscription row for that MAC'), { statusCode: 404 });
+
+    const before = auditState(row);
+    const updated = await tx.device_subscriptions.update({
+      where: { mac_address: normalizedMac },
+      data: { cancel_at_period_end: cancel, updated_at: new Date() },
+      include: PLAN_JOIN,
+    });
+
+    await tx.subscription_admin_audit.create({
+      data: {
+        admin_user: adminUser,
+        action: cancel ? 'cancel_set:on' : 'cancel_set:off',
+        mac_address: normalizedMac,
+        reason: why,
+        before_state: before,
+        after_state: auditState(updated),
+      },
+    });
+    logger.info(`[SUB-ADMIN] ${adminUser} set cancel_at_period_end=${cancel} for ${normalizedMac}`);
+    return toApi(updated, null);
+  });
+};
+
+/** Statuses an admin may force. 'grace'/'cancelled' stay webhook-owned. */
+const OVERRIDE_STATUSES = ['active', 'trial', 'lapsed'];
+
+/**
+ * Force a status — the support escape hatch for a missed webhook. Forcing
+ * 'trial' with an already-ended trial window is refused (the next verdict
+ * would lazily re-lapse it, a silent no-op): re-grant trial is the tool there.
+ */
+const setStatusOverride = async (macAddress, status, adminUser, reason) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw Object.assign(new Error('Invalid MAC'), { statusCode: 400 });
+  if (!OVERRIDE_STATUSES.includes(status)) {
+    throw Object.assign(new Error(`status must be one of: ${OVERRIDE_STATUSES.join(', ')}`), { statusCode: 400 });
+  }
+  const why = requireReason(reason);
+
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.device_subscriptions.findUnique({
+      where: { mac_address: normalizedMac },
+      include: PLAN_JOIN,
+    });
+    if (!row) throw Object.assign(new Error('No subscription row for that MAC'), { statusCode: 404 });
+
+    if (status === 'trial' && row.trial_ends_at && row.trial_ends_at.getTime() < Date.now()) {
+      throw Object.assign(
+        new Error('trial window already ended — use re-grant trial instead'),
+        { statusCode: 400 }
+      );
+    }
+
+    const before = auditState(row);
+    const updated = await tx.device_subscriptions.update({
+      where: { mac_address: normalizedMac },
+      // grace_until is only meaningful in status 'grace'; a forced status
+      // leaves it stale, so clear it (mirrors the lazy-expiry repair).
+      data: { status, grace_until: null, updated_at: new Date() },
+      include: PLAN_JOIN,
+    });
+
+    await tx.subscription_admin_audit.create({
+      data: {
+        admin_user: adminUser,
+        action: `status_override:${status}`,
+        mac_address: normalizedMac,
+        reason: why,
+        before_state: before,
+        after_state: auditState(updated),
+      },
+    });
+    logger.info(`[SUB-ADMIN] ${adminUser} forced status=${status} for ${normalizedMac}`);
+    return toApi(updated, null);
+  });
+};
+
+/**
+ * Re-point plan_id by tier — correct a mis-mapped product. The next verdict
+ * reads limits via the plan join, so the new plan's buckets apply immediately.
+ */
+const changePlan = async (macAddress, tier, adminUser, reason) => {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) throw Object.assign(new Error('Invalid MAC'), { statusCode: 400 });
+  if (!tier || typeof tier !== 'string') throw Object.assign(new Error('tier is required'), { statusCode: 400 });
+  const why = requireReason(reason);
+
+  return prisma.$transaction(async (tx) => {
+    const row = await tx.device_subscriptions.findUnique({
+      where: { mac_address: normalizedMac },
+      include: PLAN_JOIN,
+    });
+    if (!row) throw Object.assign(new Error('No subscription row for that MAC'), { statusCode: 404 });
+
+    const plan = await tx.subscription_plans.findUnique({ where: { tier } });
+    if (!plan || !plan.is_active) {
+      throw Object.assign(new Error(`No active plan with tier "${tier}"`), { statusCode: 400 });
+    }
+
+    const before = auditState(row);
+    const updated = await tx.device_subscriptions.update({
+      where: { mac_address: normalizedMac },
+      data: { plan_id: plan.id, updated_at: new Date() },
+      include: PLAN_JOIN,
+    });
+
+    await tx.subscription_admin_audit.create({
+      data: {
+        admin_user: adminUser,
+        action: `plan_change:${tier}`,
+        mac_address: normalizedMac,
+        reason: why,
+        before_state: before,
+        after_state: auditState(updated),
+      },
+    });
+    logger.info(`[SUB-ADMIN] ${adminUser} changed plan to ${tier} for ${normalizedMac}`);
+    return toApi(updated, null);
+  });
+};
+
 /**
  * Full support view for one device (SUB-18 detail drawer). The status, plan,
  * metered usage and gate reason are pulled straight from subscription.service
@@ -415,4 +568,15 @@ const getMetrics = async ({ now = new Date() } = {}) => {
   };
 };
 
-module.exports = { searchSubscriptions, listByStatus, getDetail, compExtend, regrantTrial, getAuditLog, getMetrics };
+module.exports = {
+  searchSubscriptions,
+  listByStatus,
+  getDetail,
+  compExtend,
+  regrantTrial,
+  setCancelAtPeriodEnd,
+  setStatusOverride,
+  changePlan,
+  getAuditLog,
+  getMetrics,
+};
