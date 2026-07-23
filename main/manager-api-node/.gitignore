@@ -42,3 +42,8 @@ tmp/
 temp/
 
 /src/generated/prisma
+
+# Secrets — Firebase service-account keys (never commit)
+cheekoai-firebase-adminsdk.json
+*-firebase-adminsdk-*.json
+*firebase-adminsdk*.json
