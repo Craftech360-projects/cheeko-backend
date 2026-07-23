@@ -693,6 +693,30 @@ async function searchFamilies(query) {
   };
 }
 
+async function listAllFamilies() {
+  const kids = await prisma.kid_profile.findMany({
+    include: {
+      sys_user: {
+        include: {
+          parent_profile: true,
+          ai_device: true,
+        },
+      },
+    },
+    orderBy: { id: 'asc' },
+  });
+
+  return kids.map((kid) => ({
+    kidId: String(kid.id),
+    kidName: kid.name,
+    grade: kid.grade || null,
+    birthDate: kid.birth_date,
+    parentName: kid.sys_user?.parent_profile?.display_name || null,
+    parentEmail: kid.sys_user?.parent_profile?.email || null,
+    deviceCount: kid.sys_user?.ai_device?.length || 0,
+  }));
+}
+
 async function resolveKidId(macOrKidId) {
   if (/^\d+$/.test(String(macOrKidId || ''))) {
     const numericId = BigInt(macOrKidId);
@@ -788,13 +812,24 @@ async function getFamilyProfile(macOrKidId) {
       id: String(kid.id),
       name: kid.name,
       nickname: kid.nickname,
+      avatarUrl: kid.avatar_url,
+      gender: kid.gender,
       grade: kid.grade,
+      school: kid.school,
       language: kid.language,
+      timezone: kid.timezone,
       interests: kid.interests || [],
       birthDate: kid.birth_date,
+      memberSince: kid.created_at,
     },
     parent: {
       displayName: kid.sys_user?.parent_profile?.display_name || null,
+      email: kid.sys_user?.parent_profile?.email || null,
+      phoneNumber: kid.sys_user?.parent_profile?.phone_number || null,
+      avatarUrl: kid.sys_user?.parent_profile?.avatar_url || null,
+      countryRegion: kid.sys_user?.parent_profile?.country_region || null,
+      timezone: kid.sys_user?.parent_profile?.timezone || null,
+      memberSince: kid.sys_user?.parent_profile?.created_at || null,
     },
     devices: devices.map((device) => {
       const runtime = runtimeByMac.get(device.mac_address);
@@ -1306,5 +1341,6 @@ module.exports = {
   getFounderCosts,
   getFounderOperate,
   searchFamilies,
+  listAllFamilies,
   getFamilyProfile,
 };

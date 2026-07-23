@@ -1095,6 +1095,15 @@ router.get('/founder/families/search',
   })
 );
 
+router.get('/founder/families/list',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.listAllFamilies();
+    success(res, payload);
+  })
+);
+
 router.get('/founder/families/:macOrKidId/profile',
   requireAuth,
   requireSuperAdmin,

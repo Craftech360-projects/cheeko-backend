@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import './App.css'
 
 type RangeOption = 'today' | '7d' | '30d' | '90d' | 'month'
@@ -22,6 +22,16 @@ type SearchResult = {
   parentName?: string | null
   toyCount?: number
   macAddress?: string
+}
+
+type FamilyListEntry = {
+  kidId: string
+  kidName: string
+  grade?: string | null
+  birthDate?: string | null
+  parentName?: string | null
+  parentEmail?: string | null
+  deviceCount: number
 }
 
 type OverviewResponse = {
@@ -72,12 +82,25 @@ type FamilyProfile = {
     id: string
     name: string
     nickname?: string | null
+    avatarUrl?: string | null
+    gender?: string | null
     grade?: string | null
+    school?: string | null
     language?: string | null
+    timezone?: string | null
     interests: string[]
     birthDate?: string | null
+    memberSince?: string | null
   }
-  parent: { displayName?: string | null }
+  parent: {
+    displayName?: string | null
+    email?: string | null
+    phoneNumber?: string | null
+    avatarUrl?: string | null
+    countryRegion?: string | null
+    timezone?: string | null
+    memberSince?: string | null
+  }
   devices: Array<{
     id: string
     macAddress: string
@@ -1351,67 +1374,36 @@ function ConversationsPage({
 }
 
 function FamiliesPage({
+  view,
+  onBack,
   searchTerm,
   onSearchTermChange,
-  results,
-  loadingSearch,
-  selectedResult,
   onSelectResult,
   profile,
   loadingProfile,
+  allFamilies,
+  allFamiliesLoading,
 }: {
+  view: 'list' | 'detail'
+  onBack: () => void
   searchTerm: string
   onSearchTermChange: (next: string) => void
-  results: { kids: SearchResult[]; parents: SearchResult[]; devices: SearchResult[] }
-  loadingSearch: boolean
-  selectedResult: SearchResult | null
   onSelectResult: (result: SearchResult) => void
   profile: FamilyProfile | null
   loadingProfile: boolean
+  allFamilies: FamilyListEntry[]
+  allFamiliesLoading: boolean
 }) {
   const age = getAge(profile?.kid.birthDate)
-  const groupedResults = [
-    { title: 'Kids', items: results.kids },
-    { title: 'Parents', items: results.parents },
-    { title: 'Devices', items: results.devices },
-  ]
 
-  return (
-    <div className="page">
-      <PageHeader eyebrow="" title="Families" subtitle="Use one search box for parents, kids, MAC addresses, and aliases." />
-
-      <section className="search-shell">
-        <input type="search" value={searchTerm} onChange={(event) => onSearchTermChange(event.target.value)} placeholder="Search Maya, Anita, AA:BB:CC or Maya Toy" />
-        <span>{loadingSearch ? 'Searching…' : 'Live search'}</span>
-      </section>
-
-      <section className="families-layout">
-        <aside className="results-panel">
-          {groupedResults.map((group) => (
-            <div key={group.title} className="results-group">
-              <div className="results-title">{group.title}</div>
-              {group.items.length ? (
-                group.items.map((item) => (
-                  <button
-                    key={`${item.type}-${item.id}`}
-                    type="button"
-                    className={selectedResult?.id === item.id && selectedResult.type === item.type ? 'result-item active' : 'result-item'}
-                    onClick={() => onSelectResult(item)}
-                  >
-                    <strong>{item.label}</strong>
-                    <span>{item.parentName || item.subtitle || item.macAddress || 'Select to open profile'}</span>
-                  </button>
-                ))
-              ) : (
-                <div className="results-empty">No {group.title.toLowerCase()} yet.</div>
-              )}
-            </div>
-          ))}
-        </aside>
+  if (view === 'detail') {
+    return (
+      <div className="page">
+        <button type="button" className="secondary-button compact" onClick={onBack}>← Back to families</button>
 
         <section className="profile-panel">
           {loadingProfile && !profile ? <div className="loading-card">Loading family profile…</div> : null}
-          {!profile && !loadingProfile ? <div className="empty-state large">Choose a search result to open the Family 360 profile.</div> : null}
+          {!profile && !loadingProfile ? <div className="empty-state large">Unable to load this family profile.</div> : null}
 
           {profile ? (
             <>
@@ -1431,6 +1423,45 @@ function FamiliesPage({
                   ))}
                 </div>
               </article>
+
+              <section className="panel-grid panel-grid-two">
+                <article className="panel-card">
+                  <div className="panel-header">
+                    <div>
+                      <h2>Kid profile</h2>
+                      <p>Identity details for this kid.</p>
+                    </div>
+                  </div>
+                  <div className="profile-fields">
+                    <div className="mini-stat"><span>Name</span><strong>{profile.kid.name}</strong></div>
+                    {profile.kid.nickname ? <div className="mini-stat"><span>Nickname</span><strong>{profile.kid.nickname}</strong></div> : null}
+                    <div className="mini-stat"><span>Age</span><strong>{age !== null ? `${age} yrs` : '-'}</strong></div>
+                    {profile.kid.gender ? <div className="mini-stat"><span>Gender</span><strong>{profile.kid.gender}</strong></div> : null}
+                    {profile.kid.grade ? <div className="mini-stat"><span>Grade</span><strong>{profile.kid.grade}</strong></div> : null}
+                    {profile.kid.school ? <div className="mini-stat"><span>School</span><strong>{profile.kid.school}</strong></div> : null}
+                    {profile.kid.language ? <div className="mini-stat"><span>Language</span><strong>{profile.kid.language}</strong></div> : null}
+                    {profile.kid.timezone ? <div className="mini-stat"><span>Timezone</span><strong>{profile.kid.timezone}</strong></div> : null}
+                    <div className="mini-stat"><span>Member since</span><strong>{profile.kid.memberSince ? formatLongDate(profile.kid.memberSince) : '-'}</strong></div>
+                  </div>
+                </article>
+
+                <article className="panel-card">
+                  <div className="panel-header">
+                    <div>
+                      <h2>Parent profile</h2>
+                      <p>Account details for the linked parent.</p>
+                    </div>
+                  </div>
+                  <div className="profile-fields">
+                    <div className="mini-stat"><span>Name</span><strong>{profile.parent.displayName || '-'}</strong></div>
+                    {profile.parent.email ? <div className="mini-stat"><span>Email</span><strong>{profile.parent.email}</strong></div> : null}
+                    {profile.parent.phoneNumber ? <div className="mini-stat"><span>Phone</span><strong>{profile.parent.phoneNumber}</strong></div> : null}
+                    {profile.parent.countryRegion ? <div className="mini-stat"><span>Country/Region</span><strong>{profile.parent.countryRegion}</strong></div> : null}
+                    {profile.parent.timezone ? <div className="mini-stat"><span>Timezone</span><strong>{profile.parent.timezone}</strong></div> : null}
+                    <div className="mini-stat"><span>Member since</span><strong>{profile.parent.memberSince ? formatLongDate(profile.parent.memberSince) : '-'}</strong></div>
+                  </div>
+                </article>
+              </section>
 
               <section className="panel-grid panel-grid-two">
                 <article className="panel-card">
@@ -1542,7 +1573,61 @@ function FamiliesPage({
             </>
           ) : null}
         </section>
+      </div>
+    )
+  }
+
+  const normalizedSearch = searchTerm.trim().toLowerCase()
+  const visibleFamilies = normalizedSearch
+    ? allFamilies.filter((entry) =>
+        entry.kidName.toLowerCase().includes(normalizedSearch) ||
+        (entry.parentName || '').toLowerCase().includes(normalizedSearch) ||
+        (entry.parentEmail || '').toLowerCase().includes(normalizedSearch)
+      )
+    : allFamilies
+
+  return (
+    <div className="page">
+      <PageHeader eyebrow="" title="Families" subtitle="Use one search box for parents, kids, MAC addresses, and aliases." />
+
+      <section className="search-shell">
+        <input type="search" value={searchTerm} onChange={(event) => onSearchTermChange(event.target.value)} placeholder="Search Maya, Anita, AA:BB:CC or Maya Toy" />
+        <span>{visibleFamilies.length} match{visibleFamilies.length === 1 ? '' : 'es'}</span>
       </section>
+
+      <article className="panel-card">
+        <div className="panel-header">
+          <div>
+            <h2>All families</h2>
+            <p>Every kid and parent profile, {allFamilies.length} total. Click a row to open its Family 360 profile.</p>
+          </div>
+        </div>
+        {allFamiliesLoading ? <div className="loading-card">Loading families…</div> : (
+          <div className="costs-table families-table">
+            <div className="costs-table-head">
+              <span>Kid</span>
+              <span>Grade</span>
+              <span>Parent</span>
+              <span>Parent email</span>
+              <span>Devices</span>
+            </div>
+            {visibleFamilies.length ? visibleFamilies.map((entry) => (
+              <button
+                key={entry.kidId}
+                type="button"
+                className="costs-table-row clickable"
+                onClick={() => onSelectResult({ type: 'kid', id: entry.kidId, label: entry.kidName, parentName: entry.parentName })}
+              >
+                <span>{entry.kidName}</span>
+                <span>{entry.grade || '-'}</span>
+                <span>{entry.parentName || '-'}</span>
+                <span>{entry.parentEmail || '-'}</span>
+                <strong>{entry.deviceCount}</strong>
+              </button>
+            )) : <div className="empty-state">No families match &quot;{searchTerm}&quot;.</div>}
+          </div>
+        )}
+      </article>
     </div>
   )
 }
@@ -1780,6 +1865,125 @@ function OperatePage({
   )
 }
 
+function LookupTestPanel() {
+  const [uid, setUid] = useState('')
+  const [sequence, setSequence] = useState(1)
+  const [loadingKind, setLoadingKind] = useState<string | null>(null)
+  const [result, setResult] = useState<{ success: boolean; type: string; data: unknown } | null>(null)
+
+  const runLookup = async (kind: string, label: string, path: string) => {
+    const trimmedUid = uid.trim()
+    if (!trimmedUid) return
+    setLoadingKind(kind)
+    try {
+      const data = await apiFetchPublic(path)
+      setResult({ success: true, type: label, data })
+    } catch (err) {
+      setResult({
+        success: false,
+        type: label,
+        data: { error: err instanceof ApiError ? err.message : 'Request failed', uid: trimmedUid },
+      })
+    } finally {
+      setLoadingKind(null)
+    }
+  }
+
+  const encodedUid = encodeURIComponent(uid.trim())
+  const summary = result?.success && result.data && typeof result.data === 'object' ? (result.data as Record<string, unknown>) : null
+
+  return (
+    <article className="panel-card">
+      <div className="panel-header">
+        <div>
+          <h2>Lookup &amp; Test</h2>
+          <p>Look up what an RFID UID resolves to, using the same endpoints the devices use.</p>
+        </div>
+      </div>
+
+      <div className="lookup-console">
+        <div className="lookup-inputs">
+          <input placeholder="Enter RFID UID (e.g. 5C42C905)" value={uid} onChange={(event) => setUid(event.target.value)} />
+          <input
+            type="number"
+            min={1}
+            value={sequence}
+            onChange={(event) => setSequence(Number(event.target.value) || 1)}
+            title="Sequence"
+          />
+        </div>
+        <div className="lookup-actions">
+          <button
+            type="button"
+            className="secondary-button compact"
+            disabled={!uid.trim() || loadingKind !== null}
+            onClick={() => runLookup('card', 'card', `/admin/rfid/card/lookup/${encodedUid}`)}
+          >
+            {loadingKind === 'card' ? 'Looking up…' : 'Lookup Card Mapping'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact"
+            disabled={!uid.trim() || loadingKind !== null}
+            onClick={() => runLookup('series', 'series', `/admin/rfid/series/lookup/${encodedUid}`)}
+          >
+            {loadingKind === 'series' ? 'Looking up…' : 'Series'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact"
+            disabled={!uid.trim() || loadingKind !== null}
+            onClick={() => runLookup('content', 'content', `/admin/rfid/card/lookup/${encodedUid}?sequence=${sequence}`)}
+          >
+            {loadingKind === 'content' ? 'Looking up…' : 'Content (seq)'}
+          </button>
+          <button
+            type="button"
+            className="secondary-button compact"
+            disabled={!uid.trim() || loadingKind !== null}
+            onClick={() => runLookup('download', 'download', `/admin/rfid/card/content/download/${encodedUid}`)}
+          >
+            {loadingKind === 'download' ? 'Looking up…' : 'Download'}
+          </button>
+        </div>
+
+        {result ? (
+          <div className="lookup-result">
+            <div className={result.success ? 'success-banner' : 'error-banner'}>
+              {result.success ? 'Resolved' : 'Not resolved'} — {result.type}
+            </div>
+            {summary ? (
+              <div className="lookup-summary">
+                {typeof summary.contentType === 'string' ? (
+                  <span>
+                    <strong>Type:</strong> {summary.contentType}
+                  </span>
+                ) : null}
+                {typeof (summary.characterName || summary.agentName) === 'string' ? (
+                  <span>
+                    <strong>Character:</strong> {(summary.characterName || summary.agentName) as string}
+                  </span>
+                ) : null}
+                {typeof summary.title === 'string' ? (
+                  <span>
+                    <strong>Title:</strong> {summary.title}
+                  </span>
+                ) : null}
+                {typeof summary.packCode === 'string' ? (
+                  <span>
+                    <strong>Pack:</strong> {summary.packCode}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <pre className="lookup-json">{JSON.stringify(result.data, null, 2)}</pre>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
 function RfidStudioPage({
   cards,
   loading,
@@ -1861,6 +2065,8 @@ function RfidStudioPage({
           </div>
         </article>
       </section>
+
+      <LookupTestPanel />
     </div>
   )
 }
@@ -1872,7 +2078,6 @@ function ContentLibraryPage({
   editorLoading,
   onEdit,
   onCloseEditor,
-  onDelete,
 }: {
   packs: RfidContentPack[]
   loading: boolean
@@ -1880,7 +2085,6 @@ function ContentLibraryPage({
   editorLoading: boolean
   onEdit: (packCode: string) => void
   onCloseEditor: () => void
-  onDelete: (packCode: string) => void
 }) {
   const visiblePacks = packs.filter((item) => {
     const name = item.name?.trim().toLowerCase() || ''
@@ -1940,8 +2144,7 @@ function ContentLibraryPage({
                 <div className="content-pack-card-footer">
                   <span>{item.contentType === 'prompt' ? 'AI Generated' : 'Read-Aloud'}</span>
                   <div className="content-pack-actions">
-                    <button type="button" className="secondary-button compact" onClick={() => onEdit(item.packCode)}>Edit</button>
-                    <button type="button" className="secondary-button compact danger" onClick={() => onDelete(item.packCode)}>Delete</button>
+                    <button type="button" className="secondary-button compact" onClick={() => onEdit(item.packCode)}>Detail</button>
                   </div>
                 </div>
               </article>
@@ -1978,8 +2181,8 @@ function ContentLibraryPage({
         <article className="panel-card">
           <div className="panel-header">
             <div>
-              <h2>Edit preview</h2>
-              <p>The same founder-dashboard-only detail view that opens from Edit.</p>
+              <h2>Detail preview</h2>
+              <p>The same founder-dashboard-only detail view that opens from Detail.</p>
             </div>
           </div>
           {editorLoading ? <div className="loading-card">Loading pack details…</div> : editorPack ? (
@@ -2012,7 +2215,7 @@ function ContentLibraryPage({
           <div className="modal-card content-pack-modal" onClick={(event) => event.stopPropagation()}>
             <div className="panel-header">
               <div>
-                <h2>Edit Content Pack</h2>
+                <h2>Content Pack Details</h2>
                 <p>{editorPack.packCode}</p>
               </div>
               <button type="button" className="secondary-button compact" onClick={onCloseEditor}>Close</button>
@@ -2063,7 +2266,7 @@ function ContentLibraryPage({
               {(editorPack.items || []).length ? (editorPack.items || []).map((item, index) => (
                 <div key={`${editorPack.id}-${index}`} className="content-pack-item-card">
                   <strong>{index + 1}. {item.title || 'Untitled item'}</strong>
-                  <span>{item.audioUrl || 'No audio URL'}</span>
+                  {item.audioUrl ? <audio controls src={item.audioUrl} /> : <span>No audio URL</span>}
                   <span>{item.imageUrl || 'No image URL'}</span>
                   <p>{item.text || 'No text content'}</p>
                 </div>
@@ -2178,17 +2381,13 @@ function App() {
   const [contentPacksLoading, setContentPacksLoading] = useState(false)
   const [contentPackEditorLoading, setContentPackEditorLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const [searchResults, setSearchResults] = useState<{ kids: SearchResult[]; parents: SearchResult[]; devices: SearchResult[] }>({
-    kids: [],
-    parents: [],
-    devices: [],
-  })
-  const [searchLoading, setSearchLoading] = useState(false)
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null)
+  const [familiesView, setFamiliesView] = useState<'list' | 'detail'>('list')
+  const [allFamilies, setAllFamilies] = useState<FamilyListEntry[]>([])
+  const [allFamiliesLoading, setAllFamiliesLoading] = useState(false)
   const [profile, setProfile] = useState<FamilyProfile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
   const [error, setError] = useState('')
-  const deferredSearchTerm = useDeferredValue(searchTerm)
 
   useEffect(() => {
     setToken(loadStoredToken())
@@ -2283,35 +2482,15 @@ function App() {
   }, [token])
 
   useEffect(() => {
-    if (!token || deferredSearchTerm.trim().length < 2) {
-      setSearchResults({ kids: [], parents: [], devices: [] })
-      return
-    }
+    if (!token) return
     let cancelled = false
-    const timer = window.setTimeout(() => {
-      setSearchLoading(true)
-      apiFetch<{ kids: SearchResult[]; parents: SearchResult[]; devices: SearchResult[] }>(
-        `/admin/founder/families/search?q=${encodeURIComponent(deferredSearchTerm.trim())}`,
-        token,
-      )
-        .then((payload) => {
-          if (cancelled) return
-          setSearchResults(payload)
-          if (!selectedResult) {
-            const first = payload.kids[0] || payload.devices[0] || payload.parents[0] || null
-            if (first) setSelectedResult(first)
-          }
-        })
-        .catch((requestError: unknown) => {
-          if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to search families')
-        })
-        .finally(() => { if (!cancelled) setSearchLoading(false) })
-    }, 250)
-    return () => {
-      cancelled = true
-      window.clearTimeout(timer)
-    }
-  }, [deferredSearchTerm, selectedResult, token])
+    setAllFamiliesLoading(true)
+    apiFetch<FamilyListEntry[]>('/admin/founder/families/list', token)
+      .then((payload) => { if (!cancelled) setAllFamilies(payload) })
+      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load families') })
+      .finally(() => { if (!cancelled) setAllFamiliesLoading(false) })
+    return () => { cancelled = true }
+  }, [token])
 
   useEffect(() => {
     if (!token || !selectedResult) return
@@ -2368,7 +2547,7 @@ function App() {
     setContentPackEditor(null)
     setProfile(null)
     setSelectedResult(null)
-    setSearchResults({ kids: [], parents: [], devices: [] })
+    setFamiliesView('list')
   }
 
   const openContentPackEditor = async (packCode: string) => {
@@ -2387,10 +2566,6 @@ function App() {
   const closeContentPackEditor = () => {
     setContentPackEditor(null)
     setContentPackEditorLoading(false)
-  }
-
-  const showDeleteDisabled = (packCode: string) => {
-    setError(`Delete for ${packCode} is intentionally disabled in the founder dashboard.`)
   }
 
   if (!token) {
@@ -2419,14 +2594,18 @@ function App() {
         {activePage === 'conversations' ? <ConversationsPage range={conversationRange} data={conversations} loading={conversationsLoading} onRangeChange={setConversationRange} /> : null}
         {activePage === 'families' ? (
           <FamiliesPage
+            view={familiesView}
+            onBack={() => setFamiliesView('list')}
             searchTerm={searchTerm}
             onSearchTermChange={setSearchTerm}
-            results={searchResults}
-            loadingSearch={searchLoading}
-            selectedResult={selectedResult}
-            onSelectResult={setSelectedResult}
+            onSelectResult={(result) => {
+              setSelectedResult(result)
+              setFamiliesView('detail')
+            }}
             profile={profile}
             loadingProfile={profileLoading}
+            allFamilies={allFamilies}
+            allFamiliesLoading={allFamiliesLoading}
           />
         ) : null}
         {activePage === 'costs' ? <CostsPage range={costRange} data={costs} loading={costsLoading} onRangeChange={setCostRange} /> : null}
@@ -2440,7 +2619,6 @@ function App() {
             editorLoading={contentPackEditorLoading}
             onEdit={openContentPackEditor}
             onCloseEditor={closeContentPackEditor}
-            onDelete={showDeleteDisabled}
           />
         ) : null}
         {activePage === 'settings' ? <SettingsPage username={username} onSignOut={signOut} /> : null}
