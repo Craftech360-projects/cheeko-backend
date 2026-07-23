@@ -437,28 +437,45 @@ describe('listByStatus', () => {
 });
 
 describe('getMetrics', () => {
-  test('assembles funnel, churn, MRR and gate hits', async () => {
+  const NOW = new Date('2026-07-23T12:00:00Z');
+
+  const primeMocks = () => {
     mockPrisma.ai_device.count.mockResolvedValue(100);
     mockPrisma.device_subscriptions.groupBy.mockResolvedValue([
       { status: 'trial', _count: { _all: 10 } },
       { status: 'active', _count: { _all: 20 } },
       { status: 'lapsed', _count: { _all: 5 } },
     ]);
-    mockPrisma.device_subscriptions.findMany.mockResolvedValue([
-      { subscription_plans: { price_inr: 499 } },
-      { subscription_plans: { price_inr: 199 } },
-      { subscription_plans: null },
-    ]);
+    // First findMany = active rows with plans, second = trial starts in range.
+    mockPrisma.device_subscriptions.findMany
+      .mockResolvedValueOnce([
+        { subscription_plans: { tier: 'family', price_inr: 499 } },
+        { subscription_plans: { tier: 'starter', price_inr: 199 } },
+        { subscription_plans: { tier: 'family', price_inr: 499 } },
+        { subscription_plans: null },
+      ])
+      .mockResolvedValueOnce([
+        { trial_started_at: new Date('2026-07-22T05:00:00Z') },
+        { trial_started_at: new Date('2026-07-22T09:00:00Z') },
+      ]);
     mockPrisma.device_subscriptions.count.mockResolvedValue(40);
-    mockPrisma.subscription_events.groupBy.mockResolvedValue([
-      { event_type: 'EXPIRATION', _count: { _all: 3 } },
+    mockPrisma.subscription_events.findMany.mockResolvedValue([
+      { event_type: 'EXPIRATION', created_at: new Date('2026-07-21T10:00:00Z') },
+      { event_type: 'EXPIRATION', created_at: new Date('2026-07-21T11:00:00Z') },
+      { event_type: 'CANCELLATION', created_at: new Date('2026-07-20T10:00:00Z') },
+      { event_type: 'RENEWAL', created_at: new Date('2026-07-22T10:00:00Z') },
+      { event_type: 'INITIAL_PURCHASE', created_at: new Date('2026-07-19T10:00:00Z') },
     ]);
     mockPrisma.subscription_gate_hits.groupBy.mockResolvedValue([
       { reason: 'no_plan', _count: { _all: 12 } },
       { reason: 'daily_questions', _count: { _all: 4 } },
     ]);
+  };
 
-    const m = await service.getMetrics();
+  test('assembles funnel, ranged churn, per-plan MRR, gate hits and trends', async () => {
+    primeMocks();
+
+    const m = await service.getMetrics({ now: NOW });
 
     expect(m.funnel).toMatchObject({
       devices_bound: 100,
@@ -467,9 +484,82 @@ describe('getMetrics', () => {
       paid_now: 20,
       lapsed_now: 5,
     });
-    expect(m.churn_30d).toEqual({ EXPIRATION: 3 });
-    expect(m.mrr_inr).toBe(698);
-    expect(m.gate_hits_30d).toEqual({ no_plan: 12, daily_questions: 4 });
+    expect(m.churn).toEqual({ EXPIRATION: 2, CANCELLATION: 1 });
+    expect(m.mrr_inr).toBe(1197);
+    expect(m.mrr_by_tier).toEqual({ family: 998, starter: 199 });
+    // per-plan breakdown sums to the aggregate
+    expect(Object.values(m.mrr_by_tier).reduce((a, b) => a + b, 0)).toBe(m.mrr_inr);
+    expect(m.gate_hits).toEqual({ no_plan: 12, daily_questions: 4 });
+
+    // 30d default range → 31 day buckets, and the bumps land on their days
+    expect(m.trends.days).toHaveLength(31);
+    const i22 = m.trends.days.indexOf('2026-07-22');
+    expect(m.trends.trials[i22]).toBe(2);
+    expect(m.trends.paid[i22]).toBe(1);
+    expect(m.trends.lapsed[m.trends.days.indexOf('2026-07-21')]).toBe(2);
+    expect(m.trends.lapsed[m.trends.days.indexOf('2026-07-20')]).toBe(1);
+  });
+
+  test('a custom range is passed through to the range-driven queries', async () => {
+    primeMocks();
+    const from = new Date('2026-07-01T00:00:00Z');
+    const to = new Date('2026-07-08T00:00:00Z');
+
+    const m = await service.getMetrics({ from, to, now: NOW });
+
+    expect(m.range).toEqual({ from, to });
+    expect(m.trends.days[0]).toBe('2026-07-01');
+    expect(m.trends.days).toHaveLength(8);
+    expect(mockPrisma.subscription_events.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ created_at: { gte: from, lte: to } }) })
+    );
+  });
+
+  test('inverted range falls back to 30d before `to`', async () => {
+    primeMocks();
+    const m = await service.getMetrics({
+      from: new Date('2026-07-30T00:00:00Z'),
+      to: new Date('2026-07-08T00:00:00Z'),
+      now: NOW,
+    });
+    expect(m.range.to.toISOString()).toBe('2026-07-08T00:00:00.000Z');
+    expect(m.range.from.getTime()).toBe(m.range.to.getTime() - 30 * DAY_MS);
+  });
+});
+
+describe('getGateHits', () => {
+  test('groups hits per device+flow with count/last-hit and joins the parent', async () => {
+    mockPrisma.subscription_gate_hits.groupBy.mockResolvedValue([
+      { mac_address: MAC, flow: 'voice', _count: { _all: 7 }, _max: { created_at: new Date('2026-07-22T10:00:00Z') } },
+      { mac_address: '11:22:33:44:55:66', flow: 'imagine', _count: { _all: 2 }, _max: { created_at: new Date('2026-07-21T10:00:00Z') } },
+    ]);
+    mockPrisma.ai_device.findMany.mockResolvedValue([
+      { mac_address: MAC, alias: 'Toy', sys_user: { email: 'p@x.in', nickname: 'P' } },
+    ]);
+
+    const out = await service.getGateHits({ reason: 'daily_questions' });
+
+    expect(mockPrisma.subscription_gate_hits.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        by: ['mac_address', 'flow'],
+        where: expect.objectContaining({ reason: 'daily_questions' }),
+      })
+    );
+    expect(out.devices).toHaveLength(2);
+    expect(out.devices[0]).toMatchObject({ mac_address: MAC, flow: 'voice', hits: 7, parent: 'p@x.in', alias: 'Toy' });
+    expect(out.devices[1].parent).toBeNull(); // device row gone → MAC still listed
+  });
+
+  test('missing reason is rejected with 400', async () => {
+    await expect(service.getGateHits({})).rejects.toMatchObject({ statusCode: 400 });
+    expect(mockPrisma.subscription_gate_hits.groupBy).not.toHaveBeenCalled();
+  });
+
+  test('empty range returns a clean empty state', async () => {
+    mockPrisma.subscription_gate_hits.groupBy.mockResolvedValue([]);
+    const out = await service.getGateHits({ reason: 'no_plan' });
+    expect(out.devices).toEqual([]);
+    expect(mockPrisma.ai_device.findMany).not.toHaveBeenCalled();
   });
 });
 

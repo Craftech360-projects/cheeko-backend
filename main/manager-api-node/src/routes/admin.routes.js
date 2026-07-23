@@ -1758,12 +1758,35 @@ router.get('/subscriptions/audit',
   })
 );
 
-// GET /admin/subscriptions/metrics
+/** Query-string date, or undefined when absent/garbage (service defaults). */
+const parseDate = (v) => {
+  if (!v) return undefined;
+  const d = new Date(v);
+  return isNaN(d) ? undefined : d;
+};
+
+// GET /admin/subscriptions/metrics?from=&to=  (ISO dates; default last 30d)
 router.get('/subscriptions/metrics',
   requireAuth,
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
-    success(res, await subscriptionAdminService.getMetrics());
+    success(res, await subscriptionAdminService.getMetrics({
+      from: parseDate(req.query.from),
+      to: parseDate(req.query.to),
+    }));
+  })
+);
+
+// GET /admin/subscriptions/gate-hits?reason=&from=&to= — drill-down list (SUB-20)
+router.get('/subscriptions/gate-hits',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await subscriptionAdminService.getGateHits({
+      reason: req.query.reason,
+      from: parseDate(req.query.from),
+      to: parseDate(req.query.to),
+    }));
   })
 );
 

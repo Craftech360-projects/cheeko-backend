@@ -4,7 +4,20 @@
     <div class="page-body">
       <!-- Metrics -->
       <el-card shadow="never" class="block">
-        <div slot="header">Subscription Metrics (last 30 days)</div>
+        <div slot="header" class="metrics-header">
+          <span>Subscription Metrics</span>
+          <el-date-picker
+            v-model="dateRange"
+            type="daterange"
+            value-format="yyyy-MM-dd"
+            range-separator="–"
+            start-placeholder="From"
+            end-placeholder="To"
+            size="small"
+            :clearable="true"
+            @change="loadMetrics"
+          />
+        </div>
         <div v-if="metrics" class="metrics-row">
           <div class="metric">
             <div class="metric-label">Devices bound</div>
@@ -35,13 +48,33 @@
             <div class="metric-value">{{ metrics.mrr_inr }}</div>
           </div>
           <div class="metric">
-            <div class="metric-label">Churn events 30d</div>
+            <div class="metric-label">Churn events</div>
             <div class="metric-value">{{ churnTotal }}</div>
           </div>
         </div>
-        <div v-if="metrics && Object.keys(metrics.gate_hits_30d).length" class="gate-hits">
-          <span class="metric-label">Gate hits by reason:</span>
-          <el-tag v-for="(count, reason) in metrics.gate_hits_30d" :key="reason" size="small" class="gate-tag">
+        <div v-if="metrics && Object.keys(metrics.mrr_by_tier).length" class="gate-hits">
+          <span class="metric-label">MRR by plan:</span>
+          <el-tag v-for="(inr, tier) in metrics.mrr_by_tier" :key="tier" size="small" type="success" class="gate-tag">
+            {{ tier }}: ₹{{ inr }}
+          </el-tag>
+        </div>
+        <div v-if="metrics && metrics.trends" class="trends-row">
+          <div v-for="t in trendBlocks" :key="t.label" class="trend">
+            <div class="metric-label">{{ t.label }} ({{ t.total }})</div>
+            <svg viewBox="0 0 120 30" class="spark" preserveAspectRatio="none">
+              <polyline :points="sparkPoints(t.series)" fill="none" stroke="#409EFF" stroke-width="1.5" />
+            </svg>
+          </div>
+        </div>
+        <div v-if="metrics && Object.keys(metrics.gate_hits).length" class="gate-hits">
+          <span class="metric-label">Gate hits by reason (click to drill down):</span>
+          <el-tag
+            v-for="(count, reason) in metrics.gate_hits"
+            :key="reason"
+            size="small"
+            class="gate-tag gate-tag-click"
+            @click.native="openGateHits(reason)"
+          >
             {{ reason }}: {{ count }}
           </el-tag>
         </div>
@@ -162,6 +195,27 @@
         <el-button @click="regrantVisible = false">Cancel</el-button>
         <el-button type="primary" :loading="acting" @click="doRegrant">Re-grant</el-button>
       </span>
+    </el-dialog>
+
+    <!-- Gate-hit drill-down (SUB-20) -->
+    <el-dialog :title="`Gate hits — ${gateHits ? gateHits.reason : ''}`" :visible.sync="gateHitsVisible" width="620px">
+      <el-table
+        v-if="gateHits && gateHits.devices.length"
+        :data="gateHits.devices"
+        size="small"
+        class="row-clickable"
+        @row-click="openGateHitDevice"
+      >
+        <el-table-column prop="mac_address" label="MAC" width="160" />
+        <el-table-column prop="alias" label="Device" width="110" />
+        <el-table-column prop="parent" label="Parent" min-width="140" />
+        <el-table-column prop="flow" label="Flow" width="80" />
+        <el-table-column prop="hits" label="Hits" width="60" />
+        <el-table-column label="Last hit" width="140">
+          <template slot-scope="{ row }">{{ fmtDate(row.last_hit, true) }}</template>
+        </el-table-column>
+      </el-table>
+      <em v-else class="muted">No devices hit this gate in the selected range.</em>
     </el-dialog>
 
     <!-- Device detail drawer (SUB-18) -->
@@ -317,12 +371,25 @@ export default {
       actionBusy: false,
       overrideStatuses: ['active', 'trial', 'lapsed'],
       plans: [],
+      dateRange: null,
+      gateHits: null,
+      gateHitsVisible: false,
     }
   },
   computed: {
     churnTotal() {
       if (!this.metrics) return 0
-      return Object.values(this.metrics.churn_30d).reduce((a, b) => a + b, 0)
+      return Object.values(this.metrics.churn).reduce((a, b) => a + b, 0)
+    },
+    trendBlocks() {
+      const t = this.metrics && this.metrics.trends
+      if (!t) return []
+      const sum = (a) => a.reduce((x, y) => x + y, 0)
+      return [
+        { label: 'Trials started', series: t.trials, total: sum(t.trials) },
+        { label: 'Paid events', series: t.paid, total: sum(t.paid) },
+        { label: 'Lapses', series: t.lapsed, total: sum(t.lapsed) },
+      ]
     },
     usageBars() {
       const d = this.detail
@@ -368,10 +435,40 @@ export default {
       if (!withTime) return date
       return `${date} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     },
+    rangeParams() {
+      if (!this.dateRange || this.dateRange.length !== 2) return {}
+      // End of the picked "to" day, so that day's events are included.
+      return { from: this.dateRange[0], to: `${this.dateRange[1]}T23:59:59.999Z` }
+    },
     loadMetrics() {
-      subscriptionAdminApi.getMetrics(({ data }) => {
+      subscriptionAdminApi.getMetrics(this.rangeParams(), ({ data }) => {
         if (data.code === 0) this.metrics = data.data
       })
+    },
+    openGateHits(reason) {
+      subscriptionAdminApi.getGateHits({ reason, ...this.rangeParams() }, ({ data }) => {
+        if (data.code === 0) {
+          this.gateHits = data.data
+          this.gateHitsVisible = true
+        } else {
+          this.$message.error(data.msg || 'Drill-down failed')
+        }
+      })
+    },
+    openGateHitDevice(row) {
+      this.gateHitsVisible = false
+      this.openDetail(row)
+    },
+    sparkPoints(series) {
+      if (!series || !series.length) return ''
+      const max = Math.max(...series, 1)
+      const w = 120
+      const h = 30
+      const pad = 2
+      const step = series.length > 1 ? (w - 2 * pad) / (series.length - 1) : 0
+      return series
+        .map((v, i) => `${(pad + i * step).toFixed(1)},${(h - pad - (v / max) * (h - 2 * pad)).toFixed(1)}`)
+        .join(' ')
     },
     loadAudit() {
       subscriptionAdminApi.getAuditLog({ limit: 50 }, ({ data }) => {
@@ -547,6 +644,27 @@ export default {
 }
 .gate-tag {
   margin-left: 8px;
+}
+.gate-tag-click {
+  cursor: pointer;
+}
+.metrics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.trends-row {
+  display: flex;
+  gap: 32px;
+  margin-top: 14px;
+}
+.trend {
+  width: 160px;
+}
+.spark {
+  width: 100%;
+  height: 30px;
+  margin-top: 4px;
 }
 .results-table {
   margin-top: 14px;

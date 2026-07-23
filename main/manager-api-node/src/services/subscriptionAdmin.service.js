@@ -521,38 +521,98 @@ const getAuditLog = async ({ mac, limit = 50 } = {}) => {
   }));
 };
 
+/** Longest metrics range the dashboard may ask for. */
+const MAX_RANGE_DAYS = 366;
+
+/** Normalise a from/to pair: default last 30d, clamp order and length. */
+const resolveRange = (from, to, now) => {
+  const end = to instanceof Date && !isNaN(to) ? to : now;
+  let start = from instanceof Date && !isNaN(from) ? from : new Date(end.getTime() - 30 * DAY_MS);
+  if (start > end) start = new Date(end.getTime() - 30 * DAY_MS);
+  if (end.getTime() - start.getTime() > MAX_RANGE_DAYS * DAY_MS) {
+    start = new Date(end.getTime() - MAX_RANGE_DAYS * DAY_MS);
+  }
+  return { from: start, to: end };
+};
+
+/** UTC day key for trend buckets, e.g. "2026-07-23". */
+const dayKey = (d) => d.toISOString().slice(0, 10);
+
+const PAID_EVENTS = ['INITIAL_PURCHASE', 'RENEWAL'];
+const CHURN_EVENTS = ['EXPIRATION', 'CANCELLATION'];
+
 /**
- * Dashboard metrics: conversion funnel, churn, MRR, gate hits by reason.
+ * Dashboard metrics: conversion funnel (point-in-time), and range-driven
+ * churn / gate hits / trends (SUB-20). Historical per-day *status* is not
+ * stored anywhere, so the trends are daily counts of the recorded signals:
+ * trial starts (trial_started_at), paid store events, and churn events.
  * Live queries — no materialised views; call volume is one admin page.
  */
-const getMetrics = async ({ now = new Date() } = {}) => {
-  const since30d = new Date(now.getTime() - 30 * DAY_MS);
+const getMetrics = async ({ from, to, now = new Date() } = {}) => {
+  const range = resolveRange(from, to, now);
+  const inRange = { gte: range.from, lte: range.to };
 
-  const [bound, statusCounts, activeWithPlan, churnEvents, gateHits] = await Promise.all([
+  const [bound, statusCounts, activeWithPlan, events, gateHits, trialStarts] = await Promise.all([
     prisma.ai_device.count({ where: { user_id: { not: null } } }),
     prisma.device_subscriptions.groupBy({ by: ['status'], _count: { _all: true } }),
     prisma.device_subscriptions.findMany({
       where: { status: 'active' },
-      select: { subscription_plans: { select: { price_inr: true } } },
+      select: { subscription_plans: { select: { tier: true, price_inr: true } } },
     }),
-    prisma.subscription_events.groupBy({
-      by: ['event_type'],
-      where: { event_type: { in: ['EXPIRATION', 'CANCELLATION'] }, created_at: { gte: since30d } },
-      _count: { _all: true },
+    prisma.subscription_events.findMany({
+      where: { event_type: { in: [...PAID_EVENTS, ...CHURN_EVENTS] }, created_at: inRange },
+      select: { event_type: true, created_at: true },
     }),
     prisma.subscription_gate_hits.groupBy({
       by: ['reason'],
-      where: { created_at: { gte: since30d } },
+      where: { created_at: inRange },
       _count: { _all: true },
+    }),
+    prisma.device_subscriptions.findMany({
+      where: { trial_started_at: inRange },
+      select: { trial_started_at: true },
     }),
   ]);
 
   const trialsStarted = await prisma.device_subscriptions.count({ where: { trial_used: true } });
 
   const status = Object.fromEntries(statusCounts.map((s) => [s.status, s._count._all]));
-  const mrrInr = activeWithPlan.reduce((sum, r) => sum + (r.subscription_plans?.price_inr || 0), 0);
+
+  const mrrByTier = {};
+  let mrrInr = 0;
+  for (const r of activeWithPlan) {
+    const p = r.subscription_plans;
+    if (!p) continue;
+    mrrInr += p.price_inr || 0;
+    mrrByTier[p.tier] = (mrrByTier[p.tier] || 0) + (p.price_inr || 0);
+  }
+
+  // Daily trend buckets over the range (UTC day keys).
+  const days = [];
+  const index = new Map();
+  for (let t = Math.floor(range.from.getTime() / DAY_MS) * DAY_MS; t <= range.to.getTime(); t += DAY_MS) {
+    index.set(dayKey(new Date(t)), days.length);
+    days.push(dayKey(new Date(t)));
+  }
+  const zeros = () => new Array(days.length).fill(0);
+  const trends = { days, trials: zeros(), paid: zeros(), lapsed: zeros() };
+  const bump = (series, date) => {
+    const i = index.get(dayKey(date));
+    if (i !== undefined) series[i] += 1;
+  };
+  for (const s of trialStarts) bump(trends.trials, s.trial_started_at);
+  const churn = {};
+  for (const e of events) {
+    if (!e.created_at) continue;
+    if (PAID_EVENTS.includes(e.event_type)) bump(trends.paid, e.created_at);
+    else {
+      bump(trends.lapsed, e.created_at);
+      churn[e.event_type] = (churn[e.event_type] || 0) + 1;
+    }
+  }
 
   return {
+    range: { from: range.from, to: range.to },
     funnel: {
       devices_bound: bound,
       trials_started: trialsStarted,
@@ -562,9 +622,58 @@ const getMetrics = async ({ now = new Date() } = {}) => {
       lapsed_now: status.lapsed || 0,
       cancelled_now: status.cancelled || 0,
     },
-    churn_30d: Object.fromEntries(churnEvents.map((e) => [e.event_type, e._count._all])),
+    churn,
     mrr_inr: mrrInr,
-    gate_hits_30d: Object.fromEntries(gateHits.map((g) => [g.reason, g._count._all])),
+    mrr_by_tier: mrrByTier,
+    gate_hits: Object.fromEntries(gateHits.map((g) => [g.reason, g._count._all])),
+    trends,
+  };
+};
+
+/**
+ * Gate-hit drill-down (SUB-20): which devices hit a given refusal reason in
+ * the range, grouped per device+flow with hit count and last hit, joined to
+ * the parent for recognisability. Each row's MAC opens the SUB-18 drawer.
+ */
+const getGateHits = async ({ reason, from, to, now = new Date(), limit = 100 } = {}) => {
+  const why = (reason || '').trim();
+  if (!why) throw Object.assign(new Error('reason is required'), { statusCode: 400 });
+  const range = resolveRange(from, to, now);
+
+  const groups = await prisma.subscription_gate_hits.groupBy({
+    by: ['mac_address', 'flow'],
+    where: { reason: why, created_at: { gte: range.from, lte: range.to } },
+    _count: { _all: true },
+    _max: { created_at: true },
+    orderBy: { _max: { created_at: 'desc' } },
+    take: limit,
+  });
+  if (groups.length === 0) return { range, reason: why, devices: [] };
+
+  const devices = await prisma.ai_device.findMany({
+    where: { mac_address: { in: groups.map((g) => g.mac_address) } },
+    select: {
+      mac_address: true,
+      alias: true,
+      sys_user: { select: { email: true, nickname: true } },
+    },
+  });
+  const byMac = new Map(devices.map((d) => [d.mac_address, d]));
+
+  return {
+    range,
+    reason: why,
+    devices: groups.map((g) => {
+      const d = byMac.get(g.mac_address);
+      return {
+        mac_address: g.mac_address,
+        flow: g.flow,
+        hits: g._count._all,
+        last_hit: g._max.created_at,
+        parent: d ? d.sys_user?.email || d.sys_user?.nickname || null : null,
+        alias: d ? d.alias || null : null,
+      };
+    }),
   };
 };
 
@@ -579,4 +688,5 @@ module.exports = {
   changePlan,
   getAuditLog,
   getMetrics,
+  getGateHits,
 };

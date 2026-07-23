@@ -159,9 +159,10 @@ export default {
                 })
             }).send()
     },
-    getMetrics(callback) {
+    getMetrics(params, callback) {
+        const query = new URLSearchParams(params).toString()
         RequestService.sendRequest()
-            .url(`${getServiceUrl()}/admin/subscriptions/metrics`)
+            .url(`${getServiceUrl()}/admin/subscriptions/metrics${query ? `?${query}` : ''}`)
             .method('GET')
             .success((res) => {
                 RequestService.clearRequestTime()
@@ -170,7 +171,23 @@ export default {
             .networkFail((err) => {
                 console.error('Metrics fetch failed:', err)
                 RequestService.reAjaxFun(() => {
-                    this.getMetrics(callback)
+                    this.getMetrics(params, callback)
+                })
+            }).send()
+    },
+    getGateHits(params, callback) {
+        const query = new URLSearchParams(params).toString()
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/subscriptions/gate-hits?${query}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Gate-hits fetch failed:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getGateHits(params, callback)
                 })
             }).send()
     },
