@@ -10,7 +10,7 @@ const mockPrisma = {
   subscription_plans: { findUnique: jest.fn() },
   subscription_admin_audit: { create: jest.fn(), findMany: jest.fn() },
   subscription_events: { groupBy: jest.fn(), findMany: jest.fn() },
-  subscription_gate_hits: { groupBy: jest.fn() },
+  subscription_gate_hits: { groupBy: jest.fn(), findFirst: jest.fn() },
 };
 // $transaction(cb) runs the callback with the same mock as tx.
 mockPrisma.$transaction = jest.fn((cb) => cb(mockPrisma));
@@ -377,13 +377,32 @@ describe('getDetail', () => {
     expect(out.device.parent_phone).toBe('99999');
   });
 
-  test('unknown MAC (no device and no sub row) 404s', async () => {
+  test('unknown MAC (no device, no sub row, no gate hits) 404s', async () => {
     mockSubService.getSubscriptionSummary.mockResolvedValue(null);
     mockSubService.getSessionVerdict.mockResolvedValue({ allowed: false, reason: 'no_plan' });
     mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
     mockPrisma.ai_device.findFirst.mockResolvedValue(null);
+    mockPrisma.subscription_gate_hits.findFirst.mockResolvedValue(null);
 
     await expect(service.getDetail(MAC)).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  test('unbound MAC whose only record is the gate-hit ledger gets the none shell', async () => {
+    // The SUB-20 drill-down lists these; the drawer must open, not 404.
+    mockSubService.getSubscriptionSummary.mockResolvedValue(null);
+    mockSubService.getSessionVerdict.mockResolvedValue({ allowed: false, reason: 'no_plan' });
+    mockPrisma.device_subscriptions.findUnique.mockResolvedValue(null);
+    mockPrisma.ai_device.findFirst.mockResolvedValue(null);
+    mockPrisma.subscription_gate_hits.findFirst.mockResolvedValue({ id: 1n });
+    mockPrisma.subscription_events.findMany.mockResolvedValue([]);
+    mockPrisma.subscription_admin_audit.findMany.mockResolvedValue([]);
+
+    const out = await service.getDetail(MAC);
+
+    expect(out.status).toBe('none');
+    expect(out.gate.reason).toBe('no_plan');
+    expect(out.device).toBeNull();
+    expect(out.plan).toBeNull();
   });
 
   test('bound device with no subscription row → empty (status none) shell', async () => {

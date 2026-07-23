@@ -416,8 +416,10 @@ const changePlan = async (macAddress, tier, adminUser, reason) => {
  * fields, the webhook event ledger, and this MAC's override history are added
  * on top.
  *
- * Unknown MAC (no device *and* no subscription row) → 404. A bound device with
- * no subscription row → 200 with an empty (status 'none') shell.
+ * Unknown MAC → 404, but "known" is any trace of the MAC: a subscription row,
+ * an ai_device row, or gate-hit history. The gate-hit drill-down (SUB-20)
+ * lists unbound MACs whose only record IS the refusal ledger — those get the
+ * empty (status 'none') shell, same as a bound device with no subscription.
  */
 const getDetail = async (macAddress, { now = new Date() } = {}) => {
   const normalizedMac = normalizeMacAddress(macAddress);
@@ -454,7 +456,13 @@ const getDetail = async (macAddress, { now = new Date() } = {}) => {
     }),
   ]);
 
-  if (!row && !device) throw Object.assign(new Error('Unknown MAC'), { statusCode: 404 });
+  if (!row && !device) {
+    const gateHit = await prisma.subscription_gate_hits.findFirst({
+      where: { mac_address: normalizedMac },
+      select: { id: true },
+    });
+    if (!gateHit) throw Object.assign(new Error('Unknown MAC'), { statusCode: 404 });
+  }
 
   const [events, audit] = await Promise.all([
     prisma.subscription_events.findMany({
