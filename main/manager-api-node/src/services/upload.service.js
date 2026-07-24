@@ -198,9 +198,27 @@ async function listImagineImages(deviceMac) {
     .map((o) => ({ url: `${IMAGINE_PUBLIC_BASE}/${o.Key}`, createdAt: o.LastModified }));
 }
 
+/**
+ * Upload a kid's profile avatar image to S3 and return the public CloudFront URL.
+ */
+async function uploadKidAvatar(fileBuffer, kidId, mimeType) {
+  const ext = mimeType === 'image/png' ? '.png' : '.jpg';
+  const s3Key = `kids/avatars/${kidId}-${randomUUID()}${ext}`;
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: fileBuffer,
+    ContentType: mimeType || 'image/jpeg',
+    CacheControl: 'max-age=31536000',
+  }));
+  const url = `https://${CLOUDFRONT_DOMAIN}/${s3Key}`;
+  return { success: true, url, s3Key };
+}
+
 module.exports = {
   uploadContentFile,
   uploadThumbnail,
   uploadImagineImage,
+  uploadKidAvatar,
   listImagineImages
 };

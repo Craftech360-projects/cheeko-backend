@@ -30,6 +30,19 @@ const voiceCardUpload = multer({
     },
 });
 
+const kidAvatarUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 8 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+        if (allowedMimes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Invalid file type. Only JPEG, PNG, or WEBP images are allowed.'));
+        }
+    },
+});
+
 // Device firmware only reliably decodes MP3; phone recordings commonly arrive as m4a/wav/ogg.
 const VOICE_CARD_MIME_TO_EXT = {
     'audio/mpeg': '.mp3',
@@ -240,6 +253,22 @@ router.put('/kids/:id', asyncHandler(async (req, res) => {
 router.delete('/kids/:id', asyncHandler(async (req, res) => {
     await mobileService.deleteKid(req.firebaseUser.uid, req.params.id);
     success(res, null, 'Kid profile deleted');
+}));
+
+router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(async (req, res) => {
+    if (!req.file) {
+        return badRequest(res, 'No file uploaded');
+    }
+
+    const uploadResult = await uploadService.uploadKidAvatar(
+        req.file.buffer,
+        req.params.id,
+        req.file.mimetype
+    );
+
+    const kid = await mobileService.updateKid(req.params.id, { avatar_url: uploadResult.url });
+
+    success(res, { avatarUrl: uploadResult.url, kid });
 }));
 
 // ─── RPC Replacements ───────────────────────────────────────────────────────
