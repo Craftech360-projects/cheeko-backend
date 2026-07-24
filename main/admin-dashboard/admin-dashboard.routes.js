@@ -94,6 +94,16 @@ router.put('/templates/:id', gate, asyncHandler(async (req, res) => {
   }
 }));
 
+// Delete a character template.
+router.delete('/templates/:id', gate, asyncHandler(async (req, res) => {
+  try {
+    await agentService.deleteTemplate(req.params.id);
+    success(res, null, 'Deleted');
+  } catch (err) {
+    return badRequest(res, err.message);
+  }
+}));
+
 // Static dashboard files (this same folder).
 router.use('/', express.static(path.join(__dirname, 'public')));
 

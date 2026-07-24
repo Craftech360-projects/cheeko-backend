@@ -100,6 +100,21 @@ async function save() {
   }
 }
 
+async function deleteChar() {
+  const id = $('charSelect').value;
+  if (!id) return;
+  const name = $('charSelect').selectedOptions[0]?.textContent || 'this character';
+  if (!confirm(`Delete ${name}? This cannot be undone.`)) return;
+  setStatus('Deleting…');
+  try {
+    await api('DELETE', '/templates/' + id);
+    await showEditor();
+    setStatus('Deleted ✓', true);
+  } catch (e) {
+    setStatus(e.message, false);
+  }
+}
+
 function setStatus(msg, ok) {
   const el = $('status');
   el.textContent = msg;
@@ -167,6 +182,7 @@ $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(
 $('logout').addEventListener('click', logout);
 $('charSelect').addEventListener('change', loadChar);
 $('saveBtn').addEventListener('click', save);
+$('deleteBtn').addEventListener('click', deleteChar);
 $('newBtn').addEventListener('click', enterCreateMode);
 $('cancelNewBtn').addEventListener('click', exitCreateMode);
 
