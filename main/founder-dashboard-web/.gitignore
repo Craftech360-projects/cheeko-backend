@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Secrets — never commit env files (see docs/KNOWN_ISSUES_PR137_PR138.md: rotate leaked key)
+.env
+.env.*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
