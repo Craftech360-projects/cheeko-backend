@@ -2450,6 +2450,29 @@ const createTemplate = async (data) => {
   validateAgentMd(data.systemPrompt);
   const toNullIfEmpty = (val) => (val === '' || val === undefined) ? null : val;
 
+  // No duplicate names/codes: by-name persona resolution and RFID routing key
+  // on agent_name, so a duplicate would resolve to an arbitrary row.
+  const dupName = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: data.agentName, mode: 'insensitive' } },
+    select: { id: true },
+  });
+  if (dupName) {
+    const err = new Error(`Agent name "${data.agentName}" already exists`);
+    err.statusCode = 400;
+    throw err;
+  }
+  if (data.agentCode) {
+    const dupCode = await prisma.ai_agent_template.findFirst({
+      where: { agent_code: { equals: data.agentCode, mode: 'insensitive' } },
+      select: { id: true },
+    });
+    if (dupCode) {
+      const err = new Error(`Agent code "${data.agentCode}" already exists`);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
   const template = await prisma.ai_agent_template.create({
     data: {
       agent_code: data.agentCode || null,
@@ -2464,6 +2487,7 @@ const createTemplate = async (data) => {
       intent_model_id: toNullIfEmpty(data.intentModelId),
       chat_history_conf: data.chatHistoryConf || 0,
       system_prompt: data.systemPrompt,
+      soul: data.soul ?? null,
       summary_memory: data.summaryMemory,
       lang_code: data.langCode || 'en',
       language: data.language || 'English',

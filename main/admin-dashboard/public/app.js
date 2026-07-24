@@ -5,6 +5,8 @@ const API = '/api'; // proxied by server.js to the Manager's /admin-dashboard ro
 const $ = (id) => document.getElementById(id);
 
 let token = sessionStorage.getItem('adminToken') || '';
+let creating = false;   // create-mode: editors hold a NEW character
+let charList = [];      // cached template list for client-side dup checks
 
 // fetch wrapper: attaches Bearer, unwraps { code, msg, data }.
 async function api(method, path, body) {
@@ -66,7 +68,8 @@ async function showEditor() {
       opt.textContent = `${t.agentName}  (${String(t.id).slice(0, 8)})`;
       sel.appendChild(opt);
     });
-    if (list.length) await loadChar();
+    charList = list;
+    if (list.length && !creating) await loadChar();
   } catch (e) {
     // token gone stale -> back to login
     if (/password|token|unauth/i.test(e.message)) return logout();
@@ -83,6 +86,7 @@ async function loadChar() {
 }
 
 async function save() {
+  if (creating) return createChar();
   setStatus('Saving…');
   const id = $('charSelect').value;
   try {
@@ -102,12 +106,69 @@ function setStatus(msg, ok) {
   el.className = 'status' + (msg ? (ok ? ' ok' : ' err') : '');
 }
 
+// ---- create mode ----
+function enterCreateMode() {
+  creating = true;
+  $('newCharBar').hidden = false;
+  $('newName').value = '';
+  $('newCode').value = '';
+  $('charSelect').disabled = true;
+  $('agentMd').value = '';
+  $('soulMd').value = '';
+  setStatus('Fill name, AGENT.md and SOUL.md, then Save.');
+  $('newName').focus();
+}
+
+async function exitCreateMode() {
+  creating = false;
+  $('newCharBar').hidden = true;
+  $('charSelect').disabled = false;
+  setStatus('');
+  if ($('charSelect').value) await loadChar();
+}
+
+async function createChar() {
+  const name = $('newName').value.trim();
+  const code = $('newCode').value.trim();
+  const agentMd = $('agentMd').value;
+  const soulMd = $('soulMd').value;
+  if (!name) return setStatus('Agent name is required', false);
+  if (/[0-9]/.test(name)) return setStatus('Agent name must not contain numbers', false);
+  if (code && /[0-9]/.test(code)) return setStatus('Agent code must not contain numbers', false);
+  if (charList.some((t) => String(t.agentName).toLowerCase() === name.toLowerCase()))
+    return setStatus(`Agent name "${name}" already exists`, false);
+  if (!agentMd.trim()) return setStatus('AGENT.md (system_prompt) is required', false);
+  if (!soulMd.trim()) return setStatus('SOUL.md (soul) is required', false);
+  setStatus('Creating…');
+  try {
+    const data = await api('POST', '/templates', {
+      agentName: name,
+      agentCode: code || undefined,
+      systemPrompt: agentMd,
+      soul: soulMd,
+    });
+    creating = false;
+    $('newCharBar').hidden = true;
+    $('charSelect').disabled = false;
+    await showEditor();
+    if (data && data.id) {
+      $('charSelect').value = data.id;
+      await loadChar();
+    }
+    setStatus('Created ✓', true);
+  } catch (e) {
+    setStatus(e.message, false); // server-side dup/validator message
+  }
+}
+
 // ---- wire up ----
 $('loginBtn').addEventListener('click', login);
 $('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
 $('logout').addEventListener('click', logout);
 $('charSelect').addEventListener('change', loadChar);
 $('saveBtn').addEventListener('click', save);
+$('newBtn').addEventListener('click', enterCreateMode);
+$('cancelNewBtn').addEventListener('click', exitCreateMode);
 
 // auto-resume if token already stored
 if (token) showEditor();

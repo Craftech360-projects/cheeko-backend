@@ -256,6 +256,21 @@ class TestClient:
                     "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
                 stop_recording_event.set()  # This will cause the recording thread loop to exit
 
+            # Handle mode_update (character switch): adopt the new session_id
+            elif payload.get("type") == "mode_update":
+                new_sid = payload.get("session_id")
+                if new_sid and udp_session_details:
+                    old_sid = udp_session_details.get("session_id")
+                    udp_session_details["session_id"] = new_sid
+                    logger.info("[MODE] Adopted new session_id %s (was %s), character=%s",
+                                new_sid, old_sid, payload.get("character"))
+                # Flush buffered old-character audio so the new voice starts clean
+                try:
+                    while True:
+                        self.audio_playback_queue.get_nowait()
+                except Empty:
+                    pass
+
             else:
                 mqtt_message_queue.put(payload)
         except (json.JSONDecodeError, Exception) as e:

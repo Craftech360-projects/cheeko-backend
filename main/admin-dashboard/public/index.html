@@ -49,6 +49,20 @@
             <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
           </div>
         </div>
+        <button id="newBtn" class="btn ghost">+ New Character</button>
+      </div>
+
+      <!-- New-character bar (create mode only) -->
+      <div class="card toolbar" id="newCharBar" hidden>
+        <div class="field">
+          <label for="newName">Name (required, no numbers)</label>
+          <input id="newName" placeholder="e.g. Bheem" />
+        </div>
+        <div class="field">
+          <label for="newCode">Code (optional, no numbers)</label>
+          <input id="newCode" placeholder="e.g. bheem" />
+        </div>
+        <button id="cancelNewBtn" class="btn ghost">Cancel</button>
       </div>
 
       <div class="editor-grid">
