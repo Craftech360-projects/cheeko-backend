@@ -2659,7 +2659,7 @@ const recordCardTap = async (payload = {}) => {
   const clientContentHash = normalizeVersion(payload.localContentHash || payload.local_content_hash || payload.clientContentHash || payload.client_content_hash);
   const source = normalizeVersion(payload.source) || 'gateway';
 
-  const [device, mapping] = await Promise.all([
+  const [device, initialMapping] = await Promise.all([
     prisma.ai_device.findFirst({
       where: { mac_address: normalizedMac },
       select: { id: true, alias: true, kid_id: true, user_id: true }
@@ -2673,6 +2673,57 @@ const recordCardTap = async (payload = {}) => {
       }
     })
   ]);
+
+  let mapping = initialMapping;
+  const pendingPairing = await prisma.pending_card_pairing.findFirst({
+    where: { mac_address: normalizedMac, status: 'pending', expires_at: { gt: new Date() } },
+    orderBy: { created_at: 'desc' }
+  });
+
+  const canClaimForPairing = !mapping || mapping.card_type === 'custom_voice';
+  if (pendingPairing && canClaimForPairing) {
+    try {
+      await prisma.rfid_card_mapping.upsert({
+        where: { rfid_uid: normalizedUid },
+        create: {
+          rfid_uid: normalizedUid,
+          content_pack_id: pendingPairing.content_pack_id,
+          card_type: 'custom_voice',
+          active: true
+        },
+        update: {
+          content_pack_id: pendingPairing.content_pack_id,
+          card_type: 'custom_voice',
+          active: true,
+          pack_id: null,
+          question_id: null,
+          question_pack_id: null,
+          question_ids: [],
+          action_type: null,
+          action_data: {}
+        }
+      });
+      await prisma.pending_card_pairing.update({
+        where: { id: pendingPairing.id },
+        data: { status: 'completed', rfid_uid: normalizedUid }
+      });
+      mapping = await prisma.rfid_card_mapping.findFirst({
+        where: { rfid_uid: normalizedUid, active: true },
+        include: {
+          rfid_content_pack: {
+            select: { id: true, pack_code: true, name: true, version: true, content_hash: true }
+          }
+        }
+      });
+    } catch (pairingErr) {
+      logger.warn(`[RFID-TAP] Failed to complete pending pairing for mac=${normalizedMac}: ${pairingErr.message}`);
+    }
+  } else if (pendingPairing && mapping) {
+    await prisma.pending_card_pairing.update({
+      where: { id: pendingPairing.id },
+      data: { status: 'rejected_non_blank', rfid_uid: normalizedUid }
+    });
+  }
 
   let lookupResolved = null;
   if (!mapping) {
@@ -3114,6 +3165,122 @@ const registerDeviceTags = async (mac, tags) => {
   }
 
   return results;
+};
+
+// =============================================
+// Custom Voice Cards (parent recording → blank RFID card pairing)
+// =============================================
+
+/**
+ * Create a content pack + single content item for a parent-recorded voice message.
+ * @param {Object} params
+ * @param {string} params.audioUrl - Uploaded audio CDN URL
+ * @param {number|string} params.userId - Mobile user id (creator)
+ * @returns {Promise<{contentPackId: number}>}
+ */
+const createCustomVoiceCardPack = async ({ audioUrl, userId }) => {
+  if (!audioUrl) {
+    throw new Error('audioUrl is required');
+  }
+
+  const packCode = `custom_voice_${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  const pack = await prisma.rfid_content_pack.create({
+    data: {
+      pack_code: packCode,
+      name: 'Custom Voice Card',
+      content_type: 'custom_voice',
+      total_items: 1,
+      active: true,
+      creator: userId ? BigInt(userId) : null
+    }
+  });
+
+  await prisma.content_item.create({
+    data: {
+      content_pack_id: pack.id,
+      item_number: 1,
+      audio_url: audioUrl,
+      creator: userId ? BigInt(userId) : null,
+      active: true
+    }
+  });
+
+  return { contentPackId: Number(pack.id) };
+};
+
+/**
+ * Open a 60s pairing window: the next tap on this device claims the given content pack.
+ * @param {Object} params
+ * @param {string} params.macAddress - Normalized device MAC
+ * @param {number|string} params.contentPackId
+ * @param {number|string} [params.kidId]
+ * @param {number|string} params.userId
+ * @returns {Promise<Object>} pending_card_pairing row
+ */
+const createPendingCardPairing = async ({ macAddress, contentPackId, kidId, userId }) => {
+  // Validate contentPackId is a positive integer before BigInt() (which 500s on junk input)
+  if (contentPackId === null || contentPackId === undefined || !/^\d+$/.test(String(contentPackId)) || BigInt(contentPackId) <= 0n) {
+    const error = new Error('contentPackId must be a positive integer');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Guard against IDOR: the pack must exist, be a custom voice card, and belong to the caller
+  const pack = await prisma.rfid_content_pack.findUnique({
+    where: { id: BigInt(contentPackId) },
+    select: { id: true, content_type: true, creator: true }
+  });
+  if (!pack) {
+    const error = new Error('content pack not found');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (pack.content_type !== 'custom_voice') {
+    const error = new Error('not a custom voice card pack');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (pack.creator !== null && pack.creator !== BigInt(userId)) {
+    const error = new Error('pack not owned by user');
+    error.statusCode = 403;
+    throw error;
+  }
+
+  const expiresAt = new Date(Date.now() + 60 * 1000);
+
+  return prisma.pending_card_pairing.create({
+    data: {
+      mac_address: macAddress,
+      content_pack_id: BigInt(contentPackId),
+      kid_id: kidId ? BigInt(kidId) : null,
+      user_id: BigInt(userId),
+      status: 'pending',
+      expires_at: expiresAt
+    }
+  });
+};
+
+/**
+ * Get pairing status, lazily flipping expired pending pairings on read.
+ * @param {number|string} pairingId
+ * @returns {Promise<Object|null>}
+ */
+const getPendingCardPairingStatus = async (pairingId) => {
+  const pairing = await prisma.pending_card_pairing.findUnique({
+    where: { id: BigInt(pairingId) }
+  });
+  if (!pairing) return null;
+
+  if (pairing.status === 'pending' && pairing.expires_at < new Date()) {
+    const updated = await prisma.pending_card_pairing.update({
+      where: { id: pairing.id },
+      data: { status: 'expired' }
+    });
+    return updated;
+  }
+
+  return pairing;
 };
 
 // =============================================
@@ -4590,6 +4757,11 @@ module.exports = {
   getCardTapLogs,
   getCardTapAnalyticsSummary,
   registerDeviceTags,
+
+  // Custom Voice Cards
+  createCustomVoiceCardPack,
+  createPendingCardPairing,
+  getPendingCardPairingStatus,
 
   // Content Item methods (Task 3)
   getContentItemsByPackId,

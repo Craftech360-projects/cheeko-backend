@@ -32,6 +32,9 @@ ENV NODE_ENV=production
 
 WORKDIR /app
 
+# Install ffmpeg (required by fluent-ffmpeg for audio processing)
+RUN apk add --no-cache ffmpeg
+
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs \
     && adduser -S nodeuser -u 1001 -G nodejs
