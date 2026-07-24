@@ -54,6 +54,32 @@ router.get('/templates/:id', gate, asyncHandler(async (req, res) => {
   success(res, { id: t.id, agentName: t.agentName, systemPrompt: t.systemPrompt, soul: t.soul });
 }));
 
+// Create a character template. AGENT.md + SOUL.md are mandatory; name/code
+// must contain no digits and be unique (service enforces uniqueness).
+router.post('/templates', gate, asyncHandler(async (req, res) => {
+  const b = req.body || {};
+  const agentName = String(b.agentName || '').trim();
+  const agentCode = String(b.agentCode || '').trim();
+  if (!agentName) return badRequest(res, 'Agent name is required');
+  if (/[0-9]/.test(agentName)) return badRequest(res, 'Agent name must not contain numbers');
+  if (agentCode && /[0-9]/.test(agentCode)) return badRequest(res, 'Agent code must not contain numbers');
+  if (!b.systemPrompt || !String(b.systemPrompt).trim()) return badRequest(res, 'AGENT.md (system_prompt) is required');
+  if (!b.soul || !String(b.soul).trim()) return badRequest(res, 'SOUL.md (soul) is required');
+  try {
+    const id = await agentService.createTemplate({
+      agentName,
+      agentCode: agentCode || undefined,
+      systemPrompt: b.systemPrompt,
+      soul: b.soul,
+      language: b.language,
+      langCode: b.langCode,
+    });
+    success(res, { id }, 'Created');
+  } catch (err) {
+    return badRequest(res, err.message); // dup name/code + validator 400s go to UI
+  }
+}));
+
 // Save AGENT.md (systemPrompt) + SOUL.md (soul). updateTemplate runs
 // validateAgentMd → throws statusCode 400 on malformed AGENT.md; we surface it.
 router.put('/templates/:id', gate, asyncHandler(async (req, res) => {

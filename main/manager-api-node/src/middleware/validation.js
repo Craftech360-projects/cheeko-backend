@@ -136,8 +136,10 @@ const schemas = {
 
   // Agent template create/update
   agentTemplate: Joi.object({
-    agentCode: Joi.string().max(100),
-    agentName: Joi.string().max(255).required(),
+    agentCode: Joi.string().max(100).pattern(/^[^0-9]+$/)
+      .messages({ 'string.pattern.base': 'agentCode must not contain numbers' }),
+    agentName: Joi.string().max(255).required().pattern(/^[^0-9]+$/)
+      .messages({ 'string.pattern.base': 'agentName must not contain numbers' }),
     asrModelId: Joi.string().uuid().allow(null, ''),
     vadModelId: Joi.string().uuid().allow(null, ''),
     llmModelId: Joi.string().uuid().allow(null, ''),
