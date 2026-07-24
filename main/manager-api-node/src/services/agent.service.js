@@ -2897,6 +2897,40 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
     select: { agent_id: true, mac_address: true, last_connected_at: true },
   });
 
+  // Apple/Firebase sign-ups get an opaque UID as their username, so the Owner
+  // column alone cannot identify a parent. Pull contact details and child
+  // names for admins so the row is recognisable.
+  let contactMap = {};
+  if (isSuperAdmin) {
+    const ownerIds = [...new Set(agents.map(a => a.user_id).filter(Boolean))];
+    if (ownerIds.length) {
+      const [parents, kids] = await Promise.all([
+        prisma.parent_profile.findMany({
+          where: { user_id: { in: ownerIds } },
+          select: { user_id: true, display_name: true, email: true, phone_number: true },
+        }),
+        prisma.kid_profile.findMany({
+          where: { user_id: { in: ownerIds } },
+          select: { user_id: true, name: true },
+        }),
+      ]);
+      parents.forEach(p => {
+        contactMap[p.user_id] = {
+          parentName: p.display_name || null,
+          parentEmail: p.email || null,
+          parentPhone: p.phone_number || null,
+          kidNames: [],
+        };
+      });
+      kids.forEach(k => {
+        if (!contactMap[k.user_id]) {
+          contactMap[k.user_id] = { parentName: null, parentEmail: null, parentPhone: null, kidNames: [] };
+        }
+        if (k.name) contactMap[k.user_id].kidNames.push(k.name);
+      });
+    }
+  }
+
   const deviceStatsMap = {};
   allDevices.forEach(device => {
     const aid = device.agent_id;
@@ -2913,6 +2947,7 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
 
   const list = agents.map(agent => {
     const stats = deviceStatsMap[agent.id] || { count: 0, macs: [], lastConnected: null };
+    const contact = contactMap[agent.user_id] || {};
     return {
       id: agent.id,
       agentName: agent.agent_name,
@@ -2926,6 +2961,10 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
       deviceCount: stats.count,
       deviceMacAddresses: stats.macs.join(','),
       ownerUsername: isSuperAdmin ? (agent.sys_user?.username || null) : undefined,
+      parentName: isSuperAdmin ? (contact.parentName || null) : undefined,
+      parentEmail: isSuperAdmin ? (contact.parentEmail || null) : undefined,
+      parentPhone: isSuperAdmin ? (contact.parentPhone || null) : undefined,
+      kidNames: isSuperAdmin ? (contact.kidNames || []) : undefined,
       createDate: agent.created_at,
     };
   });

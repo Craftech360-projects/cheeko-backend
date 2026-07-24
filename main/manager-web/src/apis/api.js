@@ -13,6 +13,7 @@ import rfid from './module/rfid.js'
 import profile from './module/profile.js'
 import emailReport from './module/emailReport.js'
 import runtimeProviders from './module/runtimeProviders.js'
+import activeDevices from './module/activeDevices.js'
 
 /**
  * API URL
@@ -52,5 +53,6 @@ export default {
     rfid,
     profile,
     emailReport,
-    runtimeProviders
+    runtimeProviders,
+    activeDevices
 }

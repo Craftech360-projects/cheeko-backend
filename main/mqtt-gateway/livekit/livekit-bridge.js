@@ -1619,10 +1619,13 @@ class LiveKitBridge extends EventEmitter {
   sendTtsStartMessage(text = "") {
     if (!this.connection) return;
 
-    // Dedup: don't send tts start twice within 3 seconds
+    // Within the same speaking turn (chunks < 3s apart), the first chunk is
+    // tts_start (triggers playback); later chunks become per-sentence updates so
+    // the client can show each sentence's emotion. A gap > 3s starts a new turn.
     const now = Date.now();
     if (this._lastTtsStartTime && (now - this._lastTtsStartTime) < 3000) {
-      // console.log(`📝 [TTS-START-DEDUP] Skipping duplicate tts start`);
+      this._lastTtsStartTime = now;
+      if (text) this.sendTtsSentenceStartMessage(text);
       return;
     }
     this._lastTtsStartTime = now;

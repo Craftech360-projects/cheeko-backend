@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = {
   system_prompt: true,
   vibration: true,
   sleep_enabled: true,
+  autoplay: false,
   theme: 0,
   autoplay: true,
   quiet_hours: {
@@ -81,6 +82,7 @@ function mergeAndValidateSettings(currentSettings, patch) {
     'system_prompt',
     'vibration',
     'sleep_enabled',
+    'autoplay',
     'theme',
     'autoplay',
     'quiet_hours',

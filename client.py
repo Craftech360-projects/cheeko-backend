@@ -22,9 +22,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.20"
+SERVER_IP = "192.168.0.82"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.20"
+MQTT_BROKER_HOST ="192.168.0.82"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
@@ -147,7 +147,8 @@ class TestClient:
         self.audio_playback_queue = Queue()
 
         # --- NEW: Sequence tracking variables ---
-        self.expected_sequence = 1  # Expected next sequence number
+        self.expected_sequence = None  # Adopted from the first packet received
+        self.first_sequence = None  # First seq of the current stream (baseline)
         self.last_received_sequence = 0  # Last sequence number received
         self.total_packets_received = 0  # Total packets received
         self.out_of_order_packets = 0  # Count of out-of-order packets
@@ -412,7 +413,10 @@ class TestClient:
 
     def reset_sequence_tracking(self):
         """Reset sequence tracking statistics for a new TTS stream."""
-        self.expected_sequence = 1
+        # Baseline is adopted from the first packet received (the gateway uses one
+        # continuous UDP sequence across the session, not per-stream from 1).
+        self.expected_sequence = None
+        self.first_sequence = None
         self.last_received_sequence = 0
         self.total_packets_received = 0
         self.out_of_order_packets = 0
@@ -446,10 +450,11 @@ class TestClient:
         else:
             logger.info("[OK] No sequence gaps detected")
 
-        # Calculate packet loss percentage
-        if self.last_received_sequence > 0:
-            expected_total = self.last_received_sequence
-            loss_rate = (self.missing_packets / expected_total) * 100
+        # Calculate packet loss percentage over the actual stream range
+        # (last - first + 1), not from sequence 1.
+        if self.first_sequence is not None and self.last_received_sequence >= self.first_sequence:
+            expected_total = self.last_received_sequence - self.first_sequence + 1
+            loss_rate = (self.missing_packets / expected_total) * 100 if expected_total else 0
             logger.info(f"[LOSS] Packet loss rate: {loss_rate:.2f}%")
 
         logger.info("=" * 60)
@@ -481,6 +486,14 @@ class TestClient:
 
         self.total_packets_received += 1
         self.last_audio_received = time.time()
+
+        # First packet of a stream: adopt its sequence as the baseline. The gateway
+        # uses one continuous UDP sequence across the whole session, so a stream does
+        # NOT start at 1 — assuming so produced false "missing packets" reports.
+        if self.expected_sequence is None:
+            self.expected_sequence = sequence
+            self.first_sequence = sequence
+            self.last_received_sequence = sequence - 1
 
         # Check for missing packets (gaps in sequence) - most critical
         if sequence > self.expected_sequence:

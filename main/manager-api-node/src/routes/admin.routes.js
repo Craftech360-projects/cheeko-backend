@@ -34,6 +34,7 @@ const adminService = require('../services/admin.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const mobileService = require('../services/mobile.service');
+const founderDashboardService = require('../services/founderDashboard.service');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { success, badRequest, notFound } = require('../utils/response');
@@ -1018,6 +1019,100 @@ router.get('/stats/overview',
   asyncHandler(async (req, res) => {
     const stats = await adminService.getSystemOverview();
     success(res, stats);
+  })
+);
+
+router.get('/founder/overview',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderOverview({
+      range: req.query.range || '7d',
+    });
+    success(res, payload);
+  })
+);
+
+router.get('/founder/engagement',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderEngagement({
+      range: req.query.range || '30d',
+    });
+    success(res, payload);
+  })
+);
+
+router.get('/founder/content',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderContent({
+      range: req.query.range || '7d',
+    });
+    success(res, payload);
+  })
+);
+
+router.get('/founder/conversations',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderConversations({
+      range: req.query.range || '7d',
+    });
+    success(res, payload);
+  })
+);
+
+router.get('/founder/costs',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderCosts({
+      range: req.query.range || 'month',
+    });
+    success(res, payload);
+  })
+);
+
+router.get('/founder/operate',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderOperate();
+    success(res, payload);
+  })
+);
+
+router.get('/founder/families/search',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.searchFamilies(req.query.q || '');
+    success(res, payload);
+  })
+);
+
+router.get('/founder/families/list',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.listAllFamilies();
+    success(res, payload);
+  })
+);
+
+router.get('/founder/families/:macOrKidId/profile',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFamilyProfile(req.params.macOrKidId);
+    if (!payload) {
+      return notFound(res, 'Family profile not found');
+    }
+    success(res, payload);
   })
 );
 

@@ -25,6 +25,8 @@ const runPrismaGenerate = async () => {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        DIRECT_URL: process.env.DIRECT_URL || process.env.DATABASE_URL,
+        DATABASE_URL: process.env.DATABASE_URL || process.env.DIRECT_URL,
         NO_COLOR: '1',
         FORCE_COLOR: '0'
       },
@@ -150,6 +152,8 @@ const runPrismaMigrations = async () => {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
+        DIRECT_URL: process.env.DIRECT_URL || process.env.DATABASE_URL,
+        DATABASE_URL: process.env.DATABASE_URL || process.env.DIRECT_URL,
         // Ensure colors are disabled for cleaner logging
         NO_COLOR: '1',
         FORCE_COLOR: '0'
