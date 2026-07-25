@@ -1610,13 +1610,14 @@ const getCurrentCharacter = async (mac) => {
 const mergeTemplatePersona = async (agent) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: normalizeCharacterName(agent.agent_name), mode: 'insensitive' } },
-    select: { system_prompt: true, soul: true, runtime_agent_name: true },
+    select: { system_prompt: true, soul: true, runtime_agent_name: true, sarvam_voice_id: true },
   });
   return {
     ...agent,
     system_prompt: template?.system_prompt ?? agent.system_prompt,
     soul: template?.soul ?? agent.soul,
     runtime_agent_name: agent.runtime_agent_name ?? template?.runtime_agent_name ?? null,
+    sarvam_voice_id: template?.sarvam_voice_id ?? null,
   };
 };
 
@@ -1660,7 +1661,7 @@ const getCharacterSession = async (characterId, { language } = {}) => {
 const getCharacterSessionByName = async (characterName, { language } = {}) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true, sarvam_voice_id: true },
   });
   if (!template) throw new Error('Character not found');
   return resolveSessionForCharacter(
@@ -1671,6 +1672,7 @@ const getCharacterSessionByName = async (characterName, { language } = {}) => {
       system_prompt: template.system_prompt,
       soul: template.soul,
       language: template.language,
+      sarvam_voice_id: template.sarvam_voice_id,
     },
     { language }
   );

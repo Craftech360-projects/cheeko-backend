@@ -22,19 +22,19 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.82"
+SERVER_IP = "192.168.0.93"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.82"
+MQTT_BROKER_HOST ="192.168.0.93"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
-MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.0.28:8001/toy")
+MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.0.93:8001/toy")
 MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
 # DEVICE_MAC is now dynamically generated for uniqueness
 # Minimum frames to have in buffer to continue playback
-PLAYBACK_BUFFER_MIN_FRAMES = 3
+PLAYBACK_BUFFER_MIN_FRAMES = 1
 # Number of frames to buffer before starting playback
-PLAYBACK_BUFFER_START_FRAMES = 16
+PLAYBACK_BUFFER_START_FRAMES = 8
 
 # --- NEW: Sequence tracking configuration ---
 # Set to False to disable sequence logging
@@ -164,6 +164,9 @@ class TestClient:
 
         # Cards for mid-session RFID mimic: list of (label, uid), tapped via number keys.
         self.rfid_cards = []
+
+        # Persona requested in the hello (firmware GetSelectedCharacterId mimic).
+        self.character_id = None
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
@@ -721,11 +724,14 @@ class TestClient:
             logger.error(f"   Broker: {mqtt_broker}:{mqtt_port}")
             return False
 
-    def send_hello_and_get_session(self, feature: Optional[str] = None) -> bool:
+    def send_hello_and_get_session(self, feature: Optional[str] = None,
+                                   character_id: Optional[str] = None) -> bool:
         """Sends 'hello' message and waits for session details.
 
         `feature` (e.g. "ai_imagine") is added at the top level of the hello so the
         gateway routes the whole session to that feature (spec Option A).
+        `character_id` (e.g. "tara") is the firmware persona selection; the gateway
+        resolves it to the matching agent for this session.
         """
         logger.info("[STEP] STEP 3: Sending 'hello' and pinging UDP...")
         # Use the client_id from our generated MQTT credentials
@@ -743,6 +749,8 @@ class TestClient:
         }
         if feature:
             hello_message["feature"] = feature
+        if character_id:
+            hello_message["character_id"] = character_id
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
             response = mqtt_message_queue.get(timeout=30)
@@ -1114,7 +1122,7 @@ class TestClient:
         if not self.connect_mqtt():
             return
         time.sleep(1)  # Give MQTT a moment to connect and subscribe
-        if not self.send_hello_and_get_session():
+        if not self.send_hello_and_get_session(character_id=self.character_id):
             self.cleanup()
             return
         self.trigger_conversation()
@@ -1276,6 +1284,12 @@ if __name__ == "__main__":
         help="imagine mode: use the OTA handshake instead of the local-gateway config.",
     )
     parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:ac:b5:38"))
+    parser.add_argument(
+        "--character-id",
+        default=os.getenv("TEST_CHARACTER_ID"),
+        help="Persona to request in the hello (e.g. tara, nani, mitthu, chanda, masti). "
+             "Exercises the gateway's character_id switching.",
+    )
     parser.add_argument("--rfid-uid", default=os.getenv("TEST_RFID_UID"))
     parser.add_argument(
         "--cards",
@@ -1308,6 +1322,7 @@ if __name__ == "__main__":
 
     client = TestClient(device_mac=args.device_mac)
     client.rfid_cards = parse_cards(args.cards, args.rfid_uid)
+    client.character_id = args.character_id
     try:
         if args.mode == "voice":
             client.run_test()
