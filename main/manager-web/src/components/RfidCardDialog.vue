@@ -55,16 +55,10 @@
 
         <!-- AI Card Session Config -->
         <el-form-item v-if="form.actionType === 'ai'" label="Agent" class="form-item">
-          <el-select v-model="form.aiAgentName" placeholder="Select agent" class="custom-select">
-            <el-option label="Cheeko" value="Cheeko" />
-            <el-option label="Cheeko Magic" value="Cheeko Magic" />
-            <el-option label="Cheeko Astronaut" value="Cheeko Astronaut" />
-            <el-option label="Cheeko German" value="Cheeko German" />
-            <el-option label="Math Tutor" value="Math Tutor" />
-            <el-option label="Riddle Solver" value="Riddle Solver" />
-            <el-option label="Word Ladder" value="Word Ladder" />
+          <el-select v-model="form.aiAgentName" placeholder="Select agent" class="custom-select" filterable allow-create :loading="loadingAgentTemplates">
+            <el-option v-for="tpl in agentTemplates" :key="tpl.id" :label="tpl.agentName" :value="tpl.agentName" />
           </el-select>
-          <div class="field-hint">This becomes <code>actionData.agent_name</code> for the AI card.</div>
+          <div class="field-hint">This becomes <code>actionData.agent_name</code> for the AI card. Listed from AI agent templates; the worker pulls the persona by this exact name.</div>
         </el-form-item>
 
         <el-form-item v-if="form.actionType === 'ai'" label="Language" class="form-item">
@@ -205,6 +199,8 @@ export default {
       dialogKey: Date.now(),
       saving: false,
       uploadingThumbnail: false,
+      agentTemplates: [],
+      loadingAgentTemplates: false,
       rules: {
         rfidUid: [
           { required: true, message: "Please enter RFID UID", trigger: "blur" }
@@ -212,7 +208,21 @@ export default {
       }
     };
   },
+  mounted() {
+    this.fetchAgentTemplates();
+  },
   methods: {
+    fetchAgentTemplates() {
+      this.loadingAgentTemplates = true;
+      Api.agent.getAgentTemplate((res) => {
+        this.loadingAgentTemplates = false;
+        if (res.data && res.data.code === 0) {
+          this.agentTemplates = res.data.data || [];
+        } else {
+          this.$message.error('Failed to load agent templates');
+        }
+      });
+    },
     submit() {
       this.$refs.form.validate((valid) => {
         if (valid) {

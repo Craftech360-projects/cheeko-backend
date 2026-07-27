@@ -43,6 +43,12 @@
             Token Analytics
           </div>
           <div v-if="isSuperAdmin" class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/active-devices' }" @click="goActiveDevices">
+            <i class="el-icon-view"
+              :style="{ fontSize: '15px', color: $route.path === '/active-devices' ? '#fff' : '#3d4566' }"></i>
+            Active Devices
+          </div>
+          <div v-if="isSuperAdmin" class="equipment-management"
             :class="{ 'active-tab': $route.path === '/game-analytics' }" @click="goGameAnalytics">
             <i class="el-icon-trophy"
               :style="{ fontSize: '15px', color: $route.path === '/game-analytics' ? '#fff' : '#3d4566' }"></i>
@@ -206,6 +212,9 @@ export default {
     },
     goTokenAnalytics() {
       this.$router.push('/token-analytics')
+    },
+    goActiveDevices() {
+      this.$router.push('/active-devices')
     },
     goGameAnalytics() {
       this.$router.push('/game-analytics')

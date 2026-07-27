@@ -86,7 +86,7 @@ function startInternalCommandServer(gateway) {
 
       if (publishResult.published) {
         logger.info(
-          `[SETTINGS-SYNC][INTERNAL-CMD] Published ${resolvedMessage.type || 'unknown'} to sender=${publishResult.targetClientId} topic=${publishResult.topic} payload=${JSON.stringify(resolvedMessage)}`
+          `[SETTINGS-SYNC][INTERNAL-CMD] Published ${resolvedMessage.type || 'unknown'} theme=${resolvedMessage?.settings?.theme ?? 'na'} to sender=${publishResult.targetClientId} topic=${publishResult.topic} payload=${JSON.stringify(resolvedMessage)}`
         );
         sendJson(res, 200, {
           code: 0,
@@ -137,9 +137,31 @@ function startInternalCommandServer(gateway) {
     }
   });
 
-  server.listen(port, host, () => {
-    logger.info(`[INTERNAL-CMD] Listening on http://${host}:${port}`);
+  let retryCount = 0;
+  const maxRetries = 3;
+  const retryDelays = [500, 1000, 2000];
+
+  function attemptBind() {
+    server.listen(port, host, () => {
+      logger.info(`[INTERNAL-CMD] Listening on http://${host}:${port}`);
+    });
+  }
+
+  server.on('error', (error) => {
+    if ((error.code === 'EACCES' || error.code === 'EADDRINUSE') && retryCount < maxRetries) {
+      retryCount++;
+      const delay = retryDelays[retryCount - 1];
+      logger.warn(`[INTERNAL-CMD] Binding failed (attempt ${retryCount}/${maxRetries}): ${error.message}. Retrying in ${delay}ms...`);
+      setTimeout(attemptBind, delay);
+    } else if (error.code === 'EACCES' || error.code === 'EADDRINUSE') {
+      logger.error(`[INTERNAL-CMD] Failed to bind to http://${host}:${port} after ${maxRetries} attempts: ${error.message}`);
+      logger.warn(`[INTERNAL-CMD] Internal command server will not be available. This may affect settings synchronization.`);
+    } else {
+      logger.error(`[INTERNAL-CMD] Server error: ${error.message}`);
+    }
   });
+
+  attemptBind();
 
   return server;
 }

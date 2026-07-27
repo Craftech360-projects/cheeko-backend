@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import uuid
 import threading
@@ -21,19 +22,19 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.21"
+SERVER_IP = "192.168.0.93"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.21"
+MQTT_BROKER_HOST ="192.168.0.93"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
-MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.0.28:8001/toy")
+MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.0.93:8001/toy")
 MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
 # DEVICE_MAC is now dynamically generated for uniqueness
 # Minimum frames to have in buffer to continue playback
-PLAYBACK_BUFFER_MIN_FRAMES = 3
+PLAYBACK_BUFFER_MIN_FRAMES = 1
 # Number of frames to buffer before starting playback
-PLAYBACK_BUFFER_START_FRAMES = 16
+PLAYBACK_BUFFER_START_FRAMES = 8
 
 # --- NEW: Sequence tracking configuration ---
 # Set to False to disable sequence logging
@@ -98,6 +99,32 @@ def generate_unique_mac() -> str:
     return '_'.join(f'{b:02x}' for b in mac_bytes)
 
 
+# --- Cheeko Face expression tags (mimics firmware parsing) ---
+FACE_EXPRESSIONS = {
+    "neutral", "happy", "excited", "laughing", "love", "silly", "curious",
+    "surprised", "confused", "shy", "sad", "crying", "angry", "scared", "sleepy",
+}
+FACE_TAG_RE = re.compile(r"^\[([a-z]{2,12})\]\s*")
+
+
+def parse_expression_tag(text):
+    """Mimic firmware: a leading [tag] is stripped from display text.
+
+    Returns (expression, display_text). Known tag drives the face, unknown
+    lowercase tag falls back to neutral, non-tag brackets are left untouched.
+    """
+    m = FACE_TAG_RE.match(text or "")
+    if not m:
+        return None, text or ""
+    tag = m.group(1)
+    return (tag if tag in FACE_EXPRESSIONS else "neutral"), text[m.end():]
+
+
+assert parse_expression_tag("[happy] Yay!") == ("happy", "Yay!")
+assert parse_expression_tag("[zzzz] hi") == ("neutral", "hi")
+assert parse_expression_tag("[OK!] hi") == (None, "[OK!] hi")
+
+
 class TestClient:
     def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
@@ -120,7 +147,8 @@ class TestClient:
         self.audio_playback_queue = Queue()
 
         # --- NEW: Sequence tracking variables ---
-        self.expected_sequence = 1  # Expected next sequence number
+        self.expected_sequence = None  # Adopted from the first packet received
+        self.first_sequence = None  # First seq of the current stream (baseline)
         self.last_received_sequence = 0  # Last sequence number received
         self.total_packets_received = 0  # Total packets received
         self.out_of_order_packets = 0  # Count of out-of-order packets
@@ -136,6 +164,9 @@ class TestClient:
 
         # Cards for mid-session RFID mimic: list of (label, uid), tapped via number keys.
         self.rfid_cards = []
+
+        # Persona requested in the hello (firmware GetSelectedCharacterId mimic).
+        self.character_id = None
 
         logger.info(
             f"Client initialized with unique MAC: {self.device_mac_formatted}")
@@ -173,6 +204,12 @@ class TestClient:
             payload = json.loads(payload_str)
             logger.info(
                 f"[EMOJI] MQTT Message received on topic '{msg.topic}':\n{json.dumps(payload, indent=2)}")
+
+            # Mimic firmware Cheeko Face: parse expression tag on text-bearing messages
+            if payload.get("type") in ("tts", "llm") and payload.get("text"):
+                face, shown = parse_expression_tag(payload["text"])
+                if face:
+                    logger.info("[FACE] expression=%s | display text: %s", face, shown)
 
             # Handle TTS start signal (reset sequence tracking)
             if payload.get("type") == "tts" and payload.get("state") == "start":
@@ -221,6 +258,21 @@ class TestClient:
                 logger.info(
                     "[STOP] Received 'record_stop' signal from server. Stopping current audio recording...")
                 stop_recording_event.set()  # This will cause the recording thread loop to exit
+
+            # Handle mode_update (character switch): adopt the new session_id
+            elif payload.get("type") == "mode_update":
+                new_sid = payload.get("session_id")
+                if new_sid and udp_session_details:
+                    old_sid = udp_session_details.get("session_id")
+                    udp_session_details["session_id"] = new_sid
+                    logger.info("[MODE] Adopted new session_id %s (was %s), character=%s",
+                                new_sid, old_sid, payload.get("character"))
+                # Flush buffered old-character audio so the new voice starts clean
+                try:
+                    while True:
+                        self.audio_playback_queue.get_nowait()
+                except Empty:
+                    pass
 
             else:
                 mqtt_message_queue.put(payload)
@@ -379,7 +431,10 @@ class TestClient:
 
     def reset_sequence_tracking(self):
         """Reset sequence tracking statistics for a new TTS stream."""
-        self.expected_sequence = 1
+        # Baseline is adopted from the first packet received (the gateway uses one
+        # continuous UDP sequence across the session, not per-stream from 1).
+        self.expected_sequence = None
+        self.first_sequence = None
         self.last_received_sequence = 0
         self.total_packets_received = 0
         self.out_of_order_packets = 0
@@ -413,10 +468,11 @@ class TestClient:
         else:
             logger.info("[OK] No sequence gaps detected")
 
-        # Calculate packet loss percentage
-        if self.last_received_sequence > 0:
-            expected_total = self.last_received_sequence
-            loss_rate = (self.missing_packets / expected_total) * 100
+        # Calculate packet loss percentage over the actual stream range
+        # (last - first + 1), not from sequence 1.
+        if self.first_sequence is not None and self.last_received_sequence >= self.first_sequence:
+            expected_total = self.last_received_sequence - self.first_sequence + 1
+            loss_rate = (self.missing_packets / expected_total) * 100 if expected_total else 0
             logger.info(f"[LOSS] Packet loss rate: {loss_rate:.2f}%")
 
         logger.info("=" * 60)
@@ -448,6 +504,14 @@ class TestClient:
 
         self.total_packets_received += 1
         self.last_audio_received = time.time()
+
+        # First packet of a stream: adopt its sequence as the baseline. The gateway
+        # uses one continuous UDP sequence across the whole session, so a stream does
+        # NOT start at 1 — assuming so produced false "missing packets" reports.
+        if self.expected_sequence is None:
+            self.expected_sequence = sequence
+            self.first_sequence = sequence
+            self.last_received_sequence = sequence - 1
 
         # Check for missing packets (gaps in sequence) - most critical
         if sequence > self.expected_sequence:
@@ -660,11 +724,14 @@ class TestClient:
             logger.error(f"   Broker: {mqtt_broker}:{mqtt_port}")
             return False
 
-    def send_hello_and_get_session(self, feature: Optional[str] = None) -> bool:
+    def send_hello_and_get_session(self, feature: Optional[str] = None,
+                                   character_id: Optional[str] = None) -> bool:
         """Sends 'hello' message and waits for session details.
 
         `feature` (e.g. "ai_imagine") is added at the top level of the hello so the
         gateway routes the whole session to that feature (spec Option A).
+        `character_id` (e.g. "tara") is the firmware persona selection; the gateway
+        resolves it to the matching agent for this session.
         """
         logger.info("[STEP] STEP 3: Sending 'hello' and pinging UDP...")
         # Use the client_id from our generated MQTT credentials
@@ -682,6 +749,8 @@ class TestClient:
         }
         if feature:
             hello_message["feature"] = feature
+        if character_id:
+            hello_message["character_id"] = character_id
         self.mqtt_client.publish("device-server", json.dumps(hello_message))
         try:
             response = mqtt_message_queue.get(timeout=30)
@@ -1053,7 +1122,7 @@ class TestClient:
         if not self.connect_mqtt():
             return
         time.sleep(1)  # Give MQTT a moment to connect and subscribe
-        if not self.send_hello_and_get_session():
+        if not self.send_hello_and_get_session(character_id=self.character_id):
             self.cleanup()
             return
         self.trigger_conversation()
@@ -1215,6 +1284,12 @@ if __name__ == "__main__":
         help="imagine mode: use the OTA handshake instead of the local-gateway config.",
     )
     parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:ac:b5:38"))
+    parser.add_argument(
+        "--character-id",
+        default=os.getenv("TEST_CHARACTER_ID"),
+        help="Persona to request in the hello (e.g. tara, nani, mitthu, chanda, masti). "
+             "Exercises the gateway's character_id switching.",
+    )
     parser.add_argument("--rfid-uid", default=os.getenv("TEST_RFID_UID"))
     parser.add_argument(
         "--cards",
@@ -1247,6 +1322,7 @@ if __name__ == "__main__":
 
     client = TestClient(device_mac=args.device_mac)
     client.rfid_cards = parse_cards(args.cards, args.rfid_uid)
+    client.character_id = args.character_id
     try:
         if args.mode == "voice":
             client.run_test()

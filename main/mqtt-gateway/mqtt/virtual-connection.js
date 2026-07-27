@@ -531,8 +531,11 @@ class VirtualMQTTConnection {
       axios.get(`${baseUrl}/toy/device/${macAddress}/device-mode`, { timeout: 5000 })
         .then((r) => r.data?.code === 0 ? r.data.data : "manual")
         .catch(() => "manual"),
-      // Character
-      this.fetchCurrentCharacter(this.deviceId),
+      // Character — hello.character_id (firmware wheel selection) overrides the device
+      // default when present; unknown/absent id falls back to the DB default character.
+      json.character_id
+        ? this.fetchCharacterById(this.deviceId, json.character_id).then((r) => r || this.fetchCurrentCharacter(this.deviceId))
+        : this.fetchCurrentCharacter(this.deviceId),
       // Child profile
       this.fetchChildProfile(this.deviceId),
     ]);
@@ -548,6 +551,7 @@ class VirtualMQTTConnection {
     this.currentCharacter = characterResolution.characterName || "Cheeko";
     this.runtimeAgentName = characterResolution.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
     this.characterId = characterResolution.characterId ?? null;
+    this.sarvamVoiceId = characterResolution.sarvamVoiceId ?? null;
     if (characterResolution.language) this.language = characterResolution.language;
     this.childProfile = childProfile.status === "fulfilled" ? childProfile.value : null;
 
@@ -723,6 +727,7 @@ class VirtualMQTTConnection {
         character: this.currentCharacter,
         characterId: this.characterId,
         language: this.language,
+        sarvamVoiceId: this.sarvamVoiceId,
         childProfile: this.childProfile,
         sessionConfig: this.sessionConfig,
       });
@@ -821,6 +826,36 @@ class VirtualMQTTConnection {
     }
   }
 
+  // Resolve the character selected in the firmware hello (json.character_id).
+  // Matched case-insensitively against ai_agent_template.agent_name via set-character.
+  // persist:false → session-scoped: the wheel selection applies to THIS session only and
+  // does not overwrite the device's app-set default agent (same semantics as an RFID tap).
+  // ponytail: session-scoped; flip persist:true if the firmware selection should stick.
+  async fetchCharacterById(macAddress, characterId) {
+    try {
+      const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
+      const apiUrl = `${process.env.MANAGER_API_URL}/agent/device/${cleanMac}/set-character`;
+      logger.info(`🎭 [CHARACTER] hello.character_id="${characterId}" → set-character (session-scoped)`);
+      const response = await axios.post(apiUrl, { characterName: characterId, persist: false }, { timeout: 5000 });
+      if (response.data?.code === 0 && response.data.data?.success) {
+        const d = response.data.data;
+        logger.info(`🎭 [CHARACTER] ✅ character_id "${characterId}" → "${d.newModeName}"`);
+        return {
+          characterName: d.newModeName || characterId,
+          runtimeAgentName: d.runtimeAgentName || DEFAULT_RUNTIME_AGENT,
+          characterId: d.characterId ?? null,
+          language: d.language ?? null,
+          sarvamVoiceId: d.sarvamVoiceId ?? null,
+        };
+      }
+      logger.warn(`🎭 [CHARACTER] Unknown character_id "${characterId}", falling back to device default`);
+      return null;
+    } catch (error) {
+      logger.warn(`🎭 [CHARACTER] character_id "${characterId}" resolve failed (${error.message}), falling back to device default`);
+      return null;
+    }
+  }
+
   async fetchCurrentCharacter(macAddress) {
     try {
       const cleanMac = macAddress.replace(/:/g, "").toLowerCase();
@@ -847,6 +882,7 @@ class VirtualMQTTConnection {
           runtimeAgentName: data.runtimeAgentName || DEFAULT_RUNTIME_AGENT,
           characterId: data.characterId ?? null,
           language: data.language ?? null,
+          sarvamVoiceId: data.sarvamVoiceId ?? null,
         };
         logger.info(`🎭 [CHARACTER] ✅ Got character from DB: "${resolution.characterName}" → agent "${resolution.runtimeAgentName}"`);
         return resolution;

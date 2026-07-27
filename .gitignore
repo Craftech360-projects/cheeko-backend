@@ -210,3 +210,6 @@ clerk-nextjs-guide
 .agents/
 .qwen/
 .tmp
+
+# Vercel
+.vercel

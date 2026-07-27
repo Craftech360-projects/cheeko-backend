@@ -8,7 +8,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
-const { resolveSessionForCharacter } = require('./character-resolver');
+const { resolveSessionForCharacter, normalizeCharacterName } = require('./character-resolver');
 const { validateAgentMd } = require('../utils/agent-md-validator');
 const crypto = require('crypto');
 const path = require('path');
@@ -151,11 +151,21 @@ const formatChatHistoryMessages = (messages, getChatType) => {
  */
 const createAgent = async (userId, data) => {
   validateAgentMd(data.systemPrompt);
+
+  // Clients (the mobile app) create character instances by name, often with a numeric
+  // suffix ("Cheeko 2") and no persona. Source persona from the matching character
+  // template so we never persist a null-persona, unknown-name agent, and store the
+  // canonical character name so persona resolves and it is spoken correctly.
+  const template = await prisma.ai_agent_template.findFirst({
+    where: { agent_name: { equals: normalizeCharacterName(data.agentName), mode: 'insensitive' } },
+    select: { agent_name: true, system_prompt: true, soul: true, runtime_agent_name: true },
+  });
+
   const agent = await prisma.ai_agent.create({
     data: {
       user_id: BigInt(userId),
       agent_code: data.agentCode || null,
-      agent_name: data.agentName,
+      agent_name: template?.agent_name || data.agentName,
       asr_model_id: data.asrModelId || null,
       vad_model_id: data.vadModelId || null,
       llm_model_id: data.llmModelId || null,
@@ -165,7 +175,9 @@ const createAgent = async (userId, data) => {
       mem_model_id: data.memModelId || null,
       intent_model_id: data.intentModelId || null,
       chat_history_conf: data.chatHistoryConf || 0,
-      system_prompt: data.systemPrompt || null,
+      system_prompt: data.systemPrompt || template?.system_prompt || null,
+      soul: data.soul || template?.soul || null,
+      runtime_agent_name: data.runtimeAgentName || template?.runtime_agent_name || null,
       summary_memory: data.summaryMemory || null,
       lang_code: data.langCode || 'en',
       language: data.language || 'English',
@@ -1472,11 +1484,14 @@ const setCharacterByName = async (mac, characterName, { language, persist = true
       where: { agent_name: { equals: characterName, mode: 'insensitive' } },
     });
 
-    if (template) {
-      logger.info(`[setCharacterByName] Found template for "${characterName}", applying to new agent`);
-    } else {
-      logger.warn(`[setCharacterByName] No template found for "${characterName}", creating minimal agent`);
+    if (!template) {
+      // Guard: never auto-create a persona-less agent from an unknown name.
+      // A name matching no template (e.g. a typo like "Cheeko 2") produced an agent
+      // with null system_prompt/soul that ALSO gets spoken literally as its own name
+      // (TTS: "Cheeko two" / "Cheeko do"). Reject so the caller falls back to default.
+      throw new Error(`Unknown character "${characterName}" (no matching ai_agent_template)`);
     }
+    logger.info(`[setCharacterByName] Found template for "${characterName}", applying to new agent`);
 
     agent = await prisma.ai_agent.create({
       data: {
@@ -1594,14 +1609,15 @@ const getCurrentCharacter = async (mac) => {
  */
 const mergeTemplatePersona = async (agent) => {
   const template = await prisma.ai_agent_template.findFirst({
-    where: { agent_name: { equals: agent.agent_name, mode: 'insensitive' } },
-    select: { system_prompt: true, soul: true, runtime_agent_name: true },
+    where: { agent_name: { equals: normalizeCharacterName(agent.agent_name), mode: 'insensitive' } },
+    select: { system_prompt: true, soul: true, runtime_agent_name: true, sarvam_voice_id: true },
   });
   return {
     ...agent,
     system_prompt: template?.system_prompt ?? agent.system_prompt,
     soul: template?.soul ?? agent.soul,
     runtime_agent_name: agent.runtime_agent_name ?? template?.runtime_agent_name ?? null,
+    sarvam_voice_id: template?.sarvam_voice_id ?? null,
   };
 };
 
@@ -1645,7 +1661,7 @@ const getCharacterSession = async (characterId, { language } = {}) => {
 const getCharacterSessionByName = async (characterName, { language } = {}) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true, sarvam_voice_id: true },
   });
   if (!template) throw new Error('Character not found');
   return resolveSessionForCharacter(
@@ -1656,6 +1672,7 @@ const getCharacterSessionByName = async (characterName, { language } = {}) => {
       system_prompt: template.system_prompt,
       soul: template.soul,
       language: template.language,
+      sarvam_voice_id: template.sarvam_voice_id,
     },
     { language }
   );
@@ -2897,6 +2914,40 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
     select: { agent_id: true, mac_address: true, last_connected_at: true },
   });
 
+  // Apple/Firebase sign-ups get an opaque UID as their username, so the Owner
+  // column alone cannot identify a parent. Pull contact details and child
+  // names for admins so the row is recognisable.
+  let contactMap = {};
+  if (isSuperAdmin) {
+    const ownerIds = [...new Set(agents.map(a => a.user_id).filter(Boolean))];
+    if (ownerIds.length) {
+      const [parents, kids] = await Promise.all([
+        prisma.parent_profile.findMany({
+          where: { user_id: { in: ownerIds } },
+          select: { user_id: true, display_name: true, email: true, phone_number: true },
+        }),
+        prisma.kid_profile.findMany({
+          where: { user_id: { in: ownerIds } },
+          select: { user_id: true, name: true },
+        }),
+      ]);
+      parents.forEach(p => {
+        contactMap[p.user_id] = {
+          parentName: p.display_name || null,
+          parentEmail: p.email || null,
+          parentPhone: p.phone_number || null,
+          kidNames: [],
+        };
+      });
+      kids.forEach(k => {
+        if (!contactMap[k.user_id]) {
+          contactMap[k.user_id] = { parentName: null, parentEmail: null, parentPhone: null, kidNames: [] };
+        }
+        if (k.name) contactMap[k.user_id].kidNames.push(k.name);
+      });
+    }
+  }
+
   const deviceStatsMap = {};
   allDevices.forEach(device => {
     const aid = device.agent_id;
@@ -2913,6 +2964,7 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
 
   const list = agents.map(agent => {
     const stats = deviceStatsMap[agent.id] || { count: 0, macs: [], lastConnected: null };
+    const contact = contactMap[agent.user_id] || {};
     return {
       id: agent.id,
       agentName: agent.agent_name,
@@ -2926,6 +2978,10 @@ const getAgentListForUser = async (userId, isSuperAdmin, options = {}) => {
       deviceCount: stats.count,
       deviceMacAddresses: stats.macs.join(','),
       ownerUsername: isSuperAdmin ? (agent.sys_user?.username || null) : undefined,
+      parentName: isSuperAdmin ? (contact.parentName || null) : undefined,
+      parentEmail: isSuperAdmin ? (contact.parentEmail || null) : undefined,
+      parentPhone: isSuperAdmin ? (contact.parentPhone || null) : undefined,
+      kidNames: isSuperAdmin ? (contact.kidNames || []) : undefined,
       createDate: agent.created_at,
     };
   });

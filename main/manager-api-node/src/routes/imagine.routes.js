@@ -8,6 +8,7 @@
 const express = require('express');
 const multer = require('multer');
 const { requireServiceKey } = require('../middleware/auth');
+const { requireFlexAuth } = require('../middleware/flexAuth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { success, badRequest } = require('../utils/response');
 const uploadService = require('../services/upload.service');
@@ -33,6 +34,15 @@ router.post('/upload', requireServiceKey, uploadJpeg, asyncHandler(async (req, r
   if (!req.file) return badRequest(res, 'No file uploaded');
   const result = await uploadService.uploadImagineImage(req.file.buffer, req.body.deviceMac);
   return success(res, result);
+}));
+
+// Active Devices Analytics: list a device's AI-generated images, optionally
+// filtered to one IST calendar date. Images are S3 key/URL only (no DB row),
+// so there's nothing to scope besides the S3 prefix + in-memory date filter.
+router.get('/device/:mac/images', requireFlexAuth, asyncHandler(async (req, res) => {
+  const date = (req.query.date || '').trim() || null;
+  const images = await uploadService.listImagineImages(req.params.mac, date);
+  return success(res, images);
 }));
 
 module.exports = router;

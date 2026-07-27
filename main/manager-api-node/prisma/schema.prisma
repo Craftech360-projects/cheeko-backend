@@ -69,6 +69,7 @@ model ai_agent_template {
   vllm_model_id      String?   @db.Uuid
   tts_model_id       String?   @db.Uuid
   tts_voice_id       String?   @db.Uuid
+  sarvam_voice_id    String?   @db.VarChar(100)
   mem_model_id       String?   @db.Uuid
   intent_model_id    String?   @db.Uuid
   chat_history_conf  Int?      @default(1)
@@ -1238,6 +1239,36 @@ model stt_providers {
 
   @@index([is_active], map: "idx_stt_active")
   @@index([priority(sort: Desc)], map: "idx_stt_priority")
+}
+
+model moderation_providers {
+  id            BigInt    @id @default(autoincrement())
+  provider_name String    @unique
+  api_key       String    @default("")
+  model         String    @default("")
+  is_active     Boolean   @default(false)
+  priority      Int       @default(0)
+  config_json   Json?
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([is_active], map: "idx_moderation_active")
+  @@index([priority(sort: Desc)], map: "idx_moderation_priority")
+}
+
+model image_providers {
+  id            BigInt    @id @default(autoincrement())
+  provider_name String    @unique
+  api_key       String    @default("")
+  model         String    @default("")
+  is_active     Boolean   @default(false)
+  priority      Int       @default(0)
+  config_json   Json?
+  created_at    DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@index([is_active], map: "idx_image_active")
+  @@index([priority(sort: Desc)], map: "idx_image_priority")
 }
 
 model tts_providers {

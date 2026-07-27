@@ -13,6 +13,7 @@ require('dotenv').config();
 BigInt.prototype.toJSON = function () { return this.toString(); };
 
 const logger = require('./src/utils/logger');
+const { ensurePortAvailability } = require('./src/utils/portGuard');
 const { runPrismaGenerate, runPrismaMigrations } = require('./src/config/prisma-migrations');
 
 const PORT = process.env.PORT || 8002;
@@ -23,6 +24,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
  */
 const startServer = async () => {
   try {
+    await ensurePortAvailability(PORT, process.env.HOST || '127.0.0.1');
     await runPrismaGenerate();
 
     // Server will exit with code 1 if migrations or schema guards fail.

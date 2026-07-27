@@ -3219,6 +3219,34 @@ const createCustomVoiceCardPack = async ({ audioUrl, userId }) => {
  * @returns {Promise<Object>} pending_card_pairing row
  */
 const createPendingCardPairing = async ({ macAddress, contentPackId, kidId, userId }) => {
+  // Validate contentPackId is a positive integer before BigInt() (which 500s on junk input)
+  if (contentPackId === null || contentPackId === undefined || !/^\d+$/.test(String(contentPackId)) || BigInt(contentPackId) <= 0n) {
+    const error = new Error('contentPackId must be a positive integer');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // Guard against IDOR: the pack must exist, be a custom voice card, and belong to the caller
+  const pack = await prisma.rfid_content_pack.findUnique({
+    where: { id: BigInt(contentPackId) },
+    select: { id: true, content_type: true, creator: true }
+  });
+  if (!pack) {
+    const error = new Error('content pack not found');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (pack.content_type !== 'custom_voice') {
+    const error = new Error('not a custom voice card pack');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (pack.creator !== null && pack.creator !== BigInt(userId)) {
+    const error = new Error('pack not owned by user');
+    error.statusCode = 403;
+    throw error;
+  }
+
   const expiresAt = new Date(Date.now() + 60 * 1000);
 
   return prisma.pending_card_pairing.create({

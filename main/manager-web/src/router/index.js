@@ -133,6 +133,17 @@ const routes = [
     }
   },
   {
+    path: '/active-devices',
+    name: 'ActiveDevices',
+    component: function () {
+      return import('../views/ActiveDevices.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Active Devices'
+    }
+  },
+  {
     path: '/rfid-management',
     name: 'RfidManagement',
     component: function () {
@@ -241,7 +252,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'RuntimeProviders', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'ActiveDevices', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'RuntimeProviders', 'GameAnalytics']
 
 // Route guard
 router.beforeEach((to, from, next) => {

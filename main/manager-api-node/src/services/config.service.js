@@ -464,18 +464,39 @@ const createAndAssignChildProfile = async (macAddress, payload = {}) => {
     throw new Error('Device not found');
   }
 
+  const birthDate = payload.dateOfBirth ? new Date(payload.dateOfBirth) : null;
+  const gender = payload.gender ? String(payload.gender).trim() : null;
+
+  // Re-running device setup for the same child used to insert a fresh
+  // kid_profile every time, leaving orphaned duplicates behind (one parent
+  // accumulated four identical "Adi" rows). Reuse the existing profile when
+  // the same owner already has a child with this name and birth date.
+  const existing = device.user_id
+    ? await prisma.kid_profile.findFirst({
+      where: {
+        user_id: device.user_id,
+        name: { equals: name, mode: 'insensitive' },
+        birth_date: birthDate
+      },
+      orderBy: { created_at: 'desc' },
+      select: { id: true }
+    })
+    : null;
+
   const result = await prisma.$transaction(async (tx) => {
-    const kid = await tx.kid_profile.create({
-      data: {
-        user_id: device.user_id || null,
-        name,
-        birth_date: payload.dateOfBirth ? new Date(payload.dateOfBirth) : null,
-        gender: payload.gender ? String(payload.gender).trim() : null,
-        interests,
-        language: 'en',
-        preferences
-      }
-    });
+    const data = {
+      user_id: device.user_id || null,
+      name,
+      birth_date: birthDate,
+      gender,
+      interests,
+      language: 'en',
+      preferences
+    };
+
+    const kid = existing
+      ? await tx.kid_profile.update({ where: { id: existing.id }, data })
+      : await tx.kid_profile.create({ data });
 
     await tx.ai_device.update({
       where: { id: device.id },

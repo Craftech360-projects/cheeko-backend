@@ -2181,6 +2181,7 @@ class MQTTGateway {
             let runtimeAgentName = DEFAULT_RUNTIME_AGENT;
             let characterId = null;
             let language = null;
+            let sarvamVoiceId = null;
             let childProfile = null;
 
             try {
@@ -2198,6 +2199,7 @@ class MQTTGateway {
                 runtimeAgentName = charResponse.data.data.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
                 characterId = charResponse.data.data.characterId ?? null;
                 language = charResponse.data.data.language ?? null;
+                sarvamVoiceId = charResponse.data.data.sarvamVoiceId ?? null;
               }
               if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
                 childProfile = profileResponse.data.data;
@@ -2218,6 +2220,7 @@ class MQTTGateway {
                 character: characterName,
                 characterId,
                 language,
+                sarvamVoiceId,
                 childProfile,
                 sessionConfig: connection?.sessionConfig,
               }),
@@ -2414,6 +2417,7 @@ class MQTTGateway {
                   let runtimeAgentName = DEFAULT_RUNTIME_AGENT;
                   let characterId = null;
                   let language = null;
+                  let sarvamVoiceId = null;
                   let childProfile = null;
 
                   // Fetch character and child profile in parallel
@@ -2433,6 +2437,7 @@ class MQTTGateway {
                       runtimeAgentName = charResponse.data.data.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
                       characterId = charResponse.data.data.characterId ?? null;
                       language = charResponse.data.data.language ?? null;
+                      sarvamVoiceId = charResponse.data.data.sarvamVoiceId ?? null;
                       logger.info(`[START-AGENT] âœ… Character from DB: "${characterName}"`);
                     }
 
@@ -2461,6 +2466,7 @@ class MQTTGateway {
                           character: characterName,
                           characterId,
                           language,
+                          sarvamVoiceId,
                           childProfile,
                           sessionConfig: connection?.sessionConfig,
                         }),
@@ -2982,7 +2988,7 @@ class MQTTGateway {
       });
 
       if (response.data.code === 0 && response.data.data.success) {
-        const { newModeName, runtimeAgentName, characterId, language } = response.data.data;
+        const { newModeName, runtimeAgentName, characterId, language, sarvamVoiceId } = response.data.data;
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
         // Step 1: Route via Manager's runtimeAgentName.
@@ -3040,6 +3046,7 @@ class MQTTGateway {
         // Step 6: Update connection state
         connection.udp.session_id = newRoomName;
         connection.currentCharacter = newModeName;
+        connection.sarvamVoiceId = sarvamVoiceId ?? null;
         connection.isEnding = false;
         connection.endPromptSentTime = null;
         connection.goodbyeSent = false;
@@ -3097,6 +3104,7 @@ class MQTTGateway {
                 character: newModeName,
                 characterId,
                 language,
+                sarvamVoiceId,
                 childProfile,
                 sessionConfig: connection?.sessionConfig,
               }),
@@ -3499,6 +3507,7 @@ class MQTTGateway {
                     character: currentCharacter || "Cheeko",
                     characterId: connection?.characterId ?? null,
                     language: connection?.language ?? null,
+                    sarvamVoiceId: connection?.sarvamVoiceId ?? null,
                     childProfile,
                     sessionConfig: connection?.sessionConfig,
                   }),

@@ -40,7 +40,7 @@
   --shadow:    0 10px 30px rgba(69, 49, 31, 0.08);
   --shadow-md: 0 16px 40px rgba(69, 49, 31, 0.12);
 
-  --maxw: 1080px;
+  --maxw: 1600px;
 }
 
 * { box-sizing: border-box; }
@@ -178,7 +178,7 @@ textarea:focus {
 }
 
 textarea {
-  min-height: 360px;
+  min-height: 70vh;
   resize: vertical;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 0.9rem;
@@ -254,18 +254,22 @@ textarea {
 }
 .btn.ghost:hover { background: var(--bg-secondary); border-color: var(--brand-border); color: var(--text-primary); }
 .btn.ghost:active { transform: translateY(1px); }
+.btn.ghost.danger { color: #d33; border-color: #d33a; }
+.btn.ghost.danger:hover { background: #d33a1a; border-color: #d33; color: #d33; }
 
 /* ---------- editor screen ---------- */
-.toolbar { padding: 18px clamp(20px, 3vw, 28px); }
+.toolbar {
+  padding: 18px clamp(20px, 3vw, 28px);
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
 
 .editor-grid {
   display: grid;
   grid-template-columns: 1fr;
   gap: 22px;
-}
-@media (min-width: 880px) {
-  .editor-grid { grid-template-columns: 1fr 1fr; }
-  .editor-grid .card { margin-bottom: 0; }
 }
 
 .actionbar {

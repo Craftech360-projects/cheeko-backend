@@ -260,6 +260,12 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
         return badRequest(res, 'No file uploaded');
     }
 
+    // updateKid() does not scope by owner, so verify the kid belongs to this parent first
+    const ownedKids = await mobileService.getKids(req.firebaseUser.uid);
+    if (!ownedKids.some((k) => String(k.id) === String(req.params.id))) {
+        return res.status(404).json({ code: 404, msg: 'Kid profile not found', data: null });
+    }
+
     const uploadResult = await uploadService.uploadKidAvatar(
         req.file.buffer,
         req.params.id,

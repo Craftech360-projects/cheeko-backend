@@ -18,7 +18,7 @@ const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent
  * @param {object} params - macAddress, deviceId, character, characterId, language, childProfile, sessionConfig
  * @returns {string} JSON string for dispatch metadata
  */
-function buildDispatchMetadata({ macAddress, deviceId, character, characterId = null, language = null, childProfile, sessionConfig = {} }) {
+function buildDispatchMetadata({ macAddress, deviceId, character, characterId = null, language = null, sarvamVoiceId = null, childProfile, sessionConfig = {} }) {
   // ADR-0004: confirm whether a parent rule is being placed into room metadata.
   const _parentRule = (childProfile && childProfile.parent_rule) ? String(childProfile.parent_rule) : null;
   logger.debug(`[PARENT-RULE] dispatch metadata for mac=${macAddress}: parent_rule ${_parentRule ? `PRESENT (${_parentRule.length} chars): "${_parentRule.slice(0, 80)}"` : 'ABSENT'}`);
@@ -29,6 +29,7 @@ function buildDispatchMetadata({ macAddress, deviceId, character, characterId = 
     character: character || "Cheeko",
     character_id: characterId,
     language: language,
+    sarvam_voice_id: sarvamVoiceId,
     child_profile: childProfile || null,
     session_language_code: sessionConfig.languageCode || null,
     session_language_name: sessionConfig.languageName || null,
