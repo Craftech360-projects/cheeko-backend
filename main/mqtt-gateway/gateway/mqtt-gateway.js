@@ -2182,6 +2182,7 @@ class MQTTGateway {
             let characterId = null;
             let language = null;
             let sarvamVoiceId = null;
+            let elevenlabsVoiceId = null;
             let childProfile = null;
 
             try {
@@ -2200,6 +2201,7 @@ class MQTTGateway {
                 characterId = charResponse.data.data.characterId ?? null;
                 language = charResponse.data.data.language ?? null;
                 sarvamVoiceId = charResponse.data.data.sarvamVoiceId ?? null;
+                elevenlabsVoiceId = charResponse.data.data.elevenlabsVoiceId ?? null;
               }
               if (profileResponse.data?.code === 0 && profileResponse.data?.data) {
                 childProfile = profileResponse.data.data;
@@ -2221,6 +2223,7 @@ class MQTTGateway {
                 characterId,
                 language,
                 sarvamVoiceId,
+                elevenlabsVoiceId,
                 childProfile,
                 sessionConfig: connection?.sessionConfig,
               }),
@@ -2418,6 +2421,7 @@ class MQTTGateway {
                   let characterId = null;
                   let language = null;
                   let sarvamVoiceId = null;
+                  let elevenlabsVoiceId = null;
                   let childProfile = null;
 
                   // Fetch character and child profile in parallel
@@ -2438,6 +2442,7 @@ class MQTTGateway {
                       characterId = charResponse.data.data.characterId ?? null;
                       language = charResponse.data.data.language ?? null;
                       sarvamVoiceId = charResponse.data.data.sarvamVoiceId ?? null;
+                      elevenlabsVoiceId = charResponse.data.data.elevenlabsVoiceId ?? null;
                       logger.info(`[START-AGENT] âœ… Character from DB: "${characterName}"`);
                     }
 
@@ -2467,6 +2472,8 @@ class MQTTGateway {
                           characterId,
                           language,
                           sarvamVoiceId,
+                elevenlabsVoiceId,
+                          elevenlabsVoiceId,
                           childProfile,
                           sessionConfig: connection?.sessionConfig,
                         }),
@@ -2988,7 +2995,7 @@ class MQTTGateway {
       });
 
       if (response.data.code === 0 && response.data.data.success) {
-        const { newModeName, runtimeAgentName, characterId, language, sarvamVoiceId } = response.data.data;
+        const { newModeName, runtimeAgentName, characterId, language, sarvamVoiceId, elevenlabsVoiceId } = response.data.data;
         logger.info(`[CHARACTER-CHANGE] Switching to: ${newModeName}`);
 
         // Step 1: Route via Manager's runtimeAgentName.
@@ -3047,6 +3054,7 @@ class MQTTGateway {
         connection.udp.session_id = newRoomName;
         connection.currentCharacter = newModeName;
         connection.sarvamVoiceId = sarvamVoiceId ?? null;
+        connection.elevenlabsVoiceId = elevenlabsVoiceId ?? null;
         connection.isEnding = false;
         connection.endPromptSentTime = null;
         connection.goodbyeSent = false;
@@ -3105,6 +3113,7 @@ class MQTTGateway {
                 characterId,
                 language,
                 sarvamVoiceId,
+                elevenlabsVoiceId,
                 childProfile,
                 sessionConfig: connection?.sessionConfig,
               }),
@@ -3508,6 +3517,7 @@ class MQTTGateway {
                     characterId: connection?.characterId ?? null,
                     language: connection?.language ?? null,
                     sarvamVoiceId: connection?.sarvamVoiceId ?? null,
+                    elevenlabsVoiceId: connection?.elevenlabsVoiceId ?? null,
                     childProfile,
                     sessionConfig: connection?.sessionConfig,
                   }),

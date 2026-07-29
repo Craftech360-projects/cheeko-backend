@@ -70,10 +70,12 @@ model ai_agent_template {
   tts_model_id       String?   @db.Uuid
   tts_voice_id       String?   @db.Uuid
   sarvam_voice_id    String?   @db.VarChar(100)
+  elevenlabs_voice_id String?  @db.VarChar(100)
   mem_model_id       String?   @db.Uuid
   intent_model_id    String?   @db.Uuid
   chat_history_conf  Int?      @default(1)
   system_prompt      String?
+  greeting_prompt    String?
   soul               String?
   runtime_agent_name String?   @db.VarChar(100)
   summary_memory     String?

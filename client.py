@@ -22,13 +22,13 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.93"
+SERVER_IP = "192.168.0.27"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.93"
+MQTT_BROKER_HOST ="192.168.0.27"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
-MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.0.93:8001/toy")
+MANAGER_API_BASE = os.getenv("TEST_MANAGER_API_BASE", "http://192.168.0.27:8001/toy")
 MQTT_SIGNATURE_KEY = os.getenv("TEST_MQTT_SIGNATURE_KEY", "test-signature-key-12345")
 # DEVICE_MAC is now dynamically generated for uniqueness
 # Minimum frames to have in buffer to continue playback

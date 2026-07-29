@@ -51,7 +51,15 @@ router.get('/templates', gate, asyncHandler(async (req, res) => {
 router.get('/templates/:id', gate, asyncHandler(async (req, res) => {
   const t = await agentService.getTemplateById(req.params.id);
   if (!t) return notFound(res, 'Template not found');
-  success(res, { id: t.id, agentName: t.agentName, systemPrompt: t.systemPrompt, soul: t.soul });
+  success(res, {
+    id: t.id,
+    agentName: t.agentName,
+    greetingPrompt: t.greetingPrompt,
+    systemPrompt: t.systemPrompt,
+    soul: t.soul,
+    sarvamVoiceId: t.sarvamVoiceId,
+    elevenlabsVoiceId: t.elevenlabsVoiceId,
+  });
 }));
 
 // Create a character template. AGENT.md + SOUL.md are mandatory; name/code
@@ -69,10 +77,14 @@ router.post('/templates', gate, asyncHandler(async (req, res) => {
     const id = await agentService.createTemplate({
       agentName,
       agentCode: agentCode || undefined,
+      // Optional: empty -> NULL -> worker falls back to the generic greeting.
+      greetingPrompt: b.greetingPrompt,
       systemPrompt: b.systemPrompt,
       soul: b.soul,
       language: b.language,
       langCode: b.langCode,
+      sarvamVoiceId: b.sarvamVoiceId,
+      elevenlabsVoiceId: b.elevenlabsVoiceId,
     });
     success(res, { id }, 'Created');
   } catch (err) {
@@ -80,13 +92,16 @@ router.post('/templates', gate, asyncHandler(async (req, res) => {
   }
 }));
 
-// Save AGENT.md (systemPrompt) + SOUL.md (soul). updateTemplate runs
+// Save greeting_prompt + AGENT.md (systemPrompt) + SOUL.md (soul). updateTemplate runs
 // validateAgentMd → throws statusCode 400 on malformed AGENT.md; we surface it.
 router.put('/templates/:id', gate, asyncHandler(async (req, res) => {
   try {
     await agentService.updateTemplate(req.params.id, {
+      greetingPrompt: req.body.greetingPrompt,
       systemPrompt: req.body.systemPrompt,
       soul: req.body.soul,
+      sarvamVoiceId: req.body.sarvamVoiceId,
+      elevenlabsVoiceId: req.body.elevenlabsVoiceId,
     });
     success(res, null, 'Saved');
   } catch (err) {

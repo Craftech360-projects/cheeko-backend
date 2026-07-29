@@ -43,7 +43,10 @@ describe('resolveSessionForCharacter', () => {
       runtimeAgentName: 'cheeko-agent',
       language: 'English',
       systemPrompt: 'Be kind and playful.',
+      greetingPrompt: null,
       soul: 'I am warm and curious.',
+      sarvamVoiceId: null,
+      elevenlabsVoiceId: null,
     });
   });
 

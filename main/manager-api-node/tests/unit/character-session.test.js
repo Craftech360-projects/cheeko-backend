@@ -53,7 +53,10 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
       runtimeAgentName: 'cheeko-agent',
       language: 'English',
       systemPrompt: 'Be kind.',
+      greetingPrompt: null,
       soul: 'I am warm.',
+      sarvamVoiceId: null,
+      elevenlabsVoiceId: null,
     });
   });
 
@@ -66,10 +69,12 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
   it('getCharacterSession sources persona from the template (single source), overriding the instance', async () => {
     prisma.ai_agent.findUnique.mockResolvedValue(character); // instance: 'Be kind.' / 'I am warm.'
     prisma.ai_agent_template.findFirst.mockResolvedValue({
-      system_prompt: 'TEMPLATE PROMPT', soul: 'TEMPLATE SOUL', runtime_agent_name: null,
+      system_prompt: 'TEMPLATE PROMPT', greeting_prompt: 'TEMPLATE GREETING',
+      soul: 'TEMPLATE SOUL', runtime_agent_name: null,
     });
     const result = await agentService.getCharacterSession('char-uuid');
     expect(result.systemPrompt).toBe('TEMPLATE PROMPT');
+    expect(result.greetingPrompt).toBe('TEMPLATE GREETING');
     expect(result.soul).toBe('TEMPLATE SOUL');
     expect(prisma.ai_agent_template.findFirst).toHaveBeenCalled();
   });

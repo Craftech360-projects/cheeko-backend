@@ -272,6 +272,17 @@ textarea {
   gap: 22px;
 }
 
+/* Greeting is a sentence or two, not a document — don't give it the 70vh
+   editor height the AGENT.md/SOUL.md textareas get. */
+#greetingPrompt { min-height: 7rem; }
+
+.hint {
+  margin: 4px 0 10px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .actionbar {
   display: flex;
   align-items: center;

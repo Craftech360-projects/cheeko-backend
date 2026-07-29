@@ -251,7 +251,8 @@ router.put('/kids/:id', asyncHandler(async (req, res) => {
 }));
 
 router.delete('/kids/:id', asyncHandler(async (req, res) => {
-    await mobileService.deleteKid(req.firebaseUser.uid, req.params.id);
+    const deleted = await mobileService.deleteKid(req.firebaseUser.uid, req.params.id);
+    await uploadService.deleteKidAvatarByUrl(deleted.avatar_url);
     success(res, null, 'Kid profile deleted');
 }));
 
@@ -262,7 +263,8 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
 
     // updateKid() does not scope by owner, so verify the kid belongs to this parent first
     const ownedKids = await mobileService.getKids(req.firebaseUser.uid);
-    if (!ownedKids.some((k) => String(k.id) === String(req.params.id))) {
+    const existingKid = ownedKids.find((k) => String(k.id) === String(req.params.id));
+    if (!existingKid) {
         return res.status(404).json({ code: 404, msg: 'Kid profile not found', data: null });
     }
 
@@ -273,6 +275,9 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
     );
 
     const kid = await mobileService.updateKid(req.params.id, { avatar_url: uploadResult.url });
+
+    // Only after the profile points at the new image, so a failed update never orphans the kid
+    await uploadService.deleteKidAvatarByUrl(existingKid.avatar_url);
 
     success(res, { avatarUrl: uploadResult.url, kid });
 }));

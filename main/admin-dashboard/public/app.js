@@ -81,8 +81,11 @@ async function loadChar() {
   setStatus('');
   const id = $('charSelect').value;
   const t = await api('GET', '/templates/' + id);
+  $('greetingPrompt').value = t.greetingPrompt || '';
   $('agentMd').value = t.systemPrompt || '';
   $('soulMd').value = t.soul || '';
+  $('sarvamVoiceId').value = t.sarvamVoiceId || '';
+  $('elevenlabsVoiceId').value = t.elevenlabsVoiceId || '';
 }
 
 async function save() {
@@ -91,8 +94,11 @@ async function save() {
   const id = $('charSelect').value;
   try {
     await api('PUT', '/templates/' + id, {
+      greetingPrompt: $('greetingPrompt').value,
       systemPrompt: $('agentMd').value,
       soul: $('soulMd').value,
+      sarvamVoiceId: $('sarvamVoiceId').value,
+      elevenlabsVoiceId: $('elevenlabsVoiceId').value,
     });
     setStatus('Saved ✓', true);
   } catch (e) {
@@ -128,8 +134,11 @@ function enterCreateMode() {
   $('newName').value = '';
   $('newCode').value = '';
   $('charSelect').disabled = true;
+  $('greetingPrompt').value = '';
   $('agentMd').value = '';
   $('soulMd').value = '';
+  $('sarvamVoiceId').value = '';
+  $('elevenlabsVoiceId').value = '';
   setStatus('Fill name, AGENT.md and SOUL.md, then Save.');
   $('newName').focus();
 }
@@ -159,8 +168,11 @@ async function createChar() {
     const data = await api('POST', '/templates', {
       agentName: name,
       agentCode: code || undefined,
+      greetingPrompt: $('greetingPrompt').value,
       systemPrompt: agentMd,
       soul: soulMd,
+      sarvamVoiceId: $('sarvamVoiceId').value,
+      elevenlabsVoiceId: $('elevenlabsVoiceId').value,
     });
     creating = false;
     $('newCharBar').hidden = true;

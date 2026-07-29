@@ -1917,7 +1917,8 @@ async function deleteKid(firebaseUid, kidId) {
         }),
         prisma.kid_profile.delete({ where: { id: BigInt(kidId) } }),
     ]);
-    return { success: true };
+    // Returned so the caller can clean up the publicly-served avatar object
+    return { success: true, avatar_url: kid.avatar_url };
 }
 
 // ─── RPC Replacements ───────────────────────────────────────────────────────

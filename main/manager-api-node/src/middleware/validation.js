@@ -150,6 +150,7 @@ const schemas = {
     intentModelId: Joi.string().uuid().allow(null, ''),
     chatHistoryConf: Joi.number().integer().min(0).max(2),
     systemPrompt: Joi.string().allow(null, ''),
+    greetingPrompt: Joi.string().allow(null, ''),
     summaryMemory: Joi.string().allow(null, ''),
     langCode: Joi.string().max(10),
     language: Joi.string().max(50),

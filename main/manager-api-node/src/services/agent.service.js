@@ -1610,14 +1610,17 @@ const getCurrentCharacter = async (mac) => {
 const mergeTemplatePersona = async (agent) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: normalizeCharacterName(agent.agent_name), mode: 'insensitive' } },
-    select: { system_prompt: true, soul: true, runtime_agent_name: true, sarvam_voice_id: true },
+    select: { system_prompt: true, greeting_prompt: true, soul: true, runtime_agent_name: true, sarvam_voice_id: true, elevenlabs_voice_id: true },
   });
   return {
     ...agent,
     system_prompt: template?.system_prompt ?? agent.system_prompt,
+    // Greeting prompt is template-only (no per-instance column on ai_agent).
+    greeting_prompt: template?.greeting_prompt ?? null,
     soul: template?.soul ?? agent.soul,
     runtime_agent_name: agent.runtime_agent_name ?? template?.runtime_agent_name ?? null,
     sarvam_voice_id: template?.sarvam_voice_id ?? null,
+    elevenlabs_voice_id: template?.elevenlabs_voice_id ?? null,
   };
 };
 
@@ -1661,7 +1664,7 @@ const getCharacterSession = async (characterId, { language } = {}) => {
 const getCharacterSessionByName = async (characterName, { language } = {}) => {
   const template = await prisma.ai_agent_template.findFirst({
     where: { agent_name: { equals: characterName, mode: 'insensitive' } },
-    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, soul: true, language: true, sarvam_voice_id: true },
+    select: { id: true, agent_name: true, runtime_agent_name: true, system_prompt: true, greeting_prompt: true, soul: true, language: true, sarvam_voice_id: true, elevenlabs_voice_id: true },
   });
   if (!template) throw new Error('Character not found');
   return resolveSessionForCharacter(
@@ -1670,9 +1673,11 @@ const getCharacterSessionByName = async (characterName, { language } = {}) => {
       agent_name: template.agent_name,
       runtime_agent_name: template.runtime_agent_name,
       system_prompt: template.system_prompt,
+      greeting_prompt: template.greeting_prompt,
       soul: template.soul,
       language: template.language,
       sarvam_voice_id: template.sarvam_voice_id,
+      elevenlabs_voice_id: template.elevenlabs_voice_id,
     },
     { language }
   );
@@ -2477,10 +2482,13 @@ const createTemplate = async (data) => {
       vllm_model_id: toNullIfEmpty(data.vllmModelId),
       tts_model_id: toNullIfEmpty(data.ttsModelId),
       tts_voice_id: toNullIfEmpty(data.ttsVoiceId),
+      sarvam_voice_id: toNullIfEmpty(data.sarvamVoiceId),
+      elevenlabs_voice_id: toNullIfEmpty(data.elevenlabsVoiceId),
       mem_model_id: toNullIfEmpty(data.memModelId),
       intent_model_id: toNullIfEmpty(data.intentModelId),
       chat_history_conf: data.chatHistoryConf || 0,
       system_prompt: data.systemPrompt,
+      greeting_prompt: toNullIfEmpty(data.greetingPrompt),
       summary_memory: data.summaryMemory,
       lang_code: data.langCode || 'en',
       language: data.language || 'English',
@@ -2521,6 +2529,8 @@ const updateTemplate = async (templateId, data) => {
   if (data.vllmModelId !== undefined) updateData.vllm_model_id = toNullIfEmpty(data.vllmModelId);
   if (data.ttsModelId !== undefined) updateData.tts_model_id = toNullIfEmpty(data.ttsModelId);
   if (data.ttsVoiceId !== undefined) updateData.tts_voice_id = toNullIfEmpty(data.ttsVoiceId);
+  if (data.sarvamVoiceId !== undefined) updateData.sarvam_voice_id = toNullIfEmpty(data.sarvamVoiceId);
+  if (data.elevenlabsVoiceId !== undefined) updateData.elevenlabs_voice_id = toNullIfEmpty(data.elevenlabsVoiceId);
   if (data.memModelId !== undefined) updateData.mem_model_id = toNullIfEmpty(data.memModelId);
   if (data.intentModelId !== undefined) updateData.intent_model_id = toNullIfEmpty(data.intentModelId);
   if (data.chatHistoryConf !== undefined) updateData.chat_history_conf = data.chatHistoryConf;
@@ -2528,6 +2538,7 @@ const updateTemplate = async (templateId, data) => {
     validateAgentMd(data.systemPrompt);
     updateData.system_prompt = data.systemPrompt;
   }
+  if (data.greetingPrompt !== undefined) updateData.greeting_prompt = toNullIfEmpty(data.greetingPrompt);
   if (data.soul !== undefined) updateData.soul = data.soul; // SOUL.md (admin dashboard edits this)
   if (data.summaryMemory !== undefined) updateData.summary_memory = data.summaryMemory;
   if (data.langCode !== undefined) updateData.lang_code = data.langCode;

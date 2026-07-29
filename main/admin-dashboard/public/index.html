@@ -67,6 +67,14 @@
 
       <div class="editor-grid">
         <div class="card">
+          <label for="greetingPrompt">Greeting <code>greeting_prompt</code></label>
+          <p class="hint">How this character opens a session. Leave empty for the default
+            "introduce yourself using your persona guidelines".</p>
+          <textarea id="greetingPrompt" spellcheck="false"
+            placeholder="e.g. Greet them in a hushed, mysterious voice and hint that a riddle is waiting."></textarea>
+        </div>
+
+        <div class="card">
           <label for="agentMd">AGENT.md <code>system_prompt</code></label>
           <textarea id="agentMd" spellcheck="false"></textarea>
         </div>
@@ -74,6 +82,16 @@
         <div class="card">
           <label for="soulMd">SOUL.md <code>soul</code></label>
           <textarea id="soulMd" spellcheck="false"></textarea>
+        </div>
+
+        <div class="card">
+          <label for="sarvamVoiceId">Sarvam voice ID</label>
+          <input id="sarvamVoiceId" placeholder="e.g. meera" />
+        </div>
+
+        <div class="card">
+          <label for="elevenlabsVoiceId">ElevenLabs voice ID</label>
+          <input id="elevenlabsVoiceId" placeholder="e.g. 21m00Tcm4TlvDq8ikWAM" />
         </div>
       </div>
 

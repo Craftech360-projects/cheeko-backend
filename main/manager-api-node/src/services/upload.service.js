@@ -3,7 +3,7 @@
  * Handles file uploads to AWS S3
  */
 
-const { S3Client, PutObjectCommand, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const path = require('path');
@@ -229,10 +229,34 @@ async function uploadKidAvatar(fileBuffer, kidId, mimeType) {
   return { success: true, url, s3Key };
 }
 
+/**
+ * Delete a previously uploaded kid avatar, given the public URL stored on the
+ * profile. Avatars are served publicly with a 1-year cache header, so a replaced
+ * or deleted child's photo must not be left readable in the bucket.
+ *
+ * Best-effort: a failure here leaves an orphaned object, which is preferable to
+ * failing the request that already succeeded.
+ */
+async function deleteKidAvatarByUrl(url) {
+  const prefix = `https://${CLOUDFRONT_DOMAIN}/`;
+  if (!url || !url.startsWith(prefix)) return;
+  const s3Key = url.slice(prefix.length);
+  // avatar_url is client-writable via PUT /kids/:id, so treat it as untrusted:
+  // confine deletes to the avatar prefix and reject any traversal segment.
+  if (!s3Key.startsWith('kids/avatars/') || s3Key.includes('..')) return;
+
+  try {
+    await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+  } catch (error) {
+    logger.warn(`Failed to delete old kid avatar ${s3Key}: ${error.message}`);
+  }
+}
+
 module.exports = {
   uploadContentFile,
   uploadThumbnail,
   uploadImagineImage,
   uploadKidAvatar,
+  deleteKidAvatarByUrl,
   listImagineImages
 };
