@@ -14,10 +14,13 @@ const DB = path.join(__dirname, '../manager-api-node/src/config/database.js');
 
 // Stub the DB module so requiring the service never touches Postgres.
 let updated = null;
+// updateTemplate re-reads after writing and throws unless the row comes back
+// with the new values, so the stub has to actually retain what it was given.
+let stored = { id: 'demo-id' };
 const fakePrisma = {
   ai_agent_template: {
-    findUnique: async () => ({ id: 'demo-id' }),       // "template exists"
-    update: async ({ data }) => { updated = data; return { id: 'demo-id' }; },
+    findUnique: async () => stored,                    // "template exists"
+    update: async ({ data }) => { updated = data; stored = { ...stored, ...data }; return stored; },
   },
 };
 require.cache[require.resolve(DB)] = new Module(DB);
@@ -60,6 +63,68 @@ const ok = (name, cond) => { (cond ? pass++ : fail++); console.log(`${cond ? 'PA
     ok('saves valid AGENT.md', false);
     console.log('   unexpected error:', e.message);
   }
+
+  // 3. Device sim wire format. These vectors were produced by client.py's own
+  //    struct/AES/HMAC math and compared byte-for-byte; if the sim ever drifts
+  //    from the firmware the gateway silently drops its packets, so pin them.
+  const crypto = require('crypto');
+  const { DeviceSim, makeCredentials, parseExpressionTag } = require('./device-sim');
+
+  const KEY_HEX = '00112233445566778899aabbccddeeff';
+  const nonce = Buffer.alloc(16);
+  nonce.writeUInt32BE(0x1a2b3c4d, 4);
+
+  const sim = new DeviceSim({ signatureKey: 'x' });
+  sim.aesKey = Buffer.from(KEY_HEX, 'hex');
+  sim.connectionId = nonce.readUInt32BE(4);
+  sim.txSequence = 7;
+
+  const realNow = Date.now;
+  Date.now = () => 1700000000 * 1000; // freeze: the header carries a timestamp
+  const packet = sim.encryptPacket(Buffer.from('hello-cheeko-audio')).toString('hex');
+  Date.now = realNow;
+  ok('UDP packet matches client.py byte-for-byte',
+    packet === '010000121a2b3c4d6553f10000000007303cbdc928fe04e6df1d8306c76f845f09f9');
+
+  const realUUID = crypto.randomUUID;
+  crypto.randomUUID = () => 'fixed-uuid';
+  const creds = makeCredentials('00:16:3e:ac:b5:38', 'test-signature-key-12345');
+  crypto.randomUUID = realUUID;
+  ok('MQTT password HMAC matches client.py',
+    creds.password === 'S4rBZDqj7jGyopfFPvgCOEgYt2ZosqKWud5ZFnDW9eg=');
+
+  // 4. Receive path, loopback: a packet built by the send path must come back
+  //    out as PCM. Same header/AES the gateway proved it can decrypt, so this
+  //    closes the loop without needing a live TTS stream.
+  const rx = new DeviceSim({ signatureKey: 'x' });
+  rx.aesKey = Buffer.from(KEY_HEX, 'hex');
+  rx.connectionId = 0x1a2b3c4d;
+  rx.decoder = new (require('@discordjs/opus').OpusEncoder)(16000, 1);
+
+  const tone = Buffer.alloc(640);
+  for (let i = 0; i < 320; i++) tone.writeInt16LE(Math.round(6000 * Math.sin(i / 4)), i * 2);
+
+  let gotPcm = null;
+  rx.on('pcm', (p) => { gotPcm = p; });
+  rx.txSequence = 41;
+  rx._onAudioPacket(rx.encryptPacket(rx.encoder.encode(tone)));
+
+  ok('inbound packet decrypts + decodes to a full PCM frame',
+    gotPcm !== null && gotPcm.length === 640);
+  ok('inbound sequence tracked from the packet header',
+    rx.stats.received === 1 && rx.stats.first === 41 && rx.stats.missing === 0);
+
+  // A dropped packet must be counted, not silently swallowed.
+  rx.txSequence = 45; // 42..44 never arrive
+  rx._onAudioPacket(rx.encryptPacket(rx.encoder.encode(tone)));
+  ok('gap in sequence counted as missing packets', rx.stats.missing === 3);
+
+  ok('face tag: known tag drives expression',
+    parseExpressionTag('[happy] Yay!').face === 'happy');
+  ok('face tag: unknown tag falls back to neutral',
+    parseExpressionTag('[zzzz] hi').face === 'neutral');
+  ok('face tag: non-tag brackets left untouched',
+    parseExpressionTag('[OK!] hi').text === '[OK!] hi');
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

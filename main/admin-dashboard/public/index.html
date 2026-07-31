@@ -39,6 +39,12 @@
       <p id="loginErr" class="err" role="alert" hidden></p>
     </section>
 
+    <!-- Tabs (shown once logged in) -->
+    <nav id="tabs" class="tabs" hidden>
+      <button class="tab active" data-tab="editorView">Personas</button>
+      <button class="tab" data-tab="testView">Test device</button>
+    </nav>
+
     <!-- Editor -->
     <section id="editorView" hidden>
       <div class="card toolbar">
@@ -104,8 +110,48 @@
         <span id="status" class="status" role="status" aria-live="polite"></span>
       </div>
     </section>
+
+    <!-- Test device: the browser acts as an ESP32 talking to the mqtt-gateway -->
+    <section id="testView" hidden>
+      <div class="card toolbar">
+        <div class="field">
+          <label for="testChar">Character <code>character_id</code></label>
+          <div class="select-wrap">
+            <select id="testChar"></select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <label for="testMac">Device MAC</label>
+          <input id="testMac" value="00:16:3e:ac:b5:38" />
+        </div>
+        <button id="startTest" class="btn">▶ Start</button>
+        <button id="stopTest" class="btn ghost danger" hidden>■ Stop</button>
+        <span id="testState" class="pill">idle</span>
+      </div>
+
+      <div class="test-grid">
+        <div class="card">
+          <label>Conversation</label>
+          <div id="transcript" class="transcript"></div>
+          <div class="actionbar">
+            <button id="muteBtn" class="btn ghost" disabled>Mute mic</button>
+            <span class="hint">Just talk — the agent's VAD handles turn-taking.</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <label>Session log</label>
+          <div id="testLog" class="testlog"></div>
+        </div>
+      </div>
+
+      <!-- Agent audio elements are attached here; must be in the DOM to play. -->
+      <div id="audioSink" hidden></div>
+    </section>
   </main>
 
   <script src="app.js"></script>
+  <script src="test.js"></script>
 </body>
 </html>

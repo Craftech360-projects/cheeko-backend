@@ -42,15 +42,27 @@ function logout() {
   token = '';
   sessionStorage.removeItem('adminToken');
   $('editorView').hidden = true;
+  $('testView').hidden = true;
+  $('tabs').hidden = true;
   $('logout').hidden = true;
   $('loginView').hidden = false;
+}
+
+// ---- tabs ----
+function showTab(id) {
+  $('editorView').hidden = id !== 'editorView';
+  $('testView').hidden = id !== 'testView';
+  document.querySelectorAll('.tab').forEach((b) =>
+    b.classList.toggle('active', b.dataset.tab === id));
 }
 
 // ---- editor ----
 async function showEditor() {
   $('loginView').hidden = true;
+  $('tabs').hidden = false;
   $('editorView').hidden = false;
   $('logout').hidden = false;
+  loadTestCharacters(); // Test tab shares this character list
   try {
     const list = await api('GET', '/templates');
     // Cheeko first, then the rest alphabetically.
@@ -197,6 +209,9 @@ $('saveBtn').addEventListener('click', save);
 $('deleteBtn').addEventListener('click', deleteChar);
 $('newBtn').addEventListener('click', enterCreateMode);
 $('cancelNewBtn').addEventListener('click', exitCreateMode);
+document.querySelectorAll('.tab').forEach((b) =>
+  b.addEventListener('click', () => showTab(b.dataset.tab)));
 
-// auto-resume if token already stored
-if (token) showEditor();
+// auto-resume if token already stored. Deferred to DOMContentLoaded so test.js
+// (loaded after this file) has defined loadTestCharacters by the time we call it.
+window.addEventListener('DOMContentLoaded', () => { if (token) showEditor(); });
