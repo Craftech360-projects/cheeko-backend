@@ -56,8 +56,14 @@ function livekitConfig() {
   try {
     file = JSON.parse(fs.readFileSync(path.join(__dirname, '../mqtt-gateway/config/mqtt.json'), 'utf8')).livekit || {};
   } catch { /* no sibling gateway checkout */ }
+  const url = gatewayEnv('LIVEKIT_URL') || file.url;
   return {
-    url: gatewayEnv('LIVEKIT_URL') || file.url,
+    url,
+    // Where the BROWSER should connect. Often not the same address this server
+    // uses: localhost is reachable here but meaningless in a remote browser,
+    // and the LAN IP can be firewalled for this process even though LiveKit
+    // binds 0.0.0.0. Defaults to the server URL when they are the same.
+    publicUrl: gatewayEnv('LIVEKIT_PUBLIC_URL') || url,
     apiKey: gatewayEnv('LIVEKIT_API_KEY') || file.api_key,
     apiSecret: gatewayEnv('LIVEKIT_API_SECRET') || file.api_secret,
   };
@@ -161,7 +167,9 @@ server.listen(PORT, () => {
   console.log(`Admin dashboard: http://localhost:${PORT}  ->  Manager ${MANAGER_URL}`);
   console.log(
     LIVEKIT.url && LIVEKIT.apiKey
-      ? `Test tab: LiveKit ${LIVEKIT.url}  |  agent API ${MANAGER_API_URL}`
+      ? `Test tab: LiveKit ${LIVEKIT.url}` +
+        (LIVEKIT.publicUrl !== LIVEKIT.url ? ` (browser -> ${LIVEKIT.publicUrl})` : '') +
+        `  |  agent API ${MANAGER_API_URL}`
       : 'Test tab: DISABLED — no LiveKit credentials (set LIVEKIT_URL/API_KEY/API_SECRET)'
   );
 });

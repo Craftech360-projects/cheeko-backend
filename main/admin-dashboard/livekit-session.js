@@ -109,7 +109,8 @@ async function startSession({ livekit, managerApiUrl, managerSecret, mac, charac
   at.addGrant({ roomJoin: true, room: roomName, canPublish: true, canSubscribe: true });
 
   return {
-    url: livekit.url,
+    // The browser's address, which may differ from the one we just used.
+    url: livekit.publicUrl || livekit.url,
     token: await at.toJwt(),
     roomName,
     agentName,
