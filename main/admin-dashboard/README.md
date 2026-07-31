@@ -64,9 +64,21 @@ turn-taking, so you can speak and interrupt normally.
 
 - **The mic needs a secure context.** `localhost` is fine; a deployed
   `http://<ip>:4000` is not — browsers block `getUserMedia` outside HTTPS.
-- **`LIVEKIT_URL` must be reachable from the browser**, not just from the
-  server — the browser connects to LiveKit directly. `ws://localhost:7880`
-  only works when the browser is on the same machine.
+  The cheapest fix for a dev box is to tunnel instead of installing certs:
+
+  ```bash
+  ssh -L 4000:localhost:4000 -L 7880:localhost:7880 root@<host>
+  # then open http://localhost:4000, with LIVEKIT_PUBLIC_URL=ws://localhost:7880
+  ```
+
+  Port 7880 has to be tunnelled too, because the browser talks to LiveKit
+  directly. Note that serving the page over HTTPS instead forces LiveKit onto
+  `wss://` as well — an `https` page cannot open a `ws://` socket, so a
+  certificate on 4000 alone yields a page that loads and then fails to join.
+- **Two LiveKit URLs, on purpose.** `LIVEKIT_URL` is what this server dials;
+  `LIVEKIT_PUBLIC_URL` is what the browser dials. Keep the server one on
+  `localhost` so it survives the host's IP changing, and point the public one
+  at whatever the browser can actually route to. Startup prints both.
 - **Use headphones**, or the agent hears itself.
 - The **MAC** selects which child profile the agent loads. Keep it stable when
   testing personalization, vary it otherwise. Unlike the device path, two

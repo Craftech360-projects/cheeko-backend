@@ -158,7 +158,13 @@ async function startTest() {
   resetTurns();
 
   if (!window.isSecureContext) {
-    return tlog('Microphone needs HTTPS (or localhost). Serve the dashboard over TLS.', 'err');
+    tlog(`Microphone blocked: ${location.origin} is not a secure context.`, 'err');
+    tlog('Quickest fix — tunnel the dashboard AND LiveKit, then use localhost:', 'err');
+    tlog(`  ssh -L 4000:localhost:4000 -L 7880:localhost:7880 <user>@${location.hostname}`, 'err');
+    tlog('  …then open http://localhost:4000 and set LIVEKIT_PUBLIC_URL=ws://localhost:7880', 'err');
+    tlog('Serving this page over HTTPS instead also requires wss:// for LiveKit — ' +
+         'an https page cannot open a ws:// socket.', 'err');
+    return;
   }
 
   try {
