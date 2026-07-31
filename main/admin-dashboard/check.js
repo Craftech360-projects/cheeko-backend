@@ -126,6 +126,36 @@ const ok = (name, cond) => { (cond ? pass++ : fail++); console.log(`${cond ? 'PA
   ok('face tag: non-tag brackets left untouched',
     parseExpressionTag('[OK!] hi').text === '[OK!] hi');
 
+  // 5. livekit-session.js keeps its own copy of buildDispatchMetadata so the
+  //    dashboard can deploy without the gateway installed. That copy must not
+  //    drift from the gateway's — the worker parses exactly one shape. Skipped
+  //    when the gateway checkout isn't present (e.g. on a deploy box).
+  try {
+    const gateway = require('../mqtt-gateway/core/mem0-integration');
+    const mine = require('./livekit-session');
+    const args = {
+      macAddress: '00:16:3e:ac:b5:38',
+      deviceId: '00:16:3e:ac:b5:38',
+      character: 'nani',
+      characterId: 'abc-123',
+      language: 'English',
+      sarvamVoiceId: 'ritu',
+      childProfile: { name: 'Rahul', age: 8 },
+      sessionConfig: {},
+    };
+    const realNow = Date.now;
+    Date.now = () => 1700000000000; // both stamp a timestamp
+    const theirs = JSON.parse(gateway.buildDispatchMetadata(args));
+    const ours = JSON.parse(mine._buildDispatchMetadata(args));
+    Date.now = realNow;
+    ok('dispatch metadata matches the gateway\'s builder',
+      JSON.stringify(ours) === JSON.stringify(theirs));
+    ok('default runtime agent matches the gateway\'s',
+      mine._DEFAULT_RUNTIME_AGENT === gateway.DEFAULT_RUNTIME_AGENT);
+  } catch (e) {
+    console.log(`SKIP — dispatch metadata drift check (${e.message.split('\n')[0]})`);
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

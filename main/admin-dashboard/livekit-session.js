@@ -21,10 +21,37 @@ const {
   AccessToken,
 } = require('livekit-server-sdk');
 
-const {
-  buildDispatchMetadata,
-  DEFAULT_RUNTIME_AGENT,
-} = require('../mqtt-gateway/core/mem0-integration');
+// Deliberately NOT imported from ../mqtt-gateway/core/mem0-integration, even
+// though that is the canonical copy: requiring it drags in the gateway's logger
+// and therefore winston from the gateway's node_modules, which breaks any deploy
+// where the gateway isn't installed alongside this app. check.js asserts this
+// stays byte-identical to the gateway's builder whenever that checkout is
+// present, so drift is caught in dev rather than in the worker.
+const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || 'cheeko-agent';
+
+function buildDispatchMetadata({
+  macAddress, deviceId, character, characterId = null, language = null,
+  sarvamVoiceId = null, elevenlabsVoiceId = null, childProfile, sessionConfig = {},
+}) {
+  return JSON.stringify({
+    device_mac: macAddress,
+    device_uuid: deviceId,
+    character: character || 'Cheeko',
+    character_id: characterId,
+    language: language,
+    sarvam_voice_id: sarvamVoiceId,
+    elevenlabs_voice_id: elevenlabsVoiceId,
+    child_profile: childProfile || null,
+    session_language_code: sessionConfig.languageCode || null,
+    session_language_name: sessionConfig.languageName || null,
+    session_voice_id: sessionConfig.voiceId || null,
+    session_agent_name: sessionConfig.agentName || null,
+    long_term_memories: [],
+    memory_relations: [],
+    memory_entities: [],
+    timestamp: Date.now(),
+  });
+}
 
 // Room name shape the gateway uses: <uuid>_<MAC, no colons, upper>_<type>.
 // Some worker-side logging keys off it, so keep the shape.
@@ -126,4 +153,11 @@ async function deleteRoom(livekit, roomName) {
   } catch { /* already gone, or LiveKit cleaned it up on empty */ }
 }
 
-module.exports = { startSession, deleteRoom, roomNameFor };
+module.exports = {
+  startSession,
+  deleteRoom,
+  roomNameFor,
+  // Exposed only so check.js can diff them against the gateway's originals.
+  _buildDispatchMetadata: buildDispatchMetadata,
+  _DEFAULT_RUNTIME_AGENT: DEFAULT_RUNTIME_AGENT,
+};
