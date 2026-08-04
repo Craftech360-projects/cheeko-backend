@@ -20,6 +20,8 @@ const DEFAULT_AGE_BAND = '6-8';
 const DEFAULT_LANGUAGE = 'en';
 // kid_learning_progress.subject value for quiz milestones.
 const QUIZ_SUBJECT = 'quiz';
+// The Daily Ten: how many scored questions make a day complete.
+const DAILY_QUESTION_TARGET = 10;
 const ANSWER_RESULTS = ['correct', 'wrong', 'revealed'];
 const CLEARED_RESULTS = ['correct', 'revealed'];
 // Warn once the device is inside the top 3 authored levels of its band.
@@ -162,6 +164,15 @@ const nextQuestions = async (deviceMac) => {
 
   const selected = new Set(selectedIds.map(String));
 
+  // The day-gate is decided here, from the log, not left to the model. It kept
+  // reading "the Daily Ten is complete" out of restored transcripts and
+  // refusing to start a genuinely fresh day.
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const answeredToday = await prisma.quiz_question_answer.count({
+    where: { device_mac: macFilter(deviceMac), answered_at: { gte: startOfDay } }
+  });
+
   return {
     age_band: context.ageBand,
     age_band_defaulted: context.ageBandDefaulted,
@@ -169,6 +180,8 @@ const nextQuestions = async (deviceMac) => {
     level,
     replay,
     frontier_warning: frontierWarning,
+    answered_today: answeredToday,
+    day_complete: answeredToday >= DAILY_QUESTION_TARGET,
     questions: bank.filter((q) => selected.has(String(q.id))).map(toQuestion)
   };
 };
