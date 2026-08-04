@@ -67,7 +67,22 @@ const deriveLevelState = (questions, clearedIds) => {
   return { currentLevel: null, unclearedIds: [], allCleared: true };
 };
 
+/**
+ * Count the levels the device has finished: every active question in the level
+ * is Cleared. Independent of Current Level — a level cleared out of order (or
+ * left behind when a new question reopened an earlier one) still counts.
+ *
+ * @param {Array<{id: *, level: number}>} questions - active bank for the band, any order
+ * @param {Set<string>} clearedIds - cleared question ids as strings
+ * @returns {number}
+ */
+const countCompletedLevels = (questions, clearedIds) =>
+  [...new Set(questions.map((q) => q.level))].filter((level) =>
+    questions.every((q) => q.level !== level || clearedIds.has(String(q.id)))
+  ).length;
+
 module.exports = {
   ageBandFromBirthDate,
-  deriveLevelState
+  deriveLevelState,
+  countCompletedLevels
 };

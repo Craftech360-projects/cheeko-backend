@@ -3,7 +3,11 @@
  * Spec: docs/superpowers/specs/2026-08-04-quizzy-question-bank-design.md
  */
 
-const { ageBandFromBirthDate, deriveLevelState } = require('../../src/services/quiz.logic');
+const {
+  ageBandFromBirthDate,
+  deriveLevelState,
+  countCompletedLevels
+} = require('../../src/services/quiz.logic');
 
 describe('ageBandFromBirthDate', () => {
   const now = new Date('2026-08-04T10:00:00Z');
@@ -130,5 +134,44 @@ describe('deriveLevelState', () => {
       unclearedIds: [],
       allCleared: true,
     });
+  });
+});
+
+describe('countCompletedLevels', () => {
+  const questions = [
+    { id: 1n, level: 1 },
+    { id: 2n, level: 1 },
+    { id: 3n, level: 2 },
+    { id: 4n, level: 2 },
+  ];
+
+  it('counts nothing for an empty bank', () => {
+    expect(countCompletedLevels([], new Set())).toBe(0);
+    expect(countCompletedLevels([], new Set(['1']))).toBe(0);
+  });
+
+  it('counts nothing when nothing is cleared', () => {
+    expect(countCompletedLevels(questions, new Set())).toBe(0);
+  });
+
+  it('does not count a partially cleared level', () => {
+    expect(countCompletedLevels(questions, new Set(['1']))).toBe(0);
+  });
+
+  it('counts a fully cleared level while the next one is still partial', () => {
+    expect(countCompletedLevels(questions, new Set(['1', '2', '3']))).toBe(1);
+  });
+
+  it('counts a cleared upper level even when a lower one is incomplete', () => {
+    expect(countCompletedLevels(questions, new Set(['3', '4']))).toBe(1);
+  });
+
+  it('counts every level once all questions are cleared', () => {
+    expect(countCompletedLevels(questions, new Set(['1', '2', '3', '4']))).toBe(2);
+  });
+
+  it('matches cleared ids by string, not by BigInt identity', () => {
+    const numericIds = [{ id: 1, level: 1 }, { id: 2, level: 1 }];
+    expect(countCompletedLevels(numericIds, new Set(['1', '2']))).toBe(1);
   });
 });

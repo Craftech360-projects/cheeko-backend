@@ -2,7 +2,8 @@
  * Quiz Service
  *
  * Selection side of the Quizzy Question Bank: picks the device's next batch of
- * scored questions. Progress is never stored — Cleared and Current Level are
+ * scored questions, logs the answers the worker reports, and aggregates them for
+ * the parent portal. Progress is never stored — Cleared and Current Level are
  * derived from the quiz_question_answer log on every call, and nothing is
  * written on fetch.
  *
@@ -12,10 +13,12 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
-const { ageBandFromBirthDate, deriveLevelState } = require('./quiz.logic');
+const { ApiError } = require('../middleware/errorHandler');
+const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels } = require('./quiz.logic');
 
 const DEFAULT_AGE_BAND = '6-8';
 const DEFAULT_LANGUAGE = 'en';
+const ANSWER_RESULTS = ['correct', 'wrong', 'revealed'];
 const CLEARED_RESULTS = ['correct', 'revealed'];
 // Warn once the device is inside the top 3 authored levels of its band.
 const FRONTIER_WARN_LEVELS = 3;
@@ -165,6 +168,98 @@ const nextQuestions = async (deviceMac) => {
   };
 };
 
+/** Worker ids arrive as strings — BigInt columns are not JSON-serialisable. */
+const toQuestionId = (questionId) => {
+  try {
+    return BigInt(questionId);
+  } catch (err) {
+    throw new ApiError(`question_id must be a numeric id, got "${questionId}"`, 400);
+  }
+};
+
+/**
+ * Log one answered question — the answer log is the only quiz write. A row with
+ * result 'correct' or 'revealed' is what makes the question Cleared, so the next
+ * fetch stops offering it.
+ *
+ * The MAC is stored as the caller sent it; reads match case-insensitively.
+ *
+ * @param {string} deviceMac
+ * @param {string|number} questionId
+ * @param {'correct'|'wrong'|'revealed'} result - validated here so a bad value is
+ *   a 400 rather than the table CHECK constraint's 500
+ * @returns {Promise<{id: string, question_id: string, result: string, answered_at: Date}>}
+ */
+const recordAnswer = async (deviceMac, questionId, result) => {
+  if (!ANSWER_RESULTS.includes(result)) {
+    throw new ApiError(`result must be one of: ${ANSWER_RESULTS.join(', ')}`, 400);
+  }
+
+  const id = toQuestionId(questionId);
+  const question = await prisma.quiz_question.findUnique({
+    where: { id },
+    select: { id: true }
+  });
+  if (!question) {
+    throw new ApiError(`unknown question_id: ${questionId}`, 400);
+  }
+
+  const row = await prisma.quiz_question_answer.create({
+    data: { device_mac: deviceMac, question_id: id, result },
+    select: { id: true, answered_at: true }
+  });
+
+  return {
+    id: String(row.id),
+    question_id: String(id),
+    result,
+    answered_at: row.answered_at
+  };
+};
+
+/**
+ * Read-only aggregate over the answer log for the parent portal. Same derived
+ * state as the selection path — nothing here is stored.
+ *
+ * @param {string} deviceMac
+ * @returns {Promise<{age_band: string, current_level: number|null, levels_completed: number,
+ *   counts: Object<string, number>, last_played: Date|null}>}
+ */
+const progress = async (deviceMac) => {
+  const context = await resolveDeviceContext(deviceMac);
+  const { bank } = await loadBank(context.ageBand, context.language);
+  const clearedIds = await loadClearedIds(deviceMac, bank);
+  const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
+
+  // Counts are lifetime totals for the device, not band-scoped: a band change
+  // must not erase what the child already answered.
+  const grouped = await prisma.quiz_question_answer.groupBy({
+    by: ['result'],
+    where: { device_mac: macFilter(deviceMac) },
+    _count: { _all: true },
+    _max: { answered_at: true }
+  });
+
+  const counts = Object.fromEntries(ANSWER_RESULTS.map((result) => [result, 0]));
+  let lastPlayed = null;
+  for (const row of grouped) {
+    counts[row.result] = row._count._all;
+    if (row._max.answered_at && (!lastPlayed || row._max.answered_at > lastPlayed)) {
+      lastPlayed = row._max.answered_at;
+    }
+  }
+
+  return {
+    age_band: context.ageBand,
+    current_level: state.currentLevel,
+    levels_completed: countCompletedLevels(bank, clearedIds),
+    counts,
+    last_played: lastPlayed
+  };
+};
+
 module.exports = {
-  nextQuestions
+  nextQuestions,
+  recordAnswer,
+  progress
 };
