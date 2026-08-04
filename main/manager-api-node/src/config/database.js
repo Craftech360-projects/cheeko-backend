@@ -173,6 +173,7 @@ const getClientWithAuth = (accessToken) => {
 
 module.exports = {
   prisma,
+  pgPool,
   supabase,
   supabaseAdmin,
   testConnection,

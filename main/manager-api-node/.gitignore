@@ -45,3 +45,6 @@ temp/
 
 # One-time cleanup backup — contains child PII
 scripts/merge-duplicate-kid-profiles.backup.json
+
+# The repo-root .gitignore has a Python "lib/" rule that would swallow this.
+!scripts/lib/

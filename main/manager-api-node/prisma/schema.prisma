@@ -1397,3 +1397,37 @@ model device_radio_played {
   @@index([station, played_at(sort: Desc)], map: "idx_device_radio_played_station_played")
   @@index([activity_date, mac_address], map: "idx_device_radio_played_date_mac")
 }
+
+/// Curated quiz Question Bank. Quizzy never invents scored questions; it selects
+/// from here. A Level is the set of ten questions sharing (age_band, level).
+model quiz_question {
+  id                   BigInt                 @id @default(autoincrement())
+  code                 String                 @unique @db.VarChar(50)
+  question_text        String
+  answer_text          String
+  accepted_answers     Json                   @default("[]")
+  category             String?                @db.VarChar(100)
+  age_band             String                 @db.VarChar(10)
+  level                Int
+  language             String                 @default("en") @db.VarChar(10)
+  active               Boolean                @default(true)
+  create_date          DateTime               @default(now()) @db.Timestamptz(6)
+  update_date          DateTime               @default(now()) @db.Timestamptz(6)
+  quiz_question_answer quiz_question_answer[]
+
+  @@index([age_band, language, level], map: "idx_quiz_question_band_lang_level")
+}
+
+/// Per-device answer log. This is the ONLY quiz progress state: Cleared and
+/// current Level are derived from these rows, never stored.
+model quiz_question_answer {
+  id            BigInt        @id @default(autoincrement())
+  device_mac    String        @db.VarChar(20)
+  question_id   BigInt
+  result        String        @db.VarChar(10)
+  answered_at   DateTime      @default(now()) @db.Timestamptz(6)
+  quiz_question quiz_question @relation(fields: [question_id], references: [id], onDelete: Restrict)
+
+  @@index([device_mac, question_id], map: "idx_quiz_answer_device_question")
+  @@index([device_mac, answered_at], map: "idx_quiz_answer_device_time")
+}
