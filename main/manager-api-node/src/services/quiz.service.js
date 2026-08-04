@@ -18,6 +18,8 @@ const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels } = require
 
 const DEFAULT_AGE_BAND = '6-8';
 const DEFAULT_LANGUAGE = 'en';
+// kid_learning_progress.subject value for quiz milestones.
+const QUIZ_SUBJECT = 'quiz';
 const ANSWER_RESULTS = ['correct', 'wrong', 'revealed'];
 const CLEARED_RESULTS = ['correct', 'revealed'];
 // Warn once the device is inside the top 3 authored levels of its band.
@@ -51,7 +53,10 @@ const resolveDeviceContext = async (deviceMac) => {
   return {
     ageBand: ageBand || DEFAULT_AGE_BAND,
     ageBandDefaulted: ageBand === null,
-    language: (kid?.language || DEFAULT_LANGUAGE).toLowerCase()
+    language: (kid?.language || DEFAULT_LANGUAGE).toLowerCase(),
+    // Milestones are attributed to the child, not the device, so a sibling
+    // inheriting a toy does not inherit their progress.
+    kidId: device?.kid_id ?? null
   };
 };
 
@@ -209,12 +214,100 @@ const recordAnswer = async (deviceMac, questionId, result) => {
     select: { id: true, answered_at: true }
   });
 
+  // The answer log stays the source of truth for what to ask next; this is a
+  // derived milestone for the parent dashboard, which needs an achievement
+  // MOMENT (for cards and notifications) that a recomputed value cannot give.
+  // Never let a reporting write fail the answer that was just recorded.
+  try {
+    await recordLevelMilestone(deviceMac, id);
+  } catch (error) {
+    logger.warn(`[QUIZ] level milestone write failed for ${deviceMac}: ${error.message}`);
+  }
+
   return {
     id: String(row.id),
     question_id: String(id),
     result,
     answered_at: row.answered_at
   };
+};
+
+/**
+ * Upsert a kid_learning_progress row when an answer completes a Level.
+ *
+ * Reuses the existing progress table rather than adding a parallel one: it
+ * already carries (kid, subject, topic) uniqueness, a score, a completed flag
+ * and updated_at, which is exactly the achievement timestamp the dashboard
+ * lacks today. No-ops when the device has no child profile.
+ *
+ * @param {string} deviceMac
+ * @param {bigint} answeredQuestionId
+ */
+const recordLevelMilestone = async (deviceMac, answeredQuestionId) => {
+  const context = await resolveDeviceContext(deviceMac);
+  if (!context.kidId) return;
+
+  const answered = await prisma.quiz_question.findUnique({
+    where: { id: answeredQuestionId },
+    select: { age_band: true, level: true, language: true }
+  });
+  if (!answered) return;
+
+  const { bank } = await loadBank(answered.age_band, context.language);
+  const levelQuestions = bank.filter((q) => q.level === answered.level);
+  if (!levelQuestions.length) return;
+
+  const clearedIds = await loadClearedIds(deviceMac, levelQuestions);
+  if (!levelQuestions.every((q) => clearedIds.has(String(q.id)))) return;
+
+  const scored = await prisma.quiz_question_answer.groupBy({
+    by: ['result'],
+    where: {
+      device_mac: macFilter(deviceMac),
+      question_id: { in: levelQuestions.map((q) => q.id) }
+    },
+    _count: { _all: true }
+  });
+  const tally = Object.fromEntries(scored.map((r) => [r.result, r._count._all]));
+
+  const topic = `${answered.age_band} level ${answered.level}`;
+  await prisma.kid_learning_progress.upsert({
+    where: {
+      kid_id_subject_topic: { kid_id: context.kidId, subject: QUIZ_SUBJECT, topic }
+    },
+    create: {
+      kid_id: context.kidId,
+      subject: QUIZ_SUBJECT,
+      topic,
+      score: tally.correct || 0,
+      completed: true,
+      metadata: {
+        age_band: answered.age_band,
+        level: answered.level,
+        correct: tally.correct || 0,
+        revealed: tally.revealed || 0,
+        wrong: tally.wrong || 0,
+        questions: levelQuestions.length
+      }
+    },
+    update: {
+      score: tally.correct || 0,
+      completed: true,
+      updated_at: new Date(),
+      metadata: {
+        age_band: answered.age_band,
+        level: answered.level,
+        correct: tally.correct || 0,
+        revealed: tally.revealed || 0,
+        wrong: tally.wrong || 0,
+        questions: levelQuestions.length
+      }
+    }
+  });
+
+  logger.info(
+    `[QUIZ] level complete: kid=${context.kidId} ${topic} correct=${tally.correct || 0}`
+  );
 };
 
 /**
