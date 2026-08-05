@@ -19,39 +19,23 @@ if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
     let loggerReady = false;
     let logger = null;
     
-    // Override console methods
-    console.log = (...args) => {
-        originalConsole.log(...args); // Still show in terminal
-        
+    // Once the logger exists, winston's own Console transport prints to the
+    // terminal, so writing here as well duplicated every line. Write directly
+    // only while the logger is still missing - otherwise boot messages, which
+    // are queued rather than printed, would be invisible until it is ready.
+    const forward = (level, args) => {
         const message = args.join(' ');
         if (loggerReady && logger) {
-            logger.info(message);
+            logger[level](message);
         } else {
-            messageQueue.push({ level: 'info', message });
+            originalConsole[level === 'info' ? 'log' : level](...args);
+            messageQueue.push({ level, message });
         }
     };
-    
-    console.warn = (...args) => {
-        originalConsole.warn(...args);
-        
-        const message = args.join(' ');
-        if (loggerReady && logger) {
-            logger.warn(message);
-        } else {
-            messageQueue.push({ level: 'warn', message });
-        }
-    };
-    
-    console.error = (...args) => {
-        originalConsole.error(...args);
-        
-        const message = args.join(' ');
-        if (loggerReady && logger) {
-            logger.error(message);
-        } else {
-            messageQueue.push({ level: 'error', message });
-        }
-    };
+
+    console.log = (...args) => forward('info', args);
+    console.warn = (...args) => forward('warn', args);
+    console.error = (...args) => forward('error', args);
     
     // Function to set the logger when it's ready
     global.setConsoleLogger = (loggerInstance) => {

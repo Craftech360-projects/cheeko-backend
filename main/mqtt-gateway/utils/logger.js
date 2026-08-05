@@ -3,13 +3,6 @@ const DailyRotateFile = require('winston-daily-rotate-file');
 const LokiTransport = require('winston-loki');
 require('dotenv').config();
 
-// Store original console methods before any overrides
-const originalConsole = {
-    log: console.log,
-    warn: console.warn,
-    error: console.error
-};
-
 const logger = winston.createLogger({
     level: process.env.LOG_LEVEL || 'info',
     format: winston.format.combine(
@@ -90,37 +83,10 @@ if (process.env.LOKI_HOST) {
     console.log('⚠️ [LOKI] No LOKI_HOST found, skipping Loki transport');
 }
 
-// Override console methods to send to Loki as well (if enabled)
-if (process.env.LOKI_HOST && process.env.CAPTURE_CONSOLE_LOGS === 'true') {
-    console.log = (...args) => {
-        originalConsole.log(...args); // Still show in terminal
-        // Use setTimeout to ensure logger is ready
-        setTimeout(() => {
-            if (logger && logger.info) {
-                logger.info(args.join(' ')); // Also send to Loki
-            }
-        }, 0);
-    };
-
-    console.warn = (...args) => {
-        originalConsole.warn(...args);
-        setTimeout(() => {
-            if (logger && logger.warn) {
-                logger.warn(args.join(' '));
-            }
-        }, 0);
-    };
-
-    console.error = (...args) => {
-        originalConsole.error(...args);
-        setTimeout(() => {
-            if (logger && logger.error) {
-                logger.error(args.join(' '));
-            }
-        }, 0);
-    };
-
-    originalConsole.log('🔧 [LOKI] Console override enabled - console.log will also go to Loki');
-}
+// Console forwarding to Loki lives in utils/console-override.js, which app.js
+// loads first so it can queue messages until this logger exists. A second
+// override here stacked on top of that one: it captured the already-patched
+// console.log as its "original", so every console.log produced one terminal
+// write plus TWO logger.info calls - three lines per log line.
 
 module.exports = logger;
