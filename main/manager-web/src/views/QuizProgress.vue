@@ -60,9 +60,11 @@
           </el-table-column>
           <el-table-column label="Actions" min-width="230">
             <template slot-scope="s">
+              <!-- Enabled whenever rows are dated today, not just once the gate has
+                   closed: backdating a partial day is a valid way to start fresh. -->
               <el-button
                 size="mini"
-                :disabled="!s.row.day_complete || busyMac === s.row.device_mac"
+                :disabled="!s.row.answered_today || busyMac === s.row.device_mac"
                 @click="confirmResetDay(s.row)"
               >Reset day</el-button>
               <el-button
