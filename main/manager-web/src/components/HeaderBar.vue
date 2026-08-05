@@ -54,6 +54,12 @@
               :style="{ fontSize: '15px', color: $route.path === '/game-analytics' ? '#fff' : '#3d4566' }"></i>
             Game Analytics
           </div>
+          <div class="equipment-management"
+            :class="{ 'active-tab': $route.path === '/quiz-progress' }" @click="goQuizProgress">
+            <i class="el-icon-medal"
+              :style="{ fontSize: '15px', color: $route.path === '/quiz-progress' ? '#fff' : '#3d4566' }"></i>
+            Quiz Progress
+          </div>
           <div v-if="isSuperAdmin" class="equipment-management"
             :class="{ 'active-tab': $route.path === '/rfid-management' }" @click="goRfidManagement">
             <i class="el-icon-postcard"
@@ -215,6 +221,9 @@ export default {
     },
     goActiveDevices() {
       this.$router.push('/active-devices')
+    },
+    goQuizProgress() {
+      this.$router.push('/quiz-progress')
     },
     goGameAnalytics() {
       this.$router.push('/game-analytics')

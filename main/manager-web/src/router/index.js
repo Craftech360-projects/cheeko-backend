@@ -144,6 +144,17 @@ const routes = [
     }
   },
   {
+    path: '/quiz-progress',
+    name: 'QuizProgress',
+    component: function () {
+      return import('../views/QuizProgress.vue')
+    },
+    meta: {
+      requiresAuth: true,
+      title: 'Quiz Progress'
+    }
+  },
+  {
     path: '/rfid-management',
     name: 'RfidManagement',
     component: function () {
@@ -252,7 +263,7 @@ VueRouter.prototype.push = function push(location) {
 }
 
 // Routes that require login to access
-const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'ActiveDevices', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'RuntimeProviders', 'GameAnalytics']
+const protectedRoutes = ['home', 'RoleConfig', 'DeviceManagement', 'UserManagement', 'TokenAnalytics', 'ActiveDevices', 'RfidManagement', 'BulkImport', 'KidProfiles', 'AllDevices', 'TemplateManagement', 'ContentLibrary', 'EmailReportSettings', 'RuntimeProviders', 'GameAnalytics', 'QuizProgress']
 
 // Route guard
 router.beforeEach((to, from, next) => {

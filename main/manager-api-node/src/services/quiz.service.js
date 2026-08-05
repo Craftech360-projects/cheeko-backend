@@ -364,8 +364,191 @@ const progress = async (deviceMac) => {
   };
 };
 
+/**
+ * Every device's derived quiz state, for the admin console.
+ *
+ * Derivation is identical to progress(), but batched: the whole bank and the
+ * whole answer log are each read once and joined in memory, so adding devices
+ * does not add queries.
+ *
+ * @returns {Promise<Array<{device_mac: string, kid_name: string|null, age_band: string,
+ *   age_band_defaulted: boolean, current_level: number|null, levels_completed: number,
+ *   max_level: number, replay: boolean, answered_today: number, day_complete: boolean,
+ *   correct: number, last_played: Date|null}>>}
+ */
+const allDeviceProgress = async () => {
+  const [devices, bank, answers] = await Promise.all([
+    prisma.ai_device.findMany({
+      select: { mac_address: true, kid_id: true },
+      orderBy: { mac_address: 'asc' }
+    }),
+    prisma.quiz_question.findMany({
+      where: { active: true },
+      select: { id: true, age_band: true, level: true, language: true }
+    }),
+    prisma.quiz_question_answer.findMany({
+      select: { device_mac: true, question_id: true, result: true, answered_at: true }
+    })
+  ]);
+
+  const kidIds = [...new Set(devices.map((d) => d.kid_id).filter(Boolean))];
+  const kids = kidIds.length
+    ? await prisma.kid_profile.findMany({
+      where: { id: { in: kidIds } },
+      select: { id: true, name: true, birth_date: true, language: true }
+    })
+    : [];
+  const kidById = new Map(kids.map((k) => [k.id, k]));
+
+  // The selection path reads the bank for one band in one language; mirror that
+  // by keying the in-memory index the same way.
+  const bankByBandLang = new Map();
+  for (const q of bank) {
+    const key = `${q.age_band}|${q.language}`;
+    if (!bankByBandLang.has(key)) bankByBandLang.set(key, []);
+    bankByBandLang.get(key).push(q);
+  }
+
+  const answersByDevice = new Map();
+  for (const a of answers) {
+    const key = a.device_mac.toLowerCase();
+    if (!answersByDevice.has(key)) answersByDevice.set(key, []);
+    answersByDevice.get(key).push(a);
+  }
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const now = new Date();
+
+  return devices.map((device) => {
+    const kid = device.kid_id ? kidById.get(device.kid_id) : null;
+    const derivedBand = ageBandFromBirthDate(kid?.birth_date ?? null, now);
+    const ageBand = derivedBand || DEFAULT_AGE_BAND;
+    const language = (kid?.language || DEFAULT_LANGUAGE).toLowerCase();
+
+    const bandBank = bankByBandLang.get(`${ageBand}|${language}`)
+      || bankByBandLang.get(`${ageBand}|${DEFAULT_LANGUAGE}`)
+      || [];
+    const bandIds = new Set(bandBank.map((q) => String(q.id)));
+
+    const deviceAnswers = answersByDevice.get(device.mac_address.toLowerCase()) || [];
+    const clearedIds = new Set(
+      deviceAnswers
+        .filter((a) => CLEARED_RESULTS.includes(a.result) && bandIds.has(String(a.question_id)))
+        .map((a) => String(a.question_id))
+    );
+
+    const state = deriveLevelState(
+      bandBank.map((q) => ({ id: q.id, level: q.level })),
+      clearedIds
+    );
+    const answeredToday = deviceAnswers.filter((a) => a.answered_at >= startOfDay).length;
+    const lastPlayed = deviceAnswers.reduce(
+      (max, a) => (!max || a.answered_at > max ? a.answered_at : max),
+      null
+    );
+
+    return {
+      device_mac: device.mac_address,
+      kid_name: kid?.name ?? null,
+      age_band: ageBand,
+      age_band_defaulted: derivedBand === null,
+      current_level: state.currentLevel,
+      levels_completed: countCompletedLevels(bandBank, clearedIds),
+      max_level: bandBank.length ? Math.max(...bandBank.map((q) => q.level)) : 0,
+      replay: state.allCleared,
+      answered_today: answeredToday,
+      day_complete: answeredToday >= DAILY_QUESTION_TARGET,
+      // Lifetime, not band-scoped - a band change must not erase what was answered.
+      correct: deviceAnswers.filter((a) => a.result === 'correct').length,
+      last_played: lastPlayed
+    };
+  });
+};
+
+/**
+ * Force a device onto a chosen Level by rewriting its answer log for the band.
+ *
+ * Admin-only escape hatch for testing: every level below the target is filled
+ * with backdated 'correct' rows so it derives as Cleared, and the target level
+ * and above are emptied. Rows are dated yesterday so the day-gate stays open -
+ * a device set to level 3 can start level 3 immediately.
+ *
+ * Only the device's OWN band is touched; answers banked under another band
+ * survive, the same way loadClearedIds only ever looks at one band.
+ *
+ * @param {string} deviceMac
+ * @param {number} level - target Level, must exist in the band
+ */
+const setLevel = async (deviceMac, level) => {
+  const context = await resolveDeviceContext(deviceMac);
+  const { bank } = await loadBank(context.ageBand, context.language);
+  if (!bank.length) {
+    throw new ApiError(`no active questions for band ${context.ageBand}`, 400);
+  }
+
+  const levels = [...new Set(bank.map((q) => q.level))].sort((a, b) => a - b);
+  if (!levels.includes(level)) {
+    throw new ApiError(
+      `level ${level} does not exist in band ${context.ageBand} (have: ${levels.join(', ')})`,
+      400
+    );
+  }
+
+  const belowTarget = bank.filter((q) => q.level < level);
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  const deleted = await prisma.quiz_question_answer.deleteMany({
+    where: { device_mac: macFilter(deviceMac), question_id: { in: bank.map((q) => q.id) } }
+  });
+  const created = belowTarget.length
+    ? await prisma.quiz_question_answer.createMany({
+      data: belowTarget.map((q) => ({
+        device_mac: deviceMac,
+        question_id: q.id,
+        result: 'correct',
+        answered_at: yesterday
+      }))
+    })
+    : { count: 0 };
+
+  return {
+    device_mac: deviceMac,
+    age_band: context.ageBand,
+    level,
+    deleted: deleted.count,
+    cleared: created.count
+  };
+};
+
+/**
+ * Re-open today's Daily Ten without losing progress.
+ *
+ * Cleared and answered_today read the same rows, so DELETING today's answers
+ * would also un-clear the level and drop the device back. Shifting the
+ * timestamps back a day keeps every level Cleared while answered_today falls
+ * to zero, which is the only way to reach the next level on the same day.
+ *
+ * @param {string} deviceMac
+ */
+const clearDayGate = async (deviceMac) => {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const moved = await prisma.$executeRaw`
+    UPDATE quiz_question_answer
+    SET answered_at = answered_at - INTERVAL '1 day'
+    WHERE lower(device_mac) = lower(${deviceMac})
+      AND answered_at >= ${startOfDay}`;
+
+  return { device_mac: deviceMac, backdated: moved };
+};
+
 module.exports = {
   nextQuestions,
   recordAnswer,
-  progress
+  progress,
+  allDeviceProgress,
+  setLevel,
+  clearDayGate
 };

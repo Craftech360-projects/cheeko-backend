@@ -14,6 +14,7 @@ import profile from './module/profile.js'
 import emailReport from './module/emailReport.js'
 import runtimeProviders from './module/runtimeProviders.js'
 import activeDevices from './module/activeDevices.js'
+import quiz from './module/quiz.js'
 
 /**
  * API URL
@@ -54,5 +55,6 @@ export default {
     profile,
     emailReport,
     runtimeProviders,
-    activeDevices
+    activeDevices,
+    quiz
 }

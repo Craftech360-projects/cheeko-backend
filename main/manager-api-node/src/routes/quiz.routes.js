@@ -12,7 +12,7 @@ const express = require('express');
 const router = express.Router();
 const quizService = require('../services/quiz.service');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requireServiceKey } = require('../middleware/auth');
+const { requireServiceKey, requireAuth } = require('../middleware/auth');
 const { success, created, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
 
@@ -144,6 +144,93 @@ router.get('/progress',
       `[QUIZ] GET /quiz/progress device=${deviceMac} -> band=${summary.age_band} level=${summary.current_level} completed=${summary.levels_completed}`
     );
     return success(res, summary);
+  })
+);
+
+/**
+ * @swagger
+ * /quiz/admin/devices:
+ *   get:
+ *     tags: [Quiz]
+ *     summary: Derived quiz state for every device (admin console)
+ *     description: Read-only. One row per device with its Age Band, Current Level,
+ *       levels completed and today's answered count. Logged-in admin auth.
+ *     responses:
+ *       200:
+ *         description: One entry per device
+ */
+router.get('/admin/devices',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const rows = await quizService.allDeviceProgress();
+    return success(res, rows);
+  })
+);
+
+/**
+ * @swagger
+ * /quiz/admin/set-level:
+ *   post:
+ *     tags: [Quiz]
+ *     summary: Force a device onto a chosen Level (admin console)
+ *     description: Rewrites the device's answer log for its band - levels below the
+ *       target become Cleared with backdated rows, the target and above are emptied.
+ *       Destructive; intended for testing. Logged-in admin auth.
+ *     responses:
+ *       200:
+ *         description: Level set
+ *       400:
+ *         description: Missing device_mac, bad level, or level absent from the band
+ */
+router.post('/admin/set-level',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const deviceMac = String(req.body.device_mac || '').trim();
+    const level = Number(req.body.level);
+
+    if (!deviceMac) {
+      return badRequest(res, 'device_mac is required');
+    }
+    if (!Number.isInteger(level) || level < 1) {
+      return badRequest(res, 'level must be a positive integer');
+    }
+
+    const result = await quizService.setLevel(deviceMac, level);
+    logger.info(
+      `[QUIZ] admin set-level device=${deviceMac} band=${result.age_band} level=${level} deleted=${result.deleted} cleared=${result.cleared}`
+    );
+    return success(res, result);
+  })
+);
+
+/**
+ * @swagger
+ * /quiz/admin/reset-day:
+ *   post:
+ *     tags: [Quiz]
+ *     summary: Re-open today's Daily Ten without losing progress (admin console)
+ *     description: Backdates today's answer rows by one day. Levels stay Cleared while
+ *       answered_today drops to zero, so the device can start the next level today.
+ *       Logged-in admin auth.
+ *     responses:
+ *       200:
+ *         description: Rows backdated
+ *       400:
+ *         description: device_mac missing
+ */
+router.post('/admin/reset-day',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const deviceMac = String(req.body.device_mac || '').trim();
+    if (!deviceMac) {
+      return badRequest(res, 'device_mac is required');
+    }
+
+    const result = await quizService.clearDayGate(deviceMac);
+    logger.info(
+      `[QUIZ] admin reset-day device=${deviceMac} backdated=${result.backdated}`
+    );
+    return success(res, result);
   })
 );
 
