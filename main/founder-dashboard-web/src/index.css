@@ -1,15 +1,245 @@
+/* ============================================================
+   Theme tokens
+   Light values are taken verbatim from founder-dashboard-design.html
+   (the approved "Morning Pulse" product UI). Dark values are the
+   companion palette, tuned for legibility on a near-black surface.
+   ============================================================ */
+
 :root {
-  font-family:
-    'Avenir Next', Avenir, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
-  line-height: 1.5;
-  font-weight: 500;
-  color: #241b12;
-  background: #faf6f0;
+  color-scheme: light;
+
+  --page: #faf6f0;
+  --card: #ffffff;
+  --card-inset: #faf6f0;
+  --line: #efe6d8;
+  --line-soft: #e7dcc9;
+  --dash: #f0e7d9;
+
+  --ink: #241b12;
+  --ink-2: #5e5142;
+  --ink-3: #a0917e;
+  --ink-4: #c9bba6;
+  --ink-date: #98897a;
+
+  --accent: #ff9100;
+  --accent-2: #ffb300;
+  --accent-wash: #fff1de;
+  --accent-deep: #b35c00;
+
+  --track: #f4ebdd;
+  --good: #006300;
+  --bad: #b3261e;
+
+  --chip-bg: #fff3e2;
+  --chip-fg: #8a4b00;
+  --chip-bd: #f5dfbe;
+
+  --blue-bg: #eff5fe;
+  --blue-fg: #1d4fa1;
+  --blue-bd: #ccdef7;
+
+  --warn-bg: #fff8e6;
+  --warn-bd: #f2e3b3;
+  --crit-bg: #fcefea;
+  --crit-bd: #f2cdbf;
+  --info-bg: #eff5fe;
+  --info-bd: #ccdef7;
+
+  --ok-bg: #e3f2e3;
+  --ok-fg: #1d6e1d;
+  --badge-warn-bg: #fff3e2;
+  --badge-warn-fg: #8a4b00;
+  --badge-crit-bg: #fcefea;
+  --badge-crit-fg: #a4471b;
+
+  --quote-bg: #fffbf4;
+  --quote-bd: #ffd79b;
+
+  --avatar-bg: #ffe2bc;
+  --avatar-fg: #b35c00;
+
+  --seg-gap: #ffffff;
+
+  --shadow: 0 1px 2px rgba(36, 27, 18, 0.06), 0 12px 32px -12px rgba(36, 27, 18, 0.18);
+  --shadow-drop: 0 16px 40px -18px rgba(36, 27, 18, 0.35);
+
+  /* fixed categorical palette — always assigned by feature, never cycled */
+  --c-ai: #eb6834;
+  --c-cards: #2a78d6;
+  --c-games: #008300;
+  --c-radio: #4a3aa7;
+
+  --st-good: #0ca30c;
+  --st-warn: #fab219;
+  --st-serious: #ec835a;
+  --st-crit: #d03b3b;
+
+  --heat: #ff9100;
+
+  /* Mission Control ("ops wall"). Dark values below are the mockup's
+     committed palette; these light values are the daylight counterpart. */
+  --ob-page: #fdf9f2;
+  --ob-card: #ffffff;
+  --ob-line: #e9e0d2;
+  --ob-ink: #241b12;
+  --ob-ink-2: #6b5d4d;
+  --ob-ink-3: #98897a;
+  --ob-mono: #5e5142;
+  --ob-accent: #d97400;
+  --ob-chip-bg: #f4ede1;
+  --ob-chip-fg: #6b5d4d;
+  --ob-chip-bd: #e0d5c2;
+  --ob-live-bg: #e3f2e3;
+  --ob-live-fg: #1d6e1d;
+  --ob-live-bd: #bfe0bf;
+  --ob-good: #0ca30c;
+  --ob-idle: #b6a992;
+  --ob-track: #f0e7d9;
+  --ob-heat: #ff9100;
+  --ob-tag-talk-bg: #fff1de;
+  --ob-tag-talk-fg: #8a4b00;
+  --ob-tag-card-bg: #eff5fe;
+  --ob-tag-card-fg: #1d4fa1;
+  --ob-tag-game-bg: #e3f2e3;
+  --ob-tag-game-fg: #1d6e1d;
+  --ob-tag-alert-bg: #fcefea;
+  --ob-tag-alert-fg: #a4471b;
+
+  /* The Daily Brief (editorial paper) */
+  --oc-page: #fcfaf5;
+  --oc-card: #fffefa;
+  --oc-ink: #221a10;
+  --oc-ink-2: #4e4433;
+  --oc-ink-3: #8a7b64;
+  --oc-rule: #d9cfbc;
+  --oc-rule-soft: #e7dfce;
+  --oc-accent: #d96d00;
+  --oc-kicker: #a4571b;
+  --oc-quote: #e8b77a;
+  --oc-up: #1d6e1d;
+  --oc-dn: #b3261e;
+
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--page);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --page: #141110;
+  --card: #1e1913;
+  --card-inset: #171310;
+  --line: #332c24;
+  --line-soft: #3a322a;
+  --dash: #2c251e;
+
+  --ink: #f4ede3;
+  --ink-2: #b3a692;
+  --ink-3: #837663;
+  --ink-4: #6b6053;
+  --ink-date: #9a8d7c;
+
+  --accent: #ffa733;
+  --accent-2: #ffc46b;
+  --accent-wash: #2c2118;
+  --accent-deep: #ffb85c;
+
+  --track: #2a2318;
+  --good: #3fbf3f;
+  --bad: #f2726a;
+
+  --chip-bg: #2e2317;
+  --chip-fg: #ffc98a;
+  --chip-bd: #45361f;
+
+  --blue-bg: #16243a;
+  --blue-fg: #8fbef7;
+  --blue-bd: #2a3e5c;
+
+  --warn-bg: #2e2513;
+  --warn-bd: #4a3d1c;
+  --crit-bg: #331914;
+  --crit-bd: #55291f;
+  --info-bg: #16243a;
+  --info-bd: #2a3e5c;
+
+  --ok-bg: #142814;
+  --ok-fg: #6fd46f;
+  --badge-warn-bg: #2e2513;
+  --badge-warn-fg: #ffc98a;
+  --badge-crit-bg: #331914;
+  --badge-crit-fg: #f0a08f;
+
+  --quote-bg: #221b14;
+  --quote-bd: #6b4a1e;
+
+  --avatar-bg: #45361f;
+  --avatar-fg: #ffc98a;
+
+  --seg-gap: #1e1913;
+
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  --shadow-drop: 0 16px 40px -18px rgba(0, 0, 0, 0.7);
+
+  --c-ai: #f2814d;
+  --c-cards: #4d97ea;
+  --c-games: #3aae3a;
+  --c-radio: #9c92ec;
+
+  --st-good: #35c035;
+  --st-warn: #f0bd3f;
+  --st-serious: #f09a6a;
+  --st-crit: #e35a5a;
+
+  --heat: #ffa733;
+
+  /* Mission Control — exact values from the mockup's committed dark wall */
+  --ob-page: #15110c;
+  --ob-card: #1e1913;
+  --ob-line: #2c2519;
+  --ob-ink: #efe7da;
+  --ob-ink-2: #a89878;
+  --ob-ink-3: #7e6f55;
+  --ob-mono: #d8cbb2;
+  --ob-accent: #ff9e2e;
+  --ob-chip-bg: #241d12;
+  --ob-chip-fg: #c9b896;
+  --ob-chip-bd: #37301f;
+  --ob-live-bg: #16240f;
+  --ob-live-fg: #7be07b;
+  --ob-live-bd: #2e4a2e;
+  --ob-good: #58c458;
+  --ob-idle: #6e6350;
+  --ob-track: #2a2314;
+  --ob-heat: #ff9e2e;
+  --ob-tag-talk-bg: #3a2410;
+  --ob-tag-talk-fg: #ffb35c;
+  --ob-tag-card-bg: #12253e;
+  --ob-tag-card-fg: #7fb4f5;
+  --ob-tag-game-bg: #0f2b0f;
+  --ob-tag-game-fg: #79c879;
+  --ob-tag-alert-bg: #3a1512;
+  --ob-tag-alert-fg: #f08a7e;
+
+  /* The Daily Brief — night edition of the paper */
+  --oc-page: #17130f;
+  --oc-card: #1c1713;
+  --oc-ink: #f4ede3;
+  --oc-ink-2: #c2b5a1;
+  --oc-ink-3: #948671;
+  --oc-rule: #3a3128;
+  --oc-rule-soft: #2c251e;
+  --oc-accent: #ffa733;
+  --oc-kicker: #e0a45c;
+  --oc-quote: #8a6636;
+  --oc-up: #3fbf3f;
+  --oc-dn: #f2726a;
 }
 
 * {
@@ -24,28 +254,27 @@ body,
 
 body {
   margin: 0;
+  background: var(--page);
+  color: var(--ink);
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
+  color: inherit;
 }
 
 button {
-  transition:
-    transform 140ms ease,
-    background-color 140ms ease,
-    color 140ms ease;
-}
-
-button:hover {
-  transform: translateY(-1px);
+  cursor: pointer;
 }
 
 button:focus-visible,
-input:focus-visible {
-  outline: 2px solid #ff9100;
-  outline-offset: 3px;
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 a {

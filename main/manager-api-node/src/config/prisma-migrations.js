@@ -158,7 +158,11 @@ const runPrismaMigrations = async () => {
         NO_COLOR: '1',
         FORCE_COLOR: '0'
       },
-      timeout: 60000 // 60 second timeout
+      // Killing `migrate deploy` mid-run leaves an unfinished row in
+      // _prisma_migrations, which blocks every later deploy with P3009 until
+      // it is manually resolved. Allow enough headroom for a large migration
+      // against a remote database.
+      timeout: 300000
     });
 
     // Log migration output
@@ -197,7 +201,27 @@ const runPrismaMigrations = async () => {
     logger.error('');
 
     // Provide helpful troubleshooting tips
-    if (errorMessage.includes('database') || errorMessage.includes('connection')) {
+    if (errorMessage.includes('P3009')) {
+      const failedMigration = errorMessage.match(/The `([^`]+)` migration/)?.[1] || '<migration_name>';
+      logger.error('A previous migration is recorded as started but never finished, so');
+      logger.error('Prisma refuses to apply anything else. Read its `logs` column first:');
+      logger.error('  SELECT migration_name, logs FROM _prisma_migrations WHERE finished_at IS NULL;');
+      logger.error('');
+      logger.error('If it says "already exists", the schema was created outside Prisma');
+      logger.error('(e.g. restored or copied in) and needs baselining, not re-applying:');
+      logger.error(`  npx prisma migrate resolve --applied ${failedMigration}   # repeat per migration`);
+      logger.error('');
+      logger.error('If the objects genuinely are absent, Postgres rolled the DDL back:');
+      logger.error(`  npx prisma migrate resolve --rolled-back ${failedMigration}`);
+      logger.error('');
+      logger.error('Then re-apply with: npx prisma migrate deploy');
+      logger.error('Never use `migrate reset` here without checking the row counts first.');
+    } else if (errorMessage.includes('P3015')) {
+      logger.error('A directory under prisma/migrations has no migration.sql. Prisma treats');
+      logger.error('every subdirectory as a migration, so stray folders break deploy.');
+      logger.error('Find and remove it:');
+      logger.error("  find prisma/migrations -mindepth 1 -maxdepth 1 -type d '!' -exec test -f '{}/migration.sql' ';' -print");
+    } else if (errorMessage.includes('database') || errorMessage.includes('connection')) {
       logger.error('Troubleshooting:');
       logger.error('  1. Check your DIRECT_URL in .env is correct');
       logger.error('  2. Ensure the database server is running');
