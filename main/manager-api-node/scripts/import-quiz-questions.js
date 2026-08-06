@@ -41,8 +41,10 @@ async function main() {
   const tables = resolveBank(bankName);
 
   // The bank NAME is an argument too; skipping it stops "--bank riddle" from
-  // being read as the filename when the file comes last.
-  const file = args.find((arg, i) => !arg.startsWith('--') && i !== bankIndex + 1);
+  // being read as the filename when the file comes last. Only when the flag is
+  // present: with no --bank, bankIndex+1 is 0 and would skip a file passed
+  // first — which is exactly how the quiz import is invoked.
+  const file = args.find((arg, i) => !arg.startsWith('--') && (bankIndex === -1 || i !== bankIndex + 1));
 
   if (!file) {
     throw new Error(
