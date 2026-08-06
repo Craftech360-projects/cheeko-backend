@@ -1431,3 +1431,39 @@ model quiz_question_answer {
   @@index([device_mac, question_id], map: "idx_quiz_answer_device_question")
   @@index([device_mac, answered_at], map: "idx_quiz_answer_device_time")
 }
+
+/// Riddler's bank. Deliberately column-identical to quiz_question — including
+/// question_text rather than the better-reading riddle_text — so one service can
+/// query either bank with no per-bank field mapping. See src/services/banks.js.
+model riddle_question {
+  id                     BigInt                   @id @default(autoincrement())
+  code                   String                   @unique @db.VarChar(50)
+  question_text          String
+  answer_text            String
+  accepted_answers       Json                     @default("[]")
+  category               String?                  @db.VarChar(100)
+  age_band               String                   @db.VarChar(10)
+  level                  Int
+  language               String                   @default("en") @db.VarChar(10)
+  active                 Boolean                  @default(true)
+  create_date            DateTime                 @default(now()) @db.Timestamptz(6)
+  update_date            DateTime                 @default(now()) @db.Timestamptz(6)
+  riddle_question_answer riddle_question_answer[]
+
+  @@index([age_band, language, level], map: "idx_riddle_question_band_lang_level")
+}
+
+/// Per-device riddle answer log. Separate from quiz_question_answer so a riddle
+/// can never clear a quiz level: the isolation is the table, not a filter
+/// someone can forget.
+model riddle_question_answer {
+  id              BigInt          @id @default(autoincrement())
+  device_mac      String          @db.VarChar(20)
+  question_id     BigInt
+  result          String          @db.VarChar(10)
+  answered_at     DateTime        @default(now()) @db.Timestamptz(6)
+  riddle_question riddle_question @relation(fields: [question_id], references: [id], onDelete: Restrict)
+
+  @@index([device_mac, question_id], map: "idx_riddle_answer_device_question")
+  @@index([device_mac, answered_at], map: "idx_riddle_answer_device_time")
+}

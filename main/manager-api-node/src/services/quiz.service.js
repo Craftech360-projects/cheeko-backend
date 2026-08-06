@@ -15,11 +15,10 @@ const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels } = require('./quiz.logic');
+const { resolveBank, DEFAULT_BANK } = require('./banks');
 
 const DEFAULT_AGE_BAND = '6-8';
 const DEFAULT_LANGUAGE = 'en';
-// kid_learning_progress.subject value for quiz milestones.
-const QUIZ_SUBJECT = 'quiz';
 // The Daily Ten: how many scored questions make a day complete.
 const DAILY_QUESTION_TARGET = 10;
 const ANSWER_RESULTS = ['correct', 'wrong', 'revealed'];
@@ -67,8 +66,8 @@ const resolveDeviceContext = async (deviceMac) => {
  * English when the band has no content in that language.
  * @returns {Promise<{bank: Array, language: string}>}
  */
-const loadBank = async (ageBand, language) => {
-  const query = (lang) => prisma.quiz_question.findMany({
+const loadBank = async (tables, ageBand, language) => {
+  const query = (lang) => tables.questions.findMany({
     where: { age_band: ageBand, language: lang, active: true },
     orderBy: [{ level: 'asc' }, { id: 'asc' }]
   });
@@ -82,10 +81,10 @@ const loadBank = async (ageBand, language) => {
 };
 
 /** Cleared = an answer row with result 'correct' or 'revealed' exists. */
-const loadClearedIds = async (deviceMac, bank) => {
+const loadClearedIds = async (tables, deviceMac, bank) => {
   if (!bank.length) return new Set();
 
-  const rows = await prisma.quiz_question_answer.findMany({
+  const rows = await tables.answers.findMany({
     where: {
       device_mac: macFilter(deviceMac),
       question_id: { in: bank.map((q) => q.id) },
@@ -102,8 +101,8 @@ const loadClearedIds = async (deviceMac, bank) => {
  * one (ordered by its most recent answer). Always the full level — a partially
  * played replay day does not resume.
  */
-const leastRecentlyPlayedLevel = async (deviceMac, bank) => {
-  const grouped = await prisma.quiz_question_answer.groupBy({
+const leastRecentlyPlayedLevel = async (tables, deviceMac, bank) => {
+  const grouped = await tables.answers.groupBy({
     by: ['question_id'],
     where: {
       device_mac: macFilter(deviceMac),
@@ -136,13 +135,15 @@ const toQuestion = (question) => ({
  * The device's next batch of scored questions.
  *
  * @param {string} deviceMac
+ * @param {'quiz'|'riddle'} [bankName]
  * @returns {Promise<{age_band: string, age_band_defaulted: boolean, language: string,
  *   level: number|null, replay: boolean, frontier_warning: boolean, questions: Array}>}
  */
-const nextQuestions = async (deviceMac) => {
+const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
+  const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
-  const { bank, language } = await loadBank(context.ageBand, context.language);
-  const clearedIds = await loadClearedIds(deviceMac, bank);
+  const { bank, language } = await loadBank(tables, context.ageBand, context.language);
+  const clearedIds = await loadClearedIds(tables, deviceMac, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
   let level = state.currentLevel;
@@ -150,7 +151,7 @@ const nextQuestions = async (deviceMac) => {
   const replay = state.allCleared;
 
   if (replay) {
-    level = await leastRecentlyPlayedLevel(deviceMac, bank);
+    level = await leastRecentlyPlayedLevel(tables, deviceMac, bank);
     selectedIds = bank.filter((q) => q.level === level).map((q) => q.id);
   }
 
@@ -158,7 +159,7 @@ const nextQuestions = async (deviceMac) => {
   const frontierWarning = level !== null && !replay && maxLevel - level < FRONTIER_WARN_LEVELS;
   if (frontierWarning || replay) {
     logger.warn(
-      `[QUIZ] device ${deviceMac} at the authored frontier: level=${level} max_level=${maxLevel} band=${context.ageBand} replay=${replay}`
+      `[${tables.label}] device ${deviceMac} at the authored frontier: level=${level} max_level=${maxLevel} band=${context.ageBand} replay=${replay}`
     );
   }
 
@@ -169,7 +170,7 @@ const nextQuestions = async (deviceMac) => {
   // refusing to start a genuinely fresh day.
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const answeredToday = await prisma.quiz_question_answer.count({
+  const answeredToday = await tables.answers.count({
     where: { device_mac: macFilter(deviceMac), answered_at: { gte: startOfDay } }
   });
 
@@ -206,15 +207,20 @@ const toQuestionId = (questionId) => {
  * @param {string|number} questionId
  * @param {'correct'|'wrong'|'revealed'} result - validated here so a bad value is
  *   a 400 rather than the table CHECK constraint's 500
+ * @param {'quiz'|'riddle'} [bankName]
  * @returns {Promise<{id: string, question_id: string, result: string, answered_at: Date}>}
  */
-const recordAnswer = async (deviceMac, questionId, result) => {
+const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BANK) => {
   if (!ANSWER_RESULTS.includes(result)) {
     throw new ApiError(`result must be one of: ${ANSWER_RESULTS.join(', ')}`, 400);
   }
 
+  const tables = resolveBank(bankName);
   const id = toQuestionId(questionId);
-  const question = await prisma.quiz_question.findUnique({
+  // Looked up in the CLAIMED bank: ids are per-table, so riddle 7 and quiz 7
+  // both exist. Checking the wrong table would happily log an answer against a
+  // question the child was never asked.
+  const question = await tables.questions.findUnique({
     where: { id },
     select: { id: true }
   });
@@ -222,7 +228,7 @@ const recordAnswer = async (deviceMac, questionId, result) => {
     throw new ApiError(`unknown question_id: ${questionId}`, 400);
   }
 
-  const row = await prisma.quiz_question_answer.create({
+  const row = await tables.answers.create({
     data: { device_mac: deviceMac, question_id: id, result },
     select: { id: true, answered_at: true }
   });
@@ -232,9 +238,9 @@ const recordAnswer = async (deviceMac, questionId, result) => {
   // MOMENT (for cards and notifications) that a recomputed value cannot give.
   // Never let a reporting write fail the answer that was just recorded.
   try {
-    await recordLevelMilestone(deviceMac, id);
+    await recordLevelMilestone(tables, deviceMac, id);
   } catch (error) {
-    logger.warn(`[QUIZ] level milestone write failed for ${deviceMac}: ${error.message}`);
+    logger.warn(`[${tables.label}] level milestone write failed for ${deviceMac}: ${error.message}`);
   }
 
   return {
@@ -253,27 +259,28 @@ const recordAnswer = async (deviceMac, questionId, result) => {
  * and updated_at, which is exactly the achievement timestamp the dashboard
  * lacks today. No-ops when the device has no child profile.
  *
+ * @param {object} tables - the resolved bank
  * @param {string} deviceMac
  * @param {bigint} answeredQuestionId
  */
-const recordLevelMilestone = async (deviceMac, answeredQuestionId) => {
+const recordLevelMilestone = async (tables, deviceMac, answeredQuestionId) => {
   const context = await resolveDeviceContext(deviceMac);
   if (!context.kidId) return;
 
-  const answered = await prisma.quiz_question.findUnique({
+  const answered = await tables.questions.findUnique({
     where: { id: answeredQuestionId },
     select: { age_band: true, level: true, language: true }
   });
   if (!answered) return;
 
-  const { bank } = await loadBank(answered.age_band, context.language);
+  const { bank } = await loadBank(tables, answered.age_band, context.language);
   const levelQuestions = bank.filter((q) => q.level === answered.level);
   if (!levelQuestions.length) return;
 
-  const clearedIds = await loadClearedIds(deviceMac, levelQuestions);
+  const clearedIds = await loadClearedIds(tables, deviceMac, levelQuestions);
   if (!levelQuestions.every((q) => clearedIds.has(String(q.id)))) return;
 
-  const scored = await prisma.quiz_question_answer.groupBy({
+  const scored = await tables.answers.groupBy({
     by: ['result'],
     where: {
       device_mac: macFilter(deviceMac),
@@ -283,14 +290,17 @@ const recordLevelMilestone = async (deviceMac, answeredQuestionId) => {
   });
   const tally = Object.fromEntries(scored.map((r) => [r.result, r._count._all]));
 
+  // The subject is per-bank. The unique key is (kid, subject, topic) and topic
+  // is only "<band> level <n>", so a shared subject would make riddle level 1
+  // overwrite the child's quiz level 1 achievement.
   const topic = `${answered.age_band} level ${answered.level}`;
   await prisma.kid_learning_progress.upsert({
     where: {
-      kid_id_subject_topic: { kid_id: context.kidId, subject: QUIZ_SUBJECT, topic }
+      kid_id_subject_topic: { kid_id: context.kidId, subject: tables.subject, topic }
     },
     create: {
       kid_id: context.kidId,
-      subject: QUIZ_SUBJECT,
+      subject: tables.subject,
       topic,
       score: tally.correct || 0,
       completed: true,
@@ -319,7 +329,7 @@ const recordLevelMilestone = async (deviceMac, answeredQuestionId) => {
   });
 
   logger.info(
-    `[QUIZ] level complete: kid=${context.kidId} ${topic} correct=${tally.correct || 0}`
+    `[${tables.label}] level complete: kid=${context.kidId} ${topic} correct=${tally.correct || 0}`
   );
 };
 
@@ -328,18 +338,20 @@ const recordLevelMilestone = async (deviceMac, answeredQuestionId) => {
  * state as the selection path — nothing here is stored.
  *
  * @param {string} deviceMac
+ * @param {'quiz'|'riddle'} [bankName]
  * @returns {Promise<{age_band: string, current_level: number|null, levels_completed: number,
  *   counts: Object<string, number>, last_played: Date|null}>}
  */
-const progress = async (deviceMac) => {
+const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
+  const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
-  const { bank } = await loadBank(context.ageBand, context.language);
-  const clearedIds = await loadClearedIds(deviceMac, bank);
+  const { bank } = await loadBank(tables, context.ageBand, context.language);
+  const clearedIds = await loadClearedIds(tables, deviceMac, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
   // Counts are lifetime totals for the device, not band-scoped: a band change
   // must not erase what the child already answered.
-  const grouped = await prisma.quiz_question_answer.groupBy({
+  const grouped = await tables.answers.groupBy({
     by: ['result'],
     where: { device_mac: macFilter(deviceMac) },
     _count: { _all: true },
@@ -376,17 +388,18 @@ const progress = async (deviceMac) => {
  *   max_level: number, replay: boolean, answered_today: number, day_complete: boolean,
  *   correct: number, last_played: Date|null}>>}
  */
-const allDeviceProgress = async () => {
+const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
+  const tables = resolveBank(bankName);
   const [devices, bank, answers] = await Promise.all([
     prisma.ai_device.findMany({
       select: { mac_address: true, kid_id: true },
       orderBy: { mac_address: 'asc' }
     }),
-    prisma.quiz_question.findMany({
+    tables.questions.findMany({
       where: { active: true },
       select: { id: true, age_band: true, level: true, language: true }
     }),
-    prisma.quiz_question_answer.findMany({
+    tables.answers.findMany({
       select: { device_mac: true, question_id: true, result: true, answered_at: true }
     })
   ]);
@@ -479,10 +492,12 @@ const allDeviceProgress = async () => {
  *
  * @param {string} deviceMac
  * @param {number} level - target Level, must exist in the band
+ * @param {'quiz'|'riddle'} [bankName]
  */
-const setLevel = async (deviceMac, level) => {
+const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
+  const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
-  const { bank } = await loadBank(context.ageBand, context.language);
+  const { bank } = await loadBank(tables, context.ageBand, context.language);
   if (!bank.length) {
     throw new ApiError(`no active questions for band ${context.ageBand}`, 400);
   }
@@ -498,11 +513,11 @@ const setLevel = async (deviceMac, level) => {
   const belowTarget = bank.filter((q) => q.level < level);
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-  const deleted = await prisma.quiz_question_answer.deleteMany({
+  const deleted = await tables.answers.deleteMany({
     where: { device_mac: macFilter(deviceMac), question_id: { in: bank.map((q) => q.id) } }
   });
   const created = belowTarget.length
-    ? await prisma.quiz_question_answer.createMany({
+    ? await tables.answers.createMany({
       data: belowTarget.map((q) => ({
         device_mac: deviceMac,
         question_id: q.id,
@@ -530,16 +545,24 @@ const setLevel = async (deviceMac, level) => {
  * to zero, which is the only way to reach the next level on the same day.
  *
  * @param {string} deviceMac
+ * @param {'quiz'|'riddle'} [bankName]
  */
-const clearDayGate = async (deviceMac) => {
+const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
+  const tables = resolveBank(bankName);
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
-  const moved = await prisma.$executeRaw`
-    UPDATE quiz_question_answer
-    SET answered_at = answered_at - INTERVAL '1 day'
-    WHERE lower(device_mac) = lower(${deviceMac})
-      AND answered_at >= ${startOfDay}`;
+  // $executeRawUnsafe, not a tagged template: a table name cannot be a bound
+  // parameter. Only the table name is interpolated and it comes from the bank
+  // registry, never from the caller; both values stay bound.
+  const moved = await prisma.$executeRawUnsafe(
+    `UPDATE ${tables.answerTable}
+     SET answered_at = answered_at - INTERVAL '1 day'
+     WHERE lower(device_mac) = lower($1)
+       AND answered_at >= $2`,
+    deviceMac,
+    startOfDay
+  );
 
   return { device_mac: deviceMac, backdated: moved };
 };

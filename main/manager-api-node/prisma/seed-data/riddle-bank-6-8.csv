@@ -1,0 +1,11 @@
+code,age_band,level,category,language,question_text,answer_text,accepted_answers,active
+RID-6-8-L01-Q01,6-8,1,objects,en,I have hands but I cannot clap. What am I?,a clock,clock | a watch | watch,
+RID-6-8-L01-Q02,6-8,1,nature,en,I fall down but I never get hurt. What am I?,rain,the rain | raindrops | water,
+RID-6-8-L01-Q03,6-8,1,objects,en,The more you take away from me the bigger I get. What am I?,a hole,hole | a pit | pit,
+RID-6-8-L01-Q04,6-8,1,objects,en,I am tall when I am young and short when I am old. What am I?,a candle,candle | a pencil | pencil,
+RID-6-8-L01-Q05,6-8,1,nature,en,I follow you all day long but disappear at night. What am I?,your shadow,shadow | a shadow | my shadow,
+RID-6-8-L01-Q06,6-8,1,objects,en,I have many teeth but I cannot bite. What am I?,a comb,comb | a zip | zip | zipper,
+RID-6-8-L01-Q07,6-8,1,food,en,I am yellow and curved and monkeys love me. What am I?,a banana,banana | bananas,
+RID-6-8-L01-Q08,6-8,1,objects,en,I have keys but open no locks. What am I?,a piano,piano | a keyboard | keyboard,
+RID-6-8-L01-Q09,6-8,1,nature,en,I am full of holes but I still hold water. What am I?,a sponge,sponge,
+RID-6-8-L01-Q10,6-8,1,objects,en,What goes up but never comes down?,your age,age | how old you are | my age,
