@@ -175,3 +175,32 @@ describe('countCompletedLevels', () => {
     expect(countCompletedLevels(numericIds, new Set(['1', '2']))).toBe(1);
   });
 });
+
+describe('levelCompletedToday', () => {
+  const { levelCompletedToday } = require('../../src/services/quiz.logic');
+  const bank = [
+    { id: 1n, level: 1 }, { id: 2n, level: 1 },
+    { id: 3n, level: 2 }, { id: 4n, level: 2 }
+  ];
+
+  it('is true when a question answered today finished its level', () => {
+    expect(levelCompletedToday(bank, new Set(['1', '2']), ['2'])).toBe(true);
+  });
+
+  it('is false when the level still has uncleared questions', () => {
+    expect(levelCompletedToday(bank, new Set(['1']), ['1'])).toBe(false);
+  });
+
+  it('is false when the level was already complete before today', () => {
+    // Yesterday cleared level 1; today's answers are in level 2, still open.
+    expect(levelCompletedToday(bank, new Set(['1', '2', '3']), ['3'])).toBe(false);
+  });
+
+  it('is false with no answers today', () => {
+    expect(levelCompletedToday(bank, new Set(['1', '2']), [])).toBe(false);
+  });
+
+  it('ignores today-ids from outside this bank (a band switch mid-day)', () => {
+    expect(levelCompletedToday(bank, new Set(['1', '2']), ['999'])).toBe(false);
+  });
+});

@@ -14,7 +14,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
-const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels } = require('./quiz.logic');
+const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
 const { resolveBank, DEFAULT_BANK } = require('./banks');
 
 const DEFAULT_AGE_BAND = '6-8';
@@ -170,9 +170,17 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // refusing to start a genuinely fresh day.
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const answeredToday = await tables.answers.count({
-    where: { device_mac: macFilter(deviceMac), answered_at: { gte: startOfDay } }
+  const todayRows = await tables.answers.findMany({
+    where: { device_mac: macFilter(deviceMac), answered_at: { gte: startOfDay } },
+    select: { question_id: true }
   });
+  const answeredToday = todayRows.length;
+
+  // Finishing a level also ends the scored day: the Daily Ten is a cap, not a
+  // quota. Without this, a level finished on question 6 pulled 4 questions
+  // from the next level the same day just to reach ten.
+  const dayComplete = answeredToday >= DAILY_QUESTION_TARGET
+    || levelCompletedToday(bank, clearedIds, todayRows.map((r) => String(r.question_id)));
 
   return {
     age_band: context.ageBand,
@@ -182,7 +190,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     replay,
     frontier_warning: frontierWarning,
     answered_today: answeredToday,
-    day_complete: answeredToday >= DAILY_QUESTION_TARGET,
+    day_complete: dayComplete,
     questions: bank.filter((q) => selected.has(String(q.id))).map(toQuestion)
   };
 };
@@ -455,7 +463,10 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       bandBank.map((q) => ({ id: q.id, level: q.level })),
       clearedIds
     );
-    const answeredToday = deviceAnswers.filter((a) => a.answered_at >= startOfDay).length;
+    const todayIds = deviceAnswers
+      .filter((a) => a.answered_at >= startOfDay)
+      .map((a) => String(a.question_id));
+    const answeredToday = todayIds.length;
     const lastPlayed = deviceAnswers.reduce(
       (max, a) => (!max || a.answered_at > max ? a.answered_at : max),
       null
@@ -471,7 +482,8 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       max_level: bandBank.length ? Math.max(...bandBank.map((q) => q.level)) : 0,
       replay: state.allCleared,
       answered_today: answeredToday,
-      day_complete: answeredToday >= DAILY_QUESTION_TARGET,
+      day_complete: answeredToday >= DAILY_QUESTION_TARGET
+        || levelCompletedToday(bandBank, clearedIds, todayIds),
       // Lifetime, not band-scoped - a band change must not erase what was answered.
       correct: deviceAnswers.filter((a) => a.result === 'correct').length,
       last_played: lastPlayed
