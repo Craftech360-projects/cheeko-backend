@@ -18,6 +18,7 @@
  */
 
 const { prisma } = require('../config/database');
+const logger = require('../utils/logger');
 
 const BANKS = {
   quiz: {
@@ -84,4 +85,57 @@ const resolveBank = (bank = DEFAULT_BANK) => {
   return resolved;
 };
 
-module.exports = { BANKS, CHARACTER_BANK, DEFAULT_BANK, bankFor, resolveBank };
+// ai_agent_template.id is a Postgres uuid column. Handing Prisma a non-uuid
+// string throws, so a junk metadata field would 500 every session rather than
+// falling through to the quiz bank.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Resolve a bank from whatever identifies the character.
+ *
+ * The worker cannot send agent_code: it lives on the persona, and the quiz fetch
+ * deliberately runs BEFORE the persona pull so the two overlap. Room metadata
+ * carries only the character's uuid and its display name, so both arrive here
+ * and this looks up the agent_code they point at.
+ *
+ * Never throws. A character-table hiccup must not take the quiz down for every
+ * child, so anything unresolvable serves the quiz bank.
+ *
+ * @param {{character?: string, characterId?: string}} [ref]
+ * @returns {Promise<'quiz'|'riddle'>}
+ */
+const bankForCharacterRef = async (ref = {}) => {
+  const character = String(ref.character || '').trim();
+  const characterId = String(ref.characterId || '').trim();
+
+  // A caller that already knows the agent_code (curl, tests, a future worker)
+  // skips the lookup entirely.
+  if (character && CHARACTER_BANK[character]) {
+    return CHARACTER_BANK[character];
+  }
+
+  const where = UUID_RE.test(characterId)
+    ? { id: characterId }
+    : (character ? { agent_name: character } : null);
+  if (!where) return DEFAULT_BANK;
+
+  try {
+    const row = await prisma.ai_agent_template.findFirst({
+      where,
+      select: { agent_code: true },
+    });
+    return bankFor(row?.agent_code);
+  } catch (error) {
+    logger.warn(`[QUIZ] bank lookup failed for ${JSON.stringify(where)}: ${error.message}`);
+    return DEFAULT_BANK;
+  }
+};
+
+module.exports = {
+  BANKS,
+  CHARACTER_BANK,
+  DEFAULT_BANK,
+  bankFor,
+  bankForCharacterRef,
+  resolveBank,
+};

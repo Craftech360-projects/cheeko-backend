@@ -11,7 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const quizService = require('../services/quiz.service');
-const { bankFor, BANKS } = require('../services/banks');
+const { bankForCharacterRef, BANKS } = require('../services/banks');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireServiceKey, requireAuth } = require('../middleware/auth');
 const { success, created, badRequest } = require('../utils/response');
@@ -36,8 +36,15 @@ const logger = require('../utils/logger');
  *       - in: query
  *         name: character
  *         required: false
- *         description: Character agent_code (e.g. riddle_master) selecting the question
- *           bank. Absent or unrecognised falls back to the quiz bank.
+ *         description: Character agent_code (e.g. riddle_master) or display name.
+ *           Absent or unrecognised falls back to the quiz bank.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: character_id
+ *         required: false
+ *         description: Character uuid from room metadata. Preferred over character
+ *           when both are sent; resolved to an agent_code and then to a bank.
  *         schema:
  *           type: string
  *     responses:
@@ -54,7 +61,12 @@ router.get('/next-questions',
       return badRequest(res, 'device_mac is required');
     }
 
-    const bank = bankFor(String(req.query.character || '').trim());
+    // The worker sends the character's uuid and display name, not its
+    // agent_code — see bankForCharacterRef.
+    const bank = await bankForCharacterRef({
+      character: req.query.character,
+      characterId: req.query.character_id,
+    });
     const batch = await quizService.nextQuestions(deviceMac, bank);
     logger.info(
       `[QUIZ] GET /quiz/next-questions device=${deviceMac} bank=${bank} -> band=${batch.age_band} level=${batch.level} replay=${batch.replay} questions=${batch.questions.length}`
@@ -128,7 +140,10 @@ router.post('/answer',
     if (explicitBank && !BANKS[explicitBank]) {
       return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
     }
-    const bank = explicitBank || bankFor(String(req.body.character || '').trim());
+    const bank = explicitBank || await bankForCharacterRef({
+      character: req.body.character,
+      characterId: req.body.character_id,
+    });
 
     const answer = await quizService.recordAnswer(deviceMac, questionId, result, bank);
     logger.info(
@@ -167,7 +182,10 @@ router.get('/progress',
       return badRequest(res, 'device_mac is required');
     }
 
-    const bank = bankFor(String(req.query.character || '').trim());
+    const bank = await bankForCharacterRef({
+      character: req.query.character,
+      characterId: req.query.character_id,
+    });
     const summary = await quizService.progress(deviceMac, bank);
     logger.info(
       `[QUIZ] GET /quiz/progress device=${deviceMac} bank=${bank} -> band=${summary.age_band} level=${summary.current_level} completed=${summary.levels_completed}`
