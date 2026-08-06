@@ -66,6 +66,27 @@ describe('bankForCharacterRef', () => {
     expect(await bankForCharacterRef({ characterId: UUID })).toBe('quiz');
   });
 
+  it('falls back to the display name when the uuid matches no row', async () => {
+    // Observed live 2026-08-06: the session carried a well-formed character_id
+    // that existed in no template row, while "riddler" resolved fine. Stopping
+    // at the uuid served Riddler the quiz bank.
+    mockFindFirst
+      .mockResolvedValueOnce(null)                          // uuid miss
+      .mockResolvedValueOnce({ agent_code: 'riddle_master' }); // name hit
+
+    expect(await bankForCharacterRef({ characterId: UUID, character: 'riddler' })).toBe('riddle');
+    expect(mockFindFirst).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { id: UUID } }));
+    expect(mockFindFirst).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: { agent_name: 'riddler' } }));
+  });
+
+  it('still falls back to the display name when the uuid lookup throws', async () => {
+    mockFindFirst
+      .mockRejectedValueOnce(new Error('connection reset'))
+      .mockResolvedValueOnce({ agent_code: 'riddle_master' });
+
+    expect(await bankForCharacterRef({ characterId: UUID, character: 'riddler' })).toBe('riddle');
+  });
+
   it('falls back to quiz when nothing is supplied', async () => {
     expect(await bankForCharacterRef({})).toBe('quiz');
     expect(await bankForCharacterRef()).toBe('quiz');
@@ -78,7 +99,7 @@ describe('bankForCharacterRef', () => {
     expect(await bankForCharacterRef({ characterId: UUID })).toBe('quiz');
   });
 
-  it('prefers the uuid over the display name when both are sent', async () => {
+  it('tries the uuid first when both are sent, and stops once it hits', async () => {
     mockFindFirst.mockResolvedValue({ agent_code: 'riddle_master' });
 
     await bankForCharacterRef({ characterId: UUID, character: 'Riddler' });

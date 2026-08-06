@@ -114,21 +114,27 @@ const bankForCharacterRef = async (ref = {}) => {
     return CHARACTER_BANK[character];
   }
 
-  const where = UUID_RE.test(characterId)
-    ? { id: characterId }
-    : (character ? { agent_name: character } : null);
-  if (!where) return DEFAULT_BANK;
+  // Tried in order, and a miss falls through to the next. The uuid is preferred
+  // but is NOT authoritative: a live session on 2026-08-06 arrived with a
+  // character_id that matched no row while the display name resolved fine, and
+  // stopping at the uuid served Riddler the quiz bank.
+  const candidates = [];
+  if (UUID_RE.test(characterId)) candidates.push({ id: characterId });
+  if (character) candidates.push({ agent_name: character });
 
-  try {
-    const row = await prisma.ai_agent_template.findFirst({
-      where,
-      select: { agent_code: true },
-    });
-    return bankFor(row?.agent_code);
-  } catch (error) {
-    logger.warn(`[QUIZ] bank lookup failed for ${JSON.stringify(where)}: ${error.message}`);
-    return DEFAULT_BANK;
+  for (const where of candidates) {
+    try {
+      const row = await prisma.ai_agent_template.findFirst({
+        where,
+        select: { agent_code: true },
+      });
+      if (row?.agent_code) return bankFor(row.agent_code);
+    } catch (error) {
+      logger.warn(`[QUIZ] bank lookup failed for ${JSON.stringify(where)}: ${error.message}`);
+    }
   }
+
+  return DEFAULT_BANK;
 };
 
 module.exports = {
