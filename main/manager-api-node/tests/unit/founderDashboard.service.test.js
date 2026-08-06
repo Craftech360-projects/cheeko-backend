@@ -17,6 +17,7 @@ jest.mock('../../src/config/database', () => {
       analytics_game_sessions: model(),
       sys_user: model(),
       device_token_usage_session: model(),
+      device_token_usage: model(),
       rfid_card_tap_log: model(),
       device_games_played: model(),
       device_radio_played: model(),
@@ -151,7 +152,27 @@ describe('founderDashboard.service', () => {
         message_count: 12,
       },
     ]);
-    prisma.device_token_usage_session.aggregate.mockResolvedValue({ _sum: { message_count: 12 } });
+    // Serves both the previous-window token sums and the lifetime aggregate,
+    // which also reads _count/_min/_max.
+    prisma.device_token_usage_session.aggregate.mockResolvedValue({
+      _sum: { message_count: 12 },
+      _count: { _all: 1 },
+      _min: { usage_date: dateOnly(1) },
+      _max: { usage_date: dateOnly(0) },
+    });
+
+    prisma.device_token_usage.aggregate.mockResolvedValue({
+      _sum: {
+        input_text_tokens: 2000,
+        input_audio_tokens: 400,
+        input_cached_tokens: 0,
+        output_text_tokens: 1000,
+        output_audio_tokens: 200,
+      },
+      _count: { _all: 4 },
+      _min: { usage_date: dateOnly(3) },
+      _max: { usage_date: dateOnly(0) },
+    });
 
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([
       { created_at: instant(0), mac_address: 'AA:AA:AA:AA:AA:01', rfid_uid: 'CARD-1', content_pack_id: 1n, content_pack_name: 'Space Pack' },
@@ -418,6 +439,45 @@ describe('founderDashboard.service', () => {
     expect(result.sections.dailySpend[0]).toHaveProperty('outputCost');
     expect(result.sections.topDevices[0]).toHaveProperty('fleetSharePercent');
     expect(result.sections.topDevices[0].kidName).toBe('Maya');
+  });
+
+  it('reports lifetime spend from both token ledgers, each with its own coverage', async () => {
+    const result = await founderDashboardService.getFounderCosts({ range: 'month' });
+    const { sessionLedger, deviceLedger } = result.sections.lifetime;
+
+    // 2000 text-in + 400 audio-in + 1000 text-out + 200 audio-out, at the
+    // default INR-per-million rates.
+    expect(deviceLedger.totalInr).toBeCloseTo(
+      (2000 * 46 + 400 * 276 + 1000 * 184 + 200 * 1104) / 1000000,
+      2,
+    );
+    expect(deviceLedger.rows).toBe(4);
+    expect(deviceLedger.firstDay).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    // The two ledgers are independent: neither range nor row count is shared.
+    expect(sessionLedger.rows).toBe(1);
+    expect(sessionLedger.totalInr).not.toBe(deviceLedger.totalInr);
+  });
+
+  it('leaves lifetime spend at zero rather than null when a ledger is empty', async () => {
+    prisma.device_token_usage.aggregate.mockResolvedValue({
+      _sum: {
+        input_text_tokens: null, input_audio_tokens: null, input_cached_tokens: null,
+        output_text_tokens: null, output_audio_tokens: null,
+      },
+      _count: { _all: 0 },
+      _min: { usage_date: null },
+      _max: { usage_date: null },
+    });
+
+    const result = await founderDashboardService.getFounderCosts({ range: 'month' });
+
+    expect(result.sections.lifetime.deviceLedger).toMatchObject({
+      totalInr: 0,
+      rows: 0,
+      firstDay: null,
+      lastDay: null,
+    });
   });
 
   it('reports no budget until one is configured, and reads it from sys_params', async () => {

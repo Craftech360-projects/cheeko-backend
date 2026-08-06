@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
 import './App.css'
 
 /* ================================================================== *
@@ -304,6 +304,14 @@ type TranscriptResponse = {
   lines: Array<{ speaker: string; text: string; createdAt: string | null }>
 }
 
+/* One of the two token ledgers, reported all-time. */
+type LifetimeLedger = {
+  totalInr: number | null
+  rows: number | null
+  firstDay: string | null
+  lastDay: string | null
+}
+
 type CostsResponse = {
   range: RangeOption
   generatedAt: string
@@ -320,6 +328,10 @@ type CostsResponse = {
   }
   deltas: { totalCost: number | null }
   sections: {
+    lifetime?: {
+      sessionLedger: LifetimeLedger
+      deviceLedger: LifetimeLedger
+    }
     dailySpend: Array<{ date: string; total: number; inputCost: number; outputCost: number }>
     tokenMix: { outputAudio: number; inputAudio: number; text: number }
     topDevices: Array<{
@@ -566,6 +578,12 @@ function formatMoney(value: number | null | undefined) {
 function formatMoneyCompact(value: number | null | undefined) {
   if (isNil(value) || !Number.isFinite(value)) return DASH
   return `₹${Math.round(value).toLocaleString('en-IN')}`
+}
+
+/* Lifetime spans can cross a year boundary, so day+month alone is ambiguous. */
+function formatDayWithYear(value: string | null | undefined) {
+  if (!value) return DASH
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -1239,40 +1257,40 @@ function OverviewPage({
           <section className="oa-kpis">
             <KpiCard
               label={`Active toys · ${rangeLabel(range)}`}
-              value={formatNumber(overview.kpis.activeToys.total)}
-              unit={`of ${overview.kpis.activeToys.fleetTotal}`}
-              delta={overview.deltas.activeToys}
+              value={formatNumber(overview.kpis?.activeToys?.total)}
+              unit={`of ${formatNumber(overview.kpis?.activeToys?.fleetTotal)}`}
+              delta={overview.deltas?.activeToys ?? null}
               deltaQualifier="vs prior period"
-              sparkline={overview.kpis.activeToys.sparkline}
+              sparkline={overview.kpis?.activeToys?.sparkline}
             />
             <KpiCard
               label="Play time"
-              value={overview.kpis.playTimeHours.total.toFixed(1)}
+              value={overview.kpis?.playTimeHours?.total?.toFixed(1) ?? DASH}
               unit="hrs"
-              delta={overview.deltas.playTimeHours}
+              delta={overview.deltas?.playTimeHours ?? null}
               deltaQualifier="vs prior period"
-              sparkline={overview.kpis.playTimeHours.sparkline}
+              sparkline={overview.kpis?.playTimeHours?.sparkline}
             />
             <KpiCard
               label="Game sessions"
-              value={formatNumber(overview.kpis.sessions.total)}
-              delta={overview.deltas.sessions}
+              value={formatNumber(overview.kpis?.sessions?.total)}
+              delta={overview.deltas?.sessions ?? null}
               deltaQualifier="vs prior period"
-              sparkline={overview.kpis.sessions.sparkline}
+              sparkline={overview.kpis?.sessions?.sparkline}
             />
             <KpiCard
               label="New families"
-              value={formatNumber(overview.kpis.newFamilies.total)}
-              delta={overview.deltas.newFamilies}
+              value={formatNumber(overview.kpis?.newFamilies?.total)}
+              delta={overview.deltas?.newFamilies ?? null}
               deltaQualifier="vs prior period"
-              sparkline={overview.kpis.newFamilies.sparkline}
+              sparkline={overview.kpis?.newFamilies?.sparkline}
             />
             <KpiCard
               label="AI cost"
-              value={formatMoney(overview.kpis.aiCostInr.total)}
-              delta={overview.deltas.aiCostInr}
+              value={formatMoney(overview.kpis?.aiCostInr?.total)}
+              delta={overview.deltas?.aiCostInr ?? null}
               deltaQualifier="vs prior period"
-              sparkline={overview.kpis.aiCostInr.sparkline}
+              sparkline={overview.kpis?.aiCostInr?.sparkline}
             />
           </section>
 
@@ -2713,6 +2731,50 @@ function FamiliesPage({
  * Costs
  * ================================================================== */
 
+/**
+ * All-time spend from both token ledgers.
+ *
+ * They are separate tables that agree over recent windows and drift apart on
+ * older rows, so neither is billed as "the" total — both are shown labelled,
+ * with the gap stated rather than hidden. Every windowed figure elsewhere on
+ * this page comes from the session ledger.
+ */
+function LifetimeSpendCard({ lifetime }: { lifetime: NonNullable<CostsResponse['sections']['lifetime']> }) {
+  const ledgers = [
+    { key: 'session', label: 'Session ledger', source: 'device_token_usage_session', data: lifetime.sessionLedger },
+    { key: 'device', label: 'Device ledger', source: 'device_token_usage', data: lifetime.deviceLedger },
+  ]
+
+  const session = lifetime.sessionLedger?.totalInr
+  const device = lifetime.deviceLedger?.totalInr
+  const gap = isNil(session) || isNil(device) ? null : Math.abs(device - session)
+
+  return (
+    <section className="oa-single">
+      <Card title="Lifetime spend" hint="All-time totals · every windowed figure above is built from the session ledger">
+        <div className="pf-fields">
+          {ledgers.map((ledger) => (
+            <div key={ledger.key} className="pf-field">
+              {ledger.label}
+              <small>
+                {ledger.source} · {formatNumber(ledger.data?.rows)} rows ·{' '}
+                {formatDayWithYear(ledger.data?.firstDay)} → {formatDayWithYear(ledger.data?.lastDay)}
+              </small>
+              <strong>{formatMoney(ledger.data?.totalInr)}</strong>
+            </div>
+          ))}
+        </div>
+        {gap ? (
+          <div className="hint note">
+            The two ledgers differ by {formatMoney(gap)}. They are separate tables recording the same spend over
+            different histories, so they are not expected to reconcile.
+          </div>
+        ) : null}
+      </Card>
+    </section>
+  )
+}
+
 function CostsPage({
   range,
   data,
@@ -2770,6 +2832,8 @@ function CostsPage({
               caption={<small>time to first token</small>}
             />
           </section>
+
+          {data.sections.lifetime ? <LifetimeSpendCard lifetime={data.sections.lifetime} /> : null}
 
           <section className="oa-row">
             <Card title={`Daily AI spend · ${rangeLabel(range)}`} hint="₹ per day · input vs output tokens">
@@ -3355,6 +3419,31 @@ function SettingsPage({
  * App
  * ================================================================== */
 
+/* A page that reads a field the API stopped sending used to blank the whole
+ * dashboard with only a minified stack in the console. Keep the shell and
+ * name the failure instead. */
+/* Keyed on the active page by its caller, so navigating away remounts it and
+ * clears the caught error. */
+class PageErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+  state = { message: null as string | null }
+
+  static getDerivedStateFromError(error: unknown) {
+    return { message: error instanceof Error ? error.message : String(error) }
+  }
+
+  render() {
+    if (this.state.message) {
+      return (
+        <div className="error-banner">
+          This view could not be rendered: {this.state.message}. The API response is most likely
+          missing a field this build expects — check that the deployed manager-api matches this dashboard.
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function App() {
   const { theme, toggle: toggleTheme } = useTheme()
 
@@ -3706,6 +3795,7 @@ function App() {
       <main className="main-shell">
         {error ? <div className="error-banner">{error}</div> : null}
 
+        <PageErrorBoundary key={activePage}>
         {activePage === 'overview' ? (
           <OverviewPage
             range={overviewRange}
@@ -3828,6 +3918,7 @@ function App() {
         {activePage === 'settings' ? (
           <SettingsPage username={username} costs={costs} theme={theme} onToggleTheme={toggleTheme} onSignOut={signOut} />
         ) : null}
+        </PageErrorBoundary>
       </main>
 
       <nav className="mobile-nav">

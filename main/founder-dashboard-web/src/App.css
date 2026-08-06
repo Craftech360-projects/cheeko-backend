@@ -359,6 +359,11 @@
   align-items: start;
 }
 
+/* A single full-width card, on the same 12px rhythm as the grid rows. */
+.oa-single {
+  margin-top: 12px;
+}
+
 .oa-card {
   background: var(--card);
   border: 1px solid var(--line);

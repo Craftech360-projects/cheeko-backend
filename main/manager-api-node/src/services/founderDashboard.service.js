@@ -1585,9 +1585,49 @@ async function getConversationTranscript(sessionId) {
  * Costs
  * ================================================================== */
 
+/**
+ * Lifetime spend, reported separately from each of the two token ledgers.
+ *
+ * device_token_usage_session is what every windowed figure on the Costs page
+ * is built from; device_token_usage is the older per-device roll-up that the
+ * admin /usage/analytics/totals endpoint reads. They agree over recent
+ * windows and diverge on older rows, so neither is presented as *the* total —
+ * both are returned labelled and the UI shows them side by side.
+ */
+async function loadLifetimeSpend(rates) {
+  const TOKEN_SUMS = {
+    input_text_tokens: true,
+    input_audio_tokens: true,
+    input_cached_tokens: true,
+    output_text_tokens: true,
+    output_audio_tokens: true,
+  };
+  const AGGREGATE = {
+    _sum: TOKEN_SUMS,
+    _count: { _all: true },
+    _min: { usage_date: true },
+    _max: { usage_date: true },
+  };
+
+  const [session, device] = await Promise.all([
+    prisma.device_token_usage_session.aggregate(AGGREGATE),
+    prisma.device_token_usage.aggregate(AGGREGATE),
+  ]);
+
+  const shape = (aggregate) => ({
+    totalInr: round(rawTotalCost(aggregate._sum, rates), 2),
+    rows: aggregate._count._all,
+    firstDay: toIsoDate(aggregate._min.usage_date),
+    lastDay: toIsoDate(aggregate._max.usage_date),
+  });
+
+  return { sessionLedger: shape(session), deviceLedger: shape(device) };
+}
+
 async function getFounderCosts({ range = 'month' } = {}) {
   const window = buildDateRange(range);
   const [rates, monthlyBudget] = await Promise.all([loadCostRates(), loadMonthlyBudget()]);
+  const lifetime = await loadLifetimeSpend(rates);
 
   const [costRows, usageRows, devices] = await Promise.all([
     prisma.device_token_usage_session.findMany({
@@ -1683,6 +1723,7 @@ async function getFounderCosts({ range = 'month' } = {}) {
       totalCost: pctChange(totalCostRaw, prevTotalCost),
     },
     sections: {
+      lifetime,
       dailySpend: costByDate.map((row) => ({
         date: row.date,
         total: row.cost,
