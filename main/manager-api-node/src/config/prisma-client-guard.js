@@ -6,8 +6,7 @@ const REQUIRED_PRISMA_MODELS = [
   'device_workspace_artifacts',
   'workspace_locks',
   'device_memory_documents',
-  'device_memory_chunks',
-  'pending_card_pairing'
+  'device_memory_chunks'
 ];
 
 const REQUIRED_PRISMA_TABLES = [...REQUIRED_PRISMA_MODELS];

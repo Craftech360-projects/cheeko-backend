@@ -2,10 +2,6 @@ const express = require('express');
 const router = express.Router();
 const asyncHandler = require('express-async-handler');
 const multer = require('multer');
-const os = require('os');
-const fs = require('fs/promises');
-const path = require('path');
-const ffmpeg = require('fluent-ffmpeg');
 const { requireFirebaseAuth } = require('../middleware/firebaseAuth');
 const mobileService = require('../services/mobile.service');
 const agentService = require('../services/agent.service');
@@ -13,22 +9,9 @@ const deviceService = require('../services/device.service');
 const deviceSettingsService = require('../services/deviceSettings.service');
 const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
-const rfidService = require('../services/rfid.service');
+const customCardService = require('../services/customCard.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
-
-const voiceCardUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 20 * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-        const allowedMimes = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/ogg', 'audio/m4a', 'audio/aac', 'audio/x-m4a'];
-        if (allowedMimes.includes(file.mimetype)) {
-            cb(null, true);
-        } else {
-            cb(new Error('Invalid file type. Only audio files are allowed.'));
-        }
-    },
-});
 
 const kidAvatarUpload = multer({
     storage: multer.memoryStorage(),
@@ -43,39 +26,27 @@ const kidAvatarUpload = multer({
     },
 });
 
-// Device firmware only reliably decodes MP3; phone recordings commonly arrive as m4a/wav/ogg.
-const VOICE_CARD_MIME_TO_EXT = {
-    'audio/mpeg': '.mp3',
-    'audio/mp3': '.mp3',
-    'audio/wav': '.wav',
-    'audio/ogg': '.ogg',
-    'audio/m4a': '.m4a',
-    'audio/aac': '.aac',
-    'audio/x-m4a': '.m4a',
-};
+// Custom card audio. The 10 MB ceiling mirrors the client-side check; the real
+// enforcement (extension + sniffed magic bytes + size) lives in customCard.service
+// so a forged Content-Type cannot get past it. multer's own limit only exists to
+// stop us buffering an oversized body in memory, and its error is remapped to a
+// 400 with a readable sentence rather than the default 500/LIMIT_FILE_SIZE.
+const customCardUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+});
 
-const transcodeToMp3 = async (inputBuffer, mimeType) => {
-    const tmpId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    const inputExt = VOICE_CARD_MIME_TO_EXT[mimeType] || '.dat';
-    const inputPath = path.join(os.tmpdir(), `voicecard_in_${tmpId}${inputExt}`);
-    const outputPath = path.join(os.tmpdir(), `voicecard_out_${tmpId}.mp3`);
-
-    try {
-        await fs.writeFile(inputPath, inputBuffer);
-        await new Promise((resolve, reject) => {
-            ffmpeg(inputPath)
-                .audioCodec('libmp3lame')
-                .audioBitrate('96k')
-                .toFormat('mp3')
-                .on('end', resolve)
-                .on('error', reject)
-                .save(outputPath);
-        });
-        return await fs.readFile(outputPath);
-    } finally {
-        await fs.unlink(inputPath).catch(() => {});
-        await fs.unlink(outputPath).catch(() => {});
-    }
+const handleUploadErrors = (uploadMiddleware) => (req, res, next) => {
+    uploadMiddleware(req, res, (err) => {
+        if (!err) return next();
+        if (err instanceof multer.MulterError) {
+            const msg = err.code === 'LIMIT_FILE_SIZE'
+                ? 'That recording is larger than 10 MB. Please choose a shorter one.'
+                : 'That file could not be uploaded. Please try again.';
+            return res.status(400).json({ code: 400, msg, data: null });
+        }
+        return next(err);
+    });
 };
 
 const defaultDeviceName = (index) => `Cheeko - ${index + 1}`;
@@ -281,6 +252,46 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
 
     success(res, { avatarUrl: uploadResult.url, kid });
 }));
+
+// ─── Custom Card ────────────────────────────────────────────────────────────
+
+// Returns the kid's card plus its active content pack.
+// 404 when the kid has no card row yet — the app reads that as "no card yet",
+// not as an error. A null rfidUid (admin has not assigned the physical card)
+// and a null contentPack are both normal states, never rejections.
+router.get('/kids/:kidId/custom-card', asyncHandler(async (req, res) => {
+    const card = await customCardService.getCustomCardForKid(req.mobileUser.id, req.params.kidId);
+    if (!card) {
+        return res.status(404).json({ code: 404, msg: 'No custom card for this child yet.', data: null });
+    }
+    success(res, card);
+}));
+
+// Creates the content pack. Replaces whatever was on the card before.
+router.post('/kids/:kidId/custom-card/content',
+    handleUploadErrors(customCardUpload.single('file')),
+    asyncHandler(async (req, res) => {
+        if (!req.file) {
+            return badRequest(res, 'Please choose a recording to upload.');
+        }
+
+        // The path segment is authoritative; the repeated kidId field must agree
+        // with it so a mismatched body cannot write to a different child.
+        const bodyKidId = req.body?.kidId || req.body?.kid_id;
+        if (bodyKidId && String(bodyKidId) !== String(req.params.kidId)) {
+            return badRequest(res, 'The child in the request does not match the one being updated.');
+        }
+
+        const card = await customCardService.replaceCustomCardContent(
+            req.mobileUser.id,
+            req.params.kidId,
+            req.file,
+            { title: req.body?.title }
+        );
+
+        res.status(201).json({ code: 0, msg: 'success', data: card });
+    })
+);
 
 // ─── RPC Replacements ───────────────────────────────────────────────────────
 
@@ -598,71 +609,6 @@ router.get('/agents/device/:mac/agent-id', asyncHandler(async (req, res) => {
 // Returns null if not found — Flutter handles this gracefully
 router.get('/activation/check-code', asyncHandler(async (req, res) => {
     success(res, null);
-}));
-
-// ─── Custom Voice Cards ─────────────────────────────────────────────────────
-
-router.post('/voice-cards/upload', voiceCardUpload.single('file'), asyncHandler(async (req, res) => {
-    if (!req.file) {
-        return badRequest(res, 'No file uploaded');
-    }
-
-    const mp3Buffer = await transcodeToMp3(req.file.buffer, req.file.mimetype);
-
-    const uploadResult = await uploadService.uploadContentFile(
-        mp3Buffer,
-        `voicecard_${Date.now()}.mp3`,
-        'rfidcontent',
-        'voicecards',
-        'audio/mpeg'
-    );
-
-    const { contentPackId } = await rfidService.createCustomVoiceCardPack({
-        audioUrl: uploadResult.url,
-        userId: req.mobileUser.id
-    });
-
-    success(res, { contentPackId });
-}));
-
-router.post('/devices/:mac/voice-cards/pairing', asyncHandler(async (req, res) => {
-    const { contentPackId, kidId } = req.body;
-    if (!contentPackId) {
-        return badRequest(res, 'contentPackId is required');
-    }
-
-    const device = await deviceSettingsService.resolveOwnedDeviceForMobile(req.mobileUser.id, req.params.mac);
-    if (!device) {
-        return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
-    }
-
-    const pairing = await rfidService.createPendingCardPairing({
-        macAddress: device.mac_address,
-        contentPackId,
-        kidId,
-        userId: req.mobileUser.id
-    });
-
-    success(res, {
-        pairingId: Number(pairing.id),
-        expiresAt: pairing.expires_at
-    });
-}));
-
-router.get('/voice-cards/pairing/:pairingId', asyncHandler(async (req, res) => {
-    if (!/^\d+$/.test(req.params.pairingId)) {
-        return badRequest(res, 'Invalid pairingId');
-    }
-
-    const pairing = await rfidService.getPendingCardPairingStatus(req.params.pairingId);
-    if (!pairing || String(pairing.user_id) !== String(req.mobileUser.id)) {
-        return res.status(404).json({ code: 404, msg: 'Pairing not found', data: null });
-    }
-
-    success(res, {
-        status: pairing.status,
-        rfidUid: pairing.rfid_uid
-    });
 }));
 
 module.exports = router;

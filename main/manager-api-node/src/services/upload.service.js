@@ -3,7 +3,8 @@
  * Handles file uploads to AWS S3
  */
 
-const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const path = require('path');
@@ -252,11 +253,78 @@ async function deleteKidAvatarByUrl(url) {
   }
 }
 
+// Custom card audio is one child's private recording, not shared catalogue content,
+// so it is never served from the public CloudFront origin. Callers persist only the
+// returned key and mint a short-lived signed URL per tap via getSignedAudioUrl.
+const CUSTOM_CARD_URL_TTL_SECONDS = parseInt(process.env.CUSTOM_CARD_URL_TTL_SECONDS, 10) || 21600; // 6h
+
+/**
+ * Upload a parent-recorded custom card audio file to S3.
+ * Returns the object key ONLY — deliberately no url, so a URL cannot be persisted
+ * by accident and later expire mid-playback.
+ * @param {Buffer} fileBuffer - Audio buffer
+ * @param {number|string} kidId - Kid profile id the audio belongs to
+ * @param {string} filename - Original filename (used only for the extension)
+ * @param {string} mimeType - Validated MIME type
+ * @returns {Promise<{s3Key: string}>}
+ */
+async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType) {
+  const ext = (path.extname(filename || '') || '.mp3').toLowerCase();
+  const s3Key = `customcards/${kidId}/${randomUUID()}${ext}`;
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: fileBuffer,
+    ContentType: mimeType || 'audio/mpeg',
+    // No long-lived cache header: these objects are private and reached via
+    // signed URLs that rotate, so a shared cache must not hold onto them.
+    CacheControl: 'private, max-age=0, no-store'
+  }));
+
+  logger.info('Custom card audio uploaded to S3', { s3Key, kidId, size: fileBuffer.length });
+  return { s3Key };
+}
+
+/**
+ * Mint a short-lived signed URL for a stored audio key.
+ * Called fresh on every tap lookup — never persisted.
+ * @param {string} s3Key - Stored object key
+ * @param {number} [ttlSeconds] - Expiry, defaults to CUSTOM_CARD_URL_TTL_SECONDS
+ * @returns {Promise<string|null>} Signed URL, or null if signing fails
+ */
+async function getSignedAudioUrl(s3Key, ttlSeconds = CUSTOM_CARD_URL_TTL_SECONDS) {
+  if (!s3Key) return null;
+  try {
+    const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key });
+    return await getSignedUrl(s3Client, command, { expiresIn: ttlSeconds });
+  } catch (error) {
+    logger.error(`Failed to sign custom card audio key ${s3Key}: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Delete a retired custom card audio object. Best-effort: an orphaned object is
+ * preferable to failing a request whose DB write already succeeded.
+ */
+async function deleteCustomCardAudio(s3Key) {
+  if (!s3Key || !s3Key.startsWith('customcards/') || s3Key.includes('..')) return;
+  try {
+    await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+  } catch (error) {
+    logger.warn(`Failed to delete retired custom card audio ${s3Key}: ${error.message}`);
+  }
+}
+
 module.exports = {
   uploadContentFile,
   uploadThumbnail,
   uploadImagineImage,
   uploadKidAvatar,
   deleteKidAvatarByUrl,
-  listImagineImages
+  listImagineImages,
+  uploadCustomCardAudio,
+  getSignedAudioUrl,
+  deleteCustomCardAudio
 };

@@ -14,6 +14,7 @@ const { normalizeMacAddress } = require('../utils/helpers');
 const { resolveRuntimeAgentName } = require('./character-resolver');
 const { extractBySequence, countItems } = require('../utils/mdParser');
 const qdrantService = require('./integrations/qdrant.service');
+const uploadService = require('./upload.service');
 
 // =============================================
 // Helper: Format date to yyyy-MM-dd HH:mm:ss
@@ -798,6 +799,62 @@ const lookupCardByUid = async (rfidUid) => {
         };
       }
       logger.warn(`[RFID-LOOKUP] Series found but no question linked: series_id=${series.id}`);
+    }
+
+    // Fallback: custom card (kid-assigned RFID card with user-uploaded content)
+    let customCard = null;
+    try {
+      customCard = await prisma.custom_card.findFirst({
+        where: { rfid_uid: normalizedUid }
+      });
+    } catch (customErr) {
+      logger.error('[RFID-LOOKUP] Custom card lookup DB error:', customErr);
+    }
+
+    if (customCard) {
+      // Second hop is by kid, not uid: the parent uploads before an admin assigns
+      // the physical card, so the pack cannot be keyed on a uid that did not exist
+      // at upload time.
+      let pack = null;
+      try {
+        pack = await prisma.custom_content_pack.findFirst({
+          where: { kid_id: customCard.kid_id, is_active: true },
+          orderBy: { create_date: 'desc' }
+        });
+      } catch (packErr) {
+        logger.error('[RFID-LOOKUP] Custom content pack lookup DB error:', packErr);
+      }
+
+      if (pack) {
+        // Signed per tap, never persisted — a stored URL would expire and the card
+        // would go silent with nothing on the server to show why.
+        const audioUrl = await uploadService.getSignedAudioUrl(pack.file_key);
+
+        if (!audioUrl) {
+          logger.error(`[RFID-LOOKUP] Failed to sign custom card audio for uid=${normalizedUid}, pack_id=${pack.id}`);
+          return null;
+        }
+
+        logger.info(`[RFID-LOOKUP] Custom card resolved: uid=${normalizedUid}, kid_id=${customCard.kid_id}, pack_id=${pack.id}`);
+        return {
+          rfid_uid: normalizedUid,
+          source: 'custom_card',
+          kid_id: Number(customCard.kid_id),
+          contentType: 'custom_pack',
+          title: 'Custom Card',
+          packCode: `CUSTOM_${normalizedUid}`,
+          // The pack row id doubles as the version: every replace inserts a new
+          // row, so this changes exactly when the audio changes. A constant here
+          // would leave the toy playing the previous recording forever.
+          version: Number(pack.id),
+          items: [{
+            sequence: 1,
+            title: pack.file_name || 'Custom Recording',
+            audioUrl
+          }]
+        };
+      }
+      logger.warn(`[RFID-LOOKUP] Custom card found for uid=${normalizedUid} but no active pack for kid_id=${customCard.kid_id}`);
     }
 
     logger.warn(`[RFID-LOOKUP] No bulk-range match for uid=${normalizedUid}`);
@@ -2674,56 +2731,7 @@ const recordCardTap = async (payload = {}) => {
     })
   ]);
 
-  let mapping = initialMapping;
-  const pendingPairing = await prisma.pending_card_pairing.findFirst({
-    where: { mac_address: normalizedMac, status: 'pending', expires_at: { gt: new Date() } },
-    orderBy: { created_at: 'desc' }
-  });
-
-  const canClaimForPairing = !mapping || mapping.card_type === 'custom_voice';
-  if (pendingPairing && canClaimForPairing) {
-    try {
-      await prisma.rfid_card_mapping.upsert({
-        where: { rfid_uid: normalizedUid },
-        create: {
-          rfid_uid: normalizedUid,
-          content_pack_id: pendingPairing.content_pack_id,
-          card_type: 'custom_voice',
-          active: true
-        },
-        update: {
-          content_pack_id: pendingPairing.content_pack_id,
-          card_type: 'custom_voice',
-          active: true,
-          pack_id: null,
-          question_id: null,
-          question_pack_id: null,
-          question_ids: [],
-          action_type: null,
-          action_data: {}
-        }
-      });
-      await prisma.pending_card_pairing.update({
-        where: { id: pendingPairing.id },
-        data: { status: 'completed', rfid_uid: normalizedUid }
-      });
-      mapping = await prisma.rfid_card_mapping.findFirst({
-        where: { rfid_uid: normalizedUid, active: true },
-        include: {
-          rfid_content_pack: {
-            select: { id: true, pack_code: true, name: true, version: true, content_hash: true }
-          }
-        }
-      });
-    } catch (pairingErr) {
-      logger.warn(`[RFID-TAP] Failed to complete pending pairing for mac=${normalizedMac}: ${pairingErr.message}`);
-    }
-  } else if (pendingPairing && mapping) {
-    await prisma.pending_card_pairing.update({
-      where: { id: pendingPairing.id },
-      data: { status: 'rejected_non_blank', rfid_uid: normalizedUid }
-    });
-  }
+  const mapping = initialMapping;
 
   let lookupResolved = null;
   if (!mapping) {
@@ -2767,7 +2775,12 @@ const recordCardTap = async (payload = {}) => {
 
   let updateAvailable = false;
   let updateReason = null;
-  if (cardType === 'content' && contentPack) {
+  // A custom card carries its audio inline in the lookup response and has no
+  // rfid_content_pack row. Without it here the version check is skipped entirely,
+  // updateRequired stays false, and the gateway short-circuits to card_up_to_date
+  // on the very first tap — the toy would never receive the recording.
+  const isCustomCard = lookupResolved?.source === 'custom_card';
+  if (cardType === 'content' && (contentPack || isCustomCard)) {
     if (latestContentHash) {
       if (!clientContentHash) {
         updateAvailable = true;
@@ -3165,122 +3178,6 @@ const registerDeviceTags = async (mac, tags) => {
   }
 
   return results;
-};
-
-// =============================================
-// Custom Voice Cards (parent recording → blank RFID card pairing)
-// =============================================
-
-/**
- * Create a content pack + single content item for a parent-recorded voice message.
- * @param {Object} params
- * @param {string} params.audioUrl - Uploaded audio CDN URL
- * @param {number|string} params.userId - Mobile user id (creator)
- * @returns {Promise<{contentPackId: number}>}
- */
-const createCustomVoiceCardPack = async ({ audioUrl, userId }) => {
-  if (!audioUrl) {
-    throw new Error('audioUrl is required');
-  }
-
-  const packCode = `custom_voice_${userId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  const pack = await prisma.rfid_content_pack.create({
-    data: {
-      pack_code: packCode,
-      name: 'Custom Voice Card',
-      content_type: 'custom_voice',
-      total_items: 1,
-      active: true,
-      creator: userId ? BigInt(userId) : null
-    }
-  });
-
-  await prisma.content_item.create({
-    data: {
-      content_pack_id: pack.id,
-      item_number: 1,
-      audio_url: audioUrl,
-      creator: userId ? BigInt(userId) : null,
-      active: true
-    }
-  });
-
-  return { contentPackId: Number(pack.id) };
-};
-
-/**
- * Open a 60s pairing window: the next tap on this device claims the given content pack.
- * @param {Object} params
- * @param {string} params.macAddress - Normalized device MAC
- * @param {number|string} params.contentPackId
- * @param {number|string} [params.kidId]
- * @param {number|string} params.userId
- * @returns {Promise<Object>} pending_card_pairing row
- */
-const createPendingCardPairing = async ({ macAddress, contentPackId, kidId, userId }) => {
-  // Validate contentPackId is a positive integer before BigInt() (which 500s on junk input)
-  if (contentPackId === null || contentPackId === undefined || !/^\d+$/.test(String(contentPackId)) || BigInt(contentPackId) <= 0n) {
-    const error = new Error('contentPackId must be a positive integer');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  // Guard against IDOR: the pack must exist, be a custom voice card, and belong to the caller
-  const pack = await prisma.rfid_content_pack.findUnique({
-    where: { id: BigInt(contentPackId) },
-    select: { id: true, content_type: true, creator: true }
-  });
-  if (!pack) {
-    const error = new Error('content pack not found');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (pack.content_type !== 'custom_voice') {
-    const error = new Error('not a custom voice card pack');
-    error.statusCode = 400;
-    throw error;
-  }
-  if (pack.creator !== null && pack.creator !== BigInt(userId)) {
-    const error = new Error('pack not owned by user');
-    error.statusCode = 403;
-    throw error;
-  }
-
-  const expiresAt = new Date(Date.now() + 60 * 1000);
-
-  return prisma.pending_card_pairing.create({
-    data: {
-      mac_address: macAddress,
-      content_pack_id: BigInt(contentPackId),
-      kid_id: kidId ? BigInt(kidId) : null,
-      user_id: BigInt(userId),
-      status: 'pending',
-      expires_at: expiresAt
-    }
-  });
-};
-
-/**
- * Get pairing status, lazily flipping expired pending pairings on read.
- * @param {number|string} pairingId
- * @returns {Promise<Object|null>}
- */
-const getPendingCardPairingStatus = async (pairingId) => {
-  const pairing = await prisma.pending_card_pairing.findUnique({
-    where: { id: BigInt(pairingId) }
-  });
-  if (!pairing) return null;
-
-  if (pairing.status === 'pending' && pairing.expires_at < new Date()) {
-    const updated = await prisma.pending_card_pairing.update({
-      where: { id: pairing.id },
-      data: { status: 'expired' }
-    });
-    return updated;
-  }
-
-  return pairing;
 };
 
 // =============================================
@@ -4759,9 +4656,6 @@ module.exports = {
   registerDeviceTags,
 
   // Custom Voice Cards
-  createCustomVoiceCardPack,
-  createPendingCardPairing,
-  getPendingCardPairingStatus,
 
   // Content Item methods (Task 3)
   getContentItemsByPackId,
