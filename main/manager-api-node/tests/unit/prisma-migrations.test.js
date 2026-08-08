@@ -44,7 +44,7 @@ describe('Prisma startup migration runner', () => {
     expect(mockExecSync).toHaveBeenNthCalledWith(
       1,
       'npx prisma migrate deploy',
-      expect.objectContaining({ timeout: 60000 })
+      expect.objectContaining({ timeout: 300000 })
     );
   });
 
@@ -70,7 +70,7 @@ describe('Prisma startup migration runner', () => {
     expect(mockExecSync).toHaveBeenNthCalledWith(
       1,
       'npx prisma db push --accept-data-loss',
-      expect.objectContaining({ timeout: 60000 })
+      expect.objectContaining({ timeout: 300000 })
     );
     expect(mockLoggerWarn).toHaveBeenCalledWith(
       expect.stringContaining('ALLOW_PRISMA_DB_PUSH=1')

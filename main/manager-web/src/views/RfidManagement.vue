@@ -84,6 +84,9 @@
                 <div class="tab-btn" :class="{ active: activeTab === 'aiCards' }" @click="switchTab('aiCards')">
                     <i class="el-icon-cpu"></i> AI Cards
                 </div>
+                <div class="tab-btn" :class="{ active: activeTab === 'customCards' }" @click="switchTab('customCards')">
+                    <i class="el-icon-microphone"></i> Custom Cards
+                </div>
                 <div class="tab-btn" :class="{ active: activeTab === 'series' }" @click="switchTab('series')">
                     <i class="el-icon-s-operation"></i> Bulk Ranges
                 </div>
@@ -542,6 +545,103 @@
                                     <span class="total-text">Total {{ contentPacksTotal }} records</span>
                                 </div>
                             </div>
+                        </template>
+
+                        <!-- Custom Cards Tab -->
+                        <template v-if="activeTab === 'customCards'">
+                            <div class="section-header">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-microphone"></i> Issued Custom Cards
+                                        <el-tag size="mini" type="info" class="section-count">{{ customCardsList.length }} issued</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        Blank cards shipped for parent recordings. A UID listed here is treated as a custom card, so it never
+                                        reports as unknown. There is no card-to-device binding — any issued card plays the pack of whichever toy it is tapped on.
+                                        <el-tooltip content="Register the UIDs printed on the custom cards you ship. The parent records audio from the app, which creates that device's pack (below). Tapping any issued card on that toy plays it." placement="top">
+                                            <i class="el-icon-question section-help"></i>
+                                        </el-tooltip>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="table_top_actions" style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+                                <el-input v-model="customCardUidInput" size="mini" style="width: 320px;"
+                                    placeholder="UIDs to register, comma or newline separated" clearable
+                                    @keyup.enter.native="addCustomCards"></el-input>
+                                <el-button size="mini" type="success" icon="el-icon-plus" :loading="customCardsSaving" @click="addCustomCards">Register</el-button>
+                                <el-button size="mini" type="danger" icon="el-icon-delete" @click="deleteSelectedCustomCards">Delete Selected</el-button>
+                                <el-button size="mini" icon="el-icon-refresh" @click="fetchCustomCards">Refresh</el-button>
+                            </div>
+
+                            <el-table :data="customCardsList" v-loading="customCardsLoading" size="mini" style="width: 100%"
+                                @selection-change="handleCustomCardSelection" empty-text="No custom cards issued yet">
+                                <el-table-column type="selection" width="45"></el-table-column>
+                                <el-table-column prop="rfidUid" label="RFID UID" min-width="160">
+                                    <template slot-scope="scope">
+                                        <span style="font-family: monospace;">{{ scope.row.rfidUid }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="createDate" label="Issued" min-width="170"></el-table-column>
+                                <el-table-column label="Actions" width="90" align="center">
+                                    <template slot-scope="scope">
+                                        <el-button size="mini" icon="el-icon-delete" circle type="danger" plain
+                                            @click="deleteCustomCard(scope.row)"></el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+
+                            <div class="section-header" style="margin-top: 32px;">
+                                <div class="section-info">
+                                    <h3 class="section-title">
+                                        <i class="el-icon-folder-opened"></i> Custom Card Packages
+                                        <el-tag size="mini" type="info" class="section-count">{{ customPacksList.length }} devices</el-tag>
+                                    </h3>
+                                    <p class="section-description">
+                                        One package per device (<code>CUSTOM_&lt;MAC&gt;</code>), created when a parent uploads from the app.
+                                        Version and hash drive the toy's re-download, exactly as for catalogue content packs.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <el-table :data="customPacksList" v-loading="customPacksLoading" size="mini" style="width: 100%"
+                                empty-text="No parent has recorded anything yet">
+                                <el-table-column prop="packCode" label="Pack Code" min-width="180">
+                                    <template slot-scope="scope">
+                                        <span style="font-family: monospace;">{{ scope.row.packCode }}</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Device" min-width="180">
+                                    <template slot-scope="scope">
+                                        <div>{{ scope.row.deviceAlias || 'Unnamed toy' }}</div>
+                                        <div style="color: #909399; font-size: 12px; font-family: monospace;">
+                                            {{ scope.row.macAddress || 'device not found' }}
+                                        </div>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Recording" min-width="200">
+                                    <template slot-scope="scope">
+                                        <a v-if="scope.row.itemAudioUrl" :href="scope.row.itemAudioUrl" target="_blank" rel="noopener">
+                                            {{ scope.row.itemTitle || 'recording' }}
+                                        </a>
+                                        <span v-else style="color: #909399;">none</span>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="Size" width="90">
+                                    <template slot-scope="scope">
+                                        {{ scope.row.itemSizeBytes ? (scope.row.itemSizeBytes / 1024 / 1024).toFixed(2) + ' MB' : '—' }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="version" label="Version" width="80" align="center"></el-table-column>
+                                <el-table-column label="Status" width="90" align="center">
+                                    <template slot-scope="scope">
+                                        <el-tag size="mini" :type="scope.row.active ? 'success' : 'info'" effect="dark">
+                                            {{ scope.row.active ? 'Active' : 'Off' }}
+                                        </el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="updateDate" label="Updated" min-width="170"></el-table-column>
+                            </el-table>
                         </template>
 
                         <!-- Bulk Ranges Tab -->
@@ -1040,6 +1140,15 @@ export default {
             searchKeyword: '',
             pageSizeOptions: [10, 20, 50, 100],
 
+            // Custom Cards — issued UID allowlist plus the per-device packages
+            customCardsList: [],
+            customCardsLoading: false,
+            customCardsSaving: false,
+            customCardsSelected: [],
+            customCardUidInput: '',
+            customPacksList: [],
+            customPacksLoading: false,
+
             // Questions
             questionsList: [],
             questionsLoading: false,
@@ -1284,6 +1393,98 @@ export default {
             else if (tab === 'questionPacks') this.fetchQuestionPacks();
             else if (tab === 'aiCards') this.fetchAiCards();
             else if (tab === 'cardAnalytics') this.fetchCardTapAnalytics();
+            else if (tab === 'customCards') this.fetchCustomCardsTab();
+        },
+
+        // ── Custom Cards ────────────────────────────────────────────────────
+        fetchCustomCardsTab() {
+            this.fetchCustomCards();
+            this.fetchCustomPacks();
+        },
+
+        fetchCustomCards() {
+            this.customCardsLoading = true;
+            Api.rfid.getCustomCardList(({ data }) => {
+                this.customCardsLoading = false;
+                if (data.code === 0) {
+                    this.customCardsList = data.data || [];
+                } else {
+                    this.$message.error(data.msg || 'Failed to load custom cards');
+                }
+            });
+        },
+
+        fetchCustomPacks() {
+            this.customPacksLoading = true;
+            Api.rfid.getCustomPackList(({ data }) => {
+                this.customPacksLoading = false;
+                if (data.code === 0) {
+                    this.customPacksList = data.data || [];
+                } else {
+                    this.$message.error(data.msg || 'Failed to load custom packages');
+                }
+            });
+        },
+
+        handleCustomCardSelection(rows) {
+            this.customCardsSelected = rows || [];
+        },
+
+        addCustomCards() {
+            // Accepts a pasted batch: commas, spaces or newlines all separate UIDs,
+            // because these arrive from a fulfilment spreadsheet.
+            const uids = this.customCardUidInput.split(/[\s,]+/).filter(Boolean);
+            if (uids.length === 0) {
+                this.$message.warning('Enter at least one RFID UID');
+                return;
+            }
+
+            this.customCardsSaving = true;
+            Api.rfid.addCustomCards(uids, ({ data }) => {
+                this.customCardsSaving = false;
+                if (data.code === 0) {
+                    const result = data.data || {};
+                    let msg = `Registered ${result.created || 0} card(s)`;
+                    if (result.skipped) msg += `, ${result.skipped} already issued`;
+                    if (result.invalid && result.invalid.length) msg += `, ${result.invalid.length} invalid`;
+                    this.$message.success(msg);
+                    this.customCardUidInput = '';
+                    this.fetchCustomCards();
+                } else {
+                    this.$message.error(data.msg || 'Failed to register custom cards');
+                }
+            });
+        },
+
+        deleteCustomCard(row) {
+            this.confirmDeleteCustomCards([row.id], `custom card ${row.rfidUid}`);
+        },
+
+        deleteSelectedCustomCards() {
+            if (this.customCardsSelected.length === 0) {
+                this.$message.warning('Select at least one card');
+                return;
+            }
+            this.confirmDeleteCustomCards(
+                this.customCardsSelected.map(row => row.id),
+                `${this.customCardsSelected.length} custom card(s)`
+            );
+        },
+
+        confirmDeleteCustomCards(ids, label) {
+            this.$confirm(
+                `Delete ${label}? Tapping it will then report an unknown card.`,
+                'Confirm', { type: 'warning' }
+            ).then(() => {
+                Api.rfid.deleteCustomCards(ids, ({ data }) => {
+                    if (data.code === 0) {
+                        this.$message.success('Deleted');
+                        this.fetchCustomCards();
+                    } else {
+                        this.$message.error(data.msg || 'Failed to delete');
+                    }
+                });
+            }).catch(() => { });
         },
 
         handleSearch() {

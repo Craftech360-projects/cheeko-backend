@@ -252,11 +252,63 @@ async function deleteKidAvatarByUrl(url) {
   }
 }
 
+/**
+ * Upload a parent-recorded custom card audio file to S3 under customcard_<mac>/.
+ * Returns a public CloudFront URL: the toy downloads this straight from the
+ * content manifest, exactly like catalogue audio, so it cannot be a signed URL
+ * that expires while the manifest sits cached on the device.
+ * ponytail: unguessable key, not access control — a leaked URL is readable.
+ * Upgrade path: CloudFront signed URLs if a recording must be truly private.
+ * @param {Buffer} fileBuffer - Audio buffer
+ * @param {string} deviceMac - MAC of the device the recording belongs to
+ * @param {string} filename - Original filename (used only for the extension)
+ * @param {string} mimeType - Validated MIME type
+ * @returns {Promise<{s3Key: string, url: string}>}
+ */
+function customCardFolder(deviceMac) {
+  return `customcard_${String(deviceMac || '').toLowerCase().replace(/[^0-9a-f]/g, '')}`;
+}
+
+async function uploadCustomCardAudio(fileBuffer, deviceMac, filename, mimeType) {
+  const ext = (path.extname(filename || '') || '.mp3').toLowerCase();
+  const s3Key = `${customCardFolder(deviceMac)}/${randomUUID()}${ext}`;
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: fileBuffer,
+    ContentType: mimeType || 'audio/mpeg',
+    CacheControl: 'max-age=31536000'
+  }));
+
+  // Public CloudFront URL, same as every other content pack: the ESP32 fetches
+  // this straight out of the download manifest, and a signed URL would expire
+  // while the manifest sits cached on the toy.
+  const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
+  logger.info('Custom card audio uploaded to S3', { s3Key, deviceMac, size: fileBuffer.length });
+  return { s3Key, url };
+}
+
+/**
+ * Delete a retired custom card audio object. Best-effort: an orphaned object is
+ * preferable to failing a request whose DB write already succeeded.
+ */
+async function deleteCustomCardAudio(s3Key) {
+  if (!s3Key || !s3Key.startsWith('customcard') || s3Key.includes('..')) return;
+  try {
+    await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
+  } catch (error) {
+    logger.warn(`Failed to delete retired custom card audio ${s3Key}: ${error.message}`);
+  }
+}
+
 module.exports = {
   uploadContentFile,
   uploadThumbnail,
   uploadImagineImage,
   uploadKidAvatar,
   deleteKidAvatarByUrl,
-  listImagineImages
+  listImagineImages,
+  uploadCustomCardAudio,
+  deleteCustomCardAudio
 };

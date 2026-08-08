@@ -1033,6 +1033,24 @@ router.get('/founder/overview',
   })
 );
 
+router.get('/founder/live',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderLive();
+    success(res, payload);
+  })
+);
+
+router.get('/founder/brief',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getFounderBrief();
+    success(res, payload);
+  })
+);
+
 router.get('/founder/engagement',
   requireAuth,
   requireSuperAdmin,
@@ -1086,6 +1104,18 @@ router.get('/founder/operate',
   })
 );
 
+router.get('/founder/conversations/:sessionId/transcript',
+  requireAuth,
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const payload = await founderDashboardService.getConversationTranscript(req.params.sessionId);
+    if (!payload) {
+      return notFound(res, 'Transcript not found');
+    }
+    success(res, payload);
+  })
+);
+
 router.get('/founder/families/search',
   requireAuth,
   requireSuperAdmin,
@@ -1099,7 +1129,10 @@ router.get('/founder/families/list',
   requireAuth,
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
-    const payload = await founderDashboardService.listAllFamilies();
+    const payload = await founderDashboardService.listAllFamilies({
+      page: req.query.page,
+      limit: req.query.limit,
+    });
     success(res, payload);
   })
 );

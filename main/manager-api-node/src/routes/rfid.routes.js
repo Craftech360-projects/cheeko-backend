@@ -277,13 +277,15 @@ router.get('/card/uid/:rfidUid',
 router.get('/card/lookup/:rfidUid',
   asyncHandler(async (req, res) => {
     const { rfidUid } = req.params;
-    const { sequence } = req.query;
+    // mac identifies the tapping device. Optional for catalogue cards; required
+    // to resolve a custom card, whose pack belongs to the device, not the card.
+    const { sequence, mac } = req.query;
 
     if (!rfidUid) {
       return badRequest(res, 'RFID UID is required');
     }
 
-    logger.info(`[RFID-LOOKUP] Incoming lookup: uid=${rfidUid}, sequence=${sequence || 'none'}`);
+    logger.info(`[RFID-LOOKUP] Incoming lookup: uid=${rfidUid}, mac=${mac || 'none'}, sequence=${sequence || 'none'}`);
 
     // If sequence is provided, use content pack lookup (RAG system)
     if (sequence) {
@@ -293,7 +295,7 @@ router.get('/card/lookup/:rfidUid',
     }
 
     // Otherwise, use card lookup
-    const card = await rfidService.lookupCardByUid(rfidUid);
+    const card = await rfidService.lookupCardByUid(rfidUid, mac);
     if (!card) {
       logger.warn(`[RFID-LOOKUP] No card mapping found for uid=${rfidUid}`);
       return notFound(res, 'Card mapping not found');
@@ -880,6 +882,116 @@ router.post('/card/delete',
     try {
       await rfidService.deleteCardMappings(ids.map(id => parseInt(id)));
       success(res, null);  // Spring Boot returns Result<Void>
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+// =============================================
+// Custom Card Routes
+// custom_card is the allowlist of issued custom-card UIDs; the recording lives
+// in a per-device rfid_content_pack (CUSTOM_<MAC>).
+// =============================================
+
+/**
+ * @swagger
+ * /admin/rfid/custom-card/list:
+ *   get:
+ *     tags: [RFID Custom Cards]
+ *     summary: List issued custom cards
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Issued custom card UIDs
+ */
+router.get('/custom-card/list',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await rfidService.getCustomCardList());
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/custom-card/packs:
+ *   get:
+ *     tags: [RFID Custom Cards]
+ *     summary: List per-device custom packages
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Custom packs with their device and current recording
+ */
+router.get('/custom-card/packs',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    success(res, await rfidService.getCustomPackList());
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/custom-card:
+ *   post:
+ *     tags: [RFID Custom Cards]
+ *     summary: Register issued custom card UIDs
+ *     description: Accepts {uids:[...]}, {rfidUid:"..."} or a raw array. Duplicates are skipped.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Registration counts
+ */
+router.post('/custom-card',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    let uids = req.body;
+    if (!Array.isArray(uids)) {
+      uids = req.body?.uids || (req.body?.rfidUid ? [req.body.rfidUid] : null);
+    }
+
+    if (!uids || !Array.isArray(uids) || uids.length === 0) {
+      return badRequest(res, 'At least one RFID UID is required');
+    }
+
+    try {
+      success(res, await rfidService.createCustomCards(uids, req.user.id));
+    } catch (error) {
+      badRequest(res, error.message);
+    }
+  })
+);
+
+/**
+ * @swagger
+ * /admin/rfid/custom-card/delete:
+ *   post:
+ *     tags: [RFID Custom Cards]
+ *     summary: Delete issued custom cards
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Custom cards deleted (data is null)
+ */
+router.post('/custom-card/delete',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    let ids = req.body;
+    if (!Array.isArray(ids)) {
+      ids = req.body?.ids || (req.body?.id ? [req.body.id] : null);
+    }
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return badRequest(res, 'Custom card IDs are required');
+    }
+
+    try {
+      await rfidService.deleteCustomCards(ids.map((id) => parseInt(id)));
+      success(res, null);
     } catch (error) {
       badRequest(res, error.message);
     }
@@ -3140,7 +3252,8 @@ router.get('/card/content/download/:rfidUid',
       return badRequest(res, 'RFID UID is required');
     }
 
-    const manifest = await rfidService.getContentDownloadManifest(rfidUid);
+    // mac is required for custom cards — their pack belongs to the device.
+    const manifest = await rfidService.getContentDownloadManifest(rfidUid, req.query.mac);
     if (!manifest) {
       return notFound(res, 'No content pack found for this RFID UID');
     }

@@ -1,9 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
 import './App.css'
 
+/* ================================================================== *
+ * Types — mirror the /admin/founder/* response shapes exactly.
+ * ================================================================== */
+
 type RangeOption = 'today' | '7d' | '30d' | '90d' | 'month'
+
 type NavPage =
   | 'overview'
+  | 'live'
+  | 'brief'
   | 'engagement'
   | 'content'
   | 'conversations'
@@ -14,36 +21,74 @@ type NavPage =
   | 'contentLibrary'
   | 'settings'
 
+type Theme = 'light' | 'dark'
+
+type CardLeaderboardItem = {
+  name: string
+  taps: number
+  uniqueDevices: number
+  uniqueCards: number
+}
+
+type GameSummaryItem = {
+  name: string
+  plays: number
+  avgScore: number | null
+  avgDurationMinutes: number
+}
+
 type SearchResult = {
   type: 'kid' | 'parent' | 'device'
   id: string
   label: string
   subtitle?: string | null
   parentName?: string | null
+  kidName?: string | null
   toyCount?: number
   macAddress?: string
+}
+
+type SearchResponse = {
+  kids: SearchResult[]
+  parents: SearchResult[]
+  devices: SearchResult[]
 }
 
 type FamilyListEntry = {
   kidId: string
   kidName: string
-  grade?: string | null
-  birthDate?: string | null
-  parentName?: string | null
-  parentEmail?: string | null
+  nickname: string | null
+  grade: string | null
+  birthDate: string | null
+  parentName: string | null
   deviceCount: number
+}
+
+type FamilyListResponse = {
+  total: number
+  page: number
+  limit: number
+  items: FamilyListEntry[]
 }
 
 type OverviewResponse = {
   range: RangeOption
   generatedAt: string
   kpis: {
-    activeToysToday: { total: number; fleetTotal: number; sparkline: number[] }
+    activeToys: { total: number; fleetTotal: number; onlineNow: number; sparkline: number[] }
     playTimeHours: { total: number; sparkline: number[] }
     sessions: { total: number; sparkline: number[] }
     newFamilies: { total: number; sparkline: number[] }
     aiCostInr: { total: number; sparkline: number[] }
   }
+  deltas: {
+    activeToys: number | null
+    playTimeHours: number | null
+    sessions: number | null
+    newFamilies: number | null
+    aiCostInr: number | null
+  }
+  comparedTo: { startKey: string; endKey: string }
   sections: {
     timeByFeature: {
       series: Array<{
@@ -55,25 +100,291 @@ type OverviewResponse = {
       }>
     }
     todaysSplit: {
+      hasData: boolean
       totalMinutes: number
       items: Array<{ key: string; label: string; minutes: number }>
     }
-    cardsKidsLove: {
-      items: Array<{ name: string; taps: number; uniqueDevices: number; uniqueCards: number }>
-    }
-    gamesPlayedVsFinished: {
-      items: Array<{
-        name: string
-        plays: number
-        avgScore: number | null
-        avgDurationMinutes: number
-        completionRate: number | null
-      }>
-    }
+    cardsKidsLove: { items: CardLeaderboardItem[]; unresolvedTapCount: number }
+    gamesPlayedVsFinished: { items: GameSummaryItem[] }
     talkingAbout: {
       items: Array<{ topic: string; mentions: number }>
       samples: Array<{ summary: string; macAddress: string; updatedAt: string }>
     }
+  }
+}
+
+type EngagementResponse = {
+  range: RangeOption
+  generatedAt: string
+  kpis: {
+    activeToday: number | null
+    activeYesterday: number | null
+    weeklyActives: number
+    monthlyActives: number
+    fleetTotal: number
+    dauMauRatio: number | null
+    avgSessionMinutes: number
+  }
+  deltas: {
+    weeklyActives: number | null
+    monthlyActives: number | null
+    avgSessionMinutes: number | null
+  }
+  sections: {
+    dailyActives: Array<{ date: string; activeDevices: number; average: number | null }>
+    returningSplit: {
+      currentWeekActives: number
+      previousWeekActives: number
+      returnedCount: number
+      returnedRate: number | null
+      newCount: number
+      windowLabel: string
+    }
+    sessionsByHour: Array<{ hour: number; sessions: number }>
+    sessionsHeatmap: Array<{ day: string; hours: Array<{ hour: number; sessions: number }> }>
+    quietDevices: Array<{
+      macAddress: string
+      alias: string
+      kidName: string | null
+      parentName: string | null
+      quietDays: number
+      lastActivityDate: string
+      lastSeenAt: string | null
+    }>
+    quietDeviceTotal: number
+  }
+}
+
+type ContentResponse = {
+  range: RangeOption
+  generatedAt: string
+  kpis: {
+    cardTaps: number
+    packsInUse: number
+    catalogTotal: number
+    gamePlays: number
+    avgCompletionRate: number | null
+    mediaPlays: number
+  }
+  deltas: {
+    cardTaps: number | null
+    packsInUse: number | null
+    gamePlays: number | null
+    mediaPlays: number | null
+  }
+  sections: {
+    packLeaderboard: Array<
+      CardLeaderboardItem & {
+        repeatRate: number
+        previousTaps: number
+        changePercent: number | null
+        trend: number[]
+      }
+    >
+    games: Array<{
+      name: string
+      plays: number
+      sessions: number
+      completed: number
+      completionRate: number | null
+      avgScore: number | null
+      status: string
+    }>
+    media: Array<{ title: string; type: string; plays: number }>
+    radio: Array<{ station: string; minutes: number }>
+    losingSteam: Array<{
+      name: string
+      metric: 'taps' | 'minutes' | 'completion'
+      changePercent: number | null
+      changePoints?: number
+      consecutiveWeeks: number
+    }>
+    unresolvedTapCount: number
+  }
+}
+
+type ConversationsResponse = {
+  range: RangeOption
+  generatedAt: string
+  kpis: {
+    talkHours: number
+    talkSessions: number
+    avgTurnsPerSession: number
+    topicsDetected: number
+    moderationFlags: number | null
+    screenedMessages: number
+  }
+  deltas: {
+    talkHours: number | null
+    talkSessions: number | null
+    avgTurnsPerSession: number | null
+  }
+  sections: {
+    topics: Array<{ topic: string; mentions: number }>
+    summaries: Array<{
+      id: string
+      sessionId: string
+      macAddress: string
+      headline: string
+      summary: string
+      tags: string[]
+      turns: number
+      updatedAt: string
+    }>
+  }
+}
+
+type LiveResponse = {
+  generatedAt: string
+  kpis: {
+    onlineNow: number
+    fleetSize: number
+    peakSessionsHour: { hour: number; sessions: number } | null
+    activeToday: number
+    activeThisWeek: number
+    activeThisMonth: number
+    dauMauRatio: number | null
+  }
+  sections: {
+    liveToys: Array<{
+      macAddress: string
+      alias: string
+      kidName: string | null
+      battery: number | null
+      firmware: string | null
+      mode: string | null
+      lastSeenAt: string | null
+    }>
+    spend: {
+      monthToDate: number
+      monthlyBudget: number | null
+      budgetUsedPercent: number | null
+      projectedMonth: number
+      dayOfMonth: number
+      daysInMonth: number
+    }
+    hourlySessions: Array<{ hour: number; sessions: number }>
+    ttftTrend: Array<{ date: string; seconds: number | null }>
+    feed: Array<{
+      kind: 'talk' | 'card' | 'game' | 'alert'
+      macAddress: string
+      label: string
+      detail: string
+      at: string
+    }>
+    sessionQuality: {
+      answerAccuracy: number | null
+      avgSessionMinutes: number | null
+      avgTtftSeconds: number | null
+      completedSessionsPercent: number | null
+      sessionsCounted: number
+      attemptsCounted: number
+    }
+  }
+}
+
+type BriefResponse = {
+  generatedAt: string
+  coverDate: string
+  headline: { activeToys: number; playHours: number; sessions: number; costInr: number }
+  deltas: { activeToys: number | null; playHours: number | null; sessions: number | null }
+  threeThings: Array<{ title: string; detail: string }>
+  playHoursSeries: Array<{ date: string; hours: number }>
+  quotes: Array<{ summary: string; macAddress: string; updatedAt: string }>
+  movers: Array<{ label: string; changePercent: number }>
+}
+
+type TranscriptResponse = {
+  sessionId: string
+  macAddress: string | null
+  headline: string | null
+  summary: string | null
+  turns: number
+  updatedAt: string | null
+  lines: Array<{ speaker: string; text: string; createdAt: string | null }>
+}
+
+/* One of the two token ledgers, reported all-time. */
+type LifetimeLedger = {
+  totalInr: number | null
+  rows: number | null
+  firstDay: string | null
+  lastDay: string | null
+}
+
+type CostsResponse = {
+  range: RangeOption
+  generatedAt: string
+  kpis: {
+    totalCost: number
+    projectedMonth: number
+    daysInMonth: number
+    daysObserved: number
+    monthlyBudget: number | null
+    budgetUsedPercent: number | null
+    perActiveToyPerDay: number | null
+    perSession: number | null
+    avgResponseTimeSeconds: number | null
+  }
+  deltas: { totalCost: number | null }
+  sections: {
+    lifetime?: {
+      sessionLedger: LifetimeLedger
+      deviceLedger: LifetimeLedger
+    }
+    dailySpend: Array<{ date: string; total: number; inputCost: number; outputCost: number }>
+    tokenMix: { outputAudio: number; inputAudio: number; text: number }
+    topDevices: Array<{
+      macAddress: string
+      alias: string
+      sessions: number
+      totalTokens: number
+      cost: number
+      kidName: string | null
+      parentName: string | null
+      talkHours: number
+      fleetSharePercent: number
+    }>
+  }
+}
+
+type OperateResponse = {
+  generatedAt: string
+  kpis: {
+    fleetSize: number
+    onlineNow: number
+    reportingDevices: number
+    latestFirmwarePercent: number | null
+    latestFirmwareVersion: string | null
+    avgBattery: number | null
+    batteryReportingDevices: number
+    deviceErrors7d: number
+  }
+  sections: {
+    firmwareCoverage: Array<{ version: string; count: number; percent: number; isLatest: boolean }>
+    otaRollout: {
+      version: string
+      forceUpdate: boolean
+      updatedCount: number
+      fleetSize: number
+      percent: number
+    } | null
+    watchlist: Array<{
+      macAddress: string
+      alias: string
+      kidName: string | null
+      issue: string
+      severity: string
+      since: string | null
+    }>
+    recentEvents: Array<{
+      source: string
+      macAddress: string
+      title: string
+      detail: string
+      severity: string
+      createdAt: string | null
+    }>
   }
 }
 
@@ -82,21 +393,15 @@ type FamilyProfile = {
     id: string
     name: string
     nickname?: string | null
-    avatarUrl?: string | null
-    gender?: string | null
     grade?: string | null
     school?: string | null
     language?: string | null
-    timezone?: string | null
     interests: string[]
     birthDate?: string | null
     memberSince?: string | null
   }
   parent: {
     displayName?: string | null
-    email?: string | null
-    phoneNumber?: string | null
-    avatarUrl?: string | null
     countryRegion?: string | null
     timezone?: string | null
     memberSince?: string | null
@@ -113,239 +418,69 @@ type FamilyProfile = {
     lastSeenAt?: string | null
   }>
   quota: {
-    monthKey?: string | null
+    monthKey: string | null
     questionsUsed: number
     extraPurchased: number
+    allowance: number | null
+    remaining: number | null
+  }
+  thisWeek: {
+    playSeconds: number
+    sessions: number
+    sparkline: number[]
+    split: Array<{ key: string; label: string; minutes: number }>
   }
   progress: Array<{
-    modeType: string
-    totalSessions: number
-    totalTimeSeconds: number
-    longestStreak: number
-  }>
-  recentSummaries: Array<{
-    summary: string
     macAddress: string
-    updatedAt: string
+    totalSessions: number
+    totalDurationSeconds: number
+    totalGamesPlayed: number
+    currentStreak: number
+    longestStreak: number
+    lastActivityAt: string | null
   }>
-  contentLove: {
-    cards: Array<{ name: string; taps: number; uniqueDevices: number; uniqueCards: number }>
-    games: Array<{
-      name: string
-      plays: number
-      avgScore: number | null
-      avgDurationMinutes: number
-      completionRate: number | null
-    }>
-  }
-}
-
-type EngagementResponse = {
-  range: RangeOption
-  generatedAt: string
-  kpis: {
-    activeYesterday: number
-    weeklyActives: number
-    monthlyActives: number
-    fleetTotal: number
-    dauMauRatio: number
-    avgSessionMinutes: number
-  }
-  sections: {
-    dailyActives: Array<{ date: string; activeDevices: number; average: number }>
-    returningSplit: {
-      currentWeekActives: number
-      previousWeekActives: number
-      returnedCount: number
-      returnedRate: number
-      newCount: number
-    }
-    sessionsByHour: Array<{ hour: number; sessions: number }>
-    sessionsHeatmap: Array<{
-      day: string
-      hours: Array<{ hour: number; sessions: number }>
-    }>
-    quietDevices: Array<{
-      macAddress: string
-      alias: string
-      kidName: string | null
-      parentName: string | null
-      quietDays: number | null
-      lastSeenAt: string | null
-    }>
-  }
-}
-
-type ContentResponse = {
-  range: RangeOption
-  generatedAt: string
-  kpis: {
-    cardTaps: number
-    cardsInUse: number
-    catalogTotal: number
-    gamePlays: number
-    avgCompletionRate: number
-    mediaPlays: number
-  }
-  sections: {
-    packLeaderboard: Array<{
-      name: string
-      taps: number
-      uniqueDevices: number
-      uniqueCards: number
-      repeatRate: number
-    }>
-    games: Array<{
-      name: string
-      plays: number
-      completionRate: number | null
-      avgScore: number | null
-      status: string
-    }>
-    media: Array<{ title: string; type: string; plays: number }>
-    radio: Array<{ station: string; minutes: number }>
-    unresolvedTapCount: number
-  }
-}
-
-type ConversationsResponse = {
-  range: RangeOption
-  generatedAt: string
-  kpis: {
-    talkHours: number
-    talkSessions: number
-    avgTurnsPerSession: number
-    topicsDetected: number
-    moderationFlags: number
-    screenedMessages: number
-  }
-  sections: {
-    topics: Array<{ topic: string; mentions: number }>
-    summaries: Array<{
-      id: string
-      macAddress: string
-      headline: string
-      summary: string
-      tags: string[]
-      turns: number
-      updatedAt: string
-    }>
-    transcriptPreview: {
-      macAddress: string
-      title: string
-      lines: Array<{ speaker: string; text: string }>
-    } | null
-  }
-}
-
-type CostsResponse = {
-  range: RangeOption
-  generatedAt: string
-  kpis: {
-    totalCost: number
-    projectedMonth: number
-    monthlyBudget: number
-    budgetUsedPercent: number
-    perActiveToyPerDay: number
-    perSession: number
-    avgResponseTimeSeconds: number
-  }
-  sections: {
-    dailySpend: Array<{ date: string; total: number; inputCost: number; outputCost: number }>
-    tokenMix: {
-      outputAudio: number
-      inputAudio: number
-      text: number
-    }
-    topDevices: Array<{
-      macAddress: string
-      sessions: number
-      talkTimeSeconds: number
-      totalTokens: number
-      cost: number
-      kidName: string | null
-      parentName: string | null
-      talkHours: number
-      fleetSharePercent: number
-    }>
-  }
-}
-
-type OperateResponse = {
-  generatedAt: string
-  kpis: {
-    fleetSize: number
-    onlineNow: number
-    latestFirmwarePercent: number
-    avgBattery: number
-    deviceErrors7d: number
-  }
-  sections: {
-    firmwareCoverage: Array<{
-      version: string
-      count: number
-      percent: number
-      isLatest: boolean
-    }>
-    otaRollout: {
-      version: string
-      forceUpdate: boolean
-      updatedCount: number
-      fleetSize: number
-      percent: number
-    } | null
-    watchlist: Array<{
-      macAddress: string
-      alias: string
-      issue: string
-      severity: string
-      since: string | null
-    }>
-    recentEvents: Array<{
-      source: string
-      macAddress: string
-      title: string
-      detail: string
-      severity: string
-      createdAt: string
-    }>
-  }
+  recentSummaries: Array<{ summary: string; macAddress: string; updatedAt: string }>
+  contentLove: { cards: CardLeaderboardItem[]; games: GameSummaryItem[] }
 }
 
 type RfidCardMapping = {
-  id: number
+  id: number | string
   rfidUid: string
-  actionType?: string | null
   cardType?: string | null
-  questionPackId?: number | null
-  questionPackName?: string | null
-  contentPackId?: number | null
+  actionType?: string | null
+  questionPackId?: number | string | null
+  contentPackId?: number | string | null
   packCode?: string | null
-  active?: boolean
+  active?: boolean | null
 }
 
 type RfidContentPack = {
-  id: number
+  id: number | string
   packCode: string
   name: string
   description?: string | null
-  thumbnailUrl?: string | null
   contentType?: string | null
   language?: string | null
   status?: string | null
-  version?: number | null
+  version?: string | number | null
+  thumbnailUrl?: string | null
+  active?: boolean | null
+  totalItems?: number | null
   items?: Array<{
     title?: string | null
     audioUrl?: string | null
     imageUrl?: string | null
     text?: string | null
   }>
-  totalItems?: number | null
-  active?: boolean
 }
+
+/* ================================================================== *
+ * API layer
+ * ================================================================== */
 
 const API_BASE_URL = import.meta.env.VITE_MANAGER_API_BASE_URL || '/toy'
 const AUTH_STORAGE_KEY = 'founder_dashboard_token'
+const THEME_STORAGE_KEY = 'founder_dashboard_theme'
 
 class ApiError extends Error {
   status: number
@@ -373,10 +508,7 @@ function loadStoredToken() {
 
 async function apiFetch<T>(path: string, token: string) {
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   })
   const payload = (await response.json()) as { code?: number; msg?: string; data?: T }
   if (!response.ok || (payload.code !== 0 && payload.code !== undefined)) {
@@ -394,6 +526,17 @@ async function apiFetchPublic<T>(path: string, options?: RequestInit) {
   return payload.data as T
 }
 
+/* ================================================================== *
+ * Formatting — every helper renders an em dash for absent data so a
+ * missing measurement never reads as a real zero.
+ * ================================================================== */
+
+const DASH = '—'
+
+function isNil(value: unknown): value is null | undefined {
+  return value === null || value === undefined
+}
+
 function formatCompactDate(value: string) {
   return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
 }
@@ -404,34 +547,63 @@ function formatLongDate(value: string) {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
+    timeZone: 'Asia/Kolkata',
   })
 }
 
 function formatDateTime(value?: string | null) {
-  if (!value) return 'Unknown'
+  if (!value) return DASH
   return new Date(value).toLocaleString('en-IN', {
     day: 'numeric',
     month: 'short',
     hour: 'numeric',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   })
 }
 
-function formatHours(total: number) {
-  return `${total.toFixed(1)} hrs`
+function formatNumber(value: number | null | undefined) {
+  if (isNil(value) || !Number.isFinite(value)) return DASH
+  return value.toLocaleString('en-IN')
 }
 
-function formatMinutes(total: number) {
-  return `${total.toFixed(1)} min`
+function formatMoney(value: number | null | undefined) {
+  if (isNil(value) || !Number.isFinite(value)) return DASH
+  // Per-unit costs are routinely sub-paisa; widen precision rather than
+  // collapsing a real cost to ₹0.00.
+  const decimals = value !== 0 && Math.abs(value) < 0.01 ? 4 : 2
+  return `₹${value.toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 }
 
-function formatMoney(total: number) {
-  return `₹${total.toFixed(2)}`
+function formatMoneyCompact(value: number | null | undefined) {
+  if (isNil(value) || !Number.isFinite(value)) return DASH
+  return `₹${Math.round(value).toLocaleString('en-IN')}`
+}
+
+/* Lifetime spans can cross a year boundary, so day+month alone is ambiguous. */
+function formatDayWithYear(value: string | null | undefined) {
+  if (!value) return DASH
+  return new Date(value).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (isNil(value) || !Number.isFinite(value)) return DASH
+  return `${value}%`
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0m'
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.round((seconds % 3600) / 60)
+  if (hours && minutes) return `${hours}h ${minutes}m`
+  if (hours) return `${hours}h`
+  return `${minutes}m`
 }
 
 function getAge(birthDate?: string | null) {
   if (!birthDate) return null
   const birth = new Date(birthDate)
+  if (Number.isNaN(birth.getTime())) return null
   const now = new Date()
   let age = now.getFullYear() - birth.getFullYear()
   const monthDelta = now.getMonth() - birth.getMonth()
@@ -439,355 +611,431 @@ function getAge(birthDate?: string | null) {
   return age
 }
 
-function Sparkline({ values }: { values: number[] }) {
-  if (!values.length) return <div className="sparkline sparkline-empty" />
-  const width = 220
-  const height = 42
-  const max = Math.max(...values, 1)
-  const pointPairs = values
-    .map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * width
-      const y = height - (value / max) * (height - 8) - 3
-      return { x, y }
-    })
-  const smoothPath = pointPairs.reduce((path, point, index, array) => {
-    if (index === 0) return `M ${point.x} ${point.y}`
-    const previous = array[index - 1]
-    const controlX = (previous.x + point.x) / 2
-    return `${path} C ${controlX} ${previous.y}, ${controlX} ${point.y}, ${point.x} ${point.y}`
-  }, '')
-  const smoothAreaPath = `${smoothPath} L ${width} ${height} L 0 ${height} Z`
+function rangeLabel(range: RangeOption) {
+  switch (range) {
+    case 'today':
+      return 'today'
+    case '7d':
+      return 'last 7 days'
+    case '30d':
+      return 'last 30 days'
+    case '90d':
+      return 'last 90 days'
+    case 'month':
+      return 'this month'
+  }
+}
+
+/** Wraps the typed substring in <mark> so the matched letters stand out. */
+function Highlight({ text, query }: { text: string; query: string }) {
+  const needle = query.trim()
+  if (!needle) return <>{text}</>
+  const index = text.toLowerCase().indexOf(needle.toLowerCase())
+  if (index === -1) return <>{text}</>
   return (
-    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-      <path className="sparkline-area" d={smoothAreaPath} />
-      <path
-        d={smoothPath}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <>
+      {text.slice(0, index)}
+      <mark>{text.slice(index, index + needle.length)}</mark>
+      {text.slice(index + needle.length)}
+    </>
+  )
+}
+
+function initialsOf(name: string) {
+  const trimmed = name.trim()
+  if (!trimmed) return '?'
+  return trimmed.charAt(0).toUpperCase()
+}
+
+/* ================================================================== *
+ * Theme
+ * ================================================================== */
+
+function readInitialTheme(): Theme {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY)
+  if (stored === 'light' || stored === 'dark') return stored
+  if (typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark'
+  }
+  return 'light'
+}
+
+function useTheme() {
+  const [theme, setTheme] = useState<Theme>(readInitialTheme)
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem(THEME_STORAGE_KEY, theme)
+  }, [theme])
+
+  const toggle = useCallback(() => {
+    setTheme((current) => (current === 'light' ? 'dark' : 'light'))
+  }, [])
+
+  return { theme, toggle }
+}
+
+function ThemeToggle({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
+  const isDark = theme === 'dark'
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={onToggle}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      {isDark ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.2" />
+          <path d="M12 2v2.4M12 19.6V22M4.22 4.22l1.7 1.7M18.08 18.08l1.7 1.7M2 12h2.4M19.6 12H22M4.22 19.78l1.7-1.7M18.08 5.92l1.7-1.7" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+/* ================================================================== *
+ * Charts
+ * ================================================================== */
+
+function Sparkline({ values }: { values: number[] }) {
+  const clean = values.filter((value) => Number.isFinite(value))
+  if (clean.length < 2) return <div className="sparkline" />
+
+  const width = 120
+  const height = 30
+  const pad = 2
+  const max = Math.max(...clean)
+  const min = Math.min(...clean)
+  const span = max - min || 1
+
+  const points = clean.map((value, index) => {
+    const x = pad + ((width - 2 * pad) * index) / (clean.length - 1)
+    const y = height - pad - ((height - 2 * pad) * (value - min)) / span
+    return { x, y }
+  })
+
+  const line = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(' ')
+  const area = `${line} L ${points[points.length - 1].x.toFixed(1)} ${height - 1} L ${points[0].x.toFixed(1)} ${height - 1} Z`
+  const last = points[points.length - 1]
+
+  return (
+    <svg className="sparkline" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+      <path className="sparkline-area" d={area} />
+      <path d={line} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <circle cx={last.x} cy={last.y} r="2.6" fill="currentColor" />
     </svg>
   )
 }
 
-function StackedUsageChart({
-  series,
-}: {
-  series: OverviewResponse['sections']['timeByFeature']['series']
-}) {
-  if (!series.length) return <div className="empty-state">No activity yet for this range.</div>
-  const maxTotal = Math.max(
-    ...series.map((item) => item.aiTalkMinutes + item.cardMinutes + item.gameMinutes + item.radioMinutes),
-    1,
-  )
+const FEATURE_SERIES = [
+  { key: 'aiTalkMinutes', color: 'var(--c-ai)' },
+  { key: 'cardMinutes', color: 'var(--c-cards)' },
+  { key: 'gameMinutes', color: 'var(--c-games)' },
+  { key: 'radioMinutes', color: 'var(--c-radio)' },
+] as const
+
+function StackedUsageChart({ series }: { series: OverviewResponse['sections']['timeByFeature']['series'] }) {
+  if (!series.length) return <div className="empty-state">No activity recorded for this range.</div>
+
+  const width = 640
+  const height = 190
+  const pad = 6
+  const totals = series.map((row) => row.aiTalkMinutes + row.cardMinutes + row.gameMinutes + row.radioMinutes)
+  const max = Math.max(...totals, 1) * 1.06
+
+  if (series.length === 1) {
+    const row = series[0]
+    return (
+      <div className="split" style={{ marginTop: 14 }}>
+        {FEATURE_SERIES.map((feature) => {
+          const value = row[feature.key]
+          const pct = totals[0] ? (value / totals[0]) * 100 : 0
+          return pct > 0 ? <b key={feature.key} style={{ width: `${pct}%`, background: feature.color }} /> : null
+        })}
+      </div>
+    )
+  }
+
+  const xs = series.map((_, index) => pad + ((width - 2 * pad) * index) / (series.length - 1))
+  const yOf = (value: number) => height - pad - ((height - 2 * pad) * value) / max
+
+  let base = series.map(() => 0)
+  const bands = FEATURE_SERIES.map((feature) => {
+    const top = series.map((row, index) => base[index] + row[feature.key])
+    const upper = top.map((value, index) => `${xs[index].toFixed(1)},${yOf(value).toFixed(1)}`)
+    const lower = base.map((value, index) => `${xs[index].toFixed(1)},${yOf(value).toFixed(1)}`).reverse()
+    base = top
+    return { key: feature.key, color: feature.color, points: [...upper, ...lower].join(' ') }
+  })
+
   return (
-    <div className="stacked-usage-chart">
-      {series.map((item) => {
-        const total = item.aiTalkMinutes + item.cardMinutes + item.gameMinutes + item.radioMinutes
+    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ height: 190 }} role="img" aria-label="Daily minutes by feature">
+      {[0.25, 0.5, 0.75].map((ratio) => (
+        <line key={ratio} className="usage-grid-line" x1={pad} y1={pad + (height - 2 * pad) * ratio} x2={width - pad} y2={pad + (height - 2 * pad) * ratio} />
+      ))}
+      {bands.map((band) => (
+        <polygon key={band.key} className="stack-band" points={band.points} fill={band.color} opacity="0.9" />
+      ))}
+    </svg>
+  )
+}
+
+function TrendChart({ items }: { items: EngagementResponse['sections']['dailyActives'] }) {
+  if (items.length < 2) return <div className="empty-state">Not enough days in this range to plot a trend.</div>
+
+  const width = 640
+  const height = 190
+  const pad = 8
+  const values = items.map((item) => item.activeDevices)
+  const averages = items.map((item) => item.average)
+  const max = Math.max(...values, ...averages.filter((v): v is number => v !== null), 1) * 1.1
+
+  const xOf = (index: number) => pad + ((width - 2 * pad) * index) / (items.length - 1)
+  const yOf = (value: number) => height - pad - ((height - 2 * pad) * value) / max
+
+  const line = values.map((value, index) => `${index === 0 ? 'M' : 'L'} ${xOf(index).toFixed(1)} ${yOf(value).toFixed(1)}`).join(' ')
+  const area = `${line} L ${xOf(items.length - 1).toFixed(1)} ${height - pad} L ${xOf(0).toFixed(1)} ${height - pad} Z`
+
+  let avgPath = ''
+  averages.forEach((value, index) => {
+    if (value === null) return
+    avgPath += `${avgPath ? 'L' : 'M'} ${xOf(index).toFixed(1)} ${yOf(value).toFixed(1)} `
+  })
+
+  const lastIndex = items.length - 1
+
+  return (
+    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} style={{ height: 190 }} role="img" aria-label="Daily active toys">
+      {[0.25, 0.5, 0.75].map((ratio) => (
+        <line key={ratio} className="usage-grid-line" x1={pad} y1={pad + (height - 2 * pad) * ratio} x2={width - pad} y2={pad + (height - 2 * pad) * ratio} />
+      ))}
+      <path className="trend-area" d={area} />
+      {avgPath ? <path className="trend-average-line" d={avgPath.trim()} /> : null}
+      <path className="trend-line" d={line} />
+      <circle cx={xOf(lastIndex)} cy={yOf(values[lastIndex])} r="3.2" fill="var(--c-ai)" />
+    </svg>
+  )
+}
+
+function CostBarsChart({ items }: { items: CostsResponse['sections']['dailySpend'] }) {
+  if (!items.length) return <div className="empty-state">No spend recorded for this range.</div>
+
+  const width = 640
+  const height = 190
+  const pad = 8
+  const max = Math.max(...items.map((item) => item.total), 1) * 1.1
+  const barWidth = (width - 2 * pad) / items.length
+
+  return (
+    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ height: 190 }} role="img" aria-label="Daily AI spend">
+      {[0.33, 0.66].map((ratio) => (
+        <line key={ratio} className="usage-grid-line" x1={pad} y1={pad + (height - 2 * pad) * ratio} x2={width - pad} y2={pad + (height - 2 * pad) * ratio} />
+      ))}
+      {items.map((item, index) => {
+        const x = pad + index * barWidth + barWidth * 0.18
+        const w = barWidth * 0.64
+        const inputHeight = ((height - 2 * pad) * item.inputCost) / max
+        const outputHeight = ((height - 2 * pad) * item.outputCost) / max
+        const inputY = height - pad - inputHeight
+        const outputY = inputY - outputHeight - (inputHeight && outputHeight ? 1.5 : 0)
         return (
-          <div key={item.date} className="stacked-day">
-            <div className="stacked-column">
-              <span className="segment ai" style={{ height: `${(item.aiTalkMinutes / maxTotal) * 180}px` }} />
-              <span className="segment cards" style={{ height: `${(item.cardMinutes / maxTotal) * 180}px` }} />
-              <span className="segment games" style={{ height: `${(item.gameMinutes / maxTotal) * 180}px` }} />
-              <span className="segment radio" style={{ height: `${(item.radioMinutes / maxTotal) * 180}px` }} />
-            </div>
-            <div className="stacked-day-total">{Math.round(total)}</div>
-            <div className="stacked-day-label">{formatCompactDate(item.date)}</div>
-          </div>
+          <g key={item.date}>
+            {inputHeight > 0 ? <rect x={x} y={inputY} width={w} height={inputHeight} fill="var(--c-cards)" /> : null}
+            {outputHeight > 0 ? <rect x={x} y={outputY} width={w} height={outputHeight} rx="2" fill="var(--c-ai)" /> : null}
+          </g>
         )
       })}
-    </div>
+    </svg>
   )
 }
 
-function CostsSpendChart({
-  items,
-}: {
-  items: CostsResponse['sections']['dailySpend']
-}) {
-  if (!items.length) return <div className="empty-state">No spend yet for this range.</div>
+const HEATMAP_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
-  const max = Math.max(...items.map((item) => item.total), 1)
-  const tickIndexes = Array.from(new Set([0, Math.floor((items.length - 1) / 2), items.length - 1]))
-
-  return (
-    <div className="cost-spend-chart">
-      <div className="cost-spend-legend">
-        <span><i className="legend-dot ai" /> output (audio + text)</span>
-        <span><i className="legend-dot cards" /> input (audio + text)</span>
-      </div>
-      <div className="cost-spend-shell">
-        <div className="cost-spend-grid-line top" />
-        <div className="cost-spend-grid-line middle" />
-        <div className="cost-spend-columns">
-          {items.map((item, index) => (
-            <div key={item.date} className="cost-spend-day">
-              <div className="cost-spend-bar">
-                <span className="cost-spend-segment input" style={{ height: `${(item.inputCost / max) * 138}px` }} />
-                <span className="cost-spend-segment output" style={{ height: `${(item.outputCost / max) * 138}px` }} />
-              </div>
-              {tickIndexes.includes(index) ? <div className="cost-spend-label">{formatCompactDate(item.date)}</div> : <div className="cost-spend-label ghost" />}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function EngagementTrendChart({
-  items,
-}: {
-  items: EngagementResponse['sections']['dailyActives']
-}) {
-  if (!items.length) return <div className="empty-state">No activity yet for this range.</div>
-  const width = 640
-  const height = 210
-  const left = 8
-  const right = 12
-  const top = 18
-  const bottom = 168
-  const chartHeight = bottom - top
-  const chartWidth = width - left - right
-  const max = Math.max(...items.map((item) => Math.max(item.activeDevices, item.average)), 1)
-  const x = (index: number) => left + (index / Math.max(items.length - 1, 1)) * chartWidth
-  const y = (value: number) => bottom - (value / max) * chartHeight
-  const buildSmoothPath = (values: number[]) =>
-    values.reduce((path, value, index) => {
-      const px = x(index)
-      const py = y(value)
-      if (index === 0) return `M ${px} ${py}`
-      const prevX = x(index - 1)
-      const prevY = y(values[index - 1])
-      const controlX = (prevX + px) / 2
-      return `${path} C ${controlX} ${prevY}, ${controlX} ${py}, ${px} ${py}`
-    }, '')
-  const activeValues = items.map((item) => item.activeDevices)
-  const averageValues = items.map((item) => item.average)
-  const activePath = buildSmoothPath(activeValues)
-  const avgPath = buildSmoothPath(averageValues)
-  const activeArea = `${activePath} L ${x(items.length - 1)} ${bottom} L ${x(0)} ${bottom} Z`
-  const ticks = Array.from(new Set([0, Math.floor((items.length - 1) / 2), items.length - 1]))
-
-  return (
-    <div className="engagement-trend">
-      <div className="engagement-chart-legend">
-        <span><i className="legend-dot ai" /> daily actives</span>
-        <span><i className="legend-dot neutral" /> 7-day avg</span>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="engagement-chart-svg" aria-hidden="true">
-        <line x1={left} y1={top + chartHeight * 0.25} x2={width - right} y2={top + chartHeight * 0.25} className="usage-grid-line" />
-        <line x1={left} y1={top + chartHeight * 0.55} x2={width - right} y2={top + chartHeight * 0.55} className="usage-grid-line" />
-        <path d={activeArea} className="engagement-area" />
-        <path d={avgPath} className="engagement-average-line" />
-        <path d={activePath} className="engagement-active-line" />
-        <text x={width - right} y={y(activeValues[activeValues.length - 1]) - 10} textAnchor="end" className="engagement-end-label">
-          {items[items.length - 1]?.activeDevices} yesterday
-        </text>
-        {ticks.map((index) => (
-          <text key={items[index].date} x={x(index)} y="196" textAnchor={index === 0 ? 'start' : index === items.length - 1 ? 'end' : 'middle'} className="usage-axis-label">
-            {formatCompactDate(items[index].date)}
-          </text>
-        ))}
-      </svg>
-    </div>
-  )
-}
-
-function SessionsHeatmap({
-  rows,
-}: {
-  rows: EngagementResponse['sections']['sessionsHeatmap']
-}) {
+function SessionsHeatmap({ rows }: { rows: EngagementResponse['sections']['sessionsHeatmap'] }) {
   const max = Math.max(...rows.flatMap((row) => row.hours.map((hour) => hour.sessions)), 1)
+  const ordered = HEATMAP_DAYS.map((day) => rows.find((row) => row.day === day) || { day, hours: [] })
 
   return (
-    <div className="heatmap-shell">
-      <div className="heatmap-grid">
-        {rows.map((row) => (
-          <div key={row.day} className="heatmap-row">
-            <div className="heatmap-day">{row.day}</div>
-            <div className="heatmap-cells">
-              {row.hours.map((cell) => {
-                const intensity = cell.sessions / max
-                return (
-                  <span
-                    key={`${row.day}-${cell.hour}`}
-                    className="heatmap-cell"
-                    style={{
-                      background: intensity > 0
-                        ? `rgba(255, 152, 41, ${0.14 + intensity * 0.68})`
-                        : 'rgba(255, 226, 194, 0.38)',
-                    }}
-                    title={`${row.day} ${String(cell.hour).padStart(2, '0')}:00 · ${cell.sessions} sessions`}
-                  />
-                )
-              })}
-            </div>
+    <div className="heat7">
+      <div className="dl-col">
+        {ordered.map((row) => (
+          <div key={row.day} className="dl">{row.day}</div>
+        ))}
+      </div>
+      <div className="cells">
+        {ordered.map((row) => (
+          <div key={row.day} className="r">
+            {Array.from({ length: 24 }, (_, hour) => {
+              const cell = row.hours.find((item) => item.hour === hour)
+              const sessions = cell?.sessions || 0
+              const opacity = sessions === 0 ? 0.07 : 0.14 + 0.86 * (sessions / max)
+              return (
+                <b
+                  key={hour}
+                  style={{ opacity }}
+                  title={`${row.day} ${String(hour).padStart(2, '0')}:00 · ${sessions} session${sessions === 1 ? '' : 's'}`}
+                />
+              )
+            })}
           </div>
         ))}
       </div>
-      <div className="heatmap-axis">
-        <span>12a</span>
-        <span>6a</span>
-        <span>12p</span>
-        <span>6p</span>
-        <span>11p</span>
-      </div>
     </div>
   )
 }
 
-function Sidebar({
-  activePage,
-  onChange,
+/* ================================================================== *
+ * Shared UI
+ * ================================================================== */
+
+/**
+ * Green ▲ / red ▼ for a measured percentage change.
+ * `null` means there was no baseline, so nothing is claimed.
+ */
+function DeltaArrow({
+  value,
+  suffix = '%',
+  qualifier,
 }: {
-  activePage: NavPage
-  onChange: (next: NavPage) => void
+  value: number | null | undefined
+  suffix?: string
+  qualifier?: string
 }) {
-  const nav = [
-    {
-      title: '',
-      items: [
-        { key: 'overview', label: 'Overview', static: false },
-        { key: 'engagement', label: 'Engagement', static: false },
-        { key: 'content', label: 'Content & Games', static: false },
-        { key: 'conversations', label: 'Conversations', static: false },
-        { key: 'families', label: 'Families', static: false },
-        { key: 'costs', label: 'Costs', static: false },
-      ],
-    },
-    {
-      title: 'Operate',
-      items: [
-        { key: 'operate', label: 'Fleet & OTA', static: false },
-        { key: 'rfidStudio', label: 'RFID Studio', static: false },
-        { key: 'contentLibrary', label: 'Content Library', static: false },
-        { key: 'settings', label: 'Settings', static: false },
-      ],
-    },
-  ] as const
-
+  if (isNil(value) || !Number.isFinite(value)) {
+    return <span className="dlt-flat">{qualifier ? <small>{qualifier}</small> : <small>no prior period</small>}</span>
+  }
+  if (value === 0) {
+    return (
+      <span className="dlt-flat">
+        ■ flat {qualifier ? <small>{qualifier}</small> : null}
+      </span>
+    )
+  }
+  const up = value > 0
   return (
-    <aside className="sidebar">
-      <div className="brand">
-        <div className="brand-mark">C</div>
-        <div>
-          <strong>Cheeko</strong>
-        </div>
-      </div>
-
-      {nav.map((group) => (
-        <div key={group.title} className="sidebar-group">
-          {group.title ? <div className="sidebar-group-title">{group.title}</div> : null}
-          {group.items.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={item.key === activePage ? 'nav-link active' : 'nav-link'}
-              onClick={() => onChange(item.key as NavPage)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      ))}
-
-      <div className="sidebar-footer">
-        <div className="avatar">FD</div>
-        <div>
-          <strong>Ravi · Founder</strong>
-        </div>
-      </div>
-    </aside>
+    <span className={up ? 'dlt-up' : 'dlt-dn'}>
+      {up ? '▲' : '▼'} {Math.abs(value)}
+      {suffix}
+      {qualifier ? <small> {qualifier}</small> : null}
+    </span>
   )
 }
 
-function LoginPanel({
-  username,
-  password,
-  loading,
-  error,
-  onUsernameChange,
-  onPasswordChange,
-  onSubmit,
-}: {
-  username: string
-  password: string
-  loading: boolean
-  error: string
-  onUsernameChange: (next: string) => void
-  onPasswordChange: (next: string) => void
-  onSubmit: () => void
-}) {
+/** 90x22 trend line, coloured by direction — the mockup's pack-trend column. */
+function MiniSparkline({ values }: { values: number[] }) {
+  const clean = values.filter((v) => Number.isFinite(v))
+  if (clean.length < 2 || clean.every((v) => v === 0)) return <span className="mut">—</span>
+
+  const width = 90
+  const height = 22
+  const pad = 2
+  const max = Math.max(...clean)
+  const min = Math.min(...clean)
+  const span = max - min || 1
+  const rising = clean[clean.length - 1] >= clean[0]
+
+  const points = clean.map((value, index) => {
+    const x = pad + ((width - 2 * pad) * index) / (clean.length - 1)
+    const y = height - pad - ((height - 2 * pad) * (value - min)) / span
+    return `${x.toFixed(1)},${y.toFixed(1)}`
+  })
+  const last = points[points.length - 1].split(',')
+
   return (
-    <div className="login-screen">
-      <section className="login-card">
-        <div className="login-brand">
-          <div className="brand-mark">C</div>
-          <strong>Cheeko</strong>
-        </div>
-        <h2>Sign in</h2>
-        <p>Use your manager admin credentials to open the founder dashboard.</p>
-        {error ? <div className="error-banner">{error}</div> : null}
-        <div className="login-grid">
-          <input type="text" placeholder="Username" value={username} onChange={(event) => onUsernameChange(event.target.value)} />
-          <input type="password" placeholder="Password" value={password} onChange={(event) => onPasswordChange(event.target.value)} />
-        </div>
-        <div className="token-row">
-          <button type="button" onClick={onSubmit} disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </div>
-      </section>
-    </div>
+    <svg className="mini-spark" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={rising ? 'rising trend' : 'falling trend'}>
+      <polyline
+        points={points.join(' ')}
+        fill="none"
+        stroke={rising ? 'var(--good)' : 'var(--bad)'}
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <circle cx={last[0]} cy={last[1]} r="2.2" fill={rising ? 'var(--good)' : 'var(--bad)'} />
+    </svg>
   )
 }
 
-function StatCard({
+function KpiCard({
   label,
   value,
+  unit,
   caption,
+  delta,
+  deltaQualifier,
   sparkline,
 }: {
   label: string
-  value: string
-  caption: string
-  sparkline: number[]
+  value: ReactNode
+  unit?: string
+  caption?: ReactNode
+  delta?: number | null
+  deltaQualifier?: string
+  sparkline?: number[]
 }) {
   return (
-    <article className="stat-card">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      <div className="stat-caption">{caption}</div>
-      <Sparkline values={sparkline} />
+    <article className="oa-kpi">
+      <div className="lab">{label}</div>
+      <div className="num">
+        {value}
+        {unit ? <small> {unit}</small> : null}
+      </div>
+      <div className="dlt">
+        {delta !== undefined ? <DeltaArrow value={delta} qualifier={deltaQualifier} /> : caption}
+      </div>
+      {sparkline && sparkline.length > 1 ? <Sparkline values={sparkline} /> : null}
     </article>
   )
 }
 
-function PageHeader({
-  eyebrow,
+function Card({
   title,
-  subtitle,
+  hint,
+  className,
   children,
 }: {
-  eyebrow: string
-  title: string
-  subtitle: string
-  children?: ReactNode
+  title?: string
+  hint?: ReactNode
+  className?: string
+  children: ReactNode
 }) {
   return (
-    <header className="page-header">
-      <div>
-        {eyebrow ? <div className="eyebrow">{eyebrow}</div> : null}
-        <h1>{title}</h1>
-        <p className="page-subtitle">{subtitle}</p>
-      </div>
+    <article className={className ? `oa-card ${className}` : 'oa-card'}>
+      {title ? <h5>{title}</h5> : null}
+      {hint ? <div className="hint">{hint}</div> : null}
       {children}
-    </header>
+    </article>
+  )
+}
+
+function LeaderboardRow({
+  rank,
+  name,
+  value,
+  barPercent,
+  color,
+}: {
+  rank: number
+  name: string
+  value: ReactNode
+  barPercent: number
+  color: string
+}) {
+  return (
+    <div className="lb-item">
+      <span className="rk">{rank}</span>
+      <span className="nm">{name}</span>
+      <span className="vl">{value}</span>
+      <span className="lb-bar">
+        <i style={{ width: `${Math.max(0, Math.min(100, barPercent))}%`, background: color }} />
+      </span>
+    </div>
   )
 }
 
@@ -800,29 +1048,172 @@ function RangeToggle({
   options: RangeOption[]
   onChange: (next: RangeOption) => void
 }) {
+  const labelFor = (option: RangeOption) => {
+    switch (option) {
+      case 'today':
+        return 'Today'
+      case '7d':
+        return '7 days'
+      case '30d':
+        return '30 days'
+      case '90d':
+        return '90 days'
+      case 'month':
+        return 'This month'
+    }
+  }
+
   return (
     <div className="range-toggle">
-      {options.map((item) => (
+      {options.map((option) => (
         <button
-          key={item}
+          key={option}
           type="button"
-          className={item === value ? 'range-pill active' : 'range-pill'}
-          onClick={() => onChange(item)}
+          className={option === value ? 'range-pill active' : 'range-pill'}
+          onClick={() => onChange(option)}
         >
-          {item === 'today'
-            ? 'Today'
-            : item === '7d'
-              ? '7 days'
-              : item === '30d'
-                ? '30 days'
-                : item === '90d'
-                  ? '90 days'
-                  : 'This month'}
+          {labelFor(option)}
         </button>
       ))}
     </div>
   )
 }
+
+function TopBar({
+  title,
+  date,
+  theme,
+  onToggleTheme,
+  children,
+}: {
+  title: string
+  date?: string
+  theme: Theme
+  onToggleTheme: () => void
+  children?: ReactNode
+}) {
+  return (
+    <div className="oa-top">
+      <h1 className="disp">{title}</h1>
+      {date ? <span className="date">{date} · IST</span> : null}
+      <div className="top-actions">
+        {children}
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </div>
+    </div>
+  )
+}
+
+function Sidebar({
+  activePage,
+  onChange,
+  username,
+}: {
+  activePage: NavPage
+  onChange: (next: NavPage) => void
+  username: string
+}) {
+  const primary: Array<{ key: NavPage; label: string; icon: string }> = [
+    { key: 'overview', label: 'Overview', icon: '☀️' },
+    { key: 'live', label: 'Mission Control', icon: '🛰' },
+    { key: 'brief', label: 'The Daily Brief', icon: '📰' },
+    { key: 'engagement', label: 'Engagement', icon: '📈' },
+    { key: 'content', label: 'Content & Games', icon: '❤️' },
+    { key: 'conversations', label: 'Conversations', icon: '💬' },
+    { key: 'families', label: 'Families', icon: '👨‍👩‍👧' },
+    { key: 'costs', label: 'Costs', icon: '₹' },
+  ]
+  const operate: Array<{ key: NavPage; label: string; icon: string }> = [
+    { key: 'operate', label: 'Fleet & OTA', icon: '🛠' },
+    { key: 'rfidStudio', label: 'RFID Studio', icon: '🏷' },
+    { key: 'contentLibrary', label: 'Content Library', icon: '📚' },
+    { key: 'settings', label: 'Settings', icon: '⚙️' },
+  ]
+
+  const renderLink = (item: { key: NavPage; label: string; icon: string }) => (
+    <button
+      key={item.key}
+      type="button"
+      className={item.key === activePage ? 'nav-link active' : 'nav-link'}
+      onClick={() => onChange(item.key)}
+    >
+      <span className="ic" aria-hidden="true">{item.icon}</span>
+      {item.label}
+    </button>
+  )
+
+  return (
+    <aside className="sidebar">
+      <div className="brand">
+        <span className="brand-mark" aria-hidden="true">🧸</span>
+        Cheeko
+      </div>
+      <div className="sidebar-group">{primary.map(renderLink)}</div>
+      <div className="sidebar-group">
+        <div className="sidebar-group-title">Operate</div>
+        {operate.map(renderLink)}
+      </div>
+      <div className="sidebar-footer">
+        <span className="avatar">{initialsOf(username || 'Admin')}</span>
+        <span>{username || 'Signed in'}</span>
+      </div>
+    </aside>
+  )
+}
+
+function LoginPanel({
+  username,
+  password,
+  loading,
+  error,
+  theme,
+  onToggleTheme,
+  onUsernameChange,
+  onPasswordChange,
+  onSubmit,
+}: {
+  username: string
+  password: string
+  loading: boolean
+  error: string
+  theme: Theme
+  onToggleTheme: () => void
+  onUsernameChange: (next: string) => void
+  onPasswordChange: (next: string) => void
+  onSubmit: () => void
+}) {
+  return (
+    <div className="login-screen">
+      <section className="login-card">
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        <div className="login-brand">
+          <span className="brand-mark" aria-hidden="true">🧸</span>
+          Cheeko
+        </div>
+        <h2 className="disp">Sign in</h2>
+        <p>Use your manager admin credentials to open the founder dashboard.</p>
+        {error ? <div className="error-banner">{error}</div> : null}
+        <form
+          className="login-grid"
+          onSubmit={(event) => {
+            event.preventDefault()
+            onSubmit()
+          }}
+        >
+          <input type="text" placeholder="Username" autoComplete="username" value={username} onChange={(event) => onUsernameChange(event.target.value)} />
+          <input type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => onPasswordChange(event.target.value)} />
+          <button type="submit" className="primary-button" disabled={loading}>
+            {loading ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </section>
+    </div>
+  )
+}
+
+/* ================================================================== *
+ * Overview
+ * ================================================================== */
 
 function OverviewPage({
   range,
@@ -831,7 +1222,11 @@ function OverviewPage({
   costs,
   operate,
   loading,
+  username,
+  theme,
+  onToggleTheme,
   onRangeChange,
+  onNavigate,
 }: {
   range: RangeOption
   overview: OverviewResponse | null
@@ -839,796 +1234,1544 @@ function OverviewPage({
   costs: CostsResponse | null
   operate: OperateResponse | null
   loading: boolean
+  username: string
+  theme: Theme
+  onToggleTheme: () => void
   onRangeChange: (next: RangeOption) => void
+  onNavigate: (page: NavPage) => void
 }) {
   const generatedAt = overview?.generatedAt ? formatLongDate(overview.generatedAt) : formatLongDate(new Date().toISOString())
-  const quietCount = engagement?.sections.quietDevices.length || 0
-  const responseTime = costs?.kpis.avgResponseTimeSeconds || 0
-  const outdatedFirmwareCount = operate?.sections.firmwareCoverage
-    .filter((item) => !item.isLatest)
-    .reduce((sum, item) => sum + item.count, 0) || 0
+  const split = overview?.sections.todaysSplit
+  const totalMinutes = split?.totalMinutes || 0
 
   return (
-    <div className="page">
-      <PageHeader eyebrow="" title="Overview" subtitle={generatedAt}>
+    <>
+      <TopBar title={`Good day${username ? `, ${username}` : ''}`} date={generatedAt} theme={theme} onToggleTheme={onToggleTheme}>
         <RangeToggle value={range} options={['today', '7d', '30d']} onChange={onRangeChange} />
-      </PageHeader>
+      </TopBar>
 
       {loading && !overview ? <div className="loading-card">Loading founder overview…</div> : null}
 
       {overview ? (
         <>
-          <section className="stat-grid">
-            <StatCard
-              label="Active toys"
-              value={`${overview.kpis.activeToysToday.total}/${overview.kpis.activeToysToday.fleetTotal}`}
-              caption="Online or recently active"
-              sparkline={overview.kpis.activeToysToday.sparkline}
+          <section className="oa-kpis">
+            <KpiCard
+              label={`Active toys · ${rangeLabel(range)}`}
+              value={formatNumber(overview.kpis?.activeToys?.total)}
+              unit={`of ${formatNumber(overview.kpis?.activeToys?.fleetTotal)}`}
+              delta={overview.deltas?.activeToys ?? null}
+              deltaQualifier="vs prior period"
+              sparkline={overview.kpis?.activeToys?.sparkline}
             />
-            <StatCard
+            <KpiCard
               label="Play time"
-              value={formatHours(overview.kpis.playTimeHours.total)}
-              caption="Fleet usage in selected range"
-              sparkline={overview.kpis.playTimeHours.sparkline}
+              value={overview.kpis?.playTimeHours?.total?.toFixed(1) ?? DASH}
+              unit="hrs"
+              delta={overview.deltas?.playTimeHours ?? null}
+              deltaQualifier="vs prior period"
+              sparkline={overview.kpis?.playTimeHours?.sparkline}
             />
-            <StatCard
-              label="Sessions"
-              value={String(overview.kpis.sessions.total)}
-              caption="Tracked fleet sessions"
-              sparkline={overview.kpis.sessions.sparkline}
+            <KpiCard
+              label="Game sessions"
+              value={formatNumber(overview.kpis?.sessions?.total)}
+              delta={overview.deltas?.sessions ?? null}
+              deltaQualifier="vs prior period"
+              sparkline={overview.kpis?.sessions?.sparkline}
             />
-            <StatCard
+            <KpiCard
               label="New families"
-              value={String(overview.kpis.newFamilies.total)}
-              caption="Recent registrations"
-              sparkline={overview.kpis.newFamilies.sparkline}
+              value={formatNumber(overview.kpis?.newFamilies?.total)}
+              delta={overview.deltas?.newFamilies ?? null}
+              deltaQualifier="vs prior period"
+              sparkline={overview.kpis?.newFamilies?.sparkline}
             />
-            <StatCard
+            <KpiCard
               label="AI cost"
-              value={formatMoney(overview.kpis.aiCostInr.total)}
-              caption="Estimated spend"
-              sparkline={overview.kpis.aiCostInr.sparkline}
+              value={formatMoney(overview.kpis?.aiCostInr?.total)}
+              delta={overview.deltas?.aiCostInr ?? null}
+              deltaQualifier="vs prior period"
+              sparkline={overview.kpis?.aiCostInr?.sparkline}
             />
           </section>
 
-          <section className="panel-grid panel-grid-wide">
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Where kids spend time</h2>
-                  <p>AI talk, cards, games, and radio across the selected period.</p>
-                </div>
-                <div className="legend">
-                  <span className="legend-pill ai">AI Talk</span>
-                  <span className="legend-pill cards">Cards</span>
-                  <span className="legend-pill games">Games</span>
-                  <span className="legend-pill radio">Radio</span>
-                </div>
+          <section className="oa-row">
+            <Card title="Where kids spend time" hint={`Minutes per day by feature · ${rangeLabel(range)} · from device usage rollups`}>
+              <div className="oa-leg">
+                <i style={{ ['--c' as string]: 'var(--c-ai)' }}>AI conversations</i>
+                <i style={{ ['--c' as string]: 'var(--c-cards)' }}>Story &amp; rhyme cards</i>
+                <i style={{ ['--c' as string]: 'var(--c-games)' }}>Games</i>
+                <i style={{ ['--c' as string]: 'var(--c-radio)' }}>Radio</i>
               </div>
               <StackedUsageChart series={overview.sections.timeByFeature.series} />
-            </article>
-
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Today&apos;s split</h2>
-                  <p>{formatMinutes(overview.sections.todaysSplit.totalMinutes)} total</p>
-                </div>
-              </div>
-              <div className="split-bar">
-                {overview.sections.todaysSplit.items.map((item) => (
-                  <span
-                    key={item.key}
-                    className={`split-segment ${item.key === 'aiTalk' ? 'ai' : item.key}`}
-                    style={{
-                      width: `${overview.sections.todaysSplit.totalMinutes > 0
-                        ? (item.minutes / overview.sections.todaysSplit.totalMinutes) * 100
-                        : 0}%`,
-                    }}
-                  />
-                ))}
-              </div>
-              <div className="split-list">
-                {overview.sections.todaysSplit.items.map((item) => (
-                  <div key={item.key} className="split-list-item">
-                    <span className={`split-dot ${item.key === 'aiTalk' ? 'ai' : item.key}`} />
-                    <span>{item.label}</span>
-                    <strong>{formatMinutes(item.minutes)}</strong>
-                  </div>
-                ))}
-              </div>
-            </article>
-          </section>
-
-          <section className="panel-grid panel-grid-three">
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Cards kids love</h2>
-                  <p>Top packs by taps and unique toys.</p>
-                </div>
-              </div>
-              <div className="leaderboard">
-                {overview.sections.cardsKidsLove.items.map((item, index) => (
-                  <div key={item.name} className="leaderboard-item">
-                    <span className="rank">{index + 1}</span>
-                    <div>
-                      <strong>{item.name}</strong>
-                      <span>{item.uniqueDevices} toys • {item.uniqueCards} cards</span>
-                    </div>
-                    <strong>{item.taps} taps</strong>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Games: played vs finished</h2>
-                  <p>Current fleet signal from real play rows.</p>
-                </div>
-              </div>
-              <div className="leaderboard">
-                {overview.sections.gamesPlayedVsFinished.items.map((item, index) => (
-                  <div key={item.name} className="leaderboard-item compact">
-                    <span className="rank">{index + 1}</span>
-                    <div>
-                      <strong>{item.name}</strong>
-                      <span>{item.avgScore !== null ? `Avg score ${item.avgScore}` : 'No score yet'} • {item.avgDurationMinutes} min</span>
-                    </div>
-                    <strong>{item.plays} plays</strong>
-                  </div>
-                ))}
-              </div>
-            </article>
-
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>What kids are talking about</h2>
-                  <p>Topic hints from recent session summaries.</p>
-                </div>
-              </div>
-              <div className="topic-wrap">
-                {overview.sections.talkingAbout.items.map((item) => (
-                  <span key={item.topic} className="topic-chip">
-                    {item.topic} <strong>{item.mentions}</strong>
+              {overview.sections.timeByFeature.series.length > 1 ? (
+                <div className="oa-axis">
+                  <span>{formatCompactDate(overview.sections.timeByFeature.series[0].date)}</span>
+                  <span>
+                    {formatCompactDate(
+                      overview.sections.timeByFeature.series[overview.sections.timeByFeature.series.length - 1].date,
+                    )}
                   </span>
-                ))}
-              </div>
-              <div className="quote-stack">
-                {overview.sections.talkingAbout.samples.map((sample) => (
-                  <blockquote key={`${sample.macAddress}-${sample.updatedAt}`} className="quote-card">
-                    <p>{sample.summary}</p>
-                    <footer>{sample.macAddress}</footer>
-                  </blockquote>
-                ))}
-              </div>
-            </article>
+                </div>
+              ) : null}
+            </Card>
+
+            <Card title="Today's split" hint={split?.hasData ? `Share of ${totalMinutes.toFixed(1)} total minutes` : 'No usage recorded today yet'}>
+              {split?.hasData ? (
+                <>
+                  <div className="split">
+                    {split.items.map((item, index) => {
+                      const pct = totalMinutes ? (item.minutes / totalMinutes) * 100 : 0
+                      return pct > 0 ? (
+                        <b key={item.key} style={{ width: `${pct}%`, background: FEATURE_SERIES[index]?.color }} />
+                      ) : null
+                    })}
+                  </div>
+                  {split.items.map((item, index) => (
+                    <div key={item.key} className="li" style={{ ['--c' as string]: FEATURE_SERIES[index]?.color }}>
+                      {item.label} <small>· {item.minutes.toFixed(1)} min</small>
+                      <b>{totalMinutes ? Math.round((item.minutes / totalMinutes) * 100) : 0}%</b>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="empty-state">Nothing played today so far.</div>
+              )}
+            </Card>
           </section>
 
-          <section className="alert-grid">
-            <article className="alert-card amber">
-              <strong>{quietCount} toys have gone quiet (7+ days)</strong>
-              <p>
-                {quietCount
-                  ? 'Worth a parent nudge. The full watchlist is one click away in Engagement.'
-                  : 'No quiet-toy alert right now.'}
-              </p>
+          <section className="oa-row3">
+            <Card title="Cards kids love" hint={`Taps · ${rangeLabel(range)} · ranked by total taps`} className="oa-lb">
+              {overview.sections.cardsKidsLove.items.length ? (
+                <>
+                  {overview.sections.cardsKidsLove.items.map((item, index) => {
+                    const top = overview.sections.cardsKidsLove.items[0].taps || 1
+                    return (
+                      <LeaderboardRow
+                        key={item.name}
+                        rank={index + 1}
+                        name={item.name}
+                        value={`${formatNumber(item.taps)} · ${item.uniqueDevices} toys`}
+                        barPercent={(item.taps / top) * 100}
+                        color="var(--c-cards)"
+                      />
+                    )
+                  })}
+                  {overview.sections.cardsKidsLove.unresolvedTapCount > 0 ? (
+                    <div className="hint note">
+                      {formatNumber(overview.sections.cardsKidsLove.unresolvedTapCount)} taps could not be matched to a pack — fix mappings in RFID Studio.
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="empty-state">No card taps recorded in this range.</div>
+              )}
+            </Card>
+
+            <Card title="Games — most played" hint="Plays and average score from device game rows" className="oa-lb">
+              {overview.sections.gamesPlayedVsFinished.items.length ? (
+                <>
+                  {overview.sections.gamesPlayedVsFinished.items.map((item, index) => {
+                    const top = overview.sections.gamesPlayedVsFinished.items[0].plays || 1
+                    return (
+                      <LeaderboardRow
+                        key={item.name}
+                        rank={index + 1}
+                        name={item.name}
+                        value={`${formatNumber(item.plays)} plays${item.avgScore !== null ? ` · ${item.avgScore}` : ''}`}
+                        barPercent={(item.plays / top) * 100}
+                        color="var(--c-games)"
+                      />
+                    )
+                  })}
+                  <div className="hint note">
+                    Completion rates live on{' '}
+                    <button type="button" className="lnk" onClick={() => onNavigate('content')}>Content &amp; Games →</button>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">No game plays recorded in this range.</div>
+              )}
+            </Card>
+
+            <Card title="What kids are talking about" hint="Keyword frequency across session summaries">
+              {overview.sections.talkingAbout.items.length ? (
+                <div className="topics">
+                  {overview.sections.talkingAbout.items.map((item) => (
+                    <span key={item.topic}>
+                      {item.topic} · {item.mentions}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">No session summaries in this range.</div>
+              )}
+              {overview.sections.talkingAbout.samples.map((sample) => (
+                <div key={`${sample.macAddress}-${sample.updatedAt}`} className="oa-quote">
+                  {sample.summary}
+                  <small>
+                    {sample.macAddress} · {formatDateTime(sample.updatedAt)}
+                  </small>
+                </div>
+              ))}
+            </Card>
+          </section>
+
+          <section className="oa-alerts">
+            <article className="oa-alert warn">
+              <span className="sig" aria-hidden="true">🟡</span>
+              <div>
+                <b>
+                  {engagement ? `${engagement.sections.quietDeviceTotal} toys have gone quiet (7+ days)` : 'Quiet toys — loading…'}
+                </b>
+                <span>
+                  {engagement
+                    ? engagement.sections.quietDeviceTotal
+                      ? 'Previously active toys with no usage in the last 7 days.'
+                      : 'Every previously active toy has been used in the last 7 days.'
+                    : 'Waiting on engagement data.'}
+                </span>
+              </div>
             </article>
-            <article className="alert-card rose">
-              <strong>Average response time is {responseTime.toFixed(2)}s</strong>
-              <p>
-                This mirrors the costs view so latency shifts are visible directly from the overview.
-              </p>
+
+            <article className="oa-alert crit">
+              <span className="sig" aria-hidden="true">🔴</span>
+              <div>
+                <b>
+                  {costs
+                    ? costs.kpis.avgResponseTimeSeconds !== null
+                      ? `Average response time ${costs.kpis.avgResponseTimeSeconds.toFixed(2)}s`
+                      : 'Response time not recorded'
+                    : 'Response time — loading…'}
+                </b>
+                <span>
+                  {costs && costs.kpis.avgResponseTimeSeconds !== null
+                    ? 'Mean time-to-first-token across billed sessions.'
+                    : 'No TTFT values recorded for this period.'}
+                </span>
+              </div>
             </article>
-            <article className="alert-card blue">
-              <strong>{outdatedFirmwareCount} toys are behind latest firmware</strong>
-              <p>
-                Fleet coverage comes from Operate, surfaced here so firmware drag shows up in the daily pulse.
-              </p>
+
+            <article className="oa-alert info">
+              <span className="sig" aria-hidden="true">🔵</span>
+              <div>
+                <b>
+                  {operate
+                    ? `${operate.sections.firmwareCoverage.filter((item) => !item.isLatest).reduce((sum, item) => sum + item.count, 0)} toys behind latest firmware`
+                    : 'Firmware coverage — loading…'}
+                </b>
+                <span>
+                  {operate
+                    ? operate.kpis.latestFirmwareVersion
+                      ? `Latest is ${operate.kpis.latestFirmwareVersion}. Manage rollout in Fleet & OTA.`
+                      : 'No firmware releases registered yet.'
+                    : 'Waiting on fleet data.'}
+                </span>
+              </div>
             </article>
           </section>
         </>
       ) : null}
-    </div>
+    </>
   )
 }
+
+/* ================================================================== *
+ * Mission Control
+ * ================================================================== */
+
+function TtftTrendChart({ items }: { items: LiveResponse['sections']['ttftTrend'] }) {
+  const measured = items.filter((item) => item.seconds !== null)
+  if (measured.length < 2) return <div className="ob-empty">Not enough response-time samples to plot a trend.</div>
+
+  const width = 620
+  const height = 120
+  const pad = 8
+  const values = items.map((item) => item.seconds)
+  const known = values.filter((v): v is number => v !== null)
+  const max = Math.max(...known) * 1.15
+  const min = Math.min(...known) * 0.85
+  const span = max - min || 1
+
+  const xOf = (index: number) => pad + ((width - 2 * pad) * index) / (items.length - 1)
+  const yOf = (value: number) => height - pad - ((height - 2 * pad) * (value - min)) / span
+
+  let path = ''
+  values.forEach((value, index) => {
+    if (value === null) return
+    path += `${path ? 'L' : 'M'} ${xOf(index).toFixed(1)} ${yOf(value).toFixed(1)} `
+  })
+
+  return (
+    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} style={{ height: 120 }} role="img" aria-label="Average time to first token">
+      {[0.33, 0.66].map((ratio) => (
+        <line key={ratio} className="ob-grid-line" x1={pad} y1={pad + (height - 2 * pad) * ratio} x2={width - pad} y2={pad + (height - 2 * pad) * ratio} />
+      ))}
+      <path className="ob-trend-line" d={path.trim()} />
+    </svg>
+  )
+}
+
+function MissionControlPage({
+  data,
+  loading,
+  theme,
+  onToggleTheme,
+}: {
+  data: LiveResponse | null
+  loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
+}) {
+  const quality = data?.sections.sessionQuality
+  const spend = data?.sections.spend
+  const peakHourSessions = Math.max(...(data?.sections.hourlySessions.map((item) => item.sessions) || [0]), 1)
+  // the month the spend actually accumulated in, not a generic "month to date"
+  const monthName = data?.generatedAt
+    ? new Date(data.generatedAt).toLocaleDateString('en-IN', { month: 'long', timeZone: 'Asia/Kolkata' })
+    : ''
+
+  return (
+    <>
+      <TopBar
+        title="Mission Control"
+        date={data?.generatedAt ? formatLongDate(data.generatedAt) : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      >
+        <span className="ob-chip live">LIVE</span>
+      </TopBar>
+
+      {loading && !data ? <div className="loading-card">Loading the live wall…</div> : null}
+
+      {data ? (
+        <div className="ob">
+          <div className="ob-bar">
+            <span className="brand">
+              CHEEKO <em>MISSION CONTROL</em>
+            </span>
+            <span className="t">
+              {data.generatedAt
+                ? new Date(data.generatedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Kolkata' })
+                : ''}{' '}
+              IST
+            </span>
+          </div>
+
+          <div className="ob-grid">
+            {/* ---- left: live column ---- */}
+            <div className="ob-col">
+              <div className="ob-card">
+                <h6>Online right now</h6>
+                <div className="ob-big">
+                  {data.kpis.onlineNow}
+                  <small> / {data.kpis.fleetSize} toys</small>
+                </div>
+                <div className="ob-sub">
+                  {data.kpis.peakSessionsHour
+                    ? `Busiest hour today ${String(data.kpis.peakSessionsHour.hour).padStart(2, '0')}:00 · ${data.kpis.peakSessionsHour.sessions} sessions`
+                    : 'No sessions recorded yet today'}
+                </div>
+              </div>
+
+              <div className="ob-card">
+                <h6>Live toys</h6>
+                {data.sections.liveToys.length ? (
+                  data.sections.liveToys.map((toy) => (
+                    <div key={toy.macAddress} className="ob-dev">
+                      <span className="st" />
+                      <span className="mac">{toy.macAddress}</span>
+                      {toy.battery !== null ? (
+                        <span className={toy.battery < 20 ? 'ob-batt low' : 'ob-batt'}>
+                          <i style={{ ['--p' as string]: `${Math.max(0, Math.min(100, toy.battery))}%` }} />
+                        </span>
+                      ) : null}
+                      <span className="kid">
+                        {toy.kidName || toy.alias}
+                        {toy.mode ? ` · ${toy.mode}` : ''}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="ob-empty">No toys are online right now.</div>
+                )}
+              </div>
+
+              <div className="ob-card ob-meter">
+                <h6>{monthName} AI spend</h6>
+                <div className="ob-big sm">
+                  {formatMoneyCompact(spend?.monthToDate)}
+                  {spend?.monthlyBudget ? <small> / {formatMoneyCompact(spend.monthlyBudget)} budget</small> : null}
+                </div>
+                {spend?.monthlyBudget && spend.budgetUsedPercent !== null ? (
+                  <>
+                    <div className="track">
+                      <i style={{ width: `${Math.min(spend.budgetUsedPercent, 100)}%` }} />
+                    </div>
+                    <div className="row">
+                      <span>
+                        {spend.budgetUsedPercent}% used · day {spend.dayOfMonth} of {spend.daysInMonth}
+                      </span>
+                      <span>on pace {formatMoneyCompact(spend.projectedMonth)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="ob-empty">
+                    No budget configured · on pace {formatMoneyCompact(spend?.projectedMonth)} for the month
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ---- centre: numbers wall + heat + trend ---- */}
+            <div className="ob-col">
+              <div className="ob-kwall">
+                <div className="ob-card">
+                  <h6>Active today</h6>
+                  <div className="ob-big sm">{data.kpis.activeToday}</div>
+                </div>
+                <div className="ob-card">
+                  <h6>This week</h6>
+                  <div className="ob-big sm">{data.kpis.activeThisWeek}</div>
+                </div>
+                <div className="ob-card">
+                  <h6>This month</h6>
+                  <div className="ob-big sm">{data.kpis.activeThisMonth}</div>
+                  <div className="ob-sub">
+                    {data.kpis.dauMauRatio !== null ? `DAU/MAU ${data.kpis.dauMauRatio}%` : 'DAU/MAU —'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="ob-card">
+                <h6>Activity by hour · today (sessions)</h6>
+                <div className="ob-heat" role="img" aria-label="Sessions by hour of day">
+                  {data.sections.hourlySessions.map((bucket) => (
+                    <b
+                      key={bucket.hour}
+                      style={{ opacity: bucket.sessions === 0 ? 0.08 : 0.16 + 0.84 * (bucket.sessions / peakHourSessions) }}
+                      title={`${String(bucket.hour).padStart(2, '0')}:00 · ${bucket.sessions} session${bucket.sessions === 1 ? '' : 's'}`}
+                    />
+                  ))}
+                </div>
+                <div className="ob-heat-x">
+                  <span>12a</span>
+                  <span>6a</span>
+                  <span>12p</span>
+                  <span>6p</span>
+                  <span>11p</span>
+                </div>
+              </div>
+
+              <div className="ob-card">
+                <h6>Response speed · avg TTFT, 14 days</h6>
+                <TtftTrendChart items={data.sections.ttftTrend} />
+                <div className="ob-axis">
+                  <span>{formatCompactDate(data.sections.ttftTrend[0].date)}</span>
+                  <span>{formatCompactDate(data.sections.ttftTrend[data.sections.ttftTrend.length - 1].date)}</span>
+                </div>
+                <div className="ob-leg">
+                  <i style={{ ['--c' as string]: 'var(--ob-accent)' }}>avg TTFT (s)</i>
+                </div>
+              </div>
+            </div>
+
+            {/* ---- right: live feed + quality ---- */}
+            <div className="ob-col">
+              <div className="ob-card ob-feed">
+                <h6>Happening now</h6>
+                {data.sections.feed.length ? (
+                  data.sections.feed.map((item, index) => (
+                    <div key={`${item.kind}-${item.macAddress}-${item.at}-${index}`} className="it">
+                      <span className="tm">
+                        {new Date(item.at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' })}
+                      </span>
+                      <span className={`tag ${item.kind}`}>{item.kind.toUpperCase()}</span>
+                      <b>{item.label}</b> {item.detail}
+                    </div>
+                  ))
+                ) : (
+                  <div className="ob-empty">Nothing has happened yet today.</div>
+                )}
+              </div>
+
+              <div className="ob-card">
+                <h6>Session quality today</h6>
+                <div className="ob-quality">
+                  <div>
+                    <div className="ob-big xs">{quality?.answerAccuracy !== null && quality ? `${quality.answerAccuracy}%` : DASH}</div>
+                    <div className="lab">answer accuracy</div>
+                  </div>
+                  <div>
+                    <div className="ob-big xs">
+                      {quality?.avgSessionMinutes !== null && quality ? quality.avgSessionMinutes : DASH}
+                      {quality?.avgSessionMinutes !== null ? <small> min</small> : null}
+                    </div>
+                    <div className="lab">avg session</div>
+                  </div>
+                  <div>
+                    <div className="ob-big xs">
+                      {quality?.avgTtftSeconds !== null && quality ? quality.avgTtftSeconds : DASH}
+                      {quality?.avgTtftSeconds !== null ? <small> s</small> : null}
+                    </div>
+                    <div className="lab">avg TTFT</div>
+                  </div>
+                  <div>
+                    <div className="ob-big xs">
+                      {quality?.completedSessionsPercent !== null && quality ? `${quality.completedSessionsPercent}%` : DASH}
+                    </div>
+                    <div className="lab">sessions completed</div>
+                  </div>
+                </div>
+                <div className="ob-sub">
+                  From {quality?.sessionsCounted ?? 0} sessions and {quality?.attemptsCounted ?? 0} scored answers today.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/* ================================================================== *
+ * The Daily Brief
+ * ================================================================== */
+
+function BriefTrendChart({ items }: { items: BriefResponse['playHoursSeries'] }) {
+  if (items.length < 2) return <div className="oc-empty">Not enough days recorded to plot a trend.</div>
+
+  const width = 620
+  const height = 140
+  const pad = 8
+  const values = items.map((item) => item.hours)
+  const max = Math.max(...values, 1) * 1.1
+
+  const xOf = (index: number) => pad + ((width - 2 * pad) * index) / (items.length - 1)
+  const yOf = (value: number) => height - pad - ((height - 2 * pad) * value) / max
+
+  const line = values.map((value, index) => `${index === 0 ? 'M' : 'L'} ${xOf(index).toFixed(1)} ${yOf(value).toFixed(1)}`).join(' ')
+  const area = `${line} L ${xOf(items.length - 1).toFixed(1)} ${height - pad} L ${xOf(0).toFixed(1)} ${height - pad} Z`
+
+  return (
+    <svg className="chart-svg" viewBox={`0 0 ${width} ${height}`} style={{ height: 140 }} role="img" aria-label="Daily play hours over 30 days">
+      {[0.33, 0.66].map((ratio) => (
+        <line key={ratio} className="oc-brief-grid" x1={pad} y1={pad + (height - 2 * pad) * ratio} x2={width - pad} y2={pad + (height - 2 * pad) * ratio} />
+      ))}
+      <path className="oc-brief-area" d={area} />
+      <path className="oc-brief-line" d={line} />
+    </svg>
+  )
+}
+
+function DailyBriefPage({
+  data,
+  loading,
+  theme,
+  onToggleTheme,
+}: {
+  data: BriefResponse | null
+  loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
+}) {
+  const deltaMark = (value: number | null) => {
+    if (value === null) return <div className="d">no prior day</div>
+    if (value === 0) return <div className="d">flat</div>
+    return <div className={value > 0 ? 'd up' : 'd dn'}>{value > 0 ? `▲ ${value}%` : `▼ ${Math.abs(value)}%`}</div>
+  }
+
+  return (
+    <>
+      <TopBar
+        title="The Daily Brief"
+        date={data?.coverDate ? `covering ${formatLongDate(`${data.coverDate}T00:00:00+05:30`)}` : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
+
+      {loading && !data ? <div className="loading-card">Writing today's brief…</div> : null}
+
+      {data ? (
+        <div className="oc">
+          <div className="oc-inner">
+            <div className="oc-mast">
+              <div className="over">Every morning · covering the previous day · IST</div>
+              <h3>
+                The <em>Cheeko</em> Brief
+              </h3>
+              <div className="dt">{formatLongDate(`${data.coverDate}T00:00:00+05:30`)}</div>
+            </div>
+
+            {data.headline.activeToys > 0 ? (
+              <p className="oc-lede">
+                <b>
+                  {data.headline.activeToys} {data.headline.activeToys === 1 ? 'Cheeko' : 'Cheekos'} came alive
+                </b>{' '}
+                for {data.headline.playHours} hours of play across {data.headline.sessions}{' '}
+                {data.headline.sessions === 1 ? 'session' : 'sessions'}.
+              </p>
+            ) : (
+              <p className="oc-lede">No toys recorded any play on this day.</p>
+            )}
+            <div className="oc-byline">
+              Compiled automatically from device telemetry, card taps and session summaries.
+            </div>
+
+            <div className="oc-strip">
+              <div>
+                <div className="n">{data.headline.activeToys}</div>
+                <div className="l">active toys</div>
+                {deltaMark(data.deltas.activeToys)}
+              </div>
+              <div>
+                <div className="n">{data.headline.playHours}h</div>
+                <div className="l">play time</div>
+                {deltaMark(data.deltas.playHours)}
+              </div>
+              <div>
+                <div className="n">{data.headline.sessions}</div>
+                <div className="l">sessions</div>
+                {deltaMark(data.deltas.sessions)}
+              </div>
+              <div>
+                <div className="n">{formatMoneyCompact(data.headline.costInr)}</div>
+                <div className="l">AI cost</div>
+                <div className="d">
+                  {data.headline.activeToys
+                    ? `${formatMoney(data.headline.costInr / data.headline.activeToys)} / toy`
+                    : 'no active toys'}
+                </div>
+              </div>
+            </div>
+
+            <h4>Three things to know</h4>
+            {data.threeThings.length ? (
+              data.threeThings.map((item, index) => (
+                <div key={item.title} className="oc-item">
+                  <div className="n">{index + 1}</div>
+                  <div>
+                    <h5>{item.title}</h5>
+                    <p>{item.detail}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="oc-empty">
+                Nothing moved enough this week to call out. Insights appear once there is week-over-week change to measure.
+              </div>
+            )}
+
+            <h4>The month in one chart</h4>
+            <div className="oc-chartcard">
+              <div className="t">Daily play time · last 30 days</div>
+              <div className="s">hours across the fleet</div>
+              <BriefTrendChart items={data.playHoursSeries} />
+              {data.playHoursSeries.length > 1 ? (
+                <div className="oc-axis">
+                  <span>{formatCompactDate(data.playHoursSeries[0].date)}</span>
+                  <span>{formatCompactDate(data.playHoursSeries[data.playHoursSeries.length - 1].date)}</span>
+                </div>
+              ) : null}
+            </div>
+
+            <h4>Heard on Cheeko</h4>
+            {data.quotes.length ? (
+              <div className="oc-quotes">
+                {data.quotes.map((quote) => (
+                  <blockquote key={`${quote.macAddress}-${quote.updatedAt}`}>
+                    {quote.summary}
+                    <span>
+                      — {quote.macAddress} · {formatDateTime(quote.updatedAt)}
+                    </span>
+                  </blockquote>
+                ))}
+              </div>
+            ) : (
+              <div className="oc-empty">No conversation summaries were recorded on this day.</div>
+            )}
+
+            <h4>Movers this week</h4>
+            {data.movers.length ? (
+              <table className="oc-movers">
+                <tbody>
+                  {data.movers.map((mover) => (
+                    <tr key={mover.label} className={mover.changePercent >= 0 ? 'up' : 'dn'}>
+                      <td>{mover.label}</td>
+                      <td>
+                        {mover.changePercent > 0 ? '+' : ''}
+                        {mover.changePercent}%
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div className="oc-empty">No week-over-week movement to report yet.</div>
+            )}
+
+            <div className="oc-foot">
+              Every figure on this page is measured from stored telemetry — nothing here is estimated or illustrative.
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/* ================================================================== *
+ * Engagement
+ * ================================================================== */
 
 function EngagementPage({
   range,
   data,
   loading,
+  theme,
+  onToggleTheme,
   onRangeChange,
 }: {
   range: RangeOption
   data: EngagementResponse | null
   loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
   onRangeChange: (next: RangeOption) => void
 }) {
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
+    <>
+      <TopBar
         title="Engagement"
-        subtitle={data?.generatedAt ? formatLongDate(data.generatedAt) : 'Retention and returning usage patterns'}
+        date={data?.generatedAt ? formatLongDate(data.generatedAt) : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
       >
         <RangeToggle value={range} options={['7d', '30d', '90d']} onChange={onRangeChange} />
-      </PageHeader>
+      </TopBar>
+
       {loading && !data ? <div className="loading-card">Loading engagement view…</div> : null}
+
       {data ? (
         <>
-          <section className="stat-grid">
-            <StatCard label="Active Yesterday" value={String(data.kpis.activeYesterday)} caption="▲ founder live usage signal" sparkline={data.sections.dailyActives.map((item) => item.activeDevices)} />
-            <StatCard label="Weekly Actives" value={String(data.kpis.weeklyActives)} caption={`▲ ${data.sections.returningSplit.newCount} toys vs prior week`} sparkline={data.sections.dailyActives.map((item) => item.activeDevices)} />
-            <StatCard label="Monthly Actives" value={`${data.kpis.monthlyActives}/${data.kpis.fleetTotal}`} caption={`${Math.round((data.kpis.monthlyActives / Math.max(data.kpis.fleetTotal, 1)) * 100)}% of fleet alive`} sparkline={data.sections.dailyActives.map((item) => item.average)} />
-            <StatCard label="Stickiness · DAU/MAU" value={`${data.kpis.dauMauRatio}%`} caption="Retention snapshot" sparkline={data.sections.dailyActives.map((item) => item.average)} />
-            <StatCard label="Avg Session" value={formatMinutes(data.kpis.avgSessionMinutes)} caption="Average tracked session" sparkline={data.sections.sessionsByHour.map((item) => item.sessions)} />
+          <section className="oa-kpis">
+            <KpiCard label="Active yesterday" value={formatNumber(data.kpis.activeYesterday)} caption={<small>toys with usage yesterday</small>} />
+            <KpiCard label="Weekly actives" value={formatNumber(data.kpis.weeklyActives)} delta={data.deltas.weeklyActives} deltaQualifier="vs prior week" />
+            <KpiCard
+              label="Monthly actives"
+              value={formatNumber(data.kpis.monthlyActives)}
+              unit={`of ${data.kpis.fleetTotal}`}
+              delta={data.deltas.monthlyActives}
+              deltaQualifier="vs prior period"
+            />
+            <KpiCard label="Stickiness · DAU/MAU" value={formatPercent(data.kpis.dauMauRatio)} caption={<small>yesterday ÷ range actives</small>} />
+            <KpiCard label="Avg session" value={data.kpis.avgSessionMinutes.toFixed(1)} unit="min" delta={data.deltas.avgSessionMinutes} deltaQualifier="vs prior period" />
           </section>
 
-          <section className="panel-grid panel-grid-wide">
-            <article className="panel-card engagement-main-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Daily active toys · last {range === '90d' ? '90' : range === '7d' ? '7' : '30'} days</h2>
-                  <p>bold line = 7-day average</p>
-                </div>
+          <section className="oa-row">
+            <Card title={`Daily active toys · ${rangeLabel(range)}`} hint="Bold line = 7-day average (starts once 7 days are available)">
+              <div className="oa-leg">
+                <i style={{ ['--c' as string]: 'var(--c-ai)' }}>daily actives</i>
+                <i style={{ ['--c' as string]: 'var(--ink-4)' }}>7-day avg</i>
               </div>
-              <EngagementTrendChart items={data.sections.dailyActives} />
-            </article>
+              <TrendChart items={data.sections.dailyActives} />
+              {data.sections.dailyActives.length > 1 ? (
+                <div className="oa-axis">
+                  <span>{formatCompactDate(data.sections.dailyActives[0].date)}</span>
+                  <span>{formatCompactDate(data.sections.dailyActives[data.sections.dailyActives.length - 1].date)}</span>
+                </div>
+              ) : null}
+            </Card>
 
-            <article className="panel-card engagement-return-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Coming back?</h2>
-                  <p>this week vs last week&apos;s {data.sections.returningSplit.previousWeekActives} actives</p>
-                </div>
+            <Card title="Coming back?" hint={`Trailing 7 days vs the 7 before · ${data.sections.returningSplit.previousWeekActives} toys were active then`}>
+              <div className="split">
+                {data.sections.returningSplit.previousWeekActives ? (
+                  <>
+                    <b
+                      style={{
+                        width: `${((data.sections.returningSplit.returnedCount / data.sections.returningSplit.previousWeekActives) * 100).toFixed(1)}%`,
+                        background: 'var(--c-games)',
+                      }}
+                    />
+                    <b style={{ flex: 1, background: 'var(--ink-4)' }} />
+                  </>
+                ) : (
+                  <b style={{ width: '100%', background: 'var(--track)' }} />
+                )}
               </div>
-              <div className="engagement-return-track">
-                <span className="engagement-return-fill" style={{ width: `${data.sections.returningSplit.returnedRate}%` }} />
-                <span className="engagement-return-gap" style={{ width: `${Math.max(0, 100 - data.sections.returningSplit.returnedRate)}%` }} />
+              <div className="li" style={{ ['--c' as string]: 'var(--c-games)' }}>
+                Returned this week
+                <b>
+                  {data.sections.returningSplit.returnedCount} toys
+                  {data.sections.returningSplit.returnedRate !== null ? ` · ${data.sections.returningSplit.returnedRate}%` : ''}
+                </b>
               </div>
-              <div className="engagement-return-list">
-                <div className="engagement-return-item">
-                  <span><i className="legend-dot games" /> Returned this week</span>
-                  <strong>{data.sections.returningSplit.returnedCount} toys · {data.sections.returningSplit.returnedRate}%</strong>
-                </div>
-                <div className="engagement-return-item">
-                  <span><i className="legend-dot neutral" /> Didn&apos;t return</span>
-                  <strong>{Math.max(0, data.sections.returningSplit.previousWeekActives - data.sections.returningSplit.returnedCount)} toys</strong>
-                </div>
-                <div className="engagement-return-item">
-                  <span><i className="legend-dot cards" /> New this week</span>
-                  <strong>{data.sections.returningSplit.newCount} toys</strong>
-                </div>
+              <div className="li" style={{ ['--c' as string]: 'var(--ink-4)' }}>
+                Didn&apos;t return
+                <b>{Math.max(0, data.sections.returningSplit.previousWeekActives - data.sections.returningSplit.returnedCount)} toys</b>
               </div>
-              <p className="split-note">Returning rate and new-toy mix together give the founder read on retention vs growth.</p>
-            </article>
+              <div className="li" style={{ ['--c' as string]: 'var(--c-cards)' }}>
+                New this week
+                <b>{data.sections.returningSplit.newCount} toys</b>
+              </div>
+              <div className="hint note">{data.sections.returningSplit.windowLabel}</div>
+            </Card>
           </section>
 
-          <section className="panel-grid panel-grid-two">
-            <article className="panel-card engagement-heatmap-card">
-              <div className="panel-header">
-                <div>
-                  <h2>When kids play · sessions by hour</h2>
-                  <p>last 7 days · IST · darker = more sessions</p>
-                </div>
-              </div>
+          <section className="oa-row">
+            <Card title="When kids play · sessions by hour" hint={`${rangeLabel(range)} · IST · darker = more sessions`}>
               <SessionsHeatmap rows={data.sections.sessionsHeatmap} />
-              <p className="split-note">This shows when engagement clusters through the day so content timing decisions are obvious.</p>
-            </article>
-
-            <article className="panel-card engagement-watchlist-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Quiet toys watchlist</h2>
-                  <p>active earlier, silent 7+ days</p>
-                </div>
+              <div className="oa-axis inset">
+                <span>12a</span>
+                <span>6a</span>
+                <span>12p</span>
+                <span>6p</span>
+                <span>11p</span>
               </div>
+            </Card>
+
+            <Card
+              title="Quiet toys watchlist"
+              hint={`Had usage in the last 60 days, none in the last 7 · ${data.sections.quietDeviceTotal} total`}
+            >
               {data.sections.quietDevices.length ? (
-                <div className="watchlist-table">
-                  <div className="watchlist-head">
-                    <span>Toy / kid</span>
-                    <span>Parent</span>
-                    <span>Quiet for</span>
-                  </div>
-                  {data.sections.quietDevices.slice(0, 8).map((item) => (
-                    <div key={item.macAddress} className="watchlist-row">
-                      <span>{item.kidName || item.alias}</span>
-                      <span>{item.parentName || item.macAddress}</span>
-                      <strong>{item.quietDays} days</strong>
-                    </div>
-                  ))}
+                <div className="tbl-scroll">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Toy / kid</th>
+                        <th>Parent</th>
+                        <th className="num">Quiet for</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.sections.quietDevices.slice(0, 8).map((item) => (
+                        <tr key={item.macAddress}>
+                          <td>{item.kidName || item.alias}</td>
+                          <td className="mut">{item.parentName || DASH}</td>
+                          <td className="num">
+                            <span className={item.quietDays >= 10 ? 'badge crit' : 'badge warn'}>{item.quietDays} days</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ) : <div className="empty-state">No quiet toys in the current watchlist.</div>}
-              <p className="split-note">This list is the most actionable retention cut: devices that used to engage but have gone quiet.</p>
-            </article>
+              ) : (
+                <div className="empty-state">No previously active toy has gone quiet.</div>
+              )}
+            </Card>
           </section>
         </>
       ) : null}
-    </div>
+    </>
   )
 }
+
+/* ================================================================== *
+ * Content & games
+ * ================================================================== */
 
 function ContentPage({
   range,
   data,
   loading,
+  theme,
+  onToggleTheme,
   onRangeChange,
 }: {
   range: RangeOption
   data: ContentResponse | null
   loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
   onRangeChange: (next: RangeOption) => void
 }) {
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
+    <>
+      <TopBar
         title="Content & Games"
-        subtitle={data?.generatedAt ? formatLongDate(data.generatedAt) : 'Card packs, games, stories, and stations ranked by behavior'}
+        date={data?.generatedAt ? formatLongDate(data.generatedAt) : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
       >
         <RangeToggle value={range} options={['7d', '30d', '90d']} onChange={onRangeChange} />
-      </PageHeader>
+      </TopBar>
+
       {loading && !data ? <div className="loading-card">Loading content view…</div> : null}
+
       {data ? (
         <>
-          <section className="stat-grid">
-            <StatCard label="Card taps" value={String(data.kpis.cardTaps)} caption="▲ live content usage" sparkline={data.sections.packLeaderboard.map((item) => item.taps)} />
-            <StatCard label="Cards in use" value={`${data.kpis.cardsInUse}/${data.kpis.catalogTotal}`} caption={`${data.kpis.catalogTotal ? Math.round((data.kpis.cardsInUse / data.kpis.catalogTotal) * 100) : 0}% of catalog got played`} sparkline={data.sections.packLeaderboard.map((item) => item.uniqueDevices)} />
-            <StatCard label="Game plays" value={String(data.kpis.gamePlays)} caption="▲ tracked play activity" sparkline={data.sections.games.map((item) => item.plays)} />
-            <StatCard label="Avg completion" value={`${data.kpis.avgCompletionRate}%`} caption="kids finish signal" sparkline={data.sections.games.map((item) => item.completionRate || 0)} />
-            <StatCard label="Story & music plays" value={String(data.kpis.mediaPlays)} caption="media slot activity" sparkline={data.sections.radio.map((item) => item.minutes)} />
+          <section className="oa-kpis">
+            <KpiCard label="Card taps" value={formatNumber(data.kpis.cardTaps)} delta={data.deltas.cardTaps} deltaQualifier="vs prior period" />
+            <KpiCard
+              label="Packs in use"
+              value={formatNumber(data.kpis.packsInUse)}
+              unit={`of ${data.kpis.catalogTotal}`}
+              delta={data.deltas.packsInUse}
+              deltaQualifier="vs prior period"
+            />
+            <KpiCard label="Game plays" value={formatNumber(data.kpis.gamePlays)} delta={data.deltas.gamePlays} deltaQualifier="vs prior period" />
+            <KpiCard
+              label="Avg completion"
+              value={data.kpis.avgCompletionRate === null ? <span className="not-tracked">Not recorded</span> : formatPercent(data.kpis.avgCompletionRate)}
+              caption={<small>{data.kpis.avgCompletionRate === null ? 'no session completion data' : 'across games with sessions'}</small>}
+            />
+            <KpiCard label="Story & music plays" value={formatNumber(data.kpis.mediaPlays)} delta={data.deltas.mediaPlays} deltaQualifier="vs prior period" />
           </section>
 
-          <section className="panel-card content-wide-card">
-            <div className="panel-header">
-              <div>
-                <h2>Card packs — ranked by love</h2>
-                <p>taps · unique toys · repeat rate (taps per toy)</p>
+          <Card
+            className="spaced"
+            title="Card packs — ranked by love"
+            hint="Taps · unique toys · repeat rate (taps per toy — our strongest 'like' proxy)"
+          >
+            {data.sections.packLeaderboard.length ? (
+              <div className="tbl-scroll">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Pack</th>
+                      <th className="num">Taps · {rangeLabel(range)}</th>
+                      <th className="num">Toys</th>
+                      <th className="num">Repeat rate</th>
+                      <th className="num">vs last week</th>
+                      <th>14-day trend</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.sections.packLeaderboard.map((item) => (
+                      <tr key={item.name}>
+                        <td>{item.name}</td>
+                        <td className="num">{formatNumber(item.taps)}</td>
+                        <td className="num">{item.uniqueDevices}</td>
+                        <td className="num">{item.repeatRate}×</td>
+                        <td className="num">
+                          <DeltaArrow value={item.changePercent} />
+                        </td>
+                        <td>
+                          <MiniSparkline values={item.trend} />
+                        </td>
+                      </tr>
+                    ))}
+                    {data.sections.unresolvedTapCount > 0 ? (
+                      <tr>
+                        <td className="mut">Unresolved taps ⚠️</td>
+                        <td className="num mut">{formatNumber(data.sections.unresolvedTapCount)}</td>
+                        <td className="num mut">{DASH}</td>
+                        <td className="num mut">{DASH}</td>
+                        <td className="num mut">{DASH}</td>
+                        <td className="mut">fix mappings in RFID Studio</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
-            </div>
-            <div className="content-pack-table">
-              <div className="content-pack-head">
-                <span>Pack</span>
-                <span>Taps · 7d</span>
-                <span>Toys</span>
-                <span>Repeat rate</span>
-              </div>
-              {data.sections.packLeaderboard.map((item) => (
-                <div key={item.name} className="content-pack-row">
-                  <span>{item.name}</span>
-                  <span>{item.taps}</span>
-                  <span>{item.uniqueDevices}</span>
-                  <span>{item.repeatRate}×</span>
-                </div>
-              ))}
-              <div className="content-pack-row subtle">
-                <span>Unresolved cards</span>
-                <span>{data.sections.unresolvedTapCount}</span>
-                <span>--</span>
-                <span>fix mappings</span>
-              </div>
-            </div>
-          </section>
+            ) : (
+              <div className="empty-state">No card taps recorded in this range.</div>
+            )}
+          </Card>
 
-          <section className="content-bottom-grid">
-            <article className="panel-card content-games-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Games — played vs finished</h2>
-                  <p>completion is the strongest dislike signal we have</p>
+          <section className="oa-row">
+            <Card title="Games — played vs finished" hint="Completion comes from game sessions that record a completion status">
+              {data.sections.games.length ? (
+                <div className="tbl-scroll">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Game</th>
+                        <th className="num">Plays</th>
+                        <th style={{ width: 130 }}>Completion</th>
+                        <th className="num">Avg score</th>
+                        <th className="num">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.sections.games.map((item) => (
+                        <tr key={item.name}>
+                          <td>{item.name}</td>
+                          <td className="num">{formatNumber(item.plays)}</td>
+                          <td>
+                            {item.completionRate === null ? (
+                              <span className="mut">no session data</span>
+                            ) : (
+                              <div className={item.completionRate < 60 ? 'cbar warn' : 'cbar'}>
+                                <i style={{ width: `${item.completionRate}%` }} />
+                              </div>
+                            )}
+                          </td>
+                          <td className="num">{item.avgScore === null ? DASH : `${item.avgScore}/10`}</td>
+                          <td className="num">
+                            <span
+                              className={
+                                item.completionRate === null
+                                  ? 'badge mut'
+                                  : item.completionRate >= 70
+                                    ? 'badge ok'
+                                    : item.completionRate >= 55
+                                      ? 'badge warn'
+                                      : 'badge crit'
+                              }
+                            >
+                              {item.completionRate === null ? item.status : `${item.completionRate}% · ${item.status}`}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-              <div className="content-games-table">
-                <div className="content-games-head">
-                  <span>Game</span>
-                  <span>Plays</span>
-                  <span>Completion</span>
-                  <span>Status</span>
-                </div>
-                {data.sections.games.map((item) => (
-                  <div key={item.name} className="content-games-row">
-                    <span>{item.name}</span>
-                    <span>{item.plays}</span>
-                    <span>
-                      <span className="content-meter"><i style={{ width: `${item.completionRate ?? 0}%` }} /></span>
-                    </span>
-                    <strong>{item.completionRate ?? 0}% · {item.status}</strong>
-                  </div>
-                ))}
-              </div>
-            </article>
+              ) : (
+                <div className="empty-state">No game activity recorded in this range.</div>
+              )}
+            </Card>
 
-            <article className="panel-card content-side-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Stories, music & radio</h2>
-                  <p>most played in the current window</p>
-                </div>
-              </div>
-              <div className="content-media-list">
-                {data.sections.media.map((item) => (
-                  <div key={item.title} className="content-media-item">
-                    <span>{item.title} <small>· {item.type}</small></span>
-                    <strong>{item.plays} plays</strong>
+            <Card title="Stories, music & radio" hint={`Most played · ${rangeLabel(range)}`}>
+              {data.sections.media.length || data.sections.radio.length ? (
+                <>
+                  {data.sections.media.map((item) => (
+                    <div key={item.title} className="li" style={{ ['--c' as string]: 'var(--c-cards)' }}>
+                      {item.title} <small>· {item.type}</small>
+                      <b>{formatNumber(item.plays)} plays</b>
+                    </div>
+                  ))}
+                  {data.sections.radio.map((item) => (
+                    <div key={item.station} className="li" style={{ ['--c' as string]: 'var(--c-radio)' }}>
+                      {item.station} <small>· radio</small>
+                      <b>{Math.round(item.minutes)} min</b>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="empty-state">No story, music, or radio playback in this range.</div>
+              )}
+
+              <h5 className="sub">Losing steam</h5>
+              <div className="hint">Falling week over week — candidates for refresh or retirement</div>
+              {data.sections.losingSteam.length ? (
+                data.sections.losingSteam.map((item) => (
+                  <div key={`${item.name}-${item.metric}`} className="li noc">
+                    {item.name} <small>· {item.metric}</small>
+                    <b className="dn">
+                      {item.metric === 'completion' && item.changePoints !== undefined
+                        ? `▼ ${Math.abs(item.changePoints)} pts`
+                        : `▼ ${Math.abs(item.changePercent ?? 0)}%`}
+                      {item.consecutiveWeeks >= 2 ? ' · 2nd week' : ''}
+                    </b>
                   </div>
-                ))}
-                {data.sections.radio.map((item) => (
-                  <div key={item.station} className="content-media-item radio">
-                    <span>{item.station} <small>· radio</small></span>
-                    <strong>{Math.round(item.minutes)} min</strong>
-                  </div>
-                ))}
-              </div>
-              <div className="content-losing-steam">
-                <h3>Losing steam</h3>
-                <div className="content-media-item muted">
-                  <span>Unresolved cards</span>
-                  <strong>{data.sections.unresolvedTapCount}</strong>
-                </div>
-              </div>
-            </article>
+                ))
+              ) : (
+                <div className="empty-state">Nothing is trending down week over week.</div>
+              )}
+            </Card>
           </section>
         </>
       ) : null}
-    </div>
+    </>
   )
 }
+
+/* ================================================================== *
+ * Conversations
+ * ================================================================== */
 
 function ConversationsPage({
   range,
   data,
   loading,
+  transcript,
+  transcriptLoading,
+  selectedSessionId,
+  onSelectSession,
+  theme,
+  onToggleTheme,
   onRangeChange,
 }: {
   range: RangeOption
   data: ConversationsResponse | null
   loading: boolean
+  transcript: TranscriptResponse | null
+  transcriptLoading: boolean
+  selectedSessionId: string | null
+  onSelectSession: (sessionId: string) => void
+  theme: Theme
+  onToggleTheme: () => void
   onRangeChange: (next: RangeOption) => void
 }) {
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
+    <>
+      <TopBar
         title="Conversations"
-        subtitle={data?.generatedAt ? formatLongDate(data.generatedAt) : 'Topics, summaries, and transcript preview'}
+        date={data?.generatedAt ? formatLongDate(data.generatedAt) : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
       >
         <RangeToggle value={range} options={['7d', '30d', '90d']} onChange={onRangeChange} />
-      </PageHeader>
+      </TopBar>
+
       {loading && !data ? <div className="loading-card">Loading conversations view…</div> : null}
+
       {data ? (
         <>
-          <section className="stat-grid">
-            <StatCard label="AI talk time" value={formatHours(data.kpis.talkHours)} caption="Across the selected range" sparkline={data.sections.topics.map((item) => item.mentions)} />
-            <StatCard label="Talk sessions" value={String(data.kpis.talkSessions)} caption="Voice-session summaries found" sparkline={data.sections.summaries.map((item) => item.turns)} />
-            <StatCard label="Avg turns" value={String(data.kpis.avgTurnsPerSession)} caption="Turns per session" sparkline={data.sections.summaries.map((item) => item.turns)} />
-            <StatCard label="Topics detected" value={String(data.kpis.topicsDetected)} caption="Keyword mined from summaries" sparkline={data.sections.topics.map((item) => item.mentions)} />
-            <StatCard label="Moderation flags" value={String(data.kpis.moderationFlags)} caption={`${data.kpis.screenedMessages} messages screened`} sparkline={[data.kpis.moderationFlags, data.kpis.screenedMessages]} />
+          <section className="oa-kpis">
+            <KpiCard label="AI talk time" value={data.kpis.talkHours.toFixed(1)} unit="hrs" delta={data.deltas.talkHours} deltaQualifier="vs prior period" />
+            <KpiCard label="Talk sessions" value={formatNumber(data.kpis.talkSessions)} delta={data.deltas.talkSessions} deltaQualifier="vs prior period" />
+            <KpiCard label="Avg turns / session" value={data.kpis.avgTurnsPerSession.toFixed(1)} delta={data.deltas.avgTurnsPerSession} deltaQualifier="vs prior period" />
+            <KpiCard label="Topics detected" value={formatNumber(data.kpis.topicsDetected)} caption={<small>distinct keywords mined</small>} />
+            <KpiCard
+              label="Moderation flags"
+              value={<span className="not-tracked">Not tracked</span>}
+              caption={<small>{formatNumber(data.kpis.screenedMessages)} messages exchanged · no moderation log yet</small>}
+            />
           </section>
 
-          <section className="panel-grid panel-grid-wide">
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>What the fleet is talking about</h2>
-                  <p>Topic size reflects mention count across session summaries.</p>
-                </div>
-              </div>
-              <div className="topic-wrap">
-                {data.sections.topics.map((item) => (
-                  <span key={item.topic} className="topic-chip topic-chip-large">
-                    {item.topic} <strong>{item.mentions}</strong>
+          <Card
+            className="spaced"
+            title="What the fleet is talking about"
+            hint="Keyword frequency across session summaries — a word count, not a semantic topic model"
+          >
+            {data.sections.topics.length ? (
+              <div className="topics">
+                {data.sections.topics.map((item, index) => (
+                  <span key={item.topic} className={index < 3 ? 'big' : undefined}>
+                    {item.topic} · {item.mentions}
                   </span>
                 ))}
               </div>
-            </article>
+            ) : (
+              <div className="empty-state">No session summaries in this range.</div>
+            )}
+          </Card>
 
-            <article className="panel-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Transcript preview</h2>
-                  <p>Deep transcript stays in the existing admin chat drawer.</p>
-                </div>
-              </div>
-              {data.sections.transcriptPreview ? (
-                <div className="chat-stack">
-                  <strong>{data.sections.transcriptPreview.title}</strong>
-                  <span>{data.sections.transcriptPreview.macAddress}</span>
-                  {data.sections.transcriptPreview.lines.map((line, index) => (
-                    <div key={`${line.speaker}-${index}`} className="chat-bubble">
-                      <strong>{line.speaker}</strong>
-                      <p>{line.text}</p>
-                    </div>
-                  ))}
-                </div>
+          <section className="oa-row half">
+            <Card title="Session summaries" hint="AI-written summary per session · newest first">
+              {data.sections.summaries.length ? (
+                data.sections.summaries.map((item) => (
+                  <div key={item.id} className="conv">
+                    <b className="t">
+                      {item.headline}
+                      {item.tags.map((tag) => (
+                        <span key={tag} className="tg">{tag}</span>
+                      ))}
+                    </b>
+                    <small>
+                      {item.macAddress} · {formatDateTime(item.updatedAt)} · {item.turns} turns
+                    </small>{' '}
+                    ·{' '}
+                    <button type="button" className="lnk" onClick={() => onSelectSession(item.sessionId)}>
+                      Transcript →
+                    </button>
+                  </div>
+                ))
               ) : (
-                <div className="empty-state">No conversation preview available yet.</div>
+                <div className="empty-state">No conversation summaries in this range.</div>
               )}
-            </article>
-          </section>
+            </Card>
 
-          <section className="panel-card">
-            <div className="panel-header">
-              <div>
-                <h2>Session summaries</h2>
-                <p>Skim the fleet&apos;s day in a minute.</p>
+            <Card title="Transcript" hint="Real messages for the selected session · admin only">
+              {transcriptLoading ? <div className="loading-card">Loading transcript…</div> : null}
+              {!transcriptLoading && !selectedSessionId ? (
+                <div className="empty-state">Pick a session summary to read its transcript.</div>
+              ) : null}
+              {!transcriptLoading && selectedSessionId && transcript ? (
+                transcript.lines.length ? (
+                  <div className="chatpane">
+                    <div className="hd">
+                      🧸 {transcript.macAddress || 'Session'}
+                      <small>
+                        {transcript.turns} turns · {formatDateTime(transcript.updatedAt)}
+                      </small>
+                    </div>
+                    {transcript.lines.map((line, index) => (
+                      <div key={`${line.speaker}-${index}`} className={line.speaker === 'Cheeko' ? 'bub toy' : 'bub kid'}>
+                        {line.text}
+                        <small>
+                          {line.speaker}
+                          {line.createdAt ? ` · ${formatDateTime(line.createdAt)}` : ''}
+                        </small>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">No stored messages for this session.</div>
+                )
+              ) : null}
+              {!transcriptLoading && selectedSessionId && !transcript ? (
+                <div className="empty-state">Transcript unavailable for this session.</div>
+              ) : null}
+              <div className="hint note">
+                Privacy: transcripts are restricted to super-admins and parent contact details are never shown.
               </div>
-            </div>
-            <div className="quote-stack">
-              {data.sections.summaries.map((item) => (
-                <blockquote key={item.id} className="quote-card">
-                  <p>{item.summary}</p>
-                  <footer>
-                    {item.headline} • {item.turns} turns • {formatDateTime(item.updatedAt)}
-                  </footer>
-                </blockquote>
-              ))}
-            </div>
+            </Card>
           </section>
         </>
       ) : null}
-    </div>
+    </>
   )
 }
 
+/* ================================================================== *
+ * Families
+ * ================================================================== */
+
 function FamiliesPage({
-  view,
-  onBack,
+  theme,
+  onToggleTheme,
   searchTerm,
   onSearchTermChange,
+  searchResults,
+  searching,
   onSelectResult,
+  view,
+  onBack,
   profile,
   loadingProfile,
-  allFamilies,
-  allFamiliesLoading,
+  families,
+  familiesLoading,
+  familiesTotal,
 }: {
-  view: 'list' | 'detail'
-  onBack: () => void
+  theme: Theme
+  onToggleTheme: () => void
   searchTerm: string
   onSearchTermChange: (next: string) => void
+  searchResults: SearchResponse | null
+  searching: boolean
   onSelectResult: (result: SearchResult) => void
+  view: 'list' | 'detail'
+  onBack: () => void
   profile: FamilyProfile | null
   loadingProfile: boolean
-  allFamilies: FamilyListEntry[]
-  allFamiliesLoading: boolean
+  families: FamilyListEntry[]
+  familiesLoading: boolean
+  familiesTotal: number
 }) {
-  const age = getAge(profile?.kid.birthDate)
+  const hasQuery = searchTerm.trim().length >= 2
+  const resultCount = searchResults
+    ? searchResults.kids.length + searchResults.parents.length + searchResults.devices.length
+    : 0
 
   if (view === 'detail') {
+    const age = getAge(profile?.kid.birthDate)
+    const weekSplitTotal = profile?.thisWeek.split.reduce((sum, item) => sum + item.minutes, 0) || 0
+    const streak = profile?.progress.reduce((best, item) => Math.max(best, item.currentStreak), 0) ?? 0
+    const longestStreak = profile?.progress.reduce((best, item) => Math.max(best, item.longestStreak), 0) ?? 0
+
     return (
-      <div className="page">
-        <button type="button" className="secondary-button compact" onClick={onBack}>← Back to families</button>
+      <>
+        <TopBar title="Family 360" theme={theme} onToggleTheme={onToggleTheme}>
+          <button type="button" className="secondary-button" onClick={onBack}>← Back to families</button>
+        </TopBar>
 
-        <section className="profile-panel">
-          {loadingProfile && !profile ? <div className="loading-card">Loading family profile…</div> : null}
-          {!profile && !loadingProfile ? <div className="empty-state large">Unable to load this family profile.</div> : null}
+        {loadingProfile && !profile ? <div className="loading-card">Loading family profile…</div> : null}
+        {!loadingProfile && !profile ? <div className="empty-state large">Unable to load this family profile.</div> : null}
 
-          {profile ? (
-            <>
-              <article className="profile-hero">
+        {profile ? (
+          <>
+            <Card>
+              <div className="pf-head">
+                <div className="pf-ava">{initialsOf(profile.kid.name)}</div>
                 <div>
-                  <div className="eyebrow">Kid profile</div>
-                  <h2>{profile.kid.name}</h2>
-                  <p>
-                    {age !== null ? `${age} years old` : 'Age unavailable'}
-                    {profile.kid.grade ? ` • Grade ${profile.kid.grade}` : ''}
-                    {profile.parent.displayName ? ` • Parent ${profile.parent.displayName}` : ''}
-                  </p>
+                  <h4 className="disp">
+                    {profile.kid.name}
+                    {age !== null ? ` · ${age} yrs` : ''}
+                  </h4>
+                  <div className="sub3">
+                    {profile.parent.displayName ? <>Parent: <b>{profile.parent.displayName}</b> · </> : null}
+                    {profile.kid.grade ? `${profile.kid.grade} · ` : ''}
+                    {profile.kid.memberSince ? `joined ${formatCompactDate(profile.kid.memberSince)}` : 'join date unknown'}
+                  </div>
                 </div>
-                <div className="chip-row">
-                  {(profile.kid.interests || []).map((interest) => (
-                    <span key={interest} className="topic-chip">{interest}</span>
+                <div className="pf-chips">
+                  {profile.kid.interests.slice(0, 4).map((interest) => (
+                    <span key={interest}>{interest}</span>
                   ))}
+                  {profile.kid.grade ? <span>{profile.kid.grade}</span> : null}
+                  {profile.kid.language ? <span>{profile.kid.language}</span> : null}
+                  <span className="blue">
+                    {profile.quota.allowance !== null
+                      ? `Quota ${profile.quota.questionsUsed} / ${profile.quota.allowance} questions`
+                      : `${profile.quota.questionsUsed} questions used`}
+                  </span>
                 </div>
-              </article>
+              </div>
+            </Card>
 
-              <section className="panel-grid panel-grid-two">
-                <article className="panel-card">
-                  <div className="panel-header">
-                    <div>
-                      <h2>Kid profile</h2>
-                      <p>Identity details for this kid.</p>
-                    </div>
-                  </div>
-                  <div className="profile-fields">
-                    <div className="mini-stat"><span>Name</span><strong>{profile.kid.name}</strong></div>
-                    {profile.kid.nickname ? <div className="mini-stat"><span>Nickname</span><strong>{profile.kid.nickname}</strong></div> : null}
-                    <div className="mini-stat"><span>Age</span><strong>{age !== null ? `${age} yrs` : '-'}</strong></div>
-                    {profile.kid.gender ? <div className="mini-stat"><span>Gender</span><strong>{profile.kid.gender}</strong></div> : null}
-                    {profile.kid.grade ? <div className="mini-stat"><span>Grade</span><strong>{profile.kid.grade}</strong></div> : null}
-                    {profile.kid.school ? <div className="mini-stat"><span>School</span><strong>{profile.kid.school}</strong></div> : null}
-                    {profile.kid.language ? <div className="mini-stat"><span>Language</span><strong>{profile.kid.language}</strong></div> : null}
-                    {profile.kid.timezone ? <div className="mini-stat"><span>Timezone</span><strong>{profile.kid.timezone}</strong></div> : null}
-                    <div className="mini-stat"><span>Member since</span><strong>{profile.kid.memberSince ? formatLongDate(profile.kid.memberSince) : '-'}</strong></div>
-                  </div>
-                </article>
+            <section className="pf-kpis">
+              <KpiCard
+                label="Play this week"
+                value={formatDuration(profile.thisWeek.playSeconds)}
+                caption={<small>last 7 days</small>}
+                sparkline={profile.thisWeek.sparkline}
+              />
+              <KpiCard label="Current streak" value={formatNumber(streak)} unit="days" caption={<small>longest: {longestStreak} days</small>} />
+              <KpiCard label="Active days · 7d" value={formatNumber(profile.thisWeek.sessions)} caption={<small>days with recorded usage</small>} />
+              <KpiCard
+                label="Questions used"
+                value={formatNumber(profile.quota.questionsUsed)}
+                caption={<small>{profile.quota.extraPurchased ? `+${profile.quota.extraPurchased} purchased` : 'this month'}</small>}
+              />
+            </section>
 
-                <article className="panel-card">
-                  <div className="panel-header">
-                    <div>
-                      <h2>Parent profile</h2>
-                      <p>Account details for the linked parent.</p>
-                    </div>
-                  </div>
-                  <div className="profile-fields">
-                    <div className="mini-stat"><span>Name</span><strong>{profile.parent.displayName || '-'}</strong></div>
-                    {profile.parent.email ? <div className="mini-stat"><span>Email</span><strong>{profile.parent.email}</strong></div> : null}
-                    {profile.parent.phoneNumber ? <div className="mini-stat"><span>Phone</span><strong>{profile.parent.phoneNumber}</strong></div> : null}
-                    {profile.parent.countryRegion ? <div className="mini-stat"><span>Country/Region</span><strong>{profile.parent.countryRegion}</strong></div> : null}
-                    {profile.parent.timezone ? <div className="mini-stat"><span>Timezone</span><strong>{profile.parent.timezone}</strong></div> : null}
-                    <div className="mini-stat"><span>Member since</span><strong>{profile.parent.memberSince ? formatLongDate(profile.parent.memberSince) : '-'}</strong></div>
-                  </div>
-                </article>
-              </section>
-
-              <section className="panel-grid panel-grid-two">
-                <article className="panel-card">
-                  <div className="panel-header">
-                    <div>
-                      <h2>Toys and runtime status</h2>
-                      <p>Latest runtime state from manager-api-node.</p>
-                    </div>
-                  </div>
-                  <div className="device-stack">
-                    {profile.devices.map((device) => (
-                      <div key={device.id} className="device-card">
-                        <div>
-                          <strong>{device.alias}</strong>
-                          <span>{device.macAddress}</span>
-                        </div>
-                        <div className="device-meta">
-                          <span className={device.online ? 'status-pill online' : 'status-pill offline'}>{device.online ? 'Online' : 'Offline'}</span>
-                          <span>Battery {device.battery ?? '--'}%</span>
-                          <span>FW {device.firmware || device.appVersion || '--'}</span>
-                        </div>
+            <div className="pf-grid">
+              <div>
+                <Card title={`Where ${profile.kid.name}'s time goes`} hint="Last 7 days">
+                  {weekSplitTotal > 0 ? (
+                    <>
+                      <div className="split">
+                        {profile.thisWeek.split.map((item, index) => {
+                          const pct = (item.minutes / weekSplitTotal) * 100
+                          return pct > 0 ? (
+                            <b key={item.key} style={{ width: `${pct}%`, background: FEATURE_SERIES[index]?.color }} />
+                          ) : null
+                        })}
                       </div>
-                    ))}
-                  </div>
-                </article>
-
-                <article className="panel-card">
-                  <div className="panel-header">
-                    <div>
-                      <h2>Quota and progress</h2>
-                      <p>Useful at-a-glance signals for this family.</p>
-                    </div>
-                  </div>
-                  <div className="mini-stats">
-                    <div className="mini-stat">
-                      <span>Questions used</span>
-                      <strong>{profile.quota.questionsUsed}</strong>
-                    </div>
-                    <div className="mini-stat">
-                      <span>Extra purchased</span>
-                      <strong>{profile.quota.extraPurchased}</strong>
-                    </div>
-                    <div className="mini-stat">
-                      <span>Tracked modes</span>
-                      <strong>{profile.progress.length}</strong>
-                    </div>
-                  </div>
-                  <div className="leaderboard">
-                    {profile.progress.map((item) => (
-                      <div key={item.modeType} className="leaderboard-item compact">
-                        <div>
-                          <strong>{item.modeType}</strong>
-                          <span>{Math.round(item.totalTimeSeconds / 60)} min total</span>
-                        </div>
-                        <strong>{item.totalSessions} sessions</strong>
+                      <div className="oa-leg">
+                        {profile.thisWeek.split.map((item, index) => (
+                          <i key={item.key} style={{ ['--c' as string]: FEATURE_SERIES[index]?.color }}>
+                            {item.label} {Math.round((item.minutes / weekSplitTotal) * 100)}%
+                          </i>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </article>
-              </section>
+                    </>
+                  ) : (
+                    <div className="empty-state">No usage recorded in the last 7 days.</div>
+                  )}
+                </Card>
 
-              <section className="panel-grid panel-grid-two">
-                <article className="panel-card">
-                  <div className="panel-header">
-                    <div>
-                      <h2>What this kid loves</h2>
-                      <p>Top cards and games tied to the family&apos;s devices.</p>
-                    </div>
-                  </div>
-                  <div className="leaderboard dual">
-                    {profile.contentLove.cards.map((item) => (
-                      <div key={item.name} className="leaderboard-item compact">
-                        <div>
-                          <strong>{item.name}</strong>
-                          <span>{item.uniqueDevices} toys</span>
-                        </div>
-                        <strong>{item.taps} taps</strong>
+                <Card className="spaced" title="Recent conversations" hint="AI summaries from this family's toys">
+                  {profile.recentSummaries.length ? (
+                    profile.recentSummaries.map((item) => (
+                      <div key={`${item.macAddress}-${item.updatedAt}`} className="conv">
+                        <b className="t">{item.summary}</b>
+                        <small>
+                          {item.macAddress} · {formatDateTime(item.updatedAt)}
+                        </small>
                       </div>
-                    ))}
-                    {profile.contentLove.games.map((item) => (
-                      <div key={item.name} className="leaderboard-item compact">
-                        <div>
-                          <strong>{item.name}</strong>
-                          <span>{item.avgDurationMinutes} min avg</span>
-                        </div>
-                        <strong>{item.plays} plays</strong>
-                      </div>
-                    ))}
-                  </div>
-                </article>
+                    ))
+                  ) : (
+                    <div className="empty-state">No conversation summaries recorded yet.</div>
+                  )}
+                </Card>
+              </div>
 
-                <article className="panel-card">
-                  <div className="panel-header">
-                    <div>
-                      <h2>Recent conversation summaries</h2>
-                      <p>Latest voice-session summaries across the family&apos;s toys.</p>
-                    </div>
-                  </div>
-                  <div className="quote-stack">
-                    {profile.recentSummaries.map((summary) => (
-                      <blockquote key={`${summary.macAddress}-${summary.updatedAt}`} className="quote-card">
-                        <p>{summary.summary}</p>
-                        <footer>{summary.macAddress} • {formatCompactDate(summary.updatedAt)}</footer>
-                      </blockquote>
-                    ))}
-                  </div>
-                </article>
-              </section>
-            </>
-          ) : null}
-        </section>
-      </div>
+              <div>
+                <Card title={profile.devices.length === 1 ? 'Their toy' : 'Their toys'}>
+                  {profile.devices.length ? (
+                    profile.devices.map((device) => (
+                      <div key={device.id} className="pf-dev">
+                        <span className={device.online ? 'on' : 'on off'} />
+                        <span className="mac">{device.macAddress}</span>
+                        <small>
+                          {device.online ? 'online' : 'offline'}
+                          {device.battery !== null ? ` · ${device.battery}%` : ''}
+                          {device.firmware ? ` · ${device.firmware}` : ''}
+                        </small>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-state">No toys linked to this family.</div>
+                  )}
+                </Card>
+
+                <Card className="spaced oa-lb" title={`${profile.kid.name} loves`} hint="By taps and plays across their toys">
+                  {profile.contentLove.cards.length || profile.contentLove.games.length ? (
+                    <>
+                      {profile.contentLove.cards.map((item, index) => {
+                        const top = profile.contentLove.cards[0].taps || 1
+                        return (
+                          <LeaderboardRow
+                            key={`card-${item.name}`}
+                            rank={index + 1}
+                            name={item.name}
+                            value={`${item.taps} taps`}
+                            barPercent={(item.taps / top) * 100}
+                            color="var(--c-cards)"
+                          />
+                        )
+                      })}
+                      {profile.contentLove.games.map((item, index) => {
+                        const top = profile.contentLove.games[0].plays || 1
+                        return (
+                          <LeaderboardRow
+                            key={`game-${item.name}`}
+                            rank={profile.contentLove.cards.length + index + 1}
+                            name={item.name}
+                            value={`${item.plays} plays`}
+                            barPercent={(item.plays / top) * 100}
+                            color="var(--c-games)"
+                          />
+                        )
+                      })}
+                    </>
+                  ) : (
+                    <div className="empty-state">No card taps or game plays recorded yet.</div>
+                  )}
+                </Card>
+              </div>
+            </div>
+
+            <div className="pf-note">
+              Profile is assembled from usage rollups, tap logs, game plays, session summaries and quota. Parent email and phone are never displayed.
+            </div>
+          </>
+        ) : null}
+      </>
     )
   }
 
-  const normalizedSearch = searchTerm.trim().toLowerCase()
-  const visibleFamilies = normalizedSearch
-    ? allFamilies.filter((entry) =>
-        entry.kidName.toLowerCase().includes(normalizedSearch) ||
-        (entry.parentName || '').toLowerCase().includes(normalizedSearch) ||
-        (entry.parentEmail || '').toLowerCase().includes(normalizedSearch)
-      )
-    : allFamilies
+  return (
+    <>
+      <TopBar title="Families" theme={theme} onToggleTheme={onToggleTheme} />
+
+      <div className="pf-search">
+        <div className="pf-input">
+          <span aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            value={searchTerm}
+            onChange={(event) => onSearchTermChange(event.target.value)}
+            placeholder="Search a parent, kid, device MAC or alias"
+            aria-label="Search families"
+          />
+        </div>
+
+        {hasQuery ? (
+          <div className="pf-drop">
+            {searching ? <div className="g">Searching…</div> : null}
+            {!searching && resultCount === 0 ? <div className="g">No matches</div> : null}
+
+            {searchResults?.kids.length ? (
+              <>
+                <div className="g">Kids</div>
+                {searchResults.kids.map((result) => (
+                  <button key={`kid-${result.id}`} type="button" className="r" onClick={() => onSelectResult(result)}>
+                    <span className="av">{initialsOf(result.label)}</span>
+                    <Highlight text={result.label} query={searchTerm} />
+                    {result.subtitle ? <> · <Highlight text={result.subtitle} query={searchTerm} /></> : null}
+                    <small>{result.parentName || 'no parent linked'}</small>
+                  </button>
+                ))}
+              </>
+            ) : null}
+
+            {searchResults?.parents.length ? (
+              <>
+                <div className="g">Parents</div>
+                {searchResults.parents.map((result) => (
+                  <button key={`parent-${result.id}`} type="button" className="r" onClick={() => onSelectResult(result)}>
+                    <span className="av">{initialsOf(result.label)}</span>
+                    <Highlight text={result.label} query={searchTerm} />
+                    <small>{result.toyCount ?? 0} toys</small>
+                  </button>
+                ))}
+              </>
+            ) : null}
+
+            {searchResults?.devices.length ? (
+              <>
+                <div className="g">Devices</div>
+                {searchResults.devices.map((result) => (
+                  <button key={`device-${result.id}`} type="button" className="r" onClick={() => onSelectResult(result)}>
+                    <span className="av" aria-hidden="true">🧸</span>
+                    <Highlight text={result.label} query={searchTerm} />
+                    <small>{result.kidName || result.parentName || result.macAddress}</small>
+                  </button>
+                ))}
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+
+      <div className="pf-sel">All families · {familiesTotal}</div>
+
+      <Card hint="Click a row to open its Family 360 profile">
+        {familiesLoading ? (
+          <div className="loading-card">Loading families…</div>
+        ) : families.length ? (
+          <div className="tbl-scroll">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Kid</th>
+                  <th>Grade</th>
+                  <th>Parent</th>
+                  <th className="num">Toys</th>
+                </tr>
+              </thead>
+              <tbody>
+                {families.map((entry) => (
+                  <tr
+                    key={entry.kidId}
+                    className="clickable"
+                    onClick={() =>
+                      onSelectResult({ type: 'kid', id: entry.kidId, label: entry.kidName, parentName: entry.parentName })
+                    }
+                  >
+                    <td>
+                      {entry.kidName}
+                      {entry.nickname ? <span className="mut"> · {entry.nickname}</span> : null}
+                    </td>
+                    <td className="mut">{entry.grade || DASH}</td>
+                    <td className="mut">{entry.parentName || DASH}</td>
+                    <td className="num">{entry.deviceCount}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">No families registered yet.</div>
+        )}
+      </Card>
+    </>
+  )
+}
+
+/* ================================================================== *
+ * Costs
+ * ================================================================== */
+
+/**
+ * All-time spend from both token ledgers.
+ *
+ * They are separate tables that agree over recent windows and drift apart on
+ * older rows, so neither is billed as "the" total — both are shown labelled,
+ * with the gap stated rather than hidden. Every windowed figure elsewhere on
+ * this page comes from the session ledger.
+ */
+function LifetimeSpendCard({ lifetime }: { lifetime: NonNullable<CostsResponse['sections']['lifetime']> }) {
+  const ledgers = [
+    { key: 'session', label: 'Session ledger', source: 'device_token_usage_session', data: lifetime.sessionLedger },
+    { key: 'device', label: 'Device ledger', source: 'device_token_usage', data: lifetime.deviceLedger },
+  ]
+
+  const session = lifetime.sessionLedger?.totalInr
+  const device = lifetime.deviceLedger?.totalInr
+  const gap = isNil(session) || isNil(device) ? null : Math.abs(device - session)
 
   return (
-    <div className="page">
-      <PageHeader eyebrow="" title="Families" subtitle="Use one search box for parents, kids, MAC addresses, and aliases." />
-
-      <section className="search-shell">
-        <input type="search" value={searchTerm} onChange={(event) => onSearchTermChange(event.target.value)} placeholder="Search Maya, Anita, AA:BB:CC or Maya Toy" />
-        <span>{visibleFamilies.length} match{visibleFamilies.length === 1 ? '' : 'es'}</span>
-      </section>
-
-      <article className="panel-card">
-        <div className="panel-header">
-          <div>
-            <h2>All families</h2>
-            <p>Every kid and parent profile, {allFamilies.length} total. Click a row to open its Family 360 profile.</p>
-          </div>
-        </div>
-        {allFamiliesLoading ? <div className="loading-card">Loading families…</div> : (
-          <div className="costs-table families-table">
-            <div className="costs-table-head">
-              <span>Kid</span>
-              <span>Grade</span>
-              <span>Parent</span>
-              <span>Parent email</span>
-              <span>Devices</span>
+    <section className="oa-single">
+      <Card title="Lifetime spend" hint="All-time totals · every windowed figure above is built from the session ledger">
+        <div className="pf-fields">
+          {ledgers.map((ledger) => (
+            <div key={ledger.key} className="pf-field">
+              {ledger.label}
+              <small>
+                {ledger.source} · {formatNumber(ledger.data?.rows)} rows ·{' '}
+                {formatDayWithYear(ledger.data?.firstDay)} → {formatDayWithYear(ledger.data?.lastDay)}
+              </small>
+              <strong>{formatMoney(ledger.data?.totalInr)}</strong>
             </div>
-            {visibleFamilies.length ? visibleFamilies.map((entry) => (
-              <button
-                key={entry.kidId}
-                type="button"
-                className="costs-table-row clickable"
-                onClick={() => onSelectResult({ type: 'kid', id: entry.kidId, label: entry.kidName, parentName: entry.parentName })}
-              >
-                <span>{entry.kidName}</span>
-                <span>{entry.grade || '-'}</span>
-                <span>{entry.parentName || '-'}</span>
-                <span>{entry.parentEmail || '-'}</span>
-                <strong>{entry.deviceCount}</strong>
-              </button>
-            )) : <div className="empty-state">No families match &quot;{searchTerm}&quot;.</div>}
+          ))}
+        </div>
+        {gap ? (
+          <div className="hint note">
+            The two ledgers differ by {formatMoney(gap)}. They are separate tables recording the same spend over
+            different histories, so they are not expected to reconcile.
           </div>
-        )}
-      </article>
-    </div>
+        ) : null}
+      </Card>
+    </section>
   )
 }
 
@@ -1636,234 +2779,315 @@ function CostsPage({
   range,
   data,
   loading,
+  theme,
+  onToggleTheme,
   onRangeChange,
 }: {
   range: RangeOption
   data: CostsResponse | null
   loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
   onRangeChange: (next: RangeOption) => void
 }) {
-  const tokenTotal = data
-    ? data.sections.tokenMix.outputAudio + data.sections.tokenMix.inputAudio + data.sections.tokenMix.text
-    : 0
+  const tokenTotal = data ? data.sections.tokenMix.outputAudio + data.sections.tokenMix.inputAudio + data.sections.tokenMix.text : 0
 
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
+    <>
+      <TopBar
         title="Costs"
-        subtitle={data?.generatedAt ? formatLongDate(data.generatedAt) : 'Budget pace, token mix, and top devices by spend'}
+        date={data?.generatedAt ? formatLongDate(data.generatedAt) : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
       >
-        <RangeToggle value={range} options={['month', '30d', '90d']} onChange={onRangeChange} />
-      </PageHeader>
+        <RangeToggle value={range} options={['7d', 'month', '90d']} onChange={onRangeChange} />
+      </TopBar>
+
       {loading && !data ? <div className="loading-card">Loading costs view…</div> : null}
+
       {data ? (
         <>
-          <section className="stat-grid">
-            <StatCard label="July so far" value={formatMoney(data.kpis.totalCost)} caption="Current spend" sparkline={data.sections.dailySpend.map((item) => item.total)} />
-            <StatCard label="Projected month" value={formatMoney(data.kpis.projectedMonth)} caption={`Budget ${formatMoney(data.kpis.monthlyBudget)}`} sparkline={data.sections.dailySpend.map((item) => item.total)} />
-            <StatCard label="Per active toy" value={formatMoney(data.kpis.perActiveToyPerDay)} caption="Per toy / day" sparkline={data.sections.dailySpend.map((item) => item.total)} />
-            <StatCard label="Per session" value={formatMoney(data.kpis.perSession)} caption="Average session cost" sparkline={data.sections.topDevices.map((item) => item.cost)} />
-            <StatCard label="Avg response time" value={`${data.kpis.avgResponseTimeSeconds}s`} caption="Average TTFT" sparkline={data.sections.topDevices.map((item) => item.sessions)} />
+          <section className="oa-kpis">
+            <KpiCard
+              label={`Spend · ${rangeLabel(range)}`}
+              value={formatMoney(data.kpis.totalCost)}
+              delta={data.deltas.totalCost}
+              deltaQualifier="vs prior period"
+            />
+            <KpiCard
+              label="Projected month"
+              value={formatMoneyCompact(data.kpis.projectedMonth)}
+              caption={<small>at current daily rate × {data.kpis.daysInMonth} days</small>}
+            />
+            <KpiCard
+              label="Per active toy"
+              value={formatMoney(data.kpis.perActiveToyPerDay)}
+              caption={<small>per toy per day</small>}
+            />
+            <KpiCard label="Per session" value={formatMoney(data.kpis.perSession)} caption={<small>per billed session</small>} />
+            <KpiCard
+              label="Avg response time"
+              value={data.kpis.avgResponseTimeSeconds === null ? <span className="not-tracked">Not recorded</span> : data.kpis.avgResponseTimeSeconds.toFixed(2)}
+              unit={data.kpis.avgResponseTimeSeconds === null ? undefined : 's'}
+              caption={<small>time to first token</small>}
+            />
           </section>
 
-          <section className="costs-grid">
-            <article className="panel-card costs-chart-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Daily AI spend · last 30 days</h2>
-                  <p>₹ per day · input vs output tokens</p>
-                </div>
-              </div>
-              <CostsSpendChart items={data.sections.dailySpend} />
-            </article>
+          {data.sections.lifetime ? <LifetimeSpendCard lifetime={data.sections.lifetime} /> : null}
 
-            <article className="panel-card costs-budget-card">
-              <div className="panel-header">
-                <div>
-                  <h2>July budget</h2>
-                  <p>{formatMoney(data.kpis.monthlyBudget)} · alert at 90%</p>
-                </div>
+          <section className="oa-row">
+            <Card title={`Daily AI spend · ${rangeLabel(range)}`} hint="₹ per day · input vs output tokens">
+              <div className="oa-leg">
+                <i style={{ ['--c' as string]: 'var(--c-ai)' }}>output (audio + text)</i>
+                <i style={{ ['--c' as string]: 'var(--c-cards)' }}>input (audio + text)</i>
               </div>
-              <div className="budget-meter">
-                <div className="split-bar">
-                  <span className="split-segment ai" style={{ width: `${Math.min(data.kpis.budgetUsedPercent, 100)}%` }} />
+              <CostBarsChart items={data.sections.dailySpend} />
+              {data.sections.dailySpend.length > 1 ? (
+                <div className="oa-axis">
+                  <span>{formatCompactDate(data.sections.dailySpend[0].date)}</span>
+                  <span>{formatCompactDate(data.sections.dailySpend[data.sections.dailySpend.length - 1].date)}</span>
                 </div>
-                <div className="costs-budget-row">
-                  <span>{formatMoney(data.kpis.totalCost)} used · {data.kpis.budgetUsedPercent}%</span>
-                  <span>{formatMoney(data.kpis.projectedMonth)} projected</span>
+              ) : null}
+            </Card>
+
+            <Card className="meter" title="Monthly budget" hint={data.kpis.monthlyBudget === null ? 'No budget configured' : `${formatMoneyCompact(data.kpis.monthlyBudget)} · set in system parameters`}>
+              {data.kpis.monthlyBudget !== null && data.kpis.budgetUsedPercent !== null ? (
+                <>
+                  <div className="track">
+                    <i style={{ width: `${Math.min(data.kpis.budgetUsedPercent, 100)}%` }} />
+                  </div>
+                  <div className="row">
+                    <span>{formatMoney(data.kpis.totalCost)} used · {data.kpis.budgetUsedPercent}%</span>
+                    <span>projected {formatMoneyCompact(data.kpis.projectedMonth)}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="budget-unset">
+                  <strong>No budget set</strong>
+                  <span>
+                    Add a monthly budget in system parameters to track spend against a target and get a
+                    90% alert.
+                  </span>
+                  <code>founder_monthly_budget_inr</code>
                 </div>
-                <p className="split-note">Spend is tracking usage, not waste: the key question is cost per session, not absolute spikes alone.</p>
-                <h3 className="costs-subhead">Token mix</h3>
-                <div className="split-list">
-                  <div className="split-list-item"><span className="split-dot ai" /><span>Output audio</span><strong>{tokenTotal ? Math.round((data.sections.tokenMix.outputAudio / tokenTotal) * 100) : 0}%</strong></div>
-                  <div className="split-list-item"><span className="split-dot card" /><span>Input audio</span><strong>{tokenTotal ? Math.round((data.sections.tokenMix.inputAudio / tokenTotal) * 100) : 0}%</strong></div>
-                  <div className="split-list-item"><span className="split-dot radio" /><span>Text + tools</span><strong>{tokenTotal ? Math.round((data.sections.tokenMix.text / tokenTotal) * 100) : 0}%</strong></div>
-                </div>
-              </div>
-            </article>
+              )}
+
+              <h5 className="sub">Token mix</h5>
+              {tokenTotal ? (
+                <>
+                  <div className="split slim">
+                    <b style={{ width: `${(data.sections.tokenMix.outputAudio / tokenTotal) * 100}%`, background: 'var(--c-ai)' }} />
+                    <b style={{ width: `${(data.sections.tokenMix.inputAudio / tokenTotal) * 100}%`, background: 'var(--c-cards)' }} />
+                    <b style={{ width: `${(data.sections.tokenMix.text / tokenTotal) * 100}%`, background: 'var(--ink-4)' }} />
+                  </div>
+                  <div className="li" style={{ ['--c' as string]: 'var(--c-ai)' }}>
+                    Output audio <small>· the toy speaking</small>
+                    <b>{Math.round((data.sections.tokenMix.outputAudio / tokenTotal) * 100)}%</b>
+                  </div>
+                  <div className="li" style={{ ['--c' as string]: 'var(--c-cards)' }}>
+                    Input audio <small>· kids speaking</small>
+                    <b>{Math.round((data.sections.tokenMix.inputAudio / tokenTotal) * 100)}%</b>
+                  </div>
+                  <div className="li" style={{ ['--c' as string]: 'var(--ink-4)' }}>
+                    Text <small>· prompts</small>
+                    <b>{Math.round((data.sections.tokenMix.text / tokenTotal) * 100)}%</b>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state">No token usage in this range.</div>
+              )}
+            </Card>
           </section>
 
-          <section className="panel-card costs-table-card">
-            <div className="panel-header">
-              <div>
-                <h2>Where the money goes · top toys by spend</h2>
-                <p>Heavy users, not leaks.</p>
+          <Card className="spaced" title="Where the money goes · top toys by spend" hint="Heavy users, not leaks — cost tracks minutes">
+            {data.sections.topDevices.length ? (
+              <div className="tbl-scroll">
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>Toy / kid</th>
+                      <th>Parent</th>
+                      <th className="num">Sessions</th>
+                      <th className="num">Talk time</th>
+                      <th className="num">Tokens</th>
+                      <th className="num">Cost</th>
+                      <th className="num">% of fleet</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.sections.topDevices.map((item) => (
+                      <tr key={item.macAddress}>
+                        <td>
+                          <span className="mac">{item.macAddress}</span>
+                          {item.kidName ? ` · ${item.kidName}` : ''}
+                        </td>
+                        <td className="mut">{item.parentName || DASH}</td>
+                        <td className="num">{item.sessions}</td>
+                        <td className="num">{item.talkHours} h</td>
+                        <td className="num">{formatNumber(item.totalTokens)}</td>
+                        <td className="num">{formatMoney(item.cost)}</td>
+                        <td className="num">{item.fleetSharePercent}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
-            <div className="costs-table">
-              <div className="costs-table-head">
-                <span>Toy / kid</span>
-                <span>Parent</span>
-                <span>Sessions</span>
-                <span>Talk time</span>
-                <span>Cost</span>
-              </div>
-              {data.sections.topDevices.map((item) => (
-                <div key={item.macAddress} className="costs-table-row">
-                  <span>{item.kidName || item.macAddress}</span>
-                  <span>{item.parentName || item.macAddress}</span>
-                  <span>{item.sessions}</span>
-                  <span>{item.talkHours} h</span>
-                  <strong>{formatMoney(item.cost)}</strong>
-                </div>
-              ))}
-            </div>
-          </section>
+            ) : (
+              <div className="empty-state">No billed sessions in this range.</div>
+            )}
+          </Card>
         </>
       ) : null}
-    </div>
+    </>
   )
 }
+
+/* ================================================================== *
+ * Fleet & ops
+ * ================================================================== */
 
 function OperatePage({
   data,
   loading,
+  theme,
+  onToggleTheme,
 }: {
   data: OperateResponse | null
   loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
 }) {
-  const firmwareTotal = data?.sections.firmwareCoverage.reduce((sum, item) => sum + item.count, 0) ?? 0
-  const getFirmwareTone = (item: OperateResponse['sections']['firmwareCoverage'][number]) => {
-    if (item.isLatest) return 'games'
-    if (item.version === 'unknown') return 'rose'
-    return 'amber'
-  }
-  const getFirmwareLabel = (item: OperateResponse['sections']['firmwareCoverage'][number]) => {
-    if (item.isLatest) return `${item.version} · latest`
-    if (item.version === 'unknown') return 'Unknown firmware'
-    return item.version
+  // Distinct colour per firmware version so the stacked bar reads as segments
+  // rather than one flat block. Latest is always green, unknown always red.
+  const FIRMWARE_PALETTE = ['var(--st-warn)', 'var(--c-cards)', 'var(--c-radio)', 'var(--st-serious)', 'var(--c-ai)']
+  const olderVersions = (data?.sections.firmwareCoverage || [])
+    .filter((item) => !item.isLatest && item.version !== 'unknown')
+    .map((item) => item.version)
+
+  const firmwareTone = (item: OperateResponse['sections']['firmwareCoverage'][number]) => {
+    if (item.isLatest) return 'var(--st-good)'
+    if (item.version === 'unknown') return 'var(--st-crit)'
+    const index = olderVersions.indexOf(item.version)
+    return FIRMWARE_PALETTE[index % FIRMWARE_PALETTE.length]
   }
 
   return (
-    <div className="page">
-      <PageHeader eyebrow="" title="Fleet & OTA" subtitle={data?.generatedAt ? formatLongDate(data.generatedAt) : 'Firmware coverage, batteries, OTA rollout, and recent device events'} />
+    <>
+      <TopBar
+        title="Fleet & Ops"
+        date={data?.generatedAt ? formatLongDate(data.generatedAt) : undefined}
+        theme={theme}
+        onToggleTheme={onToggleTheme}
+      />
+
       {loading && !data ? <div className="loading-card">Loading fleet view…</div> : null}
+
       {data ? (
         <>
-          <section className="stat-grid">
-            <StatCard label="Fleet size" value={String(data.kpis.fleetSize)} caption="Registered toys" sparkline={data.sections.firmwareCoverage.map((item) => item.count)} />
-            <StatCard label="Online now" value={String(data.kpis.onlineNow)} caption="Runtime presence" sparkline={data.sections.firmwareCoverage.map((item) => item.percent)} />
-            <StatCard label="Latest firmware" value={`${data.kpis.latestFirmwarePercent}%`} caption="Coverage on latest" sparkline={data.sections.firmwareCoverage.map((item) => item.percent)} />
-            <StatCard label="Battery health" value={`${data.kpis.avgBattery}%`} caption="Average fleet battery" sparkline={data.sections.watchlist.map(() => data.kpis.avgBattery)} />
-            <StatCard label="Errors · 7d" value={String(data.kpis.deviceErrors7d)} caption="Runtime event signal" sparkline={data.sections.recentEvents.map((_, index) => index + 1)} />
+          <section className="oa-kpis">
+            <KpiCard label="Fleet size" value={formatNumber(data.kpis.fleetSize)} caption={<small>registered toys</small>} />
+            <KpiCard label="Online now" value={formatNumber(data.kpis.onlineNow)} caption={<small>of {data.kpis.reportingDevices} reporting state</small>} />
+            <KpiCard
+              label="On latest firmware"
+              value={formatPercent(data.kpis.latestFirmwarePercent)}
+              caption={<small>{data.kpis.latestFirmwareVersion ? `latest ${data.kpis.latestFirmwareVersion}` : 'no release registered'}</small>}
+            />
+            <KpiCard
+              label="Battery health"
+              value={data.kpis.avgBattery === null ? <span className="not-tracked">Not reported</span> : formatPercent(data.kpis.avgBattery)}
+              caption={<small>avg across {data.kpis.batteryReportingDevices} reporting toys</small>}
+            />
+            <KpiCard label="Device errors · 7d" value={formatNumber(data.kpis.deviceErrors7d)} caption={<small>error/fail/shutdown events</small>} />
           </section>
 
-          <section className="operate-grid">
-            <article className="panel-card operate-firmware-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Firmware coverage</h2>
-                  <p>fleet by version</p>
-                </div>
-              </div>
-
-              <div className="operate-firmware-legend">
-                <span><i className="legend-dot games" /> latest</span>
-                <span><i className="legend-dot ai" /> older</span>
-                <span><i className="legend-dot rose" /> unknown</span>
-              </div>
-
-              <div className="operate-firmware-meter">
-                <div className="split-bar">
-                  {data.sections.firmwareCoverage.map((item) => (
-                    <span
-                      key={item.version}
-                      className={`split-segment ${getFirmwareTone(item)}`}
-                      style={{ width: `${firmwareTotal ? (item.count / firmwareTotal) * 100 : 0}%` }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="operate-firmware-list">
-                {data.sections.firmwareCoverage.map((item) => (
-                  <div key={item.version} className="operate-firmware-item">
-                    <span>
-                      <i className={`legend-dot ${getFirmwareTone(item)}`} />
-                      {getFirmwareLabel(item)}
-                    </span>
-                    <strong>{item.count} toys · {item.percent}%</strong>
+          <section className="oa-row half">
+            <Card title="Firmware coverage" hint="Share of toys reporting each firmware version">
+              {data.sections.firmwareCoverage.length ? (
+                <>
+                  <div className="split">
+                    {data.sections.firmwareCoverage.map((item) => (
+                      <b key={item.version} style={{ width: `${item.percent}%`, background: firmwareTone(item) }} />
+                    ))}
                   </div>
-                ))}
-              </div>
+                  {data.sections.firmwareCoverage.map((item) => (
+                    <div key={item.version} className="li" style={{ ['--c' as string]: firmwareTone(item) }}>
+                      {item.version === 'unknown' ? 'Unknown firmware' : item.version}
+                      {item.isLatest ? <small> · latest</small> : null}
+                      <b>{item.count} toys · {item.percent}%</b>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <div className="empty-state">No devices are reporting firmware yet.</div>
+              )}
 
               {data.sections.otaRollout ? (
-                <div className="operate-ota-block">
-                  <h3>OTA rollout · {data.sections.otaRollout.version} staged</h3>
-                  <div className="split-bar compact">
-                    <span className="split-segment amber" style={{ width: `${data.sections.otaRollout.percent}%` }} />
+                <div className="meter">
+                  <h5 className="sub">OTA rollout · {data.sections.otaRollout.version}</h5>
+                  <div className="track">
+                    <i style={{ width: `${data.sections.otaRollout.percent}%` }} />
                   </div>
-                  <div className="operate-ota-meta">
+                  <div className="row">
                     <span>{data.sections.otaRollout.updatedCount} of {data.sections.otaRollout.fleetSize} updated</span>
                     <span>force update: {data.sections.otaRollout.forceUpdate ? 'on' : 'off'}</span>
                   </div>
                 </div>
               ) : null}
-            </article>
+            </Card>
 
-            <article className="panel-card operate-watchlist-card">
-              <div className="panel-header">
-                <div>
-                  <h2>Needs a human</h2>
-                  <p>watchlist from runtime state + device events</p>
-                </div>
-              </div>
+            <Card title="Needs a human" hint="Watchlist from runtime state and device events">
               {data.sections.watchlist.length ? (
-                <div className="operate-watchlist-table">
-                  <div className="operate-watchlist-head">
-                    <span>Toy</span>
-                    <span>Issue</span>
-                    <span>Since</span>
-                  </div>
-                  {data.sections.watchlist.slice(0, 4).map((item) => (
-                    <div key={`${item.macAddress}-${item.issue}`} className="operate-watchlist-row">
-                      <span>{item.alias}</span>
-                      <span className={`operate-issue-chip ${item.severity}`}>{item.issue}</span>
-                      <strong>{item.since ? formatCompactDate(item.since) : 'today'}</strong>
-                    </div>
-                  ))}
+                <div className="tbl-scroll">
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th>Toy</th>
+                        <th>Issue</th>
+                        <th className="num">Since</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.sections.watchlist.map((item) => (
+                        <tr key={`${item.macAddress}-${item.issue}`}>
+                          <td>
+                            <span className="mac">{item.macAddress}</span>
+                            <span className="watch-kid"> · {item.kidName || item.alias}</span>
+                          </td>
+                          <td>
+                            <span className={item.severity === 'critical' ? 'badge crit' : 'badge warn'}>{item.issue}</span>
+                          </td>
+                          <td className="num mut">{item.since ? formatCompactDate(item.since) : DASH}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ) : <div className="empty-state">No devices currently need manual attention.</div>}
+              ) : (
+                <div className="empty-state">No toys currently need manual attention.</div>
+              )}
 
-              <div className="operate-events-block">
-                <h3>Recent device events</h3>
-                <div className="operate-events-list">
-                  {data.sections.recentEvents.slice(0, 3).map((item) => (
-                    <div key={`${item.source}-${item.macAddress}-${item.createdAt}`} className="operate-event-row">
-                      <span>{formatDateTime(item.createdAt)} · {item.macAddress}</span>
-                      <strong className={item.severity}>{item.detail}</strong>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </article>
+              <h5 className="sub">Recent device events</h5>
+              {data.sections.recentEvents.length ? (
+                data.sections.recentEvents.map((item) => (
+                  <div key={`${item.source}-${item.macAddress}-${item.createdAt}`} className="li noc">
+                    <small>{formatDateTime(item.createdAt)}</small> · <span className="mac">{item.macAddress}</span> {item.title}
+                    <b style={{ color: item.severity === 'critical' ? 'var(--bad)' : undefined }}>{item.detail}</b>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state">No device events in the last 7 days.</div>
+              )}
+            </Card>
           </section>
         </>
       ) : null}
-    </div>
+    </>
   )
 }
+
+/* ================================================================== *
+ * RFID studio
+ * ================================================================== */
 
 function LookupTestPanel() {
   const [uid, setUid] = useState('')
@@ -1872,8 +3096,7 @@ function LookupTestPanel() {
   const [result, setResult] = useState<{ success: boolean; type: string; data: unknown } | null>(null)
 
   const runLookup = async (kind: string, label: string, path: string) => {
-    const trimmedUid = uid.trim()
-    if (!trimmedUid) return
+    if (!uid.trim()) return
     setLoadingKind(kind)
     try {
       const data = await apiFetchPublic(path)
@@ -1882,7 +3105,7 @@ function LookupTestPanel() {
       setResult({
         success: false,
         type: label,
-        data: { error: err instanceof ApiError ? err.message : 'Request failed', uid: trimmedUid },
+        data: { error: err instanceof ApiError ? err.message : 'Request failed', uid: uid.trim() },
       })
     } finally {
       setLoadingKind(null)
@@ -1890,201 +3113,142 @@ function LookupTestPanel() {
   }
 
   const encodedUid = encodeURIComponent(uid.trim())
-  const summary = result?.success && result.data && typeof result.data === 'object' ? (result.data as Record<string, unknown>) : null
 
   return (
-    <article className="panel-card">
-      <div className="panel-header">
-        <div>
-          <h2>Lookup &amp; Test</h2>
-          <p>Look up what an RFID UID resolves to, using the same endpoints the devices use.</p>
-        </div>
+    <Card className="spaced" title="Lookup & test" hint="Resolve an RFID UID through the same endpoints the devices use">
+      <div className="lookup-grid">
+        <input placeholder="RFID UID (e.g. 5C42C905)" value={uid} onChange={(event) => setUid(event.target.value)} />
+        <input
+          type="number"
+          min={1}
+          value={sequence}
+          onChange={(event) => setSequence(Number(event.target.value) || 1)}
+          title="Sequence"
+          style={{ width: 90 }}
+        />
+        <button type="button" className="secondary-button" disabled={!uid.trim() || loadingKind !== null} onClick={() => runLookup('card', 'card mapping', `/admin/rfid/card/lookup/${encodedUid}`)}>
+          {loadingKind === 'card' ? 'Looking up…' : 'Card mapping'}
+        </button>
+        <button type="button" className="secondary-button" disabled={!uid.trim() || loadingKind !== null} onClick={() => runLookup('series', 'series', `/admin/rfid/series/lookup/${encodedUid}`)}>
+          {loadingKind === 'series' ? 'Looking up…' : 'Series'}
+        </button>
+        <button type="button" className="secondary-button" disabled={!uid.trim() || loadingKind !== null} onClick={() => runLookup('content', 'content', `/admin/rfid/card/lookup/${encodedUid}?sequence=${sequence}`)}>
+          {loadingKind === 'content' ? 'Looking up…' : 'Content (seq)'}
+        </button>
+        <button type="button" className="secondary-button" disabled={!uid.trim() || loadingKind !== null} onClick={() => runLookup('download', 'download', `/admin/rfid/card/content/download/${encodedUid}`)}>
+          {loadingKind === 'download' ? 'Looking up…' : 'Download'}
+        </button>
       </div>
 
-      <div className="lookup-console">
-        <div className="lookup-inputs">
-          <input placeholder="Enter RFID UID (e.g. 5C42C905)" value={uid} onChange={(event) => setUid(event.target.value)} />
-          <input
-            type="number"
-            min={1}
-            value={sequence}
-            onChange={(event) => setSequence(Number(event.target.value) || 1)}
-            title="Sequence"
-          />
-        </div>
-        <div className="lookup-actions">
-          <button
-            type="button"
-            className="secondary-button compact"
-            disabled={!uid.trim() || loadingKind !== null}
-            onClick={() => runLookup('card', 'card', `/admin/rfid/card/lookup/${encodedUid}`)}
-          >
-            {loadingKind === 'card' ? 'Looking up…' : 'Lookup Card Mapping'}
-          </button>
-          <button
-            type="button"
-            className="secondary-button compact"
-            disabled={!uid.trim() || loadingKind !== null}
-            onClick={() => runLookup('series', 'series', `/admin/rfid/series/lookup/${encodedUid}`)}
-          >
-            {loadingKind === 'series' ? 'Looking up…' : 'Series'}
-          </button>
-          <button
-            type="button"
-            className="secondary-button compact"
-            disabled={!uid.trim() || loadingKind !== null}
-            onClick={() => runLookup('content', 'content', `/admin/rfid/card/lookup/${encodedUid}?sequence=${sequence}`)}
-          >
-            {loadingKind === 'content' ? 'Looking up…' : 'Content (seq)'}
-          </button>
-          <button
-            type="button"
-            className="secondary-button compact"
-            disabled={!uid.trim() || loadingKind !== null}
-            onClick={() => runLookup('download', 'download', `/admin/rfid/card/content/download/${encodedUid}`)}
-          >
-            {loadingKind === 'download' ? 'Looking up…' : 'Download'}
-          </button>
-        </div>
-
-        {result ? (
-          <div className="lookup-result">
-            <div className={result.success ? 'success-banner' : 'error-banner'}>
-              {result.success ? 'Resolved' : 'Not resolved'} — {result.type}
-            </div>
-            {summary ? (
-              <div className="lookup-summary">
-                {typeof summary.contentType === 'string' ? (
-                  <span>
-                    <strong>Type:</strong> {summary.contentType}
-                  </span>
-                ) : null}
-                {typeof (summary.characterName || summary.agentName) === 'string' ? (
-                  <span>
-                    <strong>Character:</strong> {(summary.characterName || summary.agentName) as string}
-                  </span>
-                ) : null}
-                {typeof summary.title === 'string' ? (
-                  <span>
-                    <strong>Title:</strong> {summary.title}
-                  </span>
-                ) : null}
-                {typeof summary.packCode === 'string' ? (
-                  <span>
-                    <strong>Pack:</strong> {summary.packCode}
-                  </span>
-                ) : null}
-              </div>
-            ) : null}
-            <pre className="lookup-json">{JSON.stringify(result.data, null, 2)}</pre>
+      {result ? (
+        <>
+          <div className={result.success ? 'hint note' : 'error-banner'} style={{ marginTop: 12 }}>
+            {result.success ? `Resolved — ${result.type}` : `Not resolved — ${result.type}`}
           </div>
-        ) : null}
-      </div>
-    </article>
+          <pre className="lookup-result">{JSON.stringify(result.data, null, 2)}</pre>
+        </>
+      ) : null}
+    </Card>
   )
 }
 
 function RfidStudioPage({
   cards,
+  total,
   loading,
+  theme,
+  onToggleTheme,
 }: {
   cards: RfidCardMapping[]
+  total: number
   loading: boolean
+  theme: Theme
+  onToggleTheme: () => void
 }) {
-  const mappedCount = cards.filter((item) => item.active !== false).length
   const contentCount = cards.filter((item) => item.contentPackId).length
   const qnaCount = cards.filter((item) => item.questionPackId).length
   const aiCount = cards.filter((item) => (item.cardType || item.actionType) === 'ai').length
+  const inactiveCount = cards.filter((item) => item.active === false).length
+  const truncated = total > cards.length
 
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
-        title="RFID Studio"
-        subtitle=""
-      />
+    <>
+      <TopBar title="RFID Studio" theme={theme} onToggleTheme={onToggleTheme} />
 
-      <section className="stat-grid">
-        <StatCard label="Mapped cards" value={String(mappedCount)} caption="Card mappings loaded from RFID Management" sparkline={cards.slice(0, 8).map((_, index) => index + 1)} />
-        <StatCard label="Content cards" value={String(contentCount)} caption="Linked to content packs" sparkline={cards.slice(0, 8).map((item) => item.contentPackId ? 1 : 0)} />
-        <StatCard label="Q&A cards" value={String(qnaCount)} caption="Linked to question packs" sparkline={cards.slice(0, 8).map((item) => item.questionPackId ? 1 : 0)} />
-        <StatCard label="AI cards" value={String(aiCount)} caption="Direct AI mappings" sparkline={cards.slice(0, 8).map((item) => (item.cardType || item.actionType) === 'ai' ? 1 : 0)} />
+      <section className="oa-kpis four">
+        <KpiCard label="Card mappings" value={formatNumber(total)} caption={<small>total in RFID management</small>} />
+        <KpiCard label="Content-linked" value={formatNumber(contentCount)} caption={<small>{truncated ? `of ${cards.length} loaded` : 'linked to content packs'}</small>} />
+        <KpiCard label="Q&A-linked" value={formatNumber(qnaCount)} caption={<small>{truncated ? `of ${cards.length} loaded` : 'linked to question packs'}</small>} />
+        <KpiCard label="AI cards" value={formatNumber(aiCount)} caption={<small>{truncated ? `of ${cards.length} loaded` : 'direct AI mappings'}</small>} />
       </section>
 
-      <section className="panel-grid panel-grid-two">
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>Card mappings</h2>
-              <p>Live rows from RFID Management.</p>
-            </div>
+      <Card
+        className="spaced"
+        title="Card mappings"
+        hint={truncated ? `Showing the first ${cards.length} of ${total} mappings` : `${cards.length} mappings`}
+      >
+        {loading ? (
+          <div className="loading-card">Loading card mappings…</div>
+        ) : cards.length ? (
+          <div className="tbl-scroll">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>RFID UID</th>
+                  <th>Type</th>
+                  <th>Content pack</th>
+                  <th className="num">Active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cards.slice(0, 25).map((item) => (
+                  <tr key={String(item.id)}>
+                    <td className="mac">{item.rfidUid}</td>
+                    <td className="mut">{item.cardType || item.actionType || DASH}</td>
+                    <td className="mut">{item.packCode || DASH}</td>
+                    <td className="num">
+                      <span className={item.active === false ? 'badge crit' : 'badge ok'}>{item.active === false ? 'No' : 'Yes'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          {loading ? <div className="loading-card">Loading card mappings…</div> : (
-            <div className="costs-table">
-              <div className="costs-table-head">
-                <span>RFID UID</span>
-                <span>Type</span>
-                <span>Q&A pack</span>
-                <span>Content pack</span>
-                <span>Active</span>
-              </div>
-              {cards.slice(0, 8).map((item) => (
-                <div key={item.id} className="costs-table-row">
-                  <span>{item.rfidUid}</span>
-                  <span>{item.cardType || item.actionType || '-'}</span>
-                  <span>{item.questionPackName || '-'}</span>
-                  <span>{item.packCode || '-'}</span>
-                  <strong>{item.active === false ? 'No' : 'Yes'}</strong>
-                </div>
-              ))}
-            </div>
-          )}
-        </article>
-
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>Mapping notes</h2>
-              <p>Quick breakdown of mapping coverage.</p>
-            </div>
-          </div>
-          <div className="leaderboard">
-            {[
-              ['Content-linked', `${contentCount} cards`],
-              ['Q&A-linked', `${qnaCount} cards`],
-              ['AI-linked', `${aiCount} cards`],
-              ['Inactive mappings', `${cards.filter((item) => item.active === false).length} cards`],
-            ].map(([title, meta]) => (
-              <div key={title} className="leaderboard-item compact">
-                <div>
-                  <strong>{title}</strong>
-                  <span>{meta}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
+        ) : (
+          <div className="empty-state">No card mappings found.</div>
+        )}
+        {inactiveCount ? <div className="hint note">{inactiveCount} inactive mapping{inactiveCount === 1 ? '' : 's'} in the loaded set.</div> : null}
+      </Card>
 
       <LookupTestPanel />
-    </div>
+    </>
   )
 }
 
+/* ================================================================== *
+ * Content library
+ * ================================================================== */
+
 function ContentLibraryPage({
   packs,
+  total,
   loading,
   editorPack,
   editorLoading,
   onEdit,
   onCloseEditor,
+  theme,
+  onToggleTheme,
 }: {
   packs: RfidContentPack[]
+  total: number
   loading: boolean
   editorPack: RfidContentPack | null
   editorLoading: boolean
   onEdit: (packCode: string) => void
   onCloseEditor: () => void
+  theme: Theme
+  onToggleTheme: () => void
 }) {
   const visiblePacks = packs.filter((item) => {
     const name = item.name?.trim().toLowerCase() || ''
@@ -2097,301 +3261,254 @@ function ContentLibraryPage({
   const ttsCount = visiblePacks.filter((item) => item.contentType && item.contentType !== 'prompt').length
 
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
-        title="Content Library"
-        subtitle=""
-      />
+    <>
+      <TopBar title="Content Library" theme={theme} onToggleTheme={onToggleTheme} />
 
-      <section className="stat-grid">
-        <StatCard label="Content packs" value={String(visiblePacks.length)} caption="Loaded from Content Packs" sparkline={visiblePacks.slice(0, 8).map((_, index) => index + 1)} />
-        <StatCard label="Active packs" value={String(activeCount)} caption="Currently marked active" sparkline={visiblePacks.slice(0, 8).map((item) => item.active === false ? 0 : 1)} />
-        <StatCard label="AI packs" value={String(promptCount)} caption="Prompt-based packs" sparkline={visiblePacks.slice(0, 8).map((item) => item.contentType === 'prompt' ? 1 : 0)} />
-        <StatCard label="Read-aloud packs" value={String(ttsCount)} caption="Non-prompt content packs" sparkline={visiblePacks.slice(0, 8).map((item) => item.contentType && item.contentType !== 'prompt' ? 1 : 0)} />
+      <section className="oa-kpis four">
+        <KpiCard label="Content packs" value={formatNumber(total)} caption={<small>{visiblePacks.length} shown after filtering</small>} />
+        <KpiCard label="Active packs" value={formatNumber(activeCount)} caption={<small>of {visiblePacks.length} shown</small>} />
+        <KpiCard label="AI packs" value={formatNumber(promptCount)} caption={<small>prompt-based</small>} />
+        <KpiCard label="Read-aloud packs" value={formatNumber(ttsCount)} caption={<small>non-prompt content</small>} />
       </section>
 
-      <section className="panel-card">
-        <div className="panel-header">
-          <div>
-            <h2>Content packs</h2>
-            <p>Live cards from RFID Management.</p>
-          </div>
-        </div>
-        {loading ? <div className="loading-card">Loading content packs…</div> : (
-          <div className="content-pack-grid">
+      <Card className="spaced" title="Content packs" hint="Live rows from RFID management">
+        {loading ? (
+          <div className="loading-card">Loading content packs…</div>
+        ) : visiblePacks.length ? (
+          <div className="pack-grid">
             {visiblePacks.map((item) => (
-              <article key={item.id} className="content-pack-card">
-                <div className="content-pack-card-header">
-                  <div>
-                    <strong className="content-pack-title">{item.name}</strong>
-                    <div className="content-pack-code">{item.packCode}</div>
-                  </div>
-                  <span className={item.active === false ? 'status-pill offline' : 'status-pill online'}>
-                    {item.active === false ? 'Draft' : 'Active'}
-                  </span>
+              <article key={String(item.id)} className="pack-card">
+                <div className="code">{item.packCode}</div>
+                <h6>{item.name}</h6>
+                <p>{item.description || 'No description provided.'}</p>
+                <div className="topics" style={{ marginTop: 0 }}>
+                  <span>{item.contentType === 'prompt' ? 'AI' : item.contentType || 'unknown type'}</span>
+                  <span>{item.totalItems ?? item.items?.length ?? 0} items</span>
+                  {item.language ? <span>{item.language}</span> : null}
+                  {item.version ? <span>v{item.version}</span> : null}
                 </div>
-
-                <p className="content-pack-description">{item.description || 'No description provided.'}</p>
-
-                <div className="topic-wrap">
-                  <span className="topic-chip">{item.contentType === 'prompt' ? 'AI' : 'TTS'}</span>
-                  <span className="topic-chip">{item.totalItems ?? item.items?.length ?? 0} items</span>
-                  <span className="topic-chip">{item.language || '-'}</span>
-                  {item.version ? <span className="topic-chip">v{item.version}</span> : null}
-                </div>
-
-                <div className="content-pack-card-footer">
-                  <span>{item.contentType === 'prompt' ? 'AI Generated' : 'Read-Aloud'}</span>
-                  <div className="content-pack-actions">
-                    <button type="button" className="secondary-button compact" onClick={() => onEdit(item.packCode)}>Detail</button>
-                  </div>
+                <div style={{ marginTop: 10 }}>
+                  <button type="button" className="secondary-button" onClick={() => onEdit(item.packCode)}>Details</button>
                 </div>
               </article>
             ))}
           </div>
+        ) : (
+          <div className="empty-state">No content packs found.</div>
         )}
-      </section>
+      </Card>
 
-      <section className="panel-grid panel-grid-two">
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>Pack breakdown</h2>
-              <p>Quick summary of the content pack mix.</p>
-            </div>
-          </div>
-          <div className="leaderboard">
-            {[
-              ['Prompt / AI packs', `${promptCount} packs`],
-              ['Read-aloud packs', `${ttsCount} packs`],
-              ['Active packs', `${activeCount} packs`],
-              ['Draft packs', `${visiblePacks.filter((item) => item.active === false).length} packs`],
-            ].map(([title, meta]) => (
-              <div key={title} className="leaderboard-item compact">
-                <div>
-                  <strong>{title}</strong>
-                  <span>{meta}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>Detail preview</h2>
-              <p>The same founder-dashboard-only detail view that opens from Detail.</p>
-            </div>
-          </div>
-          {editorLoading ? <div className="loading-card">Loading pack details…</div> : editorPack ? (
-            <div className="content-pack-editor-preview">
-              <div className="mini-stats">
-                <div className="mini-stat"><span>Pack code</span><strong>{editorPack.packCode}</strong></div>
-                <div className="mini-stat"><span>Status</span><strong>{editorPack.status || (editorPack.active === false ? 'draft' : 'published')}</strong></div>
-                <div className="mini-stat"><span>Version</span><strong>v{editorPack.version ?? 1}</strong></div>
-              </div>
-              <div className="quote-stack">
-                <blockquote className="quote-card">
-                  <p><strong>Name:</strong> {editorPack.name}</p>
-                  <footer>Description: {editorPack.description || 'None'}</footer>
-                </blockquote>
-                <blockquote className="quote-card">
-                  <p><strong>Content type:</strong> {editorPack.contentType || '-'}</p>
-                  <footer>Language: {editorPack.language || '-'}</footer>
-                </blockquote>
-              </div>
-              <button type="button" className="secondary-button" onClick={onCloseEditor}>Close</button>
-            </div>
-          ) : (
-            <div className="empty-state">Tap Edit on any content pack card to open its details here.</div>
-          )}
-        </article>
-      </section>
-
-      {editorPack ? (
+      {editorPack || editorLoading ? (
         <div className="modal-backdrop" onClick={onCloseEditor}>
-          <div className="modal-card content-pack-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="panel-header">
-              <div>
-                <h2>Content Pack Details</h2>
-                <p>{editorPack.packCode}</p>
-              </div>
-              <button type="button" className="secondary-button compact" onClick={onCloseEditor}>Close</button>
-            </div>
-
-            <div className="editor-form-grid">
-              <label>
-                <span>Pack Code</span>
-                <input value={editorPack.packCode} readOnly />
-              </label>
-              <label>
-                <span>Name</span>
-                <input value={editorPack.name} readOnly />
-              </label>
-              <label className="full">
-                <span>Description</span>
-                <textarea value={editorPack.description || ''} readOnly rows={3} />
-              </label>
-              <label>
-                <span>Thumbnail URL</span>
-                <input value={editorPack.thumbnailUrl || ''} readOnly />
-              </label>
-              <label>
-                <span>Content Type</span>
-                <input value={editorPack.contentType || ''} readOnly />
-              </label>
-              <label>
-                <span>Language</span>
-                <input value={editorPack.language || ''} readOnly />
-              </label>
-              <label>
-                <span>Status</span>
-                <input value={editorPack.status || (editorPack.active === false ? 'draft' : 'published')} readOnly />
-              </label>
-              <label>
-                <span>Version</span>
-                <input value={String(editorPack.version ?? 1)} readOnly />
-              </label>
-            </div>
-
-            <div className="panel-header">
-              <div>
-                <h2>Pack Items</h2>
-                <p>{editorPack.items?.length ?? editorPack.totalItems ?? 0} items</p>
-              </div>
-            </div>
-            <div className="content-pack-items">
-              {(editorPack.items || []).length ? (editorPack.items || []).map((item, index) => (
-                <div key={`${editorPack.id}-${index}`} className="content-pack-item-card">
-                  <strong>{index + 1}. {item.title || 'Untitled item'}</strong>
-                  {item.audioUrl ? <audio controls src={item.audioUrl} /> : <span>No audio URL</span>}
-                  <span>{item.imageUrl || 'No image URL'}</span>
-                  <p>{item.text || 'No text content'}</p>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            {editorLoading ? (
+              <div className="loading-card">Loading pack details…</div>
+            ) : editorPack ? (
+              <>
+                <div className="modal-head">
+                  <div>
+                    <h5>{editorPack.name}</h5>
+                    <div className="hint">{editorPack.packCode}</div>
+                  </div>
+                  <button type="button" className="secondary-button" onClick={onCloseEditor}>Close</button>
                 </div>
-              )) : <div className="empty-state">No item details available for this pack.</div>}
-            </div>
+
+                <div className="pf-fields">
+                  <div className="pf-field">Content type <strong>{editorPack.contentType || DASH}</strong></div>
+                  <div className="pf-field">Language <strong>{editorPack.language || DASH}</strong></div>
+                  <div className="pf-field">Status <strong>{editorPack.status || (editorPack.active === false ? 'inactive' : 'active')}</strong></div>
+                  <div className="pf-field">Version <strong>{editorPack.version ? `v${editorPack.version}` : DASH}</strong></div>
+                  <div className="pf-field">Items <strong>{editorPack.items?.length ?? editorPack.totalItems ?? 0}</strong></div>
+                </div>
+
+                {editorPack.description ? <div className="oa-quote">{editorPack.description}</div> : null}
+
+                <h5 className="sub">Pack items</h5>
+                {editorPack.items?.length ? (
+                  <div className="pack-item-grid">
+                    {editorPack.items.map((item, index) => (
+                      <div key={`${editorPack.id}-${index}`} className="pack-item">
+                        <strong>{index + 1}. {item.title || 'Untitled item'}</strong>
+                        {item.audioUrl ? <audio controls src={item.audioUrl} style={{ width: '100%', marginBottom: 6 }} /> : null}
+                        {item.text ? <span>{item.text}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-state">No item details available for this pack.</div>
+                )}
+              </>
+            ) : null}
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   )
 }
 
+/* ================================================================== *
+ * Settings
+ * ================================================================== */
+
 function SettingsPage({
   username,
+  costs,
+  theme,
+  onToggleTheme,
   onSignOut,
 }: {
   username: string
+  costs: CostsResponse | null
+  theme: Theme
+  onToggleTheme: () => void
   onSignOut: () => void
 }) {
   return (
-    <div className="page">
-      <PageHeader
-        eyebrow=""
-        title="Settings"
-        subtitle=""
-      />
+    <>
+      <TopBar title="Settings" theme={theme} onToggleTheme={onToggleTheme} />
 
-      <section className="panel-grid panel-grid-three">
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>Alerts</h2>
-              <p>Thresholds that should page the team.</p>
+      <section className="oa-row half">
+        <Card title="Appearance" hint="Applies to every page and is remembered on this device">
+          <div className="pf-fields">
+            <div className="pf-field">
+              Theme
+              <strong>{theme === 'dark' ? 'Dark' : 'Light'}</strong>
             </div>
           </div>
-          <div className="mini-stats">
-            <div className="mini-stat"><span>Battery alert</span><strong>15%</strong></div>
-            <div className="mini-stat"><span>Quiet toy</span><strong>7 days</strong></div>
-            <div className="mini-stat"><span>Budget alert</span><strong>90%</strong></div>
+          <div style={{ marginTop: 12 }}>
+            <button type="button" className="secondary-button" onClick={onToggleTheme}>
+              Switch to {theme === 'dark' ? 'light' : 'dark'} mode
+            </button>
           </div>
-        </article>
+        </Card>
 
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>Rollout defaults</h2>
-              <p>Safe starting points for product pushes.</p>
+        <Card title="Monthly AI budget" hint="Read from the founder_monthly_budget_inr system parameter">
+          {costs?.kpis.monthlyBudget !== null && costs?.kpis.monthlyBudget !== undefined ? (
+            <div className="pf-fields">
+              <div className="pf-field">Budget <strong>{formatMoneyCompact(costs.kpis.monthlyBudget)}</strong></div>
+              <div className="pf-field">Used <strong>{formatPercent(costs.kpis.budgetUsedPercent)}</strong></div>
             </div>
-          </div>
-          <div className="mini-stats">
-            <div className="mini-stat"><span>Canary cohort</span><strong>10%</strong></div>
-            <div className="mini-stat"><span>Force update</span><strong>Off</strong></div>
-            <div className="mini-stat"><span>Rollback rule</span><strong>2 fails</strong></div>
-          </div>
-        </article>
-
-        <article className="panel-card">
-          <div className="panel-header">
-            <div>
-              <h2>People</h2>
-              <p>Who should see founder-level alerts.</p>
+          ) : (
+            <div className="budget-unset">
+              <strong>No budget set</strong>
+              <span>Add a monthly budget in system parameters to enable budget tracking on the Costs page.</span>
+              <code>founder_monthly_budget_inr</code>
             </div>
-          </div>
-          <div className="leaderboard">
-            {['Ravi · Founder', 'Ops lead', 'Content lead'].map((name) => (
-              <div key={name} className="leaderboard-item compact">
-                <div>
-                  <strong>{name}</strong>
-                  <span>Alert subscriber</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
+          )}
+        </Card>
       </section>
+
+      <Card className="spaced" title="Current thresholds" hint="These are fixed in the analytics service — not yet editable from this screen">
+        <div className="pf-fields">
+          <div className="pf-field">Low-battery watchlist <strong>below 20%</strong></div>
+          <div className="pf-field">Quiet toy <strong>no usage for 7+ days</strong></div>
+          <div className="pf-field">Quiet-toy history window <strong>last 60 days</strong></div>
+          <div className="pf-field">All date bucketing <strong>Asia/Kolkata (IST)</strong></div>
+        </div>
+      </Card>
 
       <div className="session-bar">
         <span>Signed in{username ? ` as ${username}` : ''}</span>
         <button type="button" className="secondary-button" onClick={onSignOut}>Sign out</button>
       </div>
-    </div>
+    </>
   )
 }
 
+/* ================================================================== *
+ * App
+ * ================================================================== */
+
+/* A page that reads a field the API stopped sending used to blank the whole
+ * dashboard with only a minified stack in the console. Keep the shell and
+ * name the failure instead. */
+/* Keyed on the active page by its caller, so navigating away remounts it and
+ * clears the caught error. */
+class PageErrorBoundary extends Component<{ children: ReactNode }, { message: string | null }> {
+  state = { message: null as string | null }
+
+  static getDerivedStateFromError(error: unknown) {
+    return { message: error instanceof Error ? error.message : String(error) }
+  }
+
+  render() {
+    if (this.state.message) {
+      return (
+        <div className="error-banner">
+          This view could not be rendered: {this.state.message}. The API response is most likely
+          missing a field this build expects — check that the deployed manager-api matches this dashboard.
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
 function App() {
+  const { theme, toggle: toggleTheme } = useTheme()
+
   const [activePage, setActivePage] = useState<NavPage>('overview')
   const [overviewRange, setOverviewRange] = useState<RangeOption>('7d')
   const [engagementRange, setEngagementRange] = useState<RangeOption>('30d')
   const [contentRange, setContentRange] = useState<RangeOption>('7d')
   const [conversationRange, setConversationRange] = useState<RangeOption>('7d')
   const [costRange, setCostRange] = useState<RangeOption>('month')
+
   const [token, setToken] = useState('')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [authLoading, setAuthLoading] = useState(false)
+
   const [overview, setOverview] = useState<OverviewResponse | null>(null)
   const [engagement, setEngagement] = useState<EngagementResponse | null>(null)
   const [content, setContent] = useState<ContentResponse | null>(null)
   const [conversations, setConversations] = useState<ConversationsResponse | null>(null)
   const [costs, setCosts] = useState<CostsResponse | null>(null)
   const [operate, setOperate] = useState<OperateResponse | null>(null)
+  const [live, setLive] = useState<LiveResponse | null>(null)
+  const [brief, setBrief] = useState<BriefResponse | null>(null)
+
   const [rfidCards, setRfidCards] = useState<RfidCardMapping[]>([])
+  const [rfidCardTotal, setRfidCardTotal] = useState(0)
   const [contentPacks, setContentPacks] = useState<RfidContentPack[]>([])
+  const [contentPackTotal, setContentPackTotal] = useState(0)
   const [contentPackEditor, setContentPackEditor] = useState<RfidContentPack | null>(null)
+  const [contentPackEditorLoading, setContentPackEditorLoading] = useState(false)
+
   const [overviewLoading, setOverviewLoading] = useState(false)
   const [engagementLoading, setEngagementLoading] = useState(false)
   const [contentLoading, setContentLoading] = useState(false)
   const [conversationsLoading, setConversationsLoading] = useState(false)
   const [costsLoading, setCostsLoading] = useState(false)
   const [operateLoading, setOperateLoading] = useState(false)
+  const [liveLoading, setLiveLoading] = useState(false)
+  const [briefLoading, setBriefLoading] = useState(false)
   const [rfidCardsLoading, setRfidCardsLoading] = useState(false)
   const [contentPacksLoading, setContentPacksLoading] = useState(false)
-  const [contentPackEditorLoading, setContentPackEditorLoading] = useState(false)
+
   const [searchTerm, setSearchTerm] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null)
+  const [searching, setSearching] = useState(false)
   const [selectedResult, setSelectedResult] = useState<SearchResult | null>(null)
   const [familiesView, setFamiliesView] = useState<'list' | 'detail'>('list')
-  const [allFamilies, setAllFamilies] = useState<FamilyListEntry[]>([])
-  const [allFamiliesLoading, setAllFamiliesLoading] = useState(false)
+  const [families, setFamilies] = useState<FamilyListEntry[]>([])
+  const [familiesTotal, setFamiliesTotal] = useState(0)
+  const [familiesLoading, setFamiliesLoading] = useState(false)
   const [profile, setProfile] = useState<FamilyProfile | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
+
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const [transcript, setTranscript] = useState<TranscriptResponse | null>(null)
+  const [transcriptLoading, setTranscriptLoading] = useState(false)
+
   const [error, setError] = useState('')
 
   useEffect(() => {
     setToken(loadStoredToken())
   }, [])
+
+  const describeError = (requestError: unknown, fallback: string) =>
+    requestError instanceof ApiError ? `${fallback}: ${requestError.message}` : fallback
 
   useEffect(() => {
     if (!token) return
@@ -2399,7 +3516,7 @@ function App() {
     setOverviewLoading(true)
     apiFetch<OverviewResponse>(`/admin/founder/overview?range=${overviewRange}`, token)
       .then((payload) => { if (!cancelled) setOverview(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load overview') })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load overview')) })
       .finally(() => { if (!cancelled) setOverviewLoading(false) })
     return () => { cancelled = true }
   }, [overviewRange, token])
@@ -2410,7 +3527,7 @@ function App() {
     setEngagementLoading(true)
     apiFetch<EngagementResponse>(`/admin/founder/engagement?range=${engagementRange}`, token)
       .then((payload) => { if (!cancelled) setEngagement(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load engagement') })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load engagement')) })
       .finally(() => { if (!cancelled) setEngagementLoading(false) })
     return () => { cancelled = true }
   }, [engagementRange, token])
@@ -2421,7 +3538,7 @@ function App() {
     setContentLoading(true)
     apiFetch<ContentResponse>(`/admin/founder/content?range=${contentRange}`, token)
       .then((payload) => { if (!cancelled) setContent(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load content') })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load content')) })
       .finally(() => { if (!cancelled) setContentLoading(false) })
     return () => { cancelled = true }
   }, [contentRange, token])
@@ -2432,7 +3549,7 @@ function App() {
     setConversationsLoading(true)
     apiFetch<ConversationsResponse>(`/admin/founder/conversations?range=${conversationRange}`, token)
       .then((payload) => { if (!cancelled) setConversations(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load conversations') })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load conversations')) })
       .finally(() => { if (!cancelled) setConversationsLoading(false) })
     return () => { cancelled = true }
   }, [conversationRange, token])
@@ -2443,7 +3560,7 @@ function App() {
     setCostsLoading(true)
     apiFetch<CostsResponse>(`/admin/founder/costs?range=${costRange}`, token)
       .then((payload) => { if (!cancelled) setCosts(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load costs') })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load costs')) })
       .finally(() => { if (!cancelled) setCostsLoading(false) })
     return () => { cancelled = true }
   }, [costRange, token])
@@ -2454,18 +3571,55 @@ function App() {
     setOperateLoading(true)
     apiFetch<OperateResponse>('/admin/founder/operate', token)
       .then((payload) => { if (!cancelled) setOperate(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load fleet view') })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load fleet view')) })
       .finally(() => { if (!cancelled) setOperateLoading(false) })
     return () => { cancelled = true }
   }, [token])
+
+  // Mission Control is a live wall: fetch on open, then refresh every 30s
+  // while it is the active page.
+  useEffect(() => {
+    if (!token || activePage !== 'live') return
+    let cancelled = false
+
+    const load = () => {
+      apiFetch<LiveResponse>('/admin/founder/live', token)
+        .then((payload) => { if (!cancelled) setLive(payload) })
+        .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load mission control')) })
+        .finally(() => { if (!cancelled) setLiveLoading(false) })
+    }
+
+    setLiveLoading(true)
+    load()
+    const timer = window.setInterval(load, 30000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [activePage, token])
+
+  useEffect(() => {
+    if (!token || activePage !== 'brief') return
+    let cancelled = false
+    setBriefLoading(true)
+    apiFetch<BriefResponse>('/admin/founder/brief', token)
+      .then((payload) => { if (!cancelled) setBrief(payload) })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load the daily brief')) })
+      .finally(() => { if (!cancelled) setBriefLoading(false) })
+    return () => { cancelled = true }
+  }, [activePage, token])
 
   useEffect(() => {
     if (!token) return
     let cancelled = false
     setRfidCardsLoading(true)
     apiFetch<{ list: RfidCardMapping[]; total: number }>('/admin/rfid/card/page?page=1&limit=100', token)
-      .then((payload) => { if (!cancelled) setRfidCards(payload.list || []) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load card mappings') })
+      .then((payload) => {
+        if (cancelled) return
+        setRfidCards(payload.list || [])
+        setRfidCardTotal(payload.total ?? (payload.list || []).length)
+      })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load card mappings')) })
       .finally(() => { if (!cancelled) setRfidCardsLoading(false) })
     return () => { cancelled = true }
   }, [token])
@@ -2475,8 +3629,12 @@ function App() {
     let cancelled = false
     setContentPacksLoading(true)
     apiFetch<{ list: RfidContentPack[]; total: number }>('/admin/rfid/content-pack/page?page=1&limit=100', token)
-      .then((payload) => { if (!cancelled) setContentPacks(payload.list || []) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load content packs') })
+      .then((payload) => {
+        if (cancelled) return
+        setContentPacks(payload.list || [])
+        setContentPackTotal(payload.total ?? (payload.list || []).length)
+      })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load content packs')) })
       .finally(() => { if (!cancelled) setContentPacksLoading(false) })
     return () => { cancelled = true }
   }, [token])
@@ -2484,13 +3642,40 @@ function App() {
   useEffect(() => {
     if (!token) return
     let cancelled = false
-    setAllFamiliesLoading(true)
-    apiFetch<FamilyListEntry[]>('/admin/founder/families/list', token)
-      .then((payload) => { if (!cancelled) setAllFamilies(payload) })
-      .catch((requestError: unknown) => { if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load families') })
-      .finally(() => { if (!cancelled) setAllFamiliesLoading(false) })
+    setFamiliesLoading(true)
+    apiFetch<FamilyListResponse>('/admin/founder/families/list?page=1&limit=200', token)
+      .then((payload) => {
+        if (cancelled) return
+        setFamilies(payload.items || [])
+        setFamiliesTotal(payload.total ?? (payload.items || []).length)
+      })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load families')) })
+      .finally(() => { if (!cancelled) setFamiliesLoading(false) })
     return () => { cancelled = true }
   }, [token])
+
+  // Server-side family search (matches kids, parents, MAC addresses and aliases).
+  useEffect(() => {
+    if (!token) return
+    const query = searchTerm.trim()
+    if (query.length < 2) {
+      setSearchResults(null)
+      setSearching(false)
+      return
+    }
+    let cancelled = false
+    setSearching(true)
+    const timer = window.setTimeout(() => {
+      apiFetch<SearchResponse>(`/admin/founder/families/search?q=${encodeURIComponent(query)}`, token)
+        .then((payload) => { if (!cancelled) setSearchResults(payload) })
+        .catch(() => { if (!cancelled) setSearchResults(null) })
+        .finally(() => { if (!cancelled) setSearching(false) })
+    }, 300)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [searchTerm, token])
 
   useEffect(() => {
     if (!token || !selectedResult) return
@@ -2499,18 +3684,27 @@ function App() {
     const identifier = selectedResult.macAddress || selectedResult.id
     apiFetch<FamilyProfile>(`/admin/founder/families/${encodeURIComponent(identifier)}/profile`, token)
       .then((payload) => { if (!cancelled) setProfile(payload) })
-      .catch((requestError: unknown) => {
-        if (!cancelled) setError(requestError instanceof ApiError ? requestError.message : 'Unable to load family profile')
-      })
+      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load family profile')) })
       .finally(() => { if (!cancelled) setProfileLoading(false) })
     return () => { cancelled = true }
   }, [selectedResult, token])
+
+  useEffect(() => {
+    if (!token || !selectedSessionId) return
+    let cancelled = false
+    setTranscriptLoading(true)
+    setTranscript(null)
+    apiFetch<TranscriptResponse>(`/admin/founder/conversations/${encodeURIComponent(selectedSessionId)}/transcript`, token)
+      .then((payload) => { if (!cancelled) setTranscript(payload) })
+      .catch(() => { if (!cancelled) setTranscript(null) })
+      .finally(() => { if (!cancelled) setTranscriptLoading(false) })
+    return () => { cancelled = true }
+  }, [selectedSessionId, token])
 
   const signIn = async () => {
     setAuthLoading(true)
     setError('')
     try {
-      const captchaId = crypto.randomUUID()
       const payload = await apiFetchPublic<{ token: string }>('/user/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2518,7 +3712,7 @@ function App() {
           username: username.trim(),
           password,
           captcha: 'MOBILE_APP_BYPASS',
-          captchaId,
+          captchaId: crypto.randomUUID(),
         }),
       })
       localStorage.setItem(AUTH_STORAGE_KEY, payload.token)
@@ -2542,11 +3736,17 @@ function App() {
     setConversations(null)
     setCosts(null)
     setOperate(null)
+    setLive(null)
+    setBrief(null)
     setRfidCards([])
     setContentPacks([])
     setContentPackEditor(null)
     setProfile(null)
     setSelectedResult(null)
+    setSearchResults(null)
+    setSearchTerm('')
+    setSelectedSessionId(null)
+    setTranscript(null)
     setFamiliesView('list')
   }
 
@@ -2557,15 +3757,10 @@ function App() {
       const payload = await apiFetch<RfidContentPack>(`/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`, token)
       setContentPackEditor(payload)
     } catch (requestError: unknown) {
-      setError(requestError instanceof ApiError ? requestError.message : 'Unable to load content pack details')
+      setError(describeError(requestError, 'Unable to load content pack details'))
     } finally {
       setContentPackEditorLoading(false)
     }
-  }
-
-  const closeContentPackEditor = () => {
-    setContentPackEditor(null)
-    setContentPackEditorLoading(false)
   }
 
   if (!token) {
@@ -2575,6 +3770,8 @@ function App() {
         password={password}
         loading={authLoading}
         error={error}
+        theme={theme}
+        onToggleTheme={toggleTheme}
         onUsernameChange={setUsername}
         onPasswordChange={setPassword}
         onSubmit={signIn}
@@ -2582,54 +3779,160 @@ function App() {
     )
   }
 
+  const mobileTabs: Array<{ key: NavPage; label: string; icon: string }> = [
+    { key: 'overview', label: 'Home', icon: '☀️' },
+    { key: 'live', label: 'Live', icon: '🛰' },
+    { key: 'brief', label: 'Brief', icon: '📰' },
+    { key: 'families', label: 'Families', icon: '👨‍👩‍👧' },
+    { key: 'costs', label: 'Costs', icon: '₹' },
+    { key: 'operate', label: 'Fleet', icon: '🛠' },
+  ]
+
   return (
     <div className="app-shell">
-      <Sidebar activePage={activePage} onChange={setActivePage} />
+      <Sidebar activePage={activePage} onChange={setActivePage} username={username} />
+
       <main className="main-shell">
         {error ? <div className="error-banner">{error}</div> : null}
 
-        {activePage === 'overview' ? <OverviewPage range={overviewRange} overview={overview} engagement={engagement} costs={costs} operate={operate} loading={overviewLoading} onRangeChange={setOverviewRange} /> : null}
-        {activePage === 'engagement' ? <EngagementPage range={engagementRange} data={engagement} loading={engagementLoading} onRangeChange={setEngagementRange} /> : null}
-        {activePage === 'content' ? <ContentPage range={contentRange} data={content} loading={contentLoading} onRangeChange={setContentRange} /> : null}
-        {activePage === 'conversations' ? <ConversationsPage range={conversationRange} data={conversations} loading={conversationsLoading} onRangeChange={setConversationRange} /> : null}
+        <PageErrorBoundary key={activePage}>
+        {activePage === 'overview' ? (
+          <OverviewPage
+            range={overviewRange}
+            overview={overview}
+            engagement={engagement}
+            costs={costs}
+            operate={operate}
+            loading={overviewLoading}
+            username={username}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onRangeChange={setOverviewRange}
+            onNavigate={setActivePage}
+          />
+        ) : null}
+
+        {activePage === 'live' ? (
+          <MissionControlPage data={live} loading={liveLoading} theme={theme} onToggleTheme={toggleTheme} />
+        ) : null}
+
+        {activePage === 'brief' ? (
+          <DailyBriefPage data={brief} loading={briefLoading} theme={theme} onToggleTheme={toggleTheme} />
+        ) : null}
+
+        {activePage === 'engagement' ? (
+          <EngagementPage
+            range={engagementRange}
+            data={engagement}
+            loading={engagementLoading}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onRangeChange={setEngagementRange}
+          />
+        ) : null}
+
+        {activePage === 'content' ? (
+          <ContentPage
+            range={contentRange}
+            data={content}
+            loading={contentLoading}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onRangeChange={setContentRange}
+          />
+        ) : null}
+
+        {activePage === 'conversations' ? (
+          <ConversationsPage
+            range={conversationRange}
+            data={conversations}
+            loading={conversationsLoading}
+            transcript={transcript}
+            transcriptLoading={transcriptLoading}
+            selectedSessionId={selectedSessionId}
+            onSelectSession={setSelectedSessionId}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onRangeChange={setConversationRange}
+          />
+        ) : null}
+
         {activePage === 'families' ? (
           <FamiliesPage
-            view={familiesView}
-            onBack={() => setFamiliesView('list')}
+            theme={theme}
+            onToggleTheme={toggleTheme}
             searchTerm={searchTerm}
             onSearchTermChange={setSearchTerm}
+            searchResults={searchResults}
+            searching={searching}
             onSelectResult={(result) => {
               setSelectedResult(result)
               setFamiliesView('detail')
             }}
+            view={familiesView}
+            onBack={() => setFamiliesView('list')}
             profile={profile}
             loadingProfile={profileLoading}
-            allFamilies={allFamilies}
-            allFamiliesLoading={allFamiliesLoading}
+            families={families}
+            familiesLoading={familiesLoading}
+            familiesTotal={familiesTotal}
           />
         ) : null}
-        {activePage === 'costs' ? <CostsPage range={costRange} data={costs} loading={costsLoading} onRangeChange={setCostRange} /> : null}
-        {activePage === 'operate' ? <OperatePage data={operate} loading={operateLoading} /> : null}
-        {activePage === 'rfidStudio' ? <RfidStudioPage cards={rfidCards} loading={rfidCardsLoading} /> : null}
+
+        {activePage === 'costs' ? (
+          <CostsPage
+            range={costRange}
+            data={costs}
+            loading={costsLoading}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onRangeChange={setCostRange}
+          />
+        ) : null}
+
+        {activePage === 'operate' ? (
+          <OperatePage data={operate} loading={operateLoading} theme={theme} onToggleTheme={toggleTheme} />
+        ) : null}
+
+        {activePage === 'rfidStudio' ? (
+          <RfidStudioPage cards={rfidCards} total={rfidCardTotal} loading={rfidCardsLoading} theme={theme} onToggleTheme={toggleTheme} />
+        ) : null}
+
         {activePage === 'contentLibrary' ? (
           <ContentLibraryPage
             packs={contentPacks}
+            total={contentPackTotal}
             loading={contentPacksLoading}
             editorPack={contentPackEditor}
             editorLoading={contentPackEditorLoading}
             onEdit={openContentPackEditor}
-            onCloseEditor={closeContentPackEditor}
+            onCloseEditor={() => {
+              setContentPackEditor(null)
+              setContentPackEditorLoading(false)
+            }}
+            theme={theme}
+            onToggleTheme={toggleTheme}
           />
         ) : null}
-        {activePage === 'settings' ? <SettingsPage username={username} onSignOut={signOut} /> : null}
+
+        {activePage === 'settings' ? (
+          <SettingsPage username={username} costs={costs} theme={theme} onToggleTheme={toggleTheme} onSignOut={signOut} />
+        ) : null}
+        </PageErrorBoundary>
       </main>
 
       <nav className="mobile-nav">
-        <button type="button" className={activePage === 'overview' ? 'active' : ''} onClick={() => setActivePage('overview')}>Overview</button>
-        <button type="button" className={activePage === 'engagement' ? 'active' : ''} onClick={() => setActivePage('engagement')}>Engage</button>
-        <button type="button" className={activePage === 'families' ? 'active' : ''} onClick={() => setActivePage('families')}>Families</button>
-        <button type="button" className={activePage === 'costs' ? 'active' : ''} onClick={() => setActivePage('costs')}>Costs</button>
-        <button type="button" className={activePage === 'operate' ? 'active' : ''} onClick={() => setActivePage('operate')}>Operate</button>
+        {mobileTabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={activePage === tab.key ? 'active' : ''}
+            onClick={() => setActivePage(tab.key)}
+          >
+            <span className="ic" aria-hidden="true">{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
       </nav>
     </div>
   )
