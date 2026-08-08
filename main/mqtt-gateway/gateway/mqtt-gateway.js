@@ -103,7 +103,7 @@ async function postCardTapHandshake(tapPayload, { maxAttempts = 3, timeoutMs = 5
  *   - contentText: Text to speak directly (for read_only mode)
  *   - promptText: Text to send to LLM (for prompt mode, backward compatible)
  */
-async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
+async function fetchRfidContentFromManagerApi(rfidUid, sequence, deviceMac) {
   try {
     const trimmedUid = (rfidUid || "").trim();
     if (!trimmedUid) {
@@ -121,9 +121,14 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
 
     // Always fetch full card data (no sequence param).
     // The gateway handles sequence selection locally from the items array.
+    // mac is what resolves a custom card: those carry no card-to-device binding,
+    // so the pack that plays is the tapping device's own.
     let apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/lookup/${encodeURIComponent(
       trimmedUid
     )}`;
+    if (deviceMac) {
+      apiUrl += `?mac=${encodeURIComponent(deviceMac)}`;
+    }
 
     logger.info(
       `ðŸ” [RFID-LOOKUP] Looking up content for RFID UID ${trimmedUid}, sequence=${sequence} via ${apiUrl}`
@@ -214,7 +219,7 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence) {
  * @param {string} rfidUid - RFID card UID
  * @returns {Object|null} Content download manifest or null if not found
  */
-async function fetchContentDownloadManifest(rfidUid) {
+async function fetchContentDownloadManifest(rfidUid, deviceMac) {
   try {
     const trimmedUid = (rfidUid || "").trim();
     if (!trimmedUid) {
@@ -230,9 +235,10 @@ async function fetchContentDownloadManifest(rfidUid) {
       return null;
     }
 
+    // mac resolves custom cards to the requesting device's own pack.
     const apiUrl = `${baseUrl.replace(/\/$/, "")}/admin/rfid/card/content/download/${encodeURIComponent(
       trimmedUid
-    )}`;
+    )}${deviceMac ? `?mac=${encodeURIComponent(deviceMac)}` : ""}`;
 
     logger.info(
       `ðŸ” [CONTENT-DOWNLOAD] Fetching content manifest for RFID UID ${trimmedUid} via ${apiUrl}`
@@ -1078,7 +1084,7 @@ class MQTTGateway {
 
         logger.info(`[RFID-SCAN] Card scanned on device ${deviceId}: uid=${rfidUid}, sequence=${sequence}`);
 
-        const rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence);
+        const rfidContent = await fetchRfidContentFromManagerApi(rfidUid, sequence, deviceId);
         if (!rfidContent) {
           // Send card_unknown response to device (Phase 9 format)
           const unknownResponse = {
@@ -1989,7 +1995,7 @@ class MQTTGateway {
 
     try {
       // Fetch unified content manifest (works for habits, rhymes, stories, etc.)
-      const manifest = await fetchContentDownloadManifest(rfidUid);
+      const manifest = await fetchContentDownloadManifest(rfidUid, deviceId);
 
       if (!manifest) {
         // No content linked to this card

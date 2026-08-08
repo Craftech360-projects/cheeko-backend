@@ -1,24 +1,31 @@
 /**
  * Custom Card Service
  *
- * Parent-uploaded audio for a kid's custom RFID card.
+ * Parent-uploaded audio for a device's custom RFID cards.
  *
- * Ownership model: a card belongs to a kid, a kid belongs to a sys_user. The
- * Flutter app resolves kidId client-side and does not prove ownership, so every
- * entry point here re-verifies the kid against the authenticated parent.
+ * Ownership model: a custom pack belongs to a *device*, not a kid or a card.
+ * `custom_card` is a flat allowlist of issued custom-card UIDs with no device
+ * binding — tapping any issued custom card on a toy plays that toy's own pack.
+ * The parent proves ownership of the MAC, never of the card.
  *
- * Storage model: only the S3 object key is persisted. Playable URLs are signed
- * on demand (see rfid.service lookupCardByUid) so a stored URL can never expire
- * mid-playback.
+ * Storage model: the audio is a normal `rfid_content_pack` (pack_code
+ * CUSTOM_<MAC>) holding a single `content_item`, so the tap handshake, the
+ * download manifest and the ESP32 download path are the stock content-card ones
+ * — there is no second content path to maintain.
  */
 
+const { createHash } = require('crypto');
 const { prisma } = require('../config/database');
 const uploadService = require('./upload.service');
-const profileService = require('./profile.service');
+const rfidService = require('./rfid.service');
+const { normalizeMacAddress, packCodeForMac } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB, matches the client-side check
+
+// Same ceiling as a catalogue content pack.
+const MAX_ITEMS = 10;
 
 // Extension -> the MIME type we persist. The client sends audio/mpeg for .mp3 and
 // audio/wav for .wav, but the header is attacker-controlled so extension and
@@ -90,141 +97,322 @@ const validateAudioUpload = (file, fallbackName) => {
 };
 
 /**
- * Verify the kid belongs to the authenticated parent.
+ * Verify the device belongs to the authenticated parent.
  * Answers "not found" rather than "forbidden" so the endpoint cannot be used to
- * probe which kid ids exist under other parents.
+ * probe which MACs are registered to other parents.
+ * @returns {Promise<Object>} the ai_device row
  */
-const assertKidOwnedByUser = async (userId, kidId) => {
-  const kid = await profileService.getKidById(userId, kidId);
-  if (!kid) {
-    throw new ApiError('That child profile could not be found.', 404);
+const assertDeviceOwnedByUser = async (userId, mac) => {
+  const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) {
+    throw new ApiError('That device address is not valid.', 400);
   }
-  return kid;
+
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: normalizedMac, user_id: BigInt(userId) },
+    select: { id: true, mac_address: true, alias: true, kid_id: true }
+  });
+  if (!device) {
+    throw new ApiError('That device could not be found.', 404);
+  }
+  return device;
 };
 
-/**
- * Shape a card + its active pack into the response the Flutter app renders.
- * contentPack is null when nothing has been uploaded yet; rfidUid is null until
- * an admin assigns the physical card. Neither is an error for the client.
- */
-const serializeCard = async (card, pack) => {
-  let contentPack = null;
+const findPackForMac = (mac) =>
+  prisma.rfid_content_pack.findFirst({ where: { pack_code: packCodeForMac(mac) } });
 
-  if (pack) {
-    contentPack = {
-      id: String(pack.id),
-      kidId: String(pack.kid_id),
-      customCardId: String(card.id),
-      title: pack.file_name || null,
-      fileName: pack.file_name || null,
-      // Signed per request: the app plays it immediately, and the tap lookup
-      // signs its own copy independently.
-      fileUrl: await uploadService.getSignedAudioUrl(pack.file_key),
-      mimeType: pack.file_type || null,
-      sizeBytes: pack.file_size_bytes ? Number(pack.file_size_bytes) : null,
-      durationSeconds: pack.duration_seconds ?? null,
-      updatedAt: pack.update_date
-    };
-  }
+/**
+ * Shape a device's pack into the response the Flutter app renders.
+ * contentPack is null when nothing has been uploaded yet — not an error.
+ * `items` is the full list; `fileUrl`/`fileName` mirror the first item so a
+ * client written against the single-recording shape keeps working.
+ */
+const serializePack = (device, pack, items = []) => {
+  const first = items[0] || null;
 
   return {
-    id: String(card.id),
-    kidId: String(card.kid_id),
-    rfidUid: card.rfid_uid || null,
-    contentPack
+    macAddress: device.mac_address,
+    deviceAlias: device.alias || null,
+    maxItems: MAX_ITEMS,
+    contentPack: pack
+      ? {
+        id: String(pack.id),
+        packCode: pack.pack_code,
+        macAddress: device.mac_address,
+        title: first?.title || pack.name,
+        fileName: first?.title || null,
+        // Public CloudFront URL — the same one the toy downloads, so what the
+        // parent previews is exactly what plays.
+        fileUrl: first?.audio_url || null,
+        mimeType: null,
+        sizeBytes: first?.audio_size_bytes ? Number(first.audio_size_bytes) : null,
+        durationSeconds: null,
+        version: pack.version,
+        updatedAt: pack.update_date,
+        totalItems: items.length,
+        items: items.map((item) => ({
+          itemNumber: item.item_number,
+          title: item.title,
+          fileUrl: item.audio_url,
+          sizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null
+        }))
+      }
+      : null
   };
 };
 
-const findActivePack = (kidId) =>
-  prisma.custom_content_pack.findFirst({
-    where: { kid_id: BigInt(kidId), is_active: true },
-    orderBy: { create_date: 'desc' }
+// Columns are listed explicitly because deployed databases lag the Prisma model
+// (story_number / story_title are absent on some), and an unqualified query
+// selects every model column and dies on whichever one is missing.
+const CONTENT_ITEM_FIELDS = {
+  id: true,
+  item_number: true,
+  title: true,
+  audio_url: true,
+  audio_size_bytes: true
+};
+
+const loadPackItems = (packId) =>
+  prisma.content_item.findMany({
+    where: { content_pack_id: packId },
+    orderBy: { item_number: 'asc' },
+    select: CONTENT_ITEM_FIELDS
   });
+
+// The stored URL is <publicBase>/<key>; strip scheme + host to recover the key.
+const keyFromUrl = (url) => (url ? String(url).split('/').slice(3).join('/') : null);
 
 /**
- * GET the kid's custom card and whatever content is on it.
- * @returns {Promise<Object|null>} null when the kid has no card row yet
+ * Delete storage objects for items that are no longer in the pack.
+ *
+ * Runs AFTER the DB write, never before: if storage went first and the write
+ * then failed, rows would point at objects that no longer exist and the card
+ * would go silent with nothing on the server to explain why. An orphaned object
+ * is the cheaper failure.
+ *
+ * deleteCustomCardAudio ignores keys outside the customcard prefix, which is
+ * what stops a pack that somehow references catalogue audio from deleting it.
  */
-const getCustomCardForKid = async (userId, kidId) => {
-  await assertKidOwnedByUser(userId, kidId);
-
-  const card = await prisma.custom_card.findFirst({
-    where: { kid_id: BigInt(kidId) }
-  });
-  if (!card) return null;
-
-  const pack = await findActivePack(kidId);
-  return serializeCard(card, pack);
+const deleteOrphanedAudio = async (before, keptUrls) => {
+  for (const item of before) {
+    if (item.audio_url && !keptUrls.has(item.audio_url)) {
+      await uploadService.deleteCustomCardAudio(keyFromUrl(item.audio_url));
+    }
+  }
 };
 
 /**
- * Replace the kid's custom card content with a new upload.
- *
- * Upserts the card (leaving rfid_uid NULL for the admin to fill in later),
- * retires the previous pack, and inserts the new one. Returns the same shape as
- * the GET so the app can render "On the card now" without a refetch.
+ * GET the device's custom pack.
+ * @returns {Promise<Object>} always shaped; contentPack is null before first upload
  */
-const replaceCustomCardContent = async (userId, kidId, file, { title } = {}) => {
-  // Use the row's own id from here on, never the caller's string, so nothing
-  // caller-shaped can reach the S3 key.
-  const kid = await assertKidOwnedByUser(userId, kidId);
-  const id = kid.id;
+const getCustomCardForDevice = async (userId, mac) => {
+  const device = await assertDeviceOwnedByUser(userId, mac);
+  const pack = await findPackForMac(device.mac_address);
+  const items = pack ? await loadPackItems(pack.id) : [];
+  return serializePack(device, pack, items);
+};
 
+/**
+ * Ensure the device has a pack row, creating an empty one on first use.
+ * Item writes go through rfidService.updateContentPack from here on, so this
+ * only has to establish the pack itself.
+ */
+const ensurePackForDevice = async (device, userId) => {
+  const packCode = packCodeForMac(device.mac_address);
+
+  return prisma.rfid_content_pack.upsert({
+    where: { pack_code: packCode },
+    create: {
+      pack_code: packCode,
+      name: device.alias ? `${device.alias} — Custom Card` : 'Custom Card',
+      content_type: 'rfidcontent',
+      total_items: 0,
+      version: '0',
+      active: true,
+      creator: BigInt(userId)
+    },
+    update: {}
+  });
+};
+
+/**
+ * Write a new item set for the device's pack, then clean up storage.
+ *
+ * The DB write is delegated to rfidService.updateContentPack — the same function
+ * the dashboard's content pack editor uses — so item ordering, total_items and
+ * the optional-column handling live in one place. What it does not do is touch
+ * storage, so the orphan sweep is ours.
+ *
+ * Version and hash move on every write. The toy compares hash first and falls
+ * back to version, so both have to change or it keeps playing its cached copy.
+ */
+const writePackItems = async (device, pack, items, userId) => {
+  const before = await loadPackItems(pack.id);
+  const nextVersion = String(Number(pack.version || 0) + 1);
+  // Hash covers the whole set, so adding, removing or reordering all register as
+  // a change — not just a different first recording.
+  const contentHash = createHash('sha256')
+    .update(items.map((item) => `${item.itemNumber}:${item.audioUrl}`).join('|'))
+    .digest('hex');
+
+  await rfidService.updateContentPack({
+    id: Number(pack.id),
+    items,
+    version: nextVersion,
+    contentHash,
+    active: true
+  }, userId);
+
+  await deleteOrphanedAudio(before, new Set(items.map((item) => item.audioUrl)));
+
+  const saved = await prisma.rfid_content_pack.findFirst({ where: { id: pack.id } });
+  const savedItems = await loadPackItems(pack.id);
+
+  logger.info(
+    `[CUSTOM-CARD] Wrote ${savedItems.length} item(s) for mac=${device.mac_address}: pack_code=${pack.pack_code}, version=${nextVersion}`
+  );
+
+  return serializePack(device, saved, savedItems);
+};
+
+const toItemPayload = (item) => ({
+  itemNumber: item.item_number,
+  title: item.title,
+  audioUrl: item.audio_url,
+  audioSizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null
+});
+
+/**
+ * Add one or more recordings to the device's custom card.
+ *
+ * Appends rather than replaces: a parent building a card up over several
+ * sessions must not lose what is already on it. Capped at MAX_ITEMS, and an
+ * over-cap request is rejected whole rather than partially applied — a silently
+ * truncated upload reads as a bug from the app.
+ *
+ * @param {Array|Object} files - multer file object(s)
+ */
+const addCustomCardContent = async (userId, mac, files, { title } = {}) => {
+  const uploads = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  if (uploads.length === 0) {
+    throw new ApiError('Please choose a recording to upload.', 400);
+  }
+
+  const device = await assertDeviceOwnedByUser(userId, mac);
+  // Validate every file before uploading any, so a bad third file cannot leave
+  // the first two sitting in storage.
+  const validated = uploads.map((file) => ({ file, ...validateAudioUpload(file, title) }));
+
+  const pack = await ensurePackForDevice(device, userId);
+  const existing = await loadPackItems(pack.id);
+
+  if (existing.length + validated.length > MAX_ITEMS) {
+    throw new ApiError(
+      `This card holds up to ${MAX_ITEMS} recordings. It already has ${existing.length}, so ${validated.length} more will not fit — remove one first.`,
+      400
+    );
+  }
+
+  const appended = [];
+  for (const [index, entry] of validated.entries()) {
+    const { url } = await uploadService.uploadCustomCardAudio(
+      entry.file.buffer,
+      device.mac_address,
+      entry.file.originalname || `recording${entry.ext}`,
+      entry.mimeType
+    );
+
+    const itemNumber = existing.length + index + 1;
+    appended.push({
+      itemNumber,
+      title: entry.file.originalname || title || `Recording ${itemNumber}`,
+      audioUrl: url,
+      audioSizeBytes: entry.file.buffer.length
+    });
+  }
+
+  return writePackItems(device, pack, [...existing.map(toItemPayload), ...appended], userId);
+};
+
+/**
+ * Swap the audio at one position, leaving the rest of the card alone.
+ *
+ * Distinct from delete-then-add: that appends, so fixing recording 2 of 3 would
+ * silently move it to position 3 and reorder the card under the parent. Here the
+ * item number is preserved and only that slot's audio changes. The old object is
+ * removed by the orphan sweep in writePackItems.
+ */
+const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title } = {}) => {
+  if (!file) {
+    throw new ApiError('Please choose a recording to upload.', 400);
+  }
+
+  const device = await assertDeviceOwnedByUser(userId, mac);
   const { ext, mimeType } = validateAudioUpload(file, title);
 
-  // Upload before touching the DB: a failed upload should leave no trace, and an
-  // orphaned object is cheaper than a row pointing at a key that does not exist.
-  const { s3Key } = await uploadService.uploadCustomCardAudio(
+  const pack = await findPackForMac(device.mac_address);
+  if (!pack) {
+    throw new ApiError('This device has no custom card content.', 404);
+  }
+
+  const existing = await loadPackItems(pack.id);
+  const target = existing.find((item) => item.item_number === Number(itemNumber));
+  if (!target) {
+    throw new ApiError('That recording could not be found on this card.', 404);
+  }
+
+  const { url } = await uploadService.uploadCustomCardAudio(
     file.buffer,
-    id,
+    device.mac_address,
     file.originalname || `recording${ext}`,
     mimeType
   );
 
-  const card = await prisma.custom_card.upsert({
-    where: { kid_id: id },
-    create: { kid_id: id, creator: BigInt(userId) },
-    update: { updater: BigInt(userId), update_date: new Date() }
-  });
-
-  const previous = await findActivePack(id);
-
-  const pack = await prisma.$transaction(async (tx) => {
-    // Soft retire every currently-active pack for this kid, so the "one active
-    // pack" invariant holds even if a prior run left more than one behind.
-    await tx.custom_content_pack.updateMany({
-      where: { kid_id: id, is_active: true },
-      data: { is_active: false, updater: BigInt(userId), update_date: new Date() }
-    });
-
-    return tx.custom_content_pack.create({
-      data: {
-        kid_id: id,
-        file_key: s3Key,
-        file_name: title || file.originalname || null,
-        file_type: mimeType,
-        file_size_bytes: BigInt(file.buffer.length),
-        creator: BigInt(userId)
+  const items = existing.map((item) => (
+    item.item_number === Number(itemNumber)
+      ? {
+        itemNumber: item.item_number,
+        title: file.originalname || title || item.title,
+        audioUrl: url,
+        audioSizeBytes: file.buffer.length
       }
-    });
-  });
+      : toItemPayload(item)
+  ));
 
-  // The retired row keeps its key for audit, but the object itself is a child's
-  // recording that has been replaced — remove it rather than leave it readable.
-  if (previous?.file_key && previous.file_key !== s3Key) {
-    await uploadService.deleteCustomCardAudio(previous.file_key);
+  return writePackItems(device, pack, items, userId);
+};
+
+/**
+ * Remove one recording from the device's card, and its object from storage.
+ * Survivors are renumbered so item_number stays contiguous — the toy selects by
+ * sequence, and a gap would have it ask for an item that is not there.
+ */
+const deleteCustomCardItem = async (userId, mac, itemNumber) => {
+  const device = await assertDeviceOwnedByUser(userId, mac);
+  const pack = await findPackForMac(device.mac_address);
+  if (!pack) {
+    throw new ApiError('This device has no custom card content.', 404);
   }
 
-  logger.info(
-    `[CUSTOM-CARD] Replaced content for kid_id=${kidId}: pack_id=${pack.id}, key=${s3Key}, retired=${previous?.id || 'none'}`
-  );
+  const existing = await loadPackItems(pack.id);
+  const target = existing.find((item) => item.item_number === Number(itemNumber));
+  if (!target) {
+    throw new ApiError('That recording could not be found on this card.', 404);
+  }
 
-  return serializeCard(card, pack);
+  const items = existing
+    .filter((item) => item.item_number !== Number(itemNumber))
+    .map((item, index) => ({ ...toItemPayload(item), itemNumber: index + 1 }));
+
+  return writePackItems(device, pack, items, userId);
 };
 
 module.exports = {
-  getCustomCardForKid,
-  replaceCustomCardContent,
+  getCustomCardForDevice,
+  addCustomCardContent,
+  replaceCustomCardItem,
+  deleteCustomCardItem,
+  MAX_ITEMS,
   // exported for tests
   validateAudioUpload,
   sniffAudioExtension,

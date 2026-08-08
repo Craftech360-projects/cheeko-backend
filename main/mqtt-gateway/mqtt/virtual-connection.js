@@ -561,7 +561,7 @@ class VirtualMQTTConnection {
     const helloRfidUid = json.rfid_uid || null;
     if (helloRfidUid) {
       try {
-        const lookupUrl = `${process.env.MANAGER_API_URL}/admin/rfid/card/lookup/${encodeURIComponent(helloRfidUid)}`;
+        const lookupUrl = `${process.env.MANAGER_API_URL}/admin/rfid/card/lookup/${encodeURIComponent(helloRfidUid)}?mac=${encodeURIComponent(this.deviceId || "")}`;
         this.sessionConfig = {
           languageCode: null,
           languageName: null,
@@ -1598,7 +1598,8 @@ class VirtualMQTTConnection {
         }
 
         // Call Manager API RFID lookup endpoint
-        const lookupUrl = `${baseUrl}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}`;
+        // mac resolves custom cards to this device's own pack.
+        const lookupUrl = `${baseUrl}/admin/rfid/card/lookup/${encodeURIComponent(rfidUid)}?mac=${encodeURIComponent(this.deviceId || "")}`;
         console.log(`🔍 [RFID] Looking up card at: ${lookupUrl}`);
 
         const response = await axios.get(lookupUrl, { timeout: 5000 });

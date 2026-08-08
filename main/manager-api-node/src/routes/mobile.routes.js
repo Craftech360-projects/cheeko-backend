@@ -255,41 +255,80 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
 
 // ─── Custom Card ────────────────────────────────────────────────────────────
 
-// Returns the kid's card plus its active content pack.
-// 404 when the kid has no card row yet — the app reads that as "no card yet",
-// not as an error. A null rfidUid (admin has not assigned the physical card)
-// and a null contentPack are both normal states, never rejections.
-router.get('/kids/:kidId/custom-card', asyncHandler(async (req, res) => {
-    const card = await customCardService.getCustomCardForKid(req.mobileUser.id, req.params.kidId);
-    if (!card) {
-        return res.status(404).json({ code: 404, msg: 'No custom card for this child yet.', data: null });
-    }
+// Custom content belongs to a device, not to a kid or to a particular card: any
+// issued custom card tapped on this toy plays this pack. Always 200 — a null
+// contentPack means "nothing recorded yet", which is a normal state, not an error.
+router.get('/devices/:mac/custom-card', asyncHandler(async (req, res) => {
+    const card = await customCardService.getCustomCardForDevice(req.mobileUser.id, req.params.mac);
     success(res, card);
 }));
 
-// Creates the content pack. Replaces whatever was on the card before.
-router.post('/kids/:kidId/custom-card/content',
-    handleUploadErrors(customCardUpload.single('file')),
+// Adds recordings to the device's pack, creating it on first upload. Appends up
+// to MAX_ITEMS so a parent can build the card up over several sessions.
+// Accepts either `files` (up to 10) or a single `file`, so the shipped app's
+// one-file-per-upload call keeps working unchanged.
+router.post('/devices/:mac/custom-card/content',
+    handleUploadErrors(customCardUpload.fields([
+        { name: 'files', maxCount: customCardService.MAX_ITEMS },
+        { name: 'file', maxCount: 1 },
+    ])),
     asyncHandler(async (req, res) => {
-        if (!req.file) {
+        const uploads = [...(req.files?.files || []), ...(req.files?.file || [])];
+        if (uploads.length === 0) {
             return badRequest(res, 'Please choose a recording to upload.');
         }
 
-        // The path segment is authoritative; the repeated kidId field must agree
-        // with it so a mismatched body cannot write to a different child.
-        const bodyKidId = req.body?.kidId || req.body?.kid_id;
-        if (bodyKidId && String(bodyKidId) !== String(req.params.kidId)) {
-            return badRequest(res, 'The child in the request does not match the one being updated.');
+        // The path segment is authoritative; a repeated mac field must agree with
+        // it so a mismatched body cannot write to a different toy.
+        const bodyMac = req.body?.mac || req.body?.macAddress;
+        if (bodyMac && String(bodyMac).toUpperCase() !== String(req.params.mac).toUpperCase()) {
+            return badRequest(res, 'The device in the request does not match the one being updated.');
         }
 
-        const card = await customCardService.replaceCustomCardContent(
+        const card = await customCardService.addCustomCardContent(
             req.mobileUser.id,
-            req.params.kidId,
-            req.file,
+            req.params.mac,
+            uploads,
             { title: req.body?.title }
         );
 
         res.status(201).json({ code: 0, msg: 'success', data: card });
+    })
+);
+
+// Swaps the audio at one position. Unlike delete + re-add, the item keeps its
+// number, so the card does not reorder under the parent.
+router.put('/devices/:mac/custom-card/content/:itemNumber',
+    handleUploadErrors(customCardUpload.fields([
+        { name: 'file', maxCount: 1 },
+        { name: 'files', maxCount: 1 },
+    ])),
+    asyncHandler(async (req, res) => {
+        const upload = (req.files?.file || [])[0] || (req.files?.files || [])[0];
+        if (!upload) {
+            return badRequest(res, 'Please choose a recording to upload.');
+        }
+
+        const card = await customCardService.replaceCustomCardItem(
+            req.mobileUser.id,
+            req.params.mac,
+            req.params.itemNumber,
+            upload,
+            { title: req.body?.title }
+        );
+        success(res, card);
+    })
+);
+
+// Removes one recording and its stored object. Survivors are renumbered.
+router.delete('/devices/:mac/custom-card/content/:itemNumber',
+    asyncHandler(async (req, res) => {
+        const card = await customCardService.deleteCustomCardItem(
+            req.mobileUser.id,
+            req.params.mac,
+            req.params.itemNumber
+        );
+        success(res, card);
     })
 );
 

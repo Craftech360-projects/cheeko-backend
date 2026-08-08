@@ -10,7 +10,7 @@
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
-const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeMacAddress, packCodeForMac } = require('../utils/helpers');
 const { resolveRuntimeAgentName } = require('./character-resolver');
 const { extractBySequence, countItems } = require('../utils/mdParser');
 const qdrantService = require('./integrations/qdrant.service');
@@ -725,14 +725,137 @@ const getCardsByQuestionId = async (questionId) => {
 };
 
 /**
+ * Resolve a custom card to the tapping device's pack.
+ * `custom_card` is a flat allowlist of issued UIDs with no device binding, so
+ * membership decides *whether* it is a custom card and the MAC decides *which*
+ * pack plays. Returns null when the UID is not an issued custom card, when no
+ * MAC was supplied, or when that device has no recording yet.
+ * @param {string} normalizedUid
+ * @param {string} [mac]
+ * @returns {Promise<Object|null>} rfid_content_pack row
+ */
+const resolveCustomCardPack = async (normalizedUid, mac) => {
+  if (!mac) return null;
+
+  try {
+    const issued = await prisma.custom_card.findFirst({ where: { rfid_uid: normalizedUid } });
+    if (!issued) return null;
+
+    return await prisma.rfid_content_pack.findFirst({
+      where: { pack_code: packCodeForMac(mac), active: true }
+    });
+  } catch (err) {
+    logger.error('[RFID-LOOKUP] Custom card pack resolution error:', err);
+    return null;
+  }
+};
+
+/**
+ * Shape a content pack + its items into the device-facing lookup response.
+ * Shared by every card that resolves to a content pack — a catalogue card via
+ * its mapping, and a custom card via the tapping device's own pack — so the two
+ * can never drift into different response shapes.
+ * @param {Object} pack - rfid_content_pack row
+ * @param {string} normalizedUid - UID to echo back
+ * @returns {Promise<Object>} lookup response
+ */
+const buildContentPackResponse = async (pack, normalizedUid) => {
+  let items = [];
+  try {
+    items = await listContentItemsCompat(pack.id);
+  } catch (itemsErr) {
+    logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
+  }
+
+  // Grouped content = items with MORE THAN ONE distinct story_number
+  // Single story_number (e.g. all items have story_number=1) is treated as flat
+  const storyNumbers = new Set(items.filter(i => i.story_number > 0).map(i => i.story_number));
+  const hasStories = storyNumbers.size > 1;
+
+  if (hasStories) {
+    // Grouped content — group items by story_number
+    const storyMap = {};
+    for (const item of items) {
+      const sn = item.story_number || 1;
+      if (!storyMap[sn]) {
+        storyMap[sn] = {
+          index: sn,
+          title: item.story_title || `Story ${sn}`,
+          audio: [],
+          images: [],
+        };
+      }
+      if (item.audio_url) {
+        storyMap[sn].audio.push({ index: item.item_number, url: item.audio_url });
+      }
+      if (item.image_url) {
+        storyMap[sn].images.push({ index: item.item_number, url: item.image_url });
+      }
+      // Also check images_json for image URLs
+      if (item.images_json) {
+        try {
+          const imgs = typeof item.images_json === 'string' ? JSON.parse(item.images_json) : item.images_json;
+          if (Array.isArray(imgs)) {
+            for (const img of imgs) {
+              if (img.url) {
+                storyMap[sn].images.push({ index: item.item_number, url: img.url });
+              }
+            }
+          }
+        } catch (_) { /* ignore parse errors */ }
+      }
+    }
+    const stories = Object.values(storyMap).sort((a, b) => a.index - b.index);
+
+    logger.info(
+      `[RFID-LOOKUP] Grouped Content Pack resolved: uid=${normalizedUid}, packCode=${pack.pack_code || 'none'}, name="${pack.name}", type=${pack.content_type}, version=${pack.version || 'none'}, contentHash=${pack.content_hash || 'none'}, stories=${stories.length}`
+    );
+
+    return {
+      rfid_uid: normalizedUid,
+      contentType: pack.content_type || 'story_pack',
+      title: pack.name,
+      packCode: pack.pack_code,
+      version: pack.version,
+      stories: stories
+    };
+  }
+
+  // Flat content — existing behavior
+  const mappedItems = items.map(item => ({
+    sequence: item.item_number,
+    title: item.title,
+    audioUrl: item.audio_url,
+    imageUrl: item.image_url || null,
+    promptText: item.lyrics_text || null // Optional read-along
+  }));
+
+  logger.info(
+    `[RFID-LOOKUP] Content Pack resolved: uid=${normalizedUid}, packCode=${pack.pack_code || 'none'}, name="${pack.name}", type=${pack.content_type}, version=${pack.version || 'none'}, contentHash=${pack.content_hash || 'none'}, items=${mappedItems.length}, audioUrls=${mappedItems.filter(i => i.audioUrl).length}`
+  );
+
+  return {
+    rfid_uid: normalizedUid,
+    contentType: pack.content_type || 'story_pack',
+    title: pack.name,
+    packCode: pack.pack_code,
+    version: pack.version,
+    items: mappedItems
+  };
+};
+
+/**
  * Lookup card mapping by RFID UID
  * Public endpoint for ESP32 devices
  * @param {string} rfidUid - RFID UID
+ * @param {string} [mac] - MAC of the tapping device. Required to resolve a custom
+ *   card: custom cards carry no device binding, so the pack is the tapping
+ *   device's own and there is nothing to look up without it.
  * @returns {Promise<Object>} Card mapping with question data
  */
-const lookupCardByUid = async (rfidUid) => {
+const lookupCardByUid = async (rfidUid, mac) => {
   const normalizedUid = rfidUid.toUpperCase().replace(/[:-]/g, '');
-  logger.info(`[RFID-LOOKUP] lookupCardByUid: uid=${normalizedUid}`);
+  logger.info(`[RFID-LOOKUP] lookupCardByUid: uid=${normalizedUid}, mac=${mac || 'none'}`);
 
   // 1. Find the Mapping
   let mapping = null;
@@ -801,7 +924,10 @@ const lookupCardByUid = async (rfidUid) => {
       logger.warn(`[RFID-LOOKUP] Series found but no question linked: series_id=${series.id}`);
     }
 
-    // Fallback: custom card (kid-assigned RFID card with user-uploaded content)
+    // Fallback: custom card. `custom_card` is a flat allowlist of issued UIDs —
+    // being in it is what makes a card custom. There is no card-to-device
+    // binding: any issued custom card plays the pack of whichever toy it is
+    // tapped on, so the second hop is keyed on the MAC, not the UID.
     let customCard = null;
     try {
       customCard = await prisma.custom_card.findFirst({
@@ -812,49 +938,21 @@ const lookupCardByUid = async (rfidUid) => {
     }
 
     if (customCard) {
-      // Second hop is by kid, not uid: the parent uploads before an admin assigns
-      // the physical card, so the pack cannot be keyed on a uid that did not exist
-      // at upload time.
-      let pack = null;
-      try {
-        pack = await prisma.custom_content_pack.findFirst({
-          where: { kid_id: customCard.kid_id, is_active: true },
-          orderBy: { create_date: 'desc' }
-        });
-      } catch (packErr) {
-        logger.error('[RFID-LOOKUP] Custom content pack lookup DB error:', packErr);
+      if (!mac) {
+        logger.warn(`[RFID-LOOKUP] Custom card uid=${normalizedUid} tapped without a mac; cannot resolve a device pack`);
       }
+      const pack = await resolveCustomCardPack(normalizedUid, mac);
 
       if (pack) {
-        // Signed per tap, never persisted — a stored URL would expire and the card
-        // would go silent with nothing on the server to show why.
-        const audioUrl = await uploadService.getSignedAudioUrl(pack.file_key);
-
-        if (!audioUrl) {
-          logger.error(`[RFID-LOOKUP] Failed to sign custom card audio for uid=${normalizedUid}, pack_id=${pack.id}`);
-          return null;
-        }
-
-        logger.info(`[RFID-LOOKUP] Custom card resolved: uid=${normalizedUid}, kid_id=${customCard.kid_id}, pack_id=${pack.id}`);
-        return {
-          rfid_uid: normalizedUid,
-          source: 'custom_card',
-          kid_id: Number(customCard.kid_id),
-          contentType: 'custom_pack',
-          title: 'Custom Card',
-          packCode: `CUSTOM_${normalizedUid}`,
-          // The pack row id doubles as the version: every replace inserts a new
-          // row, so this changes exactly when the audio changes. A constant here
-          // would leave the toy playing the previous recording forever.
-          version: Number(pack.id),
-          items: [{
-            sequence: 1,
-            title: pack.file_name || 'Custom Recording',
-            audioUrl
-          }]
-        };
+        logger.info(`[RFID-LOOKUP] Custom card resolved: uid=${normalizedUid}, mac=${mac}, packCode=${pack.pack_code}`);
+        return buildContentPackResponse(pack, normalizedUid);
       }
-      logger.warn(`[RFID-LOOKUP] Custom card found for uid=${normalizedUid} but no active pack for kid_id=${customCard.kid_id}`);
+
+      // Issued but nothing recorded yet: null, so the gateway answers
+      // card_unknown. Returning a prompt card here instead made the toy open a
+      // full LLM session just to speak one fixed sentence.
+      logger.info(`[RFID-LOOKUP] Custom card uid=${normalizedUid} has no pack for mac=${mac || 'none'} yet, treating as unknown`);
+      return null;
     }
 
     logger.warn(`[RFID-LOOKUP] No bulk-range match for uid=${normalizedUid}`);
@@ -880,88 +978,7 @@ const lookupCardByUid = async (rfidUid) => {
     }
 
     if (pack) {
-      let items = [];
-      try {
-        items = await listContentItemsCompat(pack.id);
-      } catch (itemsErr) {
-        logger.error('[RFID-LOOKUP] Content items query error:', itemsErr);
-      }
-
-      // Grouped content = items with MORE THAN ONE distinct story_number
-      // Single story_number (e.g. all items have story_number=1) is treated as flat
-      const storyNumbers = new Set(items.filter(i => i.story_number > 0).map(i => i.story_number));
-      const hasStories = storyNumbers.size > 1;
-
-      if (hasStories) {
-        // Grouped content — group items by story_number
-        const storyMap = {};
-        for (const item of items) {
-          const sn = item.story_number || 1;
-          if (!storyMap[sn]) {
-            storyMap[sn] = {
-              index: sn,
-              title: item.story_title || `Story ${sn}`,
-              audio: [],
-              images: [],
-            };
-          }
-          if (item.audio_url) {
-            storyMap[sn].audio.push({ index: item.item_number, url: item.audio_url });
-          }
-          if (item.image_url) {
-            storyMap[sn].images.push({ index: item.item_number, url: item.image_url });
-          }
-          // Also check images_json for image URLs
-          if (item.images_json) {
-            try {
-              const imgs = typeof item.images_json === 'string' ? JSON.parse(item.images_json) : item.images_json;
-              if (Array.isArray(imgs)) {
-                for (const img of imgs) {
-                  if (img.url) {
-                    storyMap[sn].images.push({ index: item.item_number, url: img.url });
-                  }
-                }
-              }
-            } catch (_) { /* ignore parse errors */ }
-          }
-        }
-        const stories = Object.values(storyMap).sort((a, b) => a.index - b.index);
-
-        logger.info(
-          `[RFID-LOOKUP] Grouped Content Pack resolved: uid=${normalizedUid}, packCode=${pack.pack_code || 'none'}, name="${pack.name}", type=${pack.content_type}, version=${pack.version || 'none'}, contentHash=${pack.content_hash || 'none'}, stories=${stories.length}`
-        );
-
-        return {
-          rfid_uid: normalizedUid,
-          contentType: pack.content_type || 'story_pack',
-          title: pack.name,
-          packCode: pack.pack_code,
-          version: pack.version,
-          stories: stories
-        };
-      }
-
-      // Flat content — existing behavior
-      const mappedItems = items.map(item => ({
-        sequence: item.item_number,
-        title: item.title,
-        audioUrl: item.audio_url,
-        imageUrl: item.image_url || null,
-        promptText: item.lyrics_text || null // Optional read-along
-      }));
-
-      logger.info(
-        `[RFID-LOOKUP] Content Pack resolved: uid=${normalizedUid}, packCode=${pack.pack_code || 'none'}, name="${pack.name}", type=${pack.content_type}, version=${pack.version || 'none'}, contentHash=${pack.content_hash || 'none'}, items=${mappedItems.length}, audioUrls=${mappedItems.filter(i => i.audioUrl).length}`
-      );
-
-      return {
-        rfid_uid: normalizedUid,
-        contentType: pack.content_type || 'story_pack',
-        title: pack.name,
-        packCode: pack.pack_code,
-        version: pack.version,
-        items: mappedItems
-      };
+      return buildContentPackResponse(pack, normalizedUid);
     } else {
       logger.warn(`[RFID-LOOKUP] Content pack id=${mapping.content_pack_id} not found in rfid_content_pack table`);
     }
@@ -2736,7 +2753,7 @@ const recordCardTap = async (payload = {}) => {
   let lookupResolved = null;
   if (!mapping) {
     try {
-      lookupResolved = await lookupCardByUid(normalizedUid);
+      lookupResolved = await lookupCardByUid(normalizedUid, normalizedMac);
     } catch (lookupErr) {
       logger.warn(`[RFID-TAP] Fallback lookup failed for uid=${normalizedUid}: ${lookupErr.message}`);
     }
@@ -2775,12 +2792,10 @@ const recordCardTap = async (payload = {}) => {
 
   let updateAvailable = false;
   let updateReason = null;
-  // A custom card carries its audio inline in the lookup response and has no
-  // rfid_content_pack row. Without it here the version check is skipped entirely,
-  // updateRequired stays false, and the gateway short-circuits to card_up_to_date
-  // on the very first tap — the toy would never receive the recording.
-  const isCustomCard = lookupResolved?.source === 'custom_card';
-  if (cardType === 'content' && (contentPack || isCustomCard)) {
+  // Custom cards no longer need special-casing here: they resolve to a real
+  // rfid_content_pack (CUSTOM_<MAC>), which the packCode fallback above already
+  // picks up, so they get the same version/hash handshake as any content card.
+  if (cardType === 'content' && contentPack) {
     if (latestContentHash) {
       if (!clientContentHash) {
         updateAvailable = true;
@@ -3474,7 +3489,7 @@ const getCachedAudioUrl = (cachedAudioUrlsJson, sequence) => {
  * @param {string} rfidUid - RFID UID
  * @returns {Promise<Object|null>} ContentDownloadDTO or null
  */
-const getContentDownloadManifest = async (rfidUid) => {
+const getContentDownloadManifest = async (rfidUid, mac) => {
   if (!rfidUid || !rfidUid.trim()) {
     logger.warn('getContentDownloadManifest called with empty rfidUid');
     return null;
@@ -3493,6 +3508,13 @@ const getContentDownloadManifest = async (rfidUid) => {
   }
 
   if (!mapping) {
+    // A custom card has no mapping row by design — it resolves through the
+    // issued-UID allowlist to the tapping device's own pack.
+    const customPack = await resolveCustomCardPack(normalizedUid, mac);
+    if (customPack) {
+      return getContentDownloadManifestByPackId(customPack.id, normalizedUid);
+    }
+
     logger.info('No RFID mapping found for UID:', { rfidUid: normalizedUid });
     return null;
   }
@@ -4582,7 +4604,124 @@ const deleteCategories = async (ids) => {
   return null;
 };
 
+// =============================================
+// Custom Card Admin Methods
+// custom_card is a flat allowlist of issued UIDs; the content lives in
+// rfid_content_pack CUSTOM_<MAC>, one per device.
+// =============================================
+
+/**
+ * List issued custom cards, newest first.
+ */
+const getCustomCardList = async () => {
+  const cards = await prisma.custom_card.findMany({ orderBy: { create_date: 'desc' } });
+  return cards.map((card) => ({
+    id: Number(card.id),
+    rfidUid: card.rfid_uid,
+    createDate: formatDate(card.create_date),
+    updateDate: formatDate(card.update_date)
+  }));
+};
+
+/**
+ * Register issued custom card UIDs. Existing UIDs are skipped rather than
+ * failing the batch — re-importing a shipment must stay safe to retry.
+ * @param {string[]} uids
+ * @returns {Promise<{created: number, skipped: number, invalid: string[]}>}
+ */
+const createCustomCards = async (uids, userId) => {
+  if (!Array.isArray(uids) || uids.length === 0) {
+    throw new Error('At least one RFID UID is required');
+  }
+
+  const invalid = [];
+  const normalized = [];
+  for (const raw of uids) {
+    const uid = normalizeRfidUid(raw);
+    if (uid) normalized.push(uid);
+    else invalid.push(String(raw));
+  }
+
+  let created = 0;
+  if (normalized.length > 0) {
+    const result = await prisma.custom_card.createMany({
+      data: normalized.map((uid) => ({ rfid_uid: uid, creator: userId ? BigInt(userId) : null })),
+      skipDuplicates: true
+    });
+    created = result.count;
+  }
+
+  logger.info(`[CUSTOM-CARD] Registered ${created}/${normalized.length} issued UIDs (${invalid.length} invalid)`);
+  return { created, skipped: normalized.length - created, invalid };
+};
+
+const deleteCustomCards = async (ids) => {
+  if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    throw new Error('Custom card IDs are required');
+  }
+  await prisma.custom_card.deleteMany({ where: { id: { in: ids.map((id) => BigInt(id)) } } });
+  return null;
+};
+
+/**
+ * List every per-device custom pack with its device and current recording.
+ * The pack code carries a separator-stripped MAC, so the device join has to
+ * strip too — there is no FK to follow.
+ */
+const getCustomPackList = async () => {
+  const rows = await prisma.$queryRaw`
+    SELECT
+      p.id,
+      p.pack_code,
+      p.name,
+      p.version,
+      p.content_hash,
+      p.total_items,
+      p.active,
+      p.update_date,
+      d.mac_address,
+      d.alias AS device_alias,
+      i.title AS item_title,
+      i.audio_url AS item_audio_url,
+      i.audio_size_bytes AS item_size_bytes
+    FROM rfid_content_pack p
+    LEFT JOIN ai_device d
+      ON UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = REPLACE(p.pack_code, 'CUSTOM_', '')
+    LEFT JOIN LATERAL (
+      SELECT title, audio_url, audio_size_bytes
+      FROM content_item
+      WHERE content_pack_id = p.id
+      ORDER BY item_number ASC
+      LIMIT 1
+    ) i ON true
+    WHERE p.pack_code LIKE 'CUSTOM=_%' ESCAPE '='
+    ORDER BY p.update_date DESC NULLS LAST
+  `;
+
+  return (rows || []).map((row) => ({
+    id: Number(row.id),
+    packCode: row.pack_code,
+    name: row.name,
+    macAddress: row.mac_address || null,
+    deviceAlias: row.device_alias || null,
+    version: row.version,
+    contentHash: row.content_hash,
+    totalItems: row.total_items,
+    active: row.active,
+    itemTitle: row.item_title || null,
+    itemAudioUrl: row.item_audio_url || null,
+    itemSizeBytes: row.item_size_bytes ? Number(row.item_size_bytes) : null,
+    updateDate: formatDate(row.update_date)
+  }));
+};
+
 module.exports = {
+  // Custom cards
+  getCustomCardList,
+  createCustomCards,
+  deleteCustomCards,
+  getCustomPackList,
+
   // PRD-specified card mapping methods
   getCardMappingPage,
   getCardMappingList,

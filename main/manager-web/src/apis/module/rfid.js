@@ -853,5 +853,75 @@ export default {
                     this.getCardTapSummary(params, callback)
                 })
             }).send()
+    },
+
+    // ── Custom Cards ────────────────────────────────────────────────────────
+    // custom_card is the allowlist of issued UIDs; the recording lives in a
+    // per-device pack (CUSTOM_<MAC>), listed separately below.
+
+    getCustomCardList(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/custom-card/list`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get custom card list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getCustomCardList(callback)
+                })
+            }).send()
+    },
+
+    getCustomPackList(callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/custom-card/packs`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to get custom pack list:', err)
+                RequestService.reAjaxFun(() => {
+                    this.getCustomPackList(callback)
+                })
+            }).send()
+    },
+
+    addCustomCards(uids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/custom-card`)
+            .method('POST')
+            .data({ uids })
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to register custom cards:', err)
+                RequestService.reAjaxFun(() => {
+                    this.addCustomCards(uids, callback)
+                })
+            }).send()
+    },
+
+    deleteCustomCards(ids, callback) {
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/admin/rfid/custom-card/delete`)
+            .method('POST')
+            .data({ ids })
+            .success((res) => {
+                RequestService.clearRequestTime()
+                callback(res)
+            })
+            .networkFail((err) => {
+                console.error('Failed to delete custom cards:', err)
+                RequestService.reAjaxFun(() => {
+                    this.deleteCustomCards(ids, callback)
+                })
+            }).send()
     }
 }

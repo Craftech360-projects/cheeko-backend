@@ -676,15 +676,18 @@ model kid_profile {
   @@index([user_id], map: "idx_kid_profile_user_id")
 }
 
+/// Allowlist of issued custom-card UIDs. Membership is what makes a UID a custom
+/// card; the content itself lives in rfid_content_pack CUSTOM_<MAC>, keyed on the
+/// tapping device. kid_id is legacy — new rows leave it null.
 model custom_card {
-  id          BigInt      @id @default(autoincrement())
-  kid_id      BigInt      @unique
-  rfid_uid    String?     @unique @db.VarChar(50)
+  id          BigInt       @id @default(autoincrement())
+  kid_id      BigInt?      @unique
+  rfid_uid    String?      @unique @db.VarChar(50)
   creator     BigInt?
-  create_date DateTime    @default(now()) @db.Timestamptz(6)
+  create_date DateTime     @default(now()) @db.Timestamptz(6)
   updater     BigInt?
-  update_date DateTime    @default(now()) @db.Timestamptz(6)
-  kid_profile kid_profile @relation(fields: [kid_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  update_date DateTime     @default(now()) @db.Timestamptz(6)
+  kid_profile kid_profile? @relation(fields: [kid_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([kid_id], map: "idx_custom_card_kid")
   @@index([rfid_uid], map: "idx_custom_card_rfid")

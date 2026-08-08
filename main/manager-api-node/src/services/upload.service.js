@@ -3,8 +3,7 @@
  * Handles file uploads to AWS S3
  */
 
-const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
 const path = require('path');
@@ -253,55 +252,41 @@ async function deleteKidAvatarByUrl(url) {
   }
 }
 
-// Custom card audio is one child's private recording, not shared catalogue content,
-// so it is never served from the public CloudFront origin. Callers persist only the
-// returned key and mint a short-lived signed URL per tap via getSignedAudioUrl.
-const CUSTOM_CARD_URL_TTL_SECONDS = parseInt(process.env.CUSTOM_CARD_URL_TTL_SECONDS, 10) || 21600; // 6h
-
 /**
- * Upload a parent-recorded custom card audio file to S3.
- * Returns the object key ONLY — deliberately no url, so a URL cannot be persisted
- * by accident and later expire mid-playback.
+ * Upload a parent-recorded custom card audio file to S3 under customcard_<mac>/.
+ * Returns a public CloudFront URL: the toy downloads this straight from the
+ * content manifest, exactly like catalogue audio, so it cannot be a signed URL
+ * that expires while the manifest sits cached on the device.
+ * ponytail: unguessable key, not access control — a leaked URL is readable.
+ * Upgrade path: CloudFront signed URLs if a recording must be truly private.
  * @param {Buffer} fileBuffer - Audio buffer
- * @param {number|string} kidId - Kid profile id the audio belongs to
+ * @param {string} deviceMac - MAC of the device the recording belongs to
  * @param {string} filename - Original filename (used only for the extension)
  * @param {string} mimeType - Validated MIME type
- * @returns {Promise<{s3Key: string}>}
+ * @returns {Promise<{s3Key: string, url: string}>}
  */
-async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType) {
+function customCardFolder(deviceMac) {
+  return `customcard_${String(deviceMac || '').toLowerCase().replace(/[^0-9a-f]/g, '')}`;
+}
+
+async function uploadCustomCardAudio(fileBuffer, deviceMac, filename, mimeType) {
   const ext = (path.extname(filename || '') || '.mp3').toLowerCase();
-  const s3Key = `customcards/${kidId}/${randomUUID()}${ext}`;
+  const s3Key = `${customCardFolder(deviceMac)}/${randomUUID()}${ext}`;
 
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
     Key: s3Key,
     Body: fileBuffer,
     ContentType: mimeType || 'audio/mpeg',
-    // No long-lived cache header: these objects are private and reached via
-    // signed URLs that rotate, so a shared cache must not hold onto them.
-    CacheControl: 'private, max-age=0, no-store'
+    CacheControl: 'max-age=31536000'
   }));
 
-  logger.info('Custom card audio uploaded to S3', { s3Key, kidId, size: fileBuffer.length });
-  return { s3Key };
-}
-
-/**
- * Mint a short-lived signed URL for a stored audio key.
- * Called fresh on every tap lookup — never persisted.
- * @param {string} s3Key - Stored object key
- * @param {number} [ttlSeconds] - Expiry, defaults to CUSTOM_CARD_URL_TTL_SECONDS
- * @returns {Promise<string|null>} Signed URL, or null if signing fails
- */
-async function getSignedAudioUrl(s3Key, ttlSeconds = CUSTOM_CARD_URL_TTL_SECONDS) {
-  if (!s3Key) return null;
-  try {
-    const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: s3Key });
-    return await getSignedUrl(s3Client, command, { expiresIn: ttlSeconds });
-  } catch (error) {
-    logger.error(`Failed to sign custom card audio key ${s3Key}: ${error.message}`);
-    return null;
-  }
+  // Public CloudFront URL, same as every other content pack: the ESP32 fetches
+  // this straight out of the download manifest, and a signed URL would expire
+  // while the manifest sits cached on the toy.
+  const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
+  logger.info('Custom card audio uploaded to S3', { s3Key, deviceMac, size: fileBuffer.length });
+  return { s3Key, url };
 }
 
 /**
@@ -309,7 +294,7 @@ async function getSignedAudioUrl(s3Key, ttlSeconds = CUSTOM_CARD_URL_TTL_SECONDS
  * preferable to failing a request whose DB write already succeeded.
  */
 async function deleteCustomCardAudio(s3Key) {
-  if (!s3Key || !s3Key.startsWith('customcards/') || s3Key.includes('..')) return;
+  if (!s3Key || !s3Key.startsWith('customcard') || s3Key.includes('..')) return;
   try {
     await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
   } catch (error) {
@@ -325,6 +310,5 @@ module.exports = {
   deleteKidAvatarByUrl,
   listImagineImages,
   uploadCustomCardAudio,
-  getSignedAudioUrl,
   deleteCustomCardAudio
 };
