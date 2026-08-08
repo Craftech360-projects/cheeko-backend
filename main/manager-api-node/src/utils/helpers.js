@@ -201,6 +201,15 @@ const sleep = (ms) => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
+/**
+ * Content pack code for a device's custom card: CUSTOM_<MAC>, separators stripped.
+ * Lives here rather than in customCard.service because rfid.service needs it too,
+ * and a service-to-service import in both directions would be a require cycle.
+ * @param {string} mac
+ * @returns {string}
+ */
+const packCodeForMac = (mac) => `CUSTOM_${String(mac || '').toUpperCase().replace(/[^0-9A-F]/g, '')}`;
+
 module.exports = {
   generateUUID,
   generateDeviceCode,
@@ -215,5 +224,6 @@ module.exports = {
   snakeToCamel,
   transformKeysToCamel,
   transformKeysToSnake,
-  sleep
+  sleep,
+  packCodeForMac
 };

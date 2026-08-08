@@ -7,7 +7,6 @@ const REQUIRED_PRISMA_MODELS = [
   'workspace_locks',
   'device_memory_documents',
   'device_memory_chunks',
-  'pending_card_pairing',
   // Question banks. Listed here so a deploy that ships the code without the
   // migration fails at boot with a clear message, rather than serving every
   // child an empty bank and looking like a content problem.

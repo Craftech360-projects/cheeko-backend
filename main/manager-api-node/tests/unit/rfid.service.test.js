@@ -11,10 +11,6 @@ const mockPrisma = {
     updateMany: jest.fn(),
     upsert: jest.fn()
   },
-  pending_card_pairing: {
-    findFirst: jest.fn(),
-    update: jest.fn()
-  },
   rfid_card_tap_log: {
     upsert: jest.fn()
   }
@@ -33,7 +29,6 @@ describe('rfid card mapping thumbnails', () => {
     jest.clearAllMocks();
     mockPrisma.$queryRaw.mockResolvedValue([{ exists: false }]);
     mockPrisma.ai_device.findFirst.mockResolvedValue(null);
-    mockPrisma.pending_card_pairing.findFirst.mockResolvedValue(null);
   });
 
   it('persists thumbnailUrl when creating an AI card mapping', async () => {
@@ -75,7 +70,10 @@ describe('rfid card mapping thumbnails', () => {
     }));
   });
 
-  it('marks pairing as rejected when a non-blank card is tapped during voice-card pairing', async () => {
+  // A tap no longer mutates the mapping table: the voice-card pairing flow that
+  // used to claim a blank card on tap has been removed, so recordCardTap is
+  // read-only apart from the tap log.
+  it('does not write a card mapping on tap', async () => {
     mockPrisma.rfid_card_mapping.findFirst.mockResolvedValue({
       id: 11n,
       rfid_uid: 'A1B2C3D4',
@@ -93,11 +91,6 @@ describe('rfid card mapping thumbnails', () => {
         content_hash: 'hash-1'
       }
     });
-    mockPrisma.pending_card_pairing.findFirst.mockResolvedValue({
-      id: 44n,
-      mac_address: 'AA:BB:CC:DD:EE:FF',
-      status: 'pending'
-    });
 
     await rfidService.recordCardTap({
       macAddress: 'AA:BB:CC:DD:EE:FF',
@@ -105,12 +98,7 @@ describe('rfid card mapping thumbnails', () => {
     });
 
     expect(mockPrisma.rfid_card_mapping.upsert).not.toHaveBeenCalled();
-    expect(mockPrisma.pending_card_pairing.update).toHaveBeenCalledWith({
-      where: { id: 44n },
-      data: {
-        status: 'rejected_non_blank',
-        rfid_uid: 'A1B2C3D4'
-      }
-    });
+    expect(mockPrisma.rfid_card_mapping.create).not.toHaveBeenCalled();
+    expect(mockPrisma.rfid_card_mapping.updateMany).not.toHaveBeenCalled();
   });
 });
