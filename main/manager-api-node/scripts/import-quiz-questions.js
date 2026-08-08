@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * Import the Quizzy Question Bank from a spreadsheet.
+ * Import a question bank from a spreadsheet.
  *
- *   node scripts/import-quiz-questions.js path/to/bank.xlsx [--dry-run]
+ *   node scripts/import-quiz-questions.js path/to/bank.xlsx [--dry-run] [--bank riddle]
+ *
+ * Serves both Quizzy and Riddler: --bank picks the target tables, defaulting to
+ * the quiz bank so existing invocations are unchanged. The two banks are
+ * column-identical, so the parsing and validation rules are shared.
  *
  * Upserts by `code`, so re-running the same sheet is idempotent. Invalid rows
  * are reported with their spreadsheet row number and skipped; the rest import.
@@ -18,16 +22,34 @@ require('dotenv/config');
 const XLSX = require('xlsx');
 const { prisma, pgPool } = require('../src/config/database');
 const { planImport } = require('./lib/quiz-import');
+const { resolveBank, DEFAULT_BANK } = require('../src/services/banks');
 
 const REQUIRED_HEADERS = ['code', 'age_band', 'level', 'question_text', 'answer_text'];
 
 async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
-  const file = args.find((arg) => !arg.startsWith('--'));
+
+  const bankIndex = args.indexOf('--bank');
+  // A bare "--bank" with no value must not fall through to the quiz bank:
+  // resolveBank's default would silently accept undefined, and importing 90
+  // riddles into the quiz bank is not a mistake worth defaulting through.
+  if (bankIndex !== -1 && !args[bankIndex + 1]) {
+    throw new Error('--bank needs a value (quiz or riddle)');
+  }
+  const bankName = bankIndex === -1 ? DEFAULT_BANK : args[bankIndex + 1];
+  const tables = resolveBank(bankName);
+
+  // The bank NAME is an argument too; skipping it stops "--bank riddle" from
+  // being read as the filename when the file comes last. Only when the flag is
+  // present: with no --bank, bankIndex+1 is 0 and would skip a file passed
+  // first — which is exactly how the quiz import is invoked.
+  const file = args.find((arg, i) => !arg.startsWith('--') && (bankIndex === -1 || i !== bankIndex + 1));
 
   if (!file) {
-    throw new Error('usage: node scripts/import-quiz-questions.js <bank.xlsx> [--dry-run]');
+    throw new Error(
+      'usage: node scripts/import-quiz-questions.js <bank.xlsx> [--dry-run] [--bank quiz|riddle]'
+    );
   }
 
   // raw:true keeps text cells as text — without it the reader turns the age
@@ -54,7 +76,7 @@ async function main() {
   for (const { data, sheetRow } of ready) {
     try {
       if (!dryRun) {
-        await prisma.quiz_question.upsert({
+        await tables.questions.upsert({
           where: { code: data.code },
           create: data,
           update: { ...data, update_date: new Date() },
@@ -75,7 +97,7 @@ async function main() {
   );
 
   console.log(
-    `${dryRun ? '[dry-run] ' : ''}imported ${imported}, skipped ${skipped.length} (of ${rows.length} rows)`
+    `${dryRun ? '[dry-run] ' : ''}bank=${bankName} imported ${imported}, skipped ${skipped.length} (of ${rows.length} rows)`
   );
   if (skipped.length || badLevels.length) process.exitCode = 1;
 }

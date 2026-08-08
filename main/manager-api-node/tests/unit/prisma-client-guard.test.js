@@ -11,18 +11,19 @@ describe('Prisma client startup guard', () => {
   });
 
   it('accepts a Prisma client that exposes all required runtime delegates', () => {
-    const { assertRequiredPrismaModels } = require('../../src/config/prisma-client-guard');
+    const {
+      assertRequiredPrismaModels,
+      REQUIRED_PRISMA_MODELS
+    } = require('../../src/config/prisma-client-guard');
 
-    expect(() => assertRequiredPrismaModels({
-      voice_sessions: {},
-      voice_session_messages: {},
-      voice_session_summaries: {},
-      device_token_usage_session: {},
-      device_workspace_artifacts: {},
-      workspace_locks: {},
-      device_memory_documents: {},
-      device_memory_chunks: {}
-    })).not.toThrow();
+    // Built from the required list rather than hand-listed: a hand-written copy
+    // silently rots every time a model is added to the guard, which is exactly
+    // how this test came to fail on pending_card_pairing.
+    const client = Object.fromEntries(
+      REQUIRED_PRISMA_MODELS.map((model) => [model, {}])
+    );
+
+    expect(() => assertRequiredPrismaModels(client)).not.toThrow();
   });
 
   it('throws a clear error when the selected database is missing required runtime tables', async () => {

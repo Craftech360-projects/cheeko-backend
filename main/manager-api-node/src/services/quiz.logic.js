@@ -81,8 +81,30 @@ const countCompletedLevels = (questions, clearedIds) =>
     questions.every((q) => q.level !== level || clearedIds.has(String(q.id)))
   ).length;
 
+/**
+ * Did one of today's answers finish its level? Finishing a level ends the
+ * scored day: the Daily Ten is a cap, not a quota, so the next level must not
+ * open on the same day just to fill the count. Levels completed before today
+ * don't count — only a level that one of today's answers closed.
+ *
+ * @param {Array<{id: *, level: number}>} questions - active bank for the band
+ * @param {Set<string>} clearedIds - cleared question ids as strings
+ * @param {Array<string>} todayQuestionIds - question ids answered today, as strings
+ * @returns {boolean}
+ */
+const levelCompletedToday = (questions, clearedIds, todayQuestionIds) => {
+  const levelById = new Map(questions.map((q) => [String(q.id), q.level]));
+  const todayLevels = new Set(
+    todayQuestionIds.map((id) => levelById.get(String(id))).filter((l) => l !== undefined)
+  );
+  return [...todayLevels].some((level) =>
+    questions.every((q) => q.level !== level || clearedIds.has(String(q.id)))
+  );
+};
+
 module.exports = {
   ageBandFromBirthDate,
   deriveLevelState,
-  countCompletedLevels
+  countCompletedLevels,
+  levelCompletedToday
 };

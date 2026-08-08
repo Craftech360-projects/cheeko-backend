@@ -11,6 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const quizService = require('../services/quiz.service');
+const { bankForCharacterRef, BANKS } = require('../services/banks');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireServiceKey, requireAuth } = require('../middleware/auth');
 const { success, created, badRequest } = require('../utils/response');
@@ -32,6 +33,20 @@ const logger = require('../utils/logger');
  *         required: true
  *         schema:
  *           type: string
+ *       - in: query
+ *         name: character
+ *         required: false
+ *         description: Character agent_code (e.g. riddle_master) or display name.
+ *           Absent or unrecognised falls back to the quiz bank.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: character_id
+ *         required: false
+ *         description: Character uuid from room metadata. Preferred over character
+ *           when both are sent; resolved to an agent_code and then to a bank.
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Question batch (questions may be empty when the bank has no content for the band)
@@ -46,11 +61,19 @@ router.get('/next-questions',
       return badRequest(res, 'device_mac is required');
     }
 
-    const batch = await quizService.nextQuestions(deviceMac);
+    // The worker sends the character's uuid and display name, not its
+    // agent_code — see bankForCharacterRef.
+    const bank = await bankForCharacterRef({
+      character: req.query.character,
+      characterId: req.query.character_id,
+    });
+    const batch = await quizService.nextQuestions(deviceMac, bank);
     logger.info(
-      `[QUIZ] GET /quiz/next-questions device=${deviceMac} -> band=${batch.age_band} level=${batch.level} replay=${batch.replay} questions=${batch.questions.length}`
+      `[QUIZ] GET /quiz/next-questions device=${deviceMac} bank=${bank} -> band=${batch.age_band} level=${batch.level} replay=${batch.replay} questions=${batch.questions.length}`
     );
-    return success(res, batch);
+    // Echoed so the worker can send it back on /quiz/answer without having to
+    // know the character-to-bank mapping itself.
+    return success(res, { ...batch, bank });
   })
 );
 
@@ -79,11 +102,19 @@ router.get('/next-questions',
  *               result:
  *                 type: string
  *                 enum: [correct, wrong, revealed]
+ *               bank:
+ *                 type: string
+ *                 enum: [quiz, riddle]
+ *                 description: Which bank the question came from, as echoed by
+ *                   next-questions. Absent falls back to the quiz bank.
+ *               character:
+ *                 type: string
+ *                 description: Character agent_code, used only when bank is absent.
  *     responses:
  *       201:
  *         description: Answer logged
  *       400:
- *         description: Missing field, bad result, or unknown question_id
+ *         description: Missing field, bad result, unknown bank, or unknown question_id
  */
 router.post('/answer',
   requireServiceKey,
@@ -102,11 +133,23 @@ router.post('/answer',
       return badRequest(res, 'result is required');
     }
 
-    const answer = await quizService.recordAnswer(deviceMac, questionId, result);
+    // An explicit bank wins: it is what next-questions actually served. The
+    // character is only a fallback for a caller that did not echo it. An
+    // unrecognised bank is a 400 rather than a silent write to the quiz log.
+    const explicitBank = String(req.body.bank || '').trim();
+    if (explicitBank && !BANKS[explicitBank]) {
+      return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
+    }
+    const bank = explicitBank || await bankForCharacterRef({
+      character: req.body.character,
+      characterId: req.body.character_id,
+    });
+
+    const answer = await quizService.recordAnswer(deviceMac, questionId, result, bank);
     logger.info(
-      `[QUIZ] POST /quiz/answer device=${deviceMac} question=${answer.question_id} result=${answer.result}`
+      `[QUIZ] POST /quiz/answer device=${deviceMac} bank=${bank} question=${answer.question_id} result=${answer.result}`
     );
-    return created(res, answer, 'Answer logged');
+    return created(res, { ...answer, bank }, 'Answer logged');
   })
 );
 
@@ -139,11 +182,15 @@ router.get('/progress',
       return badRequest(res, 'device_mac is required');
     }
 
-    const summary = await quizService.progress(deviceMac);
+    const bank = await bankForCharacterRef({
+      character: req.query.character,
+      characterId: req.query.character_id,
+    });
+    const summary = await quizService.progress(deviceMac, bank);
     logger.info(
-      `[QUIZ] GET /quiz/progress device=${deviceMac} -> band=${summary.age_band} level=${summary.current_level} completed=${summary.levels_completed}`
+      `[QUIZ] GET /quiz/progress device=${deviceMac} bank=${bank} -> band=${summary.age_band} level=${summary.current_level} completed=${summary.levels_completed}`
     );
-    return success(res, summary);
+    return success(res, { ...summary, bank });
   })
 );
 
@@ -162,7 +209,11 @@ router.get('/progress',
 router.get('/admin/devices',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const rows = await quizService.allDeviceProgress();
+    const bank = String(req.query.bank || '').trim() || undefined;
+    if (bank && !BANKS[bank]) {
+      return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
+    }
+    const rows = await quizService.allDeviceProgress(bank);
     return success(res, rows);
   })
 );
@@ -195,9 +246,14 @@ router.post('/admin/set-level',
       return badRequest(res, 'level must be a positive integer');
     }
 
-    const result = await quizService.setLevel(deviceMac, level);
+    const bank = String(req.body.bank || '').trim() || undefined;
+    if (bank && !BANKS[bank]) {
+      return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
+    }
+
+    const result = await quizService.setLevel(deviceMac, level, bank);
     logger.info(
-      `[QUIZ] admin set-level device=${deviceMac} band=${result.age_band} level=${level} deleted=${result.deleted} cleared=${result.cleared}`
+      `[QUIZ] admin set-level device=${deviceMac} bank=${bank || 'quiz'} band=${result.age_band} level=${level} deleted=${result.deleted} cleared=${result.cleared}`
     );
     return success(res, result);
   })
@@ -226,9 +282,14 @@ router.post('/admin/reset-day',
       return badRequest(res, 'device_mac is required');
     }
 
-    const result = await quizService.clearDayGate(deviceMac);
+    const bank = String(req.body.bank || '').trim() || undefined;
+    if (bank && !BANKS[bank]) {
+      return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
+    }
+
+    const result = await quizService.clearDayGate(deviceMac, bank);
     logger.info(
-      `[QUIZ] admin reset-day device=${deviceMac} backdated=${result.backdated}`
+      `[QUIZ] admin reset-day device=${deviceMac} bank=${bank || 'quiz'} backdated=${result.backdated}`
     );
     return success(res, result);
   })
