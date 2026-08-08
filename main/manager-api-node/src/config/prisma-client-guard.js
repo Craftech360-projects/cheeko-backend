@@ -6,7 +6,14 @@ const REQUIRED_PRISMA_MODELS = [
   'device_workspace_artifacts',
   'workspace_locks',
   'device_memory_documents',
-  'device_memory_chunks'
+  'device_memory_chunks',
+  // Question banks. Listed here so a deploy that ships the code without the
+  // migration fails at boot with a clear message, rather than serving every
+  // child an empty bank and looking like a content problem.
+  'quiz_question',
+  'quiz_question_answer',
+  'riddle_question',
+  'riddle_question_answer'
 ];
 
 const REQUIRED_PRISMA_TABLES = [...REQUIRED_PRISMA_MODELS];

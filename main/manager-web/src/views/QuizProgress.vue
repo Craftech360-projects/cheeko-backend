@@ -3,12 +3,16 @@
     <HeaderBar />
     <el-main class="main-content">
       <div class="page-header">
-        <h1>Quiz Progress</h1>
+        <h1>{{ bankLabel }} Progress</h1>
         <p class="subtitle">Current Level per device, and admin overrides for testing</p>
       </div>
 
       <el-card class="filter-card" shadow="never">
         <div class="filter-row">
+          <el-radio-group v-model="bank" size="small" @change="fetchData">
+            <el-radio-button label="quiz">Quiz</el-radio-button>
+            <el-radio-button label="riddle">Riddles</el-radio-button>
+          </el-radio-group>
           <el-input
             v-model="search"
             placeholder="Filter by MAC or child name"
@@ -90,8 +94,8 @@
           type="warning"
           :closable="false"
           show-icon
-          title="This rewrites the device's quiz answer log"
-          description="Levels below the target are marked cleared with backdated answers; the target level and above are emptied. Answers banked under a different age band are untouched."
+          :title="`This rewrites the device's ${targetBank} answer log`"
+          description="Levels below the target are marked cleared with backdated answers; the target level and above are emptied. Answers banked under a different age band, and the other bank's answers, are untouched."
         />
         <div class="level-picker">
           <span>Target level:</span>
@@ -117,17 +121,30 @@ export default {
   data() {
     return {
       rows: [],
+      // Which bank the page is showing. The API defaults to quiz when absent,
+      // so this only ever narrows what is already the default.
+      bank: 'quiz',
       isLoading: false,
       search: '',
       onlyPlayed: true,
       levelDialog: false,
       target: null,
+      // The bank the open dialog was launched from. set-level rewrites an
+      // answer log, so it must write to the bank the row was read from, not
+      // whatever the selector happens to say when Submit is pressed.
+      targetBank: 'quiz',
       targetLevel: 1,
       // MAC of the row currently being written, so its buttons disable individually
       busyMac: ''
     };
   },
   computed: {
+    bankLabel() {
+      return this.bank === 'riddle' ? 'Riddle' : 'Quiz';
+    },
+    bankNoun() {
+      return this.bank === 'riddle' ? 'riddle' : 'quiz';
+    },
     filteredRows() {
       const term = this.search.trim().toLowerCase();
       return this.rows.filter((r) => {
@@ -144,28 +161,36 @@ export default {
   methods: {
     fetchData() {
       this.isLoading = true;
+      // Captured per request: switching banks mid-flight must not let a slow
+      // quiz response paint itself into the riddle table.
+      const requested = this.bank;
+      this.rows = [];
       Api.quiz.getDeviceProgress(
+        requested,
         ({ data }) => {
+          if (requested !== this.bank) return;
           this.isLoading = false;
           this.rows = (data && data.data) || [];
         },
         (err) => {
+          if (requested !== this.bank) return;
           this.isLoading = false;
-          this.$message.error(this.errText(err, 'Failed to load quiz progress'));
+          this.$message.error(this.errText(err, `Failed to load ${this.bankNoun} progress`));
         }
       );
     },
 
     confirmResetDay(row) {
       this.$confirm(
-        `Backdate today's ${row.answered_today} answers for ${row.device_mac} by one day? `
-        + 'Levels stay cleared; the device can start the next level today.',
+        `Backdate today's ${row.answered_today} ${this.bankNoun} answers for ${row.device_mac} by one day? `
+        + `Levels stay cleared; the device can start the next level today. The other bank is unaffected.`,
         'Reset day',
         { type: 'warning' }
       ).then(() => {
         this.busyMac = row.device_mac;
         Api.quiz.resetDay(
           row.device_mac,
+          this.bank,
           ({ data }) => {
             this.busyMac = '';
             this.$message.success(`Backdated ${(data && data.data && data.data.backdated) || 0} rows`);
@@ -181,6 +206,7 @@ export default {
 
     openSetLevel(row) {
       this.target = row;
+      this.targetBank = this.bankNoun;
       this.targetLevel = row.current_level || 1;
       this.levelDialog = true;
     },
@@ -191,12 +217,13 @@ export default {
       Api.quiz.setLevel(
         row.device_mac,
         this.targetLevel,
+        this.targetBank,
         ({ data }) => {
           this.busyMac = '';
           this.levelDialog = false;
           const d = (data && data.data) || {};
           this.$message.success(
-            `${row.device_mac} set to level ${this.targetLevel} (removed ${d.deleted}, cleared ${d.cleared})`
+            `${row.device_mac} ${this.targetBank} set to level ${this.targetLevel} (removed ${d.deleted}, cleared ${d.cleared})`
           );
           this.fetchData();
         },

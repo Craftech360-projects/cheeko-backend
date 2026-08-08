@@ -209,6 +209,52 @@ router.post('/unbind',
 
 /**
  * @swagger
+ * /device/unbind-open:
+ *   post:
+ *     tags: [Device]
+ *     summary: Unbind a device without authentication
+ *     description: |
+ *       No auth required. Clears user_id, agent_id and kid_id so the device can be
+ *       paired again. Soft unbind only - there is no hardDelete option here.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - deviceId
+ *             properties:
+ *               deviceId:
+ *                 type: string
+ *                 description: Device UUID or MAC address
+ *     responses:
+ *       200:
+ *         description: Device unbound successfully
+ */
+// ponytail: deliberately unauthenticated - anyone who can reach this port can unbind
+// any device by MAC. Put it behind an IP allowlist or a shared header if that changes.
+router.post('/unbind-open',
+  asyncHandler(async (req, res) => {
+    const { deviceId } = req.body;
+
+    if (!deviceId) {
+      return res.status(200).json({ code: 500, msg: 'Device ID cannot be empty', data: null });
+    }
+
+    try {
+      // isSuperAdmin=true skips the ownership check, so the userId argument is unused.
+      await deviceService.unbindDevice(0, deviceId, true);
+      logger.warn(`Unauthenticated unbind for device: ${deviceId}`);
+      success(res, null);
+    } catch (error) {
+      return res.status(200).json({ code: 500, msg: error.message, data: null });
+    }
+  })
+);
+
+/**
+ * @swagger
  * /device/update/{id}:
  *   put:
  *     tags: [Device]

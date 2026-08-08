@@ -12,8 +12,15 @@ services:
       # ponytail: single UDP mux instead of a 50000-50200 range — Windows/Hyper-V
       # reserves random ports in that range on every boot. Restore the range if
       # you ever hit mux throughput limits (hundreds of concurrent participants).
+      # node_ip is the address LiveKit advertises as its ICE candidate. Inside a
+      # container, use_external_ip:false alone advertises the CONTAINER's ip
+      # (172.x), which no browser on the LAN can route to: signalling connects
+      # over the published 7880, media never does, and the session dies on the
+      # ICE timeout ~14s in. Must be the HOST's LAN address.
+      # Override when DHCP moves you: LIVEKIT_NODE_IP=1.2.3.4 docker compose up -d
       LIVEKIT_CONFIG: |
         rtc:
           udp_port: 7882
           use_external_ip: false
+          node_ip: ${LIVEKIT_NODE_IP:-192.168.0.39}
     command: --dev --bind 0.0.0.0
