@@ -3301,12 +3301,30 @@ const quizMacFilter = macAddresses =>
  * level's question count while `cleared` stays truthful.
  */
 async function getQuizAnalytics(firebaseUid, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, options);
+    return buildQuizAnalyticsForScope(scope, options);
+}
+
+/**
+ * Same analytics by MAC for the manager web admin views, so an operator sees
+ * exactly what the parent sees. Deliberately the same builder — two
+ * implementations of "attempts, not questions" would drift apart within a month.
+ */
+async function getQuizAnalyticsByMacAdmin(mac, options = {}) {
+    const trimmed = String(mac || '').trim();
+    if (!trimmed) {
+        throw new ApiError('mac is required', 400, 400);
+    }
+    const scope = await resolveAdminProgressScopeByMac(trimmed);
+    return buildQuizAnalyticsForScope(scope, options);
+}
+
+async function buildQuizAnalyticsForScope(scope, options = {}) {
     const period = String(options.period || 'week').trim().toLowerCase();
     if (!PROGRESS_PERIODS.includes(period)) {
         throw new ApiError('period must be one of: today, week, month', 400, 400);
     }
 
-    const scope = await resolveProgressScope(firebaseUid, options);
     const now = options.now || new Date();
     const range = buildProgressDateRange(period, scope.timezone, now);
     const inRange = new Set(range.dates);
@@ -3553,6 +3571,7 @@ module.exports = {
     getProgressDetails,
     getProgressTrend,
     getQuizAnalytics,
+    getQuizAnalyticsByMacAdmin,
     getProgressSummaryByMacAdmin,
     getProgressDetailsByMacAdmin,
     getProgressTrendByMacAdmin,
