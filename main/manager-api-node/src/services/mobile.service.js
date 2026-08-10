@@ -3355,7 +3355,7 @@ async function getQuizAnalytics(firebaseUid, options = {}) {
             });
         } catch (err) {
             logger.warn(`[mobile] ${bankName} analytics unavailable: ${err.message}`);
-            banks.push({ bank: bankName, available: false, levels: [] });
+            banks.push(emptyQuizBank(bankName, false));
             continue;
         }
 
@@ -3370,7 +3370,7 @@ async function getQuizAnalytics(firebaseUid, options = {}) {
             }
         }
         if (!scoped.length) {
-            banks.push({ bank: bankName, available: true, levels: [], attempted: 0, points: 0 });
+            banks.push(emptyQuizBank(bankName, true));
             continue;
         }
 
@@ -3490,6 +3490,24 @@ function buildQuizTrend(totals) {
     if (delta >= 5) direction = 'up';
     else if (delta <= -5) direction = 'down';
     return { direction, accuracy, previous_accuracy: previousAccuracy, delta };
+}
+
+/**
+ * Every bank entry carries the same keys, whether or not anything was played.
+ * A client that has to distinguish "absent key" from "zero" ends up encoding the
+ * difference between an empty period and an unavailable bank as a typeof check.
+ * `available: false` is the only signal for that; the numbers stay zero.
+ */
+function emptyQuizBank(bankName, available) {
+    return {
+        bank: bankName,
+        available,
+        current_level: null,
+        attempted: 0,
+        correct: 0,
+        points: 0,
+        levels: [],
+    };
 }
 
 /** Cleared ids across every device in scope, chunked to keep the IN list sane. */
