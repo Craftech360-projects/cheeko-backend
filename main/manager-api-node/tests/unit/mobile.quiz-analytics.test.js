@@ -30,6 +30,13 @@ describe('mobile quiz analytics', () => {
 
     const answers = {
       findMany: jest.fn(async ({ where, select }) => {
+        // The real rows carry mixed-case MACs, so the filter must be an
+        // insensitive OR rather than a case-sensitive `in`.
+        expect(where.OR).toBeDefined();
+        expect(where.device_mac).toBeUndefined();
+        for (const clause of where.OR) {
+          expect(clause.device_mac.mode).toBe('insensitive');
+        }
         let rows = answerRows;
         if (where.answered_at?.gte) rows = rows.filter(r => r.answered_at >= where.answered_at.gte);
         if (where.answered_at?.lt) rows = rows.filter(r => r.answered_at < where.answered_at.lt);

@@ -3283,6 +3283,15 @@ const QUIZ_POINTS_PER_CORRECT = 10;
 const QUIZ_CLEARED_RESULTS = ['correct', 'revealed'];
 
 /**
+ * Answer rows store the MAC in whatever case the caller sent — the dev database
+ * holds both 00:16:3E:AC:B5:38 and 00:16:3e:ac:b5:38 for one device, 10 rows
+ * against 16. A case-sensitive `in` silently reports the smaller half, so match
+ * insensitively per MAC the way quiz.service.js does.
+ */
+const quizMacFilter = macAddresses =>
+    macAddresses.map(mac => ({ device_mac: { equals: mac, mode: 'insensitive' } }));
+
+/**
  * Per-level quiz and riddle performance for the parent app.
  *
  * Counts ATTEMPTS, not distinct questions: a question answered wrong on Monday
@@ -3338,7 +3347,7 @@ async function getQuizAnalytics(firebaseUid, options = {}) {
         try {
             rows = await tables.answers.findMany({
                 where: {
-                    device_mac: { in: scope.macAddresses },
+                    OR: quizMacFilter(scope.macAddresses),
                     answered_at: { gte: fetchFrom, lt: fetchTo },
                 },
                 select: { question_id: true, result: true, answered_at: true },
@@ -3376,7 +3385,7 @@ async function getQuizAnalytics(firebaseUid, options = {}) {
         const clearedBefore = new Set(
             (await tables.answers.findMany({
                 where: {
-                    device_mac: { in: scope.macAddresses },
+                    OR: quizMacFilter(scope.macAddresses),
                     result: { in: QUIZ_CLEARED_RESULTS },
                     answered_at: { lt: windowOpened },
                 },
@@ -3488,7 +3497,7 @@ async function loadQuizClearedIds(tables, macAddresses, activeBank) {
     if (!activeBank.length) return new Set();
     const rows = await tables.answers.findMany({
         where: {
-            device_mac: { in: macAddresses },
+            OR: quizMacFilter(macAddresses),
             question_id: { in: activeBank.map(q => q.id) },
             result: { in: QUIZ_CLEARED_RESULTS },
         },
