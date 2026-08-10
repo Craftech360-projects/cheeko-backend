@@ -115,6 +115,24 @@ describe('mobile quiz analytics', () => {
     expect(riddle.levels).toEqual([]);
   });
 
+  // The client should never have to tell "key absent" from "zero", so every bank
+  // entry carries the same keys whatever happened.
+  test('every bank entry has the same keys, played or not', async () => {
+    const out = await mobileService.getQuizAnalytics('uid', { period: 'week', now: NOW });
+    const expected = ['bank', 'available', 'current_level', 'attempted', 'correct', 'points', 'levels'];
+
+    expect(out.banks.length).toBeGreaterThan(1);
+    for (const bank of out.banks) {
+      expect(Object.keys(bank).sort()).toEqual([...expected].sort());
+    }
+    // The riddle bank is the unavailable one here — zeros, not missing keys.
+    const riddle = out.banks.find(b => b.bank === 'riddle');
+    expect(riddle.attempted).toBe(0);
+    expect(riddle.correct).toBe(0);
+    expect(riddle.points).toBe(0);
+    expect(riddle.current_level).toBeNull();
+  });
+
   test('trend compares this week with the one before it', async () => {
     const out = await mobileService.getQuizAnalytics('uid', { period: 'week', now: NOW });
 

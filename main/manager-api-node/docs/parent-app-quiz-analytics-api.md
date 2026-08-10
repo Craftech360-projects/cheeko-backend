@@ -179,11 +179,12 @@ steps, so a 10-point swing is one question and not news. `previous_accuracy` and
 | All levels cleared | `current_level: null` | "Finished every level" — do not print "Level null" |
 | Replay pass | `replay: true` | Badge it. Otherwise repeated level numbers read as regression |
 
-⚠️ **Known shape wart.** When a bank has no rows in the period, the entry omits
-`correct` and `current_level`; when `available: false`, it also omits `attempted`
-and `points`. Treat missing numeric fields as `0` and missing `current_level` as
-`null`. This inconsistency should be fixed server-side — do not build a
-dependency on the keys being absent.
+**Every bank entry carries the same keys**, whatever happened — `bank`,
+`available`, `current_level`, `attempted`, `correct`, `points`, `levels`. An
+unplayed or unavailable bank reports zeros and `current_level: null`, never a
+missing key, so no `null`/`undefined` checks are needed to tell the cases apart.
+`available` is the only signal that distinguishes an empty period from a bank
+whose tables are absent. A unit test pins this, so it won't drift.
 
 ---
 
