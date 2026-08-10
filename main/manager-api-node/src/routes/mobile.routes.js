@@ -162,6 +162,11 @@ router.get('/progress/details', asyncHandler(async (req, res) => {
     success(res, details);
 }));
 
+router.get('/progress/quiz', asyncHandler(async (req, res) => {
+    const analytics = await mobileService.getQuizAnalytics(req.firebaseUser.uid, req.query);
+    success(res, analytics);
+}));
+
 router.get('/progress/trend', asyncHandler(async (req, res) => {
     const trend = await mobileService.getProgressTrend(req.firebaseUser.uid, req.query);
     success(res, trend);

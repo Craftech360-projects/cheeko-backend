@@ -3274,6 +3274,238 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
     };
 }
 
+// ─── Quiz / riddle analytics ────────────────────────────────────────────────
+
+const QUIZ_POINTS_PER_CORRECT = 10;
+
+// Cleared mirrors quiz.service.js: a revealed question clears too, which is why
+// the response reports revealed separately instead of folding it into wrong.
+const QUIZ_CLEARED_RESULTS = ['correct', 'revealed'];
+
+/**
+ * Per-level quiz and riddle performance for the parent app.
+ *
+ * Counts ATTEMPTS, not distinct questions: a question answered wrong on Monday
+ * and right on Wednesday appears twice, because the screen reports what the week
+ * contained rather than what the child currently knows. Level progress still
+ * comes from the cleared set, which dedupes — so `attempted` can exceed the
+ * level's question count while `cleared` stays truthful.
+ */
+async function getQuizAnalytics(firebaseUid, options = {}) {
+    const period = String(options.period || 'week').trim().toLowerCase();
+    if (!PROGRESS_PERIODS.includes(period)) {
+        throw new ApiError('period must be one of: today, week, month', 400, 400);
+    }
+
+    const scope = await resolveProgressScope(firebaseUid, options);
+    const now = options.now || new Date();
+    const range = buildProgressDateRange(period, scope.timezone, now);
+    const inRange = new Set(range.dates);
+
+    if (!scope.macAddresses.length) {
+        return { period, start_date: range.startDate, end_date: range.endDate, banks: [] };
+    }
+
+    // The equal-length period immediately before this one, so the banner can say
+    // "better than last week" from data rather than as decoration.
+    const previousDates = range.dates.map(dateKey => shiftDateKey(dateKey, -range.dates.length));
+    const inPrevious = new Set(previousDates);
+
+    // Bucketing happens in the parent's timezone, so the window is widened a day
+    // at each edge and filtered per row. Note the quiz day-gate itself uses
+    // SERVER-local midnight (quiz.service.js), so a late-evening answer can sit
+    // in a different day here than the gate counted it in.
+    const fetchFrom = new Date(`${shiftDateKey(previousDates[0], -1)}T00:00:00Z`);
+    const fetchTo = new Date(`${shiftDateKey(range.endDate, 1)}T00:00:00Z`);
+    // Replay is judged against the window opening, not the widened fetch edge.
+    const windowOpened = new Date(`${range.startDate}T00:00:00Z`);
+    const totals = { correct: 0, attempted: 0, previousCorrect: 0, previousAttempted: 0 };
+
+    const { resolveBank } = require('./banks');
+    const banks = [];
+
+    for (const bankName of ['quiz', 'riddle']) {
+        let tables;
+        try {
+            tables = resolveBank(bankName);
+        } catch (err) {
+            continue;
+        }
+
+        // Riddle tables do not exist on every deployment yet; an absent table
+        // must read as "nothing played", not a 500 for the whole screen.
+        let rows;
+        try {
+            rows = await tables.answers.findMany({
+                where: {
+                    device_mac: { in: scope.macAddresses },
+                    answered_at: { gte: fetchFrom, lt: fetchTo },
+                },
+                select: { question_id: true, result: true, answered_at: true },
+                orderBy: { answered_at: 'asc' },
+            });
+        } catch (err) {
+            logger.warn(`[mobile] ${bankName} analytics unavailable: ${err.message}`);
+            banks.push({ bank: bankName, available: false, levels: [] });
+            continue;
+        }
+
+        const scoped = [];
+        for (const row of rows) {
+            const dateKey = formatDateInTimezone(row.answered_at, scope.timezone);
+            if (inRange.has(dateKey)) {
+                scoped.push(row);
+            } else if (inPrevious.has(dateKey)) {
+                totals.previousAttempted += 1;
+                if (row.result === 'correct') totals.previousCorrect += 1;
+            }
+        }
+        if (!scoped.length) {
+            banks.push({ bank: bankName, available: true, levels: [], attempted: 0, points: 0 });
+            continue;
+        }
+
+        const questions = await tables.questions.findMany({
+            where: { id: { in: [...new Set(scoped.map(r => r.question_id))] } },
+            select: { id: true, level: true, question_text: true, answer_text: true, age_band: true, language: true },
+        });
+        const questionById = new Map(questions.map(q => [String(q.id), q]));
+
+        // Cleared before the window opened tells a replay pass from a first
+        // pass: a level whose questions were all already cleared is practice.
+        const clearedBefore = new Set(
+            (await tables.answers.findMany({
+                where: {
+                    device_mac: { in: scope.macAddresses },
+                    result: { in: QUIZ_CLEARED_RESULTS },
+                    answered_at: { lt: windowOpened },
+                },
+                select: { question_id: true },
+            })).map(r => String(r.question_id))
+        );
+
+        const bands = [...new Set(questions.map(q => q.age_band))];
+        const langs = [...new Set(questions.map(q => q.language))];
+        const activeBank = await tables.questions.findMany({
+            where: { active: true, age_band: { in: bands }, language: { in: langs } },
+            select: { id: true, level: true },
+        });
+        const clearedIds = await loadQuizClearedIds(tables, scope.macAddresses, activeBank);
+
+        const byLevel = new Map();
+        for (const row of scoped) {
+            const question = questionById.get(String(row.question_id));
+            if (!question) continue;
+            if (!byLevel.has(question.level)) {
+                byLevel.set(question.level, { correct: 0, wrong: 0, revealed: 0, questions: [], replay: true });
+            }
+            const bucket = byLevel.get(question.level);
+            if (row.result === 'correct') bucket.correct += 1;
+            else if (row.result === 'revealed') bucket.revealed += 1;
+            else bucket.wrong += 1;
+            if (!clearedBefore.has(String(row.question_id))) bucket.replay = false;
+            bucket.questions.push({
+                question_text: question.question_text,
+                correct_answer: question.answer_text,
+                result: row.result,
+                points: row.result === 'correct' ? QUIZ_POINTS_PER_CORRECT : 0,
+                answered_on: formatDateInTimezone(row.answered_at, scope.timezone),
+            });
+        }
+
+        const levels = [...byLevel.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .map(([level, bucket]) => {
+                const attempted = bucket.correct + bucket.wrong + bucket.revealed;
+                const levelQuestions = activeBank.filter(q => q.level === level);
+                return {
+                    level,
+                    attempted,
+                    correct: bucket.correct,
+                    wrong: bucket.wrong,
+                    revealed: bucket.revealed,
+                    accuracy: attempted ? Math.round((bucket.correct / attempted) * 100) : 0,
+                    points: bucket.correct * QUIZ_POINTS_PER_CORRECT,
+                    replay: bucket.replay,
+                    cleared: levelQuestions.length > 0
+                        && levelQuestions.every(q => clearedIds.has(String(q.id))),
+                    questions: bucket.questions,
+                };
+            });
+
+        const bankAttempted = levels.reduce((sum, l) => sum + l.attempted, 0);
+        const bankCorrect = levels.reduce((sum, l) => sum + l.correct, 0);
+        totals.attempted += bankAttempted;
+        totals.correct += bankCorrect;
+
+        banks.push({
+            bank: bankName,
+            available: true,
+            current_level: deriveCurrentLevel(activeBank, clearedIds),
+            attempted: bankAttempted,
+            correct: bankCorrect,
+            points: levels.reduce((sum, l) => sum + l.points, 0),
+            levels,
+        });
+    }
+
+    return {
+        period,
+        start_date: range.startDate,
+        end_date: range.endDate,
+        banks,
+        trend: buildQuizTrend(totals),
+    };
+}
+
+/**
+ * Accuracy this period against the one before it, across both banks.
+ *
+ * `direction: 'new'` means there is nothing to compare against — no attempts in
+ * the previous period — so the app must not render "improving" over an absent
+ * baseline. Direction is decided on a 5-point band because week-to-week accuracy
+ * on ten questions swings by a whole question at a time; a 1-point move is noise,
+ * not progress worth telling a parent about.
+ */
+function buildQuizTrend(totals) {
+    if (!totals.attempted) {
+        return { direction: 'none', accuracy: null, previous_accuracy: null, delta: null };
+    }
+    const accuracy = Math.round((totals.correct / totals.attempted) * 100);
+    if (!totals.previousAttempted) {
+        return { direction: 'new', accuracy, previous_accuracy: null, delta: null };
+    }
+    const previousAccuracy = Math.round((totals.previousCorrect / totals.previousAttempted) * 100);
+    const delta = accuracy - previousAccuracy;
+    let direction = 'flat';
+    if (delta >= 5) direction = 'up';
+    else if (delta <= -5) direction = 'down';
+    return { direction, accuracy, previous_accuracy: previousAccuracy, delta };
+}
+
+/** Cleared ids across every device in scope, chunked to keep the IN list sane. */
+async function loadQuizClearedIds(tables, macAddresses, activeBank) {
+    if (!activeBank.length) return new Set();
+    const rows = await tables.answers.findMany({
+        where: {
+            device_mac: { in: macAddresses },
+            question_id: { in: activeBank.map(q => q.id) },
+            result: { in: QUIZ_CLEARED_RESULTS },
+        },
+        select: { question_id: true },
+    });
+    return new Set(rows.map(r => String(r.question_id)));
+}
+
+/** Mirrors quiz.logic.deriveLevelState: lowest level with an uncleared question. */
+function deriveCurrentLevel(activeBank, clearedIds) {
+    const levels = [...new Set(activeBank.map(q => q.level))].sort((a, b) => a - b);
+    for (const level of levels) {
+        if (activeBank.some(q => q.level === level && !clearedIds.has(String(q.id)))) return level;
+    }
+    return null;
+}
+
 module.exports = {
     getParentProfile,
     createParentProfile,
@@ -3293,6 +3525,7 @@ module.exports = {
     getProgressSummary,
     getProgressDetails,
     getProgressTrend,
+    getQuizAnalytics,
     getProgressSummaryByMacAdmin,
     getProgressDetailsByMacAdmin,
     getProgressTrendByMacAdmin,
