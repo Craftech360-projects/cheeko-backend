@@ -73,6 +73,11 @@
               >Reset day</el-button>
               <el-button
                 size="mini"
+                :disabled="!s.row.last_played"
+                @click="openAnalytics(s.row)"
+              >Analytics</el-button>
+              <el-button
+                size="mini"
                 type="warning"
                 :disabled="!s.row.max_level || busyMac === s.row.device_mac"
                 @click="openSetLevel(s.row)"
@@ -83,6 +88,81 @@
         <p v-if="!isLoading && !filteredRows.length" class="muted empty">No devices match.</p>
       </el-card>
     </el-main>
+
+    <el-dialog
+      :title="analyticsTitle"
+      :visible.sync="analyticsDialog"
+      width="820px"
+      class="analytics-dialog"
+    >
+      <div class="analytics-head">
+        <el-radio-group v-model="analyticsPeriod" size="mini" @change="fetchAnalytics">
+          <el-radio-button label="today">Day</el-radio-button>
+          <el-radio-button label="week">Week</el-radio-button>
+          <el-radio-button label="month">Month</el-radio-button>
+        </el-radio-group>
+        <span v-if="analytics" class="muted">
+          {{ analytics.start_date }} to {{ analytics.end_date }}
+        </span>
+        <!-- Same wording rule as the parent app: 'new' has no baseline, so it
+             must not be reported as improvement. -->
+        <el-tag v-if="trendTag" size="mini" :type="trendTag.type">{{ trendTag.text }}</el-tag>
+      </div>
+
+      <div v-loading="analyticsLoading">
+        <template v-if="analytics">
+          <div v-for="b in analytics.banks" :key="b.bank" class="bank-block">
+            <div class="bank-head">
+              <b>{{ b.bank === 'riddle' ? 'Riddler' : 'Quizzy' }}</b>
+              <span class="muted">
+                now on level {{ b.current_level === null ? 'all cleared' : b.current_level }}
+              </span>
+              <span v-if="b.attempted" class="muted">
+                &middot; {{ b.attempted }} answers &middot; {{ b.points }} pts
+              </span>
+              <el-tag v-if="!b.available" size="mini" type="info">bank not deployed</el-tag>
+            </div>
+
+            <p v-if="!b.levels.length" class="muted empty">Nothing played in this period.</p>
+
+            <el-table v-else :data="b.levels" size="mini" border>
+              <el-table-column label="Level" width="130">
+                <template slot-scope="s">
+                  {{ s.row.level }}
+                  <el-tag v-if="s.row.cleared" size="mini" type="success">cleared</el-tag>
+                  <el-tag v-if="s.row.replay" size="mini" type="warning">replay</el-tag>
+                </template>
+              </el-table-column>
+              <!-- "answers", never "questions": a wrong answer returns on a later
+                   day, so attempts can exceed the level's question count. -->
+              <el-table-column prop="attempted" label="Answers" width="80" align="center" />
+              <el-table-column prop="correct" label="Correct" width="80" align="center" />
+              <el-table-column prop="wrong" label="Wrong" width="70" align="center" />
+              <!-- Revealed is its own column: it clears the question without the
+                   child answering, so it belongs with neither correct nor wrong. -->
+              <el-table-column prop="revealed" label="Revealed" width="85" align="center" />
+              <el-table-column label="Accuracy" width="90" align="center">
+                <template slot-scope="s">{{ s.row.accuracy }}%</template>
+              </el-table-column>
+              <el-table-column label="Questions" min-width="240">
+                <template slot-scope="s">
+                  <div v-for="(q, i) in s.row.questions" :key="i" class="q-row">
+                    <i :class="resultIcon(q.result)"></i>
+                    <span class="q-text">{{ q.question_text }}</span>
+                    <span v-if="q.result !== 'correct'" class="muted">&rarr; {{ q.correct_answer }}</span>
+                    <span class="muted q-date">{{ q.answered_on }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+      </div>
+
+      <span slot="footer">
+        <el-button @click="analyticsDialog = false">Close</el-button>
+      </span>
+    </el-dialog>
 
     <el-dialog title="Set Level" :visible.sync="levelDialog" width="480px">
       <template v-if="target">
@@ -135,7 +215,14 @@ export default {
       targetBank: 'quiz',
       targetLevel: 1,
       // MAC of the row currently being written, so its buttons disable individually
-      busyMac: ''
+      busyMac: '',
+      analyticsDialog: false,
+      analyticsLoading: false,
+      analyticsRow: null,
+      analyticsPeriod: 'week',
+      // Covers both banks regardless of the page's bank selector: an operator
+      // looking at one child wants the whole picture, not half of it.
+      analytics: null
     };
   },
   computed: {
@@ -144,6 +231,19 @@ export default {
     },
     bankNoun() {
       return this.bank === 'riddle' ? 'riddle' : 'quiz';
+    },
+    analyticsTitle() {
+      if (!this.analyticsRow) return 'Analytics';
+      const who = this.analyticsRow.kid_name || 'no profile';
+      return `${who} — ${this.analyticsRow.device_mac}`;
+    },
+    trendTag() {
+      const t = this.analytics && this.analytics.trend;
+      if (!t || t.direction === 'none') return null;
+      if (t.direction === 'new') return { type: 'info', text: `${t.accuracy}% — first period, no baseline` };
+      if (t.direction === 'up') return { type: 'success', text: `${t.accuracy}% (up ${t.delta} pts)` };
+      if (t.direction === 'down') return { type: 'danger', text: `${t.accuracy}% (down ${Math.abs(t.delta)} pts)` };
+      return { type: '', text: `${t.accuracy}% — about the same` };
     },
     filteredRows() {
       const term = this.search.trim().toLowerCase();
@@ -178,6 +278,42 @@ export default {
           this.$message.error(this.errText(err, `Failed to load ${this.bankNoun} progress`));
         }
       );
+    },
+
+    openAnalytics(row) {
+      this.analyticsRow = row;
+      this.analytics = null;
+      this.analyticsDialog = true;
+      this.fetchAnalytics();
+    },
+
+    fetchAnalytics() {
+      if (!this.analyticsRow) return;
+      const mac = this.analyticsRow.device_mac;
+      const period = this.analyticsPeriod;
+      this.analyticsLoading = true;
+      Api.quiz.getAnalytics(
+        mac,
+        period,
+        ({ data }) => {
+          // A slow response for a previous device or period must not paint over
+          // the one the operator is now looking at.
+          if (!this.analyticsRow || this.analyticsRow.device_mac !== mac || this.analyticsPeriod !== period) return;
+          this.analyticsLoading = false;
+          this.analytics = (data && data.data) || null;
+        },
+        (err) => {
+          if (!this.analyticsRow || this.analyticsRow.device_mac !== mac || this.analyticsPeriod !== period) return;
+          this.analyticsLoading = false;
+          this.$message.error(this.errText(err, 'Failed to load analytics'));
+        }
+      );
+    },
+
+    resultIcon(result) {
+      if (result === 'correct') return 'el-icon-check q-ok';
+      if (result === 'revealed') return 'el-icon-view q-revealed';
+      return 'el-icon-close q-bad';
     },
 
     confirmResetDay(row) {
@@ -298,6 +434,55 @@ export default {
 
 .muted {
   color: #a0a4b8;
+}
+
+.analytics-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.bank-block {
+  margin-bottom: 18px;
+}
+
+.bank-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.q-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.q-text {
+  flex: 1;
+}
+
+.q-date {
+  white-space: nowrap;
+}
+
+.q-ok {
+  color: #67c23a;
+}
+
+.q-bad {
+  color: #f56c6c;
+}
+
+.q-revealed {
+  color: #e6a23c;
 }
 
 .empty {

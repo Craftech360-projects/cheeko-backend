@@ -11,6 +11,7 @@
 const express = require('express');
 const router = express.Router();
 const quizService = require('../services/quiz.service');
+const mobileService = require('../services/mobile.service');
 const { bankForCharacterRef, BANKS } = require('../services/banks');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { requireServiceKey, requireAuth } = require('../middleware/auth');
@@ -215,6 +216,46 @@ router.get('/admin/devices',
     }
     const rows = await quizService.allDeviceProgress(bank);
     return success(res, rows);
+  })
+);
+
+/**
+ * @swagger
+ * /quiz/admin/analytics:
+ *   get:
+ *     tags: [Quiz]
+ *     summary: Per-level quiz and riddle analytics for one device (admin console)
+ *     description: The same payload the parent app receives from
+ *       /api/mobile/progress/quiz, resolved by MAC instead of by Firebase account,
+ *       so an operator sees exactly what the parent sees. Read-only. Field
+ *       semantics - attempts rather than distinct questions, revealed as a third
+ *       outcome, replay - are documented in
+ *       docs/parent-app-quiz-analytics-api.md; the admin table must read them the
+ *       same way. Logged-in admin auth, matching /quiz/admin/devices, which
+ *       already returns child names.
+ *     parameters:
+ *       - in: query
+ *         name: mac
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: period
+ *         schema: { type: string, enum: [today, week, month] }
+ *     responses:
+ *       200:
+ *         description: Banks with per-level breakdowns
+ *       400:
+ *         description: Missing mac or unknown period
+ */
+router.get('/admin/analytics',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const mac = String(req.query.mac || '').trim();
+    if (!mac) {
+      return badRequest(res, 'mac is required');
+    }
+    const analytics = await mobileService.getQuizAnalyticsByMacAdmin(mac, { period: req.query.period });
+    return success(res, analytics);
   })
 );
 

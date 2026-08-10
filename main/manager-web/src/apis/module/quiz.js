@@ -24,6 +24,27 @@ export default {
             }).send();
     },
 
+    // Per-level analytics for one device: the same payload the parent app gets.
+    // Read-only, so retrying on a network blip is safe.
+    getAnalytics(mac, period, callback, errorCallback) {
+        const query = `?mac=${encodeURIComponent(mac)}&period=${encodeURIComponent(period || 'week')}`;
+        RequestService.sendRequest()
+            .url(`${getServiceUrl()}/quiz/admin/analytics${query}`)
+            .method('GET')
+            .success((res) => {
+                RequestService.clearRequestTime();
+                callback(res);
+            })
+            .networkFail((err) => {
+                if (errorCallback) errorCallback(err);
+                else {
+                    RequestService.reAjaxFun(() => {
+                        this.getAnalytics(mac, period, callback, errorCallback);
+                    });
+                }
+            }).send();
+    },
+
     // Force a device onto a level. Destructive - rewrites its answer log for the band.
     // No retry: a repeated write is worse than a reported failure.
     setLevel(mac, level, bank, callback, errorCallback) {
