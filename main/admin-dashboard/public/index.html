@@ -130,13 +130,26 @@
         <span id="testState" class="pill">idle</span>
       </div>
 
+      <div class="card ptt-card">
+        <div class="ptt-viz"><canvas id="vizCanvas"></canvas></div>
+        <div class="ptt-controls">
+          <button id="pttBtn" class="btn ptt-btn" disabled>● Talk</button>
+          <div class="ptt-meta">
+            <span id="pttState" class="pill ptt-idle">idle</span>
+            <span class="hint">Tap to talk, tap again when done ·
+              <kbd>Space</kbd> tap · <kbd>Esc</kbd> cancel turn</span>
+            <span class="hint">Turn latency <b id="pttLatency">—</b></span>
+          </div>
+        </div>
+      </div>
+
       <div class="test-grid">
         <div class="card">
           <label>Conversation</label>
           <div id="transcript" class="transcript"></div>
           <div class="actionbar">
             <button id="muteBtn" class="btn ghost" disabled>Mute mic</button>
-            <span class="hint">Just talk — the agent's VAD handles turn-taking.</span>
+            <span class="hint">Manual Talk: the button is the turn boundary, not VAD.</span>
           </div>
         </div>
 
@@ -152,6 +165,7 @@
   </main>
 
   <script src="app.js"></script>
+  <script src="visualizer.js"></script>
   <script src="test.js"></script>
 </body>
 </html>

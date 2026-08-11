@@ -12,6 +12,122 @@ let session = null;   // { url, token, roomName, agentName, character }
 let running = false;
 let LK = null;        // lazily imported livekit-client module
 
+// --- Push-to-talk (Manual Talk) ---
+// Publishes the same data-channel payloads mqtt-gateway forwards for a real
+// device, so the agent (pkg/livekit/room_session.go) cannot tell this browser
+// from an ESP32. Only acted on when the sarvam_rest provider is active; with a
+// streaming provider the agent ignores them and this is just a mic toggle.
+let talking = false;        // true between press and speech_end
+let speechEndAt = 0;        // for the turn-latency readout
+let viz = null;             // RadialVisualizer
+let audioCtx = null;
+let micAnalyser = null;
+let remoteAnalyser = null;
+
+// The ring runs whenever the tab is open — an empty box reads as broken, and
+// the idle animation is what shows the component is alive before a session.
+function startViz() {
+  if (!viz) viz = new window.RadialVisualizer(T('vizCanvas'));
+  viz.start();
+}
+
+function vizState(state) {
+  if (viz) viz.setState(state);
+  T('pttState').textContent = state;
+  T('pttState').className = 'pill ptt-' + state;
+}
+
+async function publish(payload) {
+  if (!room) return;
+  await room.localParticipant.publishData(
+    new TextEncoder().encode(JSON.stringify({ ...payload, source: 'admin_dashboard' })),
+    { reliable: true },
+  );
+}
+
+function ensureAudioContext() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+function makeAnalyser(mediaStreamTrack) {
+  const ctx = ensureAudioContext();
+  const src = ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 128;
+  analyser.smoothingTimeConstant = 0.7;
+  src.connect(analyser);
+  return analyser;
+}
+
+// Tap 1: mic on, turn opens.
+async function pttPress() {
+  if (!room || talking) return;
+  // Barge-in: a tap while Cheeko is talking stops the reply first, exactly as
+  // the firmware's manual-interrupt does.
+  if (T('pttState').textContent === 'speaking') {
+    await publish({ type: 'abort', session_id: session?.roomName });
+    tlog('Sent abort (barge-in)');
+  }
+  talking = true;
+  speechEndAt = 0;
+  await publish({ type: 'ptt_event', action: 'press', state: 'start', mode: 'manual' });
+  await room.localParticipant.setMicrophoneEnabled(true);
+
+  const pub = [...room.localParticipant.audioTrackPublications.values()][0];
+  if (pub?.track?.mediaStreamTrack) {
+    micAnalyser = makeAnalyser(pub.track.mediaStreamTrack);
+    viz?.attachAnalyser(micAnalyser);
+  }
+  vizState('listening');
+  T('pttBtn').textContent = '■ Done';
+  T('pttBtn').classList.add('talking');
+  tlog('PTT press — listening', 'ok');
+}
+
+// Tap 2: End Turn. The agent finalizes the utterance and transcribes it.
+async function pttDone() {
+  if (!room || !talking) return;
+  talking = false;
+  speechEndAt = performance.now();
+  await publish({ type: 'speech_end', session_id: session?.roomName });
+  await room.localParticipant.setMicrophoneEnabled(false);
+  viz?.attachAnalyser(null);
+  vizState('thinking');
+  T('pttBtn').textContent = '● Talk';
+  T('pttBtn').classList.remove('talking');
+  tlog('PTT speech_end — thinking', 'ok');
+}
+
+// Esc: Cancel Turn. Buffer discarded, nothing transcribed, Cheeko stays silent.
+async function pttCancel() {
+  if (!room || !talking) return;
+  talking = false;
+  speechEndAt = 0;
+  await publish({ type: 'ptt_event', action: 'release', state: 'stop' });
+  await room.localParticipant.setMicrophoneEnabled(false);
+  viz?.attachAnalyser(null);
+  vizState('idle');
+  T('pttBtn').textContent = '● Talk';
+  T('pttBtn').classList.remove('talking');
+  tlog('PTT cancel — turn discarded', 'ok');
+}
+
+function pttToggle() {
+  if (talking) pttDone(); else pttPress();
+}
+
+// speech_end -> first final transcript. The number this whole PTT/batch-STT
+// change exists to move (12s streaming -> target under 2s).
+function noteTurnLatency() {
+  if (!speechEndAt) return;
+  const ms = Math.round(performance.now() - speechEndAt);
+  speechEndAt = 0;
+  T('pttLatency').textContent = ms + ' ms';
+  tlog(`Turn latency (speech_end -> transcript): ${ms} ms`, 'ok');
+}
+
 function tlog(message, cls) {
   const el = T('testLog');
   const line = document.createElement('div');
@@ -79,7 +195,10 @@ function registerTextHandlers(r) {
       const parsed = JSON.parse(text);
       if (parsed?.segments?.length) out = parsed.segments.map((s) => s.text).join(' ').trim();
     } catch { /* plain text */ }
-    turn(isAgent(info) ? 'cheeko' : 'kid', out, final);
+    const who = isAgent(info) ? 'cheeko' : 'kid';
+    // The child's own final transcript is what closes the latency window.
+    if (who === 'kid' && final) noteTurnLatency();
+    turn(who, out, final);
   });
 
   r.registerTextStreamHandler('lk.agent.events', async (reader) => {
@@ -90,6 +209,21 @@ function registerTextHandlers(r) {
       const { old_state, new_state } = event.data;
       T('testState').textContent = new_state || 'live';
       tlog(`agent: ${old_state} -> ${new_state}`);
+      // Correction signal for the ring: the worker knows when it actually
+      // started and stopped speaking. Never override an open turn — the
+      // child's mic wins while they hold the floor.
+      if (!talking) {
+        if (new_state === 'speaking') {
+          viz?.attachAnalyser(remoteAnalyser);
+          vizState('speaking');
+        } else if (new_state === 'thinking') {
+          viz?.attachAnalyser(null);
+          vizState('thinking');
+        } else if (new_state === 'listening' || new_state === 'idle') {
+          viz?.attachAnalyser(null);
+          vizState('idle');
+        }
+      }
     } else if (type === 'speech_created' && event.data) {
       // Fallback text source when transcription streams are quiet.
       const said = event.data.text || event.data.content || event.data.source_text;
@@ -103,10 +237,18 @@ function setRunning(on) {
   T('startTest').hidden = on;
   T('stopTest').hidden = !on;
   T('muteBtn').disabled = !on;
+  T('pttBtn').disabled = !on;
   T('testChar').disabled = on;
   T('testMac').disabled = on;
   T('testState').textContent = on ? 'live' : 'idle';
   T('testState').className = 'pill ' + (on ? 'live' : '');
+  if (!on) {
+    talking = false;
+    T('pttBtn').textContent = '● Talk';
+    T('pttBtn').classList.remove('talking');
+    viz?.attachAnalyser(null);
+    vizState('idle');
+  }
 }
 
 async function loadTestCharacters() {
@@ -203,6 +345,14 @@ async function startTest() {
       el.autoplay = true;
       T('audioSink').appendChild(el);
       tlog('Agent audio track attached', 'ok');
+      // Drive the ring from Cheeko's voice while she speaks.
+      if (track.mediaStreamTrack) {
+        remoteAnalyser = makeAnalyser(track.mediaStreamTrack);
+        if (!talking) {
+          viz?.attachAnalyser(remoteAnalyser);
+          vizState('speaking');
+        }
+      }
     }
   });
 
@@ -222,9 +372,14 @@ async function startTest() {
 
   try {
     await room.connect(session.url, session.token);
+    // Publish the track, then close it: Manual Talk means the mic only opens
+    // between taps. Publishing once up front keeps the first press instant.
     await room.localParticipant.setMicrophoneEnabled(true);
+    await room.localParticipant.setMicrophoneEnabled(false);
     setRunning(true);
-    tlog('Connected — start talking.', 'ok');
+    startViz();
+    vizState('connecting');
+    tlog('Connected — press Talk (or Space) to speak.', 'ok');
 
     // The agent is dispatched before we connect, so on a warm worker it can
     // already be in the room — and ParticipantConnected never fires for
@@ -268,3 +423,14 @@ function toggleMute() {
 T('startTest').addEventListener('click', startTest);
 T('stopTest').addEventListener('click', stopTest);
 T('muteBtn').addEventListener('click', toggleMute);
+T('pttBtn').addEventListener('click', pttToggle);
+document.querySelector('.tab[data-tab="testView"]')?.addEventListener('click', startViz);
+
+// Space = tap, Esc = cancel — same shape as client.py's 's' and spacebar.
+document.addEventListener('keydown', (e) => {
+  if (!running || T('testView').hidden) return;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  if (typing) return;
+  if (e.code === 'Space') { e.preventDefault(); pttToggle(); }
+  else if (e.code === 'Escape') { e.preventDefault(); pttCancel(); }
+});
