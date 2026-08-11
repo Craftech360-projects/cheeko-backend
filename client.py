@@ -902,6 +902,22 @@ class TestClient:
 
         logger.info("[BYE] UDP Listener shutting down.")
 
+    def _send_ptt(self, event):
+        """Mirror the firmware's tap-talk-tap boundary (cheeko-os-v2):
+        tap 1 → listen/start mode=manual (mic on), tap 2 → speech_end (mic off,
+        waiting for reply). listen/stop is NOT the turn end — the firmware only
+        sends it to cancel a turn back to idle."""
+        if not self.mqtt_client or not udp_session_details:
+            return
+        sid = udp_session_details["session_id"]
+        if event == "start":
+            payload = {"type": "listen", "session_id": sid,
+                       "state": "start", "mode": "manual"}
+        else:
+            payload = {"type": "speech_end", "session_id": sid}
+        self.mqtt_client.publish("device-server", json.dumps(payload))
+        logger.info(f"[PTT] Sent {payload['type']}/{payload.get('state', '')}")
+
     def _record_and_send_audio_thread(self):
         """Thread to record microphone audio and send it to the server."""
         # Main loop to keep the thread alive for multiple recording sessions
@@ -935,6 +951,8 @@ class TestClient:
             server_udp_addr = (
                 udp_session_details['udp']['server'], udp_session_details['udp']['port'])
 
+            self._send_ptt("start")
+
             packets_sent = 0
             last_log_time = time.time()
 
@@ -961,6 +979,8 @@ class TestClient:
                     logger.error(
                         f"An error occurred in the recording loop: {e}")
                     break  # Exit inner loop on error
+
+            self._send_ptt("end")
 
             # Cleanup for the current recording session
             logger.info("[MIC] Stopping microphone stream for this session.")
@@ -1004,7 +1024,7 @@ class TestClient:
             "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
         self.mqtt_client.publish("device-server", json.dumps(listen_payload))
         logger.info(
-            "[WAIT] Test running. Press Spacebar to abort TTS or Ctrl+C to stop.")
+            "[WAIT] Test running. Press Spacebar to abort TTS, 's' to end your turn, or Ctrl+C to stop.")
         if self.rfid_cards:
             logger.info("[RFID] Press a number key to mimic an RFID card tap (switch character):")
             for i, (label, uid) in enumerate(self.rfid_cards, 1):
@@ -1034,6 +1054,20 @@ class TestClient:
                         self.mimic_rfid_scan(uid)
                         while keyboard.is_pressed(key) and not stop_threads.is_set():
                             time.sleep(0.01)
+
+                # 's' mimics tap-2 of the device's tap-talk-tap: end the turn
+                # locally instead of waiting for the server's record_stop, so
+                # Manual Talk's device-driven turn boundary can be tested here.
+                # ponytail: a microsecond window exists against the TTS-stop
+                # handler's clear()-then-set() at the top of this file (not
+                # locked there either) where a press could skip a turn's
+                # audio silently. Not guarded — re-press and try again if a
+                # turn ever looks empty; add a lock only if this bites for real.
+                if keyboard.is_pressed('s'):
+                    logger.info("[PTT] 's' pressed. Ending turn locally...")
+                    stop_recording_event.set()
+                    while keyboard.is_pressed('s') and not stop_threads.is_set():
+                        time.sleep(0.01)
 
                 time.sleep(0.01)
 
