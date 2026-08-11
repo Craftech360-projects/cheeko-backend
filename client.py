@@ -22,9 +22,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.1.13"
+SERVER_IP = "192.168.0.3"
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.1.13"
+MQTT_BROKER_HOST ="192.168.0.3"
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
@@ -59,6 +59,9 @@ stop_threads = threading.Event()
 start_recording_event = threading.Event()
 # Event to signal recording thread to stop
 stop_recording_event = threading.Event()
+# Set by the recording thread while the mic is actually open, so the Talk key
+# knows whether a press means "start my turn" or "end my turn".
+recording_active = threading.Event()
 
 
 def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
@@ -235,18 +238,14 @@ class TestClient:
                 self.tts_active = False
                 self.print_sequence_summary()  # Print summary when TTS ends
 
-                # Proceed with recording even if we didn't receive audio,
-                # as the user might have aborted the TTS explicitly (e.g., via spacebar)
-                # and wants to speak now.
                 if self.total_packets_received == 0:
-                    logger.warning("[WARN] No audio packets received during TTS, but proceeding with recording anyway (possibly aborted).")
+                    logger.warning("[WARN] No audio packets received during TTS (possibly aborted).")
 
-                # Clear the stop event to allow the recording thread to continue or start
+                # Manual Talk: the mic does NOT open on its own when Cheeko
+                # stops speaking — the child presses the knob. Only re-arm the
+                # stop flag so the next press starts from a clean slate.
                 stop_recording_event.clear()
-                # Set the start event to signal the recording thread to begin (if it was waiting)
-                start_recording_event.set()
-                logger.info(
-                    "[MIC] Cleared stop_recording_event and set start_recording_event for next recording.")
+                logger.info("[MIC] Ready. Press 't' to talk.")
 
             # Handle STT message (server processed our speech)
             elif payload.get("type") == "stt":
@@ -952,6 +951,7 @@ class TestClient:
                 udp_session_details['udp']['server'], udp_session_details['udp']['port'])
 
             self._send_ptt("start")
+            recording_active.set()
 
             packets_sent = 0
             last_log_time = time.time()
@@ -980,6 +980,7 @@ class TestClient:
                         f"An error occurred in the recording loop: {e}")
                     break  # Exit inner loop on error
 
+            recording_active.clear()
             self._send_ptt("end")
 
             # Cleanup for the current recording session
@@ -1024,7 +1025,8 @@ class TestClient:
             "type": "listen", "session_id": udp_session_details["session_id"], "state": "detect", "text": "hello baby"}
         self.mqtt_client.publish("device-server", json.dumps(listen_payload))
         logger.info(
-            "[WAIT] Test running. Press Spacebar to abort TTS, 's' to end your turn, or Ctrl+C to stop.")
+            "[WAIT] Test running. Press 't' to talk (tap again when done), "
+            "'s' to end a turn, Spacebar to abort TTS, Ctrl+C to quit.")
         if self.rfid_cards:
             logger.info("[RFID] Press a number key to mimic an RFID card tap (switch character):")
             for i, (label, uid) in enumerate(self.rfid_cards, 1):
@@ -1055,14 +1057,23 @@ class TestClient:
                         while keyboard.is_pressed(key) and not stop_threads.is_set():
                             time.sleep(0.01)
 
-                # 's' mimics tap-2 of the device's tap-talk-tap: end the turn
-                # locally instead of waiting for the server's record_stop, so
-                # Manual Talk's device-driven turn boundary can be tested here.
-                # ponytail: a microsecond window exists against the TTS-stop
-                # handler's clear()-then-set() at the top of this file (not
-                # locked there either) where a press could skip a turn's
-                # audio silently. Not guarded — re-press and try again if a
-                # turn ever looks empty; add a lock only if this bites for real.
+                # 't' is the knob: tap once to open the mic, tap again to hand
+                # the turn to Cheeko. The mic never opens on its own — that is
+                # the whole point of Manual Talk, and it is what the firmware
+                # does (cheeko-os-v2 tap-talk-tap).
+                if keyboard.is_pressed('t'):
+                    if recording_active.is_set():
+                        logger.info("[PTT] Tap 2 — ending turn.")
+                        stop_recording_event.set()
+                    else:
+                        logger.info("[PTT] Tap 1 — mic on, talk now.")
+                        stop_recording_event.clear()
+                        start_recording_event.set()
+                    while keyboard.is_pressed('t') and not stop_threads.is_set():
+                        time.sleep(0.01)
+
+                # 's' remains a plain end-turn, for ending a turn without
+                # risking a double-tap re-open.
                 if keyboard.is_pressed('s'):
                     logger.info("[PTT] 's' pressed. Ending turn locally...")
                     stop_recording_event.set()
