@@ -73,12 +73,17 @@ async function pttPress() {
   talking = true;
   speechEndAt = 0;
   await publish({ type: 'ptt_event', action: 'press', state: 'start', mode: 'manual' });
-  await room.localParticipant.setMicrophoneEnabled(true);
-
-  const pub = [...room.localParticipant.audioTrackPublications.values()][0];
-  if (pub?.track?.mediaStreamTrack) {
-    micAnalyser = makeAnalyser(pub.track.mediaStreamTrack);
-    viz?.attachAnalyser(micAnalyser);
+  try {
+    await room.localParticipant.setMicrophoneEnabled(true);
+    const pub = [...room.localParticipant.audioTrackPublications.values()][0];
+    if (pub?.track?.mediaStreamTrack) {
+      micAnalyser = makeAnalyser(pub.track.mediaStreamTrack);
+      viz?.attachAnalyser(micAnalyser);
+    }
+  } catch (e) {
+    // The turn is already open on the agent's side; say so rather than
+    // leaving a silent turn the child cannot end.
+    tlog('Could not open the mic: ' + e.message, 'err');
   }
   vizState('listening');
   T('pttBtn').textContent = '■ Done';
@@ -373,9 +378,15 @@ async function startTest() {
   try {
     await room.connect(session.url, session.token);
     // Publish the track, then close it: Manual Talk means the mic only opens
-    // between taps. Publishing once up front keeps the first press instant.
-    await room.localParticipant.setMicrophoneEnabled(true);
-    await room.localParticipant.setMicrophoneEnabled(false);
+    // between taps, and publishing once up front keeps the first press
+    // instant. Non-fatal on purpose — a denied or missing mic must not tear
+    // down a session that is otherwise live; the first Talk press asks again.
+    try {
+      await room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(false);
+    } catch (micErr) {
+      tlog('Mic unavailable (' + micErr.message + ') — press Talk to grant access.', 'err');
+    }
     setRunning(true);
     startViz();
     vizState('connecting');
