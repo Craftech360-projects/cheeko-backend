@@ -18,6 +18,17 @@ const parsePidFromLsof = (output) => {
   return pidMatch ? Number(pidMatch[1]) : null;
 };
 
+const parsePidFromNetstat = (output, port) => {
+  const line = output
+    .split(/\r?\n/)
+    .map((l) => l.trim().split(/\s+/))
+    .find((cols) => cols[3] === 'LISTENING' && cols[1] && cols[1].endsWith(`:${port}`));
+
+  return line ? Number(line[4]) : null;
+};
+
+const isWindows = process.platform === 'win32';
+
 const ensurePortAvailability = async (port = DEFAULT_PORT, host = '127.0.0.1') => {
   if (process.env.SKIP_PORT_GUARD === '1') {
     logger.warn('Skipping port guard because SKIP_PORT_GUARD=1');
@@ -37,18 +48,19 @@ const ensurePortAvailability = async (port = DEFAULT_PORT, host = '127.0.0.1') =
       logger.warn(`Port ${port} is already in use. Attempting to free it...`);
 
       try {
-        const lsofOutput = execSync(`lsof -nP -iTCP:${port} -sTCP:LISTEN`, {
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe']
-        });
-        const pid = parsePidFromLsof(lsofOutput);
+        const execOpts = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+        const output = execSync(
+          isWindows ? 'netstat -ano -p tcp' : `lsof -nP -iTCP:${port} -sTCP:LISTEN`,
+          execOpts
+        );
+        const pid = isWindows ? parsePidFromNetstat(output, port) : parsePidFromLsof(output);
         if (!pid) {
           logger.warn(`Could not determine PID for port ${port}.`);
           resolve();
           return;
         }
 
-        execSync(`kill -TERM ${pid}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        execSync(isWindows ? `taskkill /PID ${pid} /F` : `kill -TERM ${pid}`, execOpts);
         logger.info(`Stopped stale process ${pid} bound to port ${port}.`);
         resolve();
       } catch (killError) {
@@ -68,4 +80,4 @@ const ensurePortAvailability = async (port = DEFAULT_PORT, host = '127.0.0.1') =
   });
 };
 
-module.exports = { ensurePortAvailability, parsePidFromLsof };
+module.exports = { ensurePortAvailability, parsePidFromLsof, parsePidFromNetstat };

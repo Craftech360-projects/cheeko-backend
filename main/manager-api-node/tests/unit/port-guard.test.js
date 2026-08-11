@@ -38,8 +38,13 @@ describe('port guard startup helper', () => {
       close: jest.fn()
     }));
 
+    const isWindows = process.platform === 'win32';
     mockExecSync
-      .mockReturnValueOnce('COMMAND PID USER\nnode 9988 abraham\n')
+      .mockReturnValueOnce(
+        isWindows
+          ? '  TCP    0.0.0.0:8002    0.0.0.0:0    LISTENING    9988\n'
+          : 'COMMAND PID USER\nnode 9988 abraham\n'
+      )
       .mockReturnValueOnce('');
 
     const { ensurePortAvailability } = require('../../src/utils/portGuard');
@@ -47,12 +52,23 @@ describe('port guard startup helper', () => {
     await ensurePortAvailability(8002, '127.0.0.1');
 
     expect(mockExecSync).toHaveBeenCalledWith(
-      'lsof -nP -iTCP:8002 -sTCP:LISTEN',
+      isWindows ? 'netstat -ano -p tcp' : 'lsof -nP -iTCP:8002 -sTCP:LISTEN',
       expect.objectContaining({ encoding: 'utf8' })
     );
     expect(mockExecSync).toHaveBeenCalledWith(
-      'kill -TERM 9988',
+      isWindows ? 'taskkill /PID 9988 /F' : 'kill -TERM 9988',
       expect.objectContaining({ encoding: 'utf8' })
     );
+  });
+
+  it('parses the listening PID out of netstat output', () => {
+    const { parsePidFromNetstat } = require('../../src/utils/portGuard');
+    const output = [
+      '  TCP    0.0.0.0:8001    0.0.0.0:0    LISTENING    111',
+      '  TCP    127.0.0.1:5000  127.0.0.1:8002  ESTABLISHED  222',
+      '  TCP    0.0.0.0:8002    0.0.0.0:0    LISTENING    9988'
+    ].join('\r\n');
+
+    expect(parsePidFromNetstat(output, 8002)).toBe(9988);
   });
 });
