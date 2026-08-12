@@ -79,6 +79,19 @@ router.post('/register',
  *         schema:
  *           type: string
  *         description: Device MAC address or validation code
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               kidId:
+ *                 type: integer
+ *                 description: >
+ *                   Child to pair the device to. Omit it and the device pairs to
+ *                   the owner's only child; when they have none or several it is
+ *                   left unpaired for the app's kid picker to resolve.
  *     responses:
  *       200:
  *         description: Device bound successfully
@@ -87,9 +100,10 @@ router.post('/bind/:agentId/:deviceCode',
   requireAuth,
   asyncHandler(async (req, res) => {
     const { agentId, deviceCode } = req.params;
+    const { kidId } = req.body || {};
 
     try {
-      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode);
+      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode, kidId);
 
       // Transform to DeviceResponseDTO format (matching Spring Boot)
       const response = {
@@ -432,7 +446,7 @@ router.put('/assign-kid-by-mac',
     }
 
     try {
-      const device = await deviceService.assignKidByMac(mac, kidId);
+      const device = await deviceService.assignKidByMac(mac, kidId, req.user.id);
       success(res, device, 'Kid assigned to device');
     } catch (error) {
       badRequest(res, error.message);

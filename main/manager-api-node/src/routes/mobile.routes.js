@@ -597,7 +597,8 @@ router.get('/user-devices', asyncHandler(async (req, res) => {
 }));
 
 router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) => {
-    const device = await deviceService.bindDevice(req.mobileUser.id, req.params.agentId, req.params.deviceCode);
+    const { kidId } = req.body || {};
+    const device = await deviceService.bindDevice(req.mobileUser.id, req.params.agentId, req.params.deviceCode, kidId);
     const response = {
         id: device.id,
         macAddress: device.mac_address,

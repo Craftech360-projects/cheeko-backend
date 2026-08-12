@@ -69,13 +69,70 @@ const registerDevice = async ({ mac, board, appVersion }) => {
 };
 
 /**
+ * Record a pairing change so a device that changes hands can have its MAC-keyed
+ * history split between the two children later. Closes whichever assignment is
+ * open for this MAC and, when a child is being paired, opens a new one.
+ * Re-saving the same child is a no-op, so this is safe to call on every write.
+ */
+const recordKidAssignment = async (tx, macAddress, kidId, at = new Date()) => {
+  if (!macAddress) return;
+
+  const open = await tx.device_kid_assignment.findFirst({
+    where: { mac_address: macAddress, ended_at: null },
+    select: { id: true, kid_id: true },
+  });
+
+  if (open && kidId && open.kid_id.toString() === BigInt(kidId).toString()) return;
+  if (!open && !kidId) return;
+
+  if (open) {
+    await tx.device_kid_assignment.updateMany({
+      where: { mac_address: macAddress, ended_at: null },
+      data: { ended_at: at },
+    });
+  }
+
+  if (kidId) {
+    await tx.device_kid_assignment.create({
+      data: { mac_address: macAddress, kid_id: BigInt(kidId), assigned_at: at },
+    });
+  }
+};
+
+/**
+ * The child a newly bound device should be paired to: the one the app sent, or
+ * the owner's only child when it sent none. Returns null when the owner has no
+ * children or several — the app's kid picker resolves those.
+ * @throws when an explicit kid does not belong to the binding user
+ */
+const resolveKidForBinding = async (tx, userId, kidId) => {
+  if (kidId) {
+    const kid = await tx.kid_profile.findFirst({
+      where: { id: BigInt(kidId), user_id: BigInt(userId) },
+      select: { id: true },
+    });
+    if (!kid) throw new Error('Kid profile not found');
+    return kid.id;
+  }
+
+  const kids = await tx.kid_profile.findMany({
+    where: { user_id: BigInt(userId) },
+    select: { id: true },
+    take: 2,
+  });
+  return kids.length === 1 ? kids[0].id : null;
+};
+
+/**
  * Bind device to user and agent
  * @param {number} userId - User ID
  * @param {string} agentId - Agent ID
  * @param {string} deviceCode - 6-digit device code or MAC address
+ * @param {number|string|null} kidId - Child to pair; falls back to the owner's
+ *   only child when omitted, and to no pairing when they have several
  * @returns {Promise<Object>} Bound device
  */
-const bindDevice = async (userId, agentId, deviceCode) => {
+const bindDevice = async (userId, agentId, deviceCode, kidId = null) => {
   let device = null;
   let macAddress = null;
   let activationData = null;
@@ -105,10 +162,28 @@ const bindDevice = async (userId, agentId, deviceCode) => {
 
   if (device) {
     if (device.user_id && device.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
-    const updated = await prisma.ai_device.update({
-      where: { id: device.id },
-      data: { user_id: BigInt(userId), agent_id: agentId, update_date: new Date() },
+
+    // Only resolve a child when one is being set: an explicit kid re-pairs, and
+    // the sole-child fallback applies to a device that has none. A device that
+    // is already paired keeps its child unless the app names a different one.
+    const pairedKidId = (kidId || !device.kid_id)
+      ? await resolveKidForBinding(prisma, userId, kidId)
+      : null;
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const row = await tx.ai_device.update({
+        where: { id: device.id },
+        data: {
+          user_id: BigInt(userId),
+          agent_id: agentId,
+          ...(pairedKidId ? { kid_id: pairedKidId } : {}),
+          update_date: new Date(),
+        },
+      });
+      if (pairedKidId) await recordKidAssignment(tx, macAddress, pairedKidId);
+      return row;
     });
+
     if (activationData) {
       activationCodeCache.delete(deviceCode);
       activationMacCache.delete(macAddress);
@@ -117,22 +192,28 @@ const bindDevice = async (userId, agentId, deviceCode) => {
     return updated;
   } else {
     const now = new Date();
-    const newDevice = await prisma.ai_device.create({
-      data: {
-        mac_address: macAddress,
-        user_id: BigInt(userId),
-        agent_id: agentId,
-        board: activationData.board || null,
-        app_version: activationData.appVersion || null,
-        auto_update: 1,
-        mode: 'conversation',
-        device_mode: 'manual',
-        create_date: now,
-        update_date: now,
-        last_connected_at: now,
-        creator: BigInt(userId),
-        updater: BigInt(userId),
-      },
+    const pairedKidId = await resolveKidForBinding(prisma, userId, kidId);
+    const newDevice = await prisma.$transaction(async (tx) => {
+      const row = await tx.ai_device.create({
+        data: {
+          mac_address: macAddress,
+          user_id: BigInt(userId),
+          agent_id: agentId,
+          ...(pairedKidId ? { kid_id: pairedKidId } : {}),
+          board: activationData.board || null,
+          app_version: activationData.appVersion || null,
+          auto_update: 1,
+          mode: 'conversation',
+          device_mode: 'manual',
+          create_date: now,
+          update_date: now,
+          last_connected_at: now,
+          creator: BigInt(userId),
+          updater: BigInt(userId),
+        },
+      });
+      if (pairedKidId) await recordKidAssignment(tx, macAddress, pairedKidId, now);
+      return row;
     });
     activationCodeCache.delete(deviceCode);
     activationMacCache.delete(macAddress);
@@ -171,7 +252,7 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}
 
   const device = await prisma.ai_device.findFirst({
     where: isUuid ? { id: deviceId } : { mac_address: normalizedMac || deviceId },
-    select: { id: true, user_id: true },
+    select: { id: true, user_id: true, mac_address: true },
   });
 
   if (!device) throw new Error('Device not found');
@@ -180,16 +261,20 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}
     throw new Error("You don't have permission to unbind this device");
   }
 
-  if (hardDelete) {
-    await prisma.ai_device.delete({
-      where: { id: device.id },
-    });
-    return;
-  }
+  await prisma.$transaction(async (tx) => {
+    // Close the pairing either way. The child's own rows are untouched — they
+    // belong to the child, not to the toy, and are theirs again on re-pairing.
+    await recordKidAssignment(tx, device.mac_address, null);
 
-  await prisma.ai_device.update({
-    where: { id: device.id },
-    data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() },
+    if (hardDelete) {
+      await tx.ai_device.delete({ where: { id: device.id } });
+      return;
+    }
+
+    await tx.ai_device.update({
+      where: { id: device.id },
+      data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() },
+    });
   });
 };
 
@@ -232,19 +317,15 @@ const updateDevice = async (userId, deviceId, data, isSuperAdmin = false) => {
 const assignKidToDevice = async (userId, deviceId, kidId) => {
   const device = await prisma.ai_device.findUnique({
     where: { id: deviceId },
-    select: { id: true, user_id: true, kid_id: true },
+    select: { id: true, user_id: true, kid_id: true, mac_address: true },
   });
 
   if (!device) throw new Error('Device not found');
   if (device.user_id !== BigInt(userId)) throw new Error('Device does not belong to user');
-  if (
-    kidId &&
-    device.kid_id &&
-    device.kid_id.toString() !== BigInt(kidId).toString()
-  ) {
-    throw new Error('Device already has a child assigned');
-  }
 
+  // Re-pairing to a different child is expected, not an error: a toy handed
+  // down to a sibling, or a device the picker paired to the wrong child. The
+  // outgoing child keeps everything they built up; it is keyed to them.
   if (kidId) {
     const kid = await prisma.kid_profile.findFirst({
       where: { id: BigInt(kidId), user_id: BigInt(userId) },
@@ -253,9 +334,13 @@ const assignKidToDevice = async (userId, deviceId, kidId) => {
     if (!kid) throw new Error('Kid profile not found');
   }
 
-  return prisma.ai_device.update({
-    where: { id: deviceId },
-    data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.ai_device.update({
+      where: { id: deviceId },
+      data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
+    });
+    await recordKidAssignment(tx, device.mac_address, kidId);
+    return updated;
   });
 };
 
@@ -269,7 +354,12 @@ const assignKidByMac = async (mac, kidId, userId = null) => {
   const normalizedMac = normalizeMacAddress(mac);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
-  if (userId && kidId) {
+  // Always scoped to the caller. This used to be optional, and the web route
+  // called it without a user, so any authenticated user could pair a child to
+  // any unpaired device by guessing its MAC.
+  if (!userId) throw new Error('A user is required to assign a child to a device');
+
+  if (kidId) {
     const kid = await prisma.kid_profile.findFirst({
       where: { id: BigInt(kidId), user_id: BigInt(userId) },
       select: { id: true },
@@ -278,23 +368,20 @@ const assignKidByMac = async (mac, kidId, userId = null) => {
   }
 
   const device = await prisma.ai_device.findFirst({
-    where: { mac_address: normalizedMac, ...(userId ? { user_id: BigInt(userId) } : {}) },
-    select: { id: true, kid_id: true },
+    where: { mac_address: normalizedMac, user_id: BigInt(userId) },
+    select: { id: true, kid_id: true, mac_address: true },
   });
   if (!device) throw new Error('Device not found');
-  if (
-    kidId &&
-    device.kid_id &&
-    device.kid_id.toString() !== BigInt(kidId).toString()
-  ) {
-    throw new Error('Device already has a child assigned');
-  }
 
-  const updated = await prisma.ai_device.update({
-    where: { id: device.id },
-    data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
+  // Re-pairing to a different child is expected — see assignKidToDevice.
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.ai_device.update({
+      where: { id: device.id },
+      data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
+    });
+    await recordKidAssignment(tx, device.mac_address, kidId);
+    return updated;
   });
-  return updated;
 };
 
 /**
@@ -1507,6 +1594,7 @@ module.exports = {
   updateDevice,
   assignKidToDevice,
   assignKidByMac,
+  recordKidAssignment,
   cycleMode,
   getMode,
   getDeviceByMac,
