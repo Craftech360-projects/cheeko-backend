@@ -285,7 +285,11 @@ describe('mobile.service parent profile compatibility', () => {
 
     expect(prisma.device_ai_interactions_daily.findMany).toHaveBeenCalledWith({
       where: {
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         date: {
           gte: new Date('2026-05-13T00:00:00.000Z'),
           lte: new Date('2026-05-13T00:00:00.000Z')
@@ -797,7 +801,11 @@ describe('mobile.service parent profile compatibility', () => {
     expect(result.gamesPlayed).toBe(2);
     expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith({
       where: {
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         event_name: 'game_start',
         server_received_at: {
           gte: new Date('2026-05-12T00:00:00.000Z'),
@@ -925,7 +933,11 @@ describe('mobile.service homepage activity details', () => {
 
     expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith({
       where: {
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         server_received_at: {
           gte: expectedStart,
           lte: new Date('2026-05-16T10:00:00.000Z')
@@ -984,7 +996,11 @@ describe('mobile.service homepage activity details', () => {
     const gameRowsQuery = prisma.device_games_played.findMany.mock.calls[0][0];
     expect(gameRowsQuery).toEqual(expect.objectContaining({
       where: expect.objectContaining({
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         played_at: expect.objectContaining({
           gte: expect.any(Date),
           lte: new Date('2026-05-16T10:00:00.000Z')

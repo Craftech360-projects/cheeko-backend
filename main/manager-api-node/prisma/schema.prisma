@@ -1225,6 +1225,7 @@ model device_analytics_event {
   device_id          String    @db.VarChar(100)
   event_id           String    @db.VarChar(120)
   mac_address        String    @db.VarChar(20)
+  kid_id                BigInt?
   sender_client_id   String?   @db.VarChar(255)
   board              String?   @db.VarChar(50)
   firmware           String?   @db.VarChar(100)
@@ -1254,6 +1255,7 @@ model device_analytics_event {
   @@index([mac_address, event_timestamp(sort: Desc)], map: "idx_device_analytics_event_mac_event_ts")
   @@index([mac_address, server_received_at(sort: Desc)], map: "idx_device_analytics_event_mac_received")
   @@index([mac_address, event_name], map: "idx_device_analytics_event_mac_name")
+  @@index([kid_id, event_timestamp(sort: Desc)], map: "idx_device_analytics_event_kid_ts")
 }
 
 model stt_providers {
@@ -1343,6 +1345,7 @@ model device_usage_daily {
   user_id               BigInt?
   device_id             String?   @db.Uuid
   mac_address           String    @db.VarChar(20)
+  kid_id                BigInt?
   date                  DateTime  @db.Date
   usage_time_seconds    Int       @default(0)
   game_usage_seconds    Int       @default(0)
@@ -1355,6 +1358,7 @@ model device_usage_daily {
   @@unique([date, mac_address], map: "uq_device_usage_daily_date_mac")
   @@index([user_id, date], map: "idx_device_usage_daily_user_date")
   @@index([mac_address, date], map: "idx_device_usage_daily_mac_date")
+  @@index([kid_id, date], map: "idx_device_usage_daily_kid_date")
 }
 
 model device_card_taps_daily {
@@ -1362,6 +1366,7 @@ model device_card_taps_daily {
   user_id        BigInt?
   device_id      String?   @db.Uuid
   mac_address    String    @db.VarChar(20)
+  kid_id                BigInt?
   date           DateTime  @db.Date
   card_tap_count Int       @default(0)
   created_at     DateTime? @default(now()) @db.Timestamptz(6)
@@ -1370,6 +1375,7 @@ model device_card_taps_daily {
   @@unique([date, mac_address], map: "uq_device_card_taps_daily_date_mac")
   @@index([user_id, date], map: "idx_device_card_taps_daily_user_date")
   @@index([mac_address, date], map: "idx_device_card_taps_daily_mac_date")
+  @@index([kid_id, date], map: "idx_device_card_taps_daily_kid_date")
 }
 
 model device_ai_interactions_daily {
@@ -1377,6 +1383,7 @@ model device_ai_interactions_daily {
   user_id              BigInt?
   device_id            String?   @db.Uuid
   mac_address          String    @db.VarChar(20)
+  kid_id                BigInt?
   date                 DateTime  @db.Date
   ai_interaction_count Int       @default(0)
   created_at           DateTime? @default(now()) @db.Timestamptz(6)
@@ -1385,6 +1392,7 @@ model device_ai_interactions_daily {
   @@unique([date, mac_address], map: "uq_device_ai_interactions_daily_date_mac")
   @@index([user_id, date], map: "idx_device_ai_interactions_daily_user_date")
   @@index([mac_address, date], map: "idx_device_ai_interactions_daily_mac_date")
+  @@index([kid_id, date], map: "idx_device_ai_interactions_daily_kid_date")
 }
 
 model device_games_played {
@@ -1392,6 +1400,7 @@ model device_games_played {
   user_id                BigInt?
   device_id              String?   @db.Uuid
   mac_address            String    @db.VarChar(20)
+  kid_id                BigInt?
   activity_date          DateTime  @db.Date
   game_id                String?   @db.VarChar(80)
   game_name              String?   @db.VarChar(200)
@@ -1407,6 +1416,7 @@ model device_games_played {
   @@index([mac_address, played_at(sort: Desc)], map: "idx_device_games_played_mac_played")
   @@index([user_id, played_at(sort: Desc)], map: "idx_device_games_played_user_played")
   @@index([activity_date, mac_address], map: "idx_device_games_played_date_mac")
+  @@index([kid_id, activity_date], map: "idx_device_games_played_kid_date")
 }
 
 model device_radio_played {
@@ -1414,6 +1424,7 @@ model device_radio_played {
   user_id                BigInt?
   device_id              String?   @db.Uuid
   mac_address            String    @db.VarChar(20)
+  kid_id                BigInt?
   activity_date          DateTime  @db.Date
   station                String?   @db.VarChar(120)
   duration_ms            Int?
@@ -1426,6 +1437,7 @@ model device_radio_played {
   @@index([user_id, played_at(sort: Desc)], map: "idx_device_radio_played_user_played")
   @@index([station, played_at(sort: Desc)], map: "idx_device_radio_played_station_played")
   @@index([activity_date, mac_address], map: "idx_device_radio_played_date_mac")
+  @@index([kid_id, activity_date], map: "idx_device_radio_played_kid_date")
 }
 
 /// Curated quiz Question Bank. Quizzy never invents scored questions; it selects

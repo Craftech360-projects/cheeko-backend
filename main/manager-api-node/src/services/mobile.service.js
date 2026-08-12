@@ -183,7 +183,7 @@ async function countRawGameStartsForRange(scope, range) {
 
     const rows = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: scope.macAddresses },
+            ...progressOwnerFilter(scope),
             event_name: 'game_start',
             server_received_at: {
                 gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
@@ -206,7 +206,7 @@ async function getProgressEventsForRange(scope, range, eventName) {
 
     const rows = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: scope.macAddresses },
+            ...progressOwnerFilter(scope),
             event_name: eventNameWhere,
             server_received_at: {
                 gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
@@ -2039,9 +2039,10 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
     }
 
     const { start, end, monthKey } = getActivityDetailsRange(period, now, selectedMonth);
+    const ownerFilter = await ownerFilterForMacs(macAddresses);
     const events = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: macAddresses },
+            ...ownerFilter,
             server_received_at: {
                 gte: start,
                 lte: end,
@@ -2073,7 +2074,7 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
         if (period === 'week') {
             const gameRows = await prisma.device_games_played.findMany({
                 where: {
-                    mac_address: { in: macAddresses },
+                    ...ownerFilter,
                     played_at: {
                         gte: start,
                         lte: end,
@@ -2184,11 +2185,30 @@ function recentActivityPackTitleKey(activity) {
     return title ? title.toLowerCase() : null;
 }
 
+/**
+ * The same owner filter as progressOwnerFilter, for the read paths that resolve
+ * their own device list instead of going through resolveProgressScope.
+ */
+async function ownerFilterForMacs(macAddresses) {
+    if (!macAddresses || !macAddresses.length) return { mac_address: { in: [] } };
+    const devices = await prisma.ai_device.findMany({
+        where: { mac_address: { in: macAddresses } },
+        select: { mac_address: true, kid_id: true },
+    });
+    return progressOwnerFilter({
+        kidIds: devices.filter((d) => d.kid_id).map((d) => d.kid_id),
+        unpairedMacAddresses: macAddresses.filter((mac) => {
+            const row = devices.find((d) => (normalizeMacAddress(d.mac_address) || d.mac_address) === mac);
+            return !row || !row.kid_id;
+        }),
+    });
+}
+
 async function getRecentAnalyticsCardActivities(macAddresses, limit = 3) {
     if (!macAddresses || macAddresses.length === 0) return [];
     const rows = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: macAddresses },
+            ...(await ownerFilterForMacs(macAddresses)),
             event_name: 'card_session_start',
         },
         select: {
@@ -2281,7 +2301,7 @@ async function resolveProgressScope(firebaseUid, options = {}) {
 
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id },
-        select: { mac_address: true },
+        select: { mac_address: true, kid_id: true },
     });
 
     const ownedMacAddresses = (devices || [])
@@ -2293,11 +2313,44 @@ async function resolveProgressScope(firebaseUid, options = {}) {
         throw new ApiError('Device not found', 404, 404);
     }
 
+    const macAddresses = requestedMac ? [requestedMac] : ownedMacAddresses;
+    const inScope = (devices || []).filter((d) => {
+        const mac = normalizeMacAddress(d.mac_address) || d.mac_address;
+        return macAddresses.includes(mac);
+    });
+
     return {
         userId: user.id,
         timezone: user.parent_profile?.timezone || 'UTC',
-        macAddresses: requestedMac ? [requestedMac] : ownedMacAddresses,
+        macAddresses,
+        kidIds: inScope.filter((d) => d.kid_id).map((d) => d.kid_id),
+        unpairedMacAddresses: inScope
+            .filter((d) => !d.kid_id)
+            .map((d) => normalizeMacAddress(d.mac_address) || d.mac_address),
     };
+}
+
+/**
+ * Which rollup rows belong to the children in scope.
+ *
+ * A paired device's history is read by child, so it follows them to a new toy
+ * and does not follow the toy to a sibling. An unpaired device falls back to its
+ * own MAC AND to rows with no child — without that second half, a toy handed on
+ * before the parent picks a child would report the previous child's totals.
+ *
+ * A parent can own both kinds at once, so this is an OR rather than a branch.
+ */
+function progressOwnerFilter(scope) {
+    const branches = [];
+    if (scope.kidIds && scope.kidIds.length) {
+        branches.push({ kid_id: { in: scope.kidIds } });
+    }
+    if (scope.unpairedMacAddresses && scope.unpairedMacAddresses.length) {
+        branches.push({ mac_address: { in: scope.unpairedMacAddresses }, kid_id: null });
+    }
+    // Nothing in scope: match nothing rather than everything.
+    if (!branches.length) return { mac_address: { in: [] } };
+    return branches.length === 1 ? branches[0] : { OR: branches };
 }
 
 async function resolveAdminProgressScopeByMac(mac) {
@@ -2306,7 +2359,7 @@ async function resolveAdminProgressScopeByMac(mac) {
 
     const device = await prisma.ai_device.findUnique({
         where: { mac_address: normalizedMac },
-        select: { user_id: true },
+        select: { user_id: true, kid_id: true },
     });
     if (!device) throw new ApiError('Device not found', 404, 404);
 
@@ -2323,6 +2376,8 @@ async function resolveAdminProgressScopeByMac(mac) {
         userId: device.user_id || null,
         timezone,
         macAddresses: [normalizedMac],
+        kidIds: device.kid_id ? [device.kid_id] : [],
+        unpairedMacAddresses: device.kid_id ? [] : [normalizedMac],
     };
 }
 
@@ -2366,7 +2421,7 @@ async function getProgressSummary(firebaseUid, options = {}) {
     ] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: {
@@ -2379,21 +2434,21 @@ async function getProgressSummary(firebaseUid, options = {}) {
         }),
         prisma.device_card_taps_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: { card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: { ai_interaction_count: true },
         }),
         prisma.device_games_played.count({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 activity_date: dateWhere,
             },
         }),
@@ -2466,7 +2521,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
 
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 date: true,
                 usage_time_seconds: true,
@@ -2477,15 +2532,15 @@ async function getProgressTrend(firebaseUid, options = {}) {
             },
         }),
         prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, ai_interaction_count: true },
         }),
         prisma.device_games_played.findMany({
-            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            where: { ...progressOwnerFilter(scope), activity_date: dateWhere },
             select: { activity_date: true },
         }),
     ]);
@@ -2565,7 +2620,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
     if (metric === 'usage') {
         const rows = await prisma.device_usage_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: {
@@ -2584,7 +2639,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             const monthEnd = dateOnlyFromKey(range.endDate);
             const sectionRows = await prisma.device_usage_daily.findMany({
                 where: {
-                    mac_address: { in: scope.macAddresses },
+                    ...progressOwnerFilter(scope),
                     date: {
                         gte: monthStart || dateWhere.gte,
                         lte: monthEnd,
@@ -2670,7 +2725,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
 
     if (metric === 'games') {
         const where = {
-            mac_address: { in: scope.macAddresses },
+            ...progressOwnerFilter(scope),
             activity_date: dateWhere,
         };
         const [totalItems, rows] = await Promise.all([
@@ -2713,7 +2768,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
     }
 
     const where = {
-        mac_address: { in: scope.macAddresses },
+        ...progressOwnerFilter(scope),
         activity_date: dateWhere,
     };
     const [totalItems, rows] = await Promise.all([
@@ -2783,7 +2838,7 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
 
     const [usageRows, cardRows, aiRows, gamesCount] = await Promise.all([
         prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 usage_time_seconds: true,
                 game_usage_seconds: true,
@@ -2793,15 +2848,15 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
             },
         }),
         prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { ai_interaction_count: true },
         }),
         prisma.device_games_played.count({
-            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            where: { ...progressOwnerFilter(scope), activity_date: dateWhere },
         }),
     ]);
 
@@ -2865,7 +2920,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
 
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 date: true,
                 usage_time_seconds: true,
@@ -2876,15 +2931,15 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
             },
         }),
         prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, ai_interaction_count: true },
         }),
         prisma.device_games_played.findMany({
-            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            where: { ...progressOwnerFilter(scope), activity_date: dateWhere },
             select: { activity_date: true },
         }),
     ]);
@@ -2958,7 +3013,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
 
     if (metric === 'usage') {
         const rows = await prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 date: true,
                 game_usage_seconds: true,
@@ -2975,7 +3030,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             const monthEnd = dateOnlyFromKey(range.endDate);
             const sectionRows = await prisma.device_usage_daily.findMany({
                 where: {
-                    mac_address: { in: scope.macAddresses },
+                    ...progressOwnerFilter(scope),
                     date: {
                         gte: monthStart || dateWhere.gte,
                         lte: monthEnd,
@@ -3055,7 +3110,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     }
 
     if (metric === 'games') {
-        const where = { mac_address: { in: scope.macAddresses }, activity_date: dateWhere };
+        const where = { ...progressOwnerFilter(scope), activity_date: dateWhere };
         const [totalItems, rows] = await Promise.all([
             prisma.device_games_played.count({ where }),
             prisma.device_games_played.findMany({
@@ -3094,7 +3149,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
         };
     }
 
-    const where = { mac_address: { in: scope.macAddresses }, activity_date: dateWhere };
+    const where = { ...progressOwnerFilter(scope), activity_date: dateWhere };
     const [totalItems, rows] = await Promise.all([
         prisma.device_radio_played.count({ where }),
         prisma.device_radio_played.findMany({
