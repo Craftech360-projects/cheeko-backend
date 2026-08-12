@@ -269,9 +269,15 @@ async function loadTestCharacters() {
         o.textContent = t.agentName;
         sel.appendChild(o);
       });
+    // Quizzy is the default: the Test tab is mostly used for the quiz/riddle
+    // game now, and (device default) resolves to whatever the toy is set to,
+    // which is rarely the character you meant to test.
+    const quizzy = [...sel.options].find((o) => o.value.toLowerCase() === 'quizzy');
+    if (quizzy) sel.value = quizzy.value;
   } catch (e) {
     tlog('Could not load characters: ' + e.message, 'err');
   }
+  syncQuizPanel();
 }
 
 // The agent deliberately does NOT auto-greet — base_assistant.py waits for a
@@ -439,13 +445,33 @@ function toggleMute() {
 // panel always describes the toy you are about to talk to, and the bank follows
 // the selected character.
 
+// The only two characters that play a bank. Cheeko and the rest have no levels
+// to show, so the card is hidden for them rather than showing a quiz progress
+// that has nothing to do with the session you are about to run.
+//
+// ponytail: mirrors CHARACTER_BANK in banks.js by name. Renaming a character in
+// the DB hides this card until this line follows; a server round trip just to
+// learn "does this one play a bank" is not worth it for a dev tool.
+const BANK_CHARACTERS = ['quizzy', 'riddler'];
+
+const playsBank = () => BANK_CHARACTERS.includes(String(T('testChar').value || '').toLowerCase());
+
+// Show or hide the card, and refresh it when it is on screen.
+function syncQuizPanel() {
+  const on = playsBank();
+  T('quizPanel').hidden = !on;
+  if (on) loadQuizProgress();
+}
+
 const quizQuery = () =>
   `?mac=${encodeURIComponent(T('testMac').value.trim())}` +
   `&character=${encodeURIComponent(T('testChar').value || '')}`;
 
 async function loadQuizProgress() {
   const mac = T('testMac').value.trim();
-  if (!mac) return;
+  // Callers that are not about the character — Start, Stop, typing a MAC — reach
+  // here for Cheeko too; nothing to fetch when the card is not on screen.
+  if (!mac || T('quizPanel').hidden) return;
   try {
     const { bank, device } = await api('GET', '/quiz-progress' + quizQuery());
     T('quizBank').textContent = bank;
@@ -482,7 +508,7 @@ async function quizAction(path, body, label) {
 }
 
 T('quizRefresh').addEventListener('click', loadQuizProgress);
-T('testChar').addEventListener('change', loadQuizProgress);
+T('testChar').addEventListener('change', syncQuizPanel);
 // `input`, not `change`: a text field only fires change on blur, so typing a new
 // MAC and looking straight at the panel showed the previous device's progress.
 // Debounced so a half-typed MAC does not query on every keystroke.
@@ -527,7 +553,7 @@ T('pttBtn').addEventListener('click', pttToggle);
 // session scores something, and that is exactly when you want to see them.
 document.querySelector('.tab[data-tab="testView"]')?.addEventListener('click', () => {
   startViz();
-  loadQuizProgress();
+  syncQuizPanel();
 });
 
 // Space = tap, Esc = cancel — same shape as client.py's 's' and spacebar.

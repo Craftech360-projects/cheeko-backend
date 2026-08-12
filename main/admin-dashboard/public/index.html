@@ -143,8 +143,9 @@
         </div>
       </div>
 
-      <!-- Quiz/riddle state for the MAC above. Bank follows the character. -->
-      <div class="card toolbar">
+      <!-- Quiz/riddle state for the MAC above. Bank follows the character, and
+           the whole card is hidden for characters that play no bank. -->
+      <div class="card toolbar" id="quizPanel" hidden>
         <div class="field">
           <label>Progress <span id="quizBank" class="pill">quiz</span></label>
           <div id="quizSummary" class="hint">—</div>
