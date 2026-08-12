@@ -436,12 +436,35 @@ const getVoiceSessionMessagesForDevice = async (macAddress, sessionId, options =
   };
 };
 
+/**
+ * Which voice sessions belong to this device's child.
+ *
+ * A paired device reads by child, so conversations follow them to a new toy. An
+ * unpaired device falls back to its own MAC AND to sessions with no child —
+ * without that second half, a toy handed to a sibling before the parent picks a
+ * child would replay the previous child's conversations back into the prompt.
+ */
+const voiceSessionScope = (device, normalizedMac) => (
+  device?.kid_id
+    ? { kid_id: device.kid_id }
+    : { mac_address: normalizedMac, kid_id: null }
+);
+
 const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }) => {
+  // The other upsert path (device.service recordTokenUsage) has always written
+  // kid_id; this one never did, which is why 451 sessions carry none.
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true, kid_id: true }
+  });
+
   await prisma.voice_sessions.upsert({
     where: { session_id: sessionId },
     create: {
       session_id: sessionId,
       mac_address: normalizedMac,
+      device_id: device?.id || null,
+      kid_id: device?.kid_id || null,
       agent_id: agentId || null,
       status: 'active',
       last_event_at: eventAt,
@@ -449,6 +472,8 @@ const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }
     },
     update: {
       mac_address: normalizedMac,
+      device_id: device?.id || null,
+      kid_id: device?.kid_id || null,
       agent_id: agentId || null,
       last_event_at: eventAt
     }
@@ -1888,9 +1913,11 @@ const getDeviceBootstrap = async (mac, options = {}) => {
   }
 
   const recentMessagesPromise = recentLimit > 0
+    // Reached through the session, which is what carries the child. A message
+    // has no child column of its own and should not gain one.
     ? prisma.voice_session_messages.findMany({
       where: {
-        mac_address: normalizedMac,
+        voice_sessions: voiceSessionScope(device, normalizedMac),
         agent_id: device.agent_id
       },
       select: {
@@ -1909,7 +1936,7 @@ const getDeviceBootstrap = async (mac, options = {}) => {
   const recentSessionsPromise = recentLimit > 0
     ? prisma.voice_sessions.findMany({
       where: {
-        mac_address: normalizedMac,
+        ...voiceSessionScope(device, normalizedMac),
         agent_id: device.agent_id
       },
       select: {
@@ -1928,10 +1955,12 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     : Promise.resolve([]);
 
   const sessionSummariesPromise = recentLimit > 0
+    // Summaries are the child's too, and reached the same way as messages —
+    // through the session, which is what carries the child.
     ? prisma.voice_session_summaries.findMany({
       where: {
-        mac_address: normalizedMac,
         voice_sessions: {
+          ...voiceSessionScope(device, normalizedMac),
           agent_id: device.agent_id
         }
       },
