@@ -500,6 +500,23 @@ T('quizSetLevel').addEventListener('click', () => {
 });
 T('quizResetDay').addEventListener('click', () => quizAction('/quiz-reset-day', {}, 'Reset day'));
 
+// Changing the age changes which bank the child plays, so everything they had
+// answered is wiped with it — across every toy that child uses, not just this
+// one. Loud confirm: this is the only control here that touches the profile.
+T('quizSetAge').addEventListener('click', async () => {
+  const mac = T('testMac').value.trim();
+  const age = Number(T('quizAge').value);
+  if (!mac) return;
+  if (!confirm(`Set this child's age to ${age}?\n\nThis ERASES all their quiz and riddle progress on every device they use. There is no undo.`)) return;
+  try {
+    const r = await api('POST', '/kid-age', { mac, age });
+    tlog(`Age ${r.age} (band ${r.band}) · wiped ${r.answers_removed} answers across ${r.devices} device(s)`, 'ok');
+  } catch (e) {
+    tlog('Set age failed: ' + e.message, 'err');
+  }
+  loadQuizProgress();
+});
+
 // Refreshed on Start too: the panel is what tells you whether this session will
 // do what you set it up to do, and it is the last moment you can still fix it.
 T('startTest').addEventListener('click', () => { loadQuizProgress(); startTest(); });

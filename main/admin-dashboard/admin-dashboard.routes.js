@@ -17,7 +17,9 @@ const path = require('path');
 
 const agentService = require('../manager-api-node/src/services/agent.service');
 const quizService = require('../manager-api-node/src/services/quiz.service');
-const { bankForCharacterRef } = require('../manager-api-node/src/services/banks');
+const { bankForCharacterRef, BANKS } = require('../manager-api-node/src/services/banks');
+const { ageBandFromBirthDate } = require('../manager-api-node/src/services/quiz.logic');
+const { prisma } = require('../manager-api-node/src/config/database');
 const { success, badRequest, unauthorized, notFound } = require('../manager-api-node/src/utils/response');
 const { asyncHandler } = require('../manager-api-node/src/middleware/errorHandler');
 
@@ -179,6 +181,67 @@ router.post('/quiz-reset-day', gate, asyncHandler(async (req, res) => {
 
   const bank = await bankFromQuery((req.body || {}).character);
   success(res, { bank, ...(await quizService.clearDayGate(mac, bank)) }, 'Day re-opened');
+}));
+
+// Set the child's age, and wipe what they had played.
+//
+// A band is derived from kid_profile.birth_date, so this is the only way to hear
+// the age-3 content on a toy whose child is 8. The reset is not a convenience:
+// changing age changes bank, which would leave the old band's answers dormant
+// while still counting towards today's Daily Ten, so the next session would open
+// on a fresh band already believing part of the day was spent.
+//
+// Scoped to the CHILD, not the device: two toys can share one kid_id, and
+// progress left on the sibling toy would reappear the moment it was used.
+router.post('/kid-age', gate, asyncHandler(async (req, res) => {
+  const b = req.body || {};
+  const mac = String(b.mac || '').trim();
+  const age = Number(b.age);
+  if (!mac) return badRequest(res, 'mac is required');
+  // The authored banks stop at both ends; asking for 2 or 11 would silently clamp
+  // and look like the control was ignored.
+  if (!Number.isInteger(age) || age < 3 || age > 10) {
+    return badRequest(res, 'age must be a whole number from 3 to 10');
+  }
+
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: { equals: mac, mode: 'insensitive' } },
+    select: { kid_id: true },
+  });
+  if (!device) return badRequest(res, `no device row for ${mac}`);
+  if (!device.kid_id) return badRequest(res, 'no child profile is attached to this device');
+
+  // Today's date N years back: the birthday is today, so the derived age is
+  // exactly N rather than N-1, and stays N for the next year.
+  const now = new Date();
+  const birthDate = new Date(Date.UTC(now.getUTCFullYear() - age, now.getUTCMonth(), now.getUTCDate()));
+  await prisma.kid_profile.update({ where: { id: device.kid_id }, data: { birth_date: birthDate } });
+
+  const macs = (await prisma.ai_device.findMany({
+    where: { kid_id: device.kid_id },
+    select: { mac_address: true },
+  })).map((d) => d.mac_address);
+  // OR of case-insensitive equals rather than `in`: the answer log stores the MAC
+  // as the worker sent it, and one device already appears in two casings.
+  const macFilter = { OR: macs.map((m) => ({ device_mac: { equals: m, mode: 'insensitive' } })) };
+
+  let removed = 0;
+  for (const bank of Object.values(BANKS)) {
+    removed += (await bank.answers.deleteMany({ where: macFilter })).count;
+  }
+  // Only the two bank subjects — this table also holds unrelated learning rows.
+  const milestones = await prisma.kid_learning_progress.deleteMany({
+    where: { kid_id: device.kid_id, subject: { in: Object.values(BANKS).map((x) => x.subject) } },
+  });
+
+  success(res, {
+    age,
+    band: ageBandFromBirthDate(birthDate, now),
+    birth_date: birthDate.toISOString().slice(0, 10),
+    devices: macs.length,
+    answers_removed: removed,
+    milestones_removed: milestones.count,
+  }, 'Age set and progress reset');
 }));
 
 // Static dashboard files (this same folder).
