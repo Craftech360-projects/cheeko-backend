@@ -704,26 +704,27 @@ const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
   return truncateMemoryText(lines.join('\n'));
 };
 
-const getExistingOverallMemory = async ({ normalizedMac, agentId }) => {
+/**
+ * The child's rolling conversation summary.
+ *
+ * Scoped by owner key, so it follows the child to a new toy and a sibling on a
+ * hand-me-down cannot read it. There is deliberately no fallback to
+ * `ai_agent.summary_memory`: that column belongs to the Character, is shared by
+ * every device using it, and reading it here is exactly how one child's memory
+ * reached the next. A child with no summary yet starts with none.
+ */
+const getExistingOverallMemory = async ({ normalizedMac }) => {
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const existingDocument = await prisma.device_memory_documents.findFirst({
     where: {
-      mac_address: normalizedMac,
+      owner_key: ownerKey,
       document_key: 'summary'
     },
     select: { content: true },
     orderBy: { updated_at: 'desc' }
   });
-  if (existingDocument?.content) return existingDocument.content;
 
-  if (agentId) {
-    const agent = await prisma.ai_agent.findUnique({
-      where: { id: agentId },
-      select: { summary_memory: true }
-    });
-    if (agent?.summary_memory) return agent.summary_memory;
-  }
-
-  return '';
+  return existingDocument?.content || '';
 };
 
 const saveRollingOverallMemory = async ({
@@ -731,39 +732,22 @@ const saveRollingOverallMemory = async ({
   latestSummary,
   source,
   sessionId,
-  metadata = {},
-  agentId
+  metadata = {}
 }) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
   if (latestSummary === undefined || latestSummary === null) throw new Error('latestSummary is required');
 
-  const device = agentId
-    ? null
-    : await prisma.ai_device.findUnique({
-      where: { mac_address: normalizedMac },
-      select: { agent_id: true }
-    });
-  const resolvedAgentId = agentId || device?.agent_id || null;
-  const existingMemory = await getExistingOverallMemory({ normalizedMac, agentId: resolvedAgentId });
+  const existingMemory = await getExistingOverallMemory({ normalizedMac });
   const rollingMemory = buildRollingOverallMemory({
     existingMemory,
     latestSummary
   });
-  const now = new Date();
 
-  let updatedAgent = null;
-  if (resolvedAgentId) {
-    updatedAgent = await prisma.ai_agent.update({
-      where: { id: resolvedAgentId },
-      data: {
-        summary_memory: rollingMemory,
-        updated_at: now
-      },
-      select: { id: true, agent_name: true, summary_memory: true }
-    });
-  }
-
+  // ai_agent.summary_memory is no longer written. It is the Character row, shared
+  // by every device on that character, so rolling one child's memory into it both
+  // leaked it to the next child and let two children overwrite each other. The
+  // column stays for the character CRUD and as the rollback path.
   await saveDeviceMemoryDocument({
     macAddress: normalizedMac,
     documentKey: 'summary',
@@ -779,8 +763,8 @@ const saveRollingOverallMemory = async ({
   });
 
   return {
-    agent: updatedAgent,
-    summaryMemory: updatedAgent ? updatedAgent.summary_memory : rollingMemory
+    agent: null,
+    summaryMemory: rollingMemory
   };
 };
 
