@@ -7,7 +7,10 @@
 
 const XLSX = require('xlsx');
 
-const AGE_BANDS = new Set(['3-5', '6-8', '9+']);
+// One bank per age, 3..10 — see picoclaw docs/issues/per-age-banks/000-design.md.
+// The retired '3-5'/'6-8'/'9+' vocabulary is deliberately absent so an old sheet
+// is rejected loudly instead of importing content nobody will ever be served.
+const AGE_BANDS = new Set(['3', '4', '5', '6', '7', '8', '9', '10']);
 const TRUTHY_ACTIVE = ['', 'true', '1', 'yes', 'y'];
 const FALSY_ACTIVE = ['false', '0', 'no', 'n'];
 
@@ -23,11 +26,16 @@ const str = (value) => String(value ?? '').trim();
 /**
  * Undo the spreadsheet's date guess for age bands.
  *
- * Excel treats "6-8" as a date, so the cell arrives as a Date or a date serial.
- * Which date depends on the author's locale: month-day (en-US) gives June 8,
- * day-month (en-IN, en-GB) gives 6 August. Both orientations are tried against
- * the band vocabulary; "9+" is never date-like. Anything unrecognisable is
- * returned as month-day so the caller's error message shows what was read.
+ * A band is now a single age, which is never date-like — but the cell still
+ * arrives as a NUMBER when the author typed a bare 4, and handing that to the
+ * date-serial decoder reads it as 4 January 1900. So a value that is already a
+ * band is returned before any date handling.
+ *
+ * The date path stays for the retired vocabulary: Excel bakes "6-8" into a Date
+ * or a serial, and which date depends on the author's locale — month-day (en-US)
+ * gives June 8, day-month (en-IN, en-GB) gives 6 August. Neither orientation is a
+ * valid band any more, so such a row is rejected by the caller with the offending
+ * value shown, rather than silently reinterpreted as some unrelated age.
  *
  * @param {string|number|Date} value
  * @returns {string}
@@ -35,6 +43,9 @@ const str = (value) => String(value ?? '').trim();
 function normalizeAgeBand(value) {
   let month;
   let day;
+
+  // Before the date guess, not after: 4 is an age, not 4 January 1900.
+  if (AGE_BANDS.has(str(value))) return str(value);
 
   if (value instanceof Date) {
     month = value.getMonth() + 1;
@@ -70,7 +81,10 @@ function parseQuizRow(row) {
 
   const ageBand = normalizeAgeBand(row.age_band);
   if (!AGE_BANDS.has(ageBand)) {
-    return { data: null, error: `age_band must be one of 3-5, 6-8, 9+ (got "${ageBand}")` };
+    return {
+      data: null,
+      error: `age_band must be one of ${[...AGE_BANDS].join(', ')} (got "${ageBand}")`,
+    };
   }
 
   const level = Number(row.level);

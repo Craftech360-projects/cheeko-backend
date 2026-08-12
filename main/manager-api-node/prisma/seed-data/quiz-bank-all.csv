@@ -1,91 +1,241 @@
 code,age_band,level,category,language,question_text,answer_text,accepted_answers,active
-3-5-L01-Q01,3-5,1,colours,en,What colour is the sky on a sunny day?,blue,,true
-3-5-L01-Q02,3-5,1,animals,en,What sound does a dog make?,woof,bow wow | bark | barking,true
-3-5-L01-Q03,3-5,1,body,en,How many eyes do you have?,two,2 | two eyes,true
-3-5-L01-Q04,3-5,1,everyday,en,What do we drink when we are thirsty?,water,milk | juice,true
-3-5-L01-Q05,3-5,1,animals,en,Which animal says meow?,a cat,cat | kitten | kitty,true
-3-5-L01-Q06,3-5,1,shapes,en,What shape is a ball?,round,a circle | circle | sphere,true
-3-5-L01-Q07,3-5,1,counting,en,How many wheels does a bicycle have?,two,2 | two wheels,true
-3-5-L01-Q08,3-5,1,weather,en,What falls from the sky when it rains?,rain,water | raindrops | rain drops,true
-3-5-L01-Q09,3-5,1,colours,en,What colour is grass?,green,,true
-3-5-L01-Q10,3-5,1,animals,en,Where do fish live?,in water,water | the sea | sea | river | pond,true
-3-5-L02-Q01,3-5,2,animals,en,Which animal has a long trunk?,an elephant,elephant,true
-3-5-L02-Q02,3-5,2,counting,en,What number comes after three?,four,4,true
-3-5-L02-Q03,3-5,2,body,en,Which part of your body do you use to hear?,your ears,ears | my ears | ear,true
-3-5-L02-Q04,3-5,2,nature,en,Is the sun hot or cold?,hot,it is hot | very hot,true
-3-5-L02-Q05,3-5,2,colours,en,What colour do you get when you mix red and white?,pink,,true
-3-5-L02-Q06,3-5,2,animals,en,How many legs does a cat have?,four,4 | four legs,true
-3-5-L02-Q07,3-5,2,everyday,en,What do we wear on our feet?,shoes,socks | slippers | sandals,true
-3-5-L02-Q08,3-5,2,shapes,en,How many sides does a triangle have?,three,3 | three sides,true
-3-5-L02-Q09,3-5,2,space,en,What do we see shining in the sky at night?,the moon,moon | stars | the stars,true
-3-5-L02-Q10,3-5,2,animals,en,Which animal hops and likes to eat carrots?,a rabbit,rabbit | bunny,true
-3-5-L03-Q01,3-5,3,animals,en,Which animal gives us milk?,a cow,cow | buffalo | a buffalo,true
-3-5-L03-Q02,3-5,3,counting,en,How many fingers are on one hand?,five,5 | five fingers,true
-3-5-L03-Q03,3-5,3,colours,en,What colour is a banana?,yellow,,true
-3-5-L03-Q04,3-5,3,body,en,Which part of your body do you use to walk?,your legs,legs | my legs | feet | my feet,true
-3-5-L03-Q05,3-5,3,everyday,en,What do we use to brush our teeth?,a toothbrush,toothbrush | brush,true
-3-5-L03-Q06,3-5,3,animals,en,What do we call a baby cat?,a kitten,kitten | kittens,true
-3-5-L03-Q07,3-5,3,shapes,en,How many corners does a square have?,four,4 | four corners,true
-3-5-L03-Q08,3-5,3,weather,en,What do we hold over our head when it is raining?,an umbrella,umbrella | raincoat,true
-3-5-L03-Q09,3-5,3,animals,en,Which bird likes to swim in water?,a duck,duck | swan | penguin,true
-3-5-L03-Q10,3-5,3,everyday,en,Where do we sleep at night?,in bed,bed | my bed | on a bed,true
-6-8-L01-Q01,6-8,1,animals,en,How many legs does a spider have?,eight,8 | eight legs | 8 legs,true
-6-8-L01-Q02,6-8,1,colours,en,What colour do you get when you mix red and yellow?,orange,,true
-6-8-L01-Q03,6-8,1,space,en,Which planet do we live on?,Earth,the Earth | planet Earth,true
-6-8-L01-Q04,6-8,1,body,en,Which part of your body do you use to smell?,your nose,nose | my nose,true
-6-8-L01-Q05,6-8,1,nature,en,What do bees make that we can eat?,honey,,true
-6-8-L01-Q06,6-8,1,numbers,en,What is five plus seven?,twelve,12,true
-6-8-L01-Q07,6-8,1,weather,en,What do we call water when it freezes and turns hard?,ice,frozen water,true
-6-8-L01-Q08,6-8,1,animals,en,What do we call a baby dog?,a puppy,puppy | puppies,true
-6-8-L01-Q09,6-8,1,time,en,How many days are there in one week?,seven,7 | seven days,true
-6-8-L01-Q10,6-8,1,science,en,What do plants need from the sun so they can grow?,light,sunlight | sun light | energy | sunshine | heat,true
-6-8-L02-Q01,6-8,2,space,en,Which planet is closest to the sun?,Mercury,,true
-6-8-L02-Q02,6-8,2,numbers,en,What is nine times three?,twenty-seven,27 | twenty seven,true
-6-8-L02-Q03,6-8,2,animals,en,What do we call an animal that eats only plants?,a herbivore,herbivore | plant eater | a plant eater | vegetarian,true
-6-8-L02-Q04,6-8,2,geography,en,What is the largest ocean on Earth?,the Pacific Ocean,pacific | pacific ocean,true
-6-8-L02-Q05,6-8,2,science,en,Which gas do we need to breathe in to stay alive?,oxygen,,true
-6-8-L02-Q06,6-8,2,body,en,Which organ pumps blood around your body?,the heart,heart,true
-6-8-L02-Q07,6-8,2,shapes,en,How many sides does a hexagon have?,six,6 | six sides,true
-6-8-L02-Q08,6-8,2,geography,en,How many continents are there on Earth?,seven,7 | seven continents,true
-6-8-L02-Q09,6-8,2,animals,en,What do caterpillars turn into when they grow up?,butterflies,a butterfly | butterfly | moth | a moth,true
-6-8-L02-Q10,6-8,2,numbers,en,What is half of fifty?,twenty-five,25 | twenty five,true
-6-8-L03-Q01,6-8,3,space,en,What is the name of the galaxy we live in?,the Milky Way,milky way | the milky way galaxy,true
-6-8-L03-Q02,6-8,3,numbers,en,What is twelve times two?,twenty-four,24 | twenty four,true
-6-8-L03-Q03,6-8,3,animals,en,What is the largest animal in the world?,the blue whale,blue whale | whale | a blue whale,true
-6-8-L03-Q04,6-8,3,geography,en,What is the capital city of India?,New Delhi,delhi | new delhi,true
-6-8-L03-Q05,6-8,3,science,en,Which force pulls everything down towards the ground?,gravity,the force of gravity,true
-6-8-L03-Q06,6-8,3,body,en,Which part of your body do you use to think?,the brain,brain | my brain | your brain,true
-6-8-L03-Q07,6-8,3,shapes,en,How many sides does an octagon have?,eight,8 | eight sides,true
-6-8-L03-Q08,6-8,3,science,en,What is the hardest natural material on Earth?,diamond,a diamond | diamonds,true
-6-8-L03-Q09,6-8,3,animals,en,What do we call an animal that eats both plants and meat?,an omnivore,omnivore | omnivores,true
-6-8-L03-Q10,6-8,3,numbers,en,What is one hundred minus thirty-five?,sixty-five,65 | sixty five,true
-9+-L01-Q01,9+,1,science,en,Which gas do plants take in from the air to make their food?,carbon dioxide,co2 | c o two,true
-9+-L01-Q02,9+,1,numbers,en,What is twelve times twelve?,one hundred and forty-four,144 | one hundred forty four,true
-9+-L01-Q03,9+,1,geography,en,What is the capital of India?,New Delhi,delhi | new delhi,true
-9+-L01-Q04,9+,1,science,en,Which force pulls objects towards the Earth?,gravity,,true
-9+-L01-Q05,9+,1,words,en,What do we call a word that means the opposite of another word?,an antonym,antonym | opposite word,true
-9+-L01-Q06,9+,1,space,en,How many planets are there in our solar system?,eight,8 | eight planets,true
-9+-L01-Q07,9+,1,history,en,Who was the first person to walk on the moon?,Neil Armstrong,armstrong,true
-9+-L01-Q08,9+,1,science,en,What is the hardest natural substance on Earth?,diamond,a diamond | diamonds,true
-9+-L01-Q09,9+,1,numbers,en,Which prime number comes right after seven?,eleven,11,true
-9+-L01-Q10,9+,1,science,en,What do we call the process plants use to make food from sunlight?,photosynthesis,,true
-9+-L02-Q01,9+,2,science,en,What is the chemical symbol for water?,H2O,h two o | h 2 o,true
-9+-L02-Q02,9+,2,geography,en,On which continent is the Sahara Desert?,Africa,,true
-9+-L02-Q03,9+,2,numbers,en,What is fifteen percent of two hundred?,thirty,30,true
-9+-L02-Q04,9+,2,body,en,How many bones are there in an adult human body?,two hundred and six,206 | two hundred six,true
-9+-L02-Q05,9+,2,animals,en,What word describes animals that are active at night?,nocturnal,,true
-9+-L02-Q06,9+,2,space,en,Which planet is known as the red planet?,Mars,,true
-9+-L02-Q07,9+,2,words,en,What do we call the study of living things?,biology,,true
-9+-L02-Q08,9+,2,geography,en,What is the tallest mountain in the world?,Mount Everest,everest | mt everest,true
-9+-L02-Q09,9+,2,science,en,At what temperature in Celsius does water boil at sea level?,one hundred degrees,100 | hundred | one hundred,true
-9+-L02-Q10,9+,2,numbers,en,What is the square root of eighty-one?,nine,9,true
-9+-L03-Q01,9+,3,science,en,What is the chemical symbol for gold?,Au,a u | gold is au,true
-9+-L03-Q02,9+,3,numbers,en,How many degrees are there in a right angle?,ninety,90 | ninety degrees,true
-9+-L03-Q03,9+,3,geography,en,Which ocean lies between Africa and Australia?,the Indian Ocean,indian ocean | indian,true
-9+-L03-Q04,9+,3,history,en,Who wrote the Indian national anthem?,Rabindranath Tagore,tagore | rabindranath tagore,true
-9+-L03-Q05,9+,3,animals,en,What do we call an animal that has no backbone?,an invertebrate,invertebrate | invertebrates,true
-9+-L03-Q06,9+,3,space,en,What do we call a star that suddenly explodes?,a supernova,supernova | supernovae,true
-9+-L03-Q07,9+,3,words,en,What do we call words that sound the same but mean different things?,homophones,homophone | homonyms | a homophone,true
-9+-L03-Q08,9+,3,body,en,Which blood cells help your body fight infection?,white blood cells,white cells | white blood cell | leucocytes,true
-9+-L03-Q09,9+,3,geography,en,Which is the largest country in the world by area?,Russia,,true
-9+-L03-Q10,9+,3,numbers,en,What is seven cubed?,three hundred and forty-three,343 | three hundred forty three,true
+3-5-L01-Q01-a3,3,1,colours,en,What colour is the sky on a sunny day?,blue,,true
+3-5-L01-Q02-a3,3,1,animals,en,What sound does a dog make?,woof,bow wow | bark | barking,true
+3-5-L01-Q03-a3,3,1,body,en,How many eyes do you have?,two,2 | two eyes,true
+3-5-L01-Q04-a3,3,1,everyday,en,What do we drink when we are thirsty?,water,milk | juice,true
+3-5-L01-Q05-a3,3,1,animals,en,Which animal says meow?,a cat,cat | kitten | kitty,true
+3-5-L01-Q06-a3,3,1,shapes,en,What shape is a ball?,round,a circle | circle | sphere,true
+3-5-L01-Q07-a3,3,1,counting,en,How many wheels does a bicycle have?,two,2 | two wheels,true
+3-5-L01-Q08-a3,3,1,weather,en,What falls from the sky when it rains?,rain,water | raindrops | rain drops,true
+3-5-L01-Q09-a3,3,1,colours,en,What colour is grass?,green,,true
+3-5-L01-Q10-a3,3,1,animals,en,Where do fish live?,in water,water | the sea | sea | river | pond,true
+3-5-L02-Q01-a3,3,2,animals,en,Which animal has a long trunk?,an elephant,elephant,true
+3-5-L02-Q02-a3,3,2,counting,en,What number comes after three?,four,4,true
+3-5-L02-Q03-a3,3,2,body,en,Which part of your body do you use to hear?,your ears,ears | my ears | ear,true
+3-5-L02-Q04-a3,3,2,nature,en,Is the sun hot or cold?,hot,it is hot | very hot,true
+3-5-L02-Q05-a3,3,2,colours,en,What colour do you get when you mix red and white?,pink,,true
+3-5-L02-Q06-a3,3,2,animals,en,How many legs does a cat have?,four,4 | four legs,true
+3-5-L02-Q07-a3,3,2,everyday,en,What do we wear on our feet?,shoes,socks | slippers | sandals,true
+3-5-L02-Q08-a3,3,2,shapes,en,How many sides does a triangle have?,three,3 | three sides,true
+3-5-L02-Q09-a3,3,2,space,en,What do we see shining in the sky at night?,the moon,moon | stars | the stars,true
+3-5-L02-Q10-a3,3,2,animals,en,Which animal hops and likes to eat carrots?,a rabbit,rabbit | bunny,true
+3-5-L03-Q01-a3,3,3,animals,en,Which animal gives us milk?,a cow,cow | buffalo | a buffalo,true
+3-5-L03-Q02-a3,3,3,counting,en,How many fingers are on one hand?,five,5 | five fingers,true
+3-5-L03-Q03-a3,3,3,colours,en,What colour is a banana?,yellow,,true
+3-5-L03-Q04-a3,3,3,body,en,Which part of your body do you use to walk?,your legs,legs | my legs | feet | my feet,true
+3-5-L03-Q05-a3,3,3,everyday,en,What do we use to brush our teeth?,a toothbrush,toothbrush | brush,true
+3-5-L03-Q06-a3,3,3,animals,en,What do we call a baby cat?,a kitten,kitten | kittens,true
+3-5-L03-Q07-a3,3,3,shapes,en,How many corners does a square have?,four,4 | four corners,true
+3-5-L03-Q08-a3,3,3,weather,en,What do we hold over our head when it is raining?,an umbrella,umbrella | raincoat,true
+3-5-L03-Q09-a3,3,3,animals,en,Which bird likes to swim in water?,a duck,duck | swan | penguin,true
+3-5-L03-Q10-a3,3,3,everyday,en,Where do we sleep at night?,in bed,bed | my bed | on a bed,true
+3-5-L01-Q01-a4,4,1,colours,en,What colour is the sky on a sunny day?,blue,,true
+3-5-L01-Q02-a4,4,1,animals,en,What sound does a dog make?,woof,bow wow | bark | barking,true
+3-5-L01-Q03-a4,4,1,body,en,How many eyes do you have?,two,2 | two eyes,true
+3-5-L01-Q04-a4,4,1,everyday,en,What do we drink when we are thirsty?,water,milk | juice,true
+3-5-L01-Q05-a4,4,1,animals,en,Which animal says meow?,a cat,cat | kitten | kitty,true
+3-5-L01-Q06-a4,4,1,shapes,en,What shape is a ball?,round,a circle | circle | sphere,true
+3-5-L01-Q07-a4,4,1,counting,en,How many wheels does a bicycle have?,two,2 | two wheels,true
+3-5-L01-Q08-a4,4,1,weather,en,What falls from the sky when it rains?,rain,water | raindrops | rain drops,true
+3-5-L01-Q09-a4,4,1,colours,en,What colour is grass?,green,,true
+3-5-L01-Q10-a4,4,1,animals,en,Where do fish live?,in water,water | the sea | sea | river | pond,true
+3-5-L02-Q01-a4,4,2,animals,en,Which animal has a long trunk?,an elephant,elephant,true
+3-5-L02-Q02-a4,4,2,counting,en,What number comes after three?,four,4,true
+3-5-L02-Q03-a4,4,2,body,en,Which part of your body do you use to hear?,your ears,ears | my ears | ear,true
+3-5-L02-Q04-a4,4,2,nature,en,Is the sun hot or cold?,hot,it is hot | very hot,true
+3-5-L02-Q05-a4,4,2,colours,en,What colour do you get when you mix red and white?,pink,,true
+3-5-L02-Q06-a4,4,2,animals,en,How many legs does a cat have?,four,4 | four legs,true
+3-5-L02-Q07-a4,4,2,everyday,en,What do we wear on our feet?,shoes,socks | slippers | sandals,true
+3-5-L02-Q08-a4,4,2,shapes,en,How many sides does a triangle have?,three,3 | three sides,true
+3-5-L02-Q09-a4,4,2,space,en,What do we see shining in the sky at night?,the moon,moon | stars | the stars,true
+3-5-L02-Q10-a4,4,2,animals,en,Which animal hops and likes to eat carrots?,a rabbit,rabbit | bunny,true
+3-5-L03-Q01-a4,4,3,animals,en,Which animal gives us milk?,a cow,cow | buffalo | a buffalo,true
+3-5-L03-Q02-a4,4,3,counting,en,How many fingers are on one hand?,five,5 | five fingers,true
+3-5-L03-Q03-a4,4,3,colours,en,What colour is a banana?,yellow,,true
+3-5-L03-Q04-a4,4,3,body,en,Which part of your body do you use to walk?,your legs,legs | my legs | feet | my feet,true
+3-5-L03-Q05-a4,4,3,everyday,en,What do we use to brush our teeth?,a toothbrush,toothbrush | brush,true
+3-5-L03-Q06-a4,4,3,animals,en,What do we call a baby cat?,a kitten,kitten | kittens,true
+3-5-L03-Q07-a4,4,3,shapes,en,How many corners does a square have?,four,4 | four corners,true
+3-5-L03-Q08-a4,4,3,weather,en,What do we hold over our head when it is raining?,an umbrella,umbrella | raincoat,true
+3-5-L03-Q09-a4,4,3,animals,en,Which bird likes to swim in water?,a duck,duck | swan | penguin,true
+3-5-L03-Q10-a4,4,3,everyday,en,Where do we sleep at night?,in bed,bed | my bed | on a bed,true
+3-5-L01-Q01-a5,5,1,colours,en,What colour is the sky on a sunny day?,blue,,true
+3-5-L01-Q02-a5,5,1,animals,en,What sound does a dog make?,woof,bow wow | bark | barking,true
+3-5-L01-Q03-a5,5,1,body,en,How many eyes do you have?,two,2 | two eyes,true
+3-5-L01-Q04-a5,5,1,everyday,en,What do we drink when we are thirsty?,water,milk | juice,true
+3-5-L01-Q05-a5,5,1,animals,en,Which animal says meow?,a cat,cat | kitten | kitty,true
+3-5-L01-Q06-a5,5,1,shapes,en,What shape is a ball?,round,a circle | circle | sphere,true
+3-5-L01-Q07-a5,5,1,counting,en,How many wheels does a bicycle have?,two,2 | two wheels,true
+3-5-L01-Q08-a5,5,1,weather,en,What falls from the sky when it rains?,rain,water | raindrops | rain drops,true
+3-5-L01-Q09-a5,5,1,colours,en,What colour is grass?,green,,true
+3-5-L01-Q10-a5,5,1,animals,en,Where do fish live?,in water,water | the sea | sea | river | pond,true
+3-5-L02-Q01-a5,5,2,animals,en,Which animal has a long trunk?,an elephant,elephant,true
+3-5-L02-Q02-a5,5,2,counting,en,What number comes after three?,four,4,true
+3-5-L02-Q03-a5,5,2,body,en,Which part of your body do you use to hear?,your ears,ears | my ears | ear,true
+3-5-L02-Q04-a5,5,2,nature,en,Is the sun hot or cold?,hot,it is hot | very hot,true
+3-5-L02-Q05-a5,5,2,colours,en,What colour do you get when you mix red and white?,pink,,true
+3-5-L02-Q06-a5,5,2,animals,en,How many legs does a cat have?,four,4 | four legs,true
+3-5-L02-Q07-a5,5,2,everyday,en,What do we wear on our feet?,shoes,socks | slippers | sandals,true
+3-5-L02-Q08-a5,5,2,shapes,en,How many sides does a triangle have?,three,3 | three sides,true
+3-5-L02-Q09-a5,5,2,space,en,What do we see shining in the sky at night?,the moon,moon | stars | the stars,true
+3-5-L02-Q10-a5,5,2,animals,en,Which animal hops and likes to eat carrots?,a rabbit,rabbit | bunny,true
+3-5-L03-Q01-a5,5,3,animals,en,Which animal gives us milk?,a cow,cow | buffalo | a buffalo,true
+3-5-L03-Q02-a5,5,3,counting,en,How many fingers are on one hand?,five,5 | five fingers,true
+3-5-L03-Q03-a5,5,3,colours,en,What colour is a banana?,yellow,,true
+3-5-L03-Q04-a5,5,3,body,en,Which part of your body do you use to walk?,your legs,legs | my legs | feet | my feet,true
+3-5-L03-Q05-a5,5,3,everyday,en,What do we use to brush our teeth?,a toothbrush,toothbrush | brush,true
+3-5-L03-Q06-a5,5,3,animals,en,What do we call a baby cat?,a kitten,kitten | kittens,true
+3-5-L03-Q07-a5,5,3,shapes,en,How many corners does a square have?,four,4 | four corners,true
+3-5-L03-Q08-a5,5,3,weather,en,What do we hold over our head when it is raining?,an umbrella,umbrella | raincoat,true
+3-5-L03-Q09-a5,5,3,animals,en,Which bird likes to swim in water?,a duck,duck | swan | penguin,true
+3-5-L03-Q10-a5,5,3,everyday,en,Where do we sleep at night?,in bed,bed | my bed | on a bed,true
+6-8-L01-Q01-a6,6,1,animals,en,How many legs does a spider have?,eight,8 | eight legs | 8 legs,true
+6-8-L01-Q02-a6,6,1,colours,en,What colour do you get when you mix red and yellow?,orange,,true
+6-8-L01-Q03-a6,6,1,space,en,Which planet do we live on?,Earth,the Earth | planet Earth,true
+6-8-L01-Q04-a6,6,1,body,en,Which part of your body do you use to smell?,your nose,nose | my nose,true
+6-8-L01-Q05-a6,6,1,nature,en,What do bees make that we can eat?,honey,,true
+6-8-L01-Q06-a6,6,1,numbers,en,What is five plus seven?,twelve,12,true
+6-8-L01-Q07-a6,6,1,weather,en,What do we call water when it freezes and turns hard?,ice,frozen water,true
+6-8-L01-Q08-a6,6,1,animals,en,What do we call a baby dog?,a puppy,puppy | puppies,true
+6-8-L01-Q09-a6,6,1,time,en,How many days are there in one week?,seven,7 | seven days,true
+6-8-L01-Q10-a6,6,1,science,en,What do plants need from the sun so they can grow?,light,sunlight | sun light | energy | sunshine | heat,true
+6-8-L02-Q01-a6,6,2,space,en,Which planet is closest to the sun?,Mercury,,true
+6-8-L02-Q02-a6,6,2,numbers,en,What is nine times three?,twenty-seven,27 | twenty seven,true
+6-8-L02-Q03-a6,6,2,animals,en,What do we call an animal that eats only plants?,a herbivore,herbivore | plant eater | a plant eater | vegetarian,true
+6-8-L02-Q04-a6,6,2,geography,en,What is the largest ocean on Earth?,the Pacific Ocean,pacific | pacific ocean,true
+6-8-L02-Q05-a6,6,2,science,en,Which gas do we need to breathe in to stay alive?,oxygen,,true
+6-8-L02-Q06-a6,6,2,body,en,Which organ pumps blood around your body?,the heart,heart,true
+6-8-L02-Q07-a6,6,2,shapes,en,How many sides does a hexagon have?,six,6 | six sides,true
+6-8-L02-Q08-a6,6,2,geography,en,How many continents are there on Earth?,seven,7 | seven continents,true
+6-8-L02-Q09-a6,6,2,animals,en,What do caterpillars turn into when they grow up?,butterflies,a butterfly | butterfly | moth | a moth,true
+6-8-L02-Q10-a6,6,2,numbers,en,What is half of fifty?,twenty-five,25 | twenty five,true
+6-8-L03-Q01-a6,6,3,space,en,What is the name of the galaxy we live in?,the Milky Way,milky way | the milky way galaxy,true
+6-8-L03-Q02-a6,6,3,numbers,en,What is twelve times two?,twenty-four,24 | twenty four,true
+6-8-L03-Q03-a6,6,3,animals,en,What is the largest animal in the world?,the blue whale,blue whale | whale | a blue whale,true
+6-8-L03-Q04-a6,6,3,geography,en,What is the capital city of India?,New Delhi,delhi | new delhi,true
+6-8-L03-Q05-a6,6,3,science,en,Which force pulls everything down towards the ground?,gravity,the force of gravity,true
+6-8-L03-Q06-a6,6,3,body,en,Which part of your body do you use to think?,the brain,brain | my brain | your brain,true
+6-8-L03-Q07-a6,6,3,shapes,en,How many sides does an octagon have?,eight,8 | eight sides,true
+6-8-L03-Q08-a6,6,3,science,en,What is the hardest natural material on Earth?,diamond,a diamond | diamonds,true
+6-8-L03-Q09-a6,6,3,animals,en,What do we call an animal that eats both plants and meat?,an omnivore,omnivore | omnivores,true
+6-8-L03-Q10-a6,6,3,numbers,en,What is one hundred minus thirty-five?,sixty-five,65 | sixty five,true
+6-8-L01-Q01-a7,7,1,animals,en,How many legs does a spider have?,eight,8 | eight legs | 8 legs,true
+6-8-L01-Q02-a7,7,1,colours,en,What colour do you get when you mix red and yellow?,orange,,true
+6-8-L01-Q03-a7,7,1,space,en,Which planet do we live on?,Earth,the Earth | planet Earth,true
+6-8-L01-Q04-a7,7,1,body,en,Which part of your body do you use to smell?,your nose,nose | my nose,true
+6-8-L01-Q05-a7,7,1,nature,en,What do bees make that we can eat?,honey,,true
+6-8-L01-Q06-a7,7,1,numbers,en,What is five plus seven?,twelve,12,true
+6-8-L01-Q07-a7,7,1,weather,en,What do we call water when it freezes and turns hard?,ice,frozen water,true
+6-8-L01-Q08-a7,7,1,animals,en,What do we call a baby dog?,a puppy,puppy | puppies,true
+6-8-L01-Q09-a7,7,1,time,en,How many days are there in one week?,seven,7 | seven days,true
+6-8-L01-Q10-a7,7,1,science,en,What do plants need from the sun so they can grow?,light,sunlight | sun light | energy | sunshine | heat,true
+6-8-L02-Q01-a7,7,2,space,en,Which planet is closest to the sun?,Mercury,,true
+6-8-L02-Q02-a7,7,2,numbers,en,What is nine times three?,twenty-seven,27 | twenty seven,true
+6-8-L02-Q03-a7,7,2,animals,en,What do we call an animal that eats only plants?,a herbivore,herbivore | plant eater | a plant eater | vegetarian,true
+6-8-L02-Q04-a7,7,2,geography,en,What is the largest ocean on Earth?,the Pacific Ocean,pacific | pacific ocean,true
+6-8-L02-Q05-a7,7,2,science,en,Which gas do we need to breathe in to stay alive?,oxygen,,true
+6-8-L02-Q06-a7,7,2,body,en,Which organ pumps blood around your body?,the heart,heart,true
+6-8-L02-Q07-a7,7,2,shapes,en,How many sides does a hexagon have?,six,6 | six sides,true
+6-8-L02-Q08-a7,7,2,geography,en,How many continents are there on Earth?,seven,7 | seven continents,true
+6-8-L02-Q09-a7,7,2,animals,en,What do caterpillars turn into when they grow up?,butterflies,a butterfly | butterfly | moth | a moth,true
+6-8-L02-Q10-a7,7,2,numbers,en,What is half of fifty?,twenty-five,25 | twenty five,true
+6-8-L03-Q01-a7,7,3,space,en,What is the name of the galaxy we live in?,the Milky Way,milky way | the milky way galaxy,true
+6-8-L03-Q02-a7,7,3,numbers,en,What is twelve times two?,twenty-four,24 | twenty four,true
+6-8-L03-Q03-a7,7,3,animals,en,What is the largest animal in the world?,the blue whale,blue whale | whale | a blue whale,true
+6-8-L03-Q04-a7,7,3,geography,en,What is the capital city of India?,New Delhi,delhi | new delhi,true
+6-8-L03-Q05-a7,7,3,science,en,Which force pulls everything down towards the ground?,gravity,the force of gravity,true
+6-8-L03-Q06-a7,7,3,body,en,Which part of your body do you use to think?,the brain,brain | my brain | your brain,true
+6-8-L03-Q07-a7,7,3,shapes,en,How many sides does an octagon have?,eight,8 | eight sides,true
+6-8-L03-Q08-a7,7,3,science,en,What is the hardest natural material on Earth?,diamond,a diamond | diamonds,true
+6-8-L03-Q09-a7,7,3,animals,en,What do we call an animal that eats both plants and meat?,an omnivore,omnivore | omnivores,true
+6-8-L03-Q10-a7,7,3,numbers,en,What is one hundred minus thirty-five?,sixty-five,65 | sixty five,true
+6-8-L01-Q01-a8,8,1,animals,en,How many legs does a spider have?,eight,8 | eight legs | 8 legs,true
+6-8-L01-Q02-a8,8,1,colours,en,What colour do you get when you mix red and yellow?,orange,,true
+6-8-L01-Q03-a8,8,1,space,en,Which planet do we live on?,Earth,the Earth | planet Earth,true
+6-8-L01-Q04-a8,8,1,body,en,Which part of your body do you use to smell?,your nose,nose | my nose,true
+6-8-L01-Q05-a8,8,1,nature,en,What do bees make that we can eat?,honey,,true
+6-8-L01-Q06-a8,8,1,numbers,en,What is five plus seven?,twelve,12,true
+6-8-L01-Q07-a8,8,1,weather,en,What do we call water when it freezes and turns hard?,ice,frozen water,true
+6-8-L01-Q08-a8,8,1,animals,en,What do we call a baby dog?,a puppy,puppy | puppies,true
+6-8-L01-Q09-a8,8,1,time,en,How many days are there in one week?,seven,7 | seven days,true
+6-8-L01-Q10-a8,8,1,science,en,What do plants need from the sun so they can grow?,light,sunlight | sun light | energy | sunshine | heat,true
+6-8-L02-Q01-a8,8,2,space,en,Which planet is closest to the sun?,Mercury,,true
+6-8-L02-Q02-a8,8,2,numbers,en,What is nine times three?,twenty-seven,27 | twenty seven,true
+6-8-L02-Q03-a8,8,2,animals,en,What do we call an animal that eats only plants?,a herbivore,herbivore | plant eater | a plant eater | vegetarian,true
+6-8-L02-Q04-a8,8,2,geography,en,What is the largest ocean on Earth?,the Pacific Ocean,pacific | pacific ocean,true
+6-8-L02-Q05-a8,8,2,science,en,Which gas do we need to breathe in to stay alive?,oxygen,,true
+6-8-L02-Q06-a8,8,2,body,en,Which organ pumps blood around your body?,the heart,heart,true
+6-8-L02-Q07-a8,8,2,shapes,en,How many sides does a hexagon have?,six,6 | six sides,true
+6-8-L02-Q08-a8,8,2,geography,en,How many continents are there on Earth?,seven,7 | seven continents,true
+6-8-L02-Q09-a8,8,2,animals,en,What do caterpillars turn into when they grow up?,butterflies,a butterfly | butterfly | moth | a moth,true
+6-8-L02-Q10-a8,8,2,numbers,en,What is half of fifty?,twenty-five,25 | twenty five,true
+6-8-L03-Q01-a8,8,3,space,en,What is the name of the galaxy we live in?,the Milky Way,milky way | the milky way galaxy,true
+6-8-L03-Q02-a8,8,3,numbers,en,What is twelve times two?,twenty-four,24 | twenty four,true
+6-8-L03-Q03-a8,8,3,animals,en,What is the largest animal in the world?,the blue whale,blue whale | whale | a blue whale,true
+6-8-L03-Q04-a8,8,3,geography,en,What is the capital city of India?,New Delhi,delhi | new delhi,true
+6-8-L03-Q05-a8,8,3,science,en,Which force pulls everything down towards the ground?,gravity,the force of gravity,true
+6-8-L03-Q06-a8,8,3,body,en,Which part of your body do you use to think?,the brain,brain | my brain | your brain,true
+6-8-L03-Q07-a8,8,3,shapes,en,How many sides does an octagon have?,eight,8 | eight sides,true
+6-8-L03-Q08-a8,8,3,science,en,What is the hardest natural material on Earth?,diamond,a diamond | diamonds,true
+6-8-L03-Q09-a8,8,3,animals,en,What do we call an animal that eats both plants and meat?,an omnivore,omnivore | omnivores,true
+6-8-L03-Q10-a8,8,3,numbers,en,What is one hundred minus thirty-five?,sixty-five,65 | sixty five,true
+9+-L01-Q01-a9,9,1,science,en,Which gas do plants take in from the air to make their food?,carbon dioxide,co2 | c o two,true
+9+-L01-Q02-a9,9,1,numbers,en,What is twelve times twelve?,one hundred and forty-four,144 | one hundred forty four,true
+9+-L01-Q03-a9,9,1,geography,en,What is the capital of India?,New Delhi,delhi | new delhi,true
+9+-L01-Q04-a9,9,1,science,en,Which force pulls objects towards the Earth?,gravity,,true
+9+-L01-Q05-a9,9,1,words,en,What do we call a word that means the opposite of another word?,an antonym,antonym | opposite word,true
+9+-L01-Q06-a9,9,1,space,en,How many planets are there in our solar system?,eight,8 | eight planets,true
+9+-L01-Q07-a9,9,1,history,en,Who was the first person to walk on the moon?,Neil Armstrong,armstrong,true
+9+-L01-Q08-a9,9,1,science,en,What is the hardest natural substance on Earth?,diamond,a diamond | diamonds,true
+9+-L01-Q09-a9,9,1,numbers,en,Which prime number comes right after seven?,eleven,11,true
+9+-L01-Q10-a9,9,1,science,en,What do we call the process plants use to make food from sunlight?,photosynthesis,,true
+9+-L02-Q01-a9,9,2,science,en,What is the chemical symbol for water?,H2O,h two o | h 2 o,true
+9+-L02-Q02-a9,9,2,geography,en,On which continent is the Sahara Desert?,Africa,,true
+9+-L02-Q03-a9,9,2,numbers,en,What is fifteen percent of two hundred?,thirty,30,true
+9+-L02-Q04-a9,9,2,body,en,How many bones are there in an adult human body?,two hundred and six,206 | two hundred six,true
+9+-L02-Q05-a9,9,2,animals,en,What word describes animals that are active at night?,nocturnal,,true
+9+-L02-Q06-a9,9,2,space,en,Which planet is known as the red planet?,Mars,,true
+9+-L02-Q07-a9,9,2,words,en,What do we call the study of living things?,biology,,true
+9+-L02-Q08-a9,9,2,geography,en,What is the tallest mountain in the world?,Mount Everest,everest | mt everest,true
+9+-L02-Q09-a9,9,2,science,en,At what temperature in Celsius does water boil at sea level?,one hundred degrees,100 | hundred | one hundred,true
+9+-L02-Q10-a9,9,2,numbers,en,What is the square root of eighty-one?,nine,9,true
+9+-L03-Q01-a9,9,3,science,en,What is the chemical symbol for gold?,Au,a u | gold is au,true
+9+-L03-Q02-a9,9,3,numbers,en,How many degrees are there in a right angle?,ninety,90 | ninety degrees,true
+9+-L03-Q03-a9,9,3,geography,en,Which ocean lies between Africa and Australia?,the Indian Ocean,indian ocean | indian,true
+9+-L03-Q04-a9,9,3,history,en,Who wrote the Indian national anthem?,Rabindranath Tagore,tagore | rabindranath tagore,true
+9+-L03-Q05-a9,9,3,animals,en,What do we call an animal that has no backbone?,an invertebrate,invertebrate | invertebrates,true
+9+-L03-Q06-a9,9,3,space,en,What do we call a star that suddenly explodes?,a supernova,supernova | supernovae,true
+9+-L03-Q07-a9,9,3,words,en,What do we call words that sound the same but mean different things?,homophones,homophone | homonyms | a homophone,true
+9+-L03-Q08-a9,9,3,body,en,Which blood cells help your body fight infection?,white blood cells,white cells | white blood cell | leucocytes,true
+9+-L03-Q09-a9,9,3,geography,en,Which is the largest country in the world by area?,Russia,,true
+9+-L03-Q10-a9,9,3,numbers,en,What is seven cubed?,three hundred and forty-three,343 | three hundred forty three,true
+9+-L01-Q01-a10,10,1,science,en,Which gas do plants take in from the air to make their food?,carbon dioxide,co2 | c o two,true
+9+-L01-Q02-a10,10,1,numbers,en,What is twelve times twelve?,one hundred and forty-four,144 | one hundred forty four,true
+9+-L01-Q03-a10,10,1,geography,en,What is the capital of India?,New Delhi,delhi | new delhi,true
+9+-L01-Q04-a10,10,1,science,en,Which force pulls objects towards the Earth?,gravity,,true
+9+-L01-Q05-a10,10,1,words,en,What do we call a word that means the opposite of another word?,an antonym,antonym | opposite word,true
+9+-L01-Q06-a10,10,1,space,en,How many planets are there in our solar system?,eight,8 | eight planets,true
+9+-L01-Q07-a10,10,1,history,en,Who was the first person to walk on the moon?,Neil Armstrong,armstrong,true
+9+-L01-Q08-a10,10,1,science,en,What is the hardest natural substance on Earth?,diamond,a diamond | diamonds,true
+9+-L01-Q09-a10,10,1,numbers,en,Which prime number comes right after seven?,eleven,11,true
+9+-L01-Q10-a10,10,1,science,en,What do we call the process plants use to make food from sunlight?,photosynthesis,,true
+9+-L02-Q01-a10,10,2,science,en,What is the chemical symbol for water?,H2O,h two o | h 2 o,true
+9+-L02-Q02-a10,10,2,geography,en,On which continent is the Sahara Desert?,Africa,,true
+9+-L02-Q03-a10,10,2,numbers,en,What is fifteen percent of two hundred?,thirty,30,true
+9+-L02-Q04-a10,10,2,body,en,How many bones are there in an adult human body?,two hundred and six,206 | two hundred six,true
+9+-L02-Q05-a10,10,2,animals,en,What word describes animals that are active at night?,nocturnal,,true
+9+-L02-Q06-a10,10,2,space,en,Which planet is known as the red planet?,Mars,,true
+9+-L02-Q07-a10,10,2,words,en,What do we call the study of living things?,biology,,true
+9+-L02-Q08-a10,10,2,geography,en,What is the tallest mountain in the world?,Mount Everest,everest | mt everest,true
+9+-L02-Q09-a10,10,2,science,en,At what temperature in Celsius does water boil at sea level?,one hundred degrees,100 | hundred | one hundred,true
+9+-L02-Q10-a10,10,2,numbers,en,What is the square root of eighty-one?,nine,9,true
+9+-L03-Q01-a10,10,3,science,en,What is the chemical symbol for gold?,Au,a u | gold is au,true
+9+-L03-Q02-a10,10,3,numbers,en,How many degrees are there in a right angle?,ninety,90 | ninety degrees,true
+9+-L03-Q03-a10,10,3,geography,en,Which ocean lies between Africa and Australia?,the Indian Ocean,indian ocean | indian,true
+9+-L03-Q04-a10,10,3,history,en,Who wrote the Indian national anthem?,Rabindranath Tagore,tagore | rabindranath tagore,true
+9+-L03-Q05-a10,10,3,animals,en,What do we call an animal that has no backbone?,an invertebrate,invertebrate | invertebrates,true
+9+-L03-Q06-a10,10,3,space,en,What do we call a star that suddenly explodes?,a supernova,supernova | supernovae,true
+9+-L03-Q07-a10,10,3,words,en,What do we call words that sound the same but mean different things?,homophones,homophone | homonyms | a homophone,true
+9+-L03-Q08-a10,10,3,body,en,Which blood cells help your body fight infection?,white blood cells,white cells | white blood cell | leucocytes,true
+9+-L03-Q09-a10,10,3,geography,en,Which is the largest country in the world by area?,Russia,,true
+9+-L03-Q10-a10,10,3,numbers,en,What is seven cubed?,three hundred and forty-three,343 | three hundred forty three,true
