@@ -100,6 +100,48 @@ const recordKidAssignment = async (tx, macAddress, kidId, at = new Date()) => {
 };
 
 /**
+ * The stores keyed by owner rather than by MAC, with the column that makes a row
+ * unique within an owner and the one that decides a collision.
+ */
+const OWNER_KEYED_STORES = [
+  { model: 'device_workspace_artifacts', unique: 'relative_path', newest: 'updated_at' },
+  { model: 'device_memory_documents', unique: 'document_key', newest: 'updated_at' },
+  { model: 'device_memory_chunks', unique: 'content_hash', newest: 'created_at' },
+];
+
+/**
+ * Re-own one store's rows, resolving collisions first.
+ *
+ * A device that ran unpaired has its own MEMORY.md; the child being paired to it
+ * may already have one from an earlier toy. A blanket updateMany then violates
+ * the (owner_key, <unique>) index and rolls back the entire pairing — the parent
+ * gets an error and the child is left unpaired. Newest wins, the same rule the
+ * owner_key migration used, so the two agree.
+ */
+const moveOwnerKey = async (tx, model, unique, newest, fromKey, toKey) => {
+  const incoming = await tx[model].findMany({
+    where: { owner_key: fromKey },
+    select: { id: true, [unique]: true, [newest]: true },
+  });
+  if (!incoming.length) return;
+
+  const clashes = await tx[model].findMany({
+    where: { owner_key: toKey, [unique]: { in: incoming.map((r) => r[unique]) } },
+    select: { id: true, [unique]: true, [newest]: true },
+  });
+  const byUnique = new Map(clashes.map((r) => [r[unique], r]));
+
+  for (const row of incoming) {
+    const held = byUnique.get(row[unique]);
+    if (!held) continue;
+    const loser = row[newest] > held[newest] ? held : row;
+    await tx[model].delete({ where: { id: loser.id } });
+  }
+
+  await tx[model].updateMany({ where: { owner_key: fromKey }, data: { owner_key: toKey } });
+};
+
+/**
  * Claim the rows a device wrote before it had a child.
  *
  * `kid_id IS NULL` is what makes this safe to run on every pairing rather than
@@ -120,13 +162,18 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   await tx.quiz_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
   await tx.riddle_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
 
-  const ownerWhere = { owner_key: ownerKeyForDevice({ mac_address: macAddress }) };
-  const ownerData = { owner_key: `kid:${BigInt(kidId)}` };
-  await tx.device_workspace_artifacts.updateMany({ where: ownerWhere, data: ownerData });
-  await tx.device_memory_documents.updateMany({ where: ownerWhere, data: ownerData });
-  await tx.device_memory_chunks.updateMany({ where: ownerWhere, data: ownerData });
-  // The pictures move by changing this row, never by copying an S3 object.
-  await tx.imagine_image.updateMany({ where: ownerWhere, data: ownerData });
+  const fromKey = ownerKeyForDevice({ mac_address: macAddress });
+  const toKey = `kid:${BigInt(kidId)}`;
+
+  for (const { model, unique, newest } of OWNER_KEYED_STORES) {
+    await moveOwnerKey(tx, model, unique, newest, fromKey, toKey);
+  }
+
+  // s3_key is globally unique, so re-owning a picture can never collide.
+  await tx.imagine_image.updateMany({
+    where: { owner_key: fromKey },
+    data: { owner_key: toKey },
+  });
 };
 
 /**

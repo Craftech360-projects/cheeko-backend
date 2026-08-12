@@ -24,9 +24,9 @@ jest.mock('../../src/config/database', () => {
     },
     quiz_question_answer: { updateMany: jest.fn() },
     riddle_question_answer: { updateMany: jest.fn() },
-    device_workspace_artifacts: { updateMany: jest.fn() },
-    device_memory_documents: { updateMany: jest.fn() },
-    device_memory_chunks: { updateMany: jest.fn() },
+    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
     imagine_image: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -48,6 +48,10 @@ describe('device pairing to a child', () => {
     prisma.quiz_question_answer.updateMany.mockResolvedValue({ count: 0 });
     prisma.riddle_question_answer.updateMany.mockResolvedValue({ count: 0 });
     prisma.ai_device.findMany.mockResolvedValue([]);
+    for (const m of ['device_workspace_artifacts', 'device_memory_documents', 'device_memory_chunks']) {
+      prisma[m].findMany.mockResolvedValue([]);
+      prisma[m].updateMany.mockResolvedValue({ count: 0 });
+    }
   });
 
   describe('pairing adopts what the device wrote before it had a child', () => {
@@ -89,6 +93,10 @@ describe('device pairing to a child', () => {
         id: 'device-1', mac_address: MAC, kid_id: null,
       });
       prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+      // One provisional file on this toy, nothing of the child's to clash with.
+      prisma.device_workspace_artifacts.findMany
+        .mockResolvedValueOnce([{ id: 'a1', relative_path: 'USER.md', updated_at: new Date(1) }])
+        .mockResolvedValueOnce([]);
 
       await deviceService.assignKidByMac(MAC, '9', 12n);
 
@@ -97,8 +105,41 @@ describe('device pairing to a child', () => {
         data: { owner_key: 'kid:9' },
       };
       expect(prisma.device_workspace_artifacts.updateMany).toHaveBeenCalledWith(expected);
-      expect(prisma.device_memory_documents.updateMany).toHaveBeenCalledWith(expected);
-      expect(prisma.device_memory_chunks.updateMany).toHaveBeenCalledWith(expected);
+      expect(prisma.device_workspace_artifacts.delete).not.toHaveBeenCalled();
+    });
+
+    it('resolves a collision instead of failing the whole pairing', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+      // The toy has a MEMORY.md and so does the child: a blanket update would
+      // violate (owner_key, relative_path) and roll the pairing back.
+      prisma.device_workspace_artifacts.findMany
+        .mockResolvedValueOnce([{ id: 'incoming', relative_path: 'MEMORY.md', updated_at: new Date(2000) }])
+        .mockResolvedValueOnce([{ id: 'held', relative_path: 'MEMORY.md', updated_at: new Date(1000) }]);
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      // Newest wins, matching the migration's rule.
+      expect(prisma.device_workspace_artifacts.delete).toHaveBeenCalledWith({ where: { id: 'held' } });
+      expect(prisma.device_workspace_artifacts.updateMany).toHaveBeenCalled();
+    });
+
+    it('keeps the child copy when the one on the toy is older', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+      prisma.device_workspace_artifacts.findMany
+        .mockResolvedValueOnce([{ id: 'incoming', relative_path: 'MEMORY.md', updated_at: new Date(1000) }])
+        .mockResolvedValueOnce([{ id: 'held', relative_path: 'MEMORY.md', updated_at: new Date(2000) }]);
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      expect(prisma.device_workspace_artifacts.delete).toHaveBeenCalledWith({ where: { id: 'incoming' } });
     });
 
     it('releases the child from any other toy, so one child is never on two', async () => {

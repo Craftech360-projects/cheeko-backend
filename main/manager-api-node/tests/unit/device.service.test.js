@@ -18,9 +18,9 @@ jest.mock('../../src/config/database', () => ({
     },
     quiz_question_answer: { updateMany: jest.fn() },
     riddle_question_answer: { updateMany: jest.fn() },
-    device_workspace_artifacts: { updateMany: jest.fn() },
-    device_memory_documents: { updateMany: jest.fn() },
-    device_memory_chunks: { updateMany: jest.fn() },
+    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
     imagine_image: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   }
@@ -37,6 +37,10 @@ describe('device.service mobile ownership helpers', () => {
     prisma.device_kid_assignment.updateMany.mockResolvedValue({ count: 0 });
     prisma.device_kid_assignment.create.mockResolvedValue({ id: 1n });
     prisma.ai_device.findMany.mockResolvedValue([]);
+    for (const m of ['device_workspace_artifacts', 'device_memory_documents', 'device_memory_chunks']) {
+      prisma[m].findMany.mockResolvedValue([]);
+      prisma[m].updateMany.mockResolvedValue({ count: 0 });
+    }
   });
 
   it('returns the device only when the normalized MAC belongs to the user', async () => {
