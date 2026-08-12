@@ -213,3 +213,6 @@ clerk-nextjs-guide
 
 # Vercel
 .vercel
+
+# Device simulator imagine output (client.py --mode imagine)
+imagine_outputs/
