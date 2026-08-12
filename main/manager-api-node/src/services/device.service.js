@@ -130,14 +130,49 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
 };
 
 /**
- * Everything a pairing change has to do: record it, and claim whatever the
- * device wrote while it had no child. Pass a null kid to unpair — the audit row
- * closes and nothing is adopted.
+ * A Child is paired to one Device at a time. Pairing them to a new one releases
+ * every other, closing those assignments as a Handover rather than leaving the
+ * child on two toys.
+ *
+ * The code only ever guarded the opposite direction — "does this Device already
+ * have a different Child" — so nothing stopped one Child accumulating several
+ * Devices. That breaks the invariant the whole design rests on: two toys writing
+ * the same owner key means two live sessions can interleave writes to one
+ * child's MEMORY.md, and it is what the workspace lease assumes cannot happen.
+ */
+const releaseKidFromOtherDevices = async (tx, macAddress, kidId, at = new Date()) => {
+  if (!kidId) return [];
+
+  const others = await tx.ai_device.findMany({
+    where: { kid_id: BigInt(kidId), mac_address: { not: macAddress } },
+    select: { mac_address: true },
+  });
+
+  for (const other of others) {
+    await tx.ai_device.update({
+      where: { mac_address: other.mac_address },
+      data: { kid_id: null, update_date: at },
+    });
+    await recordKidAssignment(tx, other.mac_address, null, at);
+  }
+
+  return others.map((o) => o.mac_address);
+};
+
+/**
+ * Everything a pairing change has to do: release the child from any other
+ * device, record it, and claim whatever this device wrote while it had no
+ * child. Pass a null kid to unpair — the audit row closes and nothing is
+ * adopted.
  *
  * Every path that writes ai_device.kid_id goes through this, inside the same
  * transaction as that write.
  */
 const pairDeviceToKid = async (tx, macAddress, kidId, at = new Date()) => {
+  const released = await releaseKidFromOtherDevices(tx, macAddress, kidId, at);
+  if (released.length) {
+    logger.info(`Child ${kidId} released from ${released.join(', ')} on pairing to ${macAddress}`);
+  }
   await recordKidAssignment(tx, macAddress, kidId, at);
   await adoptUnattributedRows(tx, macAddress, kidId);
 };

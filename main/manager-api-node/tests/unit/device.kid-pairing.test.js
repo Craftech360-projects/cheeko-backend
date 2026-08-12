@@ -5,6 +5,7 @@ jest.mock('../../src/config/database', () => {
     ai_device: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
       create: jest.fn(),
       delete: jest.fn(),
@@ -46,6 +47,7 @@ describe('device pairing to a child', () => {
     prisma.device_kid_assignment.create.mockResolvedValue({ id: 1n });
     prisma.quiz_question_answer.updateMany.mockResolvedValue({ count: 0 });
     prisma.riddle_question_answer.updateMany.mockResolvedValue({ count: 0 });
+    prisma.ai_device.findMany.mockResolvedValue([]);
   });
 
   describe('pairing adopts what the device wrote before it had a child', () => {
@@ -97,6 +99,44 @@ describe('device pairing to a child', () => {
       expect(prisma.device_workspace_artifacts.updateMany).toHaveBeenCalledWith(expected);
       expect(prisma.device_memory_documents.updateMany).toHaveBeenCalledWith(expected);
       expect(prisma.device_memory_chunks.updateMany).toHaveBeenCalledWith(expected);
+    });
+
+    it('releases the child from any other toy, so one child is never on two', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      // The child is already sitting on a different toy.
+      prisma.ai_device.findMany.mockResolvedValue([{ mac_address: '11:22:33:44:55:66' }]);
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      expect(prisma.ai_device.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { kid_id: 9n, mac_address: { not: MAC } },
+        }),
+      );
+      // The old toy is unpaired in the same transaction as the new pairing.
+      expect(prisma.ai_device.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { mac_address: '11:22:33:44:55:66' },
+          data: expect.objectContaining({ kid_id: null }),
+        }),
+      );
+    });
+
+    it('does not release anything when the child has no other toy', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.findMany.mockResolvedValue([]);
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      expect(prisma.ai_device.update).toHaveBeenCalledTimes(1);
     });
 
     it('adopts nothing when unpairing', async () => {

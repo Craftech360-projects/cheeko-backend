@@ -5,6 +5,7 @@ jest.mock('../../src/config/database', () => ({
     ai_device: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
     kid_profile: {
@@ -35,6 +36,7 @@ describe('device.service mobile ownership helpers', () => {
     prisma.device_kid_assignment.findFirst.mockResolvedValue(null);
     prisma.device_kid_assignment.updateMany.mockResolvedValue({ count: 0 });
     prisma.device_kid_assignment.create.mockResolvedValue({ id: 1n });
+    prisma.ai_device.findMany.mockResolvedValue([]);
   });
 
   it('returns the device only when the normalized MAC belongs to the user', async () => {
