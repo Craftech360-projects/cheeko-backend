@@ -3253,10 +3253,14 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
                 take: 20,
             })
             : Promise.resolve([]),
+        // Was ai_agent_chat_history, the legacy xiaozhi table, which has had no
+        // new rows since 2026-06-06 — so this "has the child talked recently"
+        // signal had been permanently off. voice_session_messages is where
+        // transcripts actually live; role 'user' is the equivalent of chat_type 1.
         (macAddresses.length > 0 || agentIds.length > 0)
-            ? prisma.ai_agent_chat_history.findMany({
+            ? prisma.voice_session_messages.findMany({
                 where: {
-                    chat_type: 1,
+                    role: 'user',
                     OR: [
                         ...(macAddresses.length > 0 ? [{ mac_address: { in: macAddresses } }] : []),
                         ...(agentIds.length > 0 ? [{ agent_id: { in: agentIds } }] : []),

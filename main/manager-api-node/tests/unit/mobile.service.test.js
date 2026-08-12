@@ -50,7 +50,7 @@ jest.mock('../../src/config/database', () => ({
       findMany: jest.fn(),
       count: jest.fn()
     },
-    ai_agent_chat_history: {
+    voice_session_messages: {
       count: jest.fn(),
       findMany: jest.fn()
     },
@@ -89,8 +89,8 @@ describe('mobile.service parent profile compatibility', () => {
     prisma.device_games_played.count.mockResolvedValue(0);
     prisma.device_radio_played.findMany.mockResolvedValue([]);
     prisma.device_radio_played.count.mockResolvedValue(0);
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
-    prisma.ai_agent_chat_history.count.mockResolvedValue(0);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.count.mockResolvedValue(0);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
   });
@@ -906,8 +906,8 @@ describe('mobile.service homepage activity details', () => {
     prisma.device_games_played.count.mockResolvedValue(0);
     prisma.device_radio_played.findMany.mockResolvedValue([]);
     prisma.device_radio_played.count.mockResolvedValue(0);
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
-    prisma.ai_agent_chat_history.count.mockResolvedValue(0);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.count.mockResolvedValue(0);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
   });
@@ -2308,7 +2308,7 @@ describe('mobile.service homepage recommendations', () => {
     ]);
     prisma.analytics_media_playback.findMany.mockResolvedValue([]);
     prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.content_library.findMany.mockResolvedValue([]);
     prisma.rfid_content_pack.findMany.mockResolvedValue([]);

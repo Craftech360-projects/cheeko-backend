@@ -607,23 +607,6 @@ model device_memory_chunks {
   @@index([kid_id, created_at(sort: Desc)], map: "idx_device_memory_chunks_kid_created")
 }
 
-model game_session {
-  id               BigInt    @id @default(autoincrement())
-  mac_address      String    @db.VarChar(50)
-  game_type        String    @db.VarChar(50)
-  session_id       String?   @db.VarChar(100)
-  started_at       DateTime? @default(now()) @db.Timestamptz(6)
-  ended_at         DateTime? @db.Timestamptz(6)
-  duration_seconds Int?
-  total_attempts   Int?      @default(0)
-  correct_attempts Int?      @default(0)
-  metadata         Json?     @default("{}")
-  created_at       DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@index([mac_address], map: "idx_game_session_mac")
-  @@index([game_type], map: "idx_game_session_type")
-}
-
 model kid_activity_log {
   id            String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   kid_id        BigInt?
@@ -1094,39 +1077,6 @@ model email_report_history {
   error_message String?
   report_data   Json?     @default("{}")
   sent_at       DateTime? @default(now()) @db.Timestamptz(6)
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model device_memories {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  mac_id     String
-  file_type  String
-  file_date  DateTime? @db.Date
-  content    String    @default("")
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([mac_id, file_type, file_date], map: "uq_device_memory")
-  @@index([file_date], map: "idx_device_memories_date", where: raw("(file_date IS NOT NULL)"))
-  @@index([mac_id], map: "idx_device_memories_mac")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-model memory_chunks {
-  id           BigInt                 @id @default(autoincrement())
-  mac_id       String
-  text         String
-  file_path    String?
-  start_line   Int?                   @default(0)
-  end_line     Int?                   @default(0)
-  embedding    Unsupported("vector")?
-  category     String?                @default("general")
-  created_at   DateTime?              @default(now()) @db.Timestamptz(6)
-  content_hash String
-
-  @@unique([mac_id, content_hash])
-  @@index([embedding], map: "idx_memory_chunks_embedding")
-  @@index([mac_id], map: "idx_memory_chunks_mac")
 }
 
 model openclaw_pair_tokens {

@@ -252,8 +252,8 @@ const deleteAgent = async (agentId, _userId) => {
     where: { agent_id: agentId },
     data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() }
   });
-  // Delete associated chat history
-  await prisma.ai_agent_chat_history.deleteMany({ where: { agent_id: agentId } });
+  // Transcripts cascade from voice_sessions; the legacy ai_agent_chat_history
+  // table has had no new rows since 2026-06-06 and nothing reads it any more.
   // Delete plugin mappings via raw SQL (table not in Prisma schema)
   await prisma.$executeRawUnsafe(`DELETE FROM ai_agent_plugin_mapping WHERE agent_id = $1::uuid`, agentId).catch(() => {});
   // Delete the agent
@@ -1753,87 +1753,10 @@ const getMemoriesByMac = async (mac, options = {}) => {
     logger.error('Failed to get Postgres memories by MAC:', { error: error.message, mac: normalizedMac });
   }
 
-  if (!mem0Service.isAvailable()) {
-    logger.debug('Mem0 not configured, returning empty memories');
-    return { memories: [], relations: [], entities: [] };
-  }
-
-  try {
-    const result = await mem0Service.searchMemories({
-      userId: normalizedMac,
-      query: options.query,
-      limit: options.limit
-    });
-
-    return result;
-  } catch (error) {
-    logger.error('Failed to get memories by MAC:', { error: error.message, mac: normalizedMac });
-    return { memories: [], relations: [], entities: [] };
-  }
-};
-
-/**
- * Add conversation to memory for a device
- * @param {string} mac - Device MAC address
- * @param {Array} chatHistory - Array of {chatType: 1|2, content: string}
- * @param {string} [sessionId] - Session identifier
- * @returns {Promise<boolean>} True if successful
- */
-const addConversationToMemory = async (mac, chatHistory, sessionId = null) => {
-  const normalizedMac = normalizeMacAddress(mac);
-
-  if (!mem0Service.isAvailable()) {
-    logger.debug('Mem0 not configured, skipping memory storage');
-    return false;
-  }
-
-  if (!chatHistory || chatHistory.length === 0) {
-    return false;
-  }
-
-  try {
-    const result = await mem0Service.addConversation({
-      userId: normalizedMac,
-      chatHistory,
-      sessionId
-    });
-
-    return result !== null;
-  } catch (error) {
-    logger.error('Failed to add conversation to memory:', { error: error.message, mac: normalizedMac });
-    return false;
-  }
-};
-
-/**
- * Add a fact to memory for a device
- * @param {string} mac - Device MAC address
- * @param {string} fact - The fact to store
- * @returns {Promise<boolean>} True if successful
- */
-const addFactToMemory = async (mac, fact) => {
-  const normalizedMac = normalizeMacAddress(mac);
-
-  if (!mem0Service.isAvailable()) {
-    logger.debug('Mem0 not configured, skipping fact storage');
-    return false;
-  }
-
-  if (!fact) {
-    return false;
-  }
-
-  try {
-    const result = await mem0Service.addFact({
-      userId: normalizedMac,
-      fact
-    });
-
-    return result !== null;
-  } catch (error) {
-    logger.error('Failed to add fact to memory:', { error: error.message, mac: normalizedMac });
-    return false;
-  }
+  // No Mem0 fallback. It was keyed on the device MAC, so two children on one toy
+  // accumulated into a single profile and a sibling could read the previous
+  // child's facts. Postgres memory is owner-keyed and is the only source now.
+  return { memories: [], relations: [], entities: [] };
 };
 
 /**
@@ -3163,8 +3086,6 @@ module.exports = {
   getCharacterSessionByName,
   // Memory integration
   getMemoriesByMac,
-  addConversationToMemory,
-  addFactToMemory,
   getPromptWithMemories,
   getDeviceBootstrap,
   saveDeviceWorkspaceArtifact,
