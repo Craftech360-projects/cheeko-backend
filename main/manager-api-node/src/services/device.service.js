@@ -510,12 +510,19 @@ const getMode = async (mac) => {
 };
 
 /**
- * Get device by MAC address
+ * Get device by MAC address, or null when the MAC is unusable.
+ *
+ * normalizeMacAddress returns null for anything that is not a MAC, and passing
+ * that straight to findUnique made Prisma throw a validation error — so any
+ * request to /device/<not-a-mac> answered 500 instead of "no such device".
+ * Every caller already handles a null device; none of them expected a throw.
+ *
  * @param {string} mac - Device MAC address
- * @returns {Promise<Object>} Device
+ * @returns {Promise<Object|null>} Device, or null if unknown or malformed
  */
 const getDeviceByMac = async (mac) => {
   const normalizedMac = normalizeMacAddress(mac);
+  if (!normalizedMac) return null;
   return prisma.ai_device.findUnique({ where: { mac_address: normalizedMac } });
 };
 

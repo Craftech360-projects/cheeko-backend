@@ -112,3 +112,24 @@ describe('device.service mobile ownership helpers', () => {
     expect(prisma.ai_device.update).toHaveBeenCalled();
   });
 });
+
+describe('getDeviceByMac tolerates a malformed MAC', () => {
+  // /device/<anything> matched this route, so a path segment like "all" reached
+  // Prisma as null and threw a validation error the route turned into a 500.
+  it('returns null instead of asking Prisma for a null MAC', async () => {
+    for (const bad of ['all', '', 'not-a-mac', null, undefined]) {
+      await expect(deviceService.getDeviceByMac(bad)).resolves.toBeNull();
+    }
+    expect(prisma.ai_device.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('still looks up a valid MAC', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({ id: 'device-1' });
+
+    await expect(deviceService.getDeviceByMac('aa-bb-cc-dd-ee-ff'))
+      .resolves.toEqual({ id: 'device-1' });
+    expect(prisma.ai_device.findUnique).toHaveBeenCalledWith({
+      where: { mac_address: 'AA:BB:CC:DD:EE:FF' },
+    });
+  });
+});
