@@ -269,6 +269,13 @@ const getChildProfileByMac = async (macAddress) => {
 
   return {
     id: kid.id ? kid.id.toString() : null,
+    // The child this device is actually PAIRED to, or null. Distinct from `id`
+    // above, which falls back to the owner's most recent child when the device
+    // has no pairing — fine for greeting a child by name, wrong for anything
+    // that owns state. Only this field may be used to key a workspace, memory
+    // or progress: keying on the fallback would hand an unpaired toy whichever
+    // sibling happened to be created last.
+    pairedKidId: device.kid_id ? device.kid_id.toString() : null,
     name: kid.name,
     dateOfBirth: birthDate,
     age,
