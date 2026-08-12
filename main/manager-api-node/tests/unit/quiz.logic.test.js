@@ -23,36 +23,35 @@ describe('ageBandFromBirthDate', () => {
     expect(ageBandFromBirthDate(new Date('nope'), now)).toBeNull();
   });
 
-  it('maps age 4 to 3-5', () => {
-    expect(ageBandFromBirthDate(new Date('2022-01-15'), now)).toBe('3-5');
+  it('maps each age 3 to 10 to its own band', () => {
+    // Birthday already passed this year, so the age is exact.
+    const bornForAge = (age) => new Date(`${2026 - age}-01-15`);
+    for (const age of [3, 4, 5, 6, 7, 8, 9, 10]) {
+      expect(ageBandFromBirthDate(bornForAge(age), now)).toBe(String(age));
+    }
   });
 
-  it('maps a child whose 6th birthday is tomorrow to 3-5 (still 5)', () => {
-    expect(ageBandFromBirthDate(new Date('2020-08-05'), now)).toBe('3-5');
+  it('moves the child to the next band on their birthday, not before', () => {
+    expect(ageBandFromBirthDate(new Date('2020-08-05'), now)).toBe('5'); // 6th is tomorrow
+    expect(ageBandFromBirthDate(new Date('2020-08-04'), now)).toBe('6'); // 6th is today
   });
 
-  it('maps a child whose 6th birthday is today to 6-8', () => {
-    expect(ageBandFromBirthDate(new Date('2020-08-04'), now)).toBe('6-8');
+  it('clamps under-3s up to the youngest authored bank', () => {
+    expect(ageBandFromBirthDate(new Date('2024-01-15'), now)).toBe('3'); // age 2
+    expect(ageBandFromBirthDate(new Date('2026-01-15'), now)).toBe('3'); // age 0
   });
 
-  it('maps age 8 to 6-8', () => {
-    expect(ageBandFromBirthDate(new Date('2018-06-15'), now)).toBe('6-8');
+  it('clamps 10-and-over down to the oldest authored bank', () => {
+    expect(ageBandFromBirthDate(new Date('2014-02-01'), now)).toBe('10'); // age 12
+    expect(ageBandFromBirthDate(new Date('2005-02-01'), now)).toBe('10'); // age 21
   });
 
-  it('maps a child whose 9th birthday is tomorrow to 6-8 (still 8)', () => {
-    expect(ageBandFromBirthDate(new Date('2017-08-05'), now)).toBe('6-8');
-  });
-
-  it('maps a child whose 9th birthday is today to 9+', () => {
-    expect(ageBandFromBirthDate(new Date('2017-08-04'), now)).toBe('9+');
-  });
-
-  it('maps age 12 to 9+', () => {
-    expect(ageBandFromBirthDate(new Date('2014-02-01'), now)).toBe('9+');
+  it('clamps rather than returning null for a birth date in the future', () => {
+    expect(ageBandFromBirthDate(new Date('2030-01-01'), now)).toBe('3');
   });
 
   it('accepts a date string as well as a Date', () => {
-    expect(ageBandFromBirthDate('2018-06-15', now)).toBe('6-8');
+    expect(ageBandFromBirthDate('2018-06-15', now)).toBe('8');
   });
 });
 

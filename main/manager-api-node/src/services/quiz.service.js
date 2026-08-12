@@ -17,7 +17,9 @@ const { ApiError } = require('../middleware/errorHandler');
 const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
 const { resolveBank, DEFAULT_BANK } = require('./banks');
 
-const DEFAULT_AGE_BAND = '6-8';
+// Used when there is no device row, no kid, or no birth date. Still the middle
+// of the authored range, now that a band is a single age (see quiz.logic).
+const DEFAULT_AGE_BAND = '6';
 const DEFAULT_LANGUAGE = 'en';
 // The Daily Ten: how many scored questions make a day complete.
 const DAILY_QUESTION_TARGET = 10;
