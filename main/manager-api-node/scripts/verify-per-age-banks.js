@@ -94,8 +94,10 @@ async function verifyBank({ name, questions, answers }) {
     JOIN ${questions} old ON old.id = a.question_id AND old.age_band = ANY($1)
     LEFT JOIN ai_device d ON lower(d.mac_address) = lower(a.device_mac)
     LEFT JOIN kid_profile k ON k.id = d.kid_id
-    LEFT JOIN ${questions} clone ON clone.code = old.code || '-a' || COALESCE(
-      greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int)), 6)::text
+    LEFT JOIN ${questions} clone ON clone.code = old.code || '-a' || (
+      CASE WHEN k.birth_date IS NULL THEN 6
+           ELSE greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int))
+      END)::text
     `, OLD_BANDS);
   // No `mappable > 0` guard: once 005 has dropped the copies there is legitimately
   // nothing left to compare, and requiring some would fail the finished state. The

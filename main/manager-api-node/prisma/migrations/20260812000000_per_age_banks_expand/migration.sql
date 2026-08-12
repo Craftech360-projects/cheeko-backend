@@ -78,9 +78,15 @@ JOIN "quiz_question" old
 LEFT JOIN "ai_device" d ON lower(d.mac_address) = lower(a.device_mac)
 LEFT JOIN "kid_profile" k ON k.id = d.kid_id
 JOIN "quiz_question" clone
-  ON clone.code = old.code || '-a' || COALESCE(
-       greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int)),
-       6
+  -- CASE, not COALESCE around the clamp: Postgres LEAST/GREATEST IGNORE null
+  -- arguments, so least(10, null) is 10 rather than null and the coalesce never
+  -- fired. Every device without a birth date resolved to age 10 and looked for a
+  -- '-a10' clone of 6-8 content, which does not exist — so nothing remapped for
+  -- them. Caught on the dev box, where 40 of 74 answers silently stayed behind.
+  ON clone.code = old.code || '-a' || (
+       CASE WHEN k.birth_date IS NULL THEN 6
+            ELSE greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int))
+       END
      )::text
 WHERE NOT EXISTS (
   SELECT 1 FROM "quiz_question_answer" dup
@@ -97,9 +103,15 @@ JOIN "riddle_question" old
 LEFT JOIN "ai_device" d ON lower(d.mac_address) = lower(a.device_mac)
 LEFT JOIN "kid_profile" k ON k.id = d.kid_id
 JOIN "riddle_question" clone
-  ON clone.code = old.code || '-a' || COALESCE(
-       greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int)),
-       6
+  -- CASE, not COALESCE around the clamp: Postgres LEAST/GREATEST IGNORE null
+  -- arguments, so least(10, null) is 10 rather than null and the coalesce never
+  -- fired. Every device without a birth date resolved to age 10 and looked for a
+  -- '-a10' clone of 6-8 content, which does not exist — so nothing remapped for
+  -- them. Caught on the dev box, where 40 of 74 answers silently stayed behind.
+  ON clone.code = old.code || '-a' || (
+       CASE WHEN k.birth_date IS NULL THEN 6
+            ELSE greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int))
+       END
      )::text
 WHERE NOT EXISTS (
   SELECT 1 FROM "riddle_question_answer" dup
