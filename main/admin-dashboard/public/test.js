@@ -483,6 +483,19 @@ async function loadQuizProgress() {
     // no content for — the API would 400 and this is friendlier.
     T('quizLevel').max = device.max_level || 1;
     if (Number(T('quizLevel').value) > (device.max_level || 1)) T('quizLevel').value = device.max_level || 1;
+
+    // Both inputs show what the device IS, not a fixed default. They used to sit
+    // at a hardcoded 5 and 1 regardless: reading "5" beside a four-year-old
+    // invites pressing Set age + wipe as a no-op and silently changing the age
+    // AND erasing progress. Skipped while focused so it cannot fight typing.
+    const setIfIdle = (id, value) => {
+      const el = T(id);
+      if (document.activeElement !== el && value != null) el.value = value;
+    };
+    // age_band is the age itself for a real child; a defaulted band means there
+    // is no birth date to reflect, so the field is left alone.
+    if (!device.age_band_defaulted) setIfIdle('quizAge', device.age_band);
+    setIfIdle('quizLevel', device.current_level ?? device.max_level);
     const level = device.current_level === null ? 'all cleared' : `${device.current_level} / ${device.max_level}`;
     T('quizSummary').textContent =
       `${device.kid_name || 'no child profile'} · ` +
