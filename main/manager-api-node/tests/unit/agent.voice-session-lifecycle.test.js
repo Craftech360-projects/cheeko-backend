@@ -164,8 +164,8 @@ describe('agent voice session lifecycle', () => {
     }));
     expect(prisma.device_memory_documents.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'summary'
         }
       },
@@ -189,8 +189,8 @@ describe('agent voice session lifecycle', () => {
     }));
     expect(prisma.device_memory_documents.upsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'session:session-1'
         }
       },
@@ -271,8 +271,8 @@ describe('agent voice session lifecycle', () => {
     }));
     expect(prisma.device_memory_documents.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'summary'
         }
       },

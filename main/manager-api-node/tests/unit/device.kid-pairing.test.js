@@ -23,6 +23,9 @@ jest.mock('../../src/config/database', () => {
     },
     quiz_question_answer: { updateMany: jest.fn() },
     riddle_question_answer: { updateMany: jest.fn() },
+    device_workspace_artifacts: { updateMany: jest.fn() },
+    device_memory_documents: { updateMany: jest.fn() },
+    device_memory_chunks: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   };
   return { prisma };
@@ -75,6 +78,24 @@ describe('device pairing to a child', () => {
       expect(prisma.quiz_question_answer.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ kid_id: null }) }),
       );
+    });
+
+    it('moves the workspace and memory out of the MAC namespace into the child', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      const expected = {
+        where: { owner_key: 'mac:aa:bb:cc:dd:ee:ff' },
+        data: { owner_key: 'kid:9' },
+      };
+      expect(prisma.device_workspace_artifacts.updateMany).toHaveBeenCalledWith(expected);
+      expect(prisma.device_memory_documents.updateMany).toHaveBeenCalledWith(expected);
+      expect(prisma.device_memory_chunks.updateMany).toHaveBeenCalledWith(expected);
     });
 
     it('adopts nothing when unpairing', async () => {

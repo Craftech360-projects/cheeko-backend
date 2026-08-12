@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const path = require('path');
 const { prisma } = require('../config/database');
-const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
 
 const FILE_MAP = {
   'AGENT.md': 'AGENT.md',
@@ -71,7 +71,7 @@ function ensureNoNulBytes(content, label) {
 async function getDeviceByMac(normalizedMac) {
   return prisma.ai_device.findUnique({
     where: { mac_address: normalizedMac },
-    select: { id: true, agent_id: true },
+    select: { id: true, agent_id: true, kid_id: true, mac_address: true },
   });
 }
 
@@ -96,12 +96,16 @@ async function getWorkspaceFiles(macAddress, userId = null) {
     await verifyOwnership(normalizedMac, userId);
   }
 
+  const device = await getDeviceByMac(normalizedMac);
+  if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
+
   const result = {};
   for (const [displayName, storagePath] of Object.entries(FILE_MAP)) {
     const row = await prisma.device_workspace_artifacts.findUnique({
       where: {
-        mac_address_relative_path: {
-          mac_address: normalizedMac,
+        owner_key_relative_path: {
+          owner_key: ownerKey,
           relative_path: storagePath,
         },
       },
@@ -133,6 +137,7 @@ async function saveWorkspaceFiles(macAddress, userId = null, files = {}) {
 
   const device = await getDeviceByMac(normalizedMac);
   if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
 
   const normalizedFiles = {};
   for (const [rawKey, rawValue] of Object.entries(files || {})) {
@@ -160,13 +165,14 @@ async function saveWorkspaceFiles(macAddress, userId = null, files = {}) {
 
     await prisma.device_workspace_artifacts.upsert({
       where: {
-        mac_address_relative_path: {
-          mac_address: normalizedMac,
+        owner_key_relative_path: {
+          owner_key: ownerKey,
           relative_path: storagePath,
         },
       },
       create: {
         mac_address: normalizedMac,
+        owner_key: ownerKey,
         device_id: device.id,
         agent_id: device.agent_id || null,
         relative_path: storagePath,
@@ -204,6 +210,10 @@ async function getWorkspaceSync(macAddress, userId = null, options = {}) {
     await verifyOwnership(normalizedMac, userId);
   }
 
+  const device = await getDeviceByMac(normalizedMac);
+  if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
+
   const sinceRevision = typeof options.sinceRevision === 'string'
     ? options.sinceRevision.trim()
     : '';
@@ -211,8 +221,8 @@ async function getWorkspaceSync(macAddress, userId = null, options = {}) {
 
   const manifestRow = await prisma.device_workspace_artifacts.findUnique({
     where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
+      owner_key_relative_path: {
+        owner_key: ownerKey,
         relative_path: MANIFEST_PATH,
       },
     },
@@ -235,7 +245,7 @@ async function getWorkspaceSync(macAddress, userId = null, options = {}) {
   }
 
   const artifacts = await prisma.device_workspace_artifacts.findMany({
-    where: { mac_address: normalizedMac },
+    where: { owner_key: ownerKey },
     orderBy: { updated_at: 'desc' },
     take: limit,
     select: {
@@ -278,6 +288,7 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
 
   const device = await getDeviceByMac(normalizedMac);
   if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
 
   const baseRevision = typeof payload.baseRevision === 'string'
     ? payload.baseRevision.trim()
@@ -342,8 +353,8 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
 
     const manifestRow = await tx.device_workspace_artifacts.findUnique({
       where: {
-        mac_address_relative_path: {
-          mac_address: normalizedMac,
+        owner_key_relative_path: {
+          owner_key: ownerKey,
           relative_path: MANIFEST_PATH,
         },
       },
@@ -363,13 +374,14 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
     for (const file of normalizedFiles.values()) {
       await tx.device_workspace_artifacts.upsert({
         where: {
-          mac_address_relative_path: {
-            mac_address: normalizedMac,
+          owner_key_relative_path: {
+            owner_key: ownerKey,
             relative_path: file.relativePath,
           },
         },
         create: {
           mac_address: normalizedMac,
+          owner_key: ownerKey,
           device_id: device.id,
           agent_id: device.agent_id || null,
           relative_path: file.relativePath,
@@ -405,7 +417,7 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
     for (const relativePath of normalizedDeleted) {
       const result = await tx.device_workspace_artifacts.deleteMany({
         where: {
-          mac_address: normalizedMac,
+          owner_key: ownerKey,
           relative_path: relativePath,
         },
       });
@@ -424,13 +436,14 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
 
     await tx.device_workspace_artifacts.upsert({
       where: {
-        mac_address_relative_path: {
-          mac_address: normalizedMac,
+        owner_key_relative_path: {
+          owner_key: ownerKey,
           relative_path: MANIFEST_PATH,
         },
       },
       create: {
         mac_address: normalizedMac,
+        owner_key: ownerKey,
         device_id: device.id,
         agent_id: device.agent_id || null,
         relative_path: MANIFEST_PATH,

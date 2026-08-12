@@ -521,6 +521,7 @@ model device_token_usage_session {
 model device_workspace_artifacts {
   id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   mac_address   String     @db.VarChar(20)
+  owner_key     String
   device_id     String?    @db.Uuid
   agent_id      String?    @db.Uuid
   session_id    String?
@@ -536,6 +537,7 @@ model device_workspace_artifacts {
   ai_agent      ai_agent?  @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([mac_address, relative_path], map: "uq_device_workspace_artifacts_mac_path")
+  @@unique([owner_key, relative_path], map: "uq_device_workspace_artifacts_owner_path")
   @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_mac_updated")
   @@index([agent_id, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_agent_updated")
   @@index([session_id], map: "idx_device_workspace_artifacts_session")
@@ -556,6 +558,7 @@ model workspace_locks {
 model device_memory_documents {
   id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   mac_address          String                 @db.VarChar(20)
+  owner_key            String
   device_id            String?                @db.Uuid
   agent_id             String?                @db.Uuid
   kid_id               BigInt?
@@ -574,6 +577,7 @@ model device_memory_documents {
   device_memory_chunks device_memory_chunks[]
 
   @@unique([mac_address, document_key], map: "uq_device_memory_documents_mac_key")
+  @@unique([owner_key, document_key], map: "uq_device_memory_documents_owner_key")
   @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_memory_documents_mac_updated")
   @@index([kid_id, updated_at(sort: Desc)], map: "idx_device_memory_documents_kid_updated")
   @@index([session_id], map: "idx_device_memory_documents_session")
@@ -583,6 +587,7 @@ model device_memory_chunks {
   id                      BigInt                  @id @default(autoincrement())
   document_id             String                  @db.Uuid
   mac_address             String                  @db.VarChar(20)
+  owner_key               String
   device_id               String?                 @db.Uuid
   agent_id                String?                 @db.Uuid
   kid_id                  BigInt?
@@ -596,6 +601,7 @@ model device_memory_chunks {
   kid_profile             kid_profile?            @relation(fields: [kid_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([mac_address, content_hash], map: "uq_device_memory_chunks_mac_hash")
+  @@unique([owner_key, content_hash], map: "uq_device_memory_chunks_owner_hash")
   @@index([document_id], map: "idx_device_memory_chunks_document")
   @@index([mac_address, created_at(sort: Desc)], map: "idx_device_memory_chunks_mac_created")
   @@index([kid_id, created_at(sort: Desc)], map: "idx_device_memory_chunks_kid_created")

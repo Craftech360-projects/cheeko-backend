@@ -6,7 +6,7 @@
 
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
-const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
+const { normalizeMacAddress, transformKeysToCamel, ownerKeyForDevice } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
 const { resolveSessionForCharacter, normalizeCharacterName } = require('./character-resolver');
 const { validateAgentMd } = require('../utils/agent-md-validator');
@@ -1015,21 +1015,23 @@ const saveDeviceWorkspaceArtifact = async ({
 
   const device = await prisma.ai_device.findUnique({
     where: { mac_address: normalizedMac },
-    select: { id: true, agent_id: true }
+    select: { id: true, agent_id: true, kid_id: true, mac_address: true }
   });
   if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
 
   const now = new Date();
   const sha256 = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
   const artifact = await prisma.device_workspace_artifacts.upsert({
     where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
+      owner_key_relative_path: {
+        owner_key: ownerKey,
         relative_path: normalizedPath
       }
     },
     create: {
       mac_address: normalizedMac,
+      owner_key: ownerKey,
       device_id: device.id,
       agent_id: device.agent_id || null,
       session_id: sessionId || null,
@@ -1058,14 +1060,29 @@ const saveDeviceWorkspaceArtifact = async ({
   return artifactToDTO(artifact);
 };
 
+/**
+ * The owner key for a device's workspace and memory rows: its child when paired,
+ * its own MAC namespace when not. Throws for an unknown device, which is what
+ * every one of these read paths wants anyway.
+ */
+const resolveOwnerKey = async (normalizedMac) => {
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { kid_id: true, mac_address: true }
+  });
+  if (!device) throw new Error('Device not found');
+  return ownerKeyForDevice(device);
+};
+
 const listDeviceWorkspaceArtifacts = async (macAddress, options = {}) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const includeContent = options.includeContent === true || options.includeContent === 'true' || options.includeContent === '1';
   const limit = clampLimit(options.limit, 50, 100);
   const artifacts = await prisma.device_workspace_artifacts.findMany({
-    where: { mac_address: normalizedMac },
+    where: { owner_key: ownerKey },
     orderBy: { updated_at: 'desc' },
     take: limit,
     select: {
@@ -1092,11 +1109,12 @@ const getDeviceWorkspaceArtifact = async (macAddress, relativePath) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const normalizedPath = normalizeWorkspaceRelativePath(relativePath);
   const artifact = await prisma.device_workspace_artifacts.findUnique({
     where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
+      owner_key_relative_path: {
+        owner_key: ownerKey,
         relative_path: normalizedPath
       }
     }
@@ -1127,21 +1145,23 @@ const saveDeviceMemoryDocument = async ({
 
   const device = await prisma.ai_device.findUnique({
     where: { mac_address: normalizedMac },
-    select: { id: true, agent_id: true, kid_id: true }
+    select: { id: true, agent_id: true, kid_id: true, mac_address: true }
   });
   if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
 
   const now = new Date();
   const parsedMemoryDate = parseMemoryDate(memoryDate);
   const document = await prisma.device_memory_documents.upsert({
     where: {
-      mac_address_document_key: {
-        mac_address: normalizedMac,
+      owner_key_document_key: {
+        owner_key: ownerKey,
         document_key: normalizedKey
       }
     },
     create: {
       mac_address: normalizedMac,
+      owner_key: ownerKey,
       device_id: device.id,
       agent_id: device.agent_id || null,
       kid_id: device.kid_id || null,
@@ -1180,6 +1200,7 @@ const saveDeviceMemoryDocument = async ({
         {
           document_id: document.id,
           mac_address: normalizedMac,
+          owner_key: ownerKey,
           device_id: device.id,
           agent_id: device.agent_id || null,
           kid_id: device.kid_id || null,
@@ -1199,11 +1220,12 @@ const listDeviceMemoryDocuments = async (macAddress, options = {}) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const limit = clampLimit(options.limit, 20, 100);
   const memoryType = options.memoryType || options.type;
   const documents = await prisma.device_memory_documents.findMany({
     where: {
-      mac_address: normalizedMac,
+      owner_key: ownerKey,
       ...(memoryType ? { memory_type: memoryType } : {})
     },
     orderBy: { updated_at: 'desc' },

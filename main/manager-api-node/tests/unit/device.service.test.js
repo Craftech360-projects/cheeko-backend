@@ -17,6 +17,9 @@ jest.mock('../../src/config/database', () => ({
     },
     quiz_question_answer: { updateMany: jest.fn() },
     riddle_question_answer: { updateMany: jest.fn() },
+    device_workspace_artifacts: { updateMany: jest.fn() },
+    device_memory_documents: { updateMany: jest.fn() },
+    device_memory_chunks: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   }
 }));

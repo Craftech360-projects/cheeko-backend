@@ -6,7 +6,7 @@
 
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
-const { generateDeviceCode, normalizeMacAddress } = require('../utils/helpers');
+const { generateDeviceCode, normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
 
 /**
  * In-memory activation code cache
@@ -105,20 +105,26 @@ const recordKidAssignment = async (tx, macAddress, kidId, at = new Date()) => {
  * `kid_id IS NULL` is what makes this safe to run on every pairing rather than
  * once: a row already attributed to a child is not in the unattributed set, so
  * pairing a hand-me-down to a sibling can never steal the previous child's
- * progress. Only the answer logs for now — the workspace, memory and imagine
- * stores are adopted by their own slices.
+ * progress. The workspace and memory stores get the same treatment through
+ * their owner key: only rows still in this device's `mac:` namespace move, so
+ * anything already stamped `kid:` is untouchable. Imagine is adopted by its own
+ * slice, which has no table yet.
  */
 const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   if (!macAddress || !kidId) return;
 
-  const where = {
+  const answerWhere = {
     device_mac: { equals: macAddress, mode: 'insensitive' },
     kid_id: null,
   };
-  const data = { kid_id: BigInt(kidId) };
+  await tx.quiz_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  await tx.riddle_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
 
-  await tx.quiz_question_answer.updateMany({ where, data });
-  await tx.riddle_question_answer.updateMany({ where, data });
+  const ownerWhere = { owner_key: ownerKeyForDevice({ mac_address: macAddress }) };
+  const ownerData = { owner_key: `kid:${BigInt(kidId)}` };
+  await tx.device_workspace_artifacts.updateMany({ where: ownerWhere, data: ownerData });
+  await tx.device_memory_documents.updateMany({ where: ownerWhere, data: ownerData });
+  await tx.device_memory_chunks.updateMany({ where: ownerWhere, data: ownerData });
 };
 
 /**

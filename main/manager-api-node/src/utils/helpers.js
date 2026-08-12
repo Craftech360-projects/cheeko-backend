@@ -210,7 +210,32 @@ const sleep = (ms) => {
  */
 const packCodeForMac = (mac) => `CUSTOM_${String(mac || '').toUpperCase().replace(/[^0-9A-F]/g, '')}`;
 
+/**
+ * Who owns a device's workspace and durable memory.
+ *
+ * A paired device resolves to its child, so the workspace follows the child to
+ * a new toy. An unpaired one falls back to its own MAC, in a separate namespace
+ * — which is what makes the fallback safe: a row stamped `kid:123` can never be
+ * reached by a `mac:` lookup, so a toy handed to a sibling before the parent
+ * picks a child cannot read the previous child's files. The isolation is the
+ * key value, not a filter a caller has to remember.
+ *
+ * Deliberately a non-null string rather than a nullable kid_id: these tables
+ * carry compound uniques, and Postgres treats NULLs as distinct in a unique
+ * index.
+ *
+ * @param {{kid_id?: bigint|null, mac_address?: string}} device
+ * @returns {string}
+ */
+const ownerKeyForDevice = (device) => {
+  if (device?.kid_id) return `kid:${device.kid_id}`;
+  const mac = normalizeMacAddress(device?.mac_address);
+  if (!mac) throw new Error('Cannot derive an owner key without a kid or a valid MAC');
+  return `mac:${mac.toLowerCase()}`;
+};
+
 module.exports = {
+  ownerKeyForDevice,
   generateUUID,
   generateDeviceCode,
   generateRandomString,

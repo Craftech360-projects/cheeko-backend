@@ -10,7 +10,14 @@ describe('workspace sync service', () => {
       $queryRawUnsafe: jest.fn().mockResolvedValue([{ id: 'device-id' }]),
       ai_device: {
         findFirst: jest.fn(),
-        findUnique: jest.fn()
+        // Every workspace read resolves the device's owner key first: the child
+        // when paired, the MAC namespace when not. This one is unpaired.
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'device-id',
+          agent_id: 'agent-id',
+          mac_address: 'AA:BB:CC:DD:EE:FF',
+          kid_id: null
+        })
       },
       device_workspace_artifacts: {
         findUnique: jest.fn(),
@@ -22,7 +29,9 @@ describe('workspace sync service', () => {
 
     jest.doMock('../../src/config/database', () => ({ prisma }));
     jest.doMock('../../src/utils/helpers', () => ({
-      normalizeMacAddress: jest.fn(() => 'AA:BB:CC:DD:EE:FF')
+      normalizeMacAddress: jest.fn(() => 'AA:BB:CC:DD:EE:FF'),
+      // Unpaired device, so the workspace lives in this MAC's own namespace.
+      ownerKeyForDevice: jest.fn(() => 'mac:aa:bb:cc:dd:ee:ff')
     }));
 
     workspaceService = require('../../src/services/workspace.service');
@@ -100,9 +109,11 @@ describe('workspace sync service', () => {
 
     expect(prisma.device_workspace_artifacts.upsert).toHaveBeenCalledTimes(2);
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    // Scoped by owner, not by MAC: a delete must reach the file the same read
+    // path would have returned, wherever the child last wrote it.
     expect(prisma.device_workspace_artifacts.deleteMany).toHaveBeenCalledWith({
       where: {
-        mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key: 'mac:aa:bb:cc:dd:ee:ff',
         relative_path: 'notes/old.md'
       }
     });

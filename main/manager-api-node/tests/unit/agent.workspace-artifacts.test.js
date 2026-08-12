@@ -44,7 +44,9 @@ describe('agent workspace artifacts', () => {
   it('upserts a small text artifact for a normalized device path', async () => {
     prisma.ai_device.findUnique.mockResolvedValue({
       id: 'device-id',
-      agent_id: 'agent-id'
+      agent_id: 'agent-id',
+      mac_address: 'AA:BB:CC:DD:EE:FF',
+      kid_id: null
     });
     prisma.device_workspace_artifacts.upsert.mockResolvedValue({
       id: 'artifact-id',
@@ -69,8 +71,8 @@ describe('agent workspace artifacts', () => {
 
     expect(prisma.device_workspace_artifacts.upsert).toHaveBeenCalledWith({
       where: {
-        mac_address_relative_path: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_relative_path: {
+          owner_key: 'mac:aa:bb:cc:dd:ee:ff',
           relative_path: 'songs/flower_song.txt'
         }
       },
@@ -111,6 +113,9 @@ describe('agent workspace artifacts', () => {
   });
 
   it('lists recent artifacts without content unless requested', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({
+      id: 'device-id', mac_address: 'AA:BB:CC:DD:EE:FF', kid_id: null
+    });
     prisma.device_workspace_artifacts.findMany.mockResolvedValue([
       {
         id: 'artifact-id',
@@ -130,7 +135,7 @@ describe('agent workspace artifacts', () => {
     });
 
     expect(prisma.device_workspace_artifacts.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { mac_address: 'AA:BB:CC:DD:EE:FF' },
+      where: { owner_key: 'mac:aa:bb:cc:dd:ee:ff' },
       take: 5,
       orderBy: { updated_at: 'desc' },
       select: expect.not.objectContaining({ content: true })

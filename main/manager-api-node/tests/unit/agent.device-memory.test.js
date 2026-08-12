@@ -77,8 +77,8 @@ describe('agent device-scoped memory documents', () => {
 
     expect(prisma.device_memory_documents.upsert).toHaveBeenCalledWith({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'summary'
         }
       },
@@ -123,6 +123,9 @@ describe('agent device-scoped memory documents', () => {
   });
 
   it('lists device-scoped memory documents newest first', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({
+      id: 'device-id', mac_address: 'AA:BB:CC:DD:EE:FF', kid_id: 77n
+    });
     prisma.device_memory_documents.findMany.mockResolvedValue([
       {
         id: 'memory-doc-id',
@@ -144,7 +147,7 @@ describe('agent device-scoped memory documents', () => {
     const result = await agentService.listDeviceMemoryDocuments('aa-bb-cc-dd-ee-ff', { limit: 5 });
 
     expect(prisma.device_memory_documents.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { mac_address: 'AA:BB:CC:DD:EE:FF' },
+      where: { owner_key: 'kid:77' },
       orderBy: { updated_at: 'desc' },
       take: 5
     }));
