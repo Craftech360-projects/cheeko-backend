@@ -4,14 +4,14 @@
  *
  *   node scripts/verify-per-age-banks.js
  *
- * Checks the acceptance criteria of picoclaw issue
- * docs/issues/per-age-banks/001-per-age-content-exists.md against the live
- * database, and exits non-zero if any fails. Read-only — safe to run any time.
+ * Checks the acceptance criteria of picoclaw issues
+ * docs/issues/per-age-banks/001-per-age-content-exists.md and 005-retire-old-bands.md
+ * against the live database, and exits non-zero if any fails. Read-only — safe
+ * to run any time.
  *
- * Asserts the post-001 state, so it stays valid across the 002 deploy but NOT
- * past 005: retiring the old bands is exactly what the "old band rows still
- * active" check is there to catch happening early. Expect that one to fail once
- * 005 has run, and read the rest.
+ * Asserts the FINISHED state of the migration. Between 001 and 005 the old
+ * bands are meant to still be active, so the retirement check fails on purpose
+ * during that window — that is the check doing its job, not a broken script.
  */
 
 require('dotenv/config');
@@ -50,14 +50,28 @@ async function verifyBank({ name, questions, answers }) {
       (missing.length ? `; missing ages: ${missing.join(', ')}` : '')
   );
 
-  // The old bands must still be servable until issue 005 retires them: the
-  // running manager-api is still asking for them.
+  // Retired by issue 005, never deleted: loadBank filters on active, so
+  // deactivating is what takes them out of play, while the answer log keeps
+  // pointing at questions that still resolve.
   const [old] = await prisma.$queryRawUnsafe(`
     SELECT count(*)::int AS total, count(*) FILTER (WHERE active)::int AS active
     FROM ${questions} WHERE age_band = ANY($1)`, OLD_BANDS);
-  check(old.total > 0 && old.total === old.active,
-    'old band rows still present and active',
-    `${old.active}/${old.total} active`);
+  check(old.total > 0 && old.active === 0,
+    'old band rows retired but still present',
+    `${old.total - old.active}/${old.total} retired`);
+
+  // The 001 remap copied answers onto the clones; 005 dropped the copies. A
+  // survivor with a twin means the cleanup missed one and the lifetime tallies
+  // are still double-counting.
+  const [dupes] = await prisma.$queryRawUnsafe(`
+    SELECT count(*)::int AS n FROM ${answers} a
+    WHERE EXISTS (
+      SELECT 1 FROM ${questions} old
+      JOIN ${questions} clone ON clone.code LIKE old.code || '-a%'
+      JOIN ${answers} twin ON twin.device_mac = a.device_mac AND twin.question_id = clone.id
+                          AND twin.answered_at = a.answered_at AND twin.result = a.result
+      WHERE old.id = a.question_id AND old.age_band = ANY($1))`, OLD_BANDS);
+  check(dupes.n === 0, 'no superseded old-band answer copies remain', `${dupes.n} left`);
 
   // The reason the remap exists: a device must not lose its cleared questions.
   //
@@ -83,7 +97,11 @@ async function verifyBank({ name, questions, answers }) {
     LEFT JOIN ${questions} clone ON clone.code = old.code || '-a' || COALESCE(
       greatest(3, least(10, date_part('year', age((now() AT TIME ZONE 'UTC')::date, k.birth_date))::int)), 6)::text
     `, OLD_BANDS);
-  check(remap.mappable > 0 && remap.remapped === remap.mappable,
+  // No `mappable > 0` guard: once 005 has dropped the copies there is legitimately
+  // nothing left to compare, and requiring some would fail the finished state. The
+  // pre-migration vacuous pass this once guarded is caught louder by the first
+  // check, which finds no per-age content at all.
+  check(remap.remapped === remap.mappable,
     'every in-band answer has been remapped onto the device age bank',
     `${remap.remapped}/${remap.mappable} remapped, ${remap.dormant} dormant (answered outside the device's current age)`);
 
