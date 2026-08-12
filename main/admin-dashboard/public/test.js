@@ -422,6 +422,7 @@ async function stopTest() {
     }).catch(() => { /* room expires on its own */ });
   }
   session = null;
+  loadQuizProgress();
 }
 
 function toggleMute() {
@@ -431,11 +432,86 @@ function toggleMute() {
   T('muteBtn').textContent = on ? 'Unmute mic' : 'Mute mic';
 }
 
-T('startTest').addEventListener('click', startTest);
+// --- Quiz/riddle progress for the device under test ---------------------------
+//
+// Testing level 3 means putting the device on level 3 first; testing the day gate
+// means being able to re-open it. Both read the MAC from the field above, so the
+// panel always describes the toy you are about to talk to, and the bank follows
+// the selected character.
+
+const quizQuery = () =>
+  `?mac=${encodeURIComponent(T('testMac').value.trim())}` +
+  `&character=${encodeURIComponent(T('testChar').value || '')}`;
+
+async function loadQuizProgress() {
+  const mac = T('testMac').value.trim();
+  if (!mac) return;
+  try {
+    const { bank, device } = await api('GET', '/quiz-progress' + quizQuery());
+    T('quizBank').textContent = bank;
+    if (!device) {
+      T('quizSummary').textContent = 'no device row for this MAC';
+      return;
+    }
+    // max_level bounds the picker, so you cannot ask for a level the band has
+    // no content for — the API would 400 and this is friendlier.
+    T('quizLevel').max = device.max_level || 1;
+    if (Number(T('quizLevel').value) > (device.max_level || 1)) T('quizLevel').value = device.max_level || 1;
+    const level = device.current_level === null ? 'all cleared' : `${device.current_level} / ${device.max_level}`;
+    T('quizSummary').textContent =
+      `${device.kid_name || 'no child profile'} · ` +
+      `band ${device.age_band}${device.age_band_defaulted ? ' (default)' : ''} · ` +
+      `level ${level} · cleared ${device.levels_completed} · ` +
+      `today ${device.answered_today}/10${device.day_complete ? ' — day complete' : ''}` +
+      `${device.replay ? ' · replay' : ''}`;
+  } catch (e) {
+    T('quizSummary').textContent = 'could not load: ' + e.message;
+  }
+}
+
+async function quizAction(path, body, label) {
+  const mac = T('testMac').value.trim();
+  if (!mac) return;
+  try {
+    await api('POST', path, { mac, character: T('testChar').value || '', ...body });
+    tlog(`${label} for ${mac}`, 'ok');
+  } catch (e) {
+    tlog(`${label} failed: ` + e.message, 'err');
+  }
+  loadQuizProgress();
+}
+
+T('quizRefresh').addEventListener('click', loadQuizProgress);
+T('testChar').addEventListener('change', loadQuizProgress);
+// `input`, not `change`: a text field only fires change on blur, so typing a new
+// MAC and looking straight at the panel showed the previous device's progress.
+// Debounced so a half-typed MAC does not query on every keystroke.
+let quizMacTimer = null;
+T('testMac').addEventListener('input', () => {
+  clearTimeout(quizMacTimer);
+  quizMacTimer = setTimeout(loadQuizProgress, 400);
+});
+// Rewrites the device's answer log for its band, so it asks first. Harmless on a
+// test toy, which is the only thing this tab points at, but it is still a wipe.
+T('quizSetLevel').addEventListener('click', () => {
+  const level = Number(T('quizLevel').value);
+  if (!confirm(`Set level ${level}? This rewrites this device's answer log for the ${T('quizBank').textContent} bank.`)) return;
+  quizAction('/quiz-set-level', { level }, `Set level ${level}`);
+});
+T('quizResetDay').addEventListener('click', () => quizAction('/quiz-reset-day', {}, 'Reset day'));
+
+// Refreshed on Start too: the panel is what tells you whether this session will
+// do what you set it up to do, and it is the last moment you can still fix it.
+T('startTest').addEventListener('click', () => { loadQuizProgress(); startTest(); });
 T('stopTest').addEventListener('click', stopTest);
 T('muteBtn').addEventListener('click', toggleMute);
 T('pttBtn').addEventListener('click', pttToggle);
-document.querySelector('.tab[data-tab="testView"]')?.addEventListener('click', startViz);
+// Refreshed on tab open and after a session ends — the numbers only move when a
+// session scores something, and that is exactly when you want to see them.
+document.querySelector('.tab[data-tab="testView"]')?.addEventListener('click', () => {
+  startViz();
+  loadQuizProgress();
+});
 
 // Space = tap, Esc = cancel — same shape as client.py's 's' and spacebar.
 document.addEventListener('keydown', (e) => {

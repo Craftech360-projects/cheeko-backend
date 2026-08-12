@@ -143,6 +143,21 @@
         </div>
       </div>
 
+      <!-- Quiz/riddle state for the MAC above. Bank follows the character. -->
+      <div class="card toolbar">
+        <div class="field">
+          <label>Progress <span id="quizBank" class="pill">quiz</span></label>
+          <div id="quizSummary" class="hint">—</div>
+        </div>
+        <div class="field">
+          <label for="quizLevel">Set level</label>
+          <input id="quizLevel" type="number" min="1" value="1" style="width:5rem" />
+        </div>
+        <button id="quizSetLevel" class="btn ghost danger">Set level</button>
+        <button id="quizResetDay" class="btn ghost">Reset day</button>
+        <button id="quizRefresh" class="btn ghost">Refresh</button>
+      </div>
+
       <div class="test-grid">
         <div class="card">
           <label>Conversation</label>
