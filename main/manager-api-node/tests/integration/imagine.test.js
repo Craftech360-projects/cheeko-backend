@@ -47,7 +47,25 @@ describe('POST /toy/imagine/upload', () => {
     expect(res.body.data.url).toBe('https://cdn.example.net/imagine/abc.jpg');
     expect(res.body.data.s3Key).toBe('imagine/abc.jpg');
     expect(uploadService.uploadImagineImage).toHaveBeenCalledTimes(1);
-    expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(expect.any(Buffer));
+    // Two arguments since the S3 key became device-bucketed: the second is the
+    // MAC, absent here because this request sends no deviceMac field.
+    expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(expect.any(Buffer), undefined);
+  });
+
+  // The MAC decides the S3 prefix (imagine/<mac>/<uuid>.jpg), so a request that
+  // loses it silently files the image where no gallery will list it.
+  it('passes the device MAC through when the gateway sends one', async () => {
+    const res = await request(app)
+      .post('/toy/imagine/upload')
+      .set('X-Service-Key', SERVICE_KEY)
+      .field('deviceMac', 'AA:BB:CC:DD:EE:FF')
+      .attach('file', JPEG, { filename: 'x.jpg', contentType: 'image/jpeg' });
+
+    expect(res.status).toBe(200);
+    expect(uploadService.uploadImagineImage).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      'AA:BB:CC:DD:EE:FF',
+    );
   });
 
   it('rejects a non-JPEG file (400)', async () => {
