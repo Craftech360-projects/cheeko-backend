@@ -57,11 +57,29 @@ const resolveDeviceContext = async (deviceMac) => {
     ageBand: ageBand || DEFAULT_AGE_BAND,
     ageBandDefaulted: ageBand === null,
     language: (kid?.language || DEFAULT_LANGUAGE).toLowerCase(),
-    // Milestones are attributed to the child, not the device, so a sibling
+    // Progress is attributed to the child, not the device, so a sibling
     // inheriting a toy does not inherit their progress.
-    kidId: device?.kid_id ?? null
+    kidId: device?.kid_id ?? null,
+    // As the caller sent it. Rows are written with the caller's spelling and
+    // read case-insensitively, so the fallback has to match on the same value.
+    deviceMac
   };
 };
+
+/**
+ * Which answer rows belong to this session's child.
+ *
+ * A paired device reads by child and ignores the MAC entirely, so progress
+ * follows the child to a new toy. An unpaired device falls back to its own MAC
+ * — and must also require `kid_id IS NULL`, or a toy handed to a sibling before
+ * the parent picks a child would read the previous child's entire log. That
+ * guard is the whole reason the fallback is safe; do not drop it.
+ */
+const answerScope = (context) => (
+  context.kidId
+    ? { kid_id: context.kidId }
+    : { device_mac: macFilter(context.deviceMac), kid_id: null }
+);
 
 /**
  * Active questions for a band in the requested language, falling back to
@@ -83,12 +101,12 @@ const loadBank = async (tables, ageBand, language) => {
 };
 
 /** Cleared = an answer row with result 'correct' or 'revealed' exists. */
-const loadClearedIds = async (tables, deviceMac, bank) => {
+const loadClearedIds = async (tables, scope, bank) => {
   if (!bank.length) return new Set();
 
   const rows = await tables.answers.findMany({
     where: {
-      device_mac: macFilter(deviceMac),
+      ...scope,
       question_id: { in: bank.map((q) => q.id) },
       result: { in: CLEARED_RESULTS }
     },
@@ -103,11 +121,11 @@ const loadClearedIds = async (tables, deviceMac, bank) => {
  * one (ordered by its most recent answer). Always the full level — a partially
  * played replay day does not resume.
  */
-const leastRecentlyPlayedLevel = async (tables, deviceMac, bank) => {
+const leastRecentlyPlayedLevel = async (tables, scope, bank) => {
   const grouped = await tables.answers.groupBy({
     by: ['question_id'],
     where: {
-      device_mac: macFilter(deviceMac),
+      ...scope,
       question_id: { in: bank.map((q) => q.id) }
     },
     _max: { answered_at: true }
@@ -144,8 +162,9 @@ const toQuestion = (question) => ({
 const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
+  const scope = answerScope(context);
   const { bank, language } = await loadBank(tables, context.ageBand, context.language);
-  const clearedIds = await loadClearedIds(tables, deviceMac, bank);
+  const clearedIds = await loadClearedIds(tables, scope, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
   let level = state.currentLevel;
@@ -153,7 +172,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const replay = state.allCleared;
 
   if (replay) {
-    level = await leastRecentlyPlayedLevel(tables, deviceMac, bank);
+    level = await leastRecentlyPlayedLevel(tables, scope, bank);
     selectedIds = bank.filter((q) => q.level === level).map((q) => q.id);
   }
 
@@ -173,7 +192,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const todayRows = await tables.answers.findMany({
-    where: { device_mac: macFilter(deviceMac), answered_at: { gte: startOfDay } },
+    where: { ...scope, answered_at: { gte: startOfDay } },
     select: { question_id: true }
   });
   const answeredToday = todayRows.length;
@@ -238,8 +257,19 @@ const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BA
     throw new ApiError(`unknown question_id: ${questionId}`, 400);
   }
 
+  // Resolved once and threaded into the milestone write, which used to resolve
+  // it again. The child is what the row belongs to; the MAC records which toy
+  // asked, and is what an unpaired device is read back by until it is paired.
+  //
+  // Unlike the milestone below, this is allowed to fail the answer. A row
+  // written with the wrong scope is invisible to every later read and silently
+  // costs the child that question forever, which is worse than the worker
+  // retrying. Both lookups are primary-key reads on the DB the insert is about
+  // to hit anyway, so there is no new failure mode in practice.
+  const context = await resolveDeviceContext(deviceMac);
+
   const row = await tables.answers.create({
-    data: { device_mac: deviceMac, question_id: id, result },
+    data: { device_mac: deviceMac, kid_id: context.kidId, question_id: id, result },
     select: { id: true, answered_at: true }
   });
 
@@ -248,7 +278,7 @@ const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BA
   // MOMENT (for cards and notifications) that a recomputed value cannot give.
   // Never let a reporting write fail the answer that was just recorded.
   try {
-    await recordLevelMilestone(tables, deviceMac, id);
+    await recordLevelMilestone(tables, context, id);
   } catch (error) {
     logger.warn(`[${tables.label}] level milestone write failed for ${deviceMac}: ${error.message}`);
   }
@@ -270,12 +300,12 @@ const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BA
  * lacks today. No-ops when the device has no child profile.
  *
  * @param {object} tables - the resolved bank
- * @param {string} deviceMac
+ * @param {object} context - the resolved device context, from recordAnswer
  * @param {bigint} answeredQuestionId
  */
-const recordLevelMilestone = async (tables, deviceMac, answeredQuestionId) => {
-  const context = await resolveDeviceContext(deviceMac);
+const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
   if (!context.kidId) return;
+  const scope = answerScope(context);
 
   const answered = await tables.questions.findUnique({
     where: { id: answeredQuestionId },
@@ -287,13 +317,13 @@ const recordLevelMilestone = async (tables, deviceMac, answeredQuestionId) => {
   const levelQuestions = bank.filter((q) => q.level === answered.level);
   if (!levelQuestions.length) return;
 
-  const clearedIds = await loadClearedIds(tables, deviceMac, levelQuestions);
+  const clearedIds = await loadClearedIds(tables, scope, levelQuestions);
   if (!levelQuestions.every((q) => clearedIds.has(String(q.id)))) return;
 
   const scored = await tables.answers.groupBy({
     by: ['result'],
     where: {
-      device_mac: macFilter(deviceMac),
+      ...scope,
       question_id: { in: levelQuestions.map((q) => q.id) }
     },
     _count: { _all: true }
@@ -355,15 +385,16 @@ const recordLevelMilestone = async (tables, deviceMac, answeredQuestionId) => {
 const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
+  const scope = answerScope(context);
   const { bank } = await loadBank(tables, context.ageBand, context.language);
-  const clearedIds = await loadClearedIds(tables, deviceMac, bank);
+  const clearedIds = await loadClearedIds(tables, scope, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
-  // Counts are lifetime totals for the device, not band-scoped: a band change
-  // must not erase what the child already answered.
+  // Counts are lifetime totals for the child, not band-scoped: a band change
+  // must not erase what they already answered.
   const grouped = await tables.answers.groupBy({
     by: ['result'],
-    where: { device_mac: macFilter(deviceMac) },
+    where: scope,
     _count: { _all: true },
     _max: { answered_at: true }
   });
@@ -527,13 +558,17 @@ const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
   const belowTarget = bank.filter((q) => q.level < level);
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
+  // Scoped the same way reads are, or forcing a level on a paired device would
+  // delete nothing it can see and write rows it cannot read back.
+  const scope = answerScope(context);
   const deleted = await tables.answers.deleteMany({
-    where: { device_mac: macFilter(deviceMac), question_id: { in: bank.map((q) => q.id) } }
+    where: { ...scope, question_id: { in: bank.map((q) => q.id) } }
   });
   const created = belowTarget.length
     ? await tables.answers.createMany({
       data: belowTarget.map((q) => ({
         device_mac: deviceMac,
+        kid_id: context.kidId,
         question_id: q.id,
         result: 'correct',
         answered_at: yesterday
@@ -563,20 +598,35 @@ const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
  */
 const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
+  const context = await resolveDeviceContext(deviceMac);
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
 
+  // Two statements rather than one, because the scope is a different column
+  // depending on whether the device is paired. Same rule as answerScope: a
+  // paired device backdates its child's rows wherever they were answered; an
+  // unpaired one may only touch rows no child owns.
   // $executeRawUnsafe, not a tagged template: a table name cannot be a bound
   // parameter. Only the table name is interpolated and it comes from the bank
   // registry, never from the caller; both values stay bound.
-  const moved = await prisma.$executeRawUnsafe(
-    `UPDATE ${tables.answerTable}
-     SET answered_at = answered_at - INTERVAL '1 day'
-     WHERE lower(device_mac) = lower($1)
-       AND answered_at >= $2`,
-    deviceMac,
-    startOfDay
-  );
+  const moved = context.kidId
+    ? await prisma.$executeRawUnsafe(
+      `UPDATE ${tables.answerTable}
+       SET answered_at = answered_at - INTERVAL '1 day'
+       WHERE kid_id = $1
+         AND answered_at >= $2`,
+      context.kidId,
+      startOfDay
+    )
+    : await prisma.$executeRawUnsafe(
+      `UPDATE ${tables.answerTable}
+       SET answered_at = answered_at - INTERVAL '1 day'
+       WHERE kid_id IS NULL
+         AND lower(device_mac) = lower($1)
+         AND answered_at >= $2`,
+      deviceMac,
+      startOfDay
+    );
 
   return { device_mac: deviceMac, backdated: moved };
 };

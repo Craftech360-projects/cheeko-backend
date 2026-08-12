@@ -1447,6 +1447,7 @@ model quiz_question {
 model quiz_question_answer {
   id            BigInt        @id @default(autoincrement())
   device_mac    String        @db.VarChar(20)
+  kid_id        BigInt?
   question_id   BigInt
   result        String        @db.VarChar(10)
   answered_at   DateTime      @default(now()) @db.Timestamptz(6)
@@ -1454,6 +1455,7 @@ model quiz_question_answer {
 
   @@index([device_mac, question_id], map: "idx_quiz_answer_device_question")
   @@index([device_mac, answered_at], map: "idx_quiz_answer_device_time")
+  @@index([kid_id, answered_at], map: "idx_quiz_answer_kid_time")
 }
 
 /// Riddler's bank. Deliberately column-identical to quiz_question — including
@@ -1483,6 +1485,7 @@ model riddle_question {
 model riddle_question_answer {
   id              BigInt          @id @default(autoincrement())
   device_mac      String          @db.VarChar(20)
+  kid_id          BigInt?
   question_id     BigInt
   result          String          @db.VarChar(10)
   answered_at     DateTime        @default(now()) @db.Timestamptz(6)
@@ -1490,6 +1493,7 @@ model riddle_question_answer {
 
   @@index([device_mac, question_id], map: "idx_riddle_answer_device_question")
   @@index([device_mac, answered_at], map: "idx_riddle_answer_device_time")
+  @@index([kid_id, answered_at], map: "idx_riddle_answer_kid_time")
 }
 
 /// Which Child was paired to a Device, and when. Nothing reads this yet: it

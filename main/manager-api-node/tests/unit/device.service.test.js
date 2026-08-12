@@ -15,6 +15,8 @@ jest.mock('../../src/config/database', () => ({
       updateMany: jest.fn(),
       create: jest.fn(),
     },
+    quiz_question_answer: { updateMany: jest.fn() },
+    riddle_question_answer: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   }
 }));

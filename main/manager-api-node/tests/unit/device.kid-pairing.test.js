@@ -21,6 +21,8 @@ jest.mock('../../src/config/database', () => {
       updateMany: jest.fn(),
       create: jest.fn(),
     },
+    quiz_question_answer: { updateMany: jest.fn() },
+    riddle_question_answer: { updateMany: jest.fn() },
     $transaction: jest.fn(),
   };
   return { prisma };
@@ -38,6 +40,53 @@ describe('device pairing to a child', () => {
     prisma.device_kid_assignment.findFirst.mockResolvedValue(null);
     prisma.device_kid_assignment.updateMany.mockResolvedValue({ count: 0 });
     prisma.device_kid_assignment.create.mockResolvedValue({ id: 1n });
+    prisma.quiz_question_answer.updateMany.mockResolvedValue({ count: 0 });
+    prisma.riddle_question_answer.updateMany.mockResolvedValue({ count: 0 });
+  });
+
+  describe('pairing adopts what the device wrote before it had a child', () => {
+    it('claims unattributed quiz and riddle answers for the incoming child', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      const expected = {
+        where: { device_mac: { equals: MAC, mode: 'insensitive' }, kid_id: null },
+        data: { kid_id: 9n },
+      };
+      expect(prisma.quiz_question_answer.updateMany).toHaveBeenCalledWith(expected);
+      expect(prisma.riddle_question_answer.updateMany).toHaveBeenCalledWith(expected);
+    });
+
+    it('cannot steal rows already attributed to a sibling', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: 7n,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      // The guard is in the where clause, not in a caller remembering to check.
+      expect(prisma.quiz_question_answer.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ kid_id: null }) }),
+      );
+    });
+
+    it('adopts nothing when unpairing', async () => {
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: 7n,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: null });
+
+      await deviceService.assignKidByMac(MAC, null, 12n);
+
+      expect(prisma.quiz_question_answer.updateMany).not.toHaveBeenCalled();
+    });
   });
 
   describe('bindDevice auto-pairs when the owner has exactly one child', () => {

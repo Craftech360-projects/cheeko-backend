@@ -11,7 +11,7 @@ const { prisma } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 const { sanitizeParentRule } = require('./profile.service');
-const { recordKidAssignment } = require('./device.service');
+const { pairDeviceToKid } = require('./device.service');
 
 // ==================== USER MANAGEMENT ====================
 
@@ -995,7 +995,7 @@ const assignKidToDeviceAdmin = async (deviceId, kidId) => {
         where: { id: deviceId },
         data: { kid_id: kidId !== null ? BigInt(kidId) : null }
       });
-      await recordKidAssignment(tx, row.mac_address, kidId);
+      await pairDeviceToKid(tx, row.mac_address, kidId);
       return row;
     });
 

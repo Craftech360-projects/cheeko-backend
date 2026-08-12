@@ -100,6 +100,41 @@ const recordKidAssignment = async (tx, macAddress, kidId, at = new Date()) => {
 };
 
 /**
+ * Claim the rows a device wrote before it had a child.
+ *
+ * `kid_id IS NULL` is what makes this safe to run on every pairing rather than
+ * once: a row already attributed to a child is not in the unattributed set, so
+ * pairing a hand-me-down to a sibling can never steal the previous child's
+ * progress. Only the answer logs for now — the workspace, memory and imagine
+ * stores are adopted by their own slices.
+ */
+const adoptUnattributedRows = async (tx, macAddress, kidId) => {
+  if (!macAddress || !kidId) return;
+
+  const where = {
+    device_mac: { equals: macAddress, mode: 'insensitive' },
+    kid_id: null,
+  };
+  const data = { kid_id: BigInt(kidId) };
+
+  await tx.quiz_question_answer.updateMany({ where, data });
+  await tx.riddle_question_answer.updateMany({ where, data });
+};
+
+/**
+ * Everything a pairing change has to do: record it, and claim whatever the
+ * device wrote while it had no child. Pass a null kid to unpair — the audit row
+ * closes and nothing is adopted.
+ *
+ * Every path that writes ai_device.kid_id goes through this, inside the same
+ * transaction as that write.
+ */
+const pairDeviceToKid = async (tx, macAddress, kidId, at = new Date()) => {
+  await recordKidAssignment(tx, macAddress, kidId, at);
+  await adoptUnattributedRows(tx, macAddress, kidId);
+};
+
+/**
  * The child a newly bound device should be paired to: the one the app sent, or
  * the owner's only child when it sent none. Returns null when the owner has no
  * children or several — the app's kid picker resolves those.
@@ -180,7 +215,7 @@ const bindDevice = async (userId, agentId, deviceCode, kidId = null) => {
           update_date: new Date(),
         },
       });
-      if (pairedKidId) await recordKidAssignment(tx, macAddress, pairedKidId);
+      if (pairedKidId) await pairDeviceToKid(tx, macAddress, pairedKidId);
       return row;
     });
 
@@ -212,7 +247,7 @@ const bindDevice = async (userId, agentId, deviceCode, kidId = null) => {
           updater: BigInt(userId),
         },
       });
-      if (pairedKidId) await recordKidAssignment(tx, macAddress, pairedKidId, now);
+      if (pairedKidId) await pairDeviceToKid(tx, macAddress, pairedKidId, now);
       return row;
     });
     activationCodeCache.delete(deviceCode);
@@ -264,7 +299,7 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}
   await prisma.$transaction(async (tx) => {
     // Close the pairing either way. The child's own rows are untouched — they
     // belong to the child, not to the toy, and are theirs again on re-pairing.
-    await recordKidAssignment(tx, device.mac_address, null);
+    await pairDeviceToKid(tx, device.mac_address, null);
 
     if (hardDelete) {
       await tx.ai_device.delete({ where: { id: device.id } });
@@ -339,7 +374,7 @@ const assignKidToDevice = async (userId, deviceId, kidId) => {
       where: { id: deviceId },
       data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
     });
-    await recordKidAssignment(tx, device.mac_address, kidId);
+    await pairDeviceToKid(tx, device.mac_address, kidId);
     return updated;
   });
 };
@@ -379,7 +414,7 @@ const assignKidByMac = async (mac, kidId, userId = null) => {
       where: { id: device.id },
       data: { kid_id: kidId ? BigInt(kidId) : null, update_date: new Date() },
     });
-    await recordKidAssignment(tx, device.mac_address, kidId);
+    await pairDeviceToKid(tx, device.mac_address, kidId);
     return updated;
   });
 };
@@ -1595,6 +1630,7 @@ module.exports = {
   assignKidToDevice,
   assignKidByMac,
   recordKidAssignment,
+  pairDeviceToKid,
   cycleMode,
   getMode,
   getDeviceByMac,
