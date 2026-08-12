@@ -1502,6 +1502,21 @@ model riddle_question_answer {
   @@index([kid_id, answered_at], map: "idx_riddle_answer_kid_time")
 }
 
+/// One AI-Imagine picture. The image itself stays in S3 under the key it was
+/// first written with; this row is what says whose it is, so a child changing
+/// toys is an UPDATE rather than a bucket copy. Before this table the gallery
+/// was a raw prefix listing, silently capped at 1000 objects.
+model imagine_image {
+  id          BigInt   @id @default(autoincrement())
+  owner_key   String
+  mac_address String   @db.VarChar(20)
+  s3_key      String   @unique(map: "uq_imagine_image_s3_key")
+  size_bytes  BigInt?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([owner_key, created_at(sort: Desc)], map: "idx_imagine_image_owner_created")
+}
+
 /// Which Child was paired to a Device, and when. Nothing reads this yet: it
 /// exists so a Device that changes hands can have its MAC-keyed history split
 /// between the two Children later, which is unreconstructable without it.

@@ -37,11 +37,15 @@ router.post('/upload', requireServiceKey, uploadJpeg, asyncHandler(async (req, r
 }));
 
 // Active Devices Analytics: list a device's AI-generated images, optionally
-// filtered to one IST calendar date. Images are S3 key/URL only (no DB row),
-// so there's nothing to scope besides the S3 prefix + in-memory date filter.
+// filtered to one IST calendar date. Resolves through the device's child, so a
+// toy handed to a sibling shows the sibling's pictures and not the previous
+// child's. Paginate with ?limit= and ?cursor=<id of the last row you saw>.
 router.get('/device/:mac/images', requireFlexAuth, asyncHandler(async (req, res) => {
   const date = (req.query.date || '').trim() || null;
-  const images = await uploadService.listImagineImages(req.params.mac, date);
+  const images = await uploadService.listImagineImages(req.params.mac, date, {
+    limit: req.query.limit,
+    cursor: req.query.cursor,
+  });
   return success(res, images);
 }));
 

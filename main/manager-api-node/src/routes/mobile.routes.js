@@ -12,6 +12,7 @@ const uploadService = require('../services/upload.service');
 const customCardService = require('../services/customCard.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
+const { prisma } = require('../config/database');
 
 const kidAvatarUpload = multer({
     storage: multer.memoryStorage(),
@@ -581,7 +582,28 @@ router.get('/devices/:mac/imagine', asyncHandler(async (req, res) => {
     if (!device) {
         return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
     }
-    const images = await uploadService.listImagineImages(device.mac_address);
+    const images = await uploadService.listImagineImages(device.mac_address, null, {
+        limit: req.query.limit,
+        cursor: req.query.cursor,
+    });
+    success(res, images);
+}));
+
+// One child's gallery, wherever the pictures were made. The route above answers
+// "what has this toy drawn"; this one answers "what has my child drawn", which
+// is the question a parent whose child changed toys is actually asking.
+router.get('/kids/:kidId/imagine', asyncHandler(async (req, res) => {
+    const kid = await prisma.kid_profile.findFirst({
+        where: { id: BigInt(req.params.kidId), user_id: BigInt(req.mobileUser.id) },
+        select: { id: true },
+    });
+    if (!kid) {
+        return res.status(404).json({ code: 404, msg: 'Kid not found', data: null });
+    }
+    const images = await uploadService.listImagineImagesForKid(kid.id, (req.query.date || '').trim() || null, {
+        limit: req.query.limit,
+        cursor: req.query.cursor,
+    });
     success(res, images);
 }));
 router.get('/user-devices', asyncHandler(async (req, res) => {

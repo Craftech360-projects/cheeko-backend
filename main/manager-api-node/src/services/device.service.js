@@ -125,6 +125,8 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   await tx.device_workspace_artifacts.updateMany({ where: ownerWhere, data: ownerData });
   await tx.device_memory_documents.updateMany({ where: ownerWhere, data: ownerData });
   await tx.device_memory_chunks.updateMany({ where: ownerWhere, data: ownerData });
+  // The pictures move by changing this row, never by copying an S3 object.
+  await tx.imagine_image.updateMany({ where: ownerWhere, data: ownerData });
 };
 
 /**
