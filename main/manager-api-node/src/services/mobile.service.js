@@ -1807,12 +1807,20 @@ async function markOnboardingCompleted(firebaseUid) {
 
 // ─── Kids ───────────────────────────────────────────────────────────────────
 
-async function getKids(firebaseUid) {
+async function getKids(firebaseUid, options = {}) {
     const user = await prisma.sys_user.findUnique({
         where: { firebase_uid: firebaseUid },
         include: { kid_profile: { orderBy: [{ created_at: 'asc' }, { id: 'asc' }] } },
     });
     if (!user) return [];
+
+    // ?mac= answers "who is this toy's child", which is the question a screen
+    // opened from a device is actually asking. Without it the caller gets every
+    // child and has to pick, and picking is where the app went wrong.
+    const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
+    if ((options.mac || options.mac_address || options.macAddress) && !requestedMac) {
+        throw new ApiError('Device not found', 404, 404);
+    }
 
     // Which toy each child is on. The app picks its active child from this list
     // and had no way to tell which one the toy in front of the parent belongs
@@ -1846,8 +1854,24 @@ async function getKids(firebaseUid) {
         return new Date(a.created_at || 0) - new Date(b.created_at || 0);
     });
 
+    // A MAC this parent does not own is a 404, not an empty list: "you have no
+    // children on that toy" and "that toy is not yours" are different answers and
+    // the caller should not have to guess which it got.
+    let scoped = ordered;
+    if (requestedMac) {
+        const owned = await prisma.ai_device.findFirst({
+            where: { user_id: user.id, mac_address: { equals: requestedMac, mode: 'insensitive' } },
+            select: { kid_id: true },
+        });
+        if (!owned) throw new ApiError('Device not found', 404, 404);
+        // An unpaired toy legitimately has no child yet, so [] rather than 404.
+        scoped = owned.kid_id
+            ? ordered.filter(k => String(k.id) === String(owned.kid_id))
+            : [];
+    }
+
     // Map to the format the mobile app expects
-    return ordered.map(k => ({
+    return scoped.map(k => ({
         device_mac: macByKid.get(String(k.id)) || null,
         deviceMac: macByKid.get(String(k.id)) || null,
         is_paired: macByKid.has(String(k.id)),

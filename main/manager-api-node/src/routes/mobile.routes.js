@@ -220,8 +220,10 @@ router.put('/user-state/onboarding-completed', asyncHandler(async (req, res) => 
 
 // ─── Kids ───────────────────────────────────────────────────────────────────
 
+// ?mac=<address> narrows this to the child paired to that toy, for screens
+// opened from a device. Without it, every child, active-toy first.
 router.get('/kids', asyncHandler(async (req, res) => {
-    const kids = await mobileService.getKids(req.firebaseUser.uid);
+    const kids = await mobileService.getKids(req.firebaseUser.uid, req.query);
     res.json(kids);
 }));
 

@@ -147,6 +147,55 @@ describe('mobile kid identity', () => {
       expect(kids.map(k => k.name)).toEqual(['Older', 'Younger']);
     });
 
+    describe('?mac=', () => {
+      beforeEach(() => {
+        prisma.ai_device.findFirst = jest.fn(async () => ({ kid_id: 15n }));
+      });
+
+      test('returns only the child paired to that toy', async () => {
+        const kids = await mobileService.getKids('uid-6', { mac: '00:16:3e:7a:11:c4' });
+
+        expect(kids.map(k => k.name)).toEqual(['Kishore']);
+      });
+
+      test('normalises the address the caller sent', async () => {
+        await mobileService.getKids('uid-6', { mac: '00-16-3e-7a-11-c4' });
+
+        expect(prisma.ai_device.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+          where: expect.objectContaining({
+            user_id: USER.id,
+            mac_address: { equals: '00:16:3E:7A:11:C4', mode: 'insensitive' },
+          }),
+        }));
+      });
+
+      test('a toy this parent does not own is 404, not an empty list', async () => {
+        prisma.ai_device.findFirst.mockResolvedValue(null);
+
+        await expect(mobileService.getKids('uid-6', { mac: 'AA:BB:CC:DD:EE:FF' }))
+          .rejects.toMatchObject({ statusCode: 404 });
+      });
+
+      test('an unpaired toy is an empty list, not 404', async () => {
+        prisma.ai_device.findFirst.mockResolvedValue({ kid_id: null });
+
+        await expect(mobileService.getKids('uid-6', { mac: '00:16:3e:7a:11:c4' })).resolves.toEqual([]);
+      });
+
+      test('a malformed address is refused rather than ignored', async () => {
+        await expect(mobileService.getKids('uid-6', { mac: 'not-a-mac' }))
+          .rejects.toMatchObject({ statusCode: 404 });
+        expect(prisma.ai_device.findFirst).not.toHaveBeenCalled();
+      });
+
+      test('no mac still returns every child', async () => {
+        const kids = await mobileService.getKids('uid-6');
+
+        expect(kids).toHaveLength(2);
+        expect(prisma.ai_device.findFirst).not.toHaveBeenCalled();
+      });
+    });
+
     test('only the requesting parent\'s paired devices are consulted', async () => {
       await mobileService.getKids('uid-6');
 
