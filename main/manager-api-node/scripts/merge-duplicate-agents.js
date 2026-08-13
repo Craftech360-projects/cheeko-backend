@@ -25,6 +25,10 @@ const { normalizeCharacterName } = require('../src/services/character-resolver')
 
 const APPLY = process.argv.includes('--apply');
 
+// What was merged into what. Deleting an agent row is not reversible from the
+// database alone, so the mapping is written before anyone needs it.
+const audit = [];
+
 // Every table carrying an agent_id, from the schema's FK list. ai_device is a
 // pointer to the device's default character rather than history, but it must move
 // too or the device keeps naming a row that is about to be deleted.
@@ -104,12 +108,17 @@ async function main() {
 
             if (!APPLY) continue;
 
+            // One cluster moves ~1000 rows; Prisma's interactive transaction
+            // defaults to a 5s timeout, which would abort the move and leave the
+            // row in place. Each loser is its own transaction, so a failure stops
+            // that one cleanly rather than half-merging it.
             await prisma.$transaction(async (tx) => {
                 for (const table of Object.keys(moves)) {
                     await tx[table].updateMany({ where: { agent_id: loser.id }, data: { agent_id: survivor.id } });
                 }
                 await tx.ai_agent.delete({ where: { id: loser.id } });
-            });
+            }, { timeout: 120000, maxWait: 15000 });
+            audit.push({ survivor: survivor.id, loser: loser.id, name: loser.agent_name, user_id: s(loser.user_id), moves });
             console.log(`         applied`);
         }
     }
@@ -130,6 +139,11 @@ async function main() {
     if (strays.length) {
         console.log(`\ncross-account history (reported, NOT changed):`);
         strays.forEach(r => console.log(`  ${r.sessions} sessions  agent ${r.agent_id} (user ${r.agent_user}) vs ${r.kid_name} (user ${r.kid_user})`));
+    }
+    if (APPLY) {
+        const auditPath = require('path').join(__dirname, 'merge-duplicate-agents.audit.json');
+        require('fs').writeFileSync(auditPath, JSON.stringify({ ranAt: new Date().toISOString(), merged: audit, strays }, null, 2));
+        console.log(`\naudit written to ${auditPath}`);
     }
     console.log(APPLY ? '\nAPPLIED.' : '\nDry run. Re-run with --apply to write.');
 }
