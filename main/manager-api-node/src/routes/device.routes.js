@@ -211,8 +211,16 @@ router.post('/unbind',
     // Check if user is super admin
     const isSuperAdmin = req.user.super_admin === 1;
 
+    // hardDelete is an operator tool, not a parent's choice. Unbinding already
+    // clears user_id, which is all the app needs -- listDevices filters on it, so
+    // the toy leaves the parent's list either way. Deleting the row on top of
+    // that destroys the assignment history, the analytics keyed on the MAC and
+    // the device's own record, and a parent tapping "unbind" is not asking for
+    // any of it. Honoured only for a super admin, who is asking deliberately.
     try {
-      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin, { hardDelete: Boolean(hardDelete) });
+      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin, {
+        hardDelete: isSuperAdmin && Boolean(hardDelete),
+      });
       success(res, null);
     } catch (error) {
       // Match Spring Boot error response format

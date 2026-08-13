@@ -152,6 +152,35 @@ const moveOwnerKey = async (tx, model, unique, newest, fromKey, toKey) => {
  * anything already stamped `kid:` is untouchable. Imagine is adopted by its own
  * slice, which has no table yet.
  */
+/**
+ * Drop everything this device wrote while it had no child, so a toy handed to
+ * another family carries nothing of the last one's.
+ *
+ * The exact inverse of adoptUnattributedRows: same rows, same keys, deleted
+ * instead of re-owned. Only `mac:` rows and answers with a null kid_id qualify —
+ * anything belonging to a child is keyed to that child and stays theirs.
+ *
+ * imagine_image rows go too; their S3 objects are left in place rather than
+ * deleted from here, so a mistaken unbind loses a gallery listing and not the
+ * pictures themselves.
+ */
+const clearUnattributedDeviceRows = async (tx, macAddress) => {
+  if (!macAddress) return;
+
+  const answerWhere = {
+    device_mac: { equals: macAddress, mode: 'insensitive' },
+    kid_id: null,
+  };
+  await tx.quiz_question_answer.deleteMany({ where: answerWhere });
+  await tx.riddle_question_answer.deleteMany({ where: answerWhere });
+
+  const macKey = ownerKeyForDevice({ mac_address: macAddress });
+  for (const { model } of OWNER_KEYED_STORES) {
+    await tx[model].deleteMany({ where: { owner_key: macKey } });
+  }
+  await tx.imagine_image.deleteMany({ where: { owner_key: macKey } });
+};
+
 const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   if (!macAddress || !kidId) return;
 
@@ -390,6 +419,18 @@ const unbindDevice = async (userId, deviceId, isSuperAdmin = false, options = {}
     // Close the pairing either way. The child's own rows are untouched — they
     // belong to the child, not to the toy, and are theirs again on re-pairing.
     await pairDeviceToKid(tx, device.mac_address, null);
+
+    // Unbinding is how a toy leaves a household. Anything still keyed to the MAC
+    // is what the device wrote while unpaired, and it must not travel: the next
+    // family's pairing runs adoptUnattributedRows, which hands every mac: row to
+    // THEIR child — workspace, memory, quiz answers and imagine pictures alike.
+    // Within one household that adoption is the point. Across two it is one
+    // family's child receiving another's.
+    //
+    // Deleted rather than retired: the previous owner gave the toy away, and
+    // leaving a child's content in the database for a stranger's device to carry
+    // is the outcome being prevented. kid: rows are never touched.
+    await clearUnattributedDeviceRows(tx, device.mac_address);
 
     if (hardDelete) {
       await tx.ai_device.delete({ where: { id: device.id } });

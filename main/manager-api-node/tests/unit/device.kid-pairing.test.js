@@ -22,12 +22,12 @@ jest.mock('../../src/config/database', () => {
       updateMany: jest.fn(),
       create: jest.fn(),
     },
-    quiz_question_answer: { updateMany: jest.fn() },
-    riddle_question_answer: { updateMany: jest.fn() },
-    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
-    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
-    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
-    imagine_image: { updateMany: jest.fn() },
+    quiz_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    riddle_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    imagine_image: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     $transaction: jest.fn(),
   };
   return { prisma };
