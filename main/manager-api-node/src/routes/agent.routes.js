@@ -13,6 +13,7 @@ const {
   saveWorkspaceFiles,
   getWorkspaceSync,
   saveWorkspaceSync,
+  resolveOwnerKeyForMac,
 } = require('../services/workspace.service');
 const {
   acquireWorkspaceLock,
@@ -1666,6 +1667,13 @@ router.post('/device/:mac/workspace-lock/acquire',
       staleGraceSeconds,
       preempt,
     });
+    // The acquire is the first call a session makes, and it happens before the
+    // worker has touched any file — which makes it the one place that can tell
+    // the worker whose workspace this is in time for it to name the directory
+    // accordingly. Null for an unknown device; the worker keeps its own guess.
+    if (result.acquired) {
+      result.ownerKey = await resolveOwnerKeyForMac(req.params.mac);
+    }
     success(res, result, result.acquired ? 'Workspace lock acquired' : 'Workspace lock busy');
   })
 );

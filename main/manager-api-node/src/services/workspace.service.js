@@ -88,6 +88,26 @@ async function verifyOwnership(macAddress, userId) {
   }
 }
 
+/**
+ * Who owns this device's workspace state — `kid:<id>` when a child is paired,
+ * `mac:<address>` when not, and null when the device is unknown.
+ *
+ * Published so the worker can NAME its local workspace directory after the same
+ * owner it will be storing under, instead of re-deriving ownership from room
+ * metadata. Two derivations of "whose workspace is this" drift the moment one
+ * input goes missing, and the local directory is what a session falls back to
+ * when a restore fails — so the copy that can go stale must not be the one on
+ * disk. See ADR 0008.
+ */
+async function resolveOwnerKeyForMac(macAddress) {
+  const normalizedMac = normalizeMacAddress(macAddress);
+  if (!normalizedMac) return null;
+
+  const device = await getDeviceByMac(normalizedMac);
+  if (!device) return null;
+  return ownerKeyForDevice(device);
+}
+
 async function getWorkspaceFiles(macAddress, userId = null) {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address');
@@ -483,6 +503,7 @@ async function saveWorkspaceSync(macAddress, userId = null, payload = {}) {
 }
 
 module.exports = {
+  resolveOwnerKeyForMac,
   getWorkspaceFiles,
   saveWorkspaceFiles,
   getWorkspaceSync,
