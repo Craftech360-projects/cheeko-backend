@@ -1957,7 +1957,22 @@ async function createKid(firebaseUid, data) {
     };
 }
 
-async function updateKid(kidId, data) {
+/**
+ * Edit a child's profile.
+ *
+ * Scoped by owner. It used to take only the id and update straight through, so
+ * any signed-in parent could edit any child in the database by putting a
+ * different number in the URL. One caller already knew — the avatar upload
+ * verifies ownership itself and says so in a comment — but PUT /kids/:id did
+ * not, and a mis-selected child in the app is exactly how you find out.
+ */
+async function updateKid(firebaseUid, kidId, data) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+        select: { id: true },
+    });
+    if (!user) throw new ApiError('User not found', 404, 404);
+
     const updates = {};
     if (data.name) updates.name = data.name;
     if (data.nickname) updates.nickname = data.nickname;
@@ -1968,10 +1983,15 @@ async function updateKid(kidId, data) {
     if (data.avatar_url) updates.avatar_url = data.avatar_url;
     if (data.parent_rule !== undefined) updates.parent_rule = data.parent_rule || null;
 
-    const kid = await prisma.kid_profile.update({
-        where: { id: BigInt(kidId) },
+    // updateMany so a row belonging to someone else simply matches nothing,
+    // rather than being fetched, compared and then hopefully rejected.
+    const result = await prisma.kid_profile.updateMany({
+        where: { id: BigInt(kidId), user_id: user.id },
         data: updates,
     });
+    if (result.count === 0) throw new ApiError('Kid profile not found', 404, 404);
+
+    const kid = await prisma.kid_profile.findUnique({ where: { id: BigInt(kidId) } });
 
     return {
         id: kid.id.toString(),

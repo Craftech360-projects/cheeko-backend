@@ -62,6 +62,30 @@ describe('mobile kid identity', () => {
     });
   });
 
+  describe('updateKid', () => {
+    beforeEach(() => {
+      prisma.kid_profile.updateMany = jest.fn(async () => ({ count: 1 }));
+      prisma.kid_profile.findUnique = jest.fn(async () => ({ id: 15n, name: 'Kishore', interests: [] }));
+    });
+
+    test('only ever touches a child belonging to the caller', async () => {
+      await mobileService.updateKid('uid-6', '15', { name: 'Kishore' });
+
+      expect(prisma.kid_profile.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: 15n, user_id: USER.id },
+      }));
+    });
+
+    // Putting another parent's kid id in the URL used to edit their child.
+    test('another parent\'s child is a 404, not an edit', async () => {
+      prisma.kid_profile.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(mobileService.updateKid('uid-6', '999', { name: 'Whoever' }))
+        .rejects.toMatchObject({ statusCode: 404 });
+      expect(prisma.kid_profile.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   describe('getKids', () => {
     beforeEach(() => {
       prisma.sys_user.findUnique.mockResolvedValue({

@@ -233,7 +233,7 @@ router.post('/kids', asyncHandler(async (req, res) => {
 }));
 
 router.put('/kids/:id', asyncHandler(async (req, res) => {
-    const kid = await mobileService.updateKid(req.params.id, req.body);
+    const kid = await mobileService.updateKid(req.firebaseUser.uid, req.params.id, req.body);
     res.json(kid);
 }));
 
@@ -261,7 +261,7 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
         req.file.mimetype
     );
 
-    const kid = await mobileService.updateKid(req.params.id, { avatar_url: uploadResult.url });
+    const kid = await mobileService.updateKid(req.firebaseUser.uid, req.params.id, { avatar_url: uploadResult.url });
 
     // Only after the profile points at the new image, so a failed update never orphans the kid
     await uploadService.deleteKidAvatarByUrl(existingKid.avatar_url);
