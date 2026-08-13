@@ -1810,12 +1810,25 @@ async function markOnboardingCompleted(firebaseUid) {
 async function getKids(firebaseUid) {
     const user = await prisma.sys_user.findUnique({
         where: { firebase_uid: firebaseUid },
-        include: { kid_profile: true },
+        include: { kid_profile: { orderBy: [{ created_at: 'asc' }, { id: 'asc' }] } },
     });
     if (!user) return [];
 
+    // Which toy each child is on. The app picks its active child from this list
+    // and had no way to tell which one the toy in front of the parent belongs
+    // to, so it took the first -- and the order was whatever Postgres returned.
+    const devices = await prisma.ai_device.findMany({
+        where: { user_id: user.id, kid_id: { not: null } },
+        select: { mac_address: true, kid_id: true },
+    });
+    const macByKid = new Map(devices.map(d => [String(d.kid_id), d.mac_address]));
+
     // Map to the format the mobile app expects
     return user.kid_profile.map(k => ({
+        device_mac: macByKid.get(String(k.id)) || null,
+        deviceMac: macByKid.get(String(k.id)) || null,
+        is_paired: macByKid.has(String(k.id)),
+        isPaired: macByKid.has(String(k.id)),
         id: k.id.toString(),
         parent_id: user.firebase_uid,
         name: k.name,
@@ -1841,17 +1854,46 @@ async function createKid(firebaseUid, data) {
     });
     if (!user) throw new Error('User not found');
 
-    const kid = await prisma.kid_profile.create({
+    const birthDate = (data.date_of_birth || data.birth_date)
+        ? new Date(data.date_of_birth || data.birth_date)
+        : null;
+
+    // Re-activating a toy walks the parent through the same "who is this for"
+    // screen, and every pass minted another profile: DB1 held two Kishores and
+    // two Rahuls, each pair identical on name and birth date. That was harmless
+    // while state lived on the MAC. Now that it follows the child, the new
+    // profile is an empty history and the toy gets paired to it -- one parent
+    // lost 67 memory documents and 71 sessions that way.
+    //
+    // Same duplicate key as scripts/merge-duplicate-kid-profiles.js:
+    // (user_id, lower(name), birth_date). Two siblings sharing both a name and a
+    // birth date is not a case worth splitting them for.
+    const existing = birthDate && data.name
+        ? await prisma.kid_profile.findFirst({
+            where: {
+                user_id: user.id,
+                name: { equals: String(data.name).trim(), mode: 'insensitive' },
+                birth_date: birthDate,
+            },
+            orderBy: { id: 'asc' },
+        })
+        : null;
+
+    const kid = existing || await prisma.kid_profile.create({
         data: {
             user_id: user.id,
             name: data.name,
             nickname: data.nickname,
-            birth_date: (data.date_of_birth || data.birth_date) ? new Date(data.date_of_birth || data.birth_date) : null,
+            birth_date: birthDate,
             gender: data.gender,
             interests: data.interests || [],
             language: data.language || 'en',
         },
     });
+
+    if (existing) {
+        logger.info(`[mobile] createKid reused existing profile ${existing.id} for "${data.name}" rather than duplicating it`);
+    }
 
     return {
         id: kid.id.toString(),
