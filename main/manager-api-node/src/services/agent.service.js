@@ -1835,13 +1835,18 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     throw new Error('Device has no agent assigned');
   }
 
+  // The character actually running, which is not the device's default whenever a
+  // card tap or the wheel picked another one. Callers that name none keep the
+  // default, which is all any caller sent before the worker learned to say.
+  const agentId = options.agentId || device.agent_id;
+
   const recentMessagesPromise = recentLimit > 0
     // Reached through the session, which is what carries the child. A message
     // has no child column of its own and should not gain one.
     ? prisma.voice_session_messages.findMany({
       where: {
         voice_sessions: voiceSessionScope(device, normalizedMac),
-        agent_id: device.agent_id
+        agent_id: agentId
       },
       select: {
         id: true,
@@ -1860,7 +1865,7 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     ? prisma.voice_sessions.findMany({
       where: {
         ...voiceSessionScope(device, normalizedMac),
-        agent_id: device.agent_id
+        agent_id: agentId
       },
       select: {
         session_id: true,
@@ -1884,7 +1889,7 @@ const getDeviceBootstrap = async (mac, options = {}) => {
       where: {
         voice_sessions: {
           ...voiceSessionScope(device, normalizedMac),
-          agent_id: device.agent_id
+          agent_id: agentId
         }
       },
       select: {

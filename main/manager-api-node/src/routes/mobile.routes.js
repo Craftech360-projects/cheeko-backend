@@ -673,6 +673,26 @@ router.get('/agents/:agentId/chat-history/:sessionId', asyncHandler(async (req, 
     success(res, history);
 }));
 
+// The two routes above are account-wide: a character, whoever spoke to it. These
+// three are the browse the app actually wants — child, then character, then the
+// transcript — and they follow the child rather than the toy.
+router.get('/kids/:kidId/characters', asyncHandler(async (req, res) => {
+    const characters = await mobileService.getKidCharacters(req.firebaseUser.uid, req.params.kidId, req.query);
+    success(res, characters);
+}));
+
+router.get('/kids/:kidId/characters/:agentId/sessions', asyncHandler(async (req, res) => {
+    const sessions = await mobileService.getKidCharacterSessions(
+        req.firebaseUser.uid, req.params.kidId, req.params.agentId, req.query);
+    success(res, sessions);
+}));
+
+router.get('/kids/:kidId/sessions/:sessionId/messages', asyncHandler(async (req, res) => {
+    const messages = await mobileService.getKidSessionMessages(
+        req.firebaseUser.uid, req.params.kidId, req.params.sessionId, req.query);
+    success(res, messages);
+}));
+
 // ─── Device → Agent lookup ────────────────────────────────────────────────────
 
 router.get('/agents/device/:mac/agent-id', asyncHandler(async (req, res) => {

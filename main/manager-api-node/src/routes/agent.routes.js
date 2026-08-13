@@ -548,6 +548,11 @@ router.get('/config/:mac',
  *         schema:
  *           type: integer
  *           default: 20
+ *       - in: query
+ *         name: agentId
+ *         description: Character being run. Defaults to the device's own agent.
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Device bootstrap context
@@ -560,7 +565,8 @@ router.get('/device/:mac/bootstrap',
       const recentLimit = req.query.recentLimit || req.query.limit;
       const result = await agentService.getDeviceBootstrap(req.params.mac, {
         includeMemories,
-        recentLimit
+        recentLimit,
+        agentId: req.query.agentId
       });
       success(res, result);
     } catch (error) {

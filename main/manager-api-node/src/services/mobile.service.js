@@ -2413,6 +2413,18 @@ async function resolveProgressScope(firebaseUid, options = {}) {
         select: { mac_address: true, kid_id: true },
     });
 
+    // A named child is checked against the account that asked for it, the same way
+    // a named toy is just below — so one guard answers both "is this my toy" and
+    // "is this my child", and neither reaches another family's.
+    const requestedKidId = options.kidId ? parseBigIntId(options.kidId, 'kidId') : null;
+    if (requestedKidId != null) {
+        const kid = await prisma.kid_profile.findFirst({
+            where: { id: requestedKidId, user_id: user.id },
+            select: { id: true },
+        });
+        if (!kid) throw new ApiError('Kid not found', 404, 404);
+    }
+
     const ownedMacAddresses = (devices || [])
         .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
         .filter(Boolean);
@@ -2432,7 +2444,9 @@ async function resolveProgressScope(firebaseUid, options = {}) {
         userId: user.id,
         timezone: user.parent_profile?.timezone || 'UTC',
         macAddresses,
-        kidIds: inScope.filter((d) => d.kid_id).map((d) => d.kid_id),
+        kidIds: requestedKidId != null
+            ? [requestedKidId]
+            : inScope.filter((d) => d.kid_id).map((d) => d.kid_id),
         unpairedMacAddresses: inScope
             .filter((d) => !d.kid_id)
             .map((d) => normalizeMacAddress(d.mac_address) || d.mac_address),
@@ -3808,6 +3822,121 @@ function deriveCurrentLevel(activeBank, clearedIds) {
     return null;
 }
 
+// ─── Chat history, by child ─────────────────────────────────────────────────
+
+const isoOrNull = (value) => (value ? new Date(value).toISOString() : null);
+
+/**
+ * Which characters has this child talked to?
+ *
+ * Grouped on voice_sessions, so the answer follows the child to a new toy: the
+ * MAC is a column on those rows, never the key they are read by.
+ */
+async function getKidCharacters(firebaseUid, kidId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const groups = await prisma.voice_sessions.groupBy({
+        by: ['agent_id'],
+        where: { kid_id: scope.kidIds[0], agent_id: { not: null } },
+        _count: { _all: true },
+        _max: { started_at: true },
+    });
+
+    const agents = await prisma.ai_agent.findMany({
+        where: { id: { in: groups.map(group => group.agent_id) } },
+        select: { id: true, agent_name: true },
+    });
+    const nameById = new Map(agents.map(agent => [agent.id, agent.agent_name]));
+
+    return groups
+        .sort((a, b) => new Date(b._max.started_at) - new Date(a._max.started_at))
+        .map(group => ({
+            agentId: group.agent_id,
+            agentName: nameById.get(group.agent_id) || null,
+            sessionCount: group._count._all,
+            lastSessionAt: isoOrNull(group._max.started_at),
+        }));
+}
+
+/**
+ * One child's sessions with one character.
+ *
+ * Both halves are required: ai_agent is per account, so two siblings share one
+ * Quizzy row and the character on its own never tells them apart.
+ */
+async function getKidCharacterSessions(firebaseUid, kidId, agentId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const page = parseInt(options.page) || 1;
+    const limit = Math.min(parseInt(options.limit) || 20, 100);
+    const where = { kid_id: scope.kidIds[0], agent_id: agentId };
+
+    const [total, rows] = await Promise.all([
+        prisma.voice_sessions.count({ where }),
+        prisma.voice_sessions.findMany({
+            where,
+            select: {
+                session_id: true,
+                started_at: true,
+                ended_at: true,
+                _count: { select: { voice_session_messages: true } },
+                voice_session_summaries: { select: { summary: true } },
+            },
+            orderBy: { started_at: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+    ]);
+
+    return {
+        total,
+        list: rows.map(row => ({
+            sessionId: row.session_id,
+            startedAt: isoOrNull(row.started_at),
+            endedAt: isoOrNull(row.ended_at),
+            messageCount: row._count?.voice_session_messages || 0,
+            summary: row.voice_session_summaries?.summary || null,
+        })),
+    };
+}
+
+/**
+ * One session's transcript.
+ *
+ * The child is matched on the session, not on the message: a message has no
+ * child column of its own and must not gain one — it reaches the child through
+ * the session it belongs to. Another child's session therefore reads as empty.
+ */
+async function getKidSessionMessages(firebaseUid, kidId, sessionId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const limit = Math.min(parseInt(options.limit) || 100, 500);
+    const cursor = parseInt(options.cursor) || 0;
+
+    const rows = await prisma.voice_session_messages.findMany({
+        where: {
+            session_id: sessionId,
+            sequence: { gt: cursor },
+            voice_sessions: { kid_id: scope.kidIds[0] },
+        },
+        select: { sequence: true, role: true, content: true, created_at: true },
+        orderBy: { sequence: 'asc' },
+        take: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const messages = hasMore ? rows.slice(0, limit) : rows;
+
+    return {
+        sessionId,
+        hasMore,
+        nextCursor: hasMore ? messages[messages.length - 1].sequence : null,
+        messages: messages.map(row => ({
+            sequence: row.sequence,
+            role: row.role,
+            content: row.content || '',
+            createdAt: isoOrNull(row.created_at),
+        })),
+    };
+}
+
 module.exports = {
     getParentProfile,
     createParentProfile,
@@ -3836,4 +3965,7 @@ module.exports = {
     getDeviceGamesPlayed,
     getDeviceRadioPlayed,
     getHomepageRecommendations,
+    getKidCharacters,
+    getKidCharacterSessions,
+    getKidSessionMessages,
 };
