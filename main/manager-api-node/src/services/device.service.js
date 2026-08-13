@@ -7,6 +7,11 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { generateDeviceCode, normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
+// Binding fails for ordinary user reasons — a mistyped code, an expired one, a toy
+// that belongs to someone else. Those were plain Errors, so the route answered 500,
+// and the app both mis-reported them and retried the whole create-then-bind flow,
+// leaving an orphan agent per attempt (see chat-history-attribution/005).
+const { ApiError } = require('../middleware/errorHandler');
 
 /**
  * In-memory activation code cache
@@ -294,28 +299,28 @@ const bindDevice = async (userId, agentId, deviceCode, kidId = null) => {
   if (deviceCode.includes(':') || deviceCode.length === 12) {
     macAddress = normalizeMacAddress(deviceCode);
     device = await prisma.ai_device.findUnique({ where: { mac_address: macAddress } });
-    if (!device) throw new Error('Device not found. Please use the 6-digit activation code.');
+    if (!device) throw new ApiError('Device not found. Please use the 6-digit activation code.', 404, 404);
   } else if (/^\d{6}$/.test(deviceCode)) {
     activationData = activationCodeCache.get(deviceCode);
-    if (!activationData) throw new Error('Invalid or expired activation code');
+    if (!activationData) throw new ApiError('Invalid or expired activation code', 400, 400);
     macAddress = activationData.macAddress;
     const existing = await prisma.ai_device.findUnique({ where: { mac_address: macAddress } });
     if (existing) {
-      if (existing.user_id && existing.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
+      if (existing.user_id && existing.user_id !== BigInt(userId)) throw new ApiError('Device is already bound to another user', 409, 409);
       device = existing;
     }
   } else {
-    throw new Error('Invalid device code format. Use 6-digit activation code or MAC address.');
+    throw new ApiError('Invalid device code format. Use 6-digit activation code or MAC address.', 400, 400);
   }
 
   const agent = await prisma.ai_agent.findFirst({
     where: { id: agentId, user_id: BigInt(userId) },
     select: { id: true },
   });
-  if (!agent) throw new Error('Agent not found or does not belong to user');
+  if (!agent) throw new ApiError('Agent not found or does not belong to user', 404, 404);
 
   if (device) {
-    if (device.user_id && device.user_id !== BigInt(userId)) throw new Error('Device is already bound to another user');
+    if (device.user_id && device.user_id !== BigInt(userId)) throw new ApiError('Device is already bound to another user', 409, 409);
 
     // Only resolve a child when one is being set: an explicit kid re-pairs, and
     // the sole-child fallback applies to a device that has none. A device that

@@ -156,8 +156,24 @@ const createAgent = async (userId, data) => {
   // suffix ("Cheeko 2") and no persona. Source persona from the matching character
   // template so we never persist a null-persona, unknown-name agent, and store the
   // canonical character name so persona resolves and it is spoken correctly.
+  const canonicalName = normalizeCharacterName(data.agentName);
+
+  // The app creates one agent per toy activation and makes the name unique itself
+  // ("Cheeko 2"), which the line above then normalises away — so without this the
+  // account collects a row per activation, all called Cheeko, and a failed bind
+  // leaves each retry's row behind. One account holds fourteen. Return what it
+  // already has: an agent is a CHARACTER, and two toys running Cheeko share it.
+  // History still separates by kid and session, not by agent row.
+  const existing = await prisma.ai_agent.findFirst({
+    where: { user_id: BigInt(userId), agent_name: { equals: canonicalName, mode: 'insensitive' } },
+  });
+  if (existing) {
+    logger.info(`[createAgent] "${data.agentName}" already exists for user ${userId} as ${existing.id}; reusing`);
+    return existing;
+  }
+
   const template = await prisma.ai_agent_template.findFirst({
-    where: { agent_name: { equals: normalizeCharacterName(data.agentName), mode: 'insensitive' } },
+    where: { agent_name: { equals: canonicalName, mode: 'insensitive' } },
     select: { agent_name: true, system_prompt: true, soul: true, runtime_agent_name: true },
   });
 

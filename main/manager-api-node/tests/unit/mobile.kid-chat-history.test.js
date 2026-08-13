@@ -80,8 +80,10 @@ describe('a child\'s chat history', () => {
 
             const page = await mobileService.getKidCharacterSessions('uid-6', '15', 'quizzy-id');
 
+            // agent_id is an `in` list because duplicate rows for one character
+            // are read as one character; with no duplicates it holds just this id.
             expect(prisma.voice_sessions.findMany.mock.calls[0][0].where)
-                .toEqual({ kid_id: 15n, agent_id: 'quizzy-id' });
+                .toEqual({ kid_id: 15n, agent_id: { in: ['quizzy-id'] } });
             expect(page).toEqual({
                 total: 1,
                 list: [{
@@ -167,5 +169,91 @@ describe('a child\'s chat history', () => {
                 where: { id: 15n, user_id: USER.id },
             }));
         });
+    });
+});
+
+/**
+ * Duplicate agent rows existed before the create path was deduped, so the read
+ * must merge them or Kishore keeps seeing Cheeko three times: 71 sessions under
+ * one row, 1 under each of two others.
+ */
+describe('a child whose account holds duplicate character rows', () => {
+    let prisma;
+    let mobileService;
+
+    const USER = { id: 6n, parent_profile: { timezone: 'Asia/Kolkata' } };
+
+    beforeEach(() => {
+        jest.resetModules();
+        prisma = {
+            sys_user: { findUnique: jest.fn(async () => USER) },
+            kid_profile: { findFirst: jest.fn(async () => ({ id: 15n })) },
+            ai_device: { findMany: jest.fn(async () => [{ mac_address: '00:16:3E:7A:11:C4', kid_id: 15n }]) },
+            ai_agent: { findMany: jest.fn(async () => []) },
+            voice_sessions: {
+                groupBy: jest.fn(async () => []),
+                findMany: jest.fn(async () => []),
+                count: jest.fn(async () => 0),
+            },
+            voice_session_messages: { findMany: jest.fn(async () => []) },
+        };
+        jest.doMock('../../src/config/database', () => ({ prisma }));
+        jest.doMock('../../src/utils/logger', () => ({ warn: jest.fn(), info: jest.fn(), error: jest.fn() }));
+        mobileService = require('../../src/services/mobile.service');
+    });
+
+    const threeCheekos = () => {
+        prisma.voice_sessions.groupBy.mockResolvedValue([
+            { agent_id: 'cheeko-a', _count: { _all: 71 }, _max: { started_at: new Date('2026-08-07T14:18:00Z') } },
+            { agent_id: 'cheeko-b', _count: { _all: 1 }, _max: { started_at: new Date('2026-08-13T08:40:00Z') } },
+            { agent_id: 'cheeko-c', _count: { _all: 1 }, _max: { started_at: new Date('2026-08-03T06:40:00Z') } },
+            { agent_id: 'nani-id', _count: { _all: 1 }, _max: { started_at: new Date('2026-08-13T15:05:00Z') } },
+        ]);
+        prisma.ai_agent.findMany.mockResolvedValue([
+            { id: 'cheeko-a', agent_name: 'Cheeko' },
+            { id: 'cheeko-b', agent_name: 'Cheeko' },
+            { id: 'cheeko-c', agent_name: 'cheeko 2' },
+            { id: 'nani-id', agent_name: 'NANI' },
+        ]);
+    };
+
+    test('one entry per character, with the counts summed', async () => {
+        threeCheekos();
+
+        const characters = await mobileService.getKidCharacters('uid', '15');
+
+        expect(characters).toHaveLength(2);
+        const cheeko = characters.find(c => c.agentName.toLowerCase() === 'cheeko');
+        expect(cheeko.sessionCount).toBe(73);
+        // The newest of the three, not whichever row happened to sort first.
+        expect(cheeko.lastSessionAt).toBe(new Date('2026-08-13T08:40:00Z').toISOString());
+    });
+
+    test('the entry names an agentId the sessions endpoint can be called with', async () => {
+        threeCheekos();
+
+        const characters = await mobileService.getKidCharacters('uid', '15');
+        const cheeko = characters.find(c => c.agentName.toLowerCase() === 'cheeko');
+
+        expect(['cheeko-a', 'cheeko-b', 'cheeko-c']).toContain(cheeko.agentId);
+    });
+
+    test('asking for one duplicate returns the sessions of all of them', async () => {
+        threeCheekos();
+
+        await mobileService.getKidCharacterSessions('uid', '15', 'cheeko-b');
+
+        const where = prisma.voice_sessions.findMany.mock.calls[0][0].where;
+        expect(where.kid_id).toBe(15n);
+        expect(where.agent_id.in.sort()).toEqual(['cheeko-a', 'cheeko-b', 'cheeko-c']);
+    });
+
+    test('a character with one row is unaffected', async () => {
+        threeCheekos();
+
+        await mobileService.getKidCharacterSessions('uid', '15', 'nani-id');
+
+        const where = prisma.voice_sessions.findMany.mock.calls[0][0].where;
+        expect(where.agent_id.in).toEqual(['nani-id']);
     });
 });

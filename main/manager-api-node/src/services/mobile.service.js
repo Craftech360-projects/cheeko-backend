@@ -2,6 +2,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeCharacterName } = require('./character-resolver');
 
 const CARD_TAP_DEBOUNCE_MS = 60 * 1000;
 
@@ -3827,19 +3828,25 @@ function deriveCurrentLevel(activeBank, clearedIds) {
 const isoOrNull = (value) => (value ? new Date(value).toISOString() : null);
 
 /**
- * Which characters has this child talked to?
+ * The characters in this child's history, each with every agent row that carries
+ * it.
  *
- * Grouped on voice_sessions, so the answer follows the child to a new toy: the
- * MAC is a column on those rows, never the key they are read by.
+ * An account can hold several rows for one character — the app created one per
+ * toy activation and the server normalised their names together, so Kishore's
+ * Cheeko is spread over three rows holding 71, 1 and 1 sessions. Reading them as
+ * three characters shows the same face three times, each with part of the story.
+ *
+ * Keyed on the normalised name, case-folded: the same character is spelled
+ * "NANI", "Nani" and "cheeko 2" across live rows.
  */
-async function getKidCharacters(firebaseUid, kidId, options = {}) {
-    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+async function kidCharacterIndex(kidId) {
     const groups = await prisma.voice_sessions.groupBy({
         by: ['agent_id'],
-        where: { kid_id: scope.kidIds[0], agent_id: { not: null } },
+        where: { kid_id: kidId, agent_id: { not: null } },
         _count: { _all: true },
         _max: { started_at: true },
     });
+    if (groups.length === 0) return [];
 
     const agents = await prisma.ai_agent.findMany({
         where: { id: { in: groups.map(group => group.agent_id) } },
@@ -3847,13 +3854,66 @@ async function getKidCharacters(firebaseUid, kidId, options = {}) {
     });
     const nameById = new Map(agents.map(agent => [agent.id, agent.agent_name]));
 
-    return groups
-        .sort((a, b) => new Date(b._max.started_at) - new Date(a._max.started_at))
-        .map(group => ({
-            agentId: group.agent_id,
-            agentName: nameById.get(group.agent_id) || null,
-            sessionCount: group._count._all,
-            lastSessionAt: isoOrNull(group._max.started_at),
+    const byCharacter = new Map();
+    for (const group of groups) {
+        const rawName = nameById.get(group.agent_id) || null;
+        // An agent row that has vanished cannot be merged with anything, so it
+        // keys on its own id rather than joining every other nameless row.
+        const key = rawName ? normalizeCharacterName(rawName).toLowerCase() : `id:${group.agent_id}`;
+        const lastSessionAt = group._max.started_at ? new Date(group._max.started_at) : null;
+
+        const entry = byCharacter.get(key);
+        if (!entry) {
+            byCharacter.set(key, {
+                agentId: group.agent_id,
+                agentName: rawName,
+                agentIds: [group.agent_id],
+                sessionCount: group._count._all,
+                lastSessionAt,
+            });
+            continue;
+        }
+        entry.agentIds.push(group.agent_id);
+        entry.sessionCount += group._count._all;
+        if (lastSessionAt && (!entry.lastSessionAt || lastSessionAt > entry.lastSessionAt)) {
+            // Represent the character by its most recently used row, so the id the
+            // app calls back with is the one still in service.
+            entry.lastSessionAt = lastSessionAt;
+            entry.agentId = group.agent_id;
+            entry.agentName = rawName;
+        }
+    }
+    return [...byCharacter.values()];
+}
+
+/**
+ * Every agent row that is the same character as the one asked for, for this
+ * child. One id in, all its duplicates out, so a session list is whole no matter
+ * which row the caller happens to name.
+ */
+async function siblingAgentIds(kidId, agentId) {
+    const index = await kidCharacterIndex(kidId);
+    const entry = index.find(character => character.agentIds.includes(agentId));
+    return entry ? entry.agentIds : [agentId];
+}
+
+/**
+ * Which characters has this child talked to?
+ *
+ * Grouped on voice_sessions, so the answer follows the child to a new toy: the
+ * MAC is a column on those rows, never the key they are read by.
+ */
+async function getKidCharacters(firebaseUid, kidId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const characters = await kidCharacterIndex(scope.kidIds[0]);
+
+    return characters
+        .sort((a, b) => (b.lastSessionAt?.getTime() || 0) - (a.lastSessionAt?.getTime() || 0))
+        .map(character => ({
+            agentId: character.agentId,
+            agentName: character.agentName,
+            sessionCount: character.sessionCount,
+            lastSessionAt: isoOrNull(character.lastSessionAt),
         }));
 }
 
@@ -3867,7 +3927,9 @@ async function getKidCharacterSessions(firebaseUid, kidId, agentId, options = {}
     const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
     const page = parseInt(options.page) || 1;
     const limit = Math.min(parseInt(options.limit) || 20, 100);
-    const where = { kid_id: scope.kidIds[0], agent_id: agentId };
+    // Duplicate rows for one character are read as one character, so the list is
+    // whole whichever of them the app names.
+    const where = { kid_id: scope.kidIds[0], agent_id: { in: await siblingAgentIds(scope.kidIds[0], agentId) } };
 
     const [total, rows] = await Promise.all([
         prisma.voice_sessions.count({ where }),
