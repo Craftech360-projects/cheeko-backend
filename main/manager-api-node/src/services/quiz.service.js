@@ -435,7 +435,10 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
  *
  * Derivation is identical to progress(), but batched: the whole bank and the
  * whole answer log are each read once and joined in memory, so adding devices
- * does not add queries.
+ * does not add queries. "Identical" includes the scope: rows are attributed to
+ * the child when there is one, exactly as answerScope does, so the console shows
+ * what the toy plays. A child with answers but no toy gets a row with an empty
+ * `device_mac` — they exist, and their progress is intact.
  *
  * @returns {Promise<Array<{device_mac: string, kid_name: string|null, age_band: string,
  *   age_band_defaulted: boolean, current_level: number|null, levels_completed: number,
@@ -454,18 +457,23 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       select: { id: true, age_band: true, level: true, language: true }
     }),
     tables.answers.findMany({
-      select: { device_mac: true, question_id: true, result: true, answered_at: true }
+      select: { device_mac: true, kid_id: true, question_id: true, result: true, answered_at: true }
     })
   ]);
 
-  const kidIds = [...new Set(devices.map((d) => d.kid_id).filter(Boolean))];
-  const kids = kidIds.length
+  // Children named by a device or by an answer row: the second set is what makes
+  // a child who has left their old toy visible at all.
+  const kidIdByKey = new Map();
+  for (const id of [...devices.map((d) => d.kid_id), ...answers.map((a) => a.kid_id)]) {
+    if (id) kidIdByKey.set(String(id), id);
+  }
+  const kids = kidIdByKey.size
     ? await prisma.kid_profile.findMany({
-      where: { id: { in: kidIds } },
+      where: { id: { in: [...kidIdByKey.values()] } },
       select: { id: true, name: true, birth_date: true, language: true }
     })
     : [];
-  const kidById = new Map(kids.map((k) => [k.id, k]));
+  const kidById = new Map(kids.map((k) => [String(k.id), k]));
 
   // The selection path reads the bank for one band in one language; mirror that
   // by keying the in-memory index the same way.
@@ -476,19 +484,33 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
     bankByBandLang.get(key).push(q);
   }
 
-  const answersByDevice = new Map();
+  // Indexed the two ways answerScope reads: by child for a paired device, by MAC
+  // for an unpaired one. The MAC index holds only childless rows, or a
+  // hand-me-down would display the previous child's log.
+  const answersByKid = new Map();
+  const answersByMac = new Map();
   for (const a of answers) {
-    const key = a.device_mac.toLowerCase();
-    if (!answersByDevice.has(key)) answersByDevice.set(key, []);
-    answersByDevice.get(key).push(a);
+    const [map, key] = a.kid_id
+      ? [answersByKid, String(a.kid_id)]
+      : [answersByMac, a.device_mac.toLowerCase()];
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(a);
   }
+
+  // A child who changed toys, or whose toy was unbound, still owns their answers.
+  // Without a row of their own the console reads them as never having played,
+  // while the toy itself resumes them at the right level.
+  const pairedKids = new Set(devices.map((d) => d.kid_id).filter(Boolean).map(String));
+  const unpairedKids = [...answersByKid.keys()]
+    .filter((key) => !pairedKids.has(key) && kidById.has(key))
+    .map((key) => ({ mac_address: '', kid_id: kidIdByKey.get(key) }));
 
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const now = new Date();
 
-  return devices.map((device) => {
-    const kid = device.kid_id ? kidById.get(device.kid_id) : null;
+  return [...devices, ...unpairedKids].map((device) => {
+    const kid = device.kid_id ? kidById.get(String(device.kid_id)) : null;
     const derivedBand = ageBandFromBirthDate(kid?.birth_date ?? null, now);
     const ageBand = derivedBand || DEFAULT_AGE_BAND;
     const language = (kid?.language || DEFAULT_LANGUAGE).toLowerCase();
@@ -498,7 +520,9 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       || [];
     const bandIds = new Set(bandBank.map((q) => String(q.id)));
 
-    const deviceAnswers = answersByDevice.get(device.mac_address.toLowerCase()) || [];
+    const deviceAnswers = (kid
+      ? answersByKid.get(String(kid.id))
+      : answersByMac.get(device.mac_address.toLowerCase())) || [];
     const clearedIds = new Set(
       deviceAnswers
         .filter((a) => CLEARED_RESULTS.includes(a.result) && bandIds.has(String(a.question_id)))

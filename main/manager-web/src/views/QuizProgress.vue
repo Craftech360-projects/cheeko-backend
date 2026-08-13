@@ -29,7 +29,12 @@
 
       <el-card shadow="never">
         <el-table :data="filteredRows" v-loading="isLoading" stripe border size="small">
-          <el-table-column prop="device_mac" label="Device MAC" width="170" />
+          <el-table-column label="Device MAC" width="170">
+            <template slot-scope="s">
+              <span v-if="s.row.device_mac">{{ s.row.device_mac }}</span>
+              <span v-else class="muted">no toy</span>
+            </template>
+          </el-table-column>
           <el-table-column label="Child" width="130">
             <template slot-scope="s">
               <span v-if="s.row.kid_name">{{ s.row.kid_name }}</span>
@@ -66,20 +71,22 @@
             <template slot-scope="s">
               <!-- Enabled whenever rows are dated today, not just once the gate has
                    closed: backdating a partial day is a valid way to start fresh. -->
+              <!-- Every action addresses a device by MAC, so a child with no toy
+                   can be read but not acted on. -->
               <el-button
                 size="mini"
-                :disabled="!s.row.answered_today || busyMac === s.row.device_mac"
+                :disabled="!s.row.device_mac || !s.row.answered_today || busyMac === s.row.device_mac"
                 @click="confirmResetDay(s.row)"
               >Reset day</el-button>
               <el-button
                 size="mini"
-                :disabled="!s.row.last_played"
+                :disabled="!s.row.device_mac || !s.row.last_played"
                 @click="openAnalytics(s.row)"
               >Analytics</el-button>
               <el-button
                 size="mini"
                 type="warning"
-                :disabled="!s.row.max_level || busyMac === s.row.device_mac"
+                :disabled="!s.row.device_mac || !s.row.max_level || busyMac === s.row.device_mac"
                 @click="openSetLevel(s.row)"
               >Set level</el-button>
             </template>
@@ -250,7 +257,7 @@ export default {
       return this.rows.filter((r) => {
         if (this.onlyPlayed && !r.last_played) return false;
         if (!term) return true;
-        return r.device_mac.toLowerCase().includes(term)
+        return (r.device_mac || '').toLowerCase().includes(term)
           || (r.kid_name || '').toLowerCase().includes(term);
       });
     }
