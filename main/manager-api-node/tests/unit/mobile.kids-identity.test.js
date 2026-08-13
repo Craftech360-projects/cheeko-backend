@@ -94,6 +94,59 @@ describe('mobile kid identity', () => {
       }));
     });
 
+    // A client that takes the head of the list must land on the family's active
+    // child. Rahul's profile is older, so age alone put him first while Kishore's
+    // toy was the one that had just been used.
+    test('the child whose toy was used most recently comes first', async () => {
+      prisma.sys_user.findUnique.mockResolvedValue({
+        ...USER,
+        kid_profile: [
+          { id: 10n, name: 'Rahul', created_at: new Date('2026-08-11'), interests: [] },
+          { id: 15n, name: 'Kishore', created_at: new Date('2026-08-13'), interests: [] },
+        ],
+      });
+      prisma.ai_device.findMany.mockResolvedValue([
+        { mac_address: 'AA:16:3E:AC:B5:38', kid_id: 10n, last_connected_at: new Date('2026-08-11T12:00:00Z') },
+        { mac_address: '00:16:3E:7A:11:C4', kid_id: 15n, last_connected_at: new Date('2026-08-13T08:32:00Z') },
+      ]);
+
+      const kids = await mobileService.getKids('uid-6');
+
+      expect(kids.map(k => k.name)).toEqual(['Kishore', 'Rahul']);
+    });
+
+    test('a child with no toy sorts after every child who has one', async () => {
+      prisma.sys_user.findUnique.mockResolvedValue({
+        ...USER,
+        kid_profile: [
+          { id: 1n, name: 'Unpaired', created_at: new Date('2020-01-01'), interests: [] },
+          { id: 2n, name: 'Paired', created_at: new Date('2026-08-13'), interests: [] },
+        ],
+      });
+      prisma.ai_device.findMany.mockResolvedValue([
+        { mac_address: 'AA:BB:CC:DD:EE:FF', kid_id: 2n, last_connected_at: new Date('2026-08-13T08:00:00Z') },
+      ]);
+
+      const kids = await mobileService.getKids('uid-6');
+
+      expect(kids.map(k => k.name)).toEqual(['Paired', 'Unpaired']);
+    });
+
+    test('two children with no toy keep a stable order by profile age', async () => {
+      prisma.sys_user.findUnique.mockResolvedValue({
+        ...USER,
+        kid_profile: [
+          { id: 2n, name: 'Younger', created_at: new Date('2026-08-13'), interests: [] },
+          { id: 1n, name: 'Older', created_at: new Date('2026-01-01'), interests: [] },
+        ],
+      });
+      prisma.ai_device.findMany.mockResolvedValue([]);
+
+      const kids = await mobileService.getKids('uid-6');
+
+      expect(kids.map(k => k.name)).toEqual(['Older', 'Younger']);
+    });
+
     test('only the requesting parent\'s paired devices are consulted', async () => {
       await mobileService.getKids('uid-6');
 

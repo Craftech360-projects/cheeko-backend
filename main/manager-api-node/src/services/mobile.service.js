@@ -1819,12 +1819,35 @@ async function getKids(firebaseUid) {
     // to, so it took the first -- and the order was whatever Postgres returned.
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id, kid_id: { not: null } },
-        select: { mac_address: true, kid_id: true },
+        select: { mac_address: true, kid_id: true, last_connected_at: true },
     });
+    const deviceByKid = new Map(devices.map(d => [String(d.kid_id), d]));
     const macByKid = new Map(devices.map(d => [String(d.kid_id), d.mac_address]));
 
+    // The child whose toy was used most recently comes first, then the rest by
+    // age of profile. A client that picks the head of this list -- which the app
+    // does -- lands on the family's active child instead of on whichever row
+    // Postgres happened to return first.
+    //
+    // This is a better default, not a substitute for choosing properly. A parent
+    // with two paired toys has two right answers and only the client knows which
+    // screen it is on, which is what device_mac below is for.
+    const lastUsed = (kid) => {
+        const at = deviceByKid.get(String(kid.id))?.last_connected_at;
+        return at ? new Date(at).getTime() : null;
+    };
+    const ordered = [...user.kid_profile].sort((a, b) => {
+        const [ua, ub] = [lastUsed(a), lastUsed(b)];
+        if (ua !== ub) {
+            if (ua === null) return 1;
+            if (ub === null) return -1;
+            return ub - ua;
+        }
+        return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    });
+
     // Map to the format the mobile app expects
-    return user.kid_profile.map(k => ({
+    return ordered.map(k => ({
         device_mac: macByKid.get(String(k.id)) || null,
         deviceMac: macByKid.get(String(k.id)) || null,
         is_paired: macByKid.has(String(k.id)),
