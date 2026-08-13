@@ -22,33 +22,73 @@ ALTER TABLE device_workspace_artifacts ADD COLUMN IF NOT EXISTS owner_key TEXT;
 ALTER TABLE device_memory_documents    ADD COLUMN IF NOT EXISTS owner_key TEXT;
 ALTER TABLE device_memory_chunks       ADD COLUMN IF NOT EXISTS owner_key TEXT;
 
--- Paired devices resolve to their child; everything else keeps its own MAC.
-UPDATE device_workspace_artifacts a SET owner_key = 'kid:' || d.kid_id::text
-  FROM ai_device d WHERE lower(d.mac_address) = lower(a.mac_address) AND d.kid_id IS NOT NULL;
-UPDATE device_memory_documents a SET owner_key = 'kid:' || d.kid_id::text
-  FROM ai_device d WHERE lower(d.mac_address) = lower(a.mac_address) AND d.kid_id IS NOT NULL;
-UPDATE device_memory_chunks a SET owner_key = 'kid:' || d.kid_id::text
-  FROM ai_device d WHERE lower(d.mac_address) = lower(a.mac_address) AND d.kid_id IS NOT NULL;
+-- Which devices may have their history claimed for their current child.
+--
+-- A device that has served more than one child cannot: its rows are a mixture,
+-- and stamping them all with the current pairing is the sibling leak this
+-- migration exists to close, performed by the migration itself. DB1 has such a
+-- device -- one toy, three children, 82 memory documents belonging to the two
+-- earlier ones.
+--
+-- Membership is judged from the tables that already carry kid_id rather than
+-- from a survey run by hand somewhere else, so the precondition travels with the
+-- migration instead of as a comment about a different database.
+CREATE TEMP TABLE _owner_key_safe_devices AS
+SELECT d.mac_address, d.kid_id
+  FROM ai_device d
+ WHERE d.kid_id IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM device_memory_documents m
+                    WHERE lower(m.mac_address) = lower(d.mac_address)
+                      AND m.kid_id IS NOT NULL AND m.kid_id <> d.kid_id)
+   AND NOT EXISTS (SELECT 1 FROM voice_sessions v
+                    WHERE lower(v.mac_address) = lower(d.mac_address)
+                      AND v.kid_id IS NOT NULL AND v.kid_id <> d.kid_id);
 
--- Includes rows whose MAC has no ai_device row at all. A survey on 2026-08-12
--- found none, but they would otherwise be left NULL and fail the NOT NULL below.
+-- A row that already knows its child keeps it. The device's current pairing is
+-- an inference about who made a row; kid_id is the record of it, and reaching
+-- past the record to the inference is what mis-attributes a shared toy.
+UPDATE device_memory_documents SET owner_key = 'kid:' || kid_id::text WHERE kid_id IS NOT NULL;
+UPDATE device_memory_chunks    SET owner_key = 'kid:' || kid_id::text WHERE kid_id IS NOT NULL;
+
+-- Everything still unattributed on a single-child device belongs to that child.
+-- device_workspace_artifacts has no kid_id at all, so this is the only signal it
+-- gets -- and on a multi-child device it correctly gets none.
+UPDATE device_workspace_artifacts a SET owner_key = 'kid:' || s.kid_id::text
+  FROM _owner_key_safe_devices s
+ WHERE lower(s.mac_address) = lower(a.mac_address) AND a.owner_key IS NULL;
+UPDATE device_memory_documents a SET owner_key = 'kid:' || s.kid_id::text
+  FROM _owner_key_safe_devices s
+ WHERE lower(s.mac_address) = lower(a.mac_address) AND a.owner_key IS NULL;
+UPDATE device_memory_chunks a SET owner_key = 'kid:' || s.kid_id::text
+  FROM _owner_key_safe_devices s
+ WHERE lower(s.mac_address) = lower(a.mac_address) AND a.owner_key IS NULL;
+
+-- The rest keep their own MAC: rows on an unpaired device, rows whose MAC has no
+-- ai_device row, and the artifacts of a device that has served several children.
+-- Keyed to the toy is the truthful statement where the child is unknowable, and
+-- it leaves the rows readable and re-attributable later instead of destroyed.
 UPDATE device_workspace_artifacts SET owner_key = 'mac:' || lower(mac_address) WHERE owner_key IS NULL;
 UPDATE device_memory_documents    SET owner_key = 'mac:' || lower(mac_address) WHERE owner_key IS NULL;
 UPDATE device_memory_chunks       SET owner_key = 'mac:' || lower(mac_address) WHERE owner_key IS NULL;
 
--- Collapse any pair that the remap made non-unique, newest wins. This can only
--- fire where one child owns two devices; the same survey found zero such kids,
--- so on that data these delete nothing. They are here so the migration is safe
--- to run somewhere the survey has not been repeated.
-DELETE FROM device_workspace_artifacts a USING device_workspace_artifacts b
- WHERE a.owner_key = b.owner_key AND a.relative_path = b.relative_path
-   AND (a.updated_at, a.id) < (b.updated_at, b.id);
-DELETE FROM device_memory_documents a USING device_memory_documents b
- WHERE a.owner_key = b.owner_key AND a.document_key = b.document_key
-   AND (a.updated_at, a.id) < (b.updated_at, b.id);
-DELETE FROM device_memory_chunks a USING device_memory_chunks b
- WHERE a.owner_key = b.owner_key AND a.content_hash = b.content_hash
-   AND (a.created_at, a.id) < (b.created_at, b.id);
+-- The remap must not have made two rows collide. It cannot when attribution is
+-- right: two children's documents get two different keys. This stops rather than
+-- deletes, because the losing row of a silent "newest wins" is a child's memory
+-- and a condition that should be impossible must never be resolved quietly.
+DO $$
+DECLARE dupes INT;
+BEGIN
+  SELECT count(*) INTO dupes FROM (
+    SELECT 1 FROM device_workspace_artifacts GROUP BY owner_key, relative_path HAVING count(*) > 1
+    UNION ALL
+    SELECT 1 FROM device_memory_documents    GROUP BY owner_key, document_key  HAVING count(*) > 1
+    UNION ALL
+    SELECT 1 FROM device_memory_chunks       GROUP BY owner_key, content_hash  HAVING count(*) > 1
+  ) collisions;
+  IF dupes > 0 THEN
+    RAISE EXCEPTION 'owner_key remap produced % colliding row group(s); stopping before any row is dropped', dupes;
+  END IF;
+END $$;
 
 ALTER TABLE device_workspace_artifacts ALTER COLUMN owner_key SET NOT NULL;
 ALTER TABLE device_memory_documents    ALTER COLUMN owner_key SET NOT NULL;
