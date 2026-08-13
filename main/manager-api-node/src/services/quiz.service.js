@@ -377,9 +377,16 @@ const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
  * Read-only aggregate over the answer log for the parent portal. Same derived
  * state as the selection path — nothing here is stored.
  *
+ * level_total / level_cleared describe the Current Level only, and are what the
+ * parent app's quiz card fills its progress bar from. Both are 0 once the band
+ * is finished (current_level null), which reads as "nothing left in this level"
+ * — the caller decides whether that means complete, because only it knows
+ * whether a null level is an achievement or an empty bank.
+ *
  * @param {string} deviceMac
  * @param {'quiz'|'riddle'} [bankName]
  * @returns {Promise<{age_band: string, current_level: number|null, levels_completed: number,
+ *   level_total: number, level_cleared: number,
  *   counts: Object<string, number>, last_played: Date|null}>}
  */
 const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
@@ -408,10 +415,16 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
     }
   }
 
+  const levelQuestions = state.currentLevel === null
+    ? []
+    : bank.filter((q) => q.level === state.currentLevel);
+
   return {
     age_band: context.ageBand,
     current_level: state.currentLevel,
     levels_completed: countCompletedLevels(bank, clearedIds),
+    level_total: levelQuestions.length,
+    level_cleared: levelQuestions.filter((q) => clearedIds.has(String(q.id))).length,
     counts,
     last_played: lastPlayed
   };

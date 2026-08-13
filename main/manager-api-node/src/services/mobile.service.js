@@ -3365,6 +3365,95 @@ async function getQuizAnalytics(firebaseUid, options = {}) {
 }
 
 /**
+ * The two characters a child plays, as the home-screen quiz card reads them.
+ *
+ * Display names are fixed here rather than read from ai_agent_template: the card
+ * ships artwork keyed on these ids, so a rename in the template table must not
+ * blank the avatar. Ids are lowercase because the app lowercases before matching.
+ */
+const QUIZ_CHARACTERS = [
+    { bank: 'quiz', character_id: 'quizy', character_name: 'Quizy' },
+    { bank: 'riddle', character_id: 'riddler', character_name: 'Riddler' },
+];
+
+/**
+ * Today's per-character quiz standing for the parent app's home card.
+ *
+ * Distinct from getQuizAnalytics, which answers "what did this week contain"
+ * over both banks. This one answers "where does each character stand right now"
+ * — one row per character, the Current Level and how much of it is cleared.
+ *
+ * Level state is a position, not a range: it is the same at any hour of the day,
+ * so `period` is accepted for the app's sake and only decides which date the
+ * response is stamped with.
+ *
+ * Scoping is quiz.service's own — by child when the toy is paired, by MAC with
+ * `kid_id IS NULL` when it is not — so a hand-me-down toy never shows the
+ * previous child's level.
+ */
+async function getQuizCharacterProgress(firebaseUid, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, options);
+    // Required here rather than at the top of the file, as ./banks already is:
+    // quiz.service reaches back into this module's neighbours at load time.
+    const quizService = require('./quiz.service');
+
+    // The app sends the home screen's active toy. Without one, the first device
+    // this parent owns stands in, which is the only toy when they own one.
+    const mac = scope.macAddresses[0] || null;
+    const date = formatDateInTimezone(options.now || new Date(), scope.timezone);
+
+    if (!mac) {
+        return { date, characters: [], total_questions_answered: 0, total_questions: 0 };
+    }
+
+    const characters = [];
+    for (const character of QUIZ_CHARACTERS) {
+        let standing;
+        try {
+            standing = await quizService.progress(mac, character.bank);
+        } catch (error) {
+            // A bank whose tables are not deployed yet must read as "not started"
+            // rather than take the whole card down.
+            logger.warn(`[mobile] ${character.bank} progress unavailable: ${error.message}`);
+            continue;
+        }
+
+        characters.push({
+            character_id: character.character_id,
+            character_name: character.character_name,
+            // A finished band keeps showing the last level it cleared; dropping to
+            // null would render the card as level 0.
+            level: standing.current_level ?? standing.levels_completed,
+            // Both are 0 for a finished band — there is no level left to fill a
+            // bar with. `status` is what tells the card to say "Level complete".
+            questions_answered: standing.level_cleared,
+            total_questions: standing.level_total,
+            status: quizCharacterStatus(standing),
+        });
+    }
+
+    return {
+        date,
+        characters,
+        total_questions_answered: characters.reduce((sum, c) => sum + c.questions_answered, 0),
+        total_questions: characters.reduce((sum, c) => sum + c.total_questions, 0),
+    };
+}
+
+/**
+ * A non-null Current Level is by definition one with questions still open, so
+ * "completed" can only come from the null case — and only when levels were
+ * actually cleared, since an empty bank reads null too and is not an
+ * achievement.
+ */
+function quizCharacterStatus(standing) {
+    if (standing.current_level === null) {
+        return standing.levels_completed > 0 ? 'completed' : 'not_started';
+    }
+    return standing.level_cleared > 0 ? 'in_progress' : 'not_started';
+}
+
+/**
  * Same analytics by MAC for the manager web admin views, so an operator sees
  * exactly what the parent sees. Deliberately the same builder — two
  * implementations of "attempts, not questions" would drift apart within a month.
@@ -3630,6 +3719,7 @@ module.exports = {
     getProgressDetails,
     getProgressTrend,
     getQuizAnalytics,
+    getQuizCharacterProgress,
     getQuizAnalyticsByMacAdmin,
     getProgressSummaryByMacAdmin,
     getProgressDetailsByMacAdmin,

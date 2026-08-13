@@ -168,6 +168,14 @@ router.get('/progress/quiz', asyncHandler(async (req, res) => {
     success(res, analytics);
 }));
 
+// The home-screen quiz card. Note the path: the shipped app calls
+// /quiz/progress, not /progress/quiz, and swallows a 404 as "no data" — so
+// until this route existed the card silently rendered its empty state.
+router.get('/quiz/progress', asyncHandler(async (req, res) => {
+    const progress = await mobileService.getQuizCharacterProgress(req.firebaseUser.uid, req.query);
+    success(res, progress);
+}));
+
 router.get('/progress/trend', asyncHandler(async (req, res) => {
     const trend = await mobileService.getProgressTrend(req.firebaseUser.uid, req.query);
     success(res, trend);
