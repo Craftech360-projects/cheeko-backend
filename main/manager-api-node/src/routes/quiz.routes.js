@@ -111,6 +111,24 @@ router.get('/next-questions',
  *               character:
  *                 type: string
  *                 description: Character agent_code, used only when bank is absent.
+ *               attempts:
+ *                 type: array
+ *                 description: Every try at this question, in order, including the
+ *                   wrong ones that never become an answer row. Optional and
+ *                   diagnostic — a failed attempt write never fails the answer,
+ *                   and nothing that gates progression reads these rows.
+ *                   Ordinals are assigned server-side from array position.
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     verdict:
+ *                       type: string
+ *                       enum: [correct, wrong, revealed]
+ *                       description: Defaults to wrong; an intermediate try is by
+ *                         definition one that did not finish the question.
+ *                     transcript:
+ *                       type: string
+ *                       description: What speech recognition heard. Omit for silence.
  *     responses:
  *       201:
  *         description: Answer logged
@@ -146,9 +164,15 @@ router.post('/answer',
       characterId: req.body.character_id,
     });
 
-    const answer = await quizService.recordAnswer(deviceMac, questionId, result, bank);
+    // Optional and additive: an older worker sends no attempts and logs exactly
+    // what it logs today. A malformed array is dropped rather than 400'd — the
+    // attempt log is diagnostic, and refusing the answer over it would trade a
+    // child's progress for a measurement.
+    const attempts = Array.isArray(req.body.attempts) ? req.body.attempts : [];
+
+    const answer = await quizService.recordAnswer(deviceMac, questionId, result, bank, attempts);
     logger.info(
-      `[QUIZ] POST /quiz/answer device=${deviceMac} bank=${bank} question=${answer.question_id} result=${answer.result}`
+      `[QUIZ] POST /quiz/answer device=${deviceMac} bank=${bank} question=${answer.question_id} result=${answer.result} attempts=${attempts.length}`
     );
     return created(res, { ...answer, bank }, 'Answer logged');
   })

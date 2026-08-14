@@ -1464,6 +1464,38 @@ model riddle_question_answer {
   @@index([kid_id, answered_at], map: "idx_riddle_answer_kid_time")
 }
 
+/// Every try, including the wrong ones that never become an answer row. The
+/// answer log records that a question was missed; this records how it was
+/// missed — how many tries, and what the child actually said.
+///
+/// Deliberately NON-AUTHORITATIVE (ADR-0009). Its write may fail without
+/// failing the child's turn, so nothing that gates progression may read it:
+/// Cleared, days-on-level and the streak all keep deriving from
+/// quiz_question_answer. A gate reading this table would silently stop firing
+/// whenever the write failed.
+///
+/// One table for both banks rather than the parallel pair the answer logs use,
+/// so `bank` carries the discriminator and there is no FK. That is affordable
+/// precisely because these rows are diagnostic: an orphaned attempt row is a
+/// lost measurement, not a child's lost progress.
+model question_attempt {
+  id          BigInt   @id @default(autoincrement())
+  device_mac  String   @db.VarChar(20)
+  kid_id      BigInt?
+  bank        String   @db.VarChar(10)
+  question_id BigInt
+  attempt_no  Int
+  verdict     String   @db.VarChar(10)
+  /// What speech recognition heard. Null when the worker had no transcript.
+  /// Retention is not yet aligned with ADR-0006's raw-transcript expiry — see
+  /// docs/issues/quizzy-redesign/004-attempt-log.md.
+  transcript  String?
+  answered_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([bank, question_id, device_mac], map: "idx_question_attempt_bank_question_device")
+  @@index([kid_id, answered_at], map: "idx_question_attempt_kid_time")
+}
+
 /// One AI-Imagine picture. The image itself stays in S3 under the key it was
 /// first written with; this row is what says whose it is, so a child changing
 /// toys is an UPDATE rather than a bucket copy. Before this table the gallery

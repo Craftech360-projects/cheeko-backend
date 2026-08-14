@@ -239,7 +239,48 @@ const toQuestionId = (questionId) => {
  * @param {'quiz'|'riddle'} [bankName]
  * @returns {Promise<{id: string, question_id: string, result: string, answered_at: Date}>}
  */
-const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BANK) => {
+/**
+ * Write the per-try rows for one question.
+ *
+ * The worker sends the whole sequence with the final answer rather than posting
+ * each try as it happens: a try is only interesting next to the ones around it,
+ * and one write per question keeps this off the conversation's critical path.
+ *
+ * Ordinals are assigned here from array position, not taken from the caller.
+ * The worker counts turns; letting it also name the ordinal would let a retry
+ * or a dropped turn write attempt 3 twice.
+ *
+ * @param {string} deviceMac
+ * @param {string|number|null} kidId
+ * @param {string} bank
+ * @param {bigint} questionId - already resolved by the caller
+ * @param {Array<{verdict?: string, transcript?: string}>} attempts
+ * @returns {Promise<number>} rows written
+ */
+const recordAttempts = async (deviceMac, kidId, bank, questionId, attempts) => {
+  if (!Array.isArray(attempts) || attempts.length === 0) return 0;
+
+  const rows = attempts.map((attempt, index) => ({
+    device_mac: deviceMac,
+    kid_id: kidId ?? null,
+    bank,
+    question_id: questionId,
+    attempt_no: index + 1,
+    // An intermediate try is by definition one that did not finish the question.
+    verdict: ANSWER_RESULTS.includes(attempt?.verdict) ? attempt.verdict : 'wrong',
+    // Empty string and whitespace both mean "nothing was heard", which is not
+    // the same as a child who said something the recogniser mangled. Keep the
+    // difference: null for silence, the raw text otherwise.
+    transcript: typeof attempt?.transcript === 'string' && attempt.transcript.trim()
+      ? attempt.transcript
+      : null
+  }));
+
+  const { count } = await prisma.question_attempt.createMany({ data: rows });
+  return count;
+};
+
+const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BANK, attempts = []) => {
   if (!ANSWER_RESULTS.includes(result)) {
     throw new ApiError(`result must be one of: ${ANSWER_RESULTS.join(', ')}`, 400);
   }
@@ -281,6 +322,15 @@ const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BA
     await recordLevelMilestone(tables, context, id);
   } catch (error) {
     logger.warn(`[${tables.label}] level milestone write failed for ${deviceMac}: ${error.message}`);
+  }
+
+  // Diagnostic, and allowed to fail (ADR-0009): a lost attempt row costs one
+  // measurement, while failing here would cost the child the answer they just
+  // earned. Nothing that gates progression reads these rows.
+  try {
+    await recordAttempts(deviceMac, context.kidId, bankName, id, attempts);
+  } catch (error) {
+    logger.warn(`[${tables.label}] attempt log write failed for ${deviceMac}: ${error.message}`);
   }
 
   return {
@@ -671,6 +721,7 @@ const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
 module.exports = {
   nextQuestions,
   recordAnswer,
+  recordAttempts,
   progress,
   allDeviceProgress,
   setLevel,
