@@ -147,12 +147,63 @@ const leastRecentlyPlayedLevel = async (tables, scope, bank) => {
     .sort((a, b) => lastPlayed(a) - lastPlayed(b))[0];
 };
 
-const toQuestion = (question) => ({
-  id: String(question.id), // BigInt is not JSON-serialisable
-  question_text: question.question_text,
-  answer_text: question.answer_text,
-  accepted_answers: question.accepted_answers
-});
+// The Door ladder. `open` is the plain ask, `choice` narrows to two, `guided`
+// teaches and hands the question back. The model never picks — every rung is
+// authored or resolved here (ADR-0005: the server owns game logic, the model
+// voices it).
+const ASK_MODES = ['open', 'choice', 'guided'];
+
+/**
+ * Door 2's two options, in a stable order.
+ *
+ * Seeded by question id so the same child hears the same order every time that
+ * question is asked: a shuffle that moves would let a child learn "it's the
+ * second one" on one day and be wrong the next, which teaches position rather
+ * than the answer.
+ */
+const choiceOrderFor = (question) => {
+  const distractors = Array.isArray(question.distractors) ? question.distractors : [];
+  const decoy = distractors.find((d) => typeof d === 'string' && d.trim());
+  // No authored distractor means no Door 2 for this question. Generating one
+  // would be exactly the invented content ADR-0005 removed from scored play.
+  if (!decoy) return null;
+  const answerFirst = Number(BigInt(question.id) % 2n) === 0;
+  return answerFirst ? [question.answer_text, decoy] : [decoy, question.answer_text];
+};
+
+/**
+ * One served question, with its Door ladder attached.
+ *
+ * Every rung ships at fetch rather than being fetched per turn. The worker
+ * escalates through what it was given, so a child who needs Door 2 does not wait
+ * on an HTTP round trip mid-sentence — on a voice path that pause is the child
+ * wondering if the toy broke. The model still chooses nothing: the options and
+ * the teaching sentence were authored, and the server decided the order.
+ *
+ * `ask_mode` is the STARTING Door, and it is always `open`: a returning question
+ * reopens at Door 1 by design (quizzy-doors.md), so there is no history to read
+ * here. `attempt_no` is 1 for the same reason.
+ */
+const toQuestion = (question) => {
+  const choiceOrder = choiceOrderFor(question);
+  const teachText = typeof question.teach_text === 'string' && question.teach_text.trim()
+    ? question.teach_text
+    : null;
+
+  return {
+    id: String(question.id), // BigInt is not JSON-serialisable
+    question_text: question.question_text,
+    answer_text: question.answer_text,
+    accepted_answers: question.accepted_answers,
+    ask_mode: ASK_MODES[0],
+    attempt_no: 1,
+    // Omitted, not null, when the content for that Door has not been authored
+    // yet — the whole bank is in that state until ticket 014 re-levels it. The
+    // worker skips a Door it was given no content for rather than improvising.
+    ...(choiceOrder ? { choice_order: choiceOrder } : {}),
+    ...(teachText ? { teach_text: teachText } : {})
+  };
+};
 
 /**
  * The device's next batch of scored questions.
@@ -744,6 +795,11 @@ const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
 };
 
 module.exports = {
+  // Exported for tests: the Door ladder is the part of the payload most likely
+  // to be got wrong quietly.
+  toQuestion,
+  choiceOrderFor,
+  ASK_MODES,
   nextQuestions,
   recordAnswer,
   recordAttempts,
