@@ -3461,13 +3461,10 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
 
 const QUIZ_POINTS_PER_CORRECT = 10;
 
-// Cleared mirrors quiz.service.js: a revealed question clears too, which is why
-// the response reports revealed separately instead of folding it into wrong.
-//
-// NOTE: this is the SECOND copy of that constant — quiz.service.js has the other.
-// Ticket 008 must flip both. Flipping only that one leaves the parent dashboard
-// reporting a question as done while the toy reopens it.
-const QUIZ_CLEARED_RESULTS = ['correct', 'revealed'];
+// What clears is per bank (banks.js clearOnReveal), asked through
+// clearedResultsFor rather than duplicated here. This file used to hold its own
+// copy of the list, so flipping quiz.service.js alone would have left the parent
+// dashboard reporting a question as done while the toy reopened it.
 
 /**
  * The wire value for a stored verdict.
@@ -3660,7 +3657,7 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
     const windowOpened = new Date(`${range.startDate}T00:00:00Z`);
     const totals = { correct: 0, attempted: 0, previousCorrect: 0, previousAttempted: 0 };
 
-    const { resolveBank } = require('./banks');
+    const { resolveBank, clearedResultsFor } = require('./banks');
     const banks = [];
 
     for (const bankName of ['quiz', 'riddle']) {
@@ -3716,7 +3713,7 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
             (await tables.answers.findMany({
                 where: {
                     OR: quizMacFilter(scope.macAddresses),
-                    result: { in: QUIZ_CLEARED_RESULTS },
+                    result: { in: clearedResultsFor(tables) },
                     answered_at: { lt: windowOpened },
                 },
                 select: { question_id: true },
@@ -3874,12 +3871,15 @@ function emptyQuizBank(bankName, available) {
 
 /** Cleared ids across every device in scope, chunked to keep the IN list sane. */
 async function loadQuizClearedIds(tables, macAddresses, activeBank) {
+    // Required here rather than at module scope, matching how the caller above
+    // pulls in resolveBank.
+    const { clearedResultsFor } = require('./banks');
     if (!activeBank.length) return new Set();
     const rows = await tables.answers.findMany({
         where: {
             OR: quizMacFilter(macAddresses),
             question_id: { in: activeBank.map(q => q.id) },
-            result: { in: QUIZ_CLEARED_RESULTS },
+            result: { in: clearedResultsFor(tables) },
         },
         select: { question_id: true },
     });

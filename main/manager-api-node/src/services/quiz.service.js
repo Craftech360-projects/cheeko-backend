@@ -15,7 +15,7 @@ const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
-const { resolveBank, DEFAULT_BANK } = require('./banks');
+const { resolveBank, clearedResultsFor, DEFAULT_BANK } = require('./banks');
 
 // Used when there is no device row, no kid, or no birth date. Still the middle
 // of the authored range, now that a band is a single age (see quiz.logic).
@@ -24,7 +24,9 @@ const DEFAULT_LANGUAGE = 'en';
 // The Daily Ten: how many scored questions make a day complete.
 const DAILY_QUESTION_TARGET = 10;
 const ANSWER_RESULTS = ['correct', 'wrong', 'revealed'];
-const CLEARED_RESULTS = ['correct', 'revealed'];
+// What CLEARS is now per bank (see banks.js clearOnReveal), not a module-level
+// constant: Quizzy and Riddler share this service and want opposite answers.
+// ANSWER_RESULTS stays global — what the worker may REPORT is the same for both.
 // Warn once the device is inside the top 3 authored levels of its band.
 const FRONTIER_WARN_LEVELS = 3;
 
@@ -100,7 +102,7 @@ const loadBank = async (tables, ageBand, language) => {
   return { bank: await query(DEFAULT_LANGUAGE), language: DEFAULT_LANGUAGE };
 };
 
-/** Cleared = an answer row with result 'correct' or 'revealed' exists. */
+/** Cleared = an answer row exists whose result clears, for THIS bank. */
 const loadClearedIds = async (tables, scope, bank) => {
   if (!bank.length) return new Set();
 
@@ -108,7 +110,7 @@ const loadClearedIds = async (tables, scope, bank) => {
     where: {
       ...scope,
       question_id: { in: bank.map((q) => q.id) },
-      result: { in: CLEARED_RESULTS }
+      result: { in: clearedResultsFor(tables) }
     },
     select: { question_id: true }
   });
@@ -558,6 +560,9 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   const now = new Date();
+  // Resolved once for the whole page rather than per device: it depends only on
+  // which bank is being reported.
+  const cleared = clearedResultsFor(tables);
 
   return [...devices, ...unpairedKids].map((device) => {
     const kid = device.kid_id ? kidById.get(String(device.kid_id)) : null;
@@ -575,7 +580,7 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       : answersByMac.get(device.mac_address.toLowerCase())) || [];
     const clearedIds = new Set(
       deviceAnswers
-        .filter((a) => CLEARED_RESULTS.includes(a.result) && bandIds.has(String(a.question_id)))
+        .filter((a) => cleared.includes(a.result) && bandIds.has(String(a.question_id)))
         .map((a) => String(a.question_id))
     );
 
