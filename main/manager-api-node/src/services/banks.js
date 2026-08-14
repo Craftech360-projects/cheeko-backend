@@ -36,11 +36,13 @@ const BANKS = {
     label: 'QUIZ',
     // Does a revealed answer count the question as cleared?
     //
-    // This flag exists because the two characters want opposite things and share
-    // one service: without it, changing progression for Quizzy silently changes
-    // Riddler in the same commit. Ticket 008 flips THIS entry to false so a
-    // question the child did not solve comes back another day (ADR-0009).
-    clearOnReveal: true,
+    // FALSE since ADR-0009: a question the child did not solve comes back
+    // another day. This reverses quiz-bank ticket 006, which chose flow over
+    // mastery on purpose — read that ADR before flipping it back.
+    //
+    // The flag exists because the two characters share one service, so without
+    // it this line would have changed Riddler in the same commit.
+    clearOnReveal: false,
   },
   riddle: {
     questions: prisma.riddle_question,

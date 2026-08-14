@@ -4,9 +4,10 @@ const { BANKS, clearedResultsFor } = require('../../src/services/banks');
 // progression for one silently changed the other in the same commit. These tests
 // are what stop that regressing.
 describe('clearOnReveal', () => {
-  test('today both banks clear on reveal — behaviour is unchanged by the flag', () => {
-    // Ticket 006 introduces the seam only. Ticket 008 flips quiz.
-    expect(clearedResultsFor(BANKS.quiz)).toEqual(['correct', 'revealed']);
+  test('quiz takes mastery, riddle keeps flow', () => {
+    // Flipped by ticket 008 (ADR-0009). Riddler stays on flow deliberately: a
+    // riddle whose answer you already know is not a riddle.
+    expect(clearedResultsFor(BANKS.quiz)).toEqual(['correct']);
     expect(clearedResultsFor(BANKS.riddle)).toEqual(['correct', 'revealed']);
   });
 

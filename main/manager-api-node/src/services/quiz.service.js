@@ -16,6 +16,7 @@ const { normalizeMacAddress } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
 const { resolveBank, clearedResultsFor, DEFAULT_BANK } = require('./banks');
+const { spokenAnswerMatches } = require('./answer-normalise');
 
 // Used when there is no device row, no kid, or no birth date. Still the middle
 // of the authored range, now that a band is a single age (see quiz.logic).
@@ -294,10 +295,29 @@ const recordAnswer = async (deviceMac, questionId, result, bankName = DEFAULT_BA
   // question the child was never asked.
   const question = await tables.questions.findUnique({
     where: { id },
-    select: { id: true }
+    select: { id: true, answer_text: true, accepted_answers: true }
   });
   if (!question) {
     throw new ApiError(`unknown question_id: ${questionId}`, 400);
+  }
+
+  // STT Layer 1 (GDD 6b). Speech recognition runs before the model judges, so a
+  // child who said the right word can be marked wrong for a machine's mistake.
+  // That used to cost one question; now it costs them another day on the level.
+  //
+  // Only ever upgrades, and only on an EXACT match after normalisation — "ate"
+  // for eight, "8" for eight, "um, I think it's eight". A false accept teaches a
+  // child that a wrong answer was right, which is worse than the miss, so
+  // nothing fuzzy happens here. Phonetic matching is Layer 2 and needs measuring
+  // against real transcripts first.
+  if (result !== 'correct' && attempts.length) {
+    const said = attempts[attempts.length - 1]?.transcript;
+    if (spokenAnswerMatches(said, question.answer_text, question.accepted_answers)) {
+      logger.info(
+        `[${tables.label}] STT rescue: "${said}" matches "${question.answer_text}" for question ${id}; ${result} -> correct`
+      );
+      result = 'correct';
+    }
   }
 
   // Resolved once and threaded into the milestone write, which used to resolve
