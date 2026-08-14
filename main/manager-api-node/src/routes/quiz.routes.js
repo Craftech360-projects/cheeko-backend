@@ -220,6 +220,37 @@ router.post('/attempts',
 
 /**
  * @swagger
+ * /quiz/wonder:
+ *   post:
+ *     tags: [Quiz]
+ *     summary: Save the Wonder Question a session ended on (worker PUSH)
+ *     description: One open, unscored question Quizzy leaves the child with. Never
+ *       affects level, streak or the day gate, and is NOT exposed to the parent
+ *       app — it records a child's private curiosity. Service-key auth.
+ *     responses:
+ *       201:
+ *         description: Wonder question saved
+ *       400:
+ *         description: Missing device_mac or question, or question too long
+ */
+router.post('/wonder',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const deviceMac = String(req.body.device_mac || '').trim();
+    const question = String(req.body.question || '').trim();
+    if (!deviceMac) return badRequest(res, 'device_mac is required');
+    if (!question) return badRequest(res, 'question is required');
+
+    const saved = await quizService.recordWonderQuestion(deviceMac, question);
+    // The question itself is not logged: it is the child's, and a log line is a
+    // second place it would have to be protected.
+    logger.info(`[QUIZ] POST /quiz/wonder device=${deviceMac} saved=${saved.id} chars=${question.length}`);
+    return created(res, saved, 'Wonder question saved');
+  })
+);
+
+/**
+ * @swagger
  * /quiz/progress:
  *   get:
  *     tags: [Quiz]

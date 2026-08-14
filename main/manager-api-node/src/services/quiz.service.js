@@ -315,10 +315,21 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const dayComplete = answeredToday >= DAILY_QUESTION_TARGET
     || levelCompletedToday(bank, clearedIds, todayRows.map((r) => String(r.question_id)));
 
+  // Diagnostic-grade, like the attempt log: the quiz must still run if this read
+  // fails. A missing wonder question costs a warm opening line, nothing more.
+  let wonderQuestion = null;
+  try {
+    wonderQuestion = await lastWonderQuestion(context);
+  } catch (error) {
+    logger.warn(`[${tables.label}] wonder question read failed for ${deviceMac}: ${error.message}`);
+  }
+
   return {
     // Frozen wire fields (ticket 005): constant now that the bank is shared.
     age_band: WIRE_AGE_BAND,
     age_band_defaulted: context.profileMissing,
+    // Null when the child has never been left one. Never gates anything.
+    wonder_question: wonderQuestion,
     language,
     level,
     replay,
@@ -362,6 +373,49 @@ const toQuestionId = (questionId) => {
  * @param {'quiz'|'riddle'} [bankName]
  * @returns {Promise<{id: string, question_id: string, result: string, answered_at: Date}>}
  */
+/**
+ * Save the Wonder Question a session ended on.
+ *
+ * Unscored and ungating by design: no answer row, no level, no streak. It exists
+ * only so the next session can open by remembering it.
+ *
+ * Attributed to the child where one is known, falling back to the device, so a
+ * child who changes toys keeps their own wondering.
+ */
+const recordWonderQuestion = async (deviceMac, question) => {
+  const text = String(question ?? '').trim();
+  if (!text) throw new ApiError('question is required', 400);
+  // Long enough for a real question, short enough that a runaway model reply
+  // cannot fill the column.
+  if (text.length > 500) throw new ApiError('question must be 500 characters or fewer', 400);
+
+  const context = await resolveDeviceContext(deviceMac);
+  const row = await prisma.kid_wonder_question.create({
+    data: { device_mac: deviceMac, kid_id: context.kidId ?? null, question: text },
+    select: { id: true, asked_at: true },
+  });
+  return { id: String(row.id), question: text, asked_at: row.asked_at };
+};
+
+/**
+ * The last Wonder Question this child was left with, or null.
+ *
+ * Read by child when there is one, else by device — mirroring answerScope, so an
+ * unpaired toy handed to a sibling does not surface the previous child's
+ * curiosity.
+ */
+const lastWonderQuestion = async (context) => {
+  const where = context.kidId
+    ? { kid_id: context.kidId }
+    : { device_mac: macFilter(context.deviceMac), kid_id: null };
+  const row = await prisma.kid_wonder_question.findFirst({
+    where,
+    orderBy: { asked_at: 'desc' },
+    select: { question: true },
+  });
+  return row ? row.question : null;
+};
+
 /**
  * Log the tries for a question that never resolved.
  *
@@ -893,6 +947,8 @@ const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
 
 module.exports = {
   recordUnresolvedAttempts,
+  recordWonderQuestion,
+  lastWonderQuestion,
   // Exported for tests: the Door ladder is the part of the payload most likely
   // to be got wrong quietly.
   toQuestion,

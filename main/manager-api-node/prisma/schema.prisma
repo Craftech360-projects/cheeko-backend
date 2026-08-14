@@ -1476,6 +1476,25 @@ model riddle_question_answer {
   @@index([kid_id, answered_at], map: "idx_riddle_answer_kid_time")
 }
 
+/// The Wonder Question (M4): one open, unscored question Quizzy leaves a child
+/// with at the end of a session, and opens the next one by remembering.
+///
+/// A table rather than memory/state/ because that directory is pruned after 48
+/// hours — a child who plays Friday and returns Monday would find it forgotten.
+///
+/// Deliberately NOT surfaced to the parent app: it records a child's private
+/// curiosity, and knowing it is reported changes what a child will wonder aloud.
+model kid_wonder_question {
+  id         BigInt   @id @default(autoincrement())
+  device_mac String   @db.VarChar(20)
+  kid_id     BigInt?
+  question   String
+  asked_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([kid_id, asked_at(sort: Desc)], map: "idx_kid_wonder_kid_time")
+  @@index([device_mac, asked_at(sort: Desc)], map: "idx_kid_wonder_device_time")
+}
+
 /// Every try, including the wrong ones that never become an answer row. The
 /// answer log records that a question was missed; this records how it was
 /// missed — how many tries, and what the child actually said.
