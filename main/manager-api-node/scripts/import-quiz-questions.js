@@ -15,7 +15,11 @@
  *
  * Sheet columns (row 1 headers):
  *   code, age_band, level, category, language, question_text, answer_text,
- *   accepted_answers (| separated), active
+ *   accepted_answers (| separated), active, teach_text, distractors (| separated)
+ *
+ * teach_text and distractors are optional: a sheet written before they existed
+ * imports unchanged, and re-importing that same sheet later with the columns
+ * filled in updates the rows in place rather than duplicating them.
  */
 
 require('dotenv/config');

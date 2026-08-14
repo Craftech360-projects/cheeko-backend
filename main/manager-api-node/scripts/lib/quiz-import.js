@@ -124,12 +124,35 @@ function parseQuizRow(row) {
     return { data: null, error: 'accepted_answers must be separated by "|", not commas' };
   }
 
+  // Same "|" rule as accepted_answers rather than a second convention: an author
+  // filling both columns on one row should not have to remember two.
+  const distractors = str(row.distractors)
+    .split('|')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (distractors.some((entry) => entry.includes(','))) {
+    return { data: null, error: 'distractors must be separated by "|", not commas' };
+  }
+  // A distractor equal to the answer turns the narrowing hint into a question
+  // with two right answers — the one failure here a child actually feels.
+  const answerable = new Set([answerText, ...acceptedAnswers].map((entry) => entry.toLowerCase()));
+  const collision = distractors.find((entry) => answerable.has(entry.toLowerCase()));
+  if (collision) {
+    return { data: null, error: `distractor "${collision}" is also a correct answer` };
+  }
+
+  // Optional: both columns may be absent from a sheet entirely, and are while
+  // the re-levelling (ticket 014) is still being authored.
+  const teachText = str(row.teach_text);
+
   return {
     data: {
       code,
       question_text: questionText,
       answer_text: answerText,
       accepted_answers: acceptedAnswers,
+      teach_text: teachText || null,
+      distractors,
       category: category || null,
       age_band: ageBand,
       level,

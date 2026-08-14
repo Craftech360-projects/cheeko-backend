@@ -21,6 +21,8 @@ describe('parseQuizRow', () => {
       question_text: 'How many legs does a spider have?',
       answer_text: 'eight',
       accepted_answers: ['8', 'eight legs'],
+      teach_text: null,
+      distractors: [],
       category: 'animals',
       age_band: '8',
       level: 1,
@@ -39,6 +41,48 @@ describe('parseQuizRow', () => {
   test('empty accepted_answers yields empty array, not [""]', () => {
     const { data } = parseQuizRow({ ...validRow, accepted_answers: '' });
     expect(data.accepted_answers).toEqual([]);
+  });
+
+  // teach_text and distractors (quizzy-redesign 007). Both optional: the
+  // re-levelling sheet fills them, every sheet written before them must not break.
+  test('a sheet with neither new column still parses', () => {
+    const { data, error } = parseQuizRow(validRow);
+    expect(error).toBeNull();
+    expect(data.teach_text).toBeNull();
+    expect(data.distractors).toEqual([]);
+  });
+
+  test('teach_text and distractors are read when present', () => {
+    const { data, error } = parseQuizRow({
+      ...validRow,
+      teach_text: 'Spiders are arachnids, and every arachnid has eight legs.',
+      distractors: 'six | ten',
+    });
+    expect(error).toBeNull();
+    expect(data.teach_text).toBe('Spiders are arachnids, and every arachnid has eight legs.');
+    expect(data.distractors).toEqual(['six', 'ten']);
+  });
+
+  test('blank teach_text stores as null, not empty string', () => {
+    const { data } = parseQuizRow({ ...validRow, teach_text: '   ' });
+    expect(data.teach_text).toBeNull();
+  });
+
+  test('distractors reject commas, same as accepted_answers', () => {
+    const { error } = parseQuizRow({ ...validRow, distractors: 'six, ten' });
+    expect(error).toMatch(/distractors must be separated by "\|"/);
+  });
+
+  test('a distractor equal to the answer is rejected', () => {
+    // Otherwise the narrowing hint offers two correct choices, which is the one
+    // authoring mistake here a child actually experiences.
+    const { error } = parseQuizRow({ ...validRow, distractors: 'six | EIGHT' });
+    expect(error).toMatch(/is also a correct answer/);
+  });
+
+  test('a distractor equal to an accepted alternative is rejected', () => {
+    const { error } = parseQuizRow({ ...validRow, distractors: 'eight legs' });
+    expect(error).toMatch(/is also a correct answer/);
   });
 
   test.each([

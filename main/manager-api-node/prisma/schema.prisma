@@ -1398,6 +1398,13 @@ model quiz_question {
   question_text        String
   answer_text          String
   accepted_answers     Json                   @default("[]")
+  /// The one-breath explanation offered when the child could not get there
+  /// alone. Authored, never improvised: a generated explanation aimed at a
+  /// 4-year-old is exactly the hallucination risk ADR-0005 removed from asks.
+  teach_text           String?
+  /// Authored wrong answers for the narrowing hint. Authored rather than
+  /// generated for the same reason, and a locked design decision.
+  distractors          Json                   @default("[]")
   category             String?                @db.VarChar(100)
   age_band             String                 @db.VarChar(10)
   level                Int
@@ -1435,6 +1442,11 @@ model riddle_question {
   question_text          String
   answer_text            String
   accepted_answers       Json                     @default("[]")
+  /// Present to keep this table column-identical to quiz_question, which is what
+  /// lets one service query either bank. Riddler keeps flow rather than mastery
+  /// (ADR-0009), so it has no Door 3 to teach at and these stay null today.
+  teach_text             String?
+  distractors            Json                     @default("[]")
   category               String?                  @db.VarChar(100)
   age_band               String                   @db.VarChar(10)
   level                  Int
