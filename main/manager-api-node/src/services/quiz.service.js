@@ -205,6 +205,38 @@ const toQuestion = (question) => {
   };
 };
 
+// M3, the anti-trap rule (ADR-0009). A child who cannot master a level advances
+// anyway after this many distinct days on it. Enforcement without an escape
+// hatch is a trap, not a standard.
+const ANTI_TRAP_DAY_CAP = 3;
+// How many unmastered questions from a capped level ride along as bonus items.
+// Small on purpose: they are practice, not a second Daily Ten.
+const BONUS_CARRY = 2;
+
+/**
+ * Distinct local days this device has answered questions from `levelIds`.
+ *
+ * Derived from the ANSWER log, never the attempt log. The attempt write is
+ * allowed to fail (ADR-0009), so a cap reading it would silently stop firing
+ * whenever it did — and the child it was meant to rescue would stay trapped with
+ * nothing in the logs to say why.
+ *
+ * Day boundary is server-local midnight, matching the day gate below. Two
+ * different day definitions in one file would eventually disagree by one.
+ */
+const daysOnLevel = async (tables, scope, levelIds) => {
+  if (!levelIds.length) return 0;
+  const rows = await tables.answers.findMany({
+    where: { ...scope, question_id: { in: levelIds } },
+    select: { answered_at: true }
+  });
+  const days = new Set(rows.map((row) => {
+    const d = new Date(row.answered_at);
+    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  }));
+  return days.size;
+};
+
 /**
  * The device's next batch of scored questions.
  *
@@ -230,6 +262,33 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     selectedIds = bank.filter((q) => q.level === level).map((q) => q.id);
   }
 
+  // Anti-trap: three days stuck on one level and the child moves on, mastered or
+  // not. The questions they did not get come along as BONUS items — practice
+  // that never gates a level, which is also the spaced-repetition pool ticket
+  // 009 had nothing to attach to. A query, not a table (ADR-0005).
+  let antiTrapAdvanced = false;
+  let bonusIds = [];
+  if (!replay && level !== null) {
+    const levelIds = bank.filter((q) => q.level === level).map((q) => q.id);
+    const days = await daysOnLevel(tables, scope, levelIds);
+    const nextLevel = [...new Set(bank.map((q) => q.level))]
+      .sort((a, b) => a - b)
+      .find((l) => l > level);
+
+    if (days >= ANTI_TRAP_DAY_CAP && nextLevel !== undefined) {
+      // Carry the unmastered ones before moving, so they are still offered.
+      bonusIds = selectedIds.slice(0, BONUS_CARRY);
+      antiTrapAdvanced = true;
+      logger.warn(
+        `[${tables.label}] anti-trap: device ${deviceMac} spent ${days} days on level ${level}; advancing to ${nextLevel} with ${bonusIds.length} bonus question(s)`
+      );
+      level = nextLevel;
+      selectedIds = bank
+        .filter((q) => q.level === nextLevel && !clearedIds.has(String(q.id)))
+        .map((q) => q.id);
+    }
+  }
+
   const maxLevel = bank.length ? Math.max(...bank.map((q) => q.level)) : 0;
   const frontierWarning = level !== null && !replay && maxLevel - level < FRONTIER_WARN_LEVELS;
   if (frontierWarning || replay) {
@@ -239,6 +298,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   }
 
   const selected = new Set(selectedIds.map(String));
+  const bonus = new Set(bonusIds.map(String));
 
   // The day-gate is decided here, from the log, not left to the model. It kept
   // reading "the Daily Ten is complete" out of restored transcripts and
@@ -266,7 +326,17 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     frontier_warning: frontierWarning,
     answered_today: answeredToday,
     day_complete: dayComplete,
-    questions: bank.filter((q) => selected.has(String(q.id))).map(toQuestion)
+    // Advancing by the cap is a different fact from advancing by mastery, and
+    // the difference matters to anyone asking why a child moved on. Progress is
+    // still derived, so this is a signal about THIS response, not stored state.
+    anti_trap_advanced: antiTrapAdvanced,
+    questions: [
+      ...bank.filter((q) => selected.has(String(q.id))).map(toQuestion),
+      // Bonus items are appended, flagged, and never counted towards clearing a
+      // level. A missed bonus simply recycles.
+      ...bank.filter((q) => bonus.has(String(q.id)))
+        .map((q) => ({ ...toQuestion(q), bonus: true }))
+    ]
   };
 };
 
