@@ -180,6 +180,46 @@ router.post('/answer',
 
 /**
  * @swagger
+ * /quiz/attempts:
+ *   post:
+ *     tags: [Quiz]
+ *     summary: Log tries for a question that never resolved (worker PUSH)
+ *     description: For a session that ended mid-question. Writes attempt rows only —
+ *       no answer row, because no verdict was reached. Service-key auth.
+ *     responses:
+ *       201:
+ *         description: Attempts logged
+ *       400:
+ *         description: Missing field, unknown bank, or unknown question_id
+ */
+router.post('/attempts',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const deviceMac = String(req.body.device_mac || '').trim();
+    const questionId = String(req.body.question_id ?? '').trim();
+    if (!deviceMac) return badRequest(res, 'device_mac is required');
+    if (!questionId) return badRequest(res, 'question_id is required');
+
+    const explicitBank = String(req.body.bank || '').trim();
+    if (explicitBank && !BANKS[explicitBank]) {
+      return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
+    }
+    const bank = explicitBank || await bankForCharacterRef({
+      character: req.body.character,
+      characterId: req.body.character_id,
+    });
+
+    const attempts = Array.isArray(req.body.attempts) ? req.body.attempts : [];
+    const out = await quizService.recordUnresolvedAttempts(deviceMac, questionId, bank, attempts);
+    logger.info(
+      `[QUIZ] POST /quiz/attempts device=${deviceMac} bank=${bank} question=${out.question_id} unresolved attempts=${out.attempts_logged}`
+    );
+    return created(res, { ...out, bank }, 'Attempts logged');
+  })
+);
+
+/**
+ * @swagger
  * /quiz/progress:
  *   get:
  *     tags: [Quiz]

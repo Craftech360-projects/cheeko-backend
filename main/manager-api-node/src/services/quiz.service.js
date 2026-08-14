@@ -364,6 +364,32 @@ const toQuestionId = (questionId) => {
  * @returns {Promise<{id: string, question_id: string, result: string, answered_at: Date}>}
  */
 /**
+ * Log the tries for a question that never resolved.
+ *
+ * A session that ends mid-question produces no answer row, and until this
+ * existed it produced no attempt rows either — the tries were held in the worker
+ * and lost on teardown. That is exactly backwards: the child who tried six times
+ * and gave up is the one worth seeing, and they were the only one leaving no
+ * trace at all. Observed live 2026-08-14.
+ *
+ * Deliberately does NOT write an answer row. No verdict was reached, so claiming
+ * one would put a result in the log the child never earned.
+ *
+ * @returns {Promise<{question_id: string, attempts_logged: number}>}
+ */
+const recordUnresolvedAttempts = async (deviceMac, questionId, bankName = DEFAULT_BANK, attempts = []) => {
+  const tables = resolveBank(bankName);
+  const id = toQuestionId(questionId);
+  const question = await tables.questions.findUnique({ where: { id }, select: { id: true } });
+  if (!question) {
+    throw new ApiError(`unknown question_id: ${questionId}`, 400);
+  }
+  const context = await resolveDeviceContext(deviceMac);
+  const count = await recordAttempts(deviceMac, context.kidId, bankName, id, attempts);
+  return { question_id: String(id), attempts_logged: count };
+};
+
+/**
  * Write the per-try rows for one question.
  *
  * The worker sends the whole sequence with the final answer rather than posting
@@ -865,6 +891,7 @@ const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
 };
 
 module.exports = {
+  recordUnresolvedAttempts,
   // Exported for tests: the Door ladder is the part of the payload most likely
   // to be got wrong quietly.
   toQuestion,
