@@ -3463,7 +3463,47 @@ const QUIZ_POINTS_PER_CORRECT = 10;
 
 // Cleared mirrors quiz.service.js: a revealed question clears too, which is why
 // the response reports revealed separately instead of folding it into wrong.
+//
+// NOTE: this is the SECOND copy of that constant — quiz.service.js has the other.
+// Ticket 008 must flip both. Flipping only that one leaves the parent dashboard
+// reporting a question as done while the toy reopens it.
 const QUIZ_CLEARED_RESULTS = ['correct', 'revealed'];
+
+/**
+ * The wire value for a stored verdict.
+ *
+ * `GET /toy/api/mobile/progress/quiz` is a published contract: the parent app
+ * types `result` as "correct" | "wrong" | "revealed" and renders each one
+ * differently. When the internal vocabulary becomes solo/helped/missed
+ * (ADR-0009), those map back here and the app sees no change:
+ *
+ *   solo -> correct, helped -> correct, missed -> revealed
+ *
+ * Note this is the REVERSE of what the design document first proposed. The live
+ * prompt only ever emits correct|revealed, `revealed` already means the answer
+ * was told to the child after two failed tries, and Quizzy never emits `wrong`
+ * at all — so `helped -> revealed` would have inverted the meaning of the tile
+ * a parent already reads.
+ *
+ * Identity today, on purpose: the seam exists so the change lands in one place
+ * rather than across every caller that touches a result string.
+ */
+const QUIZ_WIRE_RESULTS = { solo: 'correct', helped: 'correct', missed: 'revealed' };
+const toWireResult = stored => QUIZ_WIRE_RESULTS[stored] || stored;
+
+/**
+ * solo | helped | practised for one answered question, or null when unknowable.
+ *
+ * Null is the common case for anything answered before the attempt log existed:
+ * a stored `correct` conflates FIRST_TRY and WITH_HINT, so history genuinely
+ * cannot say which. Guessing "solo" there would overstate a child's mastery to
+ * their parent, so the field is absent instead.
+ */
+const quizMastery = (storedResult, attemptCount) => {
+    if (toWireResult(storedResult) === 'revealed') return 'practised';
+    if (!attemptCount) return null;
+    return attemptCount > 1 ? 'helped' : 'solo';
+};
 
 /**
  * Answer rows store the MAC in whatever case the caller sent — the dev database
@@ -3691,6 +3731,23 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
         });
         const clearedIds = await loadQuizClearedIds(tables, scope.macAddresses, activeBank);
 
+        // Tries recorded against each question (ticket 004). Absent for anything
+        // answered before that log existed, which is why the fields below are
+        // omitted rather than defaulted when there is no row.
+        const attemptCounts = new Map();
+        try {
+            const grouped = await prisma.question_attempt.groupBy({
+                by: ['question_id'],
+                where: { bank: bankName, OR: quizMacFilter(scope.macAddresses) },
+                _count: { _all: true },
+            });
+            grouped.forEach(g => attemptCounts.set(String(g.question_id), g._count._all));
+        } catch (error) {
+            // Diagnostic enrichment only: a parent's progress screen must still
+            // render if the attempt log is unavailable.
+            logger.warn(`[QUIZ] attempt counts unavailable for ${bankName}: ${error.message}`);
+        }
+
         const byLevel = new Map();
         for (const row of scoped) {
             const question = questionById.get(String(row.question_id));
@@ -3699,16 +3756,31 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
                 byLevel.set(question.level, { correct: 0, wrong: 0, revealed: 0, questions: [], replay: true });
             }
             const bucket = byLevel.get(question.level);
-            if (row.result === 'correct') bucket.correct += 1;
-            else if (row.result === 'revealed') bucket.revealed += 1;
+            // Bucketed by the WIRE value so the three tiles keep their meaning
+            // once the stored vocabulary changes underneath them.
+            const wire = toWireResult(row.result);
+            if (wire === 'correct') bucket.correct += 1;
+            else if (wire === 'revealed') bucket.revealed += 1;
             else bucket.wrong += 1;
             if (!clearedBefore.has(String(row.question_id))) bucket.replay = false;
+            // Additive only. `result` and `points` keep the meaning the app was
+            // written against; anything new is a separate field the app may
+            // ignore entirely.
+            const attemptCount = attemptCounts.get(String(row.question_id)) || 0;
+            const mastery = quizMastery(row.result, attemptCount);
             bucket.questions.push({
                 question_text: question.question_text,
                 correct_answer: question.answer_text,
-                result: row.result,
-                points: row.result === 'correct' ? QUIZ_POINTS_PER_CORRECT : 0,
+                result: toWireResult(row.result),
+                // `helped` maps to correct and so keeps full points. Docking it
+                // would drop a child's score overnight for no visible reason —
+                // the exact surprise this ticket exists to prevent.
+                points: wire === 'correct' ? QUIZ_POINTS_PER_CORRECT : 0,
                 answered_on: formatDateInTimezone(row.answered_at, scope.timezone),
+                // Omitted rather than sent as 0/null: absent means "not recorded",
+                // which is different from "answered first time".
+                ...(attemptCount ? { attempts_within_question: attemptCount } : {}),
+                ...(mastery ? { mastery } : {}),
             });
         }
 
@@ -4000,6 +4072,10 @@ async function getKidSessionMessages(firebaseUid, kidId, sessionId, options = {}
 }
 
 module.exports = {
+    // Exported for the contract test: these two are the whole seam between the
+    // internal verdict vocabulary and the published one.
+    toWireResult,
+    quizMastery,
     getParentProfile,
     createParentProfile,
     updateParentProfile,

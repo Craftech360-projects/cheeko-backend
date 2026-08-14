@@ -112,6 +112,8 @@ object above is `data`.
 | `levels[].cleared` | bool | Every active question in the level has been cleared. **Can revert to false** — see below. |
 | `levels[].replay` | bool | This level was already fully cleared before the period; a practice pass. |
 | `questions[].result` | `"correct"` \| `"wrong"` \| `"revealed"` | |
+| `questions[].attempts_within_question` | int | **Optional.** Tries recorded at this question. Absent for anything answered before attempt logging existed — absent means *not recorded*, not *answered first time*. |
+| `questions[].mastery` | `"solo"` \| `"helped"` \| `"practised"` | **Optional.** `solo` = unaided, `helped` = needed a hint, `practised` = the answer was revealed. Absent when unknowable: a stored `correct` from before attempt logging cannot distinguish solo from helped, and guessing would overstate the child's mastery. |
 | `questions[].correct_answer` | string | The bank's answer. Show it for `wrong` and `revealed`; it's a spoiler on `correct`. |
 | `questions[].answered_on` | `YYYY-MM-DD` | Parent's timezone. |
 | `trend.direction` | `"up"` \| `"down"` \| `"flat"` \| `"new"` \| `"none"` | See the trend section. |
@@ -129,14 +131,33 @@ produces a second row. A ten-question level can legitimately report
 Do **not** label this "12 questions" or draw it as `x / 10`. Label it "12
 answers" or "12 attempts". A parent seeing "12 of 10" will file a bug.
 
-### 2. `revealed` is a third outcome, and it still advances the child
+### 2. `revealed` is a third outcome, and it is changing meaning
 
-The quiz engine treats `correct` and `revealed` as *cleared*, so a revealed
-question moves the child forward without them answering it. A level can read
-`cleared: true` with `revealed: 3`, meaning three of the ten were given away.
+A `revealed` question is one the child did not answer — the toy told them after
+two tries. It needs its own tile and its own icon: folding it into `wrong`
+overstates failure, folding it into `correct` hides that the child never
+answered.
 
-Folding `revealed` into `wrong` overstates failure; folding it into `correct`
-hides that the child never answered. It needs its own tile and its own icon.
+**What is changing.** Until now the quiz engine treated `correct` and `revealed`
+alike as *cleared*, so a revealed question moved the child forward without them
+answering it, and a level could read `cleared: true` with `revealed: 3`.
+
+That is being reversed (ADR-0009): a revealed question will no longer clear, and
+will come back on a later day until the child answers it. Two consequences for
+rendering:
+
+- A level with `revealed: 3` will report `cleared: false` where it used to say
+  `true`. This is intended, not a regression.
+- The same question will legitimately appear more than once across days, first
+  as `revealed` and later as `correct`. Do not treat the repeat as duplicate data.
+
+**No field changes shape or type.** The internal vocabulary becomes
+solo/helped/missed, but the response keeps mapping back to the three values
+documented here — `solo` and `helped` both render as `correct`, `missed` renders
+as `revealed`. An app written against this document keeps working untouched.
+
+`points` is unaffected: a child who needed a hint still earns the full ten, so no
+score drops overnight because of this change.
 
 ### 3. `cleared: true` is not permanent
 
