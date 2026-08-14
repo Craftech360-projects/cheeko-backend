@@ -15,24 +15,52 @@
 -- a bank nothing is served from, which is exactly what an active per-age row
 -- becomes after this collapse — so ACTIVE rows must now be 'all', while inactive
 -- rows keep every historical value including the retired '3-5'/'6-8'/'9+'.
-ALTER TABLE quiz_question DROP CONSTRAINT IF EXISTS quiz_question_age_band_check;
-ALTER TABLE riddle_question DROP CONSTRAINT IF EXISTS riddle_question_age_band_check;
+-- SKIPPED ENTIRELY once age_band is gone, because the NEXT migration drops it.
+--
+-- In a clean run this is harmless — 20260804000000 creates the column, this
+-- collapses its values, 20260814030000 removes it. The order works.
+--
+-- What broke on the dev box (2026-08-14) was the other order: the whole set was
+-- applied by hand, then `prisma migrate deploy` replayed the files on boot. This
+-- migration then referenced a column the later one had already dropped, failed,
+-- and was recorded as failed — which stops Prisma applying anything else and
+-- crash-loops the API on start (P3009).
+--
+-- Guarding on the column is what makes the file safe in both orders. A migration
+-- that has genuinely already happened should be a no-op, not an error.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'quiz_question' AND column_name = 'age_band'
+  ) THEN
+    RAISE NOTICE 'age_band already dropped; collapse migration is a no-op';
+    RETURN;
+  END IF;
 
-UPDATE quiz_question SET age_band = 'all', update_date = now() WHERE active = true AND age_band <> 'all';
+  -- The CHECK constraint moves with the data. It exists to stop content landing
+  -- in a bank nothing is served from, which is exactly what an active per-age row
+  -- becomes after this collapse — so ACTIVE rows must now be 'all', while
+  -- inactive rows keep every historical value including '3-5'/'6-8'/'9+'.
+  EXECUTE 'ALTER TABLE quiz_question DROP CONSTRAINT IF EXISTS quiz_question_age_band_check';
+  EXECUTE 'ALTER TABLE riddle_question DROP CONSTRAINT IF EXISTS riddle_question_age_band_check';
 
--- Riddler collapses too. Its bank is column-identical by design and it plays the
--- same game against different content, so leaving it per-age would mean the two
--- characters silently disagree about what a band means.
-UPDATE riddle_question SET age_band = 'all', update_date = now() WHERE active = true AND age_band <> 'all';
+  EXECUTE $sql$UPDATE quiz_question SET age_band = 'all', update_date = now() WHERE active = true AND age_band <> 'all'$sql$;
 
-ALTER TABLE quiz_question ADD CONSTRAINT quiz_question_age_band_check CHECK (
-  age_band = 'all'
-  OR (NOT active AND age_band IN ('3','4','5','6','7','8','9','10','3-5','6-8','9+'))
-);
-ALTER TABLE riddle_question ADD CONSTRAINT riddle_question_age_band_check CHECK (
-  age_band = 'all'
-  OR (NOT active AND age_band IN ('3','4','5','6','7','8','9','10','3-5','6-8','9+'))
-);
+  -- Riddler collapses too. Its bank is column-identical by design and it plays
+  -- the same game against different content, so leaving it per-age would mean the
+  -- two characters silently disagree about what a band means.
+  EXECUTE $sql$UPDATE riddle_question SET age_band = 'all', update_date = now() WHERE active = true AND age_band <> 'all'$sql$;
+
+  EXECUTE $sql$ALTER TABLE quiz_question ADD CONSTRAINT quiz_question_age_band_check CHECK (
+    age_band = 'all'
+    OR (NOT active AND age_band IN ('3','4','5','6','7','8','9','10','3-5','6-8','9+'))
+  )$sql$;
+  EXECUTE $sql$ALTER TABLE riddle_question ADD CONSTRAINT riddle_question_age_band_check CHECK (
+    age_band = 'all'
+    OR (NOT active AND age_band IN ('3','4','5','6','7','8','9','10','3-5','6-8','9+'))
+  )$sql$;
+END $$;
 
 -- kid_learning_progress is NOT rewritten.
 --
