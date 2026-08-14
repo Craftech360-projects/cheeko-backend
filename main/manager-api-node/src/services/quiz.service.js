@@ -14,13 +14,12 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
-const { ageBandFromBirthDate, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
+const { WIRE_AGE_BAND, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
 const { resolveBank, clearedResultsFor, DEFAULT_BANK } = require('./banks');
 const { spokenAnswerMatches } = require('./answer-normalise');
 
-// Used when there is no device row, no kid, or no birth date. Still the middle
-// of the authored range, now that a band is a single age (see quiz.logic).
-const DEFAULT_AGE_BAND = '6';
+// One bank for everyone (ADR-0009, ticket 013). The age_band column is gone; the
+// range is carried by the Doors, not by separate content per age.
 const DEFAULT_LANGUAGE = 'en';
 // The Daily Ten: how many scored questions make a day complete.
 const DAILY_QUESTION_TARGET = 10;
@@ -54,11 +53,10 @@ const resolveDeviceContext = async (deviceMac) => {
     })
     : null;
 
-  const ageBand = ageBandFromBirthDate(kid?.birth_date ?? null, new Date());
-
   return {
-    ageBand: ageBand || DEFAULT_AGE_BAND,
-    ageBandDefaulted: ageBand === null,
+    // Still reported: the parent app distinguishes "no child profile" from a
+    // resolved one. It no longer selects any content.
+    profileMissing: !kid?.birth_date,
     language: (kid?.language || DEFAULT_LANGUAGE).toLowerCase(),
     // Progress is attributed to the child, not the device, so a sibling
     // inheriting a toy does not inherit their progress.
@@ -89,9 +87,9 @@ const answerScope = (context) => (
  * English when the band has no content in that language.
  * @returns {Promise<{bank: Array, language: string}>}
  */
-const loadBank = async (tables, ageBand, language) => {
+const loadBank = async (tables, language) => {
   const query = (lang) => tables.questions.findMany({
-    where: { age_band: ageBand, language: lang, active: true },
+    where: { language: lang, active: true },
     orderBy: [{ level: 'asc' }, { id: 'asc' }]
   });
 
@@ -249,7 +247,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
   const scope = answerScope(context);
-  const { bank, language } = await loadBank(tables, context.ageBand, context.language);
+  const { bank, language } = await loadBank(tables, context.language);
   const clearedIds = await loadClearedIds(tables, scope, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
@@ -293,7 +291,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const frontierWarning = level !== null && !replay && maxLevel - level < FRONTIER_WARN_LEVELS;
   if (frontierWarning || replay) {
     logger.warn(
-      `[${tables.label}] device ${deviceMac} at the authored frontier: level=${level} max_level=${maxLevel} band=${context.ageBand} replay=${replay}`
+      `[${tables.label}] device ${deviceMac} at the authored frontier: level=${level} max_level=${maxLevel} replay=${replay}`
     );
   }
 
@@ -318,8 +316,9 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     || levelCompletedToday(bank, clearedIds, todayRows.map((r) => String(r.question_id)));
 
   return {
-    age_band: context.ageBand,
-    age_band_defaulted: context.ageBandDefaulted,
+    // Frozen wire fields (ticket 005): constant now that the bank is shared.
+    age_band: WIRE_AGE_BAND,
+    age_band_defaulted: context.profileMissing,
     language,
     level,
     replay,
@@ -528,11 +527,11 @@ const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
 
   const answered = await tables.questions.findUnique({
     where: { id: answeredQuestionId },
-    select: { age_band: true, level: true, language: true }
+    select: { level: true, language: true }
   });
   if (!answered) return;
 
-  const { bank } = await loadBank(tables, answered.age_band, context.language);
+  const { bank } = await loadBank(tables, context.language);
   const levelQuestions = bank.filter((q) => q.level === answered.level);
   if (!levelQuestions.length) return;
 
@@ -552,7 +551,10 @@ const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
   // The subject is per-bank. The unique key is (kid, subject, topic) and topic
   // is only "<band> level <n>", so a shared subject would make riddle level 1
   // overwrite the child's quiz level 1 achievement.
-  const topic = `${answered.age_band} level ${answered.level}`;
+  // Topic strings written from here on read "all level N". Older rows keep their
+  // per-age topic, so a child's history shows a seam at the cutover rather than
+  // achievements silently restated to match a later decision.
+  const topic = `${WIRE_AGE_BAND} level ${answered.level}`;
   await prisma.kid_learning_progress.upsert({
     where: {
       kid_id_subject_topic: { kid_id: context.kidId, subject: tables.subject, topic }
@@ -564,7 +566,7 @@ const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
       score: tally.correct || 0,
       completed: true,
       metadata: {
-        age_band: answered.age_band,
+        age_band: WIRE_AGE_BAND,
         level: answered.level,
         correct: tally.correct || 0,
         revealed: tally.revealed || 0,
@@ -577,7 +579,7 @@ const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
       completed: true,
       updated_at: new Date(),
       metadata: {
-        age_band: answered.age_band,
+        age_band: WIRE_AGE_BAND,
         level: answered.level,
         correct: tally.correct || 0,
         revealed: tally.revealed || 0,
@@ -612,7 +614,7 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
   const scope = answerScope(context);
-  const { bank } = await loadBank(tables, context.ageBand, context.language);
+  const { bank } = await loadBank(tables, context.language);
   const clearedIds = await loadClearedIds(tables, scope, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
@@ -639,7 +641,7 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
     : bank.filter((q) => q.level === state.currentLevel);
 
   return {
-    age_band: context.ageBand,
+    age_band: WIRE_AGE_BAND,
     current_level: state.currentLevel,
     levels_completed: countCompletedLevels(bank, clearedIds),
     level_total: levelQuestions.length,
@@ -673,7 +675,7 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
     }),
     tables.questions.findMany({
       where: { active: true },
-      select: { id: true, age_band: true, level: true, language: true }
+      select: { id: true, level: true, language: true }
     }),
     tables.answers.findMany({
       select: { device_mac: true, kid_id: true, question_id: true, result: true, answered_at: true }
@@ -698,7 +700,7 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
   // by keying the in-memory index the same way.
   const bankByBandLang = new Map();
   for (const q of bank) {
-    const key = `${q.age_band}|${q.language}`;
+    const key = q.language;
     if (!bankByBandLang.has(key)) bankByBandLang.set(key, []);
     bankByBandLang.get(key).push(q);
   }
@@ -733,12 +735,11 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
 
   return [...devices, ...unpairedKids].map((device) => {
     const kid = device.kid_id ? kidById.get(String(device.kid_id)) : null;
-    const derivedBand = ageBandFromBirthDate(kid?.birth_date ?? null, now);
-    const ageBand = derivedBand || DEFAULT_AGE_BAND;
+    const profileMissing = !kid?.birth_date;
     const language = (kid?.language || DEFAULT_LANGUAGE).toLowerCase();
 
-    const bandBank = bankByBandLang.get(`${ageBand}|${language}`)
-      || bankByBandLang.get(`${ageBand}|${DEFAULT_LANGUAGE}`)
+    const bandBank = bankByBandLang.get(language)
+      || bankByBandLang.get(DEFAULT_LANGUAGE)
       || [];
     const bandIds = new Set(bandBank.map((q) => String(q.id)));
 
@@ -767,8 +768,8 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
     return {
       device_mac: device.mac_address,
       kid_name: kid?.name ?? null,
-      age_band: ageBand,
-      age_band_defaulted: derivedBand === null,
+      age_band: WIRE_AGE_BAND,
+      age_band_defaulted: profileMissing,
       current_level: state.currentLevel,
       levels_completed: countCompletedLevels(bandBank, clearedIds),
       max_level: bandBank.length ? Math.max(...bandBank.map((q) => q.level)) : 0,

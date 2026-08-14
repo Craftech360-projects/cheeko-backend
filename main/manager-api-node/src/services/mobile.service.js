@@ -3703,7 +3703,7 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
 
         const questions = await tables.questions.findMany({
             where: { id: { in: [...new Set(scoped.map(r => r.question_id))] } },
-            select: { id: true, level: true, question_text: true, answer_text: true, age_band: true, language: true },
+            select: { id: true, level: true, question_text: true, answer_text: true, language: true },
         });
         const questionById = new Map(questions.map(q => [String(q.id), q]));
 
@@ -3720,10 +3720,11 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
             })).map(r => String(r.question_id))
         );
 
-        const bands = [...new Set(questions.map(q => q.age_band))];
+        // One shared bank since ticket 013, so the active set is scoped by
+        // language alone.
         const langs = [...new Set(questions.map(q => q.language))];
         const activeBank = await tables.questions.findMany({
-            where: { active: true, age_band: { in: bands }, language: { in: langs } },
+            where: { active: true, language: { in: langs } },
             select: { id: true, level: true },
         });
         const clearedIds = await loadQuizClearedIds(tables, scope.macAddresses, activeBank);

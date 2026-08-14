@@ -4,54 +4,17 @@
  */
 
 const {
-  ageBandFromBirthDate,
+  WIRE_AGE_BAND,
   deriveLevelState,
   countCompletedLevels
 } = require('../../src/services/quiz.logic');
 
-describe('ageBandFromBirthDate', () => {
-  const now = new Date('2026-08-04T10:00:00Z');
-
-  it('returns null for a missing birth date', () => {
-    expect(ageBandFromBirthDate(null, now)).toBeNull();
-    expect(ageBandFromBirthDate(undefined, now)).toBeNull();
-    expect(ageBandFromBirthDate('', now)).toBeNull();
-  });
-
-  it('returns null for an unparseable birth date', () => {
-    expect(ageBandFromBirthDate('not-a-date', now)).toBeNull();
-    expect(ageBandFromBirthDate(new Date('nope'), now)).toBeNull();
-  });
-
-  it('maps each age 3 to 10 to its own band', () => {
-    // Birthday already passed this year, so the age is exact.
-    const bornForAge = (age) => new Date(`${2026 - age}-01-15`);
-    for (const age of [3, 4, 5, 6, 7, 8, 9, 10]) {
-      expect(ageBandFromBirthDate(bornForAge(age), now)).toBe(String(age));
-    }
-  });
-
-  it('moves the child to the next band on their birthday, not before', () => {
-    expect(ageBandFromBirthDate(new Date('2020-08-05'), now)).toBe('5'); // 6th is tomorrow
-    expect(ageBandFromBirthDate(new Date('2020-08-04'), now)).toBe('6'); // 6th is today
-  });
-
-  it('clamps under-3s up to the youngest authored bank', () => {
-    expect(ageBandFromBirthDate(new Date('2024-01-15'), now)).toBe('3'); // age 2
-    expect(ageBandFromBirthDate(new Date('2026-01-15'), now)).toBe('3'); // age 0
-  });
-
-  it('clamps 10-and-over down to the oldest authored bank', () => {
-    expect(ageBandFromBirthDate(new Date('2014-02-01'), now)).toBe('10'); // age 12
-    expect(ageBandFromBirthDate(new Date('2005-02-01'), now)).toBe('10'); // age 21
-  });
-
-  it('clamps rather than returning null for a birth date in the future', () => {
-    expect(ageBandFromBirthDate(new Date('2030-01-01'), now)).toBe('3');
-  });
-
-  it('accepts a date string as well as a Date', () => {
-    expect(ageBandFromBirthDate('2018-06-15', now)).toBe('8');
+// ageBandFromBirthDate is gone (ticket 013). The bank is no longer partitioned by
+// age at all — the column was dropped, and the range is carried by the Doors.
+// What survives is the constant the published parent-app contract still shows.
+describe('WIRE_AGE_BAND', () => {
+  it("is the constant the frozen parent-app contract reports", () => {
+    expect(WIRE_AGE_BAND).toBe('all');
   });
 });
 

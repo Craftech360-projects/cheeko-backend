@@ -6,42 +6,10 @@
  * Spec: docs/superpowers/specs/2026-08-04-quizzy-question-bank-design.md
  */
 
-// The authored banks: one per age, clamped at both ends. A 2-year-old plays the
-// youngest content rather than nothing, and a 12-year-old plays the oldest.
-const YOUNGEST_BAND = 3;
-const OLDEST_BAND = 10;
-
-/**
- * Map a birth date to an Age Band — the child's age as a string, '3' to '10'.
- *
- * Replaced the three-band vocabulary ('3-5','6-8','9+') so every age gets its
- * own question bank; see picoclaw docs/issues/per-age-banks/000-design.md. The
- * age arithmetic is unchanged, only what it maps onto.
- *
- * Dates are read in UTC on both sides: `birth_date` is a Postgres DATE that
- * Prisma returns as UTC midnight, so UTC getters recover the authored calendar
- * day regardless of the server's timezone.
- *
- * @param {Date|string|null} birthDate
- * @param {Date} now
- * @returns {string|null} '3'..'10', or null when the birth date is missing or
- *   unparseable — the caller substitutes its own default for that case, and
- *   flags it. A nonsense-but-parseable date clamps rather than returning null.
- */
-const ageBandFromBirthDate = (birthDate, now) => {
-  if (!birthDate) return null;
-
-  const born = birthDate instanceof Date ? birthDate : new Date(birthDate);
-  if (Number.isNaN(born.getTime())) return null;
-
-  let age = now.getUTCFullYear() - born.getUTCFullYear();
-  const beforeBirthday =
-    now.getUTCMonth() < born.getUTCMonth() ||
-    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() < born.getUTCDate());
-  if (beforeBirthday) age -= 1;
-
-  return String(Math.min(OLDEST_BAND, Math.max(YOUNGEST_BAND, age)));
-};
+// The bank is no longer partitioned by age. WIRE_AGE_BAND is what the published
+// parent-app contract still shows for `age_band` (ticket 005) — a constant kept
+// on the wire so dropping the column reached no app developer.
+const WIRE_AGE_BAND = 'all';
 
 /**
  * Derive the device's Current Level: the lowest level that still has an
@@ -112,7 +80,7 @@ const levelCompletedToday = (questions, clearedIds, todayQuestionIds) => {
 };
 
 module.exports = {
-  ageBandFromBirthDate,
+  WIRE_AGE_BAND,
   deriveLevelState,
   countCompletedLevels,
   levelCompletedToday

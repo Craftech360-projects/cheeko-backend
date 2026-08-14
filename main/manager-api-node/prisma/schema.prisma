@@ -1391,7 +1391,9 @@ model device_radio_played {
 }
 
 /// Curated quiz Question Bank. Quizzy never invents scored questions; it selects
-/// from here. A Level is the set of ten questions sharing (age_band, level).
+/// from here. A Level is the set of ten questions sharing (language, level) —
+/// one shared ladder for every age since ADR-0009, with the range carried by the
+/// Doors rather than by separate content per age.
 model quiz_question {
   id                   BigInt                 @id @default(autoincrement())
   code                 String                 @unique @db.VarChar(50)
@@ -1406,7 +1408,6 @@ model quiz_question {
   /// generated for the same reason, and a locked design decision.
   distractors          Json                   @default("[]")
   category             String?                @db.VarChar(100)
-  age_band             String                 @db.VarChar(10)
   level                Int
   language             String                 @default("en") @db.VarChar(10)
   active               Boolean                @default(true)
@@ -1414,7 +1415,7 @@ model quiz_question {
   update_date          DateTime               @default(now()) @db.Timestamptz(6)
   quiz_question_answer quiz_question_answer[]
 
-  @@index([age_band, language, level], map: "idx_quiz_question_band_lang_level")
+  @@index([language, level], map: "idx_quiz_question_lang_level")
 }
 
 /// Per-device answer log. This is the ONLY quiz progress state: Cleared and
@@ -1448,7 +1449,6 @@ model riddle_question {
   teach_text             String?
   distractors            Json                     @default("[]")
   category               String?                  @db.VarChar(100)
-  age_band               String                   @db.VarChar(10)
   level                  Int
   language               String                   @default("en") @db.VarChar(10)
   active                 Boolean                  @default(true)
@@ -1456,7 +1456,7 @@ model riddle_question {
   update_date            DateTime                 @default(now()) @db.Timestamptz(6)
   riddle_question_answer riddle_question_answer[]
 
-  @@index([age_band, language, level], map: "idx_riddle_question_band_lang_level")
+  @@index([language, level], map: "idx_riddle_question_lang_level")
 }
 
 /// Per-device riddle answer log. Separate from quiz_question_answer so a riddle

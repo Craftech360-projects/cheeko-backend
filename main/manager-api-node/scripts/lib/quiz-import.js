@@ -7,10 +7,18 @@
 
 const XLSX = require('xlsx');
 
-// One bank per age, 3..10 — see picoclaw docs/issues/per-age-banks/000-design.md.
-// The retired '3-5'/'6-8'/'9+' vocabulary is deliberately absent so an old sheet
-// is rejected loudly instead of importing content nobody will ever be served.
-const AGE_BANDS = new Set(['3', '4', '5', '6', '7', '8', '9', '10']);
+// One shared bank (ADR-0009): the age range is carried by the Doors, not by
+// separate content per age.
+//
+// A per-age value 3..10 is still ACCEPTED and normalised to 'all', so a sheet
+// authored before the collapse imports and its questions are actually served.
+// Rejecting it would fail the import; keeping it as-is would file the content in
+// a bank nothing reads, which the table's CHECK constraint now forbids anyway.
+// The retired '3-5'/'6-8'/'9+' vocabulary stays absent, so a really old sheet is
+// still rejected loudly rather than silently reinterpreted.
+const SHARED_BAND = 'all';
+const PER_AGE_BANDS = ['3', '4', '5', '6', '7', '8', '9', '10'];
+const AGE_BANDS = new Set([SHARED_BAND, ...PER_AGE_BANDS]);
 const TRUTHY_ACTIVE = ['', 'true', '1', 'yes', 'y'];
 const FALSY_ACTIVE = ['false', '0', 'no', 'n'];
 
@@ -79,12 +87,18 @@ function parseQuizRow(row) {
     return { data: null, error: `code must be ${MAX_CODE} characters or fewer (got ${code.length})` };
   }
 
-  const ageBand = normalizeAgeBand(row.age_band);
-  if (!AGE_BANDS.has(ageBand)) {
-    return {
-      data: null,
-      error: `age_band must be one of ${[...AGE_BANDS].join(', ')} (got "${ageBand}")`,
-    };
+  // age_band is accepted for backwards compatibility and then discarded: the
+  // column is gone (ticket 013) and every question lives in one shared bank. A
+  // sheet still carrying the retired '3-5'/'6-8'/'9+' vocabulary is rejected, so
+  // a genuinely ancient sheet fails loudly rather than importing silently.
+  if (row.age_band !== undefined) {
+    const ageBand = normalizeAgeBand(row.age_band);
+    if (!AGE_BANDS.has(ageBand)) {
+      return {
+        data: null,
+        error: `age_band must be one of ${[...AGE_BANDS].join(', ')} (got "${ageBand}")`,
+      };
+    }
   }
 
   const level = Number(row.level);
@@ -154,7 +168,6 @@ function parseQuizRow(row) {
       teach_text: teachText || null,
       distractors,
       category: category || null,
-      age_band: ageBand,
       level,
       language,
       active: !FALSY_ACTIVE.includes(rawActive),
@@ -198,7 +211,7 @@ function planImport(rows) {
     // Only live questions count towards a Level: ten rows of which three are
     // inactive is a seven-question Level.
     if (data.active) {
-      const key = `${data.age_band} / ${data.language} / level ${data.level}`;
+      const key = `${data.language} / level ${data.level}`;
       levelCounts.set(key, (levelCounts.get(key) || 0) + 1);
     }
   }
@@ -210,4 +223,4 @@ function planImport(rows) {
   };
 }
 
-module.exports = { parseQuizRow, normalizeAgeBand, planImport, AGE_BANDS };
+module.exports = { parseQuizRow, normalizeAgeBand, planImport, AGE_BANDS, SHARED_BAND };

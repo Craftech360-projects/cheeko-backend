@@ -24,7 +24,6 @@ describe('parseQuizRow', () => {
       teach_text: null,
       distractors: [],
       category: 'animals',
-      age_band: '8',
       level: 1,
       language: 'en',
       active: true,
@@ -34,7 +33,6 @@ describe('parseQuizRow', () => {
   test('trims whitespace and lowercases language', () => {
     const { data } = parseQuizRow({ ...validRow, code: '  9+-L01-Q01 ', age_band: ' 9 ', language: ' EN ' });
     expect(data.code).toBe('9+-L01-Q01');
-    expect(data.age_band).toBe('9');
     expect(data.language).toBe('en');
   });
 
@@ -143,7 +141,9 @@ describe('parseQuizRow', () => {
     for (const age of [3, 4, 5, 6, 7, 8, 9, 10]) {
       const { data, error } = parseQuizRow({ ...validRow, age_band: age });
       expect(error).toBeNull();
-      expect(data.age_band).toBe(String(age));
+      // Accepted for backwards compatibility, then discarded: the column is
+      // gone and every question lives in one shared bank (ticket 013).
+      expect('age_band' in data).toBe(false);
     }
   });
 
@@ -228,14 +228,14 @@ describe('planImport', () => {
     const { ready, skipped, badLevels } = planImport(level('8', 1, 9));
     expect(ready).toHaveLength(9);
     expect(skipped).toEqual([]);
-    expect(badLevels).toEqual([['8 / en / level 1', 9]]);
+    expect(badLevels).toEqual([['en / level 1', 9]]);
   });
 
   test('inactive rows do not count towards a level', () => {
     const rows = level('8', 1, 10, (i) => (i < 3 ? { active: 'false' } : {}));
     const { ready, badLevels } = planImport(rows);
     expect(ready).toHaveLength(10);
-    expect(badLevels).toEqual([['8 / en / level 1', 7]]);
+    expect(badLevels).toEqual([['en / level 1', 7]]);
   });
 
   test('a duplicate code is skipped with its row number, not silently overwritten', () => {
@@ -252,12 +252,21 @@ describe('planImport', () => {
     const { ready, skipped, badLevels } = planImport(rows);
     expect(ready).toHaveLength(9);
     expect(skipped).toEqual(['row 4: answer_text is required']);
-    expect(badLevels).toEqual([['8 / en / level 1', 9]]);
+    expect(badLevels).toEqual([['en / level 1', 9]]);
   });
 
-  test('separate bands and languages are tallied independently', () => {
-    const rows = [...level('8', 1, 10), ...level('4', 1, 10)];
+  test('languages are tallied independently', () => {
+    // Bands no longer partition anything (ticket 013), so only language does.
+    const rows = [...level('8', 1, 10), ...level('4', 1, 10, () => ({ language: 'hi' }))];
     expect(planImport(rows).badLevels).toEqual([]);
+  });
+
+  test('two former bands at the same level are now one over-full level', () => {
+    // Previously legal — ten for band 8 and ten for band 4 were separate Levels.
+    // With one shared bank that is twenty questions in Level 1, which is an
+    // authoring mistake worth failing on here rather than in a child's session.
+    const rows = [...level('8', 1, 10), ...level('4', 1, 10)];
+    expect(planImport(rows).badLevels).toEqual([['en / level 1', 20]]);
   });
 
   test('an empty sheet plans nothing', () => {
