@@ -796,6 +796,7 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       || bankByBandLang.get(DEFAULT_LANGUAGE)
       || [];
     const bandIds = new Set(bandBank.map((q) => String(q.id)));
+    const levelByQuestionId = new Map(bandBank.map((q) => [String(q.id), q.level]));
 
     const deviceAnswers = (kid
       ? answersByKid.get(String(kid.id))
@@ -827,6 +828,27 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       current_level: state.currentLevel,
       levels_completed: countCompletedLevels(bandBank, clearedIds),
       max_level: bandBank.length ? Math.max(...bandBank.map((q) => q.level)) : 0,
+      // How far into the CURRENT level the device is. Additive, and the one thing
+      // the mastery flip made invisible: after 008 a `revealed` answer no longer
+      // clears, so "answered ten today" and "cleared the level" came apart. Only
+      // the per-level cleared count shows the gap.
+      level_size: state.currentLevel === null
+        ? 0
+        : bandBank.filter((q) => q.level === state.currentLevel).length,
+      level_uncleared: state.unclearedIds.length,
+      // The anti-trap input, shown rather than inferred: at ANTI_TRAP_DAY_CAP the
+      // next session advances whether or not the level was mastered. Same
+      // distinct-local-day rule as daysOnLevel — a second definition of "day"
+      // here would eventually disagree with the one that actually fires.
+      days_on_level: state.currentLevel === null ? 0 : new Set(
+        deviceAnswers
+          .filter((a) => levelByQuestionId.get(String(a.question_id)) === state.currentLevel)
+          .map((a) => {
+            const d = new Date(a.answered_at);
+            return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+          })
+      ).size,
+      anti_trap_cap: ANTI_TRAP_DAY_CAP,
       replay: state.allCleared,
       answered_today: answeredToday,
       day_complete: answeredToday >= DAILY_QUESTION_TARGET
@@ -856,15 +878,15 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
 const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
   const context = await resolveDeviceContext(deviceMac);
-  const { bank } = await loadBank(tables, context.ageBand, context.language);
+  const { bank, language } = await loadBank(tables, context.language);
   if (!bank.length) {
-    throw new ApiError(`no active questions for band ${context.ageBand}`, 400);
+    throw new ApiError(`no active questions in ${language}`, 400);
   }
 
   const levels = [...new Set(bank.map((q) => q.level))].sort((a, b) => a - b);
   if (!levels.includes(level)) {
     throw new ApiError(
-      `level ${level} does not exist in band ${context.ageBand} (have: ${levels.join(', ')})`,
+      `level ${level} does not exist in ${language} (have: ${levels.join(', ')})`,
       400
     );
   }
@@ -892,7 +914,7 @@ const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
 
   return {
     device_mac: deviceMac,
-    age_band: context.ageBand,
+    age_band: WIRE_AGE_BAND,
     level,
     deleted: deleted.count,
     cleared: created.count
@@ -900,12 +922,20 @@ const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
 };
 
 /**
- * Re-open today's Daily Ten without losing progress.
+ * Re-open today's Daily Ten without losing progress: every row for the device
+ * slides back one day, so today becomes yesterday and the whole log with it.
  *
  * Cleared and answered_today read the same rows, so DELETING today's answers
  * would also un-clear the level and drop the device back. Shifting the
- * timestamps back a day keeps every level Cleared while answered_today falls
- * to zero, which is the only way to reach the next level on the same day.
+ * timestamps keeps every level Cleared while answered_today falls to zero.
+ *
+ * WHY THE WHOLE LOG AND NOT JUST TODAY'S ROWS. This used to move only
+ * `answered_at >= startOfDay`, which re-opened the gate but silently FLATTENED
+ * the day count the anti-trap reads (`daysOnLevel`, three distinct days and the
+ * child advances). Play, reset, play, reset and both sessions land on the same
+ * backdated day: the count stays at 1 and the cap can never be reached by
+ * testing. Sliding everything keeps the gaps BETWEEN sessions intact, which is
+ * the only property that matters — one press is one simulated night.
  *
  * @param {string} deviceMac
  * @param {'quiz'|'riddle'} [bankName]
@@ -915,6 +945,15 @@ const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
   const context = await resolveDeviceContext(deviceMac);
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
+
+  const scope = answerScope(context);
+  // Nothing answered today means the gate is already open, and sliding anyway
+  // would just age the log a day for no reason — and quietly move the anti-trap
+  // further away with every idle press.
+  const today = await tables.answers.count({
+    where: { ...scope, answered_at: { gte: startOfDay } }
+  });
+  if (!today) return { device_mac: deviceMac, backdated: 0, day_already_open: true };
 
   // Two statements rather than one, because the scope is a different column
   // depending on whether the device is paired. Same rule as answerScope: a
@@ -927,19 +966,15 @@ const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
     ? await prisma.$executeRawUnsafe(
       `UPDATE ${tables.answerTable}
        SET answered_at = answered_at - INTERVAL '1 day'
-       WHERE kid_id = $1
-         AND answered_at >= $2`,
-      context.kidId,
-      startOfDay
+       WHERE kid_id = $1`,
+      context.kidId
     )
     : await prisma.$executeRawUnsafe(
       `UPDATE ${tables.answerTable}
        SET answered_at = answered_at - INTERVAL '1 day'
        WHERE kid_id IS NULL
-         AND lower(device_mac) = lower($1)
-         AND answered_at >= $2`,
-      deviceMac,
-      startOfDay
+         AND lower(device_mac) = lower($1)`,
+      deviceMac
     );
 
   return { device_mac: deviceMac, backdated: moved };

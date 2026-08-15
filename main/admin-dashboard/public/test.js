@@ -484,23 +484,30 @@ async function loadQuizProgress() {
     T('quizLevel').max = device.max_level || 1;
     if (Number(T('quizLevel').value) > (device.max_level || 1)) T('quizLevel').value = device.max_level || 1;
 
-    // Both inputs show what the device IS, not a fixed default. They used to sit
-    // at a hardcoded 5 and 1 regardless: reading "5" beside a four-year-old
-    // invites pressing Set age + wipe as a no-op and silently changing the age
-    // AND erasing progress. Skipped while focused so it cannot fight typing.
-    const setIfIdle = (id, value) => {
-      const el = T(id);
-      if (document.activeElement !== el && value != null) el.value = value;
-    };
-    // age_band is the age itself for a real child; a defaulted band means there
-    // is no birth date to reflect, so the field is left alone.
-    if (!device.age_band_defaulted) setIfIdle('quizAge', device.age_band);
-    setIfIdle('quizLevel', device.current_level ?? device.max_level);
-    const level = device.current_level === null ? 'all cleared' : `${device.current_level} / ${device.max_level}`;
+    // The picker shows what the device IS, not a fixed default. It used to sit at
+    // a hardcoded 1 regardless, which invited pressing Set level as a no-op and
+    // silently wiping the log. Skipped while focused so it cannot fight typing.
+    const el = T('quizLevel');
+    const level = device.current_level ?? device.max_level;
+    if (document.activeElement !== el && level != null) el.value = level;
+
+    // One bank now (ADR-0009), so there is no band to report. What replaced it is
+    // the per-level cleared count: after the mastery flip a question resolved
+    // `revealed` does NOT clear, so a device can answer all ten today and still
+    // be on the same level tomorrow. That gap is invisible in every other number
+    // here, and it is the thing you are usually testing.
+    const cleared = device.level_size - device.level_uncleared;
+    // days_on_level is the anti-trap countdown: at the cap the NEXT session
+    // advances regardless of mastery. Flagged when it is about to fire, because
+    // otherwise an unexplained jump to the next level reads as a bug.
+    const trapping = device.days_on_level >= device.anti_trap_cap;
     T('quizSummary').textContent =
       `${device.kid_name || 'no child profile'} · ` +
-      `band ${device.age_band}${device.age_band_defaulted ? ' (default)' : ''} · ` +
-      `level ${level} · cleared ${device.levels_completed} · ` +
+      (device.current_level === null
+        ? `all ${device.max_level} levels cleared`
+        : `level ${device.current_level}/${device.max_level} — ${cleared}/${device.level_size} cleared` +
+          ` · day ${device.days_on_level}/${device.anti_trap_cap} on level${trapping ? ' — next session advances' : ''}`) +
+      ` · levels done ${device.levels_completed} · ` +
       `today ${device.answered_today}/10${device.day_complete ? ' — day complete' : ''}` +
       `${device.replay ? ' · replay' : ''}`;
   } catch (e) {
@@ -512,8 +519,14 @@ async function quizAction(path, body, label) {
   const mac = T('testMac').value.trim();
   if (!mac) return;
   try {
-    await api('POST', path, { mac, character: T('testChar').value || '', ...body });
-    tlog(`${label} for ${mac}`, 'ok');
+    const r = await api('POST', path, { mac, character: T('testChar').value || '', ...body });
+    // Reset day reports how many rows slid back, and says so when there was
+    // nothing to re-open — pressing it on an already-open day is a no-op, not a
+    // second simulated night, and silence there would be read as the opposite.
+    const detail = r && r.backdated !== undefined
+      ? (r.day_already_open ? ' — day was already open, nothing moved' : ` — ${r.backdated} row(s) slid back a day`)
+      : '';
+    tlog(`${label} for ${mac}${detail}`, 'ok');
   } catch (e) {
     tlog(`${label} failed: ` + e.message, 'err');
   }
@@ -538,23 +551,6 @@ T('quizSetLevel').addEventListener('click', () => {
   quizAction('/quiz-set-level', { level }, `Set level ${level}`);
 });
 T('quizResetDay').addEventListener('click', () => quizAction('/quiz-reset-day', {}, 'Reset day'));
-
-// Changing the age changes which bank the child plays, so everything they had
-// answered is wiped with it — across every toy that child uses, not just this
-// one. Loud confirm: this is the only control here that touches the profile.
-T('quizSetAge').addEventListener('click', async () => {
-  const mac = T('testMac').value.trim();
-  const age = Number(T('quizAge').value);
-  if (!mac) return;
-  if (!confirm(`Set this child's age to ${age}?\n\nThis ERASES all their quiz and riddle progress on every device they use. There is no undo.`)) return;
-  try {
-    const r = await api('POST', '/kid-age', { mac, age });
-    tlog(`Age ${r.age} (band ${r.band}) · wiped ${r.answers_removed} answers across ${r.devices} device(s)`, 'ok');
-  } catch (e) {
-    tlog('Set age failed: ' + e.message, 'err');
-  }
-  loadQuizProgress();
-});
 
 // Refreshed on Start too: the panel is what tells you whether this session will
 // do what you set it up to do, and it is the last moment you can still fix it.
