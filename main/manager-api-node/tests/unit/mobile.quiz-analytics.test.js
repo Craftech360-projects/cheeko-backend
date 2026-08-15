@@ -97,14 +97,24 @@ describe('mobile quiz analytics', () => {
     expect(quiz.levels.find(l => l.level === 4).replay).toBe(false);
   });
 
-  test('revealed clears a question, so level 4 reads cleared once both are seen', async () => {
+  // Reversed by ADR-0009 (ticket 008). This test previously asserted that
+  // revealed cleared a question and that level 4 therefore read cleared. It now
+  // asserts the opposite, because the dashboard MUST report the level as still
+  // open — otherwise a parent sees "done" while the toy re-asks the question.
+  // The published API doc warns app developers about exactly this transition.
+  test('revealed no longer clears, so a revealed-only level stays open', async () => {
     const out = await mobileService.getQuizAnalytics('uid', { period: 'week', now: NOW });
     const quiz = out.banks.find(b => b.bank === 'quiz');
 
-    expect(quiz.levels.find(l => l.level === 3).cleared).toBe(true);
-    expect(quiz.levels.find(l => l.level === 4).cleared).toBe(true);
-    // Every level cleared means no level is current.
-    expect(quiz.current_level).toBeNull();
+    // Both levels hold one question the child only ever had revealed — 302 and
+    // 402 — so both reopen. This is the blast radius ticket 002 measured, on
+    // fixture data rather than a real child: one revealed row per level is
+    // enough to pull the whole level back.
+    expect(quiz.levels.find(l => l.level === 3).cleared).toBe(false);
+    expect(quiz.levels.find(l => l.level === 4).cleared).toBe(false);
+    // Current level is the LOWEST with an uncleared question, so the child
+    // returns to 3 rather than continuing at 4.
+    expect(quiz.current_level).toBe(3);
   });
 
   test('a missing riddle table reports unavailable instead of failing the screen', async () => {

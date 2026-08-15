@@ -6,7 +6,7 @@
 
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
-const { normalizeMacAddress, transformKeysToCamel } = require('../utils/helpers');
+const { normalizeMacAddress, transformKeysToCamel, ownerKeyForDevice } = require('../utils/helpers');
 const mem0Service = require('./integrations/mem0.service');
 const { resolveSessionForCharacter, normalizeCharacterName } = require('./character-resolver');
 const { validateAgentMd } = require('../utils/agent-md-validator');
@@ -156,8 +156,24 @@ const createAgent = async (userId, data) => {
   // suffix ("Cheeko 2") and no persona. Source persona from the matching character
   // template so we never persist a null-persona, unknown-name agent, and store the
   // canonical character name so persona resolves and it is spoken correctly.
+  const canonicalName = normalizeCharacterName(data.agentName);
+
+  // The app creates one agent per toy activation and makes the name unique itself
+  // ("Cheeko 2"), which the line above then normalises away — so without this the
+  // account collects a row per activation, all called Cheeko, and a failed bind
+  // leaves each retry's row behind. One account holds fourteen. Return what it
+  // already has: an agent is a CHARACTER, and two toys running Cheeko share it.
+  // History still separates by kid and session, not by agent row.
+  const existing = await prisma.ai_agent.findFirst({
+    where: { user_id: BigInt(userId), agent_name: { equals: canonicalName, mode: 'insensitive' } },
+  });
+  if (existing) {
+    logger.info(`[createAgent] "${data.agentName}" already exists for user ${userId} as ${existing.id}; reusing`);
+    return existing;
+  }
+
   const template = await prisma.ai_agent_template.findFirst({
-    where: { agent_name: { equals: normalizeCharacterName(data.agentName), mode: 'insensitive' } },
+    where: { agent_name: { equals: canonicalName, mode: 'insensitive' } },
     select: { agent_name: true, system_prompt: true, soul: true, runtime_agent_name: true },
   });
 
@@ -252,8 +268,8 @@ const deleteAgent = async (agentId, _userId) => {
     where: { agent_id: agentId },
     data: { user_id: null, agent_id: null, kid_id: null, update_date: new Date() }
   });
-  // Delete associated chat history
-  await prisma.ai_agent_chat_history.deleteMany({ where: { agent_id: agentId } });
+  // Transcripts cascade from voice_sessions; the legacy ai_agent_chat_history
+  // table has had no new rows since 2026-06-06 and nothing reads it any more.
   // Delete plugin mappings via raw SQL (table not in Prisma schema)
   await prisma.$executeRawUnsafe(`DELETE FROM ai_agent_plugin_mapping WHERE agent_id = $1::uuid`, agentId).catch(() => {});
   // Delete the agent
@@ -436,12 +452,35 @@ const getVoiceSessionMessagesForDevice = async (macAddress, sessionId, options =
   };
 };
 
+/**
+ * Which voice sessions belong to this device's child.
+ *
+ * A paired device reads by child, so conversations follow them to a new toy. An
+ * unpaired device falls back to its own MAC AND to sessions with no child —
+ * without that second half, a toy handed to a sibling before the parent picks a
+ * child would replay the previous child's conversations back into the prompt.
+ */
+const voiceSessionScope = (device, normalizedMac) => (
+  device?.kid_id
+    ? { kid_id: device.kid_id }
+    : { mac_address: normalizedMac, kid_id: null }
+);
+
 const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }) => {
+  // The other upsert path (device.service recordTokenUsage) has always written
+  // kid_id; this one never did, which is why 451 sessions carry none.
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { id: true, kid_id: true }
+  });
+
   await prisma.voice_sessions.upsert({
     where: { session_id: sessionId },
     create: {
       session_id: sessionId,
       mac_address: normalizedMac,
+      device_id: device?.id || null,
+      kid_id: device?.kid_id || null,
       agent_id: agentId || null,
       status: 'active',
       last_event_at: eventAt,
@@ -449,6 +488,8 @@ const ensureVoiceSession = async ({ sessionId, normalizedMac, agentId, eventAt }
     },
     update: {
       mac_address: normalizedMac,
+      device_id: device?.id || null,
+      kid_id: device?.kid_id || null,
       agent_id: agentId || null,
       last_event_at: eventAt
     }
@@ -704,26 +745,27 @@ const buildRollingOverallMemory = ({ existingMemory, latestSummary }) => {
   return truncateMemoryText(lines.join('\n'));
 };
 
-const getExistingOverallMemory = async ({ normalizedMac, agentId }) => {
+/**
+ * The child's rolling conversation summary.
+ *
+ * Scoped by owner key, so it follows the child to a new toy and a sibling on a
+ * hand-me-down cannot read it. There is deliberately no fallback to
+ * `ai_agent.summary_memory`: that column belongs to the Character, is shared by
+ * every device using it, and reading it here is exactly how one child's memory
+ * reached the next. A child with no summary yet starts with none.
+ */
+const getExistingOverallMemory = async ({ normalizedMac }) => {
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const existingDocument = await prisma.device_memory_documents.findFirst({
     where: {
-      mac_address: normalizedMac,
+      owner_key: ownerKey,
       document_key: 'summary'
     },
     select: { content: true },
     orderBy: { updated_at: 'desc' }
   });
-  if (existingDocument?.content) return existingDocument.content;
 
-  if (agentId) {
-    const agent = await prisma.ai_agent.findUnique({
-      where: { id: agentId },
-      select: { summary_memory: true }
-    });
-    if (agent?.summary_memory) return agent.summary_memory;
-  }
-
-  return '';
+  return existingDocument?.content || '';
 };
 
 const saveRollingOverallMemory = async ({
@@ -731,39 +773,22 @@ const saveRollingOverallMemory = async ({
   latestSummary,
   source,
   sessionId,
-  metadata = {},
-  agentId
+  metadata = {}
 }) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
   if (latestSummary === undefined || latestSummary === null) throw new Error('latestSummary is required');
 
-  const device = agentId
-    ? null
-    : await prisma.ai_device.findUnique({
-      where: { mac_address: normalizedMac },
-      select: { agent_id: true }
-    });
-  const resolvedAgentId = agentId || device?.agent_id || null;
-  const existingMemory = await getExistingOverallMemory({ normalizedMac, agentId: resolvedAgentId });
+  const existingMemory = await getExistingOverallMemory({ normalizedMac });
   const rollingMemory = buildRollingOverallMemory({
     existingMemory,
     latestSummary
   });
-  const now = new Date();
 
-  let updatedAgent = null;
-  if (resolvedAgentId) {
-    updatedAgent = await prisma.ai_agent.update({
-      where: { id: resolvedAgentId },
-      data: {
-        summary_memory: rollingMemory,
-        updated_at: now
-      },
-      select: { id: true, agent_name: true, summary_memory: true }
-    });
-  }
-
+  // ai_agent.summary_memory is no longer written. It is the Character row, shared
+  // by every device on that character, so rolling one child's memory into it both
+  // leaked it to the next child and let two children overwrite each other. The
+  // column stays for the character CRUD and as the rollback path.
   await saveDeviceMemoryDocument({
     macAddress: normalizedMac,
     documentKey: 'summary',
@@ -779,8 +804,8 @@ const saveRollingOverallMemory = async ({
   });
 
   return {
-    agent: updatedAgent,
-    summaryMemory: updatedAgent ? updatedAgent.summary_memory : rollingMemory
+    agent: null,
+    summaryMemory: rollingMemory
   };
 };
 
@@ -1015,21 +1040,23 @@ const saveDeviceWorkspaceArtifact = async ({
 
   const device = await prisma.ai_device.findUnique({
     where: { mac_address: normalizedMac },
-    select: { id: true, agent_id: true }
+    select: { id: true, agent_id: true, kid_id: true, mac_address: true }
   });
   if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
 
   const now = new Date();
   const sha256 = crypto.createHash('sha256').update(content, 'utf8').digest('hex');
   const artifact = await prisma.device_workspace_artifacts.upsert({
     where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
+      owner_key_relative_path: {
+        owner_key: ownerKey,
         relative_path: normalizedPath
       }
     },
     create: {
       mac_address: normalizedMac,
+      owner_key: ownerKey,
       device_id: device.id,
       agent_id: device.agent_id || null,
       session_id: sessionId || null,
@@ -1058,14 +1085,29 @@ const saveDeviceWorkspaceArtifact = async ({
   return artifactToDTO(artifact);
 };
 
+/**
+ * The owner key for a device's workspace and memory rows: its child when paired,
+ * its own MAC namespace when not. Throws for an unknown device, which is what
+ * every one of these read paths wants anyway.
+ */
+const resolveOwnerKey = async (normalizedMac) => {
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalizedMac },
+    select: { kid_id: true, mac_address: true }
+  });
+  if (!device) throw new Error('Device not found');
+  return ownerKeyForDevice(device);
+};
+
 const listDeviceWorkspaceArtifacts = async (macAddress, options = {}) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const includeContent = options.includeContent === true || options.includeContent === 'true' || options.includeContent === '1';
   const limit = clampLimit(options.limit, 50, 100);
   const artifacts = await prisma.device_workspace_artifacts.findMany({
-    where: { mac_address: normalizedMac },
+    where: { owner_key: ownerKey },
     orderBy: { updated_at: 'desc' },
     take: limit,
     select: {
@@ -1092,11 +1134,12 @@ const getDeviceWorkspaceArtifact = async (macAddress, relativePath) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const normalizedPath = normalizeWorkspaceRelativePath(relativePath);
   const artifact = await prisma.device_workspace_artifacts.findUnique({
     where: {
-      mac_address_relative_path: {
-        mac_address: normalizedMac,
+      owner_key_relative_path: {
+        owner_key: ownerKey,
         relative_path: normalizedPath
       }
     }
@@ -1127,21 +1170,23 @@ const saveDeviceMemoryDocument = async ({
 
   const device = await prisma.ai_device.findUnique({
     where: { mac_address: normalizedMac },
-    select: { id: true, agent_id: true, kid_id: true }
+    select: { id: true, agent_id: true, kid_id: true, mac_address: true }
   });
   if (!device) throw new Error('Device not found');
+  const ownerKey = ownerKeyForDevice(device);
 
   const now = new Date();
   const parsedMemoryDate = parseMemoryDate(memoryDate);
   const document = await prisma.device_memory_documents.upsert({
     where: {
-      mac_address_document_key: {
-        mac_address: normalizedMac,
+      owner_key_document_key: {
+        owner_key: ownerKey,
         document_key: normalizedKey
       }
     },
     create: {
       mac_address: normalizedMac,
+      owner_key: ownerKey,
       device_id: device.id,
       agent_id: device.agent_id || null,
       kid_id: device.kid_id || null,
@@ -1180,6 +1225,7 @@ const saveDeviceMemoryDocument = async ({
         {
           document_id: document.id,
           mac_address: normalizedMac,
+          owner_key: ownerKey,
           device_id: device.id,
           agent_id: device.agent_id || null,
           kid_id: device.kid_id || null,
@@ -1199,11 +1245,12 @@ const listDeviceMemoryDocuments = async (macAddress, options = {}) => {
   const normalizedMac = normalizeMacAddress(macAddress);
   if (!normalizedMac) throw new Error('Invalid MAC address format');
 
+  const ownerKey = await resolveOwnerKey(normalizedMac);
   const limit = clampLimit(options.limit, 20, 100);
   const memoryType = options.memoryType || options.type;
   const documents = await prisma.device_memory_documents.findMany({
     where: {
-      mac_address: normalizedMac,
+      owner_key: ownerKey,
       ...(memoryType ? { memory_type: memoryType } : {})
     },
     orderBy: { updated_at: 'desc' },
@@ -1722,87 +1769,10 @@ const getMemoriesByMac = async (mac, options = {}) => {
     logger.error('Failed to get Postgres memories by MAC:', { error: error.message, mac: normalizedMac });
   }
 
-  if (!mem0Service.isAvailable()) {
-    logger.debug('Mem0 not configured, returning empty memories');
-    return { memories: [], relations: [], entities: [] };
-  }
-
-  try {
-    const result = await mem0Service.searchMemories({
-      userId: normalizedMac,
-      query: options.query,
-      limit: options.limit
-    });
-
-    return result;
-  } catch (error) {
-    logger.error('Failed to get memories by MAC:', { error: error.message, mac: normalizedMac });
-    return { memories: [], relations: [], entities: [] };
-  }
-};
-
-/**
- * Add conversation to memory for a device
- * @param {string} mac - Device MAC address
- * @param {Array} chatHistory - Array of {chatType: 1|2, content: string}
- * @param {string} [sessionId] - Session identifier
- * @returns {Promise<boolean>} True if successful
- */
-const addConversationToMemory = async (mac, chatHistory, sessionId = null) => {
-  const normalizedMac = normalizeMacAddress(mac);
-
-  if (!mem0Service.isAvailable()) {
-    logger.debug('Mem0 not configured, skipping memory storage');
-    return false;
-  }
-
-  if (!chatHistory || chatHistory.length === 0) {
-    return false;
-  }
-
-  try {
-    const result = await mem0Service.addConversation({
-      userId: normalizedMac,
-      chatHistory,
-      sessionId
-    });
-
-    return result !== null;
-  } catch (error) {
-    logger.error('Failed to add conversation to memory:', { error: error.message, mac: normalizedMac });
-    return false;
-  }
-};
-
-/**
- * Add a fact to memory for a device
- * @param {string} mac - Device MAC address
- * @param {string} fact - The fact to store
- * @returns {Promise<boolean>} True if successful
- */
-const addFactToMemory = async (mac, fact) => {
-  const normalizedMac = normalizeMacAddress(mac);
-
-  if (!mem0Service.isAvailable()) {
-    logger.debug('Mem0 not configured, skipping fact storage');
-    return false;
-  }
-
-  if (!fact) {
-    return false;
-  }
-
-  try {
-    const result = await mem0Service.addFact({
-      userId: normalizedMac,
-      fact
-    });
-
-    return result !== null;
-  } catch (error) {
-    logger.error('Failed to add fact to memory:', { error: error.message, mac: normalizedMac });
-    return false;
-  }
+  // No Mem0 fallback. It was keyed on the device MAC, so two children on one toy
+  // accumulated into a single profile and a sibling could read the previous
+  // child's facts. Postgres memory is owner-keyed and is the only source now.
+  return { memories: [], relations: [], entities: [] };
 };
 
 /**
@@ -1881,11 +1851,18 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     throw new Error('Device has no agent assigned');
   }
 
+  // The character actually running, which is not the device's default whenever a
+  // card tap or the wheel picked another one. Callers that name none keep the
+  // default, which is all any caller sent before the worker learned to say.
+  const agentId = options.agentId || device.agent_id;
+
   const recentMessagesPromise = recentLimit > 0
+    // Reached through the session, which is what carries the child. A message
+    // has no child column of its own and should not gain one.
     ? prisma.voice_session_messages.findMany({
       where: {
-        mac_address: normalizedMac,
-        agent_id: device.agent_id
+        voice_sessions: voiceSessionScope(device, normalizedMac),
+        agent_id: agentId
       },
       select: {
         id: true,
@@ -1903,8 +1880,8 @@ const getDeviceBootstrap = async (mac, options = {}) => {
   const recentSessionsPromise = recentLimit > 0
     ? prisma.voice_sessions.findMany({
       where: {
-        mac_address: normalizedMac,
-        agent_id: device.agent_id
+        ...voiceSessionScope(device, normalizedMac),
+        agent_id: agentId
       },
       select: {
         session_id: true,
@@ -1922,11 +1899,13 @@ const getDeviceBootstrap = async (mac, options = {}) => {
     : Promise.resolve([]);
 
   const sessionSummariesPromise = recentLimit > 0
+    // Summaries are the child's too, and reached the same way as messages —
+    // through the session, which is what carries the child.
     ? prisma.voice_session_summaries.findMany({
       where: {
-        mac_address: normalizedMac,
         voice_sessions: {
-          agent_id: device.agent_id
+          ...voiceSessionScope(device, normalizedMac),
+          agent_id: agentId
         }
       },
       select: {
@@ -3128,8 +3107,6 @@ module.exports = {
   getCharacterSessionByName,
   // Memory integration
   getMemoriesByMac,
-  addConversationToMemory,
-  addFactToMemory,
   getPromptWithMemories,
   getDeviceBootstrap,
   saveDeviceWorkspaceArtifact,

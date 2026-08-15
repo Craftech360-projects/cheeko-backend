@@ -23,9 +23,16 @@ function buildDispatchMetadata({ macAddress, deviceId, character, characterId = 
   const _parentRule = (childProfile && childProfile.parent_rule) ? String(childProfile.parent_rule) : null;
   logger.debug(`[PARENT-RULE] dispatch metadata for mac=${macAddress}: parent_rule ${_parentRule ? `PRESENT (${_parentRule.length} chars): "${_parentRule.slice(0, 80)}"` : 'ABSENT'}`);
 
+  // The child this device is PAIRED to, or null. The worker keys its workspace
+  // directory on it, so it must be the pairing and not childProfile.id, which
+  // the manager falls back to the owner's most recent child when there is no
+  // pairing — that would give an unpaired toy a sibling's workspace.
+  const pairedKidId = (childProfile && childProfile.pairedKidId) ? String(childProfile.pairedKidId) : null;
+
   return JSON.stringify({
     device_mac: macAddress,
     device_uuid: deviceId,
+    kid_id: pairedKidId,
     character: character || "Cheeko",
     character_id: characterId,
     language: language,

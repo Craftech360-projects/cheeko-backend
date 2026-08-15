@@ -50,7 +50,7 @@ jest.mock('../../src/config/database', () => ({
       findMany: jest.fn(),
       count: jest.fn()
     },
-    ai_agent_chat_history: {
+    voice_session_messages: {
       count: jest.fn(),
       findMany: jest.fn()
     },
@@ -89,8 +89,8 @@ describe('mobile.service parent profile compatibility', () => {
     prisma.device_games_played.count.mockResolvedValue(0);
     prisma.device_radio_played.findMany.mockResolvedValue([]);
     prisma.device_radio_played.count.mockResolvedValue(0);
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
-    prisma.ai_agent_chat_history.count.mockResolvedValue(0);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.count.mockResolvedValue(0);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
   });
@@ -285,7 +285,11 @@ describe('mobile.service parent profile compatibility', () => {
 
     expect(prisma.device_ai_interactions_daily.findMany).toHaveBeenCalledWith({
       where: {
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         date: {
           gte: new Date('2026-05-13T00:00:00.000Z'),
           lte: new Date('2026-05-13T00:00:00.000Z')
@@ -797,7 +801,11 @@ describe('mobile.service parent profile compatibility', () => {
     expect(result.gamesPlayed).toBe(2);
     expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith({
       where: {
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         event_name: 'game_start',
         server_received_at: {
           gte: new Date('2026-05-12T00:00:00.000Z'),
@@ -898,8 +906,8 @@ describe('mobile.service homepage activity details', () => {
     prisma.device_games_played.count.mockResolvedValue(0);
     prisma.device_radio_played.findMany.mockResolvedValue([]);
     prisma.device_radio_played.count.mockResolvedValue(0);
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
-    prisma.ai_agent_chat_history.count.mockResolvedValue(0);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.count.mockResolvedValue(0);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
   });
@@ -925,7 +933,11 @@ describe('mobile.service homepage activity details', () => {
 
     expect(prisma.device_analytics_event.findMany).toHaveBeenCalledWith({
       where: {
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         server_received_at: {
           gte: expectedStart,
           lte: new Date('2026-05-16T10:00:00.000Z')
@@ -984,7 +996,11 @@ describe('mobile.service homepage activity details', () => {
     const gameRowsQuery = prisma.device_games_played.findMany.mock.calls[0][0];
     expect(gameRowsQuery).toEqual(expect.objectContaining({
       where: expect.objectContaining({
+        // Unpaired device: the MAC fallback also requires no child, or a toy
+        // handed on before the parent picks one would report the previous
+        // child's totals.
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
+        kid_id: null,
         played_at: expect.objectContaining({
           gte: expect.any(Date),
           lte: new Date('2026-05-16T10:00:00.000Z')
@@ -2292,7 +2308,7 @@ describe('mobile.service homepage recommendations', () => {
     ]);
     prisma.analytics_media_playback.findMany.mockResolvedValue([]);
     prisma.analytics_game_sessions.findMany.mockResolvedValue([]);
-    prisma.ai_agent_chat_history.findMany.mockResolvedValue([]);
+    prisma.voice_session_messages.findMany.mockResolvedValue([]);
     prisma.rfid_card_tap_log.findMany.mockResolvedValue([]);
     prisma.content_library.findMany.mockResolvedValue([]);
     prisma.rfid_content_pack.findMany.mockResolvedValue([]);

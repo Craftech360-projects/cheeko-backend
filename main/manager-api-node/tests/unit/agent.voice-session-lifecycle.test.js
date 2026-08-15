@@ -164,8 +164,8 @@ describe('agent voice session lifecycle', () => {
     }));
     expect(prisma.device_memory_documents.upsert).toHaveBeenNthCalledWith(1, expect.objectContaining({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'summary'
         }
       },
@@ -181,16 +181,15 @@ describe('agent voice session lifecycle', () => {
     );
     expect(prisma.device_memory_documents.upsert.mock.calls[0][0].create.content).toContain('elephants');
     expect(prisma.device_memory_documents.upsert.mock.calls[0][0].create.content).not.toContain('Recent durable context:');
-    expect(prisma.ai_agent.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'agent-id' },
-      data: expect.objectContaining({
-        summary_memory: expect.stringContaining('Overall memory:')
-      })
-    }));
+    // The rolling summary lives on the child, not on the Character row that every
+    // device using that character shares.
+    expect(prisma.ai_agent.update).not.toHaveBeenCalled();
+    expect(prisma.device_memory_documents.upsert.mock.calls[0][0].create.content)
+      .toContain('Overall memory:');
     expect(prisma.device_memory_documents.upsert).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'session:session-1'
         }
       },
@@ -263,16 +262,15 @@ describe('agent voice session lifecycle', () => {
         model: 'test-model'
       })
     });
-    expect(prisma.ai_agent.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'agent-id' },
-      data: expect.objectContaining({
-        summary_memory: 'Overall memory:\n- Rahul is 10 years old.\n- Rahul enjoys short stories and drawing with Cheeko.\n- Recent recurring topics include robot stories.'
-      })
-    }));
+    // Rolling memory belongs to the child, not to the Character row that every
+    // device on that character shares.
+    expect(prisma.ai_agent.update).not.toHaveBeenCalled();
+    expect(prisma.device_memory_documents.upsert.mock.calls[0][0].create.content)
+      .toBe('Overall memory:\n- Rahul is 10 years old.\n- Rahul enjoys short stories and drawing with Cheeko.\n- Recent recurring topics include robot stories.');
     expect(prisma.device_memory_documents.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        mac_address_document_key: {
-          mac_address: 'AA:BB:CC:DD:EE:FF',
+        owner_key_document_key: {
+          owner_key: 'kid:77',
           document_key: 'summary'
         }
       },
@@ -321,13 +319,10 @@ describe('agent voice session lifecycle', () => {
       'Rahul asked for an elephant song.'
     );
 
-    expect(prisma.ai_agent.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'agent-id' },
-      data: expect.objectContaining({
-        summary_memory: 'Overall memory:\n- Rahul is 10 years old.\n- Rahul enjoys songs and drawing with Cheeko.\n- Recent recurring topics include elephants.'
-      })
-    }));
-    expect(prisma.ai_agent.update.mock.calls[0][0].data.summary_memory).not.toBe(
+    expect(prisma.ai_agent.update).not.toHaveBeenCalled();
+    expect(prisma.device_memory_documents.upsert.mock.calls[0][0].create.content)
+      .toBe('Overall memory:\n- Rahul is 10 years old.\n- Rahul enjoys songs and drawing with Cheeko.\n- Recent recurring topics include elephants.');
+    expect(prisma.device_memory_documents.upsert.mock.calls[0][0].create.content).not.toBe(
       'Rahul asked for an elephant song.'
     );
     expect(result.summaryMemory).toBe(

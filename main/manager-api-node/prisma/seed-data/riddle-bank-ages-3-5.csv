@@ -1,0 +1,91 @@
+code,age_band,level,category,language,question_text,answer_text,accepted_answers,active
+RID-3-5-L01-Q01-a3,3,1,food,en,I am yellow and long and monkeys love to eat me. What am I?,a banana,banana | bananas,true
+RID-3-5-L01-Q02-a3,3,1,animals,en,I say moo and I give you milk. What am I?,a cow,cow | the cow | cows,true
+RID-3-5-L01-Q03-a3,3,1,nature,en,I am round and I am in the sky and I am very hot. What am I?,the sun,sun | sunlight,true
+RID-3-5-L01-Q04-a3,3,1,animals,en,I have four legs and I say meow. What am I?,a cat,cat | kitty | kitten,true
+RID-3-5-L01-Q05-a3,3,1,food,en,I am white and you drink me every day. What am I?,milk,white milk | doodh,true
+RID-3-5-L01-Q06-a3,3,1,food,en,I am red and round and you put me in a salad. What am I?,a tomato,tomato | tomatoes,true
+RID-3-5-L01-Q07-a3,3,1,animals,en,I have a long trunk and two big ears. What am I?,an elephant,elephant | elephants | hathi,true
+RID-3-5-L01-Q08-a3,3,1,everyday,en,You wear me on your feet when you go outside. What am I?,shoes,shoe | slippers | chappals,true
+RID-3-5-L01-Q09-a3,3,1,animals,en,I have wings and I sing in the morning. What am I?,a bird,bird | birds | chidiya,true
+RID-3-5-L01-Q10-a3,3,1,nature,en,I am cold and white and I melt in your hand. What am I?,ice,ice cube | snow,true
+RID-3-5-L02-Q01-a3,3,2,food,en,I am white inside and hens lay me. What am I?,an egg,egg | eggs | anda,true
+RID-3-5-L02-Q02-a3,3,2,nature,en,I am green and I grow on the ground and cows eat me. What am I?,grass,green grass,true
+RID-3-5-L02-Q03-a3,3,2,food,en,I am orange and rabbits love to eat me. What am I?,a carrot,carrot | carrots | gajar,true
+RID-3-5-L02-Q04-a3,3,2,everyday,en,I have many pages and you read me. What am I?,a book,book | books | story book,true
+RID-3-5-L02-Q05-a3,3,2,everyday,en,I have two wheels and you ride me. What am I?,a cycle,cycle | bicycle | bike,true
+RID-3-5-L02-Q06-a3,3,2,nature,en,I am dark at night and I am full of stars. What am I?,the sky,sky | night sky,true
+RID-3-5-L02-Q07-a3,3,2,everyday,en,I am soft and you rest your head on me. What am I?,a pillow,pillow | pillows | takiya,true
+RID-3-5-L02-Q08-a3,3,2,food,en,I am sweet and cold and I melt very fast. What am I?,ice cream,icecream | ice creams,true
+RID-3-5-L02-Q09-a3,3,2,animals,en,I carry my house on my back and I move very slowly. What am I?,a snail,snail | tortoise | turtle,true
+RID-3-5-L02-Q10-a3,3,2,everyday,en,You switch me on and I give you light. What am I?,a light,light | bulb | lamp | tube light,true
+RID-3-5-L03-Q01-a3,3,3,nature,en,I am tall and green and I give you shade. What am I?,a tree,tree | trees,true
+RID-3-5-L03-Q02-a3,3,3,animals,en,I have a tail and I bark and I am your best friend. What am I?,a dog,dog | dogs | puppy,true
+RID-3-5-L03-Q03-a3,3,3,everyday,en,I am round and you kick me and I bounce. What am I?,a ball,ball | balls | football,true
+RID-3-5-L03-Q04-a3,3,3,nature,en,I come in the sky after the rain and I have many colours. What am I?,a rainbow,rainbow | rainbows,true
+RID-3-5-L03-Q05-a3,3,3,nature,en,I have petals and I smell very sweet. What am I?,a flower,flower | flowers | rose | phool,true
+RID-3-5-L03-Q06-a3,3,3,everyday,en,I take you to school and I have many seats. What am I?,a bus,bus | school bus | buses,true
+RID-3-5-L03-Q07-a3,3,3,nature,en,I am white and fluffy and I float in the sky. What am I?,a cloud,cloud | clouds,true
+RID-3-5-L03-Q08-a3,3,3,animals,en,I live in the sea and I have a hard shell and I walk sideways. What am I?,a crab,crab | crabs,true
+RID-3-5-L03-Q09-a3,3,3,animals,en,I am tiny and black and I live with many friends in a line. What am I?,an ant,ant | ants | cheenti,true
+RID-3-5-L03-Q10-a3,3,3,everyday,en,I am full of water and you sit in me to get clean. What am I?,a bathtub,bathtub | bucket | tub,true
+RID-3-5-L01-Q01-a4,4,1,animals,en,I have no legs at all but I can swim all day. What am I?,a fish,fish | fishes,true
+RID-3-5-L01-Q02-a4,4,1,nature,en,I am full of water and boats float on top of me. What am I?,the sea,sea | ocean | river | lake,true
+RID-3-5-L01-Q03-a4,4,1,everyday,en,I go up and I come down but I never leave my place. What am I?,a swing,swing | seesaw | jhula,true
+RID-3-5-L01-Q04-a4,4,1,food,en,I am brown outside and white inside and I grow high on a tree. What am I?,a coconut,coconut | coconuts | nariyal,true
+RID-3-5-L01-Q05-a4,4,1,thinking,en,I belong to you but your friends say me more than you do. What am I?,your name,name | my name | the name,true
+RID-3-5-L01-Q06-a4,4,1,thinking,en,I follow you everywhere in the sunshine but I disappear at night. What am I?,your shadow,shadow | my shadow | the shadow,true
+RID-3-5-L01-Q07-a4,4,1,everyday,en,I have a face and two hands and I tell you the time. What am I?,a clock,clock | watch | clocks,true
+RID-3-5-L01-Q08-a4,4,1,food,en,I am striped like a zebra on the outside but I am a sweet red fruit. What am I?,a watermelon,watermelon | water melon | tarbooj,true
+RID-3-5-L01-Q09-a4,4,1,everyday,en,I have a neck but no head and I hold your drink. What am I?,a bottle,bottle | bottles | water bottle,true
+RID-3-5-L01-Q10-a4,4,1,animals,en,I have very many legs and I live under stones in the garden. What am I?,a centipede,centipede | millipede | centipedes,true
+RID-3-5-L02-Q01-a4,4,2,everyday,en,I have leaves but I am not a tree and you turn me to read. What am I?,a book,book | books | notebook,true
+RID-3-5-L02-Q02-a4,4,2,thinking,en,The more you take away from me the bigger I get. What am I?,a hole,hole | holes | a pit,true
+RID-3-5-L02-Q03-a4,4,2,everyday,en,I am full of holes but I can still hold water. What am I?,a sponge,sponge | sponges,true
+RID-3-5-L02-Q04-a4,4,2,nature,en,I run all day long but I never get tired and I never walk. What am I?,a river,river | rivers | stream,true
+RID-3-5-L02-Q05-a4,4,2,school,en,I am clean and dark and your teacher writes on me with chalk. What am I?,a blackboard,blackboard | board | black board,true
+RID-3-5-L02-Q06-a4,4,2,everyday,en,I have four legs but I cannot walk and you eat your food on me. What am I?,a table,table | tables | dining table,true
+RID-3-5-L02-Q07-a4,4,2,everyday,en,I open and I close all day and you walk right through me. What am I?,a door,door | doors | gate,true
+RID-3-5-L02-Q08-a4,4,2,thinking,en,I am as light as a feather but nobody can hold me for very long. What am I?,your breath,breath | breathing | air,true
+RID-3-5-L02-Q09-a4,4,2,everyday,en,I have many keys but I cannot open a single door. What am I?,a piano,piano | keyboard | harmonium,true
+RID-3-5-L02-Q10-a4,4,2,nature,en,I have a face that is bright at night and I change my shape every week. What am I?,the moon,moon | chand,true
+RID-3-5-L03-Q01-a4,4,3,everyday,en,I am made of wood and I have many steps and I help you reach high. What am I?,a ladder,ladder | ladders | staircase,true
+RID-3-5-L03-Q02-a4,4,3,everyday,en,I have teeth but I cannot bite and I make your hair neat. What am I?,a comb,comb | combs | kangha,true
+RID-3-5-L03-Q03-a4,4,3,everyday,en,I have one eye but I cannot see and thread passes through me. What am I?,a needle,needle | needles | sui,true
+RID-3-5-L03-Q04-a4,4,3,everyday,en,I go all the way around your house but I never come inside. What am I?,a wall,wall | walls | fence | compound wall,true
+RID-3-5-L03-Q05-a4,4,3,school,en,I am thin and wooden and you write with me and I get shorter every day. What am I?,a pencil,pencil | pencils,true
+RID-3-5-L03-Q06-a4,4,3,food,en,The more you cut me the more I make you cry. What am I?,an onion,onion | onions | pyaaz,true
+RID-3-5-L03-Q07-a4,4,3,everyday,en,I ring when somebody wants to talk to you far away. What am I?,a phone,phone | telephone | mobile | cellphone,true
+RID-3-5-L03-Q08-a4,4,3,nature,en,I fly without any wings and I cry without any eyes. What am I?,a cloud,cloud | clouds,true
+RID-3-5-L03-Q09-a4,4,3,everyday,en,I get wet while I am drying you. What am I?,a towel,towel | towels,true
+RID-3-5-L03-Q10-a4,4,3,thinking,en,I have a head and a tail but I have no body at all. What am I?,a coin,coin | coins | rupee coin,true
+RID-3-5-L01-Q01-a5,5,1,thinking,en,I have cities but no houses and rivers but no water. What am I?,a map,map | maps | atlas,true
+RID-3-5-L01-Q02-a5,5,1,thinking,en,What has a face and two hands but no arms and no legs?,a clock,clock | watch | clocks,true
+RID-3-5-L01-Q03-a5,5,1,thinking,en,I am always coming tomorrow but I never actually arrive. What am I?,tomorrow,the next day | future,true
+RID-3-5-L01-Q04-a5,5,1,animals,en,I am the only bird that can copy the way you talk. What am I?,a parrot,parrot | parrots | tota,true
+RID-3-5-L01-Q05-a5,5,1,thinking,en,I have branches but no fruit and no trunk and no leaves. What am I?,a bank,bank | banks,true
+RID-3-5-L01-Q06-a5,5,1,thinking,en,I only go up and I can never come down. What am I?,your age,age | my age | how old you are,true
+RID-3-5-L01-Q07-a5,5,1,everyday,en,I have a neck and a body but no arms and I hold your flowers. What am I?,a vase,vase | flower vase | flower pot,true
+RID-3-5-L01-Q08-a5,5,1,nature,en,I have many rings but I am not jewellery and you count me to know how old a tree is. What am I?,tree rings,rings | growth rings | tree trunk,true
+RID-3-5-L01-Q09-a5,5,1,thinking,en,What goes up whenever the rain comes down?,an umbrella,umbrella | umbrellas | chhata,true
+RID-3-5-L01-Q10-a5,5,1,thinking,en,I am so delicate that even saying my name will break me. What am I?,silence,quiet | silent,true
+RID-3-5-L02-Q01-a5,5,2,thinking,en,I can travel all around the world while staying in one corner. What am I?,a stamp,stamp | postage stamp | stamps,true
+RID-3-5-L02-Q02-a5,5,2,nature,en,I have a bank but no money and a bed but I never sleep. What am I?,a river,river | rivers,true
+RID-3-5-L02-Q03-a5,5,2,thinking,en,I am tall when I am young and short when I am old. What am I?,a candle,candle | candles | a pencil,true
+RID-3-5-L02-Q04-a5,5,2,thinking,en,What can you catch very easily but never ever throw?,a cold,cold | a cough | cough | fever,true
+RID-3-5-L02-Q05-a5,5,2,thinking,en,I am a room that you can never walk into. What am I?,a mushroom,mushroom | mushrooms,true
+RID-3-5-L02-Q06-a5,5,2,science,en,I am not alive but I grow and I have no lungs but I need air. What am I?,fire,a fire | flame | aag,true
+RID-3-5-L02-Q07-a5,5,2,everyday,en,I have a neck but no head and two arms but no hands. What am I?,a shirt,shirt | shirts | sweater,true
+RID-3-5-L02-Q08-a5,5,2,animals,en,I live in the ocean but I am not a fish and I have five arms. What am I?,a starfish,starfish | star fish | sea star,true
+RID-3-5-L02-Q09-a5,5,2,science,en,I can fill a whole room but I take up no space at all. What am I?,light,sound | air,true
+RID-3-5-L02-Q10-a5,5,2,thinking,en,What can you break very easily without ever touching it?,a promise,promise | promises | silence | a rule,true
+RID-3-5-L03-Q01-a5,5,3,thinking,en,I have a thumb and four fingers but I am not alive. What am I?,a glove,glove | gloves | dastana,true
+RID-3-5-L03-Q02-a5,5,3,science,en,What comes down from the sky but never goes back up?,rain,the rain | rainfall | raindrops,true
+RID-3-5-L03-Q03-a5,5,3,thinking,en,What kind of coat can only be put on when it is wet?,a coat of paint,paint | painting | a paint coat,true
+RID-3-5-L03-Q04-a5,5,3,thinking,en,I am an odd number. Take away one letter from my name and I become even. What am I?,seven,7 | the number seven,true
+RID-3-5-L03-Q05-a5,5,3,thinking,en,I have keys and a screen and you press me to write on a computer. What am I?,a keyboard,keyboard | keyboards | keypad,true
+RID-3-5-L03-Q06-a5,5,3,science,en,I follow you all day but you can never step on my head. What am I?,your shadow,shadow | the shadow,true
+RID-3-5-L03-Q07-a5,5,3,thinking,en,The more of me you take the more of me you leave behind. What am I?,footsteps,footprints | steps | my footsteps | footstep,true
+RID-3-5-L03-Q08-a5,5,3,science,en,I am black when you buy me and red when you use me and grey when you throw me away. What am I?,coal,charcoal | coals | koyla,true
+RID-3-5-L03-Q09-a5,5,3,thinking,en,What has one head and one foot and four legs?,a bed,bed | beds | a cot,true
+RID-3-5-L03-Q10-a5,5,3,science,en,I am found in every home and I turn round and round to keep you cool. What am I?,a fan,fan | fans | ceiling fan,true

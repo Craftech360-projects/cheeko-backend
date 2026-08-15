@@ -153,18 +153,19 @@ describe('agent bootstrap fallback', () => {
     expect(prisma.ai_device.findUnique).toHaveBeenCalledWith(expect.objectContaining({
       where: { mac_address: 'AA:BB:CC:DD:EE:FF' }
     }));
+    // Everything the worker replays into the prompt is scoped to the child, not
+    // to the toy: messages and summaries through their session, sessions directly.
     expect(prisma.voice_session_messages.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-id' },
+      where: { voice_sessions: { kid_id: 77n }, agent_id: 'agent-id' },
       take: 2
     }));
     expect(prisma.voice_sessions.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-id' },
+      where: { kid_id: 77n, agent_id: 'agent-id' },
       take: 2
     }));
     expect(prisma.voice_session_summaries.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: {
-        mac_address: 'AA:BB:CC:DD:EE:FF',
-        voice_sessions: { agent_id: 'agent-id' }
+        voice_sessions: { kid_id: 77n, agent_id: 'agent-id' }
       },
       take: 2
     }));

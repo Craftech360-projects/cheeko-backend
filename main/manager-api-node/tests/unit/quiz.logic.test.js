@@ -4,55 +4,17 @@
  */
 
 const {
-  ageBandFromBirthDate,
+  WIRE_AGE_BAND,
   deriveLevelState,
   countCompletedLevels
 } = require('../../src/services/quiz.logic');
 
-describe('ageBandFromBirthDate', () => {
-  const now = new Date('2026-08-04T10:00:00Z');
-
-  it('returns null for a missing birth date', () => {
-    expect(ageBandFromBirthDate(null, now)).toBeNull();
-    expect(ageBandFromBirthDate(undefined, now)).toBeNull();
-    expect(ageBandFromBirthDate('', now)).toBeNull();
-  });
-
-  it('returns null for an unparseable birth date', () => {
-    expect(ageBandFromBirthDate('not-a-date', now)).toBeNull();
-    expect(ageBandFromBirthDate(new Date('nope'), now)).toBeNull();
-  });
-
-  it('maps age 4 to 3-5', () => {
-    expect(ageBandFromBirthDate(new Date('2022-01-15'), now)).toBe('3-5');
-  });
-
-  it('maps a child whose 6th birthday is tomorrow to 3-5 (still 5)', () => {
-    expect(ageBandFromBirthDate(new Date('2020-08-05'), now)).toBe('3-5');
-  });
-
-  it('maps a child whose 6th birthday is today to 6-8', () => {
-    expect(ageBandFromBirthDate(new Date('2020-08-04'), now)).toBe('6-8');
-  });
-
-  it('maps age 8 to 6-8', () => {
-    expect(ageBandFromBirthDate(new Date('2018-06-15'), now)).toBe('6-8');
-  });
-
-  it('maps a child whose 9th birthday is tomorrow to 6-8 (still 8)', () => {
-    expect(ageBandFromBirthDate(new Date('2017-08-05'), now)).toBe('6-8');
-  });
-
-  it('maps a child whose 9th birthday is today to 9+', () => {
-    expect(ageBandFromBirthDate(new Date('2017-08-04'), now)).toBe('9+');
-  });
-
-  it('maps age 12 to 9+', () => {
-    expect(ageBandFromBirthDate(new Date('2014-02-01'), now)).toBe('9+');
-  });
-
-  it('accepts a date string as well as a Date', () => {
-    expect(ageBandFromBirthDate('2018-06-15', now)).toBe('6-8');
+// ageBandFromBirthDate is gone (ticket 013). The bank is no longer partitioned by
+// age at all — the column was dropped, and the range is carried by the Doors.
+// What survives is the constant the published parent-app contract still shows.
+describe('WIRE_AGE_BAND', () => {
+  it("is the constant the frozen parent-app contract reports", () => {
+    expect(WIRE_AGE_BAND).toBe('all');
   });
 });
 

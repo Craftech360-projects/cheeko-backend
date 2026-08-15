@@ -12,6 +12,7 @@ const uploadService = require('../services/upload.service');
 const customCardService = require('../services/customCard.service');
 const { success, badRequest } = require('../utils/response');
 const logger = require('../utils/logger');
+const { prisma } = require('../config/database');
 
 const kidAvatarUpload = multer({
     storage: multer.memoryStorage(),
@@ -167,6 +168,14 @@ router.get('/progress/quiz', asyncHandler(async (req, res) => {
     success(res, analytics);
 }));
 
+// The home-screen quiz card. Note the path: the shipped app calls
+// /quiz/progress, not /progress/quiz, and swallows a 404 as "no data" — so
+// until this route existed the card silently rendered its empty state.
+router.get('/quiz/progress', asyncHandler(async (req, res) => {
+    const progress = await mobileService.getQuizCharacterProgress(req.firebaseUser.uid, req.query);
+    success(res, progress);
+}));
+
 router.get('/progress/trend', asyncHandler(async (req, res) => {
     const trend = await mobileService.getProgressTrend(req.firebaseUser.uid, req.query);
     success(res, trend);
@@ -211,8 +220,10 @@ router.put('/user-state/onboarding-completed', asyncHandler(async (req, res) => 
 
 // ─── Kids ───────────────────────────────────────────────────────────────────
 
+// ?mac=<address> narrows this to the child paired to that toy, for screens
+// opened from a device. Without it, every child, active-toy first.
 router.get('/kids', asyncHandler(async (req, res) => {
-    const kids = await mobileService.getKids(req.firebaseUser.uid);
+    const kids = await mobileService.getKids(req.firebaseUser.uid, req.query);
     res.json(kids);
 }));
 
@@ -222,7 +233,7 @@ router.post('/kids', asyncHandler(async (req, res) => {
 }));
 
 router.put('/kids/:id', asyncHandler(async (req, res) => {
-    const kid = await mobileService.updateKid(req.params.id, req.body);
+    const kid = await mobileService.updateKid(req.firebaseUser.uid, req.params.id, req.body);
     res.json(kid);
 }));
 
@@ -250,7 +261,7 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
         req.file.mimetype
     );
 
-    const kid = await mobileService.updateKid(req.params.id, { avatar_url: uploadResult.url });
+    const kid = await mobileService.updateKid(req.firebaseUser.uid, req.params.id, { avatar_url: uploadResult.url });
 
     // Only after the profile points at the new image, so a failed update never orphans the kid
     await uploadService.deleteKidAvatarByUrl(existingKid.avatar_url);
@@ -581,7 +592,28 @@ router.get('/devices/:mac/imagine', asyncHandler(async (req, res) => {
     if (!device) {
         return res.status(404).json({ code: 404, msg: 'Device not found', data: null });
     }
-    const images = await uploadService.listImagineImages(device.mac_address);
+    const images = await uploadService.listImagineImages(device.mac_address, null, {
+        limit: req.query.limit,
+        cursor: req.query.cursor,
+    });
+    success(res, images);
+}));
+
+// One child's gallery, wherever the pictures were made. The route above answers
+// "what has this toy drawn"; this one answers "what has my child drawn", which
+// is the question a parent whose child changed toys is actually asking.
+router.get('/kids/:kidId/imagine', asyncHandler(async (req, res) => {
+    const kid = await prisma.kid_profile.findFirst({
+        where: { id: BigInt(req.params.kidId), user_id: BigInt(req.mobileUser.id) },
+        select: { id: true },
+    });
+    if (!kid) {
+        return res.status(404).json({ code: 404, msg: 'Kid not found', data: null });
+    }
+    const images = await uploadService.listImagineImagesForKid(kid.id, (req.query.date || '').trim() || null, {
+        limit: req.query.limit,
+        cursor: req.query.cursor,
+    });
     success(res, images);
 }));
 router.get('/user-devices', asyncHandler(async (req, res) => {
@@ -597,7 +629,8 @@ router.get('/user-devices', asyncHandler(async (req, res) => {
 }));
 
 router.post('/agents/:agentId/bind/:deviceCode', asyncHandler(async (req, res) => {
-    const device = await deviceService.bindDevice(req.mobileUser.id, req.params.agentId, req.params.deviceCode);
+    const { kidId } = req.body || {};
+    const device = await deviceService.bindDevice(req.mobileUser.id, req.params.agentId, req.params.deviceCode, kidId);
     const response = {
         id: device.id,
         macAddress: device.mac_address,
@@ -638,6 +671,26 @@ router.get('/agents/:agentId/sessions', asyncHandler(async (req, res) => {
 router.get('/agents/:agentId/chat-history/:sessionId', asyncHandler(async (req, res) => {
     const history = await agentService.getChatHistory(req.params.agentId, req.params.sessionId);
     success(res, history);
+}));
+
+// The two routes above are account-wide: a character, whoever spoke to it. These
+// three are the browse the app actually wants — child, then character, then the
+// transcript — and they follow the child rather than the toy.
+router.get('/kids/:kidId/characters', asyncHandler(async (req, res) => {
+    const characters = await mobileService.getKidCharacters(req.firebaseUser.uid, req.params.kidId, req.query);
+    success(res, characters);
+}));
+
+router.get('/kids/:kidId/characters/:agentId/sessions', asyncHandler(async (req, res) => {
+    const sessions = await mobileService.getKidCharacterSessions(
+        req.firebaseUser.uid, req.params.kidId, req.params.agentId, req.query);
+    success(res, sessions);
+}));
+
+router.get('/kids/:kidId/sessions/:sessionId/messages', asyncHandler(async (req, res) => {
+    const messages = await mobileService.getKidSessionMessages(
+        req.firebaseUser.uid, req.params.kidId, req.params.sessionId, req.query);
+    success(res, messages);
 }));
 
 // ─── Device → Agent lookup ────────────────────────────────────────────────────

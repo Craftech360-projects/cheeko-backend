@@ -79,6 +79,19 @@ router.post('/register',
  *         schema:
  *           type: string
  *         description: Device MAC address or validation code
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               kidId:
+ *                 type: integer
+ *                 description: >
+ *                   Child to pair the device to. Omit it and the device pairs to
+ *                   the owner's only child; when they have none or several it is
+ *                   left unpaired for the app's kid picker to resolve.
  *     responses:
  *       200:
  *         description: Device bound successfully
@@ -87,9 +100,10 @@ router.post('/bind/:agentId/:deviceCode',
   requireAuth,
   asyncHandler(async (req, res) => {
     const { agentId, deviceCode } = req.params;
+    const { kidId } = req.body || {};
 
     try {
-      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode);
+      const device = await deviceService.bindDevice(req.user.id, agentId, deviceCode, kidId);
 
       // Transform to DeviceResponseDTO format (matching Spring Boot)
       const response = {
@@ -197,8 +211,16 @@ router.post('/unbind',
     // Check if user is super admin
     const isSuperAdmin = req.user.super_admin === 1;
 
+    // hardDelete is an operator tool, not a parent's choice. Unbinding already
+    // clears user_id, which is all the app needs -- listDevices filters on it, so
+    // the toy leaves the parent's list either way. Deleting the row on top of
+    // that destroys the assignment history, the analytics keyed on the MAC and
+    // the device's own record, and a parent tapping "unbind" is not asking for
+    // any of it. Honoured only for a super admin, who is asking deliberately.
     try {
-      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin, { hardDelete: Boolean(hardDelete) });
+      await deviceService.unbindDevice(req.user.id, deviceId, isSuperAdmin, {
+        hardDelete: isSuperAdmin && Boolean(hardDelete),
+      });
       success(res, null);
     } catch (error) {
       // Match Spring Boot error response format
@@ -432,7 +454,7 @@ router.put('/assign-kid-by-mac',
     }
 
     try {
-      const device = await deviceService.assignKidByMac(mac, kidId);
+      const device = await deviceService.assignKidByMac(mac, kidId, req.user.id);
       success(res, device, 'Kid assigned to device');
     } catch (error) {
       badRequest(res, error.message);

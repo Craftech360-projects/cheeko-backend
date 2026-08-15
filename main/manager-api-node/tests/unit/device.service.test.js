@@ -5,11 +5,24 @@ jest.mock('../../src/config/database', () => ({
     ai_device: {
       findFirst: jest.fn(),
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
     kid_profile: {
       findFirst: jest.fn(),
     },
+    device_kid_assignment: {
+      findFirst: jest.fn(),
+      updateMany: jest.fn(),
+      create: jest.fn(),
+    },
+    quiz_question_answer: { updateMany: jest.fn() },
+    riddle_question_answer: { updateMany: jest.fn() },
+    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn() },
+    imagine_image: { updateMany: jest.fn() },
+    $transaction: jest.fn(),
   }
 }));
 
@@ -19,6 +32,15 @@ const deviceService = require('../../src/services/device.service');
 describe('device.service mobile ownership helpers', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.$transaction.mockImplementation((fn) => fn(prisma));
+    prisma.device_kid_assignment.findFirst.mockResolvedValue(null);
+    prisma.device_kid_assignment.updateMany.mockResolvedValue({ count: 0 });
+    prisma.device_kid_assignment.create.mockResolvedValue({ id: 1n });
+    prisma.ai_device.findMany.mockResolvedValue([]);
+    for (const m of ['device_workspace_artifacts', 'device_memory_documents', 'device_memory_chunks']) {
+      prisma[m].findMany.mockResolvedValue([]);
+      prisma[m].updateMany.mockResolvedValue({ count: 0 });
+    }
   });
 
   it('returns the device only when the normalized MAC belongs to the user', async () => {
@@ -50,16 +72,31 @@ describe('device.service mobile ownership helpers', () => {
     expect(prisma.ai_device.findFirst).not.toHaveBeenCalled();
   });
 
-  it('rejects assigning a different child to a device that already has one', async () => {
+  // Re-pairing used to throw 'Device already has a child assigned', which made a
+  // wrong pairing permanent — the app's kid picker could never correct it. The
+  // boundary this covered is kept: the incoming child must belong to the caller.
+  it('re-pairs a device that already has a different child', async () => {
     prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
     prisma.ai_device.findFirst.mockResolvedValue({
       id: 'device-1',
+      mac_address: 'AA:BB:CC:DD:EE:FF',
       kid_id: 7n,
     });
+    prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
 
     await expect(
       deviceService.assignKidByMac('AA:BB:CC:DD:EE:FF', '9', 12n),
-    ).rejects.toThrow('Device already has a child assigned');
+    ).resolves.toEqual({ id: 'device-1', kid_id: 9n });
+
+    expect(prisma.ai_device.update).toHaveBeenCalled();
+  });
+
+  it('refuses a child that does not belong to the caller', async () => {
+    prisma.kid_profile.findFirst.mockResolvedValue(null);
+
+    await expect(
+      deviceService.assignKidByMac('AA:BB:CC:DD:EE:FF', '9', 12n),
+    ).rejects.toThrow('Kid profile not found');
 
     expect(prisma.ai_device.update).not.toHaveBeenCalled();
   });
@@ -77,5 +114,26 @@ describe('device.service mobile ownership helpers', () => {
     ).resolves.toEqual({ id: 'device-1', kid_id: 7n });
 
     expect(prisma.ai_device.update).toHaveBeenCalled();
+  });
+});
+
+describe('getDeviceByMac tolerates a malformed MAC', () => {
+  // /device/<anything> matched this route, so a path segment like "all" reached
+  // Prisma as null and threw a validation error the route turned into a 500.
+  it('returns null instead of asking Prisma for a null MAC', async () => {
+    for (const bad of ['all', '', 'not-a-mac', null, undefined]) {
+      await expect(deviceService.getDeviceByMac(bad)).resolves.toBeNull();
+    }
+    expect(prisma.ai_device.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('still looks up a valid MAC', async () => {
+    prisma.ai_device.findUnique.mockResolvedValue({ id: 'device-1' });
+
+    await expect(deviceService.getDeviceByMac('aa-bb-cc-dd-ee-ff'))
+      .resolves.toEqual({ id: 'device-1' });
+    expect(prisma.ai_device.findUnique).toHaveBeenCalledWith({
+      where: { mac_address: 'AA:BB:CC:DD:EE:FF' },
+    });
   });
 });

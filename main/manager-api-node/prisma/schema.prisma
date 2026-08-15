@@ -521,6 +521,7 @@ model device_token_usage_session {
 model device_workspace_artifacts {
   id            String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   mac_address   String     @db.VarChar(20)
+  owner_key     String
   device_id     String?    @db.Uuid
   agent_id      String?    @db.Uuid
   session_id    String?
@@ -536,6 +537,7 @@ model device_workspace_artifacts {
   ai_agent      ai_agent?  @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([mac_address, relative_path], map: "uq_device_workspace_artifacts_mac_path")
+  @@unique([owner_key, relative_path], map: "uq_device_workspace_artifacts_owner_path")
   @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_mac_updated")
   @@index([agent_id, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_agent_updated")
   @@index([session_id], map: "idx_device_workspace_artifacts_session")
@@ -556,6 +558,7 @@ model workspace_locks {
 model device_memory_documents {
   id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   mac_address          String                 @db.VarChar(20)
+  owner_key            String
   device_id            String?                @db.Uuid
   agent_id             String?                @db.Uuid
   kid_id               BigInt?
@@ -574,6 +577,7 @@ model device_memory_documents {
   device_memory_chunks device_memory_chunks[]
 
   @@unique([mac_address, document_key], map: "uq_device_memory_documents_mac_key")
+  @@unique([owner_key, document_key], map: "uq_device_memory_documents_owner_key")
   @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_memory_documents_mac_updated")
   @@index([kid_id, updated_at(sort: Desc)], map: "idx_device_memory_documents_kid_updated")
   @@index([session_id], map: "idx_device_memory_documents_session")
@@ -583,6 +587,7 @@ model device_memory_chunks {
   id                      BigInt                  @id @default(autoincrement())
   document_id             String                  @db.Uuid
   mac_address             String                  @db.VarChar(20)
+  owner_key               String
   device_id               String?                 @db.Uuid
   agent_id                String?                 @db.Uuid
   kid_id                  BigInt?
@@ -596,26 +601,10 @@ model device_memory_chunks {
   kid_profile             kid_profile?            @relation(fields: [kid_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([mac_address, content_hash], map: "uq_device_memory_chunks_mac_hash")
+  @@unique([owner_key, content_hash], map: "uq_device_memory_chunks_owner_hash")
   @@index([document_id], map: "idx_device_memory_chunks_document")
   @@index([mac_address, created_at(sort: Desc)], map: "idx_device_memory_chunks_mac_created")
   @@index([kid_id, created_at(sort: Desc)], map: "idx_device_memory_chunks_kid_created")
-}
-
-model game_session {
-  id               BigInt    @id @default(autoincrement())
-  mac_address      String    @db.VarChar(50)
-  game_type        String    @db.VarChar(50)
-  session_id       String?   @db.VarChar(100)
-  started_at       DateTime? @default(now()) @db.Timestamptz(6)
-  ended_at         DateTime? @db.Timestamptz(6)
-  duration_seconds Int?
-  total_attempts   Int?      @default(0)
-  correct_attempts Int?      @default(0)
-  metadata         Json?     @default("{}")
-  created_at       DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@index([mac_address], map: "idx_game_session_mac")
-  @@index([game_type], map: "idx_game_session_type")
 }
 
 model kid_activity_log {
@@ -1090,39 +1079,6 @@ model email_report_history {
   sent_at       DateTime? @default(now()) @db.Timestamptz(6)
 }
 
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-model device_memories {
-  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  mac_id     String
-  file_type  String
-  file_date  DateTime? @db.Date
-  content    String    @default("")
-  updated_at DateTime? @default(now()) @db.Timestamptz(6)
-
-  @@unique([mac_id, file_type, file_date], map: "uq_device_memory")
-  @@index([file_date], map: "idx_device_memories_date", where: raw("(file_date IS NOT NULL)"))
-  @@index([mac_id], map: "idx_device_memories_mac")
-}
-
-/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
-/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
-model memory_chunks {
-  id           BigInt                 @id @default(autoincrement())
-  mac_id       String
-  text         String
-  file_path    String?
-  start_line   Int?                   @default(0)
-  end_line     Int?                   @default(0)
-  embedding    Unsupported("vector")?
-  category     String?                @default("general")
-  created_at   DateTime?              @default(now()) @db.Timestamptz(6)
-  content_hash String
-
-  @@unique([mac_id, content_hash])
-  @@index([embedding], map: "idx_memory_chunks_embedding")
-  @@index([mac_id], map: "idx_memory_chunks_mac")
-}
-
 model openclaw_pair_tokens {
   id           BigInt    @id @default(autoincrement())
   user_id      BigInt
@@ -1219,6 +1175,7 @@ model device_analytics_event {
   device_id          String    @db.VarChar(100)
   event_id           String    @db.VarChar(120)
   mac_address        String    @db.VarChar(20)
+  kid_id                BigInt?
   sender_client_id   String?   @db.VarChar(255)
   board              String?   @db.VarChar(50)
   firmware           String?   @db.VarChar(100)
@@ -1248,6 +1205,7 @@ model device_analytics_event {
   @@index([mac_address, event_timestamp(sort: Desc)], map: "idx_device_analytics_event_mac_event_ts")
   @@index([mac_address, server_received_at(sort: Desc)], map: "idx_device_analytics_event_mac_received")
   @@index([mac_address, event_name], map: "idx_device_analytics_event_mac_name")
+  @@index([kid_id, event_timestamp(sort: Desc)], map: "idx_device_analytics_event_kid_ts")
 }
 
 model stt_providers {
@@ -1337,6 +1295,7 @@ model device_usage_daily {
   user_id               BigInt?
   device_id             String?   @db.Uuid
   mac_address           String    @db.VarChar(20)
+  kid_id                BigInt?
   date                  DateTime  @db.Date
   usage_time_seconds    Int       @default(0)
   game_usage_seconds    Int       @default(0)
@@ -1349,6 +1308,7 @@ model device_usage_daily {
   @@unique([date, mac_address], map: "uq_device_usage_daily_date_mac")
   @@index([user_id, date], map: "idx_device_usage_daily_user_date")
   @@index([mac_address, date], map: "idx_device_usage_daily_mac_date")
+  @@index([kid_id, date], map: "idx_device_usage_daily_kid_date")
 }
 
 model device_card_taps_daily {
@@ -1356,6 +1316,7 @@ model device_card_taps_daily {
   user_id        BigInt?
   device_id      String?   @db.Uuid
   mac_address    String    @db.VarChar(20)
+  kid_id                BigInt?
   date           DateTime  @db.Date
   card_tap_count Int       @default(0)
   created_at     DateTime? @default(now()) @db.Timestamptz(6)
@@ -1364,6 +1325,7 @@ model device_card_taps_daily {
   @@unique([date, mac_address], map: "uq_device_card_taps_daily_date_mac")
   @@index([user_id, date], map: "idx_device_card_taps_daily_user_date")
   @@index([mac_address, date], map: "idx_device_card_taps_daily_mac_date")
+  @@index([kid_id, date], map: "idx_device_card_taps_daily_kid_date")
 }
 
 model device_ai_interactions_daily {
@@ -1371,6 +1333,7 @@ model device_ai_interactions_daily {
   user_id              BigInt?
   device_id            String?   @db.Uuid
   mac_address          String    @db.VarChar(20)
+  kid_id                BigInt?
   date                 DateTime  @db.Date
   ai_interaction_count Int       @default(0)
   created_at           DateTime? @default(now()) @db.Timestamptz(6)
@@ -1379,6 +1342,7 @@ model device_ai_interactions_daily {
   @@unique([date, mac_address], map: "uq_device_ai_interactions_daily_date_mac")
   @@index([user_id, date], map: "idx_device_ai_interactions_daily_user_date")
   @@index([mac_address, date], map: "idx_device_ai_interactions_daily_mac_date")
+  @@index([kid_id, date], map: "idx_device_ai_interactions_daily_kid_date")
 }
 
 model device_games_played {
@@ -1386,6 +1350,7 @@ model device_games_played {
   user_id                BigInt?
   device_id              String?   @db.Uuid
   mac_address            String    @db.VarChar(20)
+  kid_id                BigInt?
   activity_date          DateTime  @db.Date
   game_id                String?   @db.VarChar(80)
   game_name              String?   @db.VarChar(200)
@@ -1401,6 +1366,7 @@ model device_games_played {
   @@index([mac_address, played_at(sort: Desc)], map: "idx_device_games_played_mac_played")
   @@index([user_id, played_at(sort: Desc)], map: "idx_device_games_played_user_played")
   @@index([activity_date, mac_address], map: "idx_device_games_played_date_mac")
+  @@index([kid_id, activity_date], map: "idx_device_games_played_kid_date")
 }
 
 model device_radio_played {
@@ -1408,6 +1374,7 @@ model device_radio_played {
   user_id                BigInt?
   device_id              String?   @db.Uuid
   mac_address            String    @db.VarChar(20)
+  kid_id                BigInt?
   activity_date          DateTime  @db.Date
   station                String?   @db.VarChar(120)
   duration_ms            Int?
@@ -1420,18 +1387,27 @@ model device_radio_played {
   @@index([user_id, played_at(sort: Desc)], map: "idx_device_radio_played_user_played")
   @@index([station, played_at(sort: Desc)], map: "idx_device_radio_played_station_played")
   @@index([activity_date, mac_address], map: "idx_device_radio_played_date_mac")
+  @@index([kid_id, activity_date], map: "idx_device_radio_played_kid_date")
 }
 
 /// Curated quiz Question Bank. Quizzy never invents scored questions; it selects
-/// from here. A Level is the set of ten questions sharing (age_band, level).
+/// from here. A Level is the set of ten questions sharing (language, level) —
+/// one shared ladder for every age since ADR-0009, with the range carried by the
+/// Doors rather than by separate content per age.
 model quiz_question {
   id                   BigInt                 @id @default(autoincrement())
   code                 String                 @unique @db.VarChar(50)
   question_text        String
   answer_text          String
   accepted_answers     Json                   @default("[]")
+  /// The one-breath explanation offered when the child could not get there
+  /// alone. Authored, never improvised: a generated explanation aimed at a
+  /// 4-year-old is exactly the hallucination risk ADR-0005 removed from asks.
+  teach_text           String?
+  /// Authored wrong answers for the narrowing hint. Authored rather than
+  /// generated for the same reason, and a locked design decision.
+  distractors          Json                   @default("[]")
   category             String?                @db.VarChar(100)
-  age_band             String                 @db.VarChar(10)
   level                Int
   language             String                 @default("en") @db.VarChar(10)
   active               Boolean                @default(true)
@@ -1439,7 +1415,7 @@ model quiz_question {
   update_date          DateTime               @default(now()) @db.Timestamptz(6)
   quiz_question_answer quiz_question_answer[]
 
-  @@index([age_band, language, level], map: "idx_quiz_question_band_lang_level")
+  @@index([language, level], map: "idx_quiz_question_lang_level")
 }
 
 /// Per-device answer log. This is the ONLY quiz progress state: Cleared and
@@ -1447,6 +1423,7 @@ model quiz_question {
 model quiz_question_answer {
   id            BigInt        @id @default(autoincrement())
   device_mac    String        @db.VarChar(20)
+  kid_id        BigInt?
   question_id   BigInt
   result        String        @db.VarChar(10)
   answered_at   DateTime      @default(now()) @db.Timestamptz(6)
@@ -1454,6 +1431,7 @@ model quiz_question_answer {
 
   @@index([device_mac, question_id], map: "idx_quiz_answer_device_question")
   @@index([device_mac, answered_at], map: "idx_quiz_answer_device_time")
+  @@index([kid_id, answered_at], map: "idx_quiz_answer_kid_time")
 }
 
 /// Riddler's bank. Deliberately column-identical to quiz_question — including
@@ -1465,8 +1443,12 @@ model riddle_question {
   question_text          String
   answer_text            String
   accepted_answers       Json                     @default("[]")
+  /// Present to keep this table column-identical to quiz_question, which is what
+  /// lets one service query either bank. Riddler keeps flow rather than mastery
+  /// (ADR-0009), so it has no Door 3 to teach at and these stay null today.
+  teach_text             String?
+  distractors            Json                     @default("[]")
   category               String?                  @db.VarChar(100)
-  age_band               String                   @db.VarChar(10)
   level                  Int
   language               String                   @default("en") @db.VarChar(10)
   active                 Boolean                  @default(true)
@@ -1474,7 +1456,7 @@ model riddle_question {
   update_date            DateTime                 @default(now()) @db.Timestamptz(6)
   riddle_question_answer riddle_question_answer[]
 
-  @@index([age_band, language, level], map: "idx_riddle_question_band_lang_level")
+  @@index([language, level], map: "idx_riddle_question_lang_level")
 }
 
 /// Per-device riddle answer log. Separate from quiz_question_answer so a riddle
@@ -1483,6 +1465,7 @@ model riddle_question {
 model riddle_question_answer {
   id              BigInt          @id @default(autoincrement())
   device_mac      String          @db.VarChar(20)
+  kid_id          BigInt?
   question_id     BigInt
   result          String          @db.VarChar(10)
   answered_at     DateTime        @default(now()) @db.Timestamptz(6)
@@ -1490,4 +1473,87 @@ model riddle_question_answer {
 
   @@index([device_mac, question_id], map: "idx_riddle_answer_device_question")
   @@index([device_mac, answered_at], map: "idx_riddle_answer_device_time")
+  @@index([kid_id, answered_at], map: "idx_riddle_answer_kid_time")
+}
+
+/// The Wonder Question (M4): one open, unscored question Quizzy leaves a child
+/// with at the end of a session, and opens the next one by remembering.
+///
+/// A table rather than memory/state/ because that directory is pruned after 48
+/// hours — a child who plays Friday and returns Monday would find it forgotten.
+///
+/// Deliberately NOT surfaced to the parent app: it records a child's private
+/// curiosity, and knowing it is reported changes what a child will wonder aloud.
+model kid_wonder_question {
+  id         BigInt   @id @default(autoincrement())
+  device_mac String   @db.VarChar(20)
+  kid_id     BigInt?
+  question   String
+  asked_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([kid_id, asked_at(sort: Desc)], map: "idx_kid_wonder_kid_time")
+  @@index([device_mac, asked_at(sort: Desc)], map: "idx_kid_wonder_device_time")
+}
+
+/// Every try, including the wrong ones that never become an answer row. The
+/// answer log records that a question was missed; this records how it was
+/// missed — how many tries, and what the child actually said.
+///
+/// Deliberately NON-AUTHORITATIVE (ADR-0009). Its write may fail without
+/// failing the child's turn, so nothing that gates progression may read it:
+/// Cleared, days-on-level and the streak all keep deriving from
+/// quiz_question_answer. A gate reading this table would silently stop firing
+/// whenever the write failed.
+///
+/// One table for both banks rather than the parallel pair the answer logs use,
+/// so `bank` carries the discriminator and there is no FK. That is affordable
+/// precisely because these rows are diagnostic: an orphaned attempt row is a
+/// lost measurement, not a child's lost progress.
+model question_attempt {
+  id          BigInt   @id @default(autoincrement())
+  device_mac  String   @db.VarChar(20)
+  kid_id      BigInt?
+  bank        String   @db.VarChar(10)
+  question_id BigInt
+  attempt_no  Int
+  verdict     String   @db.VarChar(10)
+  /// What speech recognition heard. Null when the worker had no transcript.
+  /// Retention is not yet aligned with ADR-0006's raw-transcript expiry — see
+  /// docs/issues/quizzy-redesign/004-attempt-log.md.
+  transcript  String?
+  answered_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([bank, question_id, device_mac], map: "idx_question_attempt_bank_question_device")
+  @@index([kid_id, answered_at], map: "idx_question_attempt_kid_time")
+}
+
+/// One AI-Imagine picture. The image itself stays in S3 under the key it was
+/// first written with; this row is what says whose it is, so a child changing
+/// toys is an UPDATE rather than a bucket copy. Before this table the gallery
+/// was a raw prefix listing, silently capped at 1000 objects.
+model imagine_image {
+  id          BigInt   @id @default(autoincrement())
+  owner_key   String
+  mac_address String   @db.VarChar(20)
+  s3_key      String   @unique(map: "uq_imagine_image_s3_key")
+  size_bytes  BigInt?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([owner_key, created_at(sort: Desc)], map: "idx_imagine_image_owner_created")
+}
+
+/// Which Child was paired to a Device, and when. Nothing reads this yet: it
+/// exists so a Device that changes hands can have its MAC-keyed history split
+/// between the two Children later, which is unreconstructable without it.
+/// Keyed on the MAC rather than the device row because the historical rows it
+/// will one day explain are keyed that way too.
+model device_kid_assignment {
+  id          BigInt    @id @default(autoincrement())
+  mac_address String    @db.VarChar(20)
+  kid_id      BigInt
+  assigned_at DateTime  @default(now()) @db.Timestamptz(6)
+  ended_at    DateTime? @db.Timestamptz(6)
+
+  @@index([mac_address, assigned_at(sort: Desc)], map: "idx_device_kid_assignment_mac")
+  @@index([kid_id, assigned_at(sort: Desc)], map: "idx_device_kid_assignment_kid")
 }

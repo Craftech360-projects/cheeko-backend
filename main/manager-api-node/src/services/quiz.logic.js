@@ -6,33 +6,10 @@
  * Spec: docs/superpowers/specs/2026-08-04-quizzy-question-bank-design.md
  */
 
-/**
- * Map a birth date to an Age Band: age < 6 -> '3-5', 6-8 -> '6-8', >= 9 -> '9+'.
- *
- * Dates are read in UTC on both sides: `birth_date` is a Postgres DATE that
- * Prisma returns as UTC midnight, so UTC getters recover the authored calendar
- * day regardless of the server's timezone.
- *
- * @param {Date|string|null} birthDate
- * @param {Date} now
- * @returns {'3-5'|'6-8'|'9+'|null} null when the birth date is missing or unparseable
- */
-const ageBandFromBirthDate = (birthDate, now) => {
-  if (!birthDate) return null;
-
-  const born = birthDate instanceof Date ? birthDate : new Date(birthDate);
-  if (Number.isNaN(born.getTime())) return null;
-
-  let age = now.getUTCFullYear() - born.getUTCFullYear();
-  const beforeBirthday =
-    now.getUTCMonth() < born.getUTCMonth() ||
-    (now.getUTCMonth() === born.getUTCMonth() && now.getUTCDate() < born.getUTCDate());
-  if (beforeBirthday) age -= 1;
-
-  if (age < 6) return '3-5';
-  if (age <= 8) return '6-8';
-  return '9+';
-};
+// The bank is no longer partitioned by age. WIRE_AGE_BAND is what the published
+// parent-app contract still shows for `age_band` (ticket 005) — a constant kept
+// on the wire so dropping the column reached no app developer.
+const WIRE_AGE_BAND = 'all';
 
 /**
  * Derive the device's Current Level: the lowest level that still has an
@@ -41,10 +18,14 @@ const ageBandFromBirthDate = (birthDate, now) => {
  *
  * @param {Array<{id: *, level: number}>} questions - active bank for the band, any order
  * @param {Set<string>} clearedIds - cleared question ids as strings
+ * @param {Set<number>} [skipLevels] - levels the anti-trap has already moved the
+ *   child past (see agedOutLevels). Without this the lowest uncleared level is
+ *   always the abandoned one, so the child is pulled back to it every session
+ *   and the cap has to re-fire forever.
  * @returns {{currentLevel: number|null, unclearedIds: Array<*>, allCleared: boolean}}
  *   `allCleared` is false for an empty bank — there was nothing to clear.
  */
-const deriveLevelState = (questions, clearedIds) => {
+const deriveLevelState = (questions, clearedIds, skipLevels = new Set()) => {
   if (!questions.length) {
     return { currentLevel: null, unclearedIds: [], allCleared: false };
   }
@@ -52,6 +33,7 @@ const deriveLevelState = (questions, clearedIds) => {
   const levels = [...new Set(questions.map((q) => q.level))].sort((a, b) => a - b);
 
   for (const level of levels) {
+    if (skipLevels.has(level)) continue;
     const uncleared = questions.filter(
       (q) => q.level === level && !clearedIds.has(String(q.id))
     );
@@ -72,14 +54,65 @@ const deriveLevelState = (questions, clearedIds) => {
  * is Cleared. Independent of Current Level — a level cleared out of order (or
  * left behind when a new question reopened an earlier one) still counts.
  *
+ * A level the anti-trap moved the child past also counts as finished. It is not
+ * MASTERED and the answer log still says so question by question, but the child
+ * will never be asked it again, so leaving it in the "not done yet" pile forever
+ * describes nothing anybody can act on.
+ *
  * @param {Array<{id: *, level: number}>} questions - active bank for the band, any order
  * @param {Set<string>} clearedIds - cleared question ids as strings
+ * @param {Set<number>} [skipLevels] - levels aged out by the cap
  * @returns {number}
  */
-const countCompletedLevels = (questions, clearedIds) =>
+const countCompletedLevels = (questions, clearedIds, skipLevels = new Set()) =>
   [...new Set(questions.map((q) => q.level))].filter((level) =>
-    questions.every((q) => q.level !== level || clearedIds.has(String(q.id)))
+    skipLevels.has(level)
+    || questions.every((q) => q.level !== level || clearedIds.has(String(q.id)))
   ).length;
+
+/**
+ * Levels the anti-trap has already moved the child past.
+ *
+ * A level ages out when its UNCLEARED questions have been answered on `cap` or
+ * more distinct days. Counting days only on the questions still outstanding is
+ * deliberate: days spent on questions the child already got right are not days
+ * spent stuck, and counting them would age a level out early.
+ *
+ * It also keeps the deliberate pull-back working. Adding a question to a level
+ * the child finished months ago must reopen that level (deriveLevelState's whole
+ * reason for being derived) — the new question has zero days against it, so the
+ * level is not aged out and the child is sent back to finish it.
+ *
+ * The highest level is never aged out: there is nowhere to advance to, so
+ * skipping it would silently read as "every level cleared" and start replay.
+ *
+ * @param {Array<{id: *, level: number}>} questions - active bank for the band
+ * @param {Set<string>} clearedIds - cleared question ids as strings
+ * @param {Map<string, Set<string>>} daysByQuestionId - question id -> distinct day keys
+ * @param {number} cap - ANTI_TRAP_DAY_CAP
+ * @returns {Set<number>}
+ */
+const agedOutLevels = (questions, clearedIds, daysByQuestionId, cap) => {
+  const levels = [...new Set(questions.map((q) => q.level))].sort((a, b) => a - b);
+  const top = levels[levels.length - 1];
+  const out = new Set();
+
+  for (const level of levels) {
+    if (level === top) continue;
+    const uncleared = questions.filter(
+      (q) => q.level === level && !clearedIds.has(String(q.id))
+    );
+    if (!uncleared.length) continue; // mastered, not aged out
+
+    const days = new Set();
+    for (const q of uncleared) {
+      for (const day of daysByQuestionId.get(String(q.id)) || []) days.add(day);
+    }
+    if (days.size >= cap) out.add(level);
+  }
+
+  return out;
+};
 
 /**
  * Did one of today's answers finish its level? Finishing a level ends the
@@ -103,8 +136,9 @@ const levelCompletedToday = (questions, clearedIds, todayQuestionIds) => {
 };
 
 module.exports = {
-  ageBandFromBirthDate,
+  WIRE_AGE_BAND,
   deriveLevelState,
   countCompletedLevels,
+  agedOutLevels,
   levelCompletedToday
 };

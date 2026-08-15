@@ -36,7 +36,7 @@ const DUPS_SQL = `
   WHERE k.id <> g.keep_id
   ORDER BY k.id`;
 
-// Every table with a kid_id FK to kid_profile.
+// Every table with a kid_id column pointing at kid_profile.
 const REFERENCING = [
   'ai_device',
   'voice_sessions',
@@ -44,6 +44,24 @@ const REFERENCING = [
   'kid_learning_progress',
   'device_memory_documents',
   'device_memory_chunks',
+  'device_kid_assignment',
+  'quiz_question_answer',
+  'riddle_question_answer',
+];
+
+/**
+ * Tables where the child's identity is the owner_key, not kid_id.
+ *
+ * Moving kid_id alone would leave these rows keyed to 'kid:<deleted-id>' — the
+ * merged child's workspace and memory would still exist and be unreachable,
+ * which is the exact failure the owner key was introduced to prevent. The
+ * unique column is how a collision is detected when both profiles hold the same
+ * file or document.
+ */
+const OWNER_KEYED = [
+  { table: 'device_workspace_artifacts', unique: 'relative_path', newest: 'updated_at' },
+  { table: 'device_memory_documents', unique: 'document_key', newest: 'updated_at' },
+  { table: 'device_memory_chunks', unique: 'content_hash', newest: 'created_at' },
 ];
 
 (async () => {
@@ -63,6 +81,10 @@ const REFERENCING = [
       return;
     }
 
+    // Rows dropped when both profiles hold the same file or document. Backed up
+    // alongside the kid_profile rows, since nothing else records them.
+    const discarded = [];
+
     const dupIds = dups.map(d => d.dup_id);
     const backup = (await c.query(
       'SELECT * FROM kid_profile WHERE id = ANY($1::bigint[])', [dupIds]
@@ -79,6 +101,40 @@ const REFERENCING = [
         );
         if (res.rowCount) moved.push(`${table}=${res.rowCount}`);
       }
+
+      // Owner-keyed tables carry the child's identity in owner_key; kid_id there
+      // is a denormalised audit column nobody reads. Both profiles may hold the
+      // same path or document, so drop the older side first — the unique index
+      // on (owner_key, <unique>) would otherwise reject the move.
+      const dupKey = `kid:${dupId}`;
+      const keepKey = `kid:${keepId}`;
+      for (const { table, unique, newest } of OWNER_KEYED) {
+        // Newest wins each collision, matching the owner_key migration's rule.
+        // Everything dropped is captured first: this is the only place in the
+        // script that destroys rows the kid_profile backup does not cover.
+        const losers = await c.query(
+          `SELECT loser.* FROM ${table} loser
+             JOIN ${table} winner
+               ON winner.${unique} = loser.${unique}
+              AND winner.owner_key IN ($1, $2)
+              AND winner.owner_key <> loser.owner_key
+            WHERE loser.owner_key IN ($1, $2)
+              AND (loser.${newest}, loser.id) < (winner.${newest}, winner.id)`,
+          [dupKey, keepKey]
+        );
+        if (losers.rowCount) {
+          discarded.push(...losers.rows.map((row) => ({ table, row })));
+          await c.query(
+            `DELETE FROM ${table} WHERE id::text = ANY($1::text[])`,
+            [losers.rows.map((r) => String(r.id))]
+          );
+        }
+
+        const res = await c.query(
+          `UPDATE ${table} SET owner_key = $1 WHERE owner_key = $2`, [keepKey, dupKey]
+        );
+        if (res.rowCount) moved.push(`${table}.owner_key=${res.rowCount}`);
+      }
       await c.query('DELETE FROM kid_profile WHERE id = $1', [dupId]);
       console.log(
         `user ${userId} "${name}": ${dupId} -> ${keepId}` +
@@ -86,8 +142,28 @@ const REFERENCING = [
       );
     }
 
+    if (discarded.length) {
+      const discardPath = path.join(__dirname, 'merge-duplicate-kid-profiles.discarded.json');
+      fs.writeFileSync(discardPath, JSON.stringify(discarded, null, 2));
+      console.log(`Discarded ${discarded.length} colliding owner-keyed rows -> ${discardPath}`);
+    }
+
     const remaining = (await c.query(DUPS_SQL)).rows.length;
     if (remaining) throw new Error(`${remaining} duplicates still present after merge`);
+
+    // Nothing may be left pointing at a profile that is about to disappear.
+    for (const { table } of OWNER_KEYED) {
+      const orphans = await c.query(
+        `SELECT count(*)::int AS n FROM ${table}
+          WHERE owner_key LIKE 'kid:%'
+            AND NOT EXISTS (
+              SELECT 1 FROM kid_profile k
+               WHERE 'kid:' || k.id::text = ${table}.owner_key)`
+      );
+      if (orphans.rows[0].n) {
+        throw new Error(`${table}: ${orphans.rows[0].n} rows key a kid_profile that no longer exists`);
+      }
+    }
 
     if (APPLY) {
       await c.query('COMMIT');

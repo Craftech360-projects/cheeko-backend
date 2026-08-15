@@ -16,6 +16,8 @@
 const path = require('path');
 
 const agentService = require('../manager-api-node/src/services/agent.service');
+const quizService = require('../manager-api-node/src/services/quiz.service');
+const { bankForCharacterRef } = require('../manager-api-node/src/services/banks');
 const { success, badRequest, unauthorized, notFound } = require('../manager-api-node/src/utils/response');
 const { asyncHandler } = require('../manager-api-node/src/middleware/errorHandler');
 
@@ -117,6 +119,66 @@ router.delete('/templates/:id', gate, asyncHandler(async (req, res) => {
   } catch (err) {
     return badRequest(res, err.message);
   }
+}));
+
+// --- Quiz/riddle progress for the device under test ---------------------------
+//
+// The Test device tab drives a real toy MAC through a real session, so the only
+// way to see level 3 behave is to put a device on level 3 first. These expose the
+// same quiz.service functions manager-web's /quiz-progress page uses, behind this
+// dashboard's own password rather than an admin login.
+//
+// The bank follows the character selected in the tab, so choosing Riddler shows
+// riddle progress. `character` here is the DISPLAY name (that is what the
+// template list gives the <select>); bankForCharacterRef resolves a display name
+// via ai_agent_template and falls back to the quiz bank, so an unknown one is
+// never an error.
+
+const bankFromQuery = (value) => bankForCharacterRef({ character: value });
+
+// Derived state for one MAC. allDeviceProgress rather than progress(): only it
+// carries max_level, answered_today, day_complete and replay, which are exactly
+// what decides whether the next session will do what you want. It reads the whole
+// bank and answer log, which is free at this size and is what the existing admin
+// page already does per load.
+router.get('/quiz-progress', gate, asyncHandler(async (req, res) => {
+  const mac = String(req.query.mac || '').trim();
+  if (!mac) return badRequest(res, 'mac is required');
+
+  const bank = await bankFromQuery(req.query.character);
+  const rows = await quizService.allDeviceProgress(bank);
+  const row = rows.find((r) => r.device_mac.toLowerCase() === mac.toLowerCase());
+  // A MAC with no ai_device row is a normal thing to type into the tab, so this
+  // is data rather than a 404: the UI says "unknown device" and stays usable.
+  success(res, { bank, device: row || null });
+}));
+
+// Force the device onto a level. Destructive by design — it rewrites the answer
+// log for the device's band — which is the point on a test toy.
+router.post('/quiz-set-level', gate, asyncHandler(async (req, res) => {
+  const b = req.body || {};
+  const mac = String(b.mac || '').trim();
+  const level = Number(b.level);
+  if (!mac) return badRequest(res, 'mac is required');
+  if (!Number.isInteger(level) || level < 1) return badRequest(res, 'level must be a positive integer');
+
+  const bank = await bankFromQuery(b.character);
+  try {
+    success(res, { bank, ...(await quizService.setLevel(mac, level, bank)) }, 'Level set');
+  } catch (err) {
+    return badRequest(res, err.message); // "level N does not exist in band X" goes to the UI
+  }
+}));
+
+// Re-open today's Daily Ten. Needed constantly while testing: ten answers in one
+// day closes the scored game, and this backdates them rather than deleting them,
+// so the device keeps the levels it cleared.
+router.post('/quiz-reset-day', gate, asyncHandler(async (req, res) => {
+  const mac = String((req.body || {}).mac || '').trim();
+  if (!mac) return badRequest(res, 'mac is required');
+
+  const bank = await bankFromQuery((req.body || {}).character);
+  success(res, { bank, ...(await quizService.clearDayGate(mac, bank)) }, 'Day re-opened');
 }));
 
 // Static dashboard files (this same folder).

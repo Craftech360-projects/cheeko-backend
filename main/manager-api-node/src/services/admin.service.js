@@ -11,6 +11,7 @@ const { prisma } = require('../config/database');
 const bcrypt = require('bcryptjs');
 const logger = require('../utils/logger');
 const { sanitizeParentRule } = require('./profile.service');
+const { pairDeviceToKid } = require('./device.service');
 
 // ==================== USER MANAGEMENT ====================
 
@@ -989,9 +990,13 @@ const deleteKidProfile = async (kidId) => {
  */
 const assignKidToDeviceAdmin = async (deviceId, kidId) => {
   try {
-    const device = await prisma.ai_device.update({
-      where: { id: deviceId },
-      data: { kid_id: kidId !== null ? BigInt(kidId) : null }
+    const device = await prisma.$transaction(async (tx) => {
+      const row = await tx.ai_device.update({
+        where: { id: deviceId },
+        data: { kid_id: kidId !== null ? BigInt(kidId) : null }
+      });
+      await pairDeviceToKid(tx, row.mac_address, kidId);
+      return row;
     });
 
     return device;

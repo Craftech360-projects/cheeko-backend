@@ -111,6 +111,24 @@ router.get('/next-questions',
  *               character:
  *                 type: string
  *                 description: Character agent_code, used only when bank is absent.
+ *               attempts:
+ *                 type: array
+ *                 description: Every try at this question, in order, including the
+ *                   wrong ones that never become an answer row. Optional and
+ *                   diagnostic — a failed attempt write never fails the answer,
+ *                   and nothing that gates progression reads these rows.
+ *                   Ordinals are assigned server-side from array position.
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     verdict:
+ *                       type: string
+ *                       enum: [correct, wrong, revealed]
+ *                       description: Defaults to wrong; an intermediate try is by
+ *                         definition one that did not finish the question.
+ *                     transcript:
+ *                       type: string
+ *                       description: What speech recognition heard. Omit for silence.
  *     responses:
  *       201:
  *         description: Answer logged
@@ -146,11 +164,88 @@ router.post('/answer',
       characterId: req.body.character_id,
     });
 
-    const answer = await quizService.recordAnswer(deviceMac, questionId, result, bank);
+    // Optional and additive: an older worker sends no attempts and logs exactly
+    // what it logs today. A malformed array is dropped rather than 400'd — the
+    // attempt log is diagnostic, and refusing the answer over it would trade a
+    // child's progress for a measurement.
+    const attempts = Array.isArray(req.body.attempts) ? req.body.attempts : [];
+
+    const answer = await quizService.recordAnswer(deviceMac, questionId, result, bank, attempts);
     logger.info(
-      `[QUIZ] POST /quiz/answer device=${deviceMac} bank=${bank} question=${answer.question_id} result=${answer.result}`
+      `[QUIZ] POST /quiz/answer device=${deviceMac} bank=${bank} question=${answer.question_id} result=${answer.result} attempts=${attempts.length}`
     );
     return created(res, { ...answer, bank }, 'Answer logged');
+  })
+);
+
+/**
+ * @swagger
+ * /quiz/attempts:
+ *   post:
+ *     tags: [Quiz]
+ *     summary: Log tries for a question that never resolved (worker PUSH)
+ *     description: For a session that ended mid-question. Writes attempt rows only —
+ *       no answer row, because no verdict was reached. Service-key auth.
+ *     responses:
+ *       201:
+ *         description: Attempts logged
+ *       400:
+ *         description: Missing field, unknown bank, or unknown question_id
+ */
+router.post('/attempts',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const deviceMac = String(req.body.device_mac || '').trim();
+    const questionId = String(req.body.question_id ?? '').trim();
+    if (!deviceMac) return badRequest(res, 'device_mac is required');
+    if (!questionId) return badRequest(res, 'question_id is required');
+
+    const explicitBank = String(req.body.bank || '').trim();
+    if (explicitBank && !BANKS[explicitBank]) {
+      return badRequest(res, `bank must be one of: ${Object.keys(BANKS).join(', ')}`);
+    }
+    const bank = explicitBank || await bankForCharacterRef({
+      character: req.body.character,
+      characterId: req.body.character_id,
+    });
+
+    const attempts = Array.isArray(req.body.attempts) ? req.body.attempts : [];
+    const out = await quizService.recordUnresolvedAttempts(deviceMac, questionId, bank, attempts);
+    logger.info(
+      `[QUIZ] POST /quiz/attempts device=${deviceMac} bank=${bank} question=${out.question_id} unresolved attempts=${out.attempts_logged}`
+    );
+    return created(res, { ...out, bank }, 'Attempts logged');
+  })
+);
+
+/**
+ * @swagger
+ * /quiz/wonder:
+ *   post:
+ *     tags: [Quiz]
+ *     summary: Save the Wonder Question a session ended on (worker PUSH)
+ *     description: One open, unscored question Quizzy leaves the child with. Never
+ *       affects level, streak or the day gate, and is NOT exposed to the parent
+ *       app — it records a child's private curiosity. Service-key auth.
+ *     responses:
+ *       201:
+ *         description: Wonder question saved
+ *       400:
+ *         description: Missing device_mac or question, or question too long
+ */
+router.post('/wonder',
+  requireServiceKey,
+  asyncHandler(async (req, res) => {
+    const deviceMac = String(req.body.device_mac || '').trim();
+    const question = String(req.body.question || '').trim();
+    if (!deviceMac) return badRequest(res, 'device_mac is required');
+    if (!question) return badRequest(res, 'question is required');
+
+    const saved = await quizService.recordWonderQuestion(deviceMac, question);
+    // The question itself is not logged: it is the child's, and a log line is a
+    // second place it would have to be protected.
+    logger.info(`[QUIZ] POST /quiz/wonder device=${deviceMac} saved=${saved.id} chars=${question.length}`);
+    return created(res, saved, 'Wonder question saved');
   })
 );
 

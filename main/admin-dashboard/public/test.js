@@ -269,9 +269,15 @@ async function loadTestCharacters() {
         o.textContent = t.agentName;
         sel.appendChild(o);
       });
+    // Quizzy is the default: the Test tab is mostly used for the quiz/riddle
+    // game now, and (device default) resolves to whatever the toy is set to,
+    // which is rarely the character you meant to test.
+    const quizzy = [...sel.options].find((o) => o.value.toLowerCase() === 'quizzy');
+    if (quizzy) sel.value = quizzy.value;
   } catch (e) {
     tlog('Could not load characters: ' + e.message, 'err');
   }
+  syncQuizPanel();
 }
 
 // The agent deliberately does NOT auto-greet — base_assistant.py waits for a
@@ -422,6 +428,7 @@ async function stopTest() {
     }).catch(() => { /* room expires on its own */ });
   }
   session = null;
+  loadQuizProgress();
 }
 
 function toggleMute() {
@@ -431,11 +438,138 @@ function toggleMute() {
   T('muteBtn').textContent = on ? 'Unmute mic' : 'Mute mic';
 }
 
-T('startTest').addEventListener('click', startTest);
+// --- Quiz/riddle progress for the device under test ---------------------------
+//
+// Testing level 3 means putting the device on level 3 first; testing the day gate
+// means being able to re-open it. Both read the MAC from the field above, so the
+// panel always describes the toy you are about to talk to, and the bank follows
+// the selected character.
+
+// The only two characters that play a bank. Cheeko and the rest have no levels
+// to show, so the card is hidden for them rather than showing a quiz progress
+// that has nothing to do with the session you are about to run.
+//
+// ponytail: mirrors CHARACTER_BANK in banks.js by name. Renaming a character in
+// the DB hides this card until this line follows; a server round trip just to
+// learn "does this one play a bank" is not worth it for a dev tool.
+const BANK_CHARACTERS = ['quizzy', 'riddler'];
+
+const playsBank = () => BANK_CHARACTERS.includes(String(T('testChar').value || '').toLowerCase());
+
+// Show or hide the card, and refresh it when it is on screen.
+function syncQuizPanel() {
+  const on = playsBank();
+  T('quizPanel').hidden = !on;
+  if (on) loadQuizProgress();
+}
+
+const quizQuery = () =>
+  `?mac=${encodeURIComponent(T('testMac').value.trim())}` +
+  `&character=${encodeURIComponent(T('testChar').value || '')}`;
+
+async function loadQuizProgress() {
+  const mac = T('testMac').value.trim();
+  // Callers that are not about the character — Start, Stop, typing a MAC — reach
+  // here for Cheeko too; nothing to fetch when the card is not on screen.
+  if (!mac || T('quizPanel').hidden) return;
+  try {
+    const { bank, device } = await api('GET', '/quiz-progress' + quizQuery());
+    T('quizBank').textContent = bank;
+    if (!device) {
+      T('quizSummary').textContent = 'no device row for this MAC';
+      return;
+    }
+    // max_level bounds the picker, so you cannot ask for a level the band has
+    // no content for — the API would 400 and this is friendlier.
+    T('quizLevel').max = device.max_level || 1;
+    if (Number(T('quizLevel').value) > (device.max_level || 1)) T('quizLevel').value = device.max_level || 1;
+
+    // The picker shows what the device IS, not a fixed default. It used to sit at
+    // a hardcoded 1 regardless, which invited pressing Set level as a no-op and
+    // silently wiping the log. Skipped while focused so it cannot fight typing.
+    const el = T('quizLevel');
+    const level = device.current_level ?? device.max_level;
+    if (document.activeElement !== el && level != null) el.value = level;
+
+    // One bank now (ADR-0009), so there is no band to report. What replaced it is
+    // the per-level cleared count: after the mastery flip a question resolved
+    // `revealed` does NOT clear, so a device can answer all ten today and still
+    // be on the same level tomorrow. That gap is invisible in every other number
+    // here, and it is the thing you are usually testing.
+    const cleared = device.level_size - device.level_uncleared;
+    // days_on_level is the anti-trap countdown: at the cap the NEXT session
+    // advances regardless of mastery. Flagged when it is about to fire, because
+    // otherwise an unexplained jump to the next level reads as a bug.
+    const trapping = device.days_on_level >= device.anti_trap_cap;
+    // levels_completed counts mastered AND aged-out. Splitting them out only
+    // when they differ keeps the common line short while making an aged-out
+    // level impossible to mistake for a mastered one.
+    const done = device.levels_aged_out
+      ? `levels done ${device.levels_completed} (${device.levels_mastered} mastered, ${device.levels_aged_out} aged out)`
+      : `levels done ${device.levels_completed}`;
+    T('quizSummary').textContent =
+      `${device.kid_name || 'no child profile'} · ` +
+      (device.current_level === null
+        ? `all ${device.max_level} levels cleared`
+        : `level ${device.current_level}/${device.max_level} — ${cleared}/${device.level_size} cleared` +
+          ` · day ${device.days_on_level}/${device.anti_trap_cap} on level${trapping ? ' — next session advances' : ''}`) +
+      ` · ${done} · ` +
+      `today ${device.answered_today}/10${device.day_complete ? ' — day complete' : ''}` +
+      `${device.replay ? ' · replay' : ''}`;
+  } catch (e) {
+    T('quizSummary').textContent = 'could not load: ' + e.message;
+  }
+}
+
+async function quizAction(path, body, label) {
+  const mac = T('testMac').value.trim();
+  if (!mac) return;
+  try {
+    const r = await api('POST', path, { mac, character: T('testChar').value || '', ...body });
+    // Reset day reports how many rows slid back, and says so when there was
+    // nothing to re-open — pressing it on an already-open day is a no-op, not a
+    // second simulated night, and silence there would be read as the opposite.
+    const detail = r && r.backdated !== undefined
+      ? (r.day_already_open ? ' — day was already open, nothing moved' : ` — ${r.backdated} row(s) slid back a day`)
+      : '';
+    tlog(`${label} for ${mac}${detail}`, 'ok');
+  } catch (e) {
+    tlog(`${label} failed: ` + e.message, 'err');
+  }
+  loadQuizProgress();
+}
+
+T('quizRefresh').addEventListener('click', loadQuizProgress);
+T('testChar').addEventListener('change', syncQuizPanel);
+// `input`, not `change`: a text field only fires change on blur, so typing a new
+// MAC and looking straight at the panel showed the previous device's progress.
+// Debounced so a half-typed MAC does not query on every keystroke.
+let quizMacTimer = null;
+T('testMac').addEventListener('input', () => {
+  clearTimeout(quizMacTimer);
+  quizMacTimer = setTimeout(loadQuizProgress, 400);
+});
+// Rewrites the device's answer log for its band, so it asks first. Harmless on a
+// test toy, which is the only thing this tab points at, but it is still a wipe.
+T('quizSetLevel').addEventListener('click', () => {
+  const level = Number(T('quizLevel').value);
+  if (!confirm(`Set level ${level}? This rewrites this device's answer log for the ${T('quizBank').textContent} bank.`)) return;
+  quizAction('/quiz-set-level', { level }, `Set level ${level}`);
+});
+T('quizResetDay').addEventListener('click', () => quizAction('/quiz-reset-day', {}, 'Reset day'));
+
+// Refreshed on Start too: the panel is what tells you whether this session will
+// do what you set it up to do, and it is the last moment you can still fix it.
+T('startTest').addEventListener('click', () => { loadQuizProgress(); startTest(); });
 T('stopTest').addEventListener('click', stopTest);
 T('muteBtn').addEventListener('click', toggleMute);
 T('pttBtn').addEventListener('click', pttToggle);
-document.querySelector('.tab[data-tab="testView"]')?.addEventListener('click', startViz);
+// Refreshed on tab open and after a session ends — the numbers only move when a
+// session scores something, and that is exactly when you want to see them.
+document.querySelector('.tab[data-tab="testView"]')?.addEventListener('click', () => {
+  startViz();
+  syncQuizPanel();
+});
 
 // Space = tap, Esc = cancel — same shape as client.py's 's' and spacebar.
 document.addEventListener('keydown', (e) => {

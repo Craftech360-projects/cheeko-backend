@@ -48,10 +48,11 @@ function safeObject(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function gameProjectionData({ rawEventRow, data, userId, ownerDeviceId, activityDate, eventInstant, durationMs }) {
+function gameProjectionData({ rawEventRow, data, userId, ownerDeviceId, kidId, activityDate, eventInstant, durationMs }) {
   return {
     user_id: userId,
     device_id: ownerDeviceId,
+    kid_id: kidId,
     mac_address: rawEventRow.mac_address,
     activity_date: activityDate,
     game_id: extractStringValue(rawEventRow.game_id, data.game_id),
@@ -332,7 +333,7 @@ async function fetchEventsByMac(mac, { from = null, to = null, limit = MAX_QUERY
 async function resolveProjectionContext(macAddress) {
   const device = await prisma.ai_device.findUnique({
     where: { mac_address: macAddress },
-    select: { id: true, user_id: true },
+    select: { id: true, user_id: true, kid_id: true },
   });
 
   let timezone = 'UTC';
@@ -347,6 +348,8 @@ async function resolveProjectionContext(macAddress) {
   return {
     userId: device?.user_id || null,
     ownerDeviceId: device?.id || null,
+    // The rollups belong to the child, so every projected row carries them.
+    kidId: device?.kid_id || null,
     timezone,
   };
 }
@@ -355,7 +358,7 @@ async function applyProjectionForEvent(rawEventRow) {
   const data = safeObject(rawEventRow.data);
   const eventName = rawEventRow.event_name;
   const eventInstant = eventTime(rawEventRow) || new Date();
-  const { userId, ownerDeviceId, timezone } = await resolveProjectionContext(rawEventRow.mac_address);
+  const { userId, ownerDeviceId, kidId, timezone } = await resolveProjectionContext(rawEventRow.mac_address);
   const activityDateKey = formatDateInTimezone(eventInstant, timezone) || dateKeyUtc(eventInstant);
   const activityDate = toDateOnlyValue(activityDateKey);
   if (!activityDate) return;
@@ -367,6 +370,7 @@ async function applyProjectionForEvent(rawEventRow) {
   const dailyBase = {
     user_id: userId,
     device_id: ownerDeviceId,
+    kid_id: kidId,
     mac_address: rawEventRow.mac_address,
     date: activityDate,
   };
@@ -455,6 +459,7 @@ async function applyProjectionForEvent(rawEventRow) {
           data,
           userId,
           ownerDeviceId,
+          kidId,
           activityDate,
           eventInstant,
           durationMs: null,
@@ -489,6 +494,7 @@ async function applyProjectionForEvent(rawEventRow) {
       data,
       userId,
       ownerDeviceId,
+      kidId,
       activityDate,
       eventInstant,
       durationMs,
@@ -529,6 +535,7 @@ async function applyProjectionForEvent(rawEventRow) {
       create: {
         user_id: userId,
         device_id: ownerDeviceId,
+        kid_id: kidId,
         mac_address: rawEventRow.mac_address,
         activity_date: activityDate,
         station: extractStringValue(rawEventRow.station, data.station),
@@ -568,10 +575,19 @@ async function ingestFirmwareAnalyticsEvent({ mac_address, sender_client_id = nu
   const battery = parseIntOrNull(incoming.battery);
   const batteryPercentage = parseIntOrNull(incoming.battery_percentage);
 
+  // Whose event this is. The row is built from the firmware payload, which knows
+  // nothing about children, so the pairing is looked up here. One indexed read
+  // per event: this is telemetry, a handful per session, not a hot path.
+  const owner = await prisma.ai_device.findUnique({
+    where: { mac_address: mac },
+    select: { kid_id: true },
+  });
+
   const row = {
     device_id: stableDeviceId,
     event_id: String(incoming.event_id),
     mac_address: mac,
+    kid_id: owner?.kid_id || null,
     sender_client_id: sender_client_id || null,
     board: incoming.board || null,
     firmware: incoming.firmware || null,

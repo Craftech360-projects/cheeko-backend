@@ -13,6 +13,7 @@ const {
   saveWorkspaceFiles,
   getWorkspaceSync,
   saveWorkspaceSync,
+  resolveOwnerKeyForMac,
 } = require('../services/workspace.service');
 const {
   acquireWorkspaceLock,
@@ -547,6 +548,11 @@ router.get('/config/:mac',
  *         schema:
  *           type: integer
  *           default: 20
+ *       - in: query
+ *         name: agentId
+ *         description: Character being run. Defaults to the device's own agent.
+ *         schema:
+ *           type: string
  *     responses:
  *       200:
  *         description: Device bootstrap context
@@ -559,7 +565,8 @@ router.get('/device/:mac/bootstrap',
       const recentLimit = req.query.recentLimit || req.query.limit;
       const result = await agentService.getDeviceBootstrap(req.params.mac, {
         includeMemories,
-        recentLimit
+        recentLimit,
+        agentId: req.query.agentId
       });
       success(res, result);
     } catch (error) {
@@ -1666,6 +1673,13 @@ router.post('/device/:mac/workspace-lock/acquire',
       staleGraceSeconds,
       preempt,
     });
+    // The acquire is the first call a session makes, and it happens before the
+    // worker has touched any file — which makes it the one place that can tell
+    // the worker whose workspace this is in time for it to name the directory
+    // accordingly. Null for an unknown device; the worker keeps its own guess.
+    if (result.acquired) {
+      result.ownerKey = await resolveOwnerKeyForMac(req.params.mac);
+    }
     success(res, result, result.acquired ? 'Workspace lock acquired' : 'Workspace lock busy');
   })
 );

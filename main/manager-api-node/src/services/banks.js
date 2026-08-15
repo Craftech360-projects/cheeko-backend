@@ -34,6 +34,15 @@ const BANKS = {
     subject: 'quiz',
     // Log prefix. The two banks are debugged from the same log stream.
     label: 'QUIZ',
+    // Does a revealed answer count the question as cleared?
+    //
+    // FALSE since ADR-0009: a question the child did not solve comes back
+    // another day. This reverses quiz-bank ticket 006, which chose flow over
+    // mastery on purpose — read that ADR before flipping it back.
+    //
+    // The flag exists because the two characters share one service, so without
+    // it this line would have changed Riddler in the same commit.
+    clearOnReveal: false,
   },
   riddle: {
     questions: prisma.riddle_question,
@@ -41,10 +50,25 @@ const BANKS = {
     answerTable: 'riddle_question_answer',
     subject: 'riddle',
     label: 'RIDDLE',
+    // Stays true, deliberately. A riddle whose answer you already know is not a
+    // riddle — repeating it until solved teaches nothing and only frustrates.
+    // Riddler keeps flow; Quizzy takes mastery.
+    clearOnReveal: true,
   },
 };
 
 const DEFAULT_BANK = 'quiz';
+
+/**
+ * The answer results that count a question as Cleared, for one bank.
+ *
+ * The single place either service may ask. `correct` always clears; `revealed`
+ * clears only where the bank chose flow over mastery.
+ *
+ * @param {{clearOnReveal?: boolean}} bank - a BANKS entry, as resolveBank returns
+ * @returns {string[]}
+ */
+const clearedResultsFor = (bank) => (bank?.clearOnReveal ? ['correct', 'revealed'] : ['correct']);
 
 /**
  * Character `agent_code` -> bank. Note it is agent_code, not the display name.
@@ -143,5 +167,6 @@ module.exports = {
   DEFAULT_BANK,
   bankFor,
   bankForCharacterRef,
+  clearedResultsFor,
   resolveBank,
 };

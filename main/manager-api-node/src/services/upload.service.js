@@ -6,6 +6,8 @@
 const { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { randomUUID } = require('crypto');
 const logger = require('../utils/logger');
+const { prisma } = require('../config/database');
+const { normalizeMacAddress, ownerKeyForDevice } = require('../utils/helpers');
 const path = require('path');
 
 // S3 Configuration
@@ -166,10 +168,26 @@ function macKeySegment(deviceMac) {
 }
 
 /**
- * AI Imagine: upload a generated JPEG to S3 and return the public CloudFront URL.
- * When deviceMac is provided the object is bucketed under imagine/<mac>/<uuid>.jpg
- * so images can be listed per device; otherwise it falls back to imagine/<uuid>.jpg.
- * No DB persistence — caller (mqtt-gateway) owns the device-facing image{url} message.
+ * The owner key for a device's pictures, or null when the MAC is unusable or the
+ * device is unknown. Same key the workspace and memory stores use, so a pairing
+ * adopts all four in one statement.
+ */
+async function imagineOwnerKey(deviceMac) {
+  const normalized = normalizeMacAddress(deviceMac);
+  if (!normalized) return null;
+  const device = await prisma.ai_device.findUnique({
+    where: { mac_address: normalized },
+    select: { kid_id: true, mac_address: true },
+  });
+  if (!device) return null;
+  return ownerKeyForDevice(device);
+}
+
+/**
+ * AI Imagine: upload a generated JPEG to S3, record whose it is, and return the
+ * public CloudFront URL. The object is bucketed under imagine/<mac>/<uuid>.jpg
+ * and that key never moves again — a child changing toys updates the row's
+ * owner_key, so no picture is ever copied between prefixes.
  */
 async function uploadImagineImage(fileBuffer, deviceMac) {
   const mac = macKeySegment(deviceMac);
@@ -181,35 +199,85 @@ async function uploadImagineImage(fileBuffer, deviceMac) {
     ContentType: 'image/jpeg',
     CacheControl: 'max-age=31536000',
   }));
+
+  // The picture is already safe in S3. Losing the row costs it from the gallery
+  // until the backfill re-reads the bucket, which is worth far less than failing
+  // an upload the child has already waited on.
+  const ownerKey = await imagineOwnerKey(deviceMac).catch(() => null);
+  if (ownerKey) {
+    try {
+      await prisma.imagine_image.create({
+        data: {
+          owner_key: ownerKey,
+          mac_address: normalizeMacAddress(deviceMac),
+          s3_key: s3Key,
+          size_bytes: fileBuffer.length,
+        },
+      });
+    } catch (err) {
+      logger.warn(`[imagine] uploaded ${s3Key} but failed to record it: ${err.message}`);
+    }
+  }
+
   const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
   return { success: true, url, s3Key };
 }
 
 /**
- * AI Imagine: list a device's generated images, newest first. Returns [] for an
- * unknown/malformed MAC. Pass dateISO (YYYY-MM-DD) to filter to that IST calendar
- * day — S3 has no server-side date filter, so this filters the listed page in memory.
- * ponytail: single ListObjectsV2 page (1000 max) — add a continuation token if a
- * device ever exceeds 1000 images.
+ * The UTC instants bounding an IST calendar day. IST is a fixed +05:30 with no
+ * daylight saving, so the offset is a constant rather than a lookup.
  */
-async function listImagineImages(deviceMac, dateISO) {
-  const mac = macKeySegment(deviceMac);
-  if (!mac) return [];
-  const out = await s3Client.send(new ListObjectsV2Command({
-    Bucket: S3_BUCKET,
-    Prefix: `imagine/${mac}/`,
+function istDayRange(dateISO) {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const midnightIST = new Date(`${dateISO}T00:00:00.000Z`).getTime() - IST_OFFSET_MS;
+  return { gte: new Date(midnightIST), lt: new Date(midnightIST + 24 * 60 * 60 * 1000) };
+}
+
+/**
+ * AI Imagine: list one owner's pictures, newest first.
+ *
+ * Reads the imagine_image table rather than listing the bucket, which is what
+ * makes the gallery follow the child and removes the old 1000-object ceiling —
+ * ListObjectsV2 returned a single page and the date filter was applied to
+ * whatever happened to be on it.
+ *
+ * @param {string} deviceMac
+ * @param {string|null} dateISO - YYYY-MM-DD, filtered as an IST calendar day
+ * @param {{limit?: number, cursor?: string|number}} [options] - cursor is the id
+ *   of the last row of the previous page
+ */
+async function listImagineImages(deviceMac, dateISO, options = {}) {
+  const ownerKey = await imagineOwnerKey(deviceMac);
+  if (!ownerKey) return [];
+  return listImagineImagesForOwner(ownerKey, dateISO, options);
+}
+
+async function listImagineImagesForOwner(ownerKey, dateISO, options = {}) {
+  const limit = Math.min(Math.max(Number(options.limit) || 200, 1), 1000);
+  const cursor = options.cursor ? BigInt(options.cursor) : null;
+
+  const rows = await prisma.imagine_image.findMany({
+    where: {
+      owner_key: ownerKey,
+      ...(dateISO ? { created_at: istDayRange(dateISO) } : {}),
+      ...(cursor ? { id: { lt: cursor } } : {}),
+    },
+    orderBy: { id: 'desc' },
+    take: limit,
+  });
+
+  return rows.map((row) => ({
+    id: String(row.id),
+    key: row.s3_key,
+    url: `${IMAGINE_PUBLIC_BASE}/${row.s3_key}`,
+    size: row.size_bytes ? Number(row.size_bytes) : null,
+    createdAt: row.created_at,
   }));
-  let items = (out.Contents || []).map((o) => ({
-    key: o.Key,
-    url: `${IMAGINE_PUBLIC_BASE}/${o.Key}`,
-    size: o.Size,
-    createdAt: o.LastModified,
-  }));
-  if (dateISO) {
-    items = items.filter((i) =>
-      new Date(i.createdAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }) === dateISO);
-  }
-  return items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+/** The gallery for one child, wherever the pictures were made. */
+async function listImagineImagesForKid(kidId, dateISO, options = {}) {
+  return listImagineImagesForOwner(`kid:${kidId}`, dateISO, options);
 }
 
 /**
@@ -309,6 +377,7 @@ module.exports = {
   uploadKidAvatar,
   deleteKidAvatarByUrl,
   listImagineImages,
+  listImagineImagesForKid,
   uploadCustomCardAudio,
   deleteCustomCardAudio
 };

@@ -2,6 +2,7 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeCharacterName } = require('./character-resolver');
 
 const CARD_TAP_DEBOUNCE_MS = 60 * 1000;
 
@@ -183,7 +184,7 @@ async function countRawGameStartsForRange(scope, range) {
 
     const rows = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: scope.macAddresses },
+            ...progressOwnerFilter(scope),
             event_name: 'game_start',
             server_received_at: {
                 gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
@@ -206,7 +207,7 @@ async function getProgressEventsForRange(scope, range, eventName) {
 
     const rows = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: scope.macAddresses },
+            ...progressOwnerFilter(scope),
             event_name: eventNameWhere,
             server_received_at: {
                 gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
@@ -1807,15 +1808,75 @@ async function markOnboardingCompleted(firebaseUid) {
 
 // ─── Kids ───────────────────────────────────────────────────────────────────
 
-async function getKids(firebaseUid) {
+async function getKids(firebaseUid, options = {}) {
     const user = await prisma.sys_user.findUnique({
         where: { firebase_uid: firebaseUid },
-        include: { kid_profile: true },
+        include: { kid_profile: { orderBy: [{ created_at: 'asc' }, { id: 'asc' }] } },
     });
     if (!user) return [];
 
+    // ?mac= answers "who is this toy's child", which is the question a screen
+    // opened from a device is actually asking. Without it the caller gets every
+    // child and has to pick, and picking is where the app went wrong.
+    const requestedMac = normalizeMacAddress(options.mac || options.mac_address || options.macAddress);
+    if ((options.mac || options.mac_address || options.macAddress) && !requestedMac) {
+        throw new ApiError('Device not found', 404, 404);
+    }
+
+    // Which toy each child is on. The app picks its active child from this list
+    // and had no way to tell which one the toy in front of the parent belongs
+    // to, so it took the first -- and the order was whatever Postgres returned.
+    const devices = await prisma.ai_device.findMany({
+        where: { user_id: user.id, kid_id: { not: null } },
+        select: { mac_address: true, kid_id: true, last_connected_at: true },
+    });
+    const deviceByKid = new Map(devices.map(d => [String(d.kid_id), d]));
+    const macByKid = new Map(devices.map(d => [String(d.kid_id), d.mac_address]));
+
+    // The child whose toy was used most recently comes first, then the rest by
+    // age of profile. A client that picks the head of this list -- which the app
+    // does -- lands on the family's active child instead of on whichever row
+    // Postgres happened to return first.
+    //
+    // This is a better default, not a substitute for choosing properly. A parent
+    // with two paired toys has two right answers and only the client knows which
+    // screen it is on, which is what device_mac below is for.
+    const lastUsed = (kid) => {
+        const at = deviceByKid.get(String(kid.id))?.last_connected_at;
+        return at ? new Date(at).getTime() : null;
+    };
+    const ordered = [...user.kid_profile].sort((a, b) => {
+        const [ua, ub] = [lastUsed(a), lastUsed(b)];
+        if (ua !== ub) {
+            if (ua === null) return 1;
+            if (ub === null) return -1;
+            return ub - ua;
+        }
+        return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+    });
+
+    // A MAC this parent does not own is a 404, not an empty list: "you have no
+    // children on that toy" and "that toy is not yours" are different answers and
+    // the caller should not have to guess which it got.
+    let scoped = ordered;
+    if (requestedMac) {
+        const owned = await prisma.ai_device.findFirst({
+            where: { user_id: user.id, mac_address: { equals: requestedMac, mode: 'insensitive' } },
+            select: { kid_id: true },
+        });
+        if (!owned) throw new ApiError('Device not found', 404, 404);
+        // An unpaired toy legitimately has no child yet, so [] rather than 404.
+        scoped = owned.kid_id
+            ? ordered.filter(k => String(k.id) === String(owned.kid_id))
+            : [];
+    }
+
     // Map to the format the mobile app expects
-    return user.kid_profile.map(k => ({
+    return scoped.map(k => ({
+        device_mac: macByKid.get(String(k.id)) || null,
+        deviceMac: macByKid.get(String(k.id)) || null,
+        is_paired: macByKid.has(String(k.id)),
+        isPaired: macByKid.has(String(k.id)),
         id: k.id.toString(),
         parent_id: user.firebase_uid,
         name: k.name,
@@ -1841,17 +1902,46 @@ async function createKid(firebaseUid, data) {
     });
     if (!user) throw new Error('User not found');
 
-    const kid = await prisma.kid_profile.create({
+    const birthDate = (data.date_of_birth || data.birth_date)
+        ? new Date(data.date_of_birth || data.birth_date)
+        : null;
+
+    // Re-activating a toy walks the parent through the same "who is this for"
+    // screen, and every pass minted another profile: DB1 held two Kishores and
+    // two Rahuls, each pair identical on name and birth date. That was harmless
+    // while state lived on the MAC. Now that it follows the child, the new
+    // profile is an empty history and the toy gets paired to it -- one parent
+    // lost 67 memory documents and 71 sessions that way.
+    //
+    // Same duplicate key as scripts/merge-duplicate-kid-profiles.js:
+    // (user_id, lower(name), birth_date). Two siblings sharing both a name and a
+    // birth date is not a case worth splitting them for.
+    const existing = birthDate && data.name
+        ? await prisma.kid_profile.findFirst({
+            where: {
+                user_id: user.id,
+                name: { equals: String(data.name).trim(), mode: 'insensitive' },
+                birth_date: birthDate,
+            },
+            orderBy: { id: 'asc' },
+        })
+        : null;
+
+    const kid = existing || await prisma.kid_profile.create({
         data: {
             user_id: user.id,
             name: data.name,
             nickname: data.nickname,
-            birth_date: (data.date_of_birth || data.birth_date) ? new Date(data.date_of_birth || data.birth_date) : null,
+            birth_date: birthDate,
             gender: data.gender,
             interests: data.interests || [],
             language: data.language || 'en',
         },
     });
+
+    if (existing) {
+        logger.info(`[mobile] createKid reused existing profile ${existing.id} for "${data.name}" rather than duplicating it`);
+    }
 
     return {
         id: kid.id.toString(),
@@ -1868,7 +1958,22 @@ async function createKid(firebaseUid, data) {
     };
 }
 
-async function updateKid(kidId, data) {
+/**
+ * Edit a child's profile.
+ *
+ * Scoped by owner. It used to take only the id and update straight through, so
+ * any signed-in parent could edit any child in the database by putting a
+ * different number in the URL. One caller already knew — the avatar upload
+ * verifies ownership itself and says so in a comment — but PUT /kids/:id did
+ * not, and a mis-selected child in the app is exactly how you find out.
+ */
+async function updateKid(firebaseUid, kidId, data) {
+    const user = await prisma.sys_user.findUnique({
+        where: { firebase_uid: firebaseUid },
+        select: { id: true },
+    });
+    if (!user) throw new ApiError('User not found', 404, 404);
+
     const updates = {};
     if (data.name) updates.name = data.name;
     if (data.nickname) updates.nickname = data.nickname;
@@ -1879,10 +1984,15 @@ async function updateKid(kidId, data) {
     if (data.avatar_url) updates.avatar_url = data.avatar_url;
     if (data.parent_rule !== undefined) updates.parent_rule = data.parent_rule || null;
 
-    const kid = await prisma.kid_profile.update({
-        where: { id: BigInt(kidId) },
+    // updateMany so a row belonging to someone else simply matches nothing,
+    // rather than being fetched, compared and then hopefully rejected.
+    const result = await prisma.kid_profile.updateMany({
+        where: { id: BigInt(kidId), user_id: user.id },
         data: updates,
     });
+    if (result.count === 0) throw new ApiError('Kid profile not found', 404, 404);
+
+    const kid = await prisma.kid_profile.findUnique({ where: { id: BigInt(kidId) } });
 
     return {
         id: kid.id.toString(),
@@ -2039,9 +2149,10 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
     }
 
     const { start, end, monthKey } = getActivityDetailsRange(period, now, selectedMonth);
+    const ownerFilter = await ownerFilterForMacs(macAddresses);
     const events = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: macAddresses },
+            ...ownerFilter,
             server_received_at: {
                 gte: start,
                 lte: end,
@@ -2073,7 +2184,7 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
         if (period === 'week') {
             const gameRows = await prisma.device_games_played.findMany({
                 where: {
-                    mac_address: { in: macAddresses },
+                    ...ownerFilter,
                     played_at: {
                         gte: start,
                         lte: end,
@@ -2184,11 +2295,30 @@ function recentActivityPackTitleKey(activity) {
     return title ? title.toLowerCase() : null;
 }
 
+/**
+ * The same owner filter as progressOwnerFilter, for the read paths that resolve
+ * their own device list instead of going through resolveProgressScope.
+ */
+async function ownerFilterForMacs(macAddresses) {
+    if (!macAddresses || !macAddresses.length) return { mac_address: { in: [] } };
+    const devices = await prisma.ai_device.findMany({
+        where: { mac_address: { in: macAddresses } },
+        select: { mac_address: true, kid_id: true },
+    });
+    return progressOwnerFilter({
+        kidIds: devices.filter((d) => d.kid_id).map((d) => d.kid_id),
+        unpairedMacAddresses: macAddresses.filter((mac) => {
+            const row = devices.find((d) => (normalizeMacAddress(d.mac_address) || d.mac_address) === mac);
+            return !row || !row.kid_id;
+        }),
+    });
+}
+
 async function getRecentAnalyticsCardActivities(macAddresses, limit = 3) {
     if (!macAddresses || macAddresses.length === 0) return [];
     const rows = await prisma.device_analytics_event.findMany({
         where: {
-            mac_address: { in: macAddresses },
+            ...(await ownerFilterForMacs(macAddresses)),
             event_name: 'card_session_start',
         },
         select: {
@@ -2281,8 +2411,20 @@ async function resolveProgressScope(firebaseUid, options = {}) {
 
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id },
-        select: { mac_address: true },
+        select: { mac_address: true, kid_id: true },
     });
+
+    // A named child is checked against the account that asked for it, the same way
+    // a named toy is just below — so one guard answers both "is this my toy" and
+    // "is this my child", and neither reaches another family's.
+    const requestedKidId = options.kidId ? parseBigIntId(options.kidId, 'kidId') : null;
+    if (requestedKidId != null) {
+        const kid = await prisma.kid_profile.findFirst({
+            where: { id: requestedKidId, user_id: user.id },
+            select: { id: true },
+        });
+        if (!kid) throw new ApiError('Kid not found', 404, 404);
+    }
 
     const ownedMacAddresses = (devices || [])
         .map(device => normalizeMacAddress(device.mac_address) || device.mac_address)
@@ -2293,11 +2435,46 @@ async function resolveProgressScope(firebaseUid, options = {}) {
         throw new ApiError('Device not found', 404, 404);
     }
 
+    const macAddresses = requestedMac ? [requestedMac] : ownedMacAddresses;
+    const inScope = (devices || []).filter((d) => {
+        const mac = normalizeMacAddress(d.mac_address) || d.mac_address;
+        return macAddresses.includes(mac);
+    });
+
     return {
         userId: user.id,
         timezone: user.parent_profile?.timezone || 'UTC',
-        macAddresses: requestedMac ? [requestedMac] : ownedMacAddresses,
+        macAddresses,
+        kidIds: requestedKidId != null
+            ? [requestedKidId]
+            : inScope.filter((d) => d.kid_id).map((d) => d.kid_id),
+        unpairedMacAddresses: inScope
+            .filter((d) => !d.kid_id)
+            .map((d) => normalizeMacAddress(d.mac_address) || d.mac_address),
     };
+}
+
+/**
+ * Which rollup rows belong to the children in scope.
+ *
+ * A paired device's history is read by child, so it follows them to a new toy
+ * and does not follow the toy to a sibling. An unpaired device falls back to its
+ * own MAC AND to rows with no child — without that second half, a toy handed on
+ * before the parent picks a child would report the previous child's totals.
+ *
+ * A parent can own both kinds at once, so this is an OR rather than a branch.
+ */
+function progressOwnerFilter(scope) {
+    const branches = [];
+    if (scope.kidIds && scope.kidIds.length) {
+        branches.push({ kid_id: { in: scope.kidIds } });
+    }
+    if (scope.unpairedMacAddresses && scope.unpairedMacAddresses.length) {
+        branches.push({ mac_address: { in: scope.unpairedMacAddresses }, kid_id: null });
+    }
+    // Nothing in scope: match nothing rather than everything.
+    if (!branches.length) return { mac_address: { in: [] } };
+    return branches.length === 1 ? branches[0] : { OR: branches };
 }
 
 async function resolveAdminProgressScopeByMac(mac) {
@@ -2306,7 +2483,7 @@ async function resolveAdminProgressScopeByMac(mac) {
 
     const device = await prisma.ai_device.findUnique({
         where: { mac_address: normalizedMac },
-        select: { user_id: true },
+        select: { user_id: true, kid_id: true },
     });
     if (!device) throw new ApiError('Device not found', 404, 404);
 
@@ -2323,6 +2500,8 @@ async function resolveAdminProgressScopeByMac(mac) {
         userId: device.user_id || null,
         timezone,
         macAddresses: [normalizedMac],
+        kidIds: device.kid_id ? [device.kid_id] : [],
+        unpairedMacAddresses: device.kid_id ? [] : [normalizedMac],
     };
 }
 
@@ -2366,7 +2545,7 @@ async function getProgressSummary(firebaseUid, options = {}) {
     ] = await Promise.all([
         prisma.device_usage_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: {
@@ -2379,21 +2558,21 @@ async function getProgressSummary(firebaseUid, options = {}) {
         }),
         prisma.device_card_taps_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: { card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: { ai_interaction_count: true },
         }),
         prisma.device_games_played.count({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 activity_date: dateWhere,
             },
         }),
@@ -2466,7 +2645,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
 
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 date: true,
                 usage_time_seconds: true,
@@ -2477,15 +2656,15 @@ async function getProgressTrend(firebaseUid, options = {}) {
             },
         }),
         prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, ai_interaction_count: true },
         }),
         prisma.device_games_played.findMany({
-            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            where: { ...progressOwnerFilter(scope), activity_date: dateWhere },
             select: { activity_date: true },
         }),
     ]);
@@ -2565,7 +2744,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
     if (metric === 'usage') {
         const rows = await prisma.device_usage_daily.findMany({
             where: {
-                mac_address: { in: scope.macAddresses },
+                ...progressOwnerFilter(scope),
                 date: dateWhere,
             },
             select: {
@@ -2584,7 +2763,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             const monthEnd = dateOnlyFromKey(range.endDate);
             const sectionRows = await prisma.device_usage_daily.findMany({
                 where: {
-                    mac_address: { in: scope.macAddresses },
+                    ...progressOwnerFilter(scope),
                     date: {
                         gte: monthStart || dateWhere.gte,
                         lte: monthEnd,
@@ -2670,7 +2849,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
 
     if (metric === 'games') {
         const where = {
-            mac_address: { in: scope.macAddresses },
+            ...progressOwnerFilter(scope),
             activity_date: dateWhere,
         };
         const [totalItems, rows] = await Promise.all([
@@ -2713,7 +2892,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
     }
 
     const where = {
-        mac_address: { in: scope.macAddresses },
+        ...progressOwnerFilter(scope),
         activity_date: dateWhere,
     };
     const [totalItems, rows] = await Promise.all([
@@ -2783,7 +2962,7 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
 
     const [usageRows, cardRows, aiRows, gamesCount] = await Promise.all([
         prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 usage_time_seconds: true,
                 game_usage_seconds: true,
@@ -2793,15 +2972,15 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
             },
         }),
         prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { ai_interaction_count: true },
         }),
         prisma.device_games_played.count({
-            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            where: { ...progressOwnerFilter(scope), activity_date: dateWhere },
         }),
     ]);
 
@@ -2865,7 +3044,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
 
     const [usageRows, cardRows, aiRows, gameRows] = await Promise.all([
         prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 date: true,
                 usage_time_seconds: true,
@@ -2876,15 +3055,15 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
             },
         }),
         prisma.device_card_taps_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, card_tap_count: true },
         }),
         prisma.device_ai_interactions_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: { date: true, ai_interaction_count: true },
         }),
         prisma.device_games_played.findMany({
-            where: { mac_address: { in: scope.macAddresses }, activity_date: dateWhere },
+            where: { ...progressOwnerFilter(scope), activity_date: dateWhere },
             select: { activity_date: true },
         }),
     ]);
@@ -2958,7 +3137,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
 
     if (metric === 'usage') {
         const rows = await prisma.device_usage_daily.findMany({
-            where: { mac_address: { in: scope.macAddresses }, date: dateWhere },
+            where: { ...progressOwnerFilter(scope), date: dateWhere },
             select: {
                 date: true,
                 game_usage_seconds: true,
@@ -2975,7 +3154,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             const monthEnd = dateOnlyFromKey(range.endDate);
             const sectionRows = await prisma.device_usage_daily.findMany({
                 where: {
-                    mac_address: { in: scope.macAddresses },
+                    ...progressOwnerFilter(scope),
                     date: {
                         gte: monthStart || dateWhere.gte,
                         lte: monthEnd,
@@ -3055,7 +3234,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     }
 
     if (metric === 'games') {
-        const where = { mac_address: { in: scope.macAddresses }, activity_date: dateWhere };
+        const where = { ...progressOwnerFilter(scope), activity_date: dateWhere };
         const [totalItems, rows] = await Promise.all([
             prisma.device_games_played.count({ where }),
             prisma.device_games_played.findMany({
@@ -3094,7 +3273,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
         };
     }
 
-    const where = { mac_address: { in: scope.macAddresses }, activity_date: dateWhere };
+    const where = { ...progressOwnerFilter(scope), activity_date: dateWhere };
     const [totalItems, rows] = await Promise.all([
         prisma.device_radio_played.count({ where }),
         prisma.device_radio_played.findMany({
@@ -3198,10 +3377,14 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
                 take: 20,
             })
             : Promise.resolve([]),
+        // Was ai_agent_chat_history, the legacy xiaozhi table, which has had no
+        // new rows since 2026-06-06 — so this "has the child talked recently"
+        // signal had been permanently off. voice_session_messages is where
+        // transcripts actually live; role 'user' is the equivalent of chat_type 1.
         (macAddresses.length > 0 || agentIds.length > 0)
-            ? prisma.ai_agent_chat_history.findMany({
+            ? prisma.voice_session_messages.findMany({
                 where: {
-                    chat_type: 1,
+                    role: 'user',
                     OR: [
                         ...(macAddresses.length > 0 ? [{ mac_address: { in: macAddresses } }] : []),
                         ...(agentIds.length > 0 ? [{ agent_id: { in: agentIds } }] : []),
@@ -3278,9 +3461,46 @@ async function getHomepageRecommendations(firebaseUid, options = {}) {
 
 const QUIZ_POINTS_PER_CORRECT = 10;
 
-// Cleared mirrors quiz.service.js: a revealed question clears too, which is why
-// the response reports revealed separately instead of folding it into wrong.
-const QUIZ_CLEARED_RESULTS = ['correct', 'revealed'];
+// What clears is per bank (banks.js clearOnReveal), asked through
+// clearedResultsFor rather than duplicated here. This file used to hold its own
+// copy of the list, so flipping quiz.service.js alone would have left the parent
+// dashboard reporting a question as done while the toy reopened it.
+
+/**
+ * The wire value for a stored verdict.
+ *
+ * `GET /toy/api/mobile/progress/quiz` is a published contract: the parent app
+ * types `result` as "correct" | "wrong" | "revealed" and renders each one
+ * differently. When the internal vocabulary becomes solo/helped/missed
+ * (ADR-0009), those map back here and the app sees no change:
+ *
+ *   solo -> correct, helped -> correct, missed -> revealed
+ *
+ * Note this is the REVERSE of what the design document first proposed. The live
+ * prompt only ever emits correct|revealed, `revealed` already means the answer
+ * was told to the child after two failed tries, and Quizzy never emits `wrong`
+ * at all — so `helped -> revealed` would have inverted the meaning of the tile
+ * a parent already reads.
+ *
+ * Identity today, on purpose: the seam exists so the change lands in one place
+ * rather than across every caller that touches a result string.
+ */
+const QUIZ_WIRE_RESULTS = { solo: 'correct', helped: 'correct', missed: 'revealed' };
+const toWireResult = stored => QUIZ_WIRE_RESULTS[stored] || stored;
+
+/**
+ * solo | helped | practised for one answered question, or null when unknowable.
+ *
+ * Null is the common case for anything answered before the attempt log existed:
+ * a stored `correct` conflates FIRST_TRY and WITH_HINT, so history genuinely
+ * cannot say which. Guessing "solo" there would overstate a child's mastery to
+ * their parent, so the field is absent instead.
+ */
+const quizMastery = (storedResult, attemptCount) => {
+    if (toWireResult(storedResult) === 'revealed') return 'practised';
+    if (!attemptCount) return null;
+    return attemptCount > 1 ? 'helped' : 'solo';
+};
 
 /**
  * Answer rows store the MAC in whatever case the caller sent — the dev database
@@ -3303,6 +3523,95 @@ const quizMacFilter = macAddresses =>
 async function getQuizAnalytics(firebaseUid, options = {}) {
     const scope = await resolveProgressScope(firebaseUid, options);
     return buildQuizAnalyticsForScope(scope, options);
+}
+
+/**
+ * The two characters a child plays, as the home-screen quiz card reads them.
+ *
+ * Display names are fixed here rather than read from ai_agent_template: the card
+ * ships artwork keyed on these ids, so a rename in the template table must not
+ * blank the avatar. Ids are lowercase because the app lowercases before matching.
+ */
+const QUIZ_CHARACTERS = [
+    { bank: 'quiz', character_id: 'quizy', character_name: 'Quizy' },
+    { bank: 'riddle', character_id: 'riddler', character_name: 'Riddler' },
+];
+
+/**
+ * Today's per-character quiz standing for the parent app's home card.
+ *
+ * Distinct from getQuizAnalytics, which answers "what did this week contain"
+ * over both banks. This one answers "where does each character stand right now"
+ * — one row per character, the Current Level and how much of it is cleared.
+ *
+ * Level state is a position, not a range: it is the same at any hour of the day,
+ * so `period` is accepted for the app's sake and only decides which date the
+ * response is stamped with.
+ *
+ * Scoping is quiz.service's own — by child when the toy is paired, by MAC with
+ * `kid_id IS NULL` when it is not — so a hand-me-down toy never shows the
+ * previous child's level.
+ */
+async function getQuizCharacterProgress(firebaseUid, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, options);
+    // Required here rather than at the top of the file, as ./banks already is:
+    // quiz.service reaches back into this module's neighbours at load time.
+    const quizService = require('./quiz.service');
+
+    // The app sends the home screen's active toy. Without one, the first device
+    // this parent owns stands in, which is the only toy when they own one.
+    const mac = scope.macAddresses[0] || null;
+    const date = formatDateInTimezone(options.now || new Date(), scope.timezone);
+
+    if (!mac) {
+        return { date, characters: [], total_questions_answered: 0, total_questions: 0 };
+    }
+
+    const characters = [];
+    for (const character of QUIZ_CHARACTERS) {
+        let standing;
+        try {
+            standing = await quizService.progress(mac, character.bank);
+        } catch (error) {
+            // A bank whose tables are not deployed yet must read as "not started"
+            // rather than take the whole card down.
+            logger.warn(`[mobile] ${character.bank} progress unavailable: ${error.message}`);
+            continue;
+        }
+
+        characters.push({
+            character_id: character.character_id,
+            character_name: character.character_name,
+            // A finished band keeps showing the last level it cleared; dropping to
+            // null would render the card as level 0.
+            level: standing.current_level ?? standing.levels_completed,
+            // Both are 0 for a finished band — there is no level left to fill a
+            // bar with. `status` is what tells the card to say "Level complete".
+            questions_answered: standing.level_cleared,
+            total_questions: standing.level_total,
+            status: quizCharacterStatus(standing),
+        });
+    }
+
+    return {
+        date,
+        characters,
+        total_questions_answered: characters.reduce((sum, c) => sum + c.questions_answered, 0),
+        total_questions: characters.reduce((sum, c) => sum + c.total_questions, 0),
+    };
+}
+
+/**
+ * A non-null Current Level is by definition one with questions still open, so
+ * "completed" can only come from the null case — and only when levels were
+ * actually cleared, since an empty bank reads null too and is not an
+ * achievement.
+ */
+function quizCharacterStatus(standing) {
+    if (standing.current_level === null) {
+        return standing.levels_completed > 0 ? 'completed' : 'not_started';
+    }
+    return standing.level_cleared > 0 ? 'in_progress' : 'not_started';
 }
 
 /**
@@ -3348,7 +3657,7 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
     const windowOpened = new Date(`${range.startDate}T00:00:00Z`);
     const totals = { correct: 0, attempted: 0, previousCorrect: 0, previousAttempted: 0 };
 
-    const { resolveBank } = require('./banks');
+    const { resolveBank, clearedResultsFor } = require('./banks');
     const banks = [];
 
     for (const bankName of ['quiz', 'riddle']) {
@@ -3394,7 +3703,7 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
 
         const questions = await tables.questions.findMany({
             where: { id: { in: [...new Set(scoped.map(r => r.question_id))] } },
-            select: { id: true, level: true, question_text: true, answer_text: true, age_band: true, language: true },
+            select: { id: true, level: true, question_text: true, answer_text: true, language: true },
         });
         const questionById = new Map(questions.map(q => [String(q.id), q]));
 
@@ -3404,20 +3713,38 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
             (await tables.answers.findMany({
                 where: {
                     OR: quizMacFilter(scope.macAddresses),
-                    result: { in: QUIZ_CLEARED_RESULTS },
+                    result: { in: clearedResultsFor(tables) },
                     answered_at: { lt: windowOpened },
                 },
                 select: { question_id: true },
             })).map(r => String(r.question_id))
         );
 
-        const bands = [...new Set(questions.map(q => q.age_band))];
+        // One shared bank since ticket 013, so the active set is scoped by
+        // language alone.
         const langs = [...new Set(questions.map(q => q.language))];
         const activeBank = await tables.questions.findMany({
-            where: { active: true, age_band: { in: bands }, language: { in: langs } },
+            where: { active: true, language: { in: langs } },
             select: { id: true, level: true },
         });
         const clearedIds = await loadQuizClearedIds(tables, scope.macAddresses, activeBank);
+
+        // Tries recorded against each question (ticket 004). Absent for anything
+        // answered before that log existed, which is why the fields below are
+        // omitted rather than defaulted when there is no row.
+        const attemptCounts = new Map();
+        try {
+            const grouped = await prisma.question_attempt.groupBy({
+                by: ['question_id'],
+                where: { bank: bankName, OR: quizMacFilter(scope.macAddresses) },
+                _count: { _all: true },
+            });
+            grouped.forEach(g => attemptCounts.set(String(g.question_id), g._count._all));
+        } catch (error) {
+            // Diagnostic enrichment only: a parent's progress screen must still
+            // render if the attempt log is unavailable.
+            logger.warn(`[QUIZ] attempt counts unavailable for ${bankName}: ${error.message}`);
+        }
 
         const byLevel = new Map();
         for (const row of scoped) {
@@ -3427,16 +3754,31 @@ async function buildQuizAnalyticsForScope(scope, options = {}) {
                 byLevel.set(question.level, { correct: 0, wrong: 0, revealed: 0, questions: [], replay: true });
             }
             const bucket = byLevel.get(question.level);
-            if (row.result === 'correct') bucket.correct += 1;
-            else if (row.result === 'revealed') bucket.revealed += 1;
+            // Bucketed by the WIRE value so the three tiles keep their meaning
+            // once the stored vocabulary changes underneath them.
+            const wire = toWireResult(row.result);
+            if (wire === 'correct') bucket.correct += 1;
+            else if (wire === 'revealed') bucket.revealed += 1;
             else bucket.wrong += 1;
             if (!clearedBefore.has(String(row.question_id))) bucket.replay = false;
+            // Additive only. `result` and `points` keep the meaning the app was
+            // written against; anything new is a separate field the app may
+            // ignore entirely.
+            const attemptCount = attemptCounts.get(String(row.question_id)) || 0;
+            const mastery = quizMastery(row.result, attemptCount);
             bucket.questions.push({
                 question_text: question.question_text,
                 correct_answer: question.answer_text,
-                result: row.result,
-                points: row.result === 'correct' ? QUIZ_POINTS_PER_CORRECT : 0,
+                result: toWireResult(row.result),
+                // `helped` maps to correct and so keeps full points. Docking it
+                // would drop a child's score overnight for no visible reason —
+                // the exact surprise this ticket exists to prevent.
+                points: wire === 'correct' ? QUIZ_POINTS_PER_CORRECT : 0,
                 answered_on: formatDateInTimezone(row.answered_at, scope.timezone),
+                // Omitted rather than sent as 0/null: absent means "not recorded",
+                // which is different from "answered first time".
+                ...(attemptCount ? { attempts_within_question: attemptCount } : {}),
+                ...(mastery ? { mastery } : {}),
             });
         }
 
@@ -3530,12 +3872,15 @@ function emptyQuizBank(bankName, available) {
 
 /** Cleared ids across every device in scope, chunked to keep the IN list sane. */
 async function loadQuizClearedIds(tables, macAddresses, activeBank) {
+    // Required here rather than at module scope, matching how the caller above
+    // pulls in resolveBank.
+    const { clearedResultsFor } = require('./banks');
     if (!activeBank.length) return new Set();
     const rows = await tables.answers.findMany({
         where: {
             OR: quizMacFilter(macAddresses),
             question_id: { in: activeBank.map(q => q.id) },
-            result: { in: QUIZ_CLEARED_RESULTS },
+            result: { in: clearedResultsFor(tables) },
         },
         select: { question_id: true },
     });
@@ -3551,7 +3896,187 @@ function deriveCurrentLevel(activeBank, clearedIds) {
     return null;
 }
 
+// ─── Chat history, by child ─────────────────────────────────────────────────
+
+const isoOrNull = (value) => (value ? new Date(value).toISOString() : null);
+
+/**
+ * The characters in this child's history, each with every agent row that carries
+ * it.
+ *
+ * An account can hold several rows for one character — the app created one per
+ * toy activation and the server normalised their names together, so Kishore's
+ * Cheeko is spread over three rows holding 71, 1 and 1 sessions. Reading them as
+ * three characters shows the same face three times, each with part of the story.
+ *
+ * Keyed on the normalised name, case-folded: the same character is spelled
+ * "NANI", "Nani" and "cheeko 2" across live rows.
+ */
+async function kidCharacterIndex(kidId) {
+    const groups = await prisma.voice_sessions.groupBy({
+        by: ['agent_id'],
+        where: { kid_id: kidId, agent_id: { not: null } },
+        _count: { _all: true },
+        _max: { started_at: true },
+    });
+    if (groups.length === 0) return [];
+
+    const agents = await prisma.ai_agent.findMany({
+        where: { id: { in: groups.map(group => group.agent_id) } },
+        select: { id: true, agent_name: true },
+    });
+    const nameById = new Map(agents.map(agent => [agent.id, agent.agent_name]));
+
+    const byCharacter = new Map();
+    for (const group of groups) {
+        const rawName = nameById.get(group.agent_id) || null;
+        // An agent row that has vanished cannot be merged with anything, so it
+        // keys on its own id rather than joining every other nameless row.
+        const key = rawName ? normalizeCharacterName(rawName).toLowerCase() : `id:${group.agent_id}`;
+        const lastSessionAt = group._max.started_at ? new Date(group._max.started_at) : null;
+
+        const entry = byCharacter.get(key);
+        if (!entry) {
+            byCharacter.set(key, {
+                agentId: group.agent_id,
+                agentName: rawName,
+                agentIds: [group.agent_id],
+                sessionCount: group._count._all,
+                lastSessionAt,
+            });
+            continue;
+        }
+        entry.agentIds.push(group.agent_id);
+        entry.sessionCount += group._count._all;
+        if (lastSessionAt && (!entry.lastSessionAt || lastSessionAt > entry.lastSessionAt)) {
+            // Represent the character by its most recently used row, so the id the
+            // app calls back with is the one still in service.
+            entry.lastSessionAt = lastSessionAt;
+            entry.agentId = group.agent_id;
+            entry.agentName = rawName;
+        }
+    }
+    return [...byCharacter.values()];
+}
+
+/**
+ * Every agent row that is the same character as the one asked for, for this
+ * child. One id in, all its duplicates out, so a session list is whole no matter
+ * which row the caller happens to name.
+ */
+async function siblingAgentIds(kidId, agentId) {
+    const index = await kidCharacterIndex(kidId);
+    const entry = index.find(character => character.agentIds.includes(agentId));
+    return entry ? entry.agentIds : [agentId];
+}
+
+/**
+ * Which characters has this child talked to?
+ *
+ * Grouped on voice_sessions, so the answer follows the child to a new toy: the
+ * MAC is a column on those rows, never the key they are read by.
+ */
+async function getKidCharacters(firebaseUid, kidId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const characters = await kidCharacterIndex(scope.kidIds[0]);
+
+    return characters
+        .sort((a, b) => (b.lastSessionAt?.getTime() || 0) - (a.lastSessionAt?.getTime() || 0))
+        .map(character => ({
+            agentId: character.agentId,
+            agentName: character.agentName,
+            sessionCount: character.sessionCount,
+            lastSessionAt: isoOrNull(character.lastSessionAt),
+        }));
+}
+
+/**
+ * One child's sessions with one character.
+ *
+ * Both halves are required: ai_agent is per account, so two siblings share one
+ * Quizzy row and the character on its own never tells them apart.
+ */
+async function getKidCharacterSessions(firebaseUid, kidId, agentId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const page = parseInt(options.page) || 1;
+    const limit = Math.min(parseInt(options.limit) || 20, 100);
+    // Duplicate rows for one character are read as one character, so the list is
+    // whole whichever of them the app names.
+    const where = { kid_id: scope.kidIds[0], agent_id: { in: await siblingAgentIds(scope.kidIds[0], agentId) } };
+
+    const [total, rows] = await Promise.all([
+        prisma.voice_sessions.count({ where }),
+        prisma.voice_sessions.findMany({
+            where,
+            select: {
+                session_id: true,
+                started_at: true,
+                ended_at: true,
+                _count: { select: { voice_session_messages: true } },
+                voice_session_summaries: { select: { summary: true } },
+            },
+            orderBy: { started_at: 'desc' },
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+    ]);
+
+    return {
+        total,
+        list: rows.map(row => ({
+            sessionId: row.session_id,
+            startedAt: isoOrNull(row.started_at),
+            endedAt: isoOrNull(row.ended_at),
+            messageCount: row._count?.voice_session_messages || 0,
+            summary: row.voice_session_summaries?.summary || null,
+        })),
+    };
+}
+
+/**
+ * One session's transcript.
+ *
+ * The child is matched on the session, not on the message: a message has no
+ * child column of its own and must not gain one — it reaches the child through
+ * the session it belongs to. Another child's session therefore reads as empty.
+ */
+async function getKidSessionMessages(firebaseUid, kidId, sessionId, options = {}) {
+    const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
+    const limit = Math.min(parseInt(options.limit) || 100, 500);
+    const cursor = parseInt(options.cursor) || 0;
+
+    const rows = await prisma.voice_session_messages.findMany({
+        where: {
+            session_id: sessionId,
+            sequence: { gt: cursor },
+            voice_sessions: { kid_id: scope.kidIds[0] },
+        },
+        select: { sequence: true, role: true, content: true, created_at: true },
+        orderBy: { sequence: 'asc' },
+        take: limit + 1,
+    });
+
+    const hasMore = rows.length > limit;
+    const messages = hasMore ? rows.slice(0, limit) : rows;
+
+    return {
+        sessionId,
+        hasMore,
+        nextCursor: hasMore ? messages[messages.length - 1].sequence : null,
+        messages: messages.map(row => ({
+            sequence: row.sequence,
+            role: row.role,
+            content: row.content || '',
+            createdAt: isoOrNull(row.created_at),
+        })),
+    };
+}
+
 module.exports = {
+    // Exported for the contract test: these two are the whole seam between the
+    // internal verdict vocabulary and the published one.
+    toWireResult,
+    quizMastery,
     getParentProfile,
     createParentProfile,
     updateParentProfile,
@@ -3571,6 +4096,7 @@ module.exports = {
     getProgressDetails,
     getProgressTrend,
     getQuizAnalytics,
+    getQuizCharacterProgress,
     getQuizAnalyticsByMacAdmin,
     getProgressSummaryByMacAdmin,
     getProgressDetailsByMacAdmin,
@@ -3578,4 +4104,7 @@ module.exports = {
     getDeviceGamesPlayed,
     getDeviceRadioPlayed,
     getHomepageRecommendations,
+    getKidCharacters,
+    getKidCharacterSessions,
+    getKidSessionMessages,
 };

@@ -14,8 +14,12 @@
  * mistaken for success.
  *
  * Sheet columns (row 1 headers):
- *   code, age_band, level, category, language, question_text, answer_text,
- *   accepted_answers (| separated), active
+ *   code, level, category, language, question_text, answer_text,
+ *   accepted_answers (| separated), active, teach_text, distractors (| separated)
+ *
+ * teach_text and distractors are optional: a sheet written before they existed
+ * imports unchanged, and re-importing that same sheet later with the columns
+ * filled in updates the rows in place rather than duplicating them.
  */
 
 require('dotenv/config');
@@ -24,7 +28,8 @@ const { prisma, pgPool } = require('../src/config/database');
 const { planImport } = require('./lib/quiz-import');
 const { resolveBank, DEFAULT_BANK } = require('../src/services/banks');
 
-const REQUIRED_HEADERS = ['code', 'age_band', 'level', 'question_text', 'answer_text'];
+// age_band is no longer required or stored (ticket 013): one shared bank.
+const REQUIRED_HEADERS = ['code', 'level', 'question_text', 'answer_text'];
 
 async function main() {
   const args = process.argv.slice(2);

@@ -7,7 +7,18 @@
 
 const XLSX = require('xlsx');
 
-const AGE_BANDS = new Set(['3-5', '6-8', '9+']);
+// One shared bank (ADR-0009): the age range is carried by the Doors, not by
+// separate content per age.
+//
+// A per-age value 3..10 is still ACCEPTED and normalised to 'all', so a sheet
+// authored before the collapse imports and its questions are actually served.
+// Rejecting it would fail the import; keeping it as-is would file the content in
+// a bank nothing reads, which the table's CHECK constraint now forbids anyway.
+// The retired '3-5'/'6-8'/'9+' vocabulary stays absent, so a really old sheet is
+// still rejected loudly rather than silently reinterpreted.
+const SHARED_BAND = 'all';
+const PER_AGE_BANDS = ['3', '4', '5', '6', '7', '8', '9', '10'];
+const AGE_BANDS = new Set([SHARED_BAND, ...PER_AGE_BANDS]);
 const TRUTHY_ACTIVE = ['', 'true', '1', 'yes', 'y'];
 const FALSY_ACTIVE = ['false', '0', 'no', 'n'];
 
@@ -23,11 +34,16 @@ const str = (value) => String(value ?? '').trim();
 /**
  * Undo the spreadsheet's date guess for age bands.
  *
- * Excel treats "6-8" as a date, so the cell arrives as a Date or a date serial.
- * Which date depends on the author's locale: month-day (en-US) gives June 8,
- * day-month (en-IN, en-GB) gives 6 August. Both orientations are tried against
- * the band vocabulary; "9+" is never date-like. Anything unrecognisable is
- * returned as month-day so the caller's error message shows what was read.
+ * A band is now a single age, which is never date-like — but the cell still
+ * arrives as a NUMBER when the author typed a bare 4, and handing that to the
+ * date-serial decoder reads it as 4 January 1900. So a value that is already a
+ * band is returned before any date handling.
+ *
+ * The date path stays for the retired vocabulary: Excel bakes "6-8" into a Date
+ * or a serial, and which date depends on the author's locale — month-day (en-US)
+ * gives June 8, day-month (en-IN, en-GB) gives 6 August. Neither orientation is a
+ * valid band any more, so such a row is rejected by the caller with the offending
+ * value shown, rather than silently reinterpreted as some unrelated age.
  *
  * @param {string|number|Date} value
  * @returns {string}
@@ -35,6 +51,9 @@ const str = (value) => String(value ?? '').trim();
 function normalizeAgeBand(value) {
   let month;
   let day;
+
+  // Before the date guess, not after: 4 is an age, not 4 January 1900.
+  if (AGE_BANDS.has(str(value))) return str(value);
 
   if (value instanceof Date) {
     month = value.getMonth() + 1;
@@ -68,9 +87,18 @@ function parseQuizRow(row) {
     return { data: null, error: `code must be ${MAX_CODE} characters or fewer (got ${code.length})` };
   }
 
-  const ageBand = normalizeAgeBand(row.age_band);
-  if (!AGE_BANDS.has(ageBand)) {
-    return { data: null, error: `age_band must be one of 3-5, 6-8, 9+ (got "${ageBand}")` };
+  // age_band is accepted for backwards compatibility and then discarded: the
+  // column is gone (ticket 013) and every question lives in one shared bank. A
+  // sheet still carrying the retired '3-5'/'6-8'/'9+' vocabulary is rejected, so
+  // a genuinely ancient sheet fails loudly rather than importing silently.
+  if (row.age_band !== undefined) {
+    const ageBand = normalizeAgeBand(row.age_band);
+    if (!AGE_BANDS.has(ageBand)) {
+      return {
+        data: null,
+        error: `age_band must be one of ${[...AGE_BANDS].join(', ')} (got "${ageBand}")`,
+      };
+    }
   }
 
   const level = Number(row.level);
@@ -110,14 +138,36 @@ function parseQuizRow(row) {
     return { data: null, error: 'accepted_answers must be separated by "|", not commas' };
   }
 
+  // Same "|" rule as accepted_answers rather than a second convention: an author
+  // filling both columns on one row should not have to remember two.
+  const distractors = str(row.distractors)
+    .split('|')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (distractors.some((entry) => entry.includes(','))) {
+    return { data: null, error: 'distractors must be separated by "|", not commas' };
+  }
+  // A distractor equal to the answer turns the narrowing hint into a question
+  // with two right answers — the one failure here a child actually feels.
+  const answerable = new Set([answerText, ...acceptedAnswers].map((entry) => entry.toLowerCase()));
+  const collision = distractors.find((entry) => answerable.has(entry.toLowerCase()));
+  if (collision) {
+    return { data: null, error: `distractor "${collision}" is also a correct answer` };
+  }
+
+  // Optional: both columns may be absent from a sheet entirely, and are while
+  // the re-levelling (ticket 014) is still being authored.
+  const teachText = str(row.teach_text);
+
   return {
     data: {
       code,
       question_text: questionText,
       answer_text: answerText,
       accepted_answers: acceptedAnswers,
+      teach_text: teachText || null,
+      distractors,
       category: category || null,
-      age_band: ageBand,
       level,
       language,
       active: !FALSY_ACTIVE.includes(rawActive),
@@ -161,7 +211,7 @@ function planImport(rows) {
     // Only live questions count towards a Level: ten rows of which three are
     // inactive is a seven-question Level.
     if (data.active) {
-      const key = `${data.age_band} / ${data.language} / level ${data.level}`;
+      const key = `${data.language} / level ${data.level}`;
       levelCounts.set(key, (levelCounts.get(key) || 0) + 1);
     }
   }
@@ -173,4 +223,4 @@ function planImport(rows) {
   };
 }
 
-module.exports = { parseQuizRow, normalizeAgeBand, planImport, AGE_BANDS };
+module.exports = { parseQuizRow, normalizeAgeBand, planImport, AGE_BANDS, SHARED_BAND };
