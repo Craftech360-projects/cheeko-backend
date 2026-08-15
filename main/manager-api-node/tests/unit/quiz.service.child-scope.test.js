@@ -130,8 +130,12 @@ describe('the behaviour all of this exists for', () => {
       { ...BANK[0], level: 1 },
       { ...BANK[1], level: 2 },
     ]);
-    // Rows written from a different MAC entirely — the previous toy.
-    prisma.quiz_question_answer.findMany.mockResolvedValue([{ question_id: 1n }]);
+    // Rows written from a different MAC entirely — the previous toy. `result`
+    // and `answered_at` are read now that cleared-ness and the day count come
+    // from one pass over the log rather than two separate queries.
+    prisma.quiz_question_answer.findMany.mockResolvedValue([
+      { question_id: 1n, result: 'correct', answered_at: new Date('2026-08-01') },
+    ]);
 
     const result = await quizService.nextQuestions('11:22:33:44:55:66');
 

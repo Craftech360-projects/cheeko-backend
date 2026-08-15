@@ -14,7 +14,9 @@ const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
-const { WIRE_AGE_BAND, deriveLevelState, countCompletedLevels, levelCompletedToday } = require('./quiz.logic');
+const {
+  WIRE_AGE_BAND, deriveLevelState, countCompletedLevels, agedOutLevels, levelCompletedToday
+} = require('./quiz.logic');
 const { resolveBank, clearedResultsFor, DEFAULT_BANK } = require('./banks');
 const { spokenAnswerMatches } = require('./answer-normalise');
 
@@ -212,27 +214,31 @@ const ANTI_TRAP_DAY_CAP = 3;
 const BONUS_CARRY = 2;
 
 /**
- * Distinct local days this device has answered questions from `levelIds`.
- *
- * Derived from the ANSWER log, never the attempt log. The attempt write is
- * allowed to fail (ADR-0009), so a cap reading it would silently stop firing
- * whenever it did — and the child it was meant to rescue would stay trapped with
- * nothing in the logs to say why.
- *
- * Day boundary is server-local midnight, matching the day gate below. Two
- * different day definitions in one file would eventually disagree by one.
+ * Server-local midnight day key. The same boundary the Daily Ten gate uses —
+ * two definitions of "day" in one file would eventually disagree by one, and the
+ * disagreement shows up as a child gaining or losing a day.
  */
-const daysOnLevel = async (tables, scope, levelIds) => {
-  if (!levelIds.length) return 0;
-  const rows = await tables.answers.findMany({
-    where: { ...scope, question_id: { in: levelIds } },
-    select: { answered_at: true }
-  });
-  const days = new Set(rows.map((row) => {
-    const d = new Date(row.answered_at);
-    return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-  }));
-  return days.size;
+const dayKey = (value) => {
+  const d = new Date(value);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+};
+
+/**
+ * question id -> the distinct days it was answered on.
+ *
+ * Built from the ANSWER log, never the attempt log. The attempt write is allowed
+ * to fail (ADR-0009), so a cap reading it would silently stop firing whenever it
+ * did — and the child it was meant to rescue would stay trapped with nothing in
+ * the logs to say why.
+ */
+const daysByQuestionId = (rows) => {
+  const map = new Map();
+  for (const row of rows) {
+    const key = String(row.question_id);
+    if (!map.has(key)) map.set(key, new Set());
+    map.get(key).add(dayKey(row.answered_at));
+  }
+  return map;
 };
 
 /**
@@ -248,8 +254,30 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const context = await resolveDeviceContext(deviceMac);
   const scope = answerScope(context);
   const { bank, language } = await loadBank(tables, context.language);
-  const clearedIds = await loadClearedIds(tables, scope, bank);
-  const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
+  // One read of the log, then everything derives from it in memory: which
+  // questions are cleared, and how many days each has been worked at. Two
+  // queries used to answer those separately and could disagree about "day".
+  const bankIds = new Set(bank.map((q) => String(q.id)));
+  const answerRows = (await tables.answers.findMany({
+    where: scope,
+    select: { question_id: true, result: true, answered_at: true }
+  })).filter((row) => bankIds.has(String(row.question_id)));
+
+  const clearing = clearedResultsFor(tables);
+  const clearedIds = new Set(
+    answerRows.filter((row) => clearing.includes(row.result)).map((row) => String(row.question_id))
+  );
+
+  // Levels the cap already moved the child past. Without this the lowest
+  // uncleared level is the abandoned one forever: the child is dragged back to
+  // it at the start of every session and the cap has to fire again to push them
+  // out, so the level they are really on never appears anywhere.
+  const agedOut = agedOutLevels(bank, clearedIds, daysByQuestionId(answerRows), ANTI_TRAP_DAY_CAP);
+  const state = deriveLevelState(
+    bank.map((q) => ({ id: q.id, level: q.level })),
+    clearedIds,
+    agedOut
+  );
 
   // A sitting is the WHOLE level, cleared questions included — not just the ones
   // still outstanding.
@@ -273,31 +301,25 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   }
   let selectedIds = idsForLevel(level);
 
-  // Anti-trap: three days stuck on one level and the child moves on, mastered or
-  // not. The questions they did not get come along as BONUS items — practice
-  // that never gates a level, which is also the spaced-repetition pool ticket
-  // 009 had nothing to attach to. A query, not a table (ADR-0005).
-  let antiTrapAdvanced = false;
-  let bonusIds = [];
-  if (!replay && level !== null) {
-    const days = await daysOnLevel(tables, scope, idsForLevel(level));
-    const nextLevel = [...new Set(bank.map((q) => q.level))]
-      .sort((a, b) => a - b)
-      .find((l) => l > level);
-
-    if (days >= ANTI_TRAP_DAY_CAP && nextLevel !== undefined) {
-      // Carry the UNMASTERED ones before moving, so they are still offered.
-      // Explicitly state.unclearedIds and not selectedIds: the latter is now the
-      // whole level, and carrying questions the child already got right as
-      // "practice they were stuck on" would be nonsense.
-      bonusIds = state.unclearedIds.slice(0, BONUS_CARRY);
-      antiTrapAdvanced = true;
-      logger.warn(
-        `[${tables.label}] anti-trap: device ${deviceMac} spent ${days} days on level ${level}; advancing to ${nextLevel} with ${bonusIds.length} bonus question(s)`
-      );
-      level = nextLevel;
-      selectedIds = idsForLevel(nextLevel);
-    }
+  // The cap has already been applied above — `level` IS the level past the
+  // abandoned ones. What is left is to carry the unmastered questions along as
+  // BONUS items: practice that never gates a level, which is also the
+  // spaced-repetition pool ticket 009 had nothing to attach to. A query, not a
+  // table (ADR-0005).
+  const skipped = [...agedOut].filter((l) => level === null || l < level).sort((a, b) => b - a);
+  const antiTrapAdvanced = skipped.length > 0 && !replay;
+  // Only the most recently abandoned level's questions ride along. Carrying
+  // every level the child ever aged out of would grow without bound.
+  const bonusIds = antiTrapAdvanced
+    ? bank
+      .filter((q) => q.level === skipped[0] && !clearedIds.has(String(q.id)))
+      .map((q) => q.id)
+      .slice(0, BONUS_CARRY)
+    : [];
+  if (antiTrapAdvanced) {
+    logger.warn(
+      `[${tables.label}] anti-trap: device ${deviceMac} is past level ${skipped[0]} on ${ANTI_TRAP_DAY_CAP}+ days without mastering it; serving level ${level} with ${bonusIds.length} bonus question(s)`
+    );
   }
 
   const maxLevel = bank.length ? Math.max(...bank.map((q) => q.level)) : 0;
@@ -820,9 +842,20 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
         .map((a) => String(a.question_id))
     );
 
+    // Same anti-trap derivation nextQuestions runs, so the card names the level
+    // the next session will ACTUALLY serve. Deriving it without the cap printed
+    // "level 1" while Quizzy was asking level 2 — the panel and the toy
+    // disagreeing about the one thing the panel exists to report.
+    const agedOut = agedOutLevels(
+      bandBank,
+      clearedIds,
+      daysByQuestionId(deviceAnswers.filter((a) => bandIds.has(String(a.question_id)))),
+      ANTI_TRAP_DAY_CAP
+    );
     const state = deriveLevelState(
       bandBank.map((q) => ({ id: q.id, level: q.level })),
-      clearedIds
+      clearedIds,
+      agedOut
     );
     const todayIds = deviceAnswers
       .filter((a) => a.answered_at >= startOfDay)
@@ -839,7 +872,12 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       age_band: WIRE_AGE_BAND,
       age_band_defaulted: profileMissing,
       current_level: state.currentLevel,
-      levels_completed: countCompletedLevels(bandBank, clearedIds),
+      // Mastered levels plus the ones the cap moved the child past — both are
+      // levels they will not be asked again. `levels_mastered` keeps the
+      // distinction for anyone who needs it; the answer log keeps it in full.
+      levels_completed: countCompletedLevels(bandBank, clearedIds, agedOut),
+      levels_mastered: countCompletedLevels(bandBank, clearedIds),
+      levels_aged_out: agedOut.size,
       max_level: bandBank.length ? Math.max(...bandBank.map((q) => q.level)) : 0,
       // How far into the CURRENT level the device is. Additive, and the one thing
       // the mastery flip made invisible: after 008 a `revealed` answer no longer
@@ -850,16 +888,14 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
         : bandBank.filter((q) => q.level === state.currentLevel).length,
       level_uncleared: state.unclearedIds.length,
       // The anti-trap input, shown rather than inferred: at ANTI_TRAP_DAY_CAP the
-      // next session advances whether or not the level was mastered. Same
-      // distinct-local-day rule as daysOnLevel — a second definition of "day"
-      // here would eventually disagree with the one that actually fires.
+      // child moves on whether or not the level was mastered. Counted over the
+      // level's UNCLEARED questions only, exactly as agedOutLevels does — days
+      // spent on questions already answered right are not days spent stuck.
       days_on_level: state.currentLevel === null ? 0 : new Set(
         deviceAnswers
-          .filter((a) => levelByQuestionId.get(String(a.question_id)) === state.currentLevel)
-          .map((a) => {
-            const d = new Date(a.answered_at);
-            return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-          })
+          .filter((a) => levelByQuestionId.get(String(a.question_id)) === state.currentLevel
+            && !clearedIds.has(String(a.question_id)))
+          .map((a) => dayKey(a.answered_at))
       ).size,
       anti_trap_cap: ANTI_TRAP_DAY_CAP,
       replay: state.allCleared,

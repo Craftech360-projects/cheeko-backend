@@ -501,13 +501,19 @@ async function loadQuizProgress() {
     // advances regardless of mastery. Flagged when it is about to fire, because
     // otherwise an unexplained jump to the next level reads as a bug.
     const trapping = device.days_on_level >= device.anti_trap_cap;
+    // levels_completed counts mastered AND aged-out. Splitting them out only
+    // when they differ keeps the common line short while making an aged-out
+    // level impossible to mistake for a mastered one.
+    const done = device.levels_aged_out
+      ? `levels done ${device.levels_completed} (${device.levels_mastered} mastered, ${device.levels_aged_out} aged out)`
+      : `levels done ${device.levels_completed}`;
     T('quizSummary').textContent =
       `${device.kid_name || 'no child profile'} · ` +
       (device.current_level === null
         ? `all ${device.max_level} levels cleared`
         : `level ${device.current_level}/${device.max_level} — ${cleared}/${device.level_size} cleared` +
           ` · day ${device.days_on_level}/${device.anti_trap_cap} on level${trapping ? ' — next session advances' : ''}`) +
-      ` · levels done ${device.levels_completed} · ` +
+      ` · ${done} · ` +
       `today ${device.answered_today}/10${device.day_complete ? ' — day complete' : ''}` +
       `${device.replay ? ' · replay' : ''}`;
   } catch (e) {
