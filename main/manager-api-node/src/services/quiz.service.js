@@ -428,6 +428,15 @@ const toQuestionId = (questionId) => {
  * Attributed to the child where one is known, falling back to the device, so a
  * child who changes toys keeps their own wondering.
  */
+/**
+ * Loose enough that re-punctuating or re-casing the same question still reads as
+ * a repeat, strict enough that a genuinely new question is never rejected. Not a
+ * similarity score: "did the model hand back the same sentence" is the question,
+ * and anything fuzzier would start eating real curiosity.
+ */
+const normaliseWonder = (text) =>
+  text.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+
 const recordWonderQuestion = async (deviceMac, question) => {
   const text = String(question ?? '').trim();
   if (!text) throw new ApiError('question is required', 400);
@@ -436,6 +445,23 @@ const recordWonderQuestion = async (deviceMac, question) => {
   if (text.length > 500) throw new ApiError('question must be 500 characters or fewer', 400);
 
   const context = await resolveDeviceContext(deviceMac);
+
+  // The mechanic feeds itself: the stored question is read back as the NEXT
+  // session's opening beat, so by the time the model is asked for a new one it
+  // is sitting in context — and a small model echoes it. Seen on dev
+  // 2026-08-15, where the same bee question was stored twice byte-for-byte and
+  // the child heard it at both ends of every session.
+  //
+  // The prompt now says the closing question must be about something else. This
+  // is the backstop for when it is not: refusing the duplicate leaves the older
+  // row as the most recent, so nothing changes for the child, but the table stops
+  // recording the loop as if it were two separate moments of curiosity.
+  const previous = await lastWonderQuestion(context);
+  if (previous && normaliseWonder(previous) === normaliseWonder(text)) {
+    logger.warn(`[quiz] wonder question repeated verbatim for ${deviceMac}; not stored`);
+    return { id: null, question: text, asked_at: null, duplicate: true };
+  }
+
   const row = await prisma.kid_wonder_question.create({
     data: { device_mac: deviceMac, kid_id: context.kidId ?? null, question: text },
     select: { id: true, asked_at: true },
