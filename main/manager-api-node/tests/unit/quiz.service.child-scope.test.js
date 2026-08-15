@@ -120,13 +120,22 @@ describe('writes carry the child', () => {
 });
 
 describe('the behaviour all of this exists for', () => {
-  it('a child on a new toy still sees the questions they cleared on the old one', async () => {
+  it('a child on a new toy resumes at the level they reached on the old one', async () => {
     pairTo(42n);
+    // One question per level, so the level the child lands on is visible in the
+    // batch. A sitting now serves the whole level whether or not its questions
+    // were cleared, so "was q1 skipped?" no longer distinguishes anything — the
+    // LEVEL is what carries the child's history between toys.
+    prisma.quiz_question.findMany.mockResolvedValue([
+      { ...BANK[0], level: 1 },
+      { ...BANK[1], level: 2 },
+    ]);
     // Rows written from a different MAC entirely — the previous toy.
     prisma.quiz_question_answer.findMany.mockResolvedValue([{ question_id: 1n }]);
 
     const result = await quizService.nextQuestions('11:22:33:44:55:66');
 
+    expect(result.level).toBe(2);
     expect(result.questions.map((q) => q.id)).toEqual(['2']);
   });
 

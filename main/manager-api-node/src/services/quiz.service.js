@@ -251,14 +251,27 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   const clearedIds = await loadClearedIds(tables, scope, bank);
   const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
 
+  // A sitting is the WHOLE level, cleared questions included — not just the ones
+  // still outstanding.
+  //
+  // Serving only the uncleared ones made a session as short as the number left:
+  // clear nine of ten and the next day is a one-question session, after which
+  // the model had nothing to ask and invented a question by walking to the next
+  // id (seen live 2026-08-15, and the id it reached was a Level 2 question).
+  //
+  // Re-asking a cleared question cannot un-clear it: `cleared` means a clearing
+  // answer row EXISTS, so a later miss adds a row without removing the old one.
+  // Mastery stays cumulative (ADR-0009) and the level still clears the moment
+  // its last outstanding question is answered right.
+  const idsForLevel = (n) => bank.filter((q) => q.level === n).map((q) => q.id);
+
   let level = state.currentLevel;
-  let selectedIds = state.unclearedIds;
   const replay = state.allCleared;
 
   if (replay) {
     level = await leastRecentlyPlayedLevel(tables, scope, bank);
-    selectedIds = bank.filter((q) => q.level === level).map((q) => q.id);
   }
+  let selectedIds = idsForLevel(level);
 
   // Anti-trap: three days stuck on one level and the child moves on, mastered or
   // not. The questions they did not get come along as BONUS items — practice
@@ -267,23 +280,23 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   let antiTrapAdvanced = false;
   let bonusIds = [];
   if (!replay && level !== null) {
-    const levelIds = bank.filter((q) => q.level === level).map((q) => q.id);
-    const days = await daysOnLevel(tables, scope, levelIds);
+    const days = await daysOnLevel(tables, scope, idsForLevel(level));
     const nextLevel = [...new Set(bank.map((q) => q.level))]
       .sort((a, b) => a - b)
       .find((l) => l > level);
 
     if (days >= ANTI_TRAP_DAY_CAP && nextLevel !== undefined) {
-      // Carry the unmastered ones before moving, so they are still offered.
-      bonusIds = selectedIds.slice(0, BONUS_CARRY);
+      // Carry the UNMASTERED ones before moving, so they are still offered.
+      // Explicitly state.unclearedIds and not selectedIds: the latter is now the
+      // whole level, and carrying questions the child already got right as
+      // "practice they were stuck on" would be nonsense.
+      bonusIds = state.unclearedIds.slice(0, BONUS_CARRY);
       antiTrapAdvanced = true;
       logger.warn(
         `[${tables.label}] anti-trap: device ${deviceMac} spent ${days} days on level ${level}; advancing to ${nextLevel} with ${bonusIds.length} bonus question(s)`
       );
       level = nextLevel;
-      selectedIds = bank
-        .filter((q) => q.level === nextLevel && !clearedIds.has(String(q.id)))
-        .map((q) => q.id);
+      selectedIds = idsForLevel(nextLevel);
     }
   }
 
