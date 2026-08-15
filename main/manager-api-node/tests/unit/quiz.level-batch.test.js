@@ -141,3 +141,34 @@ describe('a level aged out by the cap', () => {
     expect(result.anti_trap_advanced).toBe(false);
   });
 });
+
+/**
+ * The advance is announced once, not on every request afterwards.
+ *
+ * Applying the cap by SKIPPING the level (rather than re-firing it each session)
+ * made "is there an aged-out level behind me?" permanently true. Used directly
+ * as the advanced flag, it would have lied on every later response and written a
+ * warn line on every single request.
+ */
+describe('anti_trap_advanced', () => {
+  const stuck = [
+    ...cleared(1, 2, 3, 4, 5, 6, 7, 8, 9),
+    ...['2026-08-13', '2026-08-14', '2026-08-15'].map((d) => ({
+      question_id: 10n, result: 'revealed', answered_at: new Date(`${d}T06:00:00`),
+    })),
+  ];
+
+  it('is false once the child has started answering the new level', async () => {
+    prisma.quiz_question_answer.findMany.mockResolvedValue([
+      ...stuck,
+      { question_id: 11n, result: 'correct', answered_at: new Date('2026-08-16T06:00:00') },
+    ]);
+
+    const result = await quizService.nextQuestions(MAC);
+
+    expect(result.level).toBe(2);
+    expect(result.anti_trap_advanced).toBe(false);
+    // Practice from the level below keeps riding along while they are on level 2.
+    expect(result.questions.filter((q) => q.bonus).map((q) => q.id)).toEqual(['10']);
+  });
+});

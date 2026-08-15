@@ -272,6 +272,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // uncleared level is the abandoned one forever: the child is dragged back to
   // it at the start of every session and the cap has to fire again to push them
   // out, so the level they are really on never appears anywhere.
+  const levelById = new Map(bank.map((q) => [String(q.id), q.level]));
   const agedOut = agedOutLevels(bank, clearedIds, daysByQuestionId(answerRows), ANTI_TRAP_DAY_CAP);
   const state = deriveLevelState(
     bank.map((q) => ({ id: q.id, level: q.level })),
@@ -306,21 +307,31 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // BONUS items: practice that never gates a level, which is also the
   // spaced-repetition pool ticket 009 had nothing to attach to. A query, not a
   // table (ADR-0005).
-  const skipped = [...agedOut].filter((l) => level === null || l < level).sort((a, b) => b - a);
-  const antiTrapAdvanced = skipped.length > 0 && !replay;
-  // Only the most recently abandoned level's questions ride along. Carrying
-  // every level the child ever aged out of would grow without bound.
-  const bonusIds = antiTrapAdvanced
-    ? bank
-      .filter((q) => q.level === skipped[0] && !clearedIds.has(String(q.id)))
-      .map((q) => q.id)
-      .slice(0, BONUS_CARRY)
-    : [];
-  if (antiTrapAdvanced) {
+  // Only the level immediately below carries practice items. Older aged-out
+  // levels are let go: carrying every level the child ever walked away from
+  // would grow without bound, and a question they could not do six levels ago
+  // is not the practice they need now.
+  const levelsAsc = [...new Set(bank.map((q) => q.level))].sort((a, b) => a - b);
+  const previousLevel = levelsAsc[levelsAsc.indexOf(level) - 1];
+  const carryFrom = !replay && agedOut.has(previousLevel) ? previousLevel : null;
+  const bonusIds = carryFrom === null ? [] : bank
+    .filter((q) => q.level === carryFrom && !clearedIds.has(String(q.id)))
+    .map((q) => q.id)
+    .slice(0, BONUS_CARRY);
+
+  // "This response moved you", not "you have an aged-out level somewhere behind
+  // you". Now that the cap is applied by skipping rather than re-firing, the
+  // plain `agedOut.size > 0` test stayed true forever — the flag would have lied
+  // on every later response and the warn line would have logged on every single
+  // request. First session at the new level is what actually happened once.
+  const startedNewLevel = carryFrom !== null
+    && !answerRows.some((row) => levelById.get(String(row.question_id)) === level);
+  if (startedNewLevel) {
     logger.warn(
-      `[${tables.label}] anti-trap: device ${deviceMac} is past level ${skipped[0]} on ${ANTI_TRAP_DAY_CAP}+ days without mastering it; serving level ${level} with ${bonusIds.length} bonus question(s)`
+      `[${tables.label}] anti-trap: device ${deviceMac} spent ${ANTI_TRAP_DAY_CAP}+ days on level ${carryFrom} without mastering it; advancing to ${level} with ${bonusIds.length} bonus question(s)`
     );
   }
+  const antiTrapAdvanced = startedNewLevel;
 
   const maxLevel = bank.length ? Math.max(...bank.map((q) => q.level)) : 0;
   const frontierWarning = level !== null && !replay && maxLevel - level < FRONTIER_WARN_LEVELS;
