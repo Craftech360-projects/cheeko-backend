@@ -24,9 +24,9 @@ jest.mock('../../src/config/database', () => {
     },
     quiz_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     riddle_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
-    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
-    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
-    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     imagine_image: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     $transaction: jest.fn(),
   };
@@ -51,6 +51,7 @@ describe('device pairing to a child', () => {
     for (const m of ['device_workspace_artifacts', 'device_memory_documents', 'device_memory_chunks']) {
       prisma[m].findMany.mockResolvedValue([]);
       prisma[m].updateMany.mockResolvedValue({ count: 0 });
+      prisma[m].update.mockResolvedValue({});
     }
   });
 
@@ -122,8 +123,14 @@ describe('device pairing to a child', () => {
 
       await deviceService.assignKidByMac(MAC, '9', 12n);
 
-      // Newest wins, matching the migration's rule.
-      expect(prisma.device_workspace_artifacts.delete).toHaveBeenCalledWith({ where: { id: 'held' } });
+      // Newest wins over what is SERVED. The loser is retired to a namespace no
+      // reader asks for, not deleted: these are two different files that happen
+      // to share a name, and one of them is a child's memory.
+      expect(prisma.device_workspace_artifacts.delete).not.toHaveBeenCalled();
+      expect(prisma.device_workspace_artifacts.update).toHaveBeenCalledWith({
+        where: { id: 'held' },
+        data: { owner_key: 'superseded:kid:9:held' },
+      });
       expect(prisma.device_workspace_artifacts.updateMany).toHaveBeenCalled();
     });
 
@@ -139,7 +146,52 @@ describe('device pairing to a child', () => {
 
       await deviceService.assignKidByMac(MAC, '9', 12n);
 
-      expect(prisma.device_workspace_artifacts.delete).toHaveBeenCalledWith({ where: { id: 'incoming' } });
+      expect(prisma.device_workspace_artifacts.delete).not.toHaveBeenCalled();
+      expect(prisma.device_workspace_artifacts.update).toHaveBeenCalledWith({
+        where: { id: 'incoming' },
+        data: { owner_key: 'superseded:kid:9:incoming' },
+      });
+    });
+
+    // The bug this pair of tests exists for. A parent lost 67 memory documents
+    // and 71 sessions because the loser was deleted, and the child's file from
+    // their old toy is always the older one — so it was always the casualty.
+    it('never destroys a memory document on a collision', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+      prisma.device_memory_documents.findMany
+        .mockResolvedValueOnce([{ id: 'toy-doc', document_key: 'MEMORY.md', updated_at: new Date(2000) }])
+        .mockResolvedValueOnce([{ id: 'child-doc', document_key: 'MEMORY.md', updated_at: new Date(1000) }]);
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      expect(prisma.device_memory_documents.delete).not.toHaveBeenCalled();
+      expect(prisma.device_memory_documents.update).toHaveBeenCalledWith({
+        where: { id: 'child-doc' },
+        data: { owner_key: 'superseded:kid:9:child-doc' },
+      });
+    });
+
+    it('still deletes a colliding memory CHUNK, because those are identical', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+      // Chunks collide on content_hash, so the two rows are byte-identical by
+      // definition and keeping the duplicate preserves nothing. Retiring it
+      // instead would grow the table forever for no recoverable content.
+      prisma.device_memory_chunks.findMany
+        .mockResolvedValueOnce([{ id: 'incoming', content_hash: 'abc123', created_at: new Date(2000) }])
+        .mockResolvedValueOnce([{ id: 'held', content_hash: 'abc123', created_at: new Date(1000) }]);
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      expect(prisma.device_memory_chunks.delete).toHaveBeenCalledWith({ where: { id: 'held' } });
+      expect(prisma.device_memory_chunks.update).not.toHaveBeenCalled();
     });
 
     it('releases the child from any other toy, so one child is never on two', async () => {

@@ -109,10 +109,24 @@ const recordKidAssignment = async (tx, macAddress, kidId, at = new Date()) => {
  * unique within an owner and the one that decides a collision.
  */
 const OWNER_KEYED_STORES = [
-  { model: 'device_workspace_artifacts', unique: 'relative_path', newest: 'updated_at' },
-  { model: 'device_memory_documents', unique: 'document_key', newest: 'updated_at' },
-  { model: 'device_memory_chunks', unique: 'content_hash', newest: 'created_at' },
+  // `duplicate` says what a collision MEANS in that store, which decides whether
+  // the loser is worth keeping. Only content_hash can promise the two rows say
+  // the same thing.
+  { model: 'device_workspace_artifacts', unique: 'relative_path', newest: 'updated_at', duplicate: 'distinct' },
+  { model: 'device_memory_documents', unique: 'document_key', newest: 'updated_at', duplicate: 'distinct' },
+  { model: 'device_memory_chunks', unique: 'content_hash', newest: 'created_at', duplicate: 'identical' },
 ];
+
+/**
+ * Where a superseded row goes: out of the owner's namespace, not out of the
+ * database.
+ *
+ * Unique per row because the id is, so a second supersession of the same key
+ * years later cannot collide with the first. Nothing reads owner_key by prefix —
+ * every query in the codebase is an exact match, and none of them will ever ask
+ * for this — so the row is inert while staying fully recoverable with one UPDATE.
+ */
+const supersededOwnerKey = (toKey, loserId) => `superseded:${toKey}:${loserId}`;
 
 /**
  * Re-own one store's rows, resolving collisions first.
@@ -122,8 +136,23 @@ const OWNER_KEYED_STORES = [
  * the (owner_key, <unique>) index and rolls back the entire pairing — the parent
  * gets an error and the child is left unpaired. Newest wins, the same rule the
  * owner_key migration used, so the two agree.
+ *
+ * Newest wins over which row is SERVED. It does not decide which row survives.
+ *
+ * Deleting the loser is how this was first written, and it is why a parent lost
+ * 67 memory documents and 71 sessions: the child's file from their old toy is
+ * the older one, so it was always the one destroyed. The rule was applied to all
+ * three stores at once, but a collision means something different in each:
+ *
+ *   - content_hash — the rows are byte-identical by definition. Keeping the
+ *     duplicate preserves nothing, so it is still deleted.
+ *   - relative_path / document_key — two different files that happen to share a
+ *     name. This is a child's memory, and it is not recoverable from anywhere.
+ *
+ * The loser is moved to a retired namespace instead. It keeps every column, it
+ * is invisible to every reader, and it can be restored by rewriting one field.
  */
-const moveOwnerKey = async (tx, model, unique, newest, fromKey, toKey) => {
+const moveOwnerKey = async (tx, { model, unique, newest, duplicate }, fromKey, toKey) => {
   const incoming = await tx[model].findMany({
     where: { owner_key: fromKey },
     select: { id: true, [unique]: true, [newest]: true },
@@ -140,7 +169,19 @@ const moveOwnerKey = async (tx, model, unique, newest, fromKey, toKey) => {
     const held = byUnique.get(row[unique]);
     if (!held) continue;
     const loser = row[newest] > held[newest] ? held : row;
-    await tx[model].delete({ where: { id: loser.id } });
+
+    if (duplicate === 'identical') {
+      await tx[model].delete({ where: { id: loser.id } });
+      continue;
+    }
+
+    await tx[model].update({
+      where: { id: loser.id },
+      data: { owner_key: supersededOwnerKey(toKey, loser.id) },
+    });
+    logger.info(
+      `[pairing] ${model} "${row[unique]}" collided on ${toKey}; kept both, retired ${loser.id}`
+    );
   }
 
   await tx[model].updateMany({ where: { owner_key: fromKey }, data: { owner_key: toKey } });
@@ -199,8 +240,8 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   const fromKey = ownerKeyForDevice({ mac_address: macAddress });
   const toKey = `kid:${BigInt(kidId)}`;
 
-  for (const { model, unique, newest } of OWNER_KEYED_STORES) {
-    await moveOwnerKey(tx, model, unique, newest, fromKey, toKey);
+  for (const store of OWNER_KEYED_STORES) {
+    await moveOwnerKey(tx, store, fromKey, toKey);
   }
 
   // s3_key is globally unique, so re-owning a picture can never collide.
