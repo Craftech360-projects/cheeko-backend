@@ -292,7 +292,25 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // answer row EXISTS, so a later miss adds a row without removing the old one.
   // Mastery stays cumulative (ADR-0009) and the level still clears the moment
   // its last outstanding question is answered right.
-  const idsForLevel = (n) => bank.filter((q) => q.level === n).map((q) => q.id);
+  // Outstanding questions first, then already-cleared ones as practice, capped at
+  // the day's target.
+  //
+  // "A sitting is the whole level" was written for a level of ten, where the cap
+  // never bites. Riddle levels hold eighty, so the uncapped version put all
+  // eighty into every payload — five times the prompt, for a Daily Ten that
+  // scores at most ten of them. Seen on prod 2026-08-17: 15,775 bytes against
+  // quiz's 2,996.
+  //
+  // Uncleared first is what makes the cap safe. Taking the first ten in bank
+  // order could hand a child ten questions they had already cleared, leaving the
+  // level unfinishable while the session still felt full. At ten per level the
+  // ordering is the only change; nothing is dropped.
+  const idsForLevel = (n) => {
+    const all = bank.filter((q) => q.level === n);
+    const outstanding = all.filter((q) => !clearedIds.has(String(q.id)));
+    const practice = all.filter((q) => clearedIds.has(String(q.id)));
+    return [...outstanding, ...practice].slice(0, DAILY_QUESTION_TARGET).map((q) => q.id);
+  };
 
   let level = state.currentLevel;
   const replay = state.allCleared;
