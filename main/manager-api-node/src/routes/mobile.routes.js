@@ -11,6 +11,7 @@ const deviceAnalyticsService = require('../services/deviceAnalytics.service');
 const uploadService = require('../services/upload.service');
 const customCardService = require('../services/customCard.service');
 const { success, badRequest } = require('../utils/response');
+const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 const { prisma } = require('../config/database');
 
@@ -658,6 +659,46 @@ router.put('/devices/assign-kid-by-mac', asyncHandler(async (req, res) => {
         }
         throw error;
     }
+}));
+
+// Remove a toy from the parent's account.
+//
+// Until this existed, the only removal the mobile API exposed was
+// DELETE /agents/:agentId — which deletes the account's shared CHARACTER and, on
+// the way, clears the owner, the agent link and the child from every toy attached
+// to it. A parent wanting to remove one toy had nothing else to reach for, and
+// the app's failed-bind cleanup called it too.
+//
+// unbindDevice is the operation that was always meant for this. It has been
+// correct for a while and simply lived on the wrong side of the wall: it sits in
+// device.routes.js behind the manager's JWT session, while the app authenticates
+// with Firebase against /api/mobile. This is the same function, reachable by the
+// people who need it.
+//
+// hardDelete is deliberately not forwarded, whatever the client sends. Unbinding
+// already clears user_id, which is all the app needs — the toy leaves the
+// parent's list either way — while deleting the row would also destroy the
+// assignment history and the analytics keyed on the MAC. It stays a super-admin
+// tool asking for it on purpose.
+router.delete('/devices/:mac', asyncHandler(async (req, res) => {
+    try {
+        await deviceService.unbindDevice(req.mobileUser.id, req.params.mac, false);
+    } catch (error) {
+        // The service throws plain Errors, and device.routes.js turns them into a
+        // 200-with-code-500 envelope its client expects. Translating here rather
+        // than in the service keeps that path byte-identical.
+        //
+        // An address that is not a valid MAC reaches "not found" rather than a
+        // 400, following the decision already made in 761f47ed: from the caller's
+        // side there is no difference between a toy that never existed and an
+        // address that could not name one.
+        if (error.message === 'Device not found') throw new ApiError('Device not found', 404, 404);
+        if (error.message.includes('permission')) {
+            throw new ApiError('This device belongs to another account', 403, 403);
+        }
+        throw error;
+    }
+    success(res, null, 'Device unbound');
 }));
 
 // ─── Chat History ────────────────────────────────────────────────────────────
