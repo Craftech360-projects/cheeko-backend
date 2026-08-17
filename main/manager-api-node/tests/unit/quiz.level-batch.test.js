@@ -210,3 +210,39 @@ describe('a level bigger than the daily target', () => {
     for (const id of [76, 77, 78, 79, 80]) expect(ids).toContain(id);
   });
 });
+
+/**
+ * The served ORDER is the order selectedIds was built in.
+ *
+ * The response used to be assembled by filtering the bank, which returns rows in
+ * bank order and silently threw away the outstanding-first ordering. The cap
+ * still picked the right ten; the child just got asked the wrong one first.
+ *
+ * Seen on prod 2026-08-17: a child cleared "What colour is a banana?" and was
+ * asked it again as the opening question twenty minutes later, because it sorts
+ * first in the bank. Every test here counted questions and none checked order,
+ * which is exactly how it shipped.
+ */
+describe('the order questions are served in', () => {
+  it('puts an outstanding question before one already cleared', async () => {
+    // q1 cleared, q2..q10 outstanding. In bank order q1 comes first.
+    prisma.quiz_question_answer.findMany.mockResolvedValue(cleared(1));
+
+    const result = await quizService.nextQuestions(MAC);
+    const ids = result.questions.map((x) => Number(x.id));
+
+    expect(ids).toHaveLength(10);
+    expect(ids[0]).not.toBe(1);
+    expect(ids[ids.length - 1]).toBe(1);
+  });
+
+  it('keeps every outstanding question ahead of every cleared one', async () => {
+    prisma.quiz_question_answer.findMany.mockResolvedValue(cleared(1, 3, 5));
+
+    const ids = (await quizService.nextQuestions(MAC)).questions.map((x) => Number(x.id));
+    const lastOutstanding = Math.max(...ids.map((id, i) => ([2, 4, 6, 7, 8, 9, 10].includes(id) ? i : -1)));
+    const firstCleared = Math.min(...ids.map((id, i) => ([1, 3, 5].includes(id) ? i : Infinity)));
+
+    expect(lastOutstanding).toBeLessThan(firstCleared);
+  });
+});
