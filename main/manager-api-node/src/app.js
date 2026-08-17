@@ -63,10 +63,38 @@ app.use(requestIdMiddleware());
 // This enables express-rate-limit to correctly identify clients via X-Forwarded-For
 app.set('trust proxy', 1);
 
+// Our own workers, exempted from a limit meant for untrusted callers.
+//
+// The limiter is global and counts every request. Workers authenticate with
+// SERVICE_SECRET_KEY and all egress through the same NAT, so the entire EKS
+// fleet is charged to one client. The workspace-lock heartbeat fires every 1.5s
+// per session — 40 requests a minute each — so ten children talking for fifteen
+// minutes spend 6,000 of the 5,000 budget on heartbeats alone, before a single
+// quiz question.
+//
+// Measured on prod 2026-08-17 with ten devices: 1,902 heartbeats in eleven
+// minutes, 31% of all traffic, and 242 rejections. The casualty is the lock that
+// stops two sessions interleaving writes to one child's memory (ADR-0007), so
+// the limiter was quietly disabling the only guard there is.
+//
+// The key is COMPARED, never merely present. A skip that trusts the header's
+// existence lets anyone send `X-Service-Key: anything` and bypass the limiter
+// entirely — rate limiting left on for real users and off for everyone else,
+// which is worse than not having it.
+//
+// Off by default and enabled per environment, so this reaches production
+// without changing dev behaviour.
+const skipServiceKeyRateLimit = process.env.RATE_LIMIT_SKIP_SERVICE_KEY === '1';
+
 // Rate limiting
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
   max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 5000, // Increased for frontend dev
+  skip: (req) => {
+    if (!skipServiceKeyRateLimit) return false;
+    const expected = process.env.SERVICE_SECRET_KEY;
+    return Boolean(expected) && req.get('X-Service-Key') === expected;
+  },
   message: {
     code: 429,
     msg: 'Too many requests, please try again later.',
