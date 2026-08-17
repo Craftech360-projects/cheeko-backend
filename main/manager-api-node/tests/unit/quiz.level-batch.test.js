@@ -172,3 +172,41 @@ describe('anti_trap_advanced', () => {
     expect(result.questions.filter((q) => q.bonus).map((q) => q.id)).toEqual(['10']);
   });
 });
+
+/**
+ * The batch is capped at the day's target, outstanding questions first.
+ *
+ * "A sitting is the whole level" was written for a level of ten, where the cap
+ * never bites. Riddle levels hold eighty, so the uncapped rule put all eighty in
+ * every payload — five times the prompt for a Daily Ten that scores ten. Seen on
+ * prod 2026-08-17: 15,775 bytes against quiz's 2,996.
+ */
+describe('a level bigger than the daily target', () => {
+  // Eighty on level 1, the real shape of the riddle bank.
+  const BIG = Array.from({ length: 80 }, (_, i) => q(i + 1, 1));
+
+  beforeEach(() => {
+    prisma.quiz_question.findMany.mockResolvedValue(BIG);
+  });
+
+  it('serves ten, not eighty', async () => {
+    const result = await quizService.nextQuestions(MAC);
+
+    expect(result.questions).toHaveLength(10);
+  });
+
+  it('puts the outstanding ones first, so the level stays finishable', async () => {
+    // The first 75 are cleared. In bank order the batch would be all practice
+    // and the child could never finish the level.
+    prisma.quiz_question_answer.findMany.mockResolvedValue(
+      cleared(...Array.from({ length: 75 }, (_, i) => i + 1))
+    );
+
+    const result = await quizService.nextQuestions(MAC);
+    const ids = result.questions.map((x) => Number(x.id));
+
+    expect(result.questions).toHaveLength(10);
+    // 76..80 are the uncleared ones and must all be in the batch.
+    for (const id of [76, 77, 78, 79, 80]) expect(ids).toContain(id);
+  });
+});
