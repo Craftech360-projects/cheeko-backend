@@ -359,7 +359,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     );
   }
 
-  const selected = new Set(selectedIds.map(String));
+  const byId = new Map(bank.map((q) => [String(q.id), q]));
   const bonus = new Set(bonusIds.map(String));
 
   // The day-gate is decided here, from the log, not left to the model. It kept
@@ -405,7 +405,15 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     // still derived, so this is a signal about THIS response, not stored state.
     anti_trap_advanced: antiTrapAdvanced,
     questions: [
-      ...bank.filter((q) => selected.has(String(q.id))).map(toQuestion),
+      // Walk selectedIds, not the bank. Filtering the bank returns them in bank
+      // order and silently discards the order selectedIds was built in — which is
+      // outstanding-first, the thing that decides what the child is asked first.
+      //
+      // Seen on prod 2026-08-17: a child had cleared "What colour is a banana?"
+      // twenty minutes earlier and was asked it again as the opening question,
+      // because it sorts first in the bank. The cap was working; only the order
+      // was being thrown away.
+      ...selectedIds.map((id) => byId.get(String(id))).filter(Boolean).map(toQuestion),
       // Bonus items are appended, flagged, and never counted towards clearing a
       // level. A missed bonus simply recycles.
       ...bank.filter((q) => bonus.has(String(q.id)))
