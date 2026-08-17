@@ -53,7 +53,31 @@
               <span v-else>{{ s.row.current_level }} / {{ s.row.max_level }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="levels_completed" label="Cleared" width="80" align="center" />
+          <!-- How far into the CURRENT level the child is. "Levels done" alone
+               reads as zero for a child one question from finishing a level,
+               which is the opposite of the truth and the thing you actually
+               want to see when asking whether someone is stuck. -->
+          <el-table-column label="This level" width="110" align="center">
+            <template slot-scope="s">
+              <span v-if="s.row.current_level === null">&mdash;</span>
+              <span v-else>{{ (s.row.level_size || 0) - (s.row.level_uncleared || 0) }} / {{ s.row.level_size || 0 }}</span>
+            </template>
+          </el-table-column>
+          <!-- Was labelled "Cleared", which reads as questions cleared. It
+               counts fully finished LEVELS. Renamed rather than re-scoped: the
+               number was right, the word was wrong.
+               The tag splits mastered from aged-out when they differ — a level
+               the 3-day cap moved a child past is finished, but not mastered. -->
+          <el-table-column label="Levels done" width="120" align="center">
+            <template slot-scope="s">
+              {{ s.row.levels_completed }}
+              <el-tag v-if="s.row.levels_aged_out" size="mini" type="warning">
+                {{ s.row.levels_mastered }} mastered
+              </el-tag>
+            </template>
+          </el-table-column>
+          <!-- Lifetime, across every question ever served including retired
+               content, so it can legitimately exceed everything above it. -->
           <el-table-column prop="correct" label="Correct" width="80" align="center" />
           <el-table-column label="Today" width="130" align="center">
             <template slot-scope="s">
