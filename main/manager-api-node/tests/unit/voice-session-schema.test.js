@@ -27,7 +27,12 @@ describe('voice session schema', () => {
 
     expect(schema).toContain('model device_workspace_artifacts');
     expect(schema).toContain('relative_path');
-    expect(schema).toContain('@@unique([mac_address, relative_path], map: "uq_device_workspace_artifacts_mac_path")');
+    // Uniqueness moved to the OWNER, not the toy. A toy that served two children
+    // keeps their histories in separate owner_key namespaces, so the same path
+    // legitimately appears twice under one mac — which the old mac-based unique
+    // rejected, 500ing every workspace sync for such a device (prod, 2026-08-17).
+    expect(schema).toContain('@@unique([owner_key, relative_path], map: "uq_device_workspace_artifacts_owner_path")');
+    expect(schema).not.toContain('uq_device_workspace_artifacts_mac_path');
     expect(schema).toContain('@@index([mac_address, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_mac_updated")');
   });
 
@@ -37,8 +42,10 @@ describe('voice session schema', () => {
     expect(schema).toContain('model device_memory_documents');
     expect(schema).toContain('model device_memory_chunks');
     expect(schema).toContain('document_key');
-    expect(schema).toContain('@@unique([mac_address, document_key], map: "uq_device_memory_documents_mac_key")');
-    expect(schema).toContain('@@unique([mac_address, content_hash], map: "uq_device_memory_chunks_mac_hash")');
+    expect(schema).toContain('@@unique([owner_key, document_key], map: "uq_device_memory_documents_owner_key")');
+    expect(schema).toContain('@@unique([owner_key, content_hash], map: "uq_device_memory_chunks_owner_hash")');
+    expect(schema).not.toContain('uq_device_memory_documents_mac_key');
+    expect(schema).not.toContain('uq_device_memory_chunks_mac_hash');
     expect(schema).toContain('@@index([mac_address, updated_at(sort: Desc)], map: "idx_device_memory_documents_mac_updated")');
   });
 

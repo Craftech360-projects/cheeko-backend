@@ -536,7 +536,6 @@ model device_workspace_artifacts {
   ai_device     ai_device? @relation(fields: [device_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   ai_agent      ai_agent?  @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@unique([mac_address, relative_path], map: "uq_device_workspace_artifacts_mac_path")
   @@unique([owner_key, relative_path], map: "uq_device_workspace_artifacts_owner_path")
   @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_mac_updated")
   @@index([agent_id, updated_at(sort: Desc)], map: "idx_device_workspace_artifacts_agent_updated")
@@ -576,7 +575,6 @@ model device_memory_documents {
   kid_profile          kid_profile?           @relation(fields: [kid_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   device_memory_chunks device_memory_chunks[]
 
-  @@unique([mac_address, document_key], map: "uq_device_memory_documents_mac_key")
   @@unique([owner_key, document_key], map: "uq_device_memory_documents_owner_key")
   @@index([mac_address, updated_at(sort: Desc)], map: "idx_device_memory_documents_mac_updated")
   @@index([kid_id, updated_at(sort: Desc)], map: "idx_device_memory_documents_kid_updated")
@@ -600,7 +598,6 @@ model device_memory_chunks {
   ai_agent                ai_agent?               @relation(fields: [agent_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   kid_profile             kid_profile?            @relation(fields: [kid_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
-  @@unique([mac_address, content_hash], map: "uq_device_memory_chunks_mac_hash")
   @@unique([owner_key, content_hash], map: "uq_device_memory_chunks_owner_hash")
   @@index([document_id], map: "idx_device_memory_chunks_document")
   @@index([mac_address, created_at(sort: Desc)], map: "idx_device_memory_chunks_mac_created")
