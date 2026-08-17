@@ -86,10 +86,28 @@ const dbConnectionString = resolveDatabaseUrl(_rawUrl)
 logger.info(`🔌 DB connecting to: ${dbConnectionString.replace(/:[^@]*@/, ':***@')}`);
 logger.info(`🔐 SSL: rejectUnauthorized=false (DigitalOcean self-signed CA)`);
 
+// The managed database allows 25 connections in total, shared with mqtt-gateway,
+// DigitalOcean's own backup and failover agents, and anything run by hand. This
+// pool was unbounded, which means node-postgres' default of 10 — nearly half the
+// server's capacity held by one process, and briefly double that during a
+// restart while the old pool drains alongside the new one.
+//
+// Six is generous for the actual shape of the load: a voice session spends its
+// life waiting on a child to speak, not on Postgres, so connections sit idle
+// between short bursts. Raising this is not the way to serve more children —
+// DigitalOcean's connection pooler is, because it multiplexes many app
+// connections onto few real ones instead of reserving them.
+//
+// PGPOOL_MAX exists so the ceiling can be moved without a deploy if a restart
+// ever needs headroom in a hurry.
+const POOL_MAX = Number(process.env.PGPOOL_MAX) || 6;
+
 const pgPool = new Pool({
   connectionString: dbConnectionString,
   ssl: { rejectUnauthorized: false },
+  max: POOL_MAX,
 });
+logger.info(`🗄️  DB pool max: ${POOL_MAX} (server allows 25 in total)`);
 
 pgPool.on('error', (err) => {
   logger.error('❌ Unexpected idle pg pool error:', err.message);
