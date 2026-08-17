@@ -256,11 +256,25 @@ const updateAgent = async (agentId, _userId, data) => {
 /**
  * Delete agent and all associated records
  * Matches Spring Boot behavior: deletes devices, chat history, and plugins first
+ *
+ * Scoped to the requesting account. The user id was accepted and thrown away for
+ * a long time, which made possession of an agent id sufficient authority to
+ * unbind every device on somebody else's account and unpair their children — an
+ * agent id is a UUID, but it is not a secret, and this is the most destructive
+ * call in the mobile API.
+ *
+ * A mismatch answers "Agent not found" rather than "not yours", so the endpoint
+ * cannot be used to discover which agent ids exist.
+ *
  * @param {string} agentId - Agent ID
- * @param {number} userId - User ID (kept for backward compatibility but not used for filtering)
+ * @param {number} userId - the account making the request; required
+ * @param {boolean} [isSuperAdmin] - operator override, mirroring unbindDevice.
+ *   Only the web route can set it; the mobile route never does.
  */
-const deleteAgent = async (agentId, _userId) => {
-  const existing = await getAgentById(agentId);
+const deleteAgent = async (agentId, userId, isSuperAdmin = false) => {
+  if (!isSuperAdmin && !userId) throw new Error('A user is required to delete an agent');
+
+  const existing = await getAgentById(agentId, isSuperAdmin ? null : userId);
   if (!existing) throw new Error('Agent not found');
 
   // Fully unbind devices attached to this agent so they can be paired again.

@@ -2171,7 +2171,7 @@ router.delete('/:id',
   requireAuth,
   asyncHandler(async (req, res) => {
     try {
-      await agentService.deleteAgent(req.params.id, req.user.id);
+      await agentService.deleteAgent(req.params.id, req.user.id, req.user.super_admin === 1);
       success(res, null, 'Agent deleted successfully');
     } catch (error) {
       badRequest(res, error.message);
