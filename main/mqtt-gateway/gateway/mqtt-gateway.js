@@ -21,6 +21,7 @@ const {
   LiveKitBridge,
   setConfigManager: setLivekitConfigManager,
 } = require("../livekit/livekit-bridge");
+const { SetupBackoff } = require("./setup-backoff");
 const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
@@ -313,6 +314,7 @@ class MQTTGateway {
     this.headerBuffer = Buffer.alloc(16);
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
+    this.setupBackoff = new SetupBackoff(); // damps the 2026-08-18 retry storm
     this.clientConnections = new Map(); // clientId -> device info (for tracking EMQX clients)
     this.senderRoutesByMac = new Map(); // macAddress -> latest sender clientId route
     this.pendingDeviceMessages = new Map(); // macAddress -> queued outbound messages

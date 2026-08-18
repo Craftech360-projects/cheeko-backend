@@ -494,7 +494,9 @@ class VirtualMQTTConnection {
     // ═══════════════════════════════════════════════════════════
 
     this.deferredSetupInProgress = true;
-    this._deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId)
+    this._setupWithBackoff(() =>
+      this._deferredSetup(json, macAddress, newSessionUuid, macForRoom, futureSessionId)
+    )
       .catch((error) => {
         this.deferredSetupInProgress = false;
         console.error(`❌ [DEFERRED-SETUP] Background setup failed for ${this.deviceId}:`, error);
@@ -509,6 +511,38 @@ class VirtualMQTTConnection {
         );
         this.close();
       });
+  }
+
+  /**
+   * Runs the deferred LiveKit setup under the fleet-wide backoff and breaker.
+   *
+   * On 2026-08-18 a failed setup sent `goodbye` instantly, the toy re-sent
+   * `hello` instantly, and ~50 toys did that in lockstep. Holding a repeat
+   * offender off — jittered, so the fleet de-syncs — is what damps the herd,
+   * because the retry rate is governed by how fast we send that `goodbye`.
+   */
+  async _setupWithBackoff(runSetup, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
+    const backoff = this.gateway.setupBackoff;
+
+    const delay = backoff.delayFor(this.deviceId);
+    if (delay > 0) {
+      console.warn(`⏳ [BACKOFF] Holding setup for ${this.deviceId} ${delay}ms after recent failures`);
+      await sleep(delay);
+      if (this.closing) return; // device gave up — a room created now would leak
+    }
+
+    if (backoff.isOpen()) {
+      backoff.recordFailure(this.deviceId);
+      throw new Error("setup breaker open — LiveKit setup skipped");
+    }
+
+    try {
+      await runSetup();
+    } catch (error) {
+      backoff.recordFailure(this.deviceId);
+      throw error;
+    }
+    backoff.recordSuccess(this.deviceId);
   }
 
   /**
