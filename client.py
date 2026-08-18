@@ -22,9 +22,9 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = "192.168.0.3"
+SERVER_IP = os.getenv("TEST_SERVER_IP", "139.59.7.72")
 OTA_PORT = 8002
-MQTT_BROKER_HOST ="192.168.0.3"
+MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
 
 MQTT_BROKER_PORT = int(os.getenv("TEST_MQTT_BROKER_PORT", "1883"))
@@ -92,15 +92,6 @@ def generate_mqtt_credentials(device_mac: str) -> Dict[str, str]:
     }
 
 
-def generate_unique_mac() -> str:
-    """Generates a unique MAC address for the client."""
-    # Generate 6 random bytes for the MAC address
-    # Using a common OUI prefix (00:16:3E) for locally administered addresses
-    # and then random bytes to ensure uniqueness for each client instance.
-    mac_bytes = [0x00, 0x16, 0x3E,  # OUI prefix
-                 uuid.uuid4().bytes[0], uuid.uuid4().bytes[1], uuid.uuid4().bytes[2]]
-    return '_'.join(f'{b:02x}' for b in mac_bytes)
-
 
 # --- Cheeko Face expression tags (mimics firmware parsing) ---
 FACE_EXPRESSIONS = {
@@ -132,7 +123,7 @@ class TestClient:
     def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = device_mac or "00:16:3e:ac:b5:38"
+        self.device_mac_formatted = device_mac or "00:16:3e:7a:11:c4"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # MQTT credentials will be set from OTA response
@@ -1328,7 +1319,7 @@ if __name__ == "__main__":
         action="store_true",
         help="imagine mode: use the OTA handshake instead of the local-gateway config.",
     )
-    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:ac:b5:38"))
+    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:7a:11:c4"))
     parser.add_argument(
         "--character-id",
         default=os.getenv("TEST_CHARACTER_ID"),
