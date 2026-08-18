@@ -19,9 +19,11 @@ const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent
  * @returns {string} JSON string for dispatch metadata
  */
 function buildDispatchMetadata({ macAddress, deviceId, character, characterId = null, language = null, sarvamVoiceId = null, elevenlabsVoiceId = null, childProfile, sessionConfig = {} }) {
-  // ADR-0004: confirm whether a parent rule is being placed into room metadata.
-  const _parentRule = (childProfile && childProfile.parent_rule) ? String(childProfile.parent_rule) : null;
-  logger.debug(`[PARENT-RULE] dispatch metadata for mac=${macAddress}: parent_rule ${_parentRule ? `PRESENT (${_parentRule.length} chars): "${_parentRule.slice(0, 80)}"` : 'ABSENT'}`);
+  // ADR-0004: the worker reads a stable shape, so parent_rule is always present —
+  // null when the child has no rule. Passing childProfile through verbatim left the
+  // key `undefined`, and JSON.stringify drops undefined keys entirely.
+  const parentRule = (childProfile && childProfile.parent_rule) ? String(childProfile.parent_rule) : null;
+  logger.debug(`[PARENT-RULE] dispatch metadata for mac=${macAddress}: parent_rule ${parentRule ? `PRESENT (${parentRule.length} chars): "${parentRule.slice(0, 80)}"` : 'ABSENT'}`);
 
   // The child this device is PAIRED to, or null. The worker keys its workspace
   // directory on it, so it must be the pairing and not childProfile.id, which
@@ -38,7 +40,7 @@ function buildDispatchMetadata({ macAddress, deviceId, character, characterId = 
     language: language,
     sarvam_voice_id: sarvamVoiceId,
     elevenlabs_voice_id: elevenlabsVoiceId,
-    child_profile: childProfile || null,
+    child_profile: childProfile ? { ...childProfile, parent_rule: parentRule } : null,
     session_language_code: sessionConfig.languageCode || null,
     session_language_name: sessionConfig.languageName || null,
     session_voice_id: sessionConfig.voiceId || null,

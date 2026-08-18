@@ -5,10 +5,17 @@ const test = require("node:test");
 
 const repoRoot = path.resolve(__dirname, "..");
 const gatewayPath = path.join(repoRoot, "gateway", "mqtt-gateway.js");
-const metadataBuilderPath = path.join(repoRoot, "core", "mem0-integration.js");
 
 test("buildDispatchMetadata emits the complete LiveKit room metadata contract", () => {
-  const source = fs.readFileSync(metadataBuilderPath, "utf8");
+  const { buildDispatchMetadata } = require("../core/mem0-integration");
+  const meta = JSON.parse(buildDispatchMetadata({
+    macAddress: "AABBCC",
+    deviceId: "uuid-1",
+    character: "Cheeko",
+    childProfile: { name: "Asha" },
+    memoryData: null,
+  }));
+
   const requiredKeys = [
     "character",
     "character_id",
@@ -27,12 +34,16 @@ test("buildDispatchMetadata emits the complete LiveKit room metadata contract", 
   ];
 
   for (const key of requiredKeys) {
-    assert.match(source, new RegExp(`${key}:`), `missing metadata key ${key}`);
+    assert.ok(key in meta, `missing metadata key ${key}`);
   }
 
-  assert.match(source, /memories\s*=\s*memoryData\.memories\s*\|\|\s*\[\]/);
-  assert.match(source, /relations\s*=\s*memoryData\.relations\s*\|\|\s*\[\]/);
-  assert.match(source, /entities\s*=\s*memoryData\.entities\s*\|\|\s*\[\]/);
+  // Mem0 was removed, but the worker's contract still requires these fields to
+  // arrive as empty arrays. The old assertions grepped the builder's source for
+  // the deleted `memoryData.memories || []` lines, so they broke on the removal
+  // while the contract itself was never at risk.
+  assert.deepStrictEqual(meta.long_term_memories, []);
+  assert.deepStrictEqual(meta.memory_relations, []);
+  assert.deepStrictEqual(meta.memory_entities, []);
 });
 
 test("buildDispatchMetadata carries character_id and language but no persona text", () => {
