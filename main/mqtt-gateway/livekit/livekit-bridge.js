@@ -743,12 +743,10 @@ class LiveKitBridge extends EventEmitter {
         // Cleanup can null this.room while the async connect above is still in
         // flight (device power-cycle / reconnect). Bail out instead of throwing
         // "Cannot read properties of null" and stranding a connected room.
-        if (!this.room) {
-          throw new Error("room was torn down during setup");
-        }
+        const liveRoom = this.requireRoom();
 
         // Handle lk.agent.events text streams
-        this.room.registerTextStreamHandler("lk.agent.events", async (reader, participantInfo) => {
+        liveRoom.registerTextStreamHandler("lk.agent.events", async (reader, participantInfo) => {
           try {
             const text = await reader.readAll();
             if (!text) return;
@@ -1257,6 +1255,16 @@ class LiveKitBridge extends EventEmitter {
         reject(error);
       }
     });
+  }
+
+  // The room this bridge is setting up, or a clear error if cleanup already
+  // took it. Extracted so the teardown-during-setup race is testable without
+  // having to win a timing race against a real connect().
+  requireRoom() {
+    if (!this.room) {
+      throw new Error("room was torn down during setup");
+    }
+    return this.room;
   }
 
   // Release a room whose setup failed part-way. Always clears this.room, even
