@@ -740,6 +740,13 @@ class LiveKitBridge extends EventEmitter {
         //   "ignoring incoming text stream due to no handler for topic: …"
         // ────────────────────────────────────────────────────────────────
 
+        // Cleanup can null this.room while the async connect above is still in
+        // flight (device power-cycle / reconnect). Bail out instead of throwing
+        // "Cannot read properties of null" and stranding a connected room.
+        if (!this.room) {
+          throw new Error("room was torn down during setup");
+        }
+
         // Handle lk.agent.events text streams
         this.room.registerTextStreamHandler("lk.agent.events", async (reader, participantInfo) => {
           try {
@@ -1244,11 +1251,28 @@ class LiveKitBridge extends EventEmitter {
           "[LiveKitBridge] Error connecting to LiveKit:",
           error.message
         );
-        // console.error("[LiveKitBridge] Error name:", error.name);
-        // console.error("[LiveKitBridge] Error message:", error.message);
+        // The room may already be connected when setup throws. Without this the
+        // socket stays open forever and the device's retry loop piles up rooms.
+        await this.abandonRoom(error);
         reject(error);
       }
     });
+  }
+
+  // Release a room whose setup failed part-way. Always clears this.room, even
+  // if disconnect() throws — a half-torn-down room must never stay referenced.
+  async abandonRoom(error) {
+    const room = this.room;
+    this.room = null;
+    if (!room) return;
+    try {
+      await room.disconnect();
+      console.log(
+        `🧹 [CLEANUP] Abandoned room after failed setup: ${error && error.message}`
+      );
+    } catch (e) {
+      console.log(`⚠️ [CLEANUP] Error abandoning room: ${e.message}`);
+    }
   }
 
   async sendAudio(opusData, timestamp) {
