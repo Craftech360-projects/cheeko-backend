@@ -5,6 +5,7 @@
  */
 
 const axios = require('axios');
+const { gatewayUrlFor } = require('../utils/gateway-shard');
 const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 const logger = require('../utils/logger');
@@ -634,7 +635,8 @@ async function resolveOwnedDeviceForMobile(mobileUserId, deviceIdOrMac) {
 }
 
 async function requestGatewaySettingsPublish({ mac_address, version, settings }) {
-  const base = (process.env.MQTT_GATEWAY_INTERNAL_URL || 'http://127.0.0.1:8091').replace(/\/$/, '');
+  // Routed to the gateway instance that owns this device (horizontal sharding).
+  const base = gatewayUrlFor(mac_address);
   const serviceKey = process.env.SERVICE_SECRET_KEY;
   if (!serviceKey) {
     throw new Error('SERVICE_SECRET_KEY is not configured');

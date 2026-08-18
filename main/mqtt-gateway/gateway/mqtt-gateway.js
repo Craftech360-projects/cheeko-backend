@@ -22,6 +22,7 @@ const {
   setConfigManager: setLivekitConfigManager,
 } = require("../livekit/livekit-bridge");
 const { SetupBackoff } = require("./setup-backoff");
+const { ownsDevice } = require("./shard");
 const {
   MEDIA_API_BASE,
   mediaAxiosConfig,
@@ -315,6 +316,10 @@ class MQTTGateway {
     this.mqttClient = null;
     this.deviceConnections = new Map(); // deviceId -> connection info
     this.setupBackoff = new SetupBackoff(); // damps the 2026-08-18 retry storm
+    // Horizontal sharding: this instance serves only devices whose MAC hashes to
+    // its index. Defaults to 0/1 — a single instance owning everything.
+    this.shardIndex = parseInt(process.env.GATEWAY_SHARD_INDEX, 10) || 0;
+    this.shardCount = parseInt(process.env.GATEWAY_SHARD_COUNT, 10) || 1;
     this.clientConnections = new Map(); // clientId -> device info (for tracking EMQX clients)
     this.senderRoutesByMac = new Map(); // macAddress -> latest sender clientId route
     this.pendingDeviceMessages = new Map(); // macAddress -> queued outbound messages
@@ -735,6 +740,7 @@ class MQTTGateway {
       if (topic.startsWith("devices/") && topic.endsWith("/data")) {
         const topicParts = topic.split("/");
         const macAddress = topicParts[1]; // e.g. D0:CF:13:04:15:58
+        if (!ownsDevice(macAddress, this.shardIndex, this.shardCount)) return;
         logger.info(`ðŸ“¨ [MQTT-IN] ${macAddress}: data (direct topic)`);
         const deviceInfo = this.deviceConnections.get(macAddress);
         if (deviceInfo && deviceInfo.connection) {
@@ -779,6 +785,8 @@ class MQTTGateway {
         if (parts.length >= 2) {
           deviceId = parts[1].replace(/_/g, ":").toUpperCase(); // Convert MAC format
         }
+
+        if (!ownsDevice(deviceId, this.shardIndex, this.shardCount)) return;
 
         this.touchSenderRoute(deviceId, clientId);
 
