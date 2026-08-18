@@ -2581,7 +2581,18 @@ class LiveKitBridge extends EventEmitter {
         );
       }
 
-      // Step 2: Disconnect from the room
+      // Step 2: Drop event listeners before disconnecting — defensive teardown
+      // from the March scaling plan. NOT a memory fix: a 20-session A/B burst on
+      // dev measured +115 MB retained without this and +119 MB with it. Handlers
+      // live ON the Room and point outward to the bridge, so once `this.room` is
+      // nulled the Room and its handlers are collectable either way.
+      try {
+        this.room?.removeAllListeners?.();
+      } catch (error) {
+        console.log(`⚠️ [CLEANUP] Could not remove room listeners: ${error.message}`);
+      }
+
+      // Step 3: Disconnect from the room
       try {
         await this.room?.disconnect();
         console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
@@ -2591,7 +2602,7 @@ class LiveKitBridge extends EventEmitter {
         );
       }
 
-      // Step 3: Force delete the room from LiveKit server to remove all participants
+      // Step 4: Force delete the room from LiveKit server to remove all participants
       if (this.roomService && this.roomName) {
         try {
           await this.roomService.deleteRoom(this.roomName);
@@ -2612,6 +2623,11 @@ class LiveKitBridge extends EventEmitter {
 
       this.room = null;
     }
+
+    // Release per-session collections. Both hold callbacks that close over this
+    // bridge, so an un-cleared entry pins the whole session graph.
+    if (this.pendingMcpRequests) this.pendingMcpRequests.clear();
+    if (this.volumeAdjustmentQueue) this.volumeAdjustmentQueue.length = 0;
 
     // Tell the shared worker pool to cleanup per-session codec state
     if (this.workerPool && this.sessionId && this.workerPool.cleanupSession) {
