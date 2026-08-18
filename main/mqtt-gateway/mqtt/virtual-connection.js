@@ -514,6 +514,33 @@ class VirtualMQTTConnection {
   }
 
   /**
+   * Forwards a device abort to the agent, then returns the device to listening.
+   *
+   * The bridge is captured once: cleanup can null `this.bridge` while
+   * sendAbortSignal() is still awaiting, and the TTS stop that follows must
+   * still reach the device or it sits in speaking mode with the light stuck.
+   */
+  async _handleAbort(json) {
+    const bridge = this.bridge;
+    if (!bridge) {
+      console.warn(`⚠️ [ABORT] No bridge for ${this.deviceId} — nothing to abort`);
+      return;
+    }
+
+    try {
+      console.log(`🛑 [ABORT] Received abort signal from device: ${this.deviceId}`);
+      await bridge.sendAbortSignal(json.session_id);
+      console.log(`✅ [ABORT] Successfully forwarded abort signal to LiveKit agent`);
+
+      // Send TTS stop to device to return it to listening mode (red light)
+      bridge.sendTtsStopMessage();
+      console.log(`🛑 [ABORT] Sent TTS stop message to device: ${this.deviceId}`);
+    } catch (error) {
+      console.error(`❌ [ABORT] Failed to forward abort signal to LiveKit:`, error);
+    }
+  }
+
+  /**
    * Runs the deferred LiveKit setup under the fleet-wide backoff and breaker.
    *
    * On 2026-08-18 a failed setup sent `goodbye` instantly, the toy re-sent
@@ -1244,26 +1271,7 @@ class VirtualMQTTConnection {
 
     // Handle abort message - forward to LiveKit agent via data channel
     if (json.type === "abort") {
-      try {
-        console.log(
-          `🛑 [ABORT] Received abort signal from device: ${this.deviceId}`
-        );
-        await this.bridge.sendAbortSignal(json.session_id);
-        console.log(
-          `✅ [ABORT] Successfully forwarded abort signal to LiveKit agent`
-        );
-
-        // Send TTS stop to device to return it to listening mode (red light)
-        this.bridge.sendTtsStopMessage();
-        console.log(
-          `🛑 [ABORT] Sent TTS stop message to device: ${this.deviceId}`
-        );
-      } catch (error) {
-        console.error(
-          `❌ [ABORT] Failed to forward abort signal to LiveKit:`,
-          error
-        );
-      }
+      await this._handleAbort(json);
       return;
     }
 
