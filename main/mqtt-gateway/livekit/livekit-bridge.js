@@ -1176,7 +1176,7 @@ class LiveKitBridge extends EventEmitter {
                   session_id: this.connection?.udp?.session_id || "unknown",
                   timestamp: Date.now(),
                 });
-                await this.room.localParticipant.publishData(
+                await this.requireRoom().localParticipant.publishData(
                   Buffer.from(greetingTrigger),
                   { reliable: true }
                 );
@@ -1222,7 +1222,7 @@ class LiveKitBridge extends EventEmitter {
         const options = new TrackPublishOptions();
         options.source = TrackSource.SOURCE_MICROPHONE;
 
-        const publication = await this.room.localParticipant.publishTrack(
+        const publication = await this.requireRoom().localParticipant.publishTrack(
           track,
           options
         );
@@ -2562,7 +2562,7 @@ class LiveKitBridge extends EventEmitter {
           require_ack: false  // Don't wait for ack in close()
         };
 
-        if (this.room.localParticipant && this.room.state === 'connected') {
+        if (this.room?.localParticipant && this.room.state === 'connected') {
           const messageString = JSON.stringify(shutdownMessage);
           const messageData = new Uint8Array(
             Buffer.from(messageString, "utf8")
@@ -2583,7 +2583,7 @@ class LiveKitBridge extends EventEmitter {
 
       // Step 2: Disconnect from the room
       try {
-        await this.room.disconnect();
+        await this.room?.disconnect();
         console.log(`✅ [CLEANUP] Disconnected from room: ${this.roomName}`);
       } catch (error) {
         console.log(

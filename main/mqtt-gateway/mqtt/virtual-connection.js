@@ -781,6 +781,12 @@ class VirtualMQTTConnection {
       const roomName = this.bridge?.room?.name || this.udp.session_id;
       const agentName = this.runtimeAgentName || DEFAULT_RUNTIME_AGENT;
       logger.info(`🚀 [AUTO-DEPLOY] Character: "${this.currentCharacter}" → Agent: "${agentName}"`);
+      // Cleanup can null the bridge while the deferred setup is still awaiting.
+      // Dispatching an agent into a room nobody owns strands it, so bail instead.
+      if (!this.bridge) {
+        logger.warn(`[AUTO-DEPLOY] Bridge torn down before dispatch for ${this.deviceId} — skipping`);
+        return;
+      }
       this.bridge.expectedAgentName = agentName;
       const dispatchMetadata = buildDispatchMetadata({
         macAddress: this.macAddress,
