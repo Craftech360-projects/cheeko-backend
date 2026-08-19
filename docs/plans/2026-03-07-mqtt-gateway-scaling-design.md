@@ -1,8 +1,20 @@
 # MQTT Gateway Scaling Design — 1000 Concurrent Devices
 
 **Date:** 2026-03-07
-**Status:** Approved
+**Status:** Approved — **partially superseded 2026-08-19**
 **Target:** Scale from ~50-100 to 1000 concurrent ESP32 device connections
+
+> **Superseded on one point: the distribution mechanism (2.2).** EMQX shared
+> subscriptions (`$share/gateway/device-server`) are no longer viable — the gateway
+> subscribes to `internal/server-ingest` via a republish rule, not to
+> `device-server`, and `$share` would scatter one device's messages across
+> instances and break its session. Production uses MAC-hash sharding instead; see
+> `2026-08-19-gateway-sharding-decision.md` for the reasoning and the upgrade path.
+>
+> The multi-instance architecture, per-instance env config, PM2 layout, capacity
+> reasoning, and Phase 1 memory items in this plan all still stand. Phase 1 items
+> 1.1, 1.3 and 1.4 were implemented on 2026-08-19 (commit 4b725c56); 1.2 was skipped
+> as obsolete and 1.5 deferred — see that commit for why.
 
 ## Current State
 
