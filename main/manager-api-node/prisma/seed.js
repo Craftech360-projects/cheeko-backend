@@ -20,6 +20,7 @@
 require('dotenv').config();
 
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
 
 // Initialize Supabase admin client
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -31,6 +32,7 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  realtime: { transport: WebSocket },
   auth: { autoRefreshToken: false, persistSession: false }
 });
 
