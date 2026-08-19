@@ -1,3 +1,11 @@
+> **STALE — does not describe production.** This is a single-instance Docker Compose
+> setup from a developer laptop (note the hardcoded macOS path below). Production has
+> run **4 sharded pm2 instances** since 2026-08-19, not Docker Compose, and a single
+> instance caps out around 30-40 concurrent sessions.
+>
+> For how production is actually deployed, its capacity, and the Kubernetes path:
+> `docs/gateway-capacity-and-hardening.md`. Keep this file only as a local-dev recipe.
+
 ✅ Docker Compose Setup Complete!
 
   All files have been created successfully. The mqtt-gateway Docker image has been built and is ready to run!

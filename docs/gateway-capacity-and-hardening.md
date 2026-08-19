@@ -124,6 +124,52 @@ devices blip. Run `npm test` on the box before touching the running shards. Note
 `pm2 restart` will **not** pick up new environment variables — that needs
 `pm2 delete` followed by a fresh `pm2 start` with the env inline, then `pm2 save`.
 
+## Future: running the gateway on Kubernetes
+
+Not implemented. Recorded so the design questions are answered before someone starts.
+
+**StatefulSet, not Deployment.** A StatefulSet gives stable pod ordinals, and the
+ordinal *is* the shard index — `gw-0`..`gw-3` map directly onto
+`GATEWAY_SHARD_INDEX=0..3`, derived from the pod name at startup. A Deployment's
+random pod names cannot express shard identity.
+
+**The hard part is UDP ingress.** Each shard needs its own externally reachable
+UDP endpoint, because the device connects directly to the port the hello response
+gives it. A normal Service load-balances across pods, which breaks the model.
+Options, in increasing order of cleanliness and effort:
+
+1. `hostNetwork: true` plus pod anti-affinity so each pod lands on its own node —
+   each shard then uses its node IP with ports 8884-8887. Simplest, but ties shard
+   count to node count and puts pods on the host network.
+2. One NodePort Service per pod, selecting on the
+   `statefulset.kubernetes.io/pod-name` label. Stable external port per shard with
+   proper isolation; more YAML.
+3. One LoadBalancer per pod. Cleanest addressing, one cloud LB bill per shard.
+
+Whichever is chosen, manager-api's OTA response must return the owning shard's
+external IP and UDP port — the same routing decision it makes today, with node or
+LB addresses instead of one host IP.
+
+**Internal routing gets easier.** A headless Service gives stable DNS
+(`gw-0.mqtt-gateway.<ns>.svc.cluster.local`), so manager-api's settings-push targets
+a name instead of `127.0.0.1:8091-8094`. This is strictly better than today.
+
+**The gateway still cannot autoscale, and this is the part people will get wrong.**
+Shard assignment is `hash(mac) % count`, so changing the replica count remaps
+*every* device. An HPA on this StatefulSet would silently scramble device-to-shard
+ownership mid-traffic and desynchronise manager-api. Kubernetes buys rolling
+updates, self-healing, and scheduling — **not** elastic scaling.
+
+To make the gateway genuinely elastic, replace modulo with **consistent hashing** (a
+ring with virtual nodes), which limits remapping to roughly 1/N of devices when the
+count changes. That is the prerequisite for an HPA here, and it also softens the
+"dead instance strands its shard" trade-off. Until then, treat replica count as a
+deliberate, coordinated change across the gateway and manager-api.
+
+**Session state is in-memory**, so a pod restart drops its shard's live sessions and
+those devices reconnect. Set `terminationGracePeriodSeconds` generously (the agent
+worker uses 900s) so a rolling update drains conversations instead of cutting them.
+
 ## Load testing
 
 Harness lives on the dev box (`64.227.170.31`):
