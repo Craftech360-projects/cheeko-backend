@@ -1108,10 +1108,12 @@ function Sidebar({
   activePage,
   onChange,
   username,
+  onSignOut,
 }: {
   activePage: NavPage
   onChange: (next: NavPage) => void
   username: string
+  onSignOut: () => void
 }) {
   const primary: Array<{ key: NavPage; label: string; icon: string }> = [
     { key: 'overview', label: 'Overview', icon: '☀️' },
@@ -1155,7 +1157,11 @@ function Sidebar({
       </div>
       <div className="sidebar-footer">
         <span className="avatar">{initialsOf(username || 'Admin')}</span>
-        <span>{username || 'Signed in'}</span>
+        <span className="sidebar-user">{username || 'Signed in'}</span>
+        <button type="button" className="sidebar-signout" onClick={onSignOut}>
+          <span className="ic" aria-hidden="true">⏻</span>
+          Sign out
+        </button>
       </div>
     </aside>
   )
@@ -3510,13 +3516,25 @@ function App() {
   const describeError = (requestError: unknown, fallback: string) =>
     requestError instanceof ApiError ? `${fallback}: ${requestError.message}` : fallback
 
+  // A 401 means the stored token is gone/expired server-side — sign out
+  // immediately instead of leaving every screen stuck on a stale error.
+  const handleApiError = (err: unknown, fallback: string) => {
+    if (err instanceof ApiError && err.status === 401) {
+      localStorage.removeItem(AUTH_STORAGE_KEY)
+      setToken('')
+      setError('Your session has expired. Please sign in again.')
+      return
+    }
+    setError(describeError(err, fallback))
+  }
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
     setOverviewLoading(true)
     apiFetch<OverviewResponse>(`/admin/founder/overview?range=${overviewRange}`, token)
       .then((payload) => { if (!cancelled) setOverview(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load overview')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load overview') })
       .finally(() => { if (!cancelled) setOverviewLoading(false) })
     return () => { cancelled = true }
   }, [overviewRange, token])
@@ -3527,7 +3545,7 @@ function App() {
     setEngagementLoading(true)
     apiFetch<EngagementResponse>(`/admin/founder/engagement?range=${engagementRange}`, token)
       .then((payload) => { if (!cancelled) setEngagement(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load engagement')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load engagement') })
       .finally(() => { if (!cancelled) setEngagementLoading(false) })
     return () => { cancelled = true }
   }, [engagementRange, token])
@@ -3538,7 +3556,7 @@ function App() {
     setContentLoading(true)
     apiFetch<ContentResponse>(`/admin/founder/content?range=${contentRange}`, token)
       .then((payload) => { if (!cancelled) setContent(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load content')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load content') })
       .finally(() => { if (!cancelled) setContentLoading(false) })
     return () => { cancelled = true }
   }, [contentRange, token])
@@ -3549,7 +3567,7 @@ function App() {
     setConversationsLoading(true)
     apiFetch<ConversationsResponse>(`/admin/founder/conversations?range=${conversationRange}`, token)
       .then((payload) => { if (!cancelled) setConversations(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load conversations')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load conversations') })
       .finally(() => { if (!cancelled) setConversationsLoading(false) })
     return () => { cancelled = true }
   }, [conversationRange, token])
@@ -3560,7 +3578,7 @@ function App() {
     setCostsLoading(true)
     apiFetch<CostsResponse>(`/admin/founder/costs?range=${costRange}`, token)
       .then((payload) => { if (!cancelled) setCosts(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load costs')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load costs') })
       .finally(() => { if (!cancelled) setCostsLoading(false) })
     return () => { cancelled = true }
   }, [costRange, token])
@@ -3571,7 +3589,7 @@ function App() {
     setOperateLoading(true)
     apiFetch<OperateResponse>('/admin/founder/operate', token)
       .then((payload) => { if (!cancelled) setOperate(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load fleet view')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load fleet view') })
       .finally(() => { if (!cancelled) setOperateLoading(false) })
     return () => { cancelled = true }
   }, [token])
@@ -3585,7 +3603,7 @@ function App() {
     const load = () => {
       apiFetch<LiveResponse>('/admin/founder/live', token)
         .then((payload) => { if (!cancelled) setLive(payload) })
-        .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load mission control')) })
+        .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load mission control') })
         .finally(() => { if (!cancelled) setLiveLoading(false) })
     }
 
@@ -3604,7 +3622,7 @@ function App() {
     setBriefLoading(true)
     apiFetch<BriefResponse>('/admin/founder/brief', token)
       .then((payload) => { if (!cancelled) setBrief(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load the daily brief')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load the daily brief') })
       .finally(() => { if (!cancelled) setBriefLoading(false) })
     return () => { cancelled = true }
   }, [activePage, token])
@@ -3619,7 +3637,7 @@ function App() {
         setRfidCards(payload.list || [])
         setRfidCardTotal(payload.total ?? (payload.list || []).length)
       })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load card mappings')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load card mappings') })
       .finally(() => { if (!cancelled) setRfidCardsLoading(false) })
     return () => { cancelled = true }
   }, [token])
@@ -3634,7 +3652,7 @@ function App() {
         setContentPacks(payload.list || [])
         setContentPackTotal(payload.total ?? (payload.list || []).length)
       })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load content packs')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load content packs') })
       .finally(() => { if (!cancelled) setContentPacksLoading(false) })
     return () => { cancelled = true }
   }, [token])
@@ -3649,7 +3667,7 @@ function App() {
         setFamilies(payload.items || [])
         setFamiliesTotal(payload.total ?? (payload.items || []).length)
       })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load families')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load families') })
       .finally(() => { if (!cancelled) setFamiliesLoading(false) })
     return () => { cancelled = true }
   }, [token])
@@ -3668,7 +3686,11 @@ function App() {
     const timer = window.setTimeout(() => {
       apiFetch<SearchResponse>(`/admin/founder/families/search?q=${encodeURIComponent(query)}`, token)
         .then((payload) => { if (!cancelled) setSearchResults(payload) })
-        .catch(() => { if (!cancelled) setSearchResults(null) })
+        .catch((err: unknown) => {
+          if (cancelled) return
+          if (err instanceof ApiError && err.status === 401) handleApiError(err, 'Unable to search')
+          setSearchResults(null)
+        })
         .finally(() => { if (!cancelled) setSearching(false) })
     }, 300)
     return () => {
@@ -3684,7 +3706,7 @@ function App() {
     const identifier = selectedResult.macAddress || selectedResult.id
     apiFetch<FamilyProfile>(`/admin/founder/families/${encodeURIComponent(identifier)}/profile`, token)
       .then((payload) => { if (!cancelled) setProfile(payload) })
-      .catch((err: unknown) => { if (!cancelled) setError(describeError(err, 'Unable to load family profile')) })
+      .catch((err: unknown) => { if (!cancelled) handleApiError(err, 'Unable to load family profile') })
       .finally(() => { if (!cancelled) setProfileLoading(false) })
     return () => { cancelled = true }
   }, [selectedResult, token])
@@ -3696,7 +3718,11 @@ function App() {
     setTranscript(null)
     apiFetch<TranscriptResponse>(`/admin/founder/conversations/${encodeURIComponent(selectedSessionId)}/transcript`, token)
       .then((payload) => { if (!cancelled) setTranscript(payload) })
-      .catch(() => { if (!cancelled) setTranscript(null) })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (err instanceof ApiError && err.status === 401) handleApiError(err, 'Unable to load transcript')
+        setTranscript(null)
+      })
       .finally(() => { if (!cancelled) setTranscriptLoading(false) })
     return () => { cancelled = true }
   }, [selectedSessionId, token])
@@ -3757,7 +3783,7 @@ function App() {
       const payload = await apiFetch<RfidContentPack>(`/admin/rfid/content-pack/code/${encodeURIComponent(packCode)}`, token)
       setContentPackEditor(payload)
     } catch (requestError: unknown) {
-      setError(describeError(requestError, 'Unable to load content pack details'))
+      handleApiError(requestError, 'Unable to load content pack details')
     } finally {
       setContentPackEditorLoading(false)
     }
@@ -3790,7 +3816,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <Sidebar activePage={activePage} onChange={setActivePage} username={username} />
+      <Sidebar activePage={activePage} onChange={setActivePage} username={username} onSignOut={signOut} />
 
       <main className="main-shell">
         {error ? <div className="error-banner">{error}</div> : null}
