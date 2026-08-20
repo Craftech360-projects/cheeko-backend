@@ -46,26 +46,136 @@ const rotate = (rows, count, seed) => {
   return out;
 };
 
+// How long a served item stays "seen". Past this it may come round again — a
+// bank of sixty jokes must not go silent forever once a child has heard them
+// all, and a joke from three months ago is new again to a six-year-old. Story
+// and question ledgers age out for the same reason (30 and 14 days); this sits
+// between them and applies to every unscored bank.
+const RECYCLE_AFTER_DAYS = 45;
+
+const macFilter = (deviceMac) => ({ equals: deviceMac, mode: 'insensitive' });
+
+/** Rows scoped to the child, falling back to the device when unlinked. */
+const seenScope = (kidId, deviceMac, bank) => (kidId
+  ? { kid_id: kidId, bank }
+  : { device_mac: macFilter(deviceMac), kid_id: null, bank });
+
+const resolveKidId = async (deviceMac) => {
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: macFilter(deviceMac) },
+    select: { kid_id: true },
+  });
+  return device?.kid_id ?? null;
+};
+
 /**
+ * The story a previous session left unfinished, or null.
+ *
+ * Read from the saved `story` MEMO — the same line Nani herself resumes from,
+ * so the briefing she is handed and the beat she continues at cannot disagree.
+ * A story whose code is no longer in the active bank is treated as finished:
+ * retiring content must not strand a child on it forever.
+ *
+ * @returns {Promise<object|null>} the bank row to re-serve
+ */
+const pinnedStory = async (kidId, deviceMac, rows) => {
+  const where = kidId
+    ? { kid_id: kidId, state_type: 'story' }
+    : { device_mac: macFilter(deviceMac), kid_id: null, state_type: 'story' };
+  const state = await prisma.kid_character_state.findFirst({ where, select: { data: true } });
+  const data = state?.data;
+  if (!data || String(data.completed || '').toLowerCase() === 'true') return null;
+  const key = String(data.story_key || '').trim();
+  if (!key) return null;
+  return rows.find((r) => r.code === key) || null;
+};
+
+/**
+ * The session's content, excluding what this child has already been given.
+ *
+ * Exclusion is server-side on purpose. The MEMO's jokes_told= still tells the
+ * model what it said, but a repeat must not depend on the model noticing: the
+ * rotation hash has no memory, so before this it re-served heard items within
+ * days and the prompt was the only thing standing in the way.
+ *
  * @param {{character?: string, deviceMac: string, date?: string}} args
- * @returns {Promise<null | {bank: string, items: object[]}>} null = character has no content bank
+ * @returns {Promise<null | {bank: string, items: object[], recycled: boolean}>}
+ *   null = character has no content bank
  */
 const nextContent = async ({ character, deviceMac, date }) => {
   const key = String(character || '').trim().toLowerCase();
   const cfg = CONTENT_BANKS[key];
   if (!cfg) return null;
 
-  const rows = await cfg.table().findMany({
-    where: { active: true },
-    orderBy: [{ level: 'asc' }, { code: 'asc' }],
-  });
+  const [rows, kidId] = await Promise.all([
+    cfg.table().findMany({ where: { active: true }, orderBy: [{ level: 'asc' }, { code: 'asc' }] }),
+    resolveKidId(deviceMac),
+  ]);
+
+  const cutoff = new Date(Date.now() - RECYCLE_AFTER_DAYS * 24 * 60 * 60 * 1000);
+  const seen = new Set((await prisma.kid_content_seen.findMany({
+    where: { ...seenScope(kidId, deviceMac, cfg.bank), seen_at: { gte: cutoff } },
+    select: { code: true },
+  })).map((r) => r.code));
+
+  // An unfinished story is PINNED: Nani resumes from the saved beat next
+  // session, and the daily rotation would otherwise hand her a different story
+  // to resume into — the ledger alone cannot prevent this, because an
+  // unfinished story is deliberately never marked seen. Found 2026-08-20:
+  // the resume gate held, the rotation defeated it anyway.
+  if (cfg.bank === 'story') {
+    const pinned = await pinnedStory(kidId, deviceMac, rows);
+    if (pinned) {
+      const { id, create_date, update_date, ...rest } = pinned;
+      return { bank: cfg.bank, items: [rest], recycled: false, resumed: true };
+    }
+  }
+
+  const unseen = rows.filter((r) => !seen.has(r.code));
+  // Everything within the recycle window has been heard: fall back to the whole
+  // bank rather than serving nothing. Silence is worse than a repeat, and the
+  // flag lets the caller log which happened.
+  const recycled = unseen.length === 0 && rows.length > 0;
+  const pool = recycled ? rows : unseen;
+
   const day = date || new Date().toISOString().slice(0, 10);
   const seed = seedFrom(day + '|' + String(deviceMac).toLowerCase());
-  const items = rotate(rows, cfg.perDay, seed).map((r) => {
+  const items = rotate(pool, cfg.perDay, seed).map((r) => {
     const { id, create_date, update_date, ...rest } = r;
     return rest;
   });
-  return { bank: cfg.bank, items };
+  return { bank: cfg.bank, items, recycled };
 };
 
-module.exports = { nextContent, CONTENT_BANKS };
+/**
+ * Record items as given. Called at session close with the codes the character's
+ * MEMO says it actually used — not at serve time, because a served joke the
+ * session never reached is not one the child has heard.
+ *
+ * Idempotent: re-reporting a code is a no-op, so a retried POST cannot corrupt
+ * the ledger.
+ *
+ * @param {{deviceMac: string, bank: string, codes: string[]}} args
+ * @returns {Promise<number>} rows written
+ */
+const markContentSeen = async ({ deviceMac, bank, codes }) => {
+  const list = [...new Set((Array.isArray(codes) ? codes : [])
+    .map((c) => String(c || '').trim())
+    .filter(Boolean))];
+  if (!list.length || !bank) return 0;
+
+  const kidId = await resolveKidId(deviceMac);
+  const existing = new Set((await prisma.kid_content_seen.findMany({
+    where: { ...seenScope(kidId, deviceMac, bank), code: { in: list } },
+    select: { code: true },
+  })).map((r) => r.code));
+
+  const fresh = list.filter((code) => !existing.has(code));
+  if (!fresh.length) return 0;
+  const { count } = await prisma.kid_content_seen.createMany({
+    data: fresh.map((code) => ({ kid_id: kidId, device_mac: deviceMac, bank, code })),
+  });
+  return count;
+};
+
+module.exports = { nextContent, markContentSeen, CONTENT_BANKS, RECYCLE_AFTER_DAYS };

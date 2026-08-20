@@ -12,6 +12,7 @@
 
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
+const { markContentSeen } = require('./contentbank.service');
 
 // Same normalization stance as quiz.service: rows are written with the caller's
 // spelling and read case-insensitively.
@@ -49,15 +50,17 @@ const parseMemo = (memo) => {
  * @param {{deviceMac: string, character?: string, memos: Array<{type: string, memo: string}>}} payload
  * @returns {Promise<{saved: number}>}
  */
-const recordSessionProgress = async ({ deviceMac, character, memos }) => {
+const recordSessionProgress = async ({ deviceMac, character, memos, content }) => {
   const kidId = await resolveKidId(deviceMac);
   let saved = 0;
+  const parsedByType = new Map();
 
   for (const entry of Array.isArray(memos) ? memos : []) {
     const stateType = String(entry?.type || '').trim().toLowerCase();
     const memo = String(entry?.memo || '').trim();
     if (!stateType || !memo) continue;
     const data = parseMemo(memo);
+    parsedByType.set(stateType, data);
 
     // Upsert current state. Partial unique indexes (kid vs unlinked-device) are
     // not expressible as a Prisma upsert target, so find-then-write; the worker
@@ -83,8 +86,29 @@ const recordSessionProgress = async ({ deviceMac, character, memos }) => {
     saved++;
   }
 
-  logger.info(`[PROGRESS] ${deviceMac} kid=${kidId ?? 'unlinked'} saved ${saved} memo type(s)`);
-  return { saved };
+  // The no-repeat ledger. Recorded from what was SERVED, not from the MEMO: the
+  // id-carrying fields differ per character (jokes_told= ids, story_key=, plain
+  // words for the spelling banks) and Tara's MEMO names no items at all, so
+  // MEMO parsing cannot cover every bank. Reported at session close, so a
+  // session that never ran burns nothing.
+  //
+  // The story bank is the one exception. Nani resumes an unfinished story next
+  // session, and marking it seen would swap the story out mid-tale — so it
+  // counts as given only once its MEMO says completed.
+  let seen = 0;
+  const bank = String(content?.bank || '').trim();
+  if (bank) {
+    const finishedStory = String(parsedByType.get('story')?.completed || '').toLowerCase() === 'true';
+    if (bank !== 'story' || finishedStory) {
+      seen = await markContentSeen({ deviceMac, bank, codes: content.codes });
+    }
+  }
+
+  logger.info(
+    `[PROGRESS] ${deviceMac} kid=${kidId ?? 'unlinked'} saved ${saved} memo type(s)`
+    + (bank ? `, ${seen} ${bank} item(s) marked seen` : '')
+  );
+  return { saved, seen };
 };
 
 /**

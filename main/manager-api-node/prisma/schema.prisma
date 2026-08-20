@@ -1611,6 +1611,23 @@ model spell_bank {
   @@index([language, level], map: "idx_spell_bank_lang_level")
 }
 
+/// What content a child has already been given, per bank — the durable
+/// no-repeat ledger for the unscored characters. The MEMO's jokes_told= and
+/// friends still exist for the model to read in-session, but they are a working
+/// note, not the record: this table is what the serve endpoint excludes on.
+model kid_content_seen {
+  id         BigInt   @id @default(autoincrement())
+  kid_id     BigInt?
+  device_mac String   @db.VarChar(20)
+  bank       String   @db.VarChar(20)
+  code       String   @db.VarChar(50)
+  seen_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([kid_id, bank], map: "idx_kid_content_seen_kid_bank")
+  @@index([device_mac, bank], map: "idx_kid_content_seen_mac_bank")
+  @@index([seen_at], map: "idx_kid_content_seen_at")
+}
+
 /// Current per-character state for a child, upserted from the session's final
 /// MEMO line. Restored into the worker's Saved State each session AFTER the 48h
 /// prune, so durable progress (Tikku's ladder, Tara's cliffhanger, Nani's

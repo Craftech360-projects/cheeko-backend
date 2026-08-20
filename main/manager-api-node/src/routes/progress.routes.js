@@ -25,6 +25,9 @@ router.post('/session',
       deviceMac,
       character: String(req.body?.character || '').trim() || null,
       memos: req.body?.memos,
+      // { bank, codes } — what the content bank served this session, for the
+      // no-repeat ledger. Absent for characters with no content bank.
+      content: req.body?.content,
     });
     return success(res, result);
   }));
