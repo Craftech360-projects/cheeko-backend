@@ -22,7 +22,7 @@ import opuslib
 
 # --- Configuration ---
 
-SERVER_IP = os.getenv("TEST_SERVER_IP", "139.59.7.72")
+SERVER_IP = os.getenv("TEST_SERVER_IP", "192.168.0.246")
 OTA_PORT = 8002
 MQTT_BROKER_HOST = os.getenv("TEST_MQTT_BROKER_HOST", SERVER_IP)
 
@@ -123,7 +123,7 @@ class TestClient:
     def __init__(self, device_mac: Optional[str] = None):
         self.mqtt_client = None
         # Generate a unique MAC address for this client instance
-        self.device_mac_formatted = device_mac or "00:16:3e:7a:11:c4"
+        self.device_mac_formatted = device_mac or "00:16:3e:7a:11:c6"
         print(f"Generated unique MAC address: {self.device_mac_formatted}")
 
         # MQTT credentials will be set from OTA response
@@ -1319,7 +1319,7 @@ if __name__ == "__main__":
         action="store_true",
         help="imagine mode: use the OTA handshake instead of the local-gateway config.",
     )
-    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:7a:11:c4"))
+    parser.add_argument("--device-mac", default=os.getenv("TEST_DEVICE_MAC", "00:16:3e:7a:11:c6"))
     parser.add_argument(
         "--character-id",
         default=os.getenv("TEST_CHARACTER_ID"),

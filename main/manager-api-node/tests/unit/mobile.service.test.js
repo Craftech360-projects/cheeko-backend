@@ -773,6 +773,69 @@ describe('mobile.service parent profile compatibility', () => {
     expect(result.todayProgress.aiInteractionCount).toBe(3);
   });
 
+  // The reported ring bug: the four category columns were each floored to a
+  // whole minute before being summed, so a day of short sessions rang up as
+  // zero and every day lost up to 59 seconds four times over, per device.
+  it('counts a day of short sessions instead of flooring each category away', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([
+      {
+        usage_time_seconds: 133,
+        game_usage_seconds: 40,
+        card_usage_seconds: 30,
+        ai_talk_usage_seconds: 45,
+        radio_usage_seconds: 18
+      }
+    ]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findFirst.mockResolvedValue(null);
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    // 40 + 30 + 45 + 18 = 133 raw seconds -> two completed minutes. Flooring
+    // each category first gave 0.
+    expect(result.today_progress.usage_time_seconds).toBe(120);
+    expect(result.todayProgress.usageTimeSeconds).toBe(120);
+  });
+
+  it('adds every toy up before rounding the ring', async () => {
+    prisma.sys_user.findUnique.mockResolvedValue({
+      id: 1n,
+      firebase_uid: 'firebase-user-1',
+      parent_profile: { timezone: 'UTC' }
+    });
+    prisma.ai_device.findMany.mockResolvedValue([
+      { id: 'device-1', mac_address: 'AA:BB:CC:DD:EE:FF', agent_id: 'agent-1' },
+      { id: 'device-2', mac_address: 'AA:BB:CC:DD:EE:F0', agent_id: 'agent-1' }
+    ]);
+    prisma.device_usage_daily.findMany.mockResolvedValue([
+      { ai_talk_usage_seconds: 50, game_usage_seconds: 0, card_usage_seconds: 0, radio_usage_seconds: 0 },
+      { ai_talk_usage_seconds: 0, game_usage_seconds: 0, card_usage_seconds: 25, radio_usage_seconds: 0 }
+    ]);
+    prisma.device_card_taps_daily.findMany.mockResolvedValue([]);
+    prisma.device_ai_interactions_daily.findMany.mockResolvedValue([]);
+    prisma.device_games_played.count.mockResolvedValue(0);
+    prisma.device_analytics_event.findFirst.mockResolvedValue(null);
+
+    const result = await mobileService.getHomepageActivity('firebase-user-1', {
+      now: new Date('2026-05-13T10:00:00.000Z')
+    });
+
+    // 50 + 25 = 75 seconds across two toys -> one completed minute, not zero.
+    expect(result.today_progress.usage_time_seconds).toBe(60);
+  });
+
   it('falls back to raw game_start events when games projection is empty', async () => {
     prisma.sys_user.findUnique.mockResolvedValue({
       id: 1n,
@@ -809,7 +872,7 @@ describe('mobile.service parent profile compatibility', () => {
         event_name: 'game_start',
         server_received_at: {
           gte: new Date('2026-05-12T00:00:00.000Z'),
-          lte: new Date('2026-05-14T00:00:00.000Z')
+          lte: new Date('2026-05-15T00:00:00.000Z')
         }
       },
       select: { server_received_at: true }
@@ -912,17 +975,20 @@ describe('mobile.service homepage activity details', () => {
     prisma.rfid_card_mapping.findMany.mockResolvedValue([]);
   });
 
+  // The window is the parent's calendar month (week) or the trailing twelve
+  // calendar months (month), widened by a day either side so no zone loses its
+  // edge; membership is then decided per row by the parent's day.
   it.each([
-    ['week', new Date('2026-04-30T18:30:00.000Z')],
-    ['month', new Date('2025-05-31T18:30:00.000Z')]
+    ['week', new Date('2026-04-30T00:00:00.000Z')],
+    ['month', new Date('2025-05-31T00:00:00.000Z')]
   ])('returns games detail for period=%s', async (period, expectedStart) => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.device_analytics_event.findMany.mockResolvedValue([
-      { event_name: 'game_start', game_id: 'math_tutor', data: { game_name: 'Math Tutor' } },
-      { event_name: 'game_start', game_id: 'math_tutor', data: { game_name: 'Math Tutor' } },
-      { event_name: 'game_start', game_id: 'riddle_solver', data: {} },
-      { event_name: 'game_start', game_id: 'ANIMAL', data: { game_id: 'ANIMAL' } },
-      { event_name: 'game_end', game_id: 'math_tutor', data: {} }
+      { event_name: 'game_start', game_id: 'math_tutor', data: { game_name: 'Math Tutor' }, server_received_at: new Date('2026-05-04T08:00:00.000Z') },
+      { event_name: 'game_start', game_id: 'math_tutor', data: { game_name: 'Math Tutor' }, server_received_at: new Date('2026-05-04T09:00:00.000Z') },
+      { event_name: 'game_start', game_id: 'riddle_solver', data: {}, server_received_at: new Date('2026-05-05T08:00:00.000Z') },
+      { event_name: 'game_start', game_id: 'ANIMAL', data: { game_id: 'ANIMAL' }, server_received_at: new Date('2026-05-06T08:00:00.000Z') },
+      { event_name: 'game_end', game_id: 'math_tutor', data: {}, server_received_at: new Date('2026-05-04T08:30:00.000Z') }
     ]);
 
     const result = await mobileService.getHomepageActivityDetails('firebase-user-1', {
@@ -940,7 +1006,7 @@ describe('mobile.service homepage activity details', () => {
         kid_id: null,
         server_received_at: {
           gte: expectedStart,
-          lte: new Date('2026-05-16T10:00:00.000Z')
+          lte: new Date('2026-05-18T00:00:00.000Z')
         }
       },
       select: expect.objectContaining({
@@ -1002,8 +1068,8 @@ describe('mobile.service homepage activity details', () => {
         mac_address: { in: ['AA:BB:CC:DD:EE:FF'] },
         kid_id: null,
         played_at: expect.objectContaining({
-          gte: expect.any(Date),
-          lte: new Date('2026-05-16T10:00:00.000Z')
+          gte: new Date('2026-04-30T00:00:00.000Z'),
+          lte: new Date('2026-05-18T00:00:00.000Z')
         })
       }),
       orderBy: { played_at: 'desc' }
@@ -1101,11 +1167,11 @@ describe('mobile.service homepage activity details', () => {
   it.each(['week', 'month'])('returns usage detail for period=%s', async (period) => {
     prisma.sys_user.findUnique.mockResolvedValue({ id: 1n, firebase_uid: 'firebase-user-1' });
     prisma.device_analytics_event.findMany.mockResolvedValue([
-      { event_name: 'game_end', duration_ms: 1200000, game_id: 'math_tutor', rfid_uid: null, content_id: null, station: null, data: {} },
-      { event_name: 'card_session_end', duration_ms: 600000, game_id: null, rfid_uid: 'CARD123', content_id: null, station: null, data: {} },
-      { event_name: 'radio_end', duration_ms: 300000, game_id: null, rfid_uid: null, content_id: null, station: 'Fun Radio', data: {} },
-      { event_name: 'ai_talk_end', duration_ms: 0, game_id: null, rfid_uid: null, content_id: null, station: null, data: {} },
-      { event_name: 'game_end', duration_ms: -1000, game_id: 'riddle_solver', rfid_uid: null, content_id: null, station: null, data: {} }
+      { event_name: 'game_end', duration_ms: 1200000, game_id: 'math_tutor', rfid_uid: null, content_id: null, station: null, data: {}, server_received_at: new Date('2026-05-04T08:00:00.000Z') },
+      { event_name: 'card_session_end', duration_ms: 600000, game_id: null, rfid_uid: 'CARD123', content_id: null, station: null, data: {}, server_received_at: new Date('2026-05-04T09:00:00.000Z') },
+      { event_name: 'radio_end', duration_ms: 300000, game_id: null, rfid_uid: null, content_id: null, station: 'Fun Radio', data: {}, server_received_at: new Date('2026-05-05T08:00:00.000Z') },
+      { event_name: 'ai_talk_end', duration_ms: 0, game_id: null, rfid_uid: null, content_id: null, station: null, data: {}, server_received_at: new Date('2026-05-05T09:00:00.000Z') },
+      { event_name: 'game_end', duration_ms: -1000, game_id: 'riddle_solver', rfid_uid: null, content_id: null, station: null, data: {}, server_received_at: new Date('2026-05-06T08:00:00.000Z') }
     ]);
     prisma.rfid_card_mapping.findMany.mockResolvedValue([
       {
@@ -1332,8 +1398,10 @@ describe('mobile.service progress endpoints', () => {
       limit: 20,
       total_items: 4,
       totalItems: 4,
-      total_seconds: 1260,
-      totalSeconds: 1260,
+      // 70 + 1237 + 34 = 1341 raw seconds, floored once. The old 1260 came
+      // from flooring each category first, which threw away 81 seconds.
+      total_seconds: 1320,
+      totalSeconds: 1320,
       items: [
         { key: 'game', name: 'Game', duration_seconds: 60, durationSeconds: 60 },
         { key: 'card', name: 'Card', duration_seconds: 1200, durationSeconds: 1200 },
@@ -1402,7 +1470,7 @@ describe('mobile.service progress endpoints', () => {
       expect.objectContaining({
         label: 'Week 3',
         week: 3,
-        total_seconds: 1260,
+        total_seconds: 1320,
         items: expect.arrayContaining([
           { key: 'card', name: 'Card', duration_seconds: 1200, durationSeconds: 1200 },
           { key: 'game', name: 'Game', duration_seconds: 60, durationSeconds: 60 },
@@ -2282,7 +2350,7 @@ describe('mobile.service progress endpoints', () => {
     expect(result.points[result.points.length - 1].date).toBe('2026-05-16');
     expect(result.points).toContainEqual(expect.objectContaining({
       date: '2026-05-15',
-      usage_time_seconds: 1260,
+      usage_time_seconds: 1320,
       card_tap_count: 2,
       ai_interaction_count: 1,
       games_played: 1

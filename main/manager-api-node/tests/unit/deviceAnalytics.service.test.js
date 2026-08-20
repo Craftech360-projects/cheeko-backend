@@ -205,6 +205,102 @@ describe('deviceAnalytics.service ingest collision handling', () => {
     expect(prisma.device_games_played.upsert).not.toHaveBeenCalled();
   });
 
+  // Which calendar day a rollup lands on is the parent's, not the container's.
+  // The container runs UTC, so an event just after local midnight in India
+  // used to be filed against the previous day.
+  describe('the day a rollup is filed against', () => {
+    // 20:30 UTC on the 19th is 02:00 IST on the 20th.
+    const justAfterMidnightIst = new Date('2026-08-19T20:30:00.000Z');
+
+    function ingestCardTapAt(instant) {
+      prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+        id: 'raw-card-1',
+        server_received_at: instant,
+        ...data,
+        event_timestamp: instant,
+      }));
+
+      return deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+        mac_address: 'FC:01:2C:CF:EB:54',
+        payload: buildPayload({
+          event_id: 'card-tap-1',
+          event: 'card_session_start',
+          data: { rfid_uid: 'CARD123' },
+        }),
+      });
+    }
+
+    it('files it against the parent day when the account stores no timezone', async () => {
+      prisma.ai_device.findUnique.mockResolvedValue({ id: 'device-1', user_id: 7n, kid_id: null });
+      prisma.parent_profile.findUnique.mockResolvedValue({ timezone: null });
+
+      await ingestCardTapAt(justAfterMidnightIst);
+
+      expect(prisma.device_card_taps_daily.upsert.mock.calls[0][0].where.date_mac_address.date)
+        .toEqual(new Date('2026-08-20T00:00:00.000Z'));
+    });
+
+    it('follows a stored timezone instead of the default', async () => {
+      prisma.ai_device.findUnique.mockResolvedValue({ id: 'device-1', user_id: 7n, kid_id: null });
+      prisma.parent_profile.findUnique.mockResolvedValue({ timezone: 'America/New_York' });
+
+      await ingestCardTapAt(justAfterMidnightIst); // 16:30 on the 19th in New York
+
+      expect(prisma.device_card_taps_daily.upsert.mock.calls[0][0].where.date_mac_address.date)
+        .toEqual(new Date('2026-08-19T00:00:00.000Z'));
+    });
+
+    it('still files the event when the stored timezone is unusable', async () => {
+      prisma.ai_device.findUnique.mockResolvedValue({ id: 'device-1', user_id: 7n, kid_id: null });
+      prisma.parent_profile.findUnique.mockResolvedValue({ timezone: 'Not/AZone' });
+
+      await ingestCardTapAt(justAfterMidnightIst);
+
+      expect(prisma.device_card_taps_daily.upsert.mock.calls[0][0].where.date_mac_address.date)
+        .toEqual(new Date('2026-08-20T00:00:00.000Z'));
+    });
+  });
+
+  // A rollup row is keyed on (date, mac), so the row a toy writes before the
+  // parent picks a child is the same row it writes after. Only the create half
+  // used to carry kid_id, and progressOwnerFilter reads a paired toy by kid_id
+  // alone — so that day fell out of the parent's progress entirely.
+  describe('the child a rollup is attributed to', () => {
+    function ingestCardTapFor(device) {
+      prisma.ai_device.findUnique.mockResolvedValue(device);
+      prisma.parent_profile.findUnique.mockResolvedValue({ timezone: null });
+      prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
+        id: 'raw-card-1',
+        server_received_at: new Date('2026-08-20T06:00:00.000Z'),
+        ...data,
+        event_timestamp: new Date('2026-08-20T06:00:00.000Z'),
+      }));
+
+      return deviceAnalyticsService.ingestFirmwareAnalyticsEvent({
+        mac_address: 'FC:01:2C:CF:EB:54',
+        payload: buildPayload({
+          event_id: 'card-tap-kid-1',
+          event: 'card_session_start',
+          data: { rfid_uid: 'CARD123' },
+        }),
+      });
+    }
+
+    it('picks the child up on a row that was written before pairing', async () => {
+      await ingestCardTapFor({ id: 'device-1', user_id: 7n, kid_id: 42n });
+
+      expect(prisma.device_card_taps_daily.upsert.mock.calls[0][0].update)
+        .toEqual(expect.objectContaining({ kid_id: 42n }));
+    });
+
+    it('leaves the earned history alone when the toy has no child', async () => {
+      await ingestCardTapFor({ id: 'device-1', user_id: 7n, kid_id: null });
+
+      expect(prisma.device_card_taps_daily.upsert.mock.calls[0][0].update)
+        .not.toHaveProperty('kid_id');
+    });
+  });
+
   it('does not increment daily card taps for repeated same-card reads within debounce window', async () => {
     prisma.device_analytics_event.create.mockImplementation(async ({ data }) => ({
       id: data.event_id,

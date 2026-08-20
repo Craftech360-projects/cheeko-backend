@@ -6,6 +6,8 @@
 
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
+const { ApiError } = require('../middleware/errorHandler');
+const { isValidTimezone } = require('../utils/timezone');
 
 /**
  * Get all kid profiles for user
@@ -358,7 +360,13 @@ const applyParentProfileFields = (target, data) => {
   if (data.preferredLanguage !== undefined) target.language = data.preferredLanguage;
   if (data.preferred_language !== undefined) target.language = data.preferred_language;
   if (data.language !== undefined) target.language = data.language;
-  if (data.timezone !== undefined) target.timezone = data.timezone;
+  if (data.timezone != null && String(data.timezone).trim() !== '') {
+    const timezone = String(data.timezone).trim();
+    if (!isValidTimezone(timezone)) {
+      throw new ApiError('timezone must be an IANA zone name, for example Asia/Kolkata', 400, 400);
+    }
+    target.timezone = timezone;
+  }
   if (data.fcm_token !== undefined) target.fcm_token = data.fcm_token;
   if (data.fcmToken !== undefined) target.fcm_token = data.fcmToken;
   if (data.terms_version !== undefined) target.terms_version = data.terms_version;
@@ -433,15 +441,15 @@ const createParentProfile = async (userId, data) => {
     throw new Error('Parent profile already exists for this user');
   }
 
-  try {
-    const createData = {
-      user_id: BigInt(userId),
-      email: data.email || null,
-      language: data.preferredLanguage || data.preferred_language || data.language || 'en',
-      onboarding_completed: data.onboardingCompleted || data.onboarding_completed || false
-    };
-    applyParentProfileFields(createData, data);
+  const createData = {
+    user_id: BigInt(userId),
+    email: data.email || null,
+    language: data.preferredLanguage || data.preferred_language || data.language || 'en',
+    onboarding_completed: data.onboardingCompleted || data.onboarding_completed || false
+  };
+  applyParentProfileFields(createData, data);
 
+  try {
     const profile = await prisma.parent_profile.create({
       data: createData
     });

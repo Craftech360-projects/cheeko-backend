@@ -2,6 +2,7 @@ const { prisma } = require('../config/database');
 const { normalizeMacAddress } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const crypto = require('crypto');
+const { formatDateInTimezone, resolveTimezone } = require('../utils/timezone');
 
 const DEFAULT_RANGE_DAYS = 30;
 const MAX_QUERY_LIMIT = 5000;
@@ -64,22 +65,6 @@ function gameProjectionData({ rawEventRow, data, userId, ownerDeviceId, kidId, a
     played_at: eventInstant,
     source_event_id: rawEventRow.event_id,
   };
-}
-
-function formatDateInTimezone(value, timezone = 'UTC') {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: timezone || 'UTC',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const year = parts.find(part => part.type === 'year')?.value;
-  const month = parts.find(part => part.type === 'month')?.value;
-  const day = parts.find(part => part.type === 'day')?.value;
-  if (!year || !month || !day) return null;
-  return `${year}-${month}-${day}`;
 }
 
 function toDateOnlyValue(dateString) {
@@ -336,13 +321,13 @@ async function resolveProjectionContext(macAddress) {
     select: { id: true, user_id: true, kid_id: true },
   });
 
-  let timezone = 'UTC';
+  let timezone = resolveTimezone(null);
   if (device?.user_id != null) {
     const profile = await prisma.parent_profile.findUnique({
       where: { user_id: device.user_id },
       select: { timezone: true },
     });
-    timezone = profile?.timezone || 'UTC';
+    timezone = resolveTimezone(profile?.timezone);
   }
 
   return {
@@ -375,6 +360,18 @@ async function applyProjectionForEvent(rawEventRow) {
     date: activityDate,
   };
 
+  // Re-stamp the owner every time a row is touched, not only when it is
+  // created. A row first written while the toy had no child keeps kid_id NULL
+  // otherwise, and progressOwnerFilter reads a paired toy by kid_id alone — so
+  // the parent's progress silently drops the part of the day that came before
+  // they picked the child. kid_id is written only when there is one: handing a
+  // toy back must not blank the history it already earned.
+  const ownerRepair = {
+    user_id: userId,
+    device_id: ownerDeviceId,
+    ...(kidId != null ? { kid_id: kidId } : {}),
+  };
+
   if (eventName === 'card_session_start') {
     if (!(await shouldProjectCardTap(rawEventRow))) return;
     await prisma.device_card_taps_daily.upsert({
@@ -391,8 +388,7 @@ async function applyProjectionForEvent(rawEventRow) {
       update: {
         card_tap_count: { increment: 1 },
         updated_at: new Date(),
-        user_id: userId,
-        device_id: ownerDeviceId,
+        ...ownerRepair,
       },
     });
   }
@@ -413,8 +409,7 @@ async function applyProjectionForEvent(rawEventRow) {
       update: {
         ai_interaction_count: { increment: 1 },
         updated_at: new Date(),
-        user_id: userId,
-        device_id: ownerDeviceId,
+        ...ownerRepair,
       },
     });
   }
@@ -423,8 +418,7 @@ async function applyProjectionForEvent(rawEventRow) {
     const usageUpdate = {
       usage_time_seconds: { increment: durationSeconds },
       updated_at: new Date(),
-      user_id: userId,
-      device_id: ownerDeviceId,
+      ...ownerRepair,
     };
     if (usageBucket) {
       usageUpdate[usageBucket] = { increment: durationSeconds };
@@ -466,10 +460,7 @@ async function applyProjectionForEvent(rawEventRow) {
         }),
         source_device_event_pk: rawEventRow.id,
       },
-      update: {
-        user_id: userId,
-        device_id: ownerDeviceId,
-      },
+      update: ownerRepair,
     });
   }
 
@@ -504,8 +495,7 @@ async function applyProjectionForEvent(rawEventRow) {
       await prisma.device_games_played.update({
         where: { id: matchingStart.id },
         data: {
-          user_id: projectionData.user_id,
-          device_id: projectionData.device_id,
+          ...ownerRepair,
           game_name: projectionData.game_name,
           level: projectionData.level,
           difficulty_level: projectionData.difficulty_level,
@@ -521,10 +511,7 @@ async function applyProjectionForEvent(rawEventRow) {
           ...projectionData,
           source_device_event_pk: rawEventRow.id,
         },
-        update: {
-          user_id: userId,
-          device_id: ownerDeviceId,
-        },
+        update: ownerRepair,
       });
     }
   }
@@ -544,10 +531,7 @@ async function applyProjectionForEvent(rawEventRow) {
         source_device_event_pk: rawEventRow.id,
         source_event_id: rawEventRow.event_id,
       },
-      update: {
-        user_id: userId,
-        device_id: ownerDeviceId,
-      },
+      update: ownerRepair,
     });
   }
 }

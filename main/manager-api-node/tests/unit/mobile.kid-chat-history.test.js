@@ -86,6 +86,12 @@ describe('a child\'s chat history', () => {
                 .toEqual({ kid_id: 15n, agent_id: { in: ['quizzy-id'] } });
             expect(page).toEqual({
                 total: 1,
+                // No day asked for, so no window: every session, as before.
+                timezone: 'Asia/Kolkata',
+                start_date: null,
+                startDate: null,
+                end_date: null,
+                endDate: null,
                 list: [{
                     sessionId: 'room-1',
                     startedAt: '2026-08-13T09:00:00.000Z',
