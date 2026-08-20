@@ -1,4 +1,5 @@
 import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
+import logoUrl from './assets/logo.png'
 import './App.css'
 
 /* ================================================================== *
@@ -16,6 +17,7 @@ type NavPage =
   | 'conversations'
   | 'families'
   | 'costs'
+  | 'quiz'
   | 'operate'
   | 'rfidStudio'
   | 'contentLibrary'
@@ -472,6 +474,73 @@ type RfidContentPack = {
     imageUrl?: string | null
     text?: string | null
   }>
+}
+
+/* Quiz console — shapes returned by /quiz/admin/devices and
+ * /quiz/admin/analytics, the same endpoints the manager web console reads. */
+
+type QuizBank = 'quiz' | 'riddle'
+
+type QuizPeriod = 'today' | 'week' | 'month'
+
+type QuizProgressRow = {
+  device_mac: string
+  kid_name: string | null
+  age_band: string
+  age_band_defaulted: boolean
+  current_level: number | null
+  levels_completed: number
+  levels_mastered: number
+  levels_aged_out: number
+  max_level: number
+  level_size: number
+  level_uncleared: number
+  days_on_level: number
+  anti_trap_cap: number
+  replay: boolean
+  answered_today: number
+  day_complete: boolean
+  correct: number
+  last_played: string | null
+}
+
+type QuizAnalyticsResponse = {
+  period: QuizPeriod
+  start_date: string
+  end_date: string
+  banks: Array<{
+    bank: QuizBank
+    available: boolean
+    current_level: number | null
+    attempted: number
+    correct: number
+    points: number
+    levels: Array<{
+      level: number
+      attempted: number
+      correct: number
+      wrong: number
+      revealed: number
+      accuracy: number
+      points: number
+      replay: boolean
+      cleared: boolean
+      questions: Array<{
+        question_text: string
+        correct_answer: string
+        result: 'correct' | 'wrong' | 'revealed'
+        points: number
+        answered_on: string
+      }>
+    }>
+  }>
+  // Absent when the device has no answers at all to compare periods with.
+  trend?: {
+    direction: 'none' | 'new' | 'up' | 'down' | 'flat'
+    accuracy: number | null
+    previous_accuracy: number | null
+    delta: number | null
+  }
 }
 
 /* ================================================================== *
@@ -1124,6 +1193,7 @@ function Sidebar({
     { key: 'conversations', label: 'Conversations', icon: '💬' },
     { key: 'families', label: 'Families', icon: '👨‍👩‍👧' },
     { key: 'costs', label: 'Costs', icon: '₹' },
+    { key: 'quiz', label: 'Quiz', icon: '🧩' },
   ]
   const operate: Array<{ key: NavPage; label: string; icon: string }> = [
     { key: 'operate', label: 'Fleet & OTA', icon: '🛠' },
@@ -1147,8 +1217,7 @@ function Sidebar({
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true">🧸</span>
-        Cheeko
+        <img src={logoUrl} alt="Cheeko" />
       </div>
       <div className="sidebar-group">{primary.map(renderLink)}</div>
       <div className="sidebar-group">
@@ -1193,8 +1262,7 @@ function LoginPanel({
       <section className="login-card">
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <div className="login-brand">
-          <span className="brand-mark" aria-hidden="true">🧸</span>
-          Cheeko
+          <img src={logoUrl} alt="Cheeko" />
         </div>
         <h2 className="disp">Sign in</h2>
         <p>Use your manager admin credentials to open the founder dashboard.</p>
@@ -2949,6 +3017,426 @@ function CostsPage({
 }
 
 /* ================================================================== *
+ * Quiz progress
+ * ================================================================== */
+
+/** The Daily Ten — the same gate the toy and the manager console report. */
+const QUIZ_DAILY_TARGET = 10
+
+/** Pill group shared by the bank and period selectors — the same control the
+ *  range toggle uses, over values that are not date ranges. */
+function PillToggle<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T
+  options: Array<{ key: T; label: string }>
+  onChange: (next: T) => void
+}) {
+  return (
+    <div className="range-toggle">
+      {options.map((option) => (
+        <button
+          key={option.key}
+          type="button"
+          className={option.key === value ? 'range-pill active' : 'range-pill'}
+          onClick={() => onChange(option.key)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+const QUIZ_BANKS: Array<{ key: QuizBank; label: string }> = [
+  { key: 'quiz', label: 'Quiz' },
+  { key: 'riddle', label: 'Riddles' },
+]
+
+const QUIZ_PERIODS: Array<{ key: QuizPeriod; label: string }> = [
+  { key: 'today', label: 'Day' },
+  { key: 'week', label: 'Week' },
+  { key: 'month', label: 'Month' },
+]
+
+const QUIZ_SCOPES: Array<{ key: 'played' | 'all'; label: string }> = [
+  { key: 'played', label: 'Played' },
+  { key: 'all', label: 'All toys' },
+]
+
+/* Revealed is neither correct nor wrong — it clears the question without the
+   child answering — so it carries a mark and a colour of its own. */
+const QUIZ_RESULT_GLYPH = { correct: '✓', revealed: '◉', wrong: '✕' } as const
+const QUIZ_RESULT_TONE = { correct: 'ok', revealed: 'rev', wrong: 'bad' } as const
+
+/**
+ * Quiz progress — read-only fleet view.
+ *
+ * Reads the same two endpoints the manager console does, but reports them the
+ * way this dashboard reports everything else: a KPI strip first, then one card
+ * per question. The write actions (reset day, set level) are deliberately
+ * absent — this dashboard reports, it does not rewrite answer logs.
+ */
+function QuizPage({
+  bank,
+  rows,
+  loading,
+  search,
+  onlyPlayed,
+  analyticsRow,
+  analytics,
+  analyticsLoading,
+  period,
+  theme,
+  onToggleTheme,
+  onBankChange,
+  onSearchChange,
+  onOnlyPlayedChange,
+  onRefresh,
+  onOpenAnalytics,
+  onCloseAnalytics,
+  onPeriodChange,
+}: {
+  bank: QuizBank
+  rows: QuizProgressRow[]
+  loading: boolean
+  search: string
+  onlyPlayed: boolean
+  analyticsRow: QuizProgressRow | null
+  analytics: QuizAnalyticsResponse | null
+  analyticsLoading: boolean
+  period: QuizPeriod
+  theme: Theme
+  onToggleTheme: () => void
+  onBankChange: (next: QuizBank) => void
+  onSearchChange: (next: string) => void
+  onOnlyPlayedChange: (next: boolean) => void
+  onRefresh: () => void
+  onOpenAnalytics: (row: QuizProgressRow) => void
+  onCloseAnalytics: () => void
+  onPeriodChange: (next: QuizPeriod) => void
+}) {
+  const bankLabel = bank === 'riddle' ? 'Riddles' : 'Quiz'
+  const term = search.trim().toLowerCase()
+  const visibleRows = rows.filter((row) => {
+    if (onlyPlayed && !row.last_played) return false
+    if (!term) return true
+    return (row.device_mac || '').toLowerCase().includes(term)
+      || (row.kid_name || '').toLowerCase().includes(term)
+  })
+
+  // Fleet-wide, never the filtered view — a KPI that moves when you type in a
+  // search box is not a KPI.
+  const playing = rows.filter((row) => row.last_played).length
+  const activeToday = rows.filter((row) => row.answered_today > 0).length
+  const dayComplete = rows.filter((row) => row.day_complete).length
+  const levelsCleared = rows.reduce((sum, row) => sum + row.levels_completed, 0)
+
+  return (
+    <>
+      <TopBar title={`${bankLabel} progress`} theme={theme} onToggleTheme={onToggleTheme}>
+        <PillToggle value={bank} options={QUIZ_BANKS} onChange={onBankChange} />
+        <button type="button" className="secondary-button" onClick={onRefresh} disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </TopBar>
+
+      <section className="oa-kpis four">
+        <KpiCard label="Toys playing" value={formatNumber(playing)} caption={<small>of {rows.length} registered</small>} />
+        <KpiCard label="Active today" value={formatNumber(activeToday)} caption={<small>answered at least one</small>} />
+        <KpiCard label="Daily Ten done" value={formatNumber(dayComplete)} caption={<small>finished today's ten</small>} />
+        <KpiCard label="Levels cleared" value={formatNumber(levelsCleared)} caption={<small>across the fleet</small>} />
+      </section>
+
+      <Card
+        className="spaced"
+        title="Where every toy stands"
+        hint="Current level, progress into it, and today's Daily Ten"
+      >
+        <div className="quiz-tools">
+          <div className="pf-input">
+            <span aria-hidden="true">🔍</span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => onSearchChange(event.target.value)}
+              placeholder="Filter by MAC or child name"
+              aria-label="Filter quiz progress"
+            />
+          </div>
+          <PillToggle
+            value={onlyPlayed ? 'played' : 'all'}
+            options={QUIZ_SCOPES}
+            onChange={(next) => onOnlyPlayedChange(next === 'played')}
+          />
+          <span className="quiz-count">{visibleRows.length} shown</span>
+        </div>
+
+        {loading && !rows.length ? (
+          <div className="loading-card">Loading {bankLabel.toLowerCase()} progress…</div>
+        ) : visibleRows.length ? (
+          <div className="tbl-scroll">
+            <table className="tbl quiz-tbl">
+              <thead>
+                <tr>
+                  <th>Toy</th>
+                  <th>Child</th>
+                  <th className="num">Level</th>
+                  <th>Into this level</th>
+                  <th className="num">Levels done</th>
+                  <th className="num">Correct</th>
+                  <th className="num">Today</th>
+                  <th className="num">Last played</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {/* A child who changed toys appears with no MAC of their own,
+                    so the fallback key has to stay unique per row. */}
+                {visibleRows.map((row, index) => {
+                  const size = row.level_size || 0
+                  const done = size - (row.level_uncleared || 0)
+                  const percent = size ? Math.round((done / size) * 100) : 0
+                  return (
+                    <tr key={row.device_mac || `kid-${row.kid_name}-${index}`}>
+                      <td className="mac">{row.device_mac || <span className="mut">no toy</span>}</td>
+                      <td>{row.kid_name || <span className="mut">no profile</span>}</td>
+                      <td className="num">
+                        {row.replay ? (
+                          <span className="badge ok">replay</span>
+                        ) : row.current_level === null ? (
+                          DASH
+                        ) : (
+                          <>
+                            {row.current_level}
+                            <span className="mut"> / {row.max_level}</span>
+                          </>
+                        )}
+                      </td>
+                      {/* How far into the CURRENT level the child is. "Levels
+                          done" alone reads as zero for a child one question from
+                          finishing a level, which is the opposite of the truth. */}
+                      <td>
+                        {row.current_level === null ? (
+                          <span className="mut">{DASH}</span>
+                        ) : (
+                          <div className="quiz-prog">
+                            <span className="cbar">
+                              <i style={{ width: `${percent}%` }} />
+                            </span>
+                            <span className="v">{done} / {size}</span>
+                          </div>
+                        )}
+                      </td>
+                      {/* Fully finished LEVELS, not questions. The tag splits
+                          mastered from aged-out when they differ — a level the
+                          3-day cap moved a child past is finished, not mastered. */}
+                      <td className="num">
+                        {row.levels_completed}
+                        {row.levels_aged_out ? <span className="badge warn">{row.levels_mastered} mastered</span> : null}
+                      </td>
+                      {/* Lifetime, across every question ever served including
+                          retired content, so it can exceed everything above it. */}
+                      <td className="num">{row.correct}</td>
+                      <td className="num">
+                        {row.day_complete ? (
+                          <span className="badge ok">done</span>
+                        ) : (
+                          <>
+                            {row.answered_today}
+                            <span className="mut"> / {QUIZ_DAILY_TARGET}</span>
+                          </>
+                        )}
+                      </td>
+                      <td className="num mut">
+                        {row.last_played ? formatCompactDate(row.last_played) : 'never'}
+                      </td>
+                      <td className="num">
+                        <button
+                          type="button"
+                          className="lnk quiz-act"
+                          disabled={!row.device_mac || !row.last_played}
+                          onClick={() => onOpenAnalytics(row)}
+                        >
+                          Analytics →
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">No toys match this filter.</div>
+        )}
+      </Card>
+
+      {analyticsRow ? (
+        <QuizAnalyticsModal
+          row={analyticsRow}
+          data={analytics}
+          loading={analyticsLoading}
+          period={period}
+          onPeriodChange={onPeriodChange}
+          onClose={onCloseAnalytics}
+        />
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * One child's answer log for a period.
+ *
+ * Laid out as a summary strip and then one block per level, rather than as a
+ * grid with a list crammed into its last column: the questions are the point of
+ * the screen, and they need a full-width line each to be readable.
+ */
+function QuizAnalyticsModal({
+  row,
+  data,
+  loading,
+  period,
+  onPeriodChange,
+  onClose,
+}: {
+  row: QuizProgressRow
+  data: QuizAnalyticsResponse | null
+  loading: boolean
+  period: QuizPeriod
+  onPeriodChange: (next: QuizPeriod) => void
+  onClose: () => void
+}) {
+  const banks = (data?.banks || []).filter((item) => item.levels.length || item.attempted)
+  const levels = banks.flatMap((item) => item.levels)
+  const totals = levels.reduce(
+    (sum, level) => ({
+      attempted: sum.attempted + level.attempted,
+      correct: sum.correct + level.correct,
+      wrong: sum.wrong + level.wrong,
+      revealed: sum.revealed + level.revealed,
+      points: sum.points + level.points,
+    }),
+    { attempted: 0, correct: 0, wrong: 0, revealed: 0, points: 0 },
+  )
+  const accuracy = totals.attempted ? Math.round((totals.correct / totals.attempted) * 100) : 0
+
+  // Same wording rule as the parent app: 'new' has no baseline, so it must not
+  // be reported as improvement.
+  const trend = data?.trend
+  const trendNote = (() => {
+    if (!trend || trend.direction === 'none') return null
+    if (trend.direction === 'new') return { tone: 'mut', text: 'first period — no baseline yet' }
+    if (trend.direction === 'up') return { tone: 'ok', text: `up ${trend.delta} pts on the period before` }
+    if (trend.direction === 'down') return { tone: 'crit', text: `down ${Math.abs(trend.delta ?? 0)} pts on the period before` }
+    return { tone: 'mut', text: 'about the same as the period before' }
+  })()
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card quiz-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-head">
+          <div>
+            <h5>{row.kid_name || 'No profile'}</h5>
+            <div className="quiz-modal-sub">{row.device_mac}</div>
+          </div>
+          <PillToggle value={period} options={QUIZ_PERIODS} onChange={onPeriodChange} />
+          <button type="button" className="secondary-button" onClick={onClose}>Close</button>
+        </div>
+
+        {loading && !data ? <div className="loading-card">Loading analytics…</div> : null}
+
+        {data ? (
+          <>
+            <div className="quiz-sum">
+              <div className="s"><span>Answers</span><b>{totals.attempted}</b></div>
+              <div className="s"><span>Correct</span><b>{totals.correct}</b></div>
+              <div className="s"><span>Revealed</span><b>{totals.revealed}</b></div>
+              <div className="s"><span>Wrong</span><b>{totals.wrong}</b></div>
+              <div className="s"><span>Accuracy</span><b>{totals.attempted ? `${accuracy}%` : DASH}</b></div>
+              <div className="s"><span>Points</span><b>{totals.points}</b></div>
+            </div>
+
+            <div className="quiz-period-note">
+              <span>{formatDayWithYear(data.start_date)} — {formatDayWithYear(data.end_date)}</span>
+              {trendNote ? <span className={`badge ${trendNote.tone}`}>{trendNote.text}</span> : null}
+            </div>
+
+            {banks.length ? (
+              banks.map((bankBlock) => (
+                <section key={bankBlock.bank} className="quiz-bank">
+                  <div className="quiz-bank-head">
+                    <b>{bankBlock.bank === 'riddle' ? 'Riddler' : 'Quizzy'}</b>
+                    <span>
+                      now on level {bankBlock.current_level === null ? 'all cleared' : bankBlock.current_level}
+                      {' · '}
+                      {bankBlock.attempted} answers · {bankBlock.points} pts
+                    </span>
+                  </div>
+
+                  {bankBlock.levels.map((level) => {
+                    const total = level.attempted || 1
+                    return (
+                      <article key={`${bankBlock.bank}-${level.level}`} className="quiz-lv">
+                        <div className="quiz-lv-head">
+                          <b>Level {level.level}</b>
+                          {level.cleared ? <span className="badge ok">cleared</span> : null}
+                          {level.replay ? <span className="badge warn">replay</span> : null}
+                          <span className="acc">{level.accuracy}% accuracy</span>
+                        </div>
+
+                        <div className="split slim">
+                          {level.correct ? <b style={{ width: `${(level.correct / total) * 100}%`, background: 'var(--st-good)' }} /> : null}
+                          {level.revealed ? <b style={{ width: `${(level.revealed / total) * 100}%`, background: 'var(--st-warn)' }} /> : null}
+                          {level.wrong ? <b style={{ width: `${(level.wrong / total) * 100}%`, background: 'var(--st-crit)' }} /> : null}
+                        </div>
+
+                        {/* "answers", never "questions": a wrong answer returns on
+                            a later day, so attempts can exceed the level's
+                            question count. Revealed is its own count — it clears
+                            the question without the child answering. */}
+                        <div className="oa-leg">
+                          <i style={{ ['--c' as string]: 'var(--st-good)' }}>{level.correct} correct</i>
+                          <i style={{ ['--c' as string]: 'var(--st-warn)' }}>{level.revealed} revealed</i>
+                          <i style={{ ['--c' as string]: 'var(--st-crit)' }}>{level.wrong} wrong</i>
+                          <i className="noc">{level.attempted} answers</i>
+                        </div>
+
+                        <div className="quiz-qs">
+                          {level.questions.map((question, index) => (
+                            <div key={`${level.level}-${index}`} className="quiz-q">
+                              <span className={`q-mark ${QUIZ_RESULT_TONE[question.result]}`} aria-label={question.result}>
+                                {QUIZ_RESULT_GLYPH[question.result]}
+                              </span>
+                              <span className="t">
+                                {question.question_text}
+                                {question.result === 'correct' ? null : (
+                                  <em> → {question.correct_answer}</em>
+                                )}
+                              </span>
+                              <span className="d">{question.answered_on}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </article>
+                    )
+                  })}
+                </section>
+              ))
+            ) : (
+              <div className="empty-state">Nothing played in this period.</div>
+            )}
+          </>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+/* ================================================================== *
  * Fleet & ops
  * ================================================================== */
 
@@ -3474,6 +3962,17 @@ function App() {
   const [live, setLive] = useState<LiveResponse | null>(null)
   const [brief, setBrief] = useState<BriefResponse | null>(null)
 
+  const [quizBank, setQuizBank] = useState<QuizBank>('quiz')
+  const [quizRows, setQuizRows] = useState<QuizProgressRow[]>([])
+  const [quizLoading, setQuizLoading] = useState(false)
+  const [quizSearch, setQuizSearch] = useState('')
+  const [quizOnlyPlayed, setQuizOnlyPlayed] = useState(true)
+  const [quizReloadKey, setQuizReloadKey] = useState(0)
+  const [quizAnalyticsRow, setQuizAnalyticsRow] = useState<QuizProgressRow | null>(null)
+  const [quizAnalytics, setQuizAnalytics] = useState<QuizAnalyticsResponse | null>(null)
+  const [quizAnalyticsLoading, setQuizAnalyticsLoading] = useState(false)
+  const [quizPeriod, setQuizPeriod] = useState<QuizPeriod>('week')
+
   const [rfidCards, setRfidCards] = useState<RfidCardMapping[]>([])
   const [rfidCardTotal, setRfidCardTotal] = useState(0)
   const [contentPacks, setContentPacks] = useState<RfidContentPack[]>([])
@@ -3627,6 +4126,44 @@ function App() {
     return () => { cancelled = true }
   }, [activePage, token])
 
+  // Quiz progress is a whole-fleet derivation, so it loads only while its page
+  // is open — and again whenever the bank switches or Refresh is pressed.
+  useEffect(() => {
+    if (!token || activePage !== 'quiz') return
+    let cancelled = false
+    setQuizLoading(true)
+    apiFetch<QuizProgressRow[]>(`/quiz/admin/devices?bank=${quizBank}`, token)
+      .then((payload) => { if (!cancelled) setQuizRows(payload || []) })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setQuizRows([])
+        handleApiError(err, `Unable to load ${quizBank} progress`)
+      })
+      .finally(() => { if (!cancelled) setQuizLoading(false) })
+    return () => { cancelled = true }
+  }, [activePage, quizBank, quizReloadKey, token])
+
+  // Covers both banks regardless of the page's bank selector: an operator
+  // looking at one child wants the whole picture, not half of it.
+  useEffect(() => {
+    if (!token || !quizAnalyticsRow?.device_mac) return
+    let cancelled = false
+    setQuizAnalyticsLoading(true)
+    setQuizAnalytics(null)
+    apiFetch<QuizAnalyticsResponse>(
+      `/quiz/admin/analytics?mac=${encodeURIComponent(quizAnalyticsRow.device_mac)}&period=${quizPeriod}`,
+      token,
+    )
+      .then((payload) => { if (!cancelled) setQuizAnalytics(payload) })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        setQuizAnalytics(null)
+        handleApiError(err, 'Unable to load quiz analytics')
+      })
+      .finally(() => { if (!cancelled) setQuizAnalyticsLoading(false) })
+    return () => { cancelled = true }
+  }, [quizAnalyticsRow, quizPeriod, token])
+
   useEffect(() => {
     if (!token) return
     let cancelled = false
@@ -3761,6 +4298,9 @@ function App() {
     setContent(null)
     setConversations(null)
     setCosts(null)
+    setQuizRows([])
+    setQuizAnalyticsRow(null)
+    setQuizAnalytics(null)
     setOperate(null)
     setLive(null)
     setBrief(null)
@@ -3913,6 +4453,32 @@ function App() {
             theme={theme}
             onToggleTheme={toggleTheme}
             onRangeChange={setCostRange}
+          />
+        ) : null}
+
+        {activePage === 'quiz' ? (
+          <QuizPage
+            bank={quizBank}
+            rows={quizRows}
+            loading={quizLoading}
+            search={quizSearch}
+            onlyPlayed={quizOnlyPlayed}
+            analyticsRow={quizAnalyticsRow}
+            analytics={quizAnalytics}
+            analyticsLoading={quizAnalyticsLoading}
+            period={quizPeriod}
+            theme={theme}
+            onToggleTheme={toggleTheme}
+            onBankChange={setQuizBank}
+            onSearchChange={setQuizSearch}
+            onOnlyPlayedChange={setQuizOnlyPlayed}
+            onRefresh={() => setQuizReloadKey((key) => key + 1)}
+            onOpenAnalytics={setQuizAnalyticsRow}
+            onCloseAnalytics={() => {
+              setQuizAnalyticsRow(null)
+              setQuizAnalytics(null)
+            }}
+            onPeriodChange={setQuizPeriod}
           />
         ) : null}
 
