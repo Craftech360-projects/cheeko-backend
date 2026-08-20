@@ -452,7 +452,7 @@ function toggleMute() {
 // ponytail: mirrors CHARACTER_BANK in banks.js by name. Renaming a character in
 // the DB hides this card until this line follows; a server round trip just to
 // learn "does this one play a bank" is not worth it for a dev tool.
-const BANK_CHARACTERS = ['quizzy', 'riddler', 'ginti'];
+const BANK_CHARACTERS = ['quizzy', 'bujho', 'ginti'];
 
 const playsBank = () => BANK_CHARACTERS.includes(String(T('testChar').value || '').toLowerCase());
 
