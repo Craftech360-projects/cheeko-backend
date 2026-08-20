@@ -1,5 +1,5 @@
 /**
- * A sitting is the whole level.
+ * A sitting is always FULL, and never a rerun.
  *
  * Serving only the questions still outstanding made the session as short as the
  * number left: clear nine of ten and the next day was a ONE question session.
@@ -7,7 +7,12 @@
  * to ask and invented one by walking to the next question id, which landed on a
  * Level 2 question the child had not reached.
  *
- * The rule that must NOT change with it: re-asking a cleared question cannot
+ * The property that fix established is "full whenever content remains"; its
+ * filler (already-cleared questions from the same level) was incidental, and
+ * ADR-0010 replaced it with the NEXT level's unasked questions. These tests pin
+ * the property, not the filler.
+ *
+ * The rule that must NOT change either way: re-asking a cleared question cannot
  * un-clear it. `cleared` means a clearing answer row exists, so a later miss
  * adds a row rather than removing one (ADR-0009, mastery is cumulative).
  */
@@ -54,15 +59,37 @@ beforeEach(() => {
 });
 
 describe('the batch is the whole current level', () => {
-  it('serves ten even when nine are already cleared', async () => {
+  it('serves ten and no reruns when nine are already cleared', async () => {
     prisma.quiz_question_answer.findMany.mockResolvedValue(cleared(1, 2, 3, 4, 5, 6, 7, 8, 9));
 
     const result = await quizService.nextQuestions(MAC);
+    // Bonus items ride BEYOND the Daily Ten, so the scored batch is what the
+    // "never short" guarantee is about.
+    const scored = result.questions.filter((x) => !x.bonus);
+    const ids = scored.map((x) => Number(x.id));
 
-    // The bug: this used to be ['10'], a one-question session.
-    expect(result.level).toBe(1);
-    expect(result.questions).toHaveLength(10);
-    expect(result.questions.map((x) => x.id)).toContain('10');
+    // The bug this guards: a one-question session, after which the model
+    // invented question ten. Still ten, but now from level 2 (ADR-0010).
+    expect(scored).toHaveLength(10);
+    // Nine cleared out of ten is within the threshold, so level 1 is behind
+    // them and q10 rides along as bonus practice rather than blocking.
+    expect(result.level).toBe(2);
+    expect(ids).toEqual(expect.not.arrayContaining([1, 2, 3, 4, 5, 6, 7, 8, 9]));
+    expect(result.questions.find((x) => x.id === '10')?.bonus).toBe(true);
+  });
+
+  // The guarantee itself, stated once and directly: whatever the filler is, the
+  // scored batch is never short while unasked content remains. This is what the
+  // 2026-08-15 invention bug actually needed.
+  it('is never short while the bank still holds unasked questions', async () => {
+    for (const clearedCount of [0, 1, 5, 8, 9, 10, 15, 19]) {
+      prisma.quiz_question_answer.findMany.mockResolvedValue(
+        cleared(...Array.from({ length: clearedCount }, (_, i) => i + 1))
+      );
+      const result = await quizService.nextQuestions(MAC);
+      const scored = result.questions.filter((x) => !x.bonus);
+      expect({ clearedCount, scored: scored.length }).toEqual({ clearedCount, scored: 10 });
+    }
   });
 
   it('still moves on once the last outstanding question clears', async () => {
@@ -129,16 +156,19 @@ describe('a level aged out by the cap', () => {
     expect(row.levels_aged_out).toBe(1);
   });
 
-  it('still sends the child back when a NEW question reopens a finished level', async () => {
-    // Level 1 fully cleared, then a question is added to it. The addition has no
-    // days against it, so it is not aged out and the pull-back survives.
+  it('carries a NEW question added to a finished level as bonus practice', async () => {
+    // Level 1 fully cleared, then a question is added to it. Under ADR-0009 this
+    // dragged the child back to level 1; under the threshold a single addition
+    // no longer reopens the level. It must not be lost either — the carry is
+    // what keeps newly authored content reachable.
     prisma.quiz_question.findMany.mockResolvedValue([...BANK, q(21, 1)]);
     prisma.quiz_question_answer.findMany.mockResolvedValue(cleared(1, 2, 3, 4, 5, 6, 7, 8, 9, 10));
 
     const result = await quizService.nextQuestions(MAC);
 
-    expect(result.level).toBe(1);
+    expect(result.level).toBe(2);
     expect(result.anti_trap_advanced).toBe(false);
+    expect(result.questions.find((x) => x.id === '21')?.bonus).toBe(true);
   });
 });
 
@@ -224,25 +254,27 @@ describe('a level bigger than the daily target', () => {
  * which is exactly how it shipped.
  */
 describe('the order questions are served in', () => {
-  it('puts an outstanding question before one already cleared', async () => {
-    // q1 cleared, q2..q10 outstanding. In bank order q1 comes first.
+  it('never re-asks a cleared question while unasked ones remain', async () => {
+    // q1 cleared, q2..q10 outstanding. The tenth slot comes from level 2, not
+    // from q1 (ADR-0010) — a rerun is what the child actually complained about.
     prisma.quiz_question_answer.findMany.mockResolvedValue(cleared(1));
 
     const result = await quizService.nextQuestions(MAC);
     const ids = result.questions.map((x) => Number(x.id));
 
     expect(ids).toHaveLength(10);
-    expect(ids[0]).not.toBe(1);
-    expect(ids[ids.length - 1]).toBe(1);
+    expect(ids).not.toContain(1);
+    expect(ids).toContain(11); // topped up from level 2
   });
 
-  it('keeps every outstanding question ahead of every cleared one', async () => {
+  it('keeps every outstanding question of the current level ahead of the top-up', async () => {
     prisma.quiz_question_answer.findMany.mockResolvedValue(cleared(1, 3, 5));
 
     const ids = (await quizService.nextQuestions(MAC)).questions.map((x) => Number(x.id));
-    const lastOutstanding = Math.max(...ids.map((id, i) => ([2, 4, 6, 7, 8, 9, 10].includes(id) ? i : -1)));
-    const firstCleared = Math.min(...ids.map((id, i) => ([1, 3, 5].includes(id) ? i : Infinity)));
+    const lastCurrent = Math.max(...ids.map((id, i) => (id <= 10 ? i : -1)));
+    const firstTopUp = Math.min(...ids.map((id, i) => (id > 10 ? i : Infinity)));
 
-    expect(lastOutstanding).toBeLessThan(firstCleared);
+    expect(ids).not.toContain(1);
+    expect(lastCurrent).toBeLessThan(firstTopUp);
   });
 });

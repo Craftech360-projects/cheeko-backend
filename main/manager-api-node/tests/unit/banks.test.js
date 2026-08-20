@@ -78,11 +78,31 @@ describe('resolveBank', () => {
 });
 
 describe('bank registry', () => {
-  it('exposes exactly the two banks the character map points at', () => {
-    expect(Object.keys(BANKS).sort()).toEqual(['quiz', 'riddle']);
+  it('exposes exactly the banks the character map points at', () => {
+    expect(Object.keys(BANKS).sort()).toEqual(['math', 'quiz', 'riddle']);
     for (const bank of Object.values(CHARACTER_BANK)) {
       expect(BANKS[bank]).toBeDefined();
     }
+  });
+
+  // Every entry carries every key: a bank missing one silently takes the
+  // fallback, and the fallbacks here are behaviour (a wall, or a gate) rather
+  // than a harmless default.
+  it('gives every bank the full set of progression flags', () => {
+    for (const [name, bank] of Object.entries(BANKS)) {
+      expect(typeof bank.clearOnReveal).toBe('boolean');
+      expect(typeof bank.gatedLevels).toBe('boolean');
+      expect(Number.isInteger(bank.levelClearSlack)).toBe(true);
+      expect(bank.levelClearSlack).toBeLessThan(bank.levelSize);
+      expect(name).toBeTruthy();
+    }
+  });
+
+  // ADR-0010: Riddler derives no levels, Quizzy and Ginti do.
+  it('gates levels for the mastery banks only', () => {
+    expect(BANKS.quiz.gatedLevels).toBe(true);
+    expect(BANKS.math.gatedLevels).toBe(true);
+    expect(BANKS.riddle.gatedLevels).toBe(false);
   });
 
   // Raw SQL interpolation is only safe because these names are ours, not the

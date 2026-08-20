@@ -52,6 +52,13 @@ const BANKS = {
     // riddle levels hold eighty. One shared constant would lock Riddler out of
     // its own bank.
     levelSize: 10,
+    // How many questions may stay unmastered and the level still count as
+    // finished (ADR-0010). Progression flows; the answer log still records
+    // exactly which ones were never solved, which is why this is safe.
+    // 0 restores the ADR-0009 wall.
+    levelClearSlack: 2,
+    // Does this bank derive levels at all? See the riddle entry.
+    gatedLevels: true,
   },
   riddle: {
     questions: prisma.riddle_question,
@@ -67,6 +74,14 @@ const BANKS = {
     // questions across 3 levels, so a child clears the bank in ~3 days and
     // enters champion replay. Grow the bank before treating that as a bug.
     levelSize: 10,
+    // Irrelevant here — nothing gates. Kept so every entry has every key.
+    levelClearSlack: 0,
+    // FALSE (ADR-0010): Riddler derives no levels. With clearOnReveal every
+    // riddle is finished the moment it is heard, so the gate enforced no
+    // mastery — it only ordered difficulty, at the cost of a completion rule
+    // and an anti-trap that could never meaningfully fire. Selection serves
+    // unheard riddles in level order instead.
+    gatedLevels: false,
   },
   math: {
     questions: prisma.math_question,
@@ -78,6 +93,8 @@ const BANKS = {
     // child did not crack WILL come back on a later day".
     clearOnReveal: false,
     levelSize: 10,
+    levelClearSlack: 2,
+    gatedLevels: true,
   },
 };
 

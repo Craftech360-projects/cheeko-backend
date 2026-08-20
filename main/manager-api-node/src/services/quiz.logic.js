@@ -11,6 +11,26 @@
 // on the wire so dropping the column reached no app developer.
 const WIRE_AGE_BAND = 'all';
 
+// The share of a level ADR-0010's threshold may leave unmastered. The bank's
+// `levelClearSlack` is an absolute count tuned for the authored level size of
+// ten; applied blindly it is a hole, because a level holding one or two
+// questions would clear with NOTHING mastered and the whole bank would skip
+// itself. Caught by the child-scope test on 2026-08-20, whose synthetic bank
+// holds one question per level.
+const MAX_UNMASTERED_SHARE = 0.2;
+
+/**
+ * How many questions this level may leave unmastered: the bank's slack, capped
+ * at a fifth of the level. A level of ten allows two (the intended 8-of-10);
+ * levels of one to four allow none.
+ *
+ * @param {number} levelSize - active questions in the level
+ * @param {number} slack - the bank's configured allowance
+ * @returns {number}
+ */
+const allowedUnmastered = (levelSize, slack) =>
+  Math.max(0, Math.min(slack, Math.floor(levelSize * MAX_UNMASTERED_SHARE)));
+
 /**
  * Derive the device's Current Level: the lowest level that still has an
  * uncleared question. Never stored — adding a question to an already-cleared
@@ -22,10 +42,14 @@ const WIRE_AGE_BAND = 'all';
  *   child past (see agedOutLevels). Without this the lowest uncleared level is
  *   always the abandoned one, so the child is pulled back to it every session
  *   and the cap has to re-fire forever.
+ * @param {number} [slack] - how many questions may stay unmastered and the level
+ *   still count as finished (ADR-0010). 0 restores the ADR-0009 rule that every
+ *   question must be cleared. The unmastered ones are not forgotten: they follow
+ *   the child as bonus practice and the answer log still records them.
  * @returns {{currentLevel: number|null, unclearedIds: Array<*>, allCleared: boolean}}
  *   `allCleared` is false for an empty bank — there was nothing to clear.
  */
-const deriveLevelState = (questions, clearedIds, skipLevels = new Set()) => {
+const deriveLevelState = (questions, clearedIds, skipLevels = new Set(), slack = 0) => {
   if (!questions.length) {
     return { currentLevel: null, unclearedIds: [], allCleared: false };
   }
@@ -34,10 +58,10 @@ const deriveLevelState = (questions, clearedIds, skipLevels = new Set()) => {
 
   for (const level of levels) {
     if (skipLevels.has(level)) continue;
-    const uncleared = questions.filter(
-      (q) => q.level === level && !clearedIds.has(String(q.id))
-    );
-    if (uncleared.length) {
+    const inLevel = questions.filter((q) => q.level === level);
+    const uncleared = inLevel.filter((q) => !clearedIds.has(String(q.id)));
+    // Strictly greater: slack=2 means two may remain and the level is still done.
+    if (uncleared.length > allowedUnmastered(inLevel.length, slack)) {
       return {
         currentLevel: level,
         unclearedIds: uncleared.map((q) => q.id),
@@ -59,16 +83,24 @@ const deriveLevelState = (questions, clearedIds, skipLevels = new Set()) => {
  * will never be asked it again, so leaving it in the "not done yet" pile forever
  * describes nothing anybody can act on.
  *
+ * A level finished on the threshold (ADR-0010) counts too, for the same reason:
+ * the child has moved past it. "Completed" here has meant "will not be asked
+ * again" since the anti-trap; it has never meant "mastered". Mastery is a
+ * question-by-question read of the answer log.
+ *
  * @param {Array<{id: *, level: number}>} questions - active bank for the band, any order
  * @param {Set<string>} clearedIds - cleared question ids as strings
  * @param {Set<number>} [skipLevels] - levels aged out by the cap
+ * @param {number} [slack] - unmastered questions a finished level may still hold
  * @returns {number}
  */
-const countCompletedLevels = (questions, clearedIds, skipLevels = new Set()) =>
-  [...new Set(questions.map((q) => q.level))].filter((level) =>
-    skipLevels.has(level)
-    || questions.every((q) => q.level !== level || clearedIds.has(String(q.id)))
-  ).length;
+const countCompletedLevels = (questions, clearedIds, skipLevels = new Set(), slack = 0) =>
+  [...new Set(questions.map((q) => q.level))].filter((level) => {
+    if (skipLevels.has(level)) return true;
+    const inLevel = questions.filter((q) => q.level === level);
+    const uncleared = inLevel.filter((q) => !clearedIds.has(String(q.id)));
+    return uncleared.length <= allowedUnmastered(inLevel.length, slack);
+  }).length;
 
 /**
  * Levels the anti-trap has already moved the child past.
@@ -140,5 +172,6 @@ module.exports = {
   deriveLevelState,
   countCompletedLevels,
   agedOutLevels,
-  levelCompletedToday
+  levelCompletedToday,
+  allowedUnmastered
 };

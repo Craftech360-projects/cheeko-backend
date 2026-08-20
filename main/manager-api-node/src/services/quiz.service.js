@@ -208,10 +208,14 @@ const toQuestion = (question) => {
 // M3, the anti-trap rule (ADR-0009). A child who cannot master a level advances
 // anyway after this many distinct days on it. Enforcement without an escape
 // hatch is a trap, not a standard.
-const ANTI_TRAP_DAY_CAP = 3;
+// Dropped 3 -> 2 by ADR-0010: with the level threshold doing most of the work,
+// the cap is now the rarer escape and firing it a day sooner costs less.
+const ANTI_TRAP_DAY_CAP = 2;
 // How many unmastered questions from a capped level ride along as bonus items.
-// Small on purpose: they are practice, not a second Daily Ten.
-const BONUS_CARRY = 2;
+// Small on purpose: they are practice, not a second Daily Ten. Raised 2 -> 3
+// (ADR-0010): the threshold lets up to `levelClearSlack` questions through
+// unmastered, so more of them need carrying.
+const BONUS_CARRY = 3;
 
 /**
  * Server-local midnight day key. The same boundary the Daily Ten gate uses —
@@ -273,11 +277,13 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // it at the start of every session and the cap has to fire again to push them
   // out, so the level they are really on never appears anywhere.
   const levelById = new Map(bank.map((q) => [String(q.id), q.level]));
+  const slack = tables.levelClearSlack || 0;
   const agedOut = agedOutLevels(bank, clearedIds, daysByQuestionId(answerRows), ANTI_TRAP_DAY_CAP);
   const state = deriveLevelState(
     bank.map((q) => ({ id: q.id, level: q.level })),
     clearedIds,
-    agedOut
+    agedOut,
+    slack
   );
 
   // A sitting is the WHOLE level, cleared questions included — not just the ones
@@ -305,20 +311,54 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // order could hand a child ten questions they had already cleared, leaving the
   // level unfinishable while the session still felt full. At ten per level the
   // ordering is the only change; nothing is dropped.
+  // ADR-0010 replaces the cleared-question filler with the NEXT level's unasked
+  // questions. The invention bug the old filler fixed was caused by a SHORT
+  // batch, not by which questions filled it — so the guarantee to keep is "full
+  // whenever content remains", and re-asking solved questions was never part of
+  // it. Outstanding still come first, so mastery keeps priority.
+  //
+  // Clearing a next-level question early is a head start, not a leak:
+  // deriveLevelState still walks levels in order and simply finds it done.
+  const levelsAscending = [...new Set(bank.map((q) => q.level))].sort((a, b) => a - b);
+
   const idsForLevel = (n) => {
-    const all = bank.filter((q) => q.level === n);
-    const outstanding = all.filter((q) => !clearedIds.has(String(q.id)));
-    const practice = all.filter((q) => clearedIds.has(String(q.id)));
-    return [...outstanding, ...practice].slice(0, DAILY_QUESTION_TARGET).map((q) => q.id);
+    const outstanding = bank.filter((q) => q.level === n && !clearedIds.has(String(q.id)));
+    const picked = [...outstanding];
+    // Top up from later levels, nearest first, never from cleared questions.
+    for (const next of levelsAscending.filter((l) => l > n)) {
+      if (picked.length >= DAILY_QUESTION_TARGET) break;
+      picked.push(...bank.filter((q) => q.level === next && !clearedIds.has(String(q.id))));
+    }
+    // Only when the child has cleared everything ahead of them does practice
+    // become the only way to fill a sitting; champion replay is the case.
+    if (picked.length < DAILY_QUESTION_TARGET) {
+      picked.push(...bank.filter((q) => q.level === n && clearedIds.has(String(q.id))));
+    }
+    return picked.slice(0, DAILY_QUESTION_TARGET).map((q) => q.id);
   };
 
+  // Riddler derives no levels (ADR-0010): every riddle is finished when heard,
+  // so there is nothing to gate. Serve unheard riddles in level order — the
+  // ramp without the wall.
+  const idsUngated = () => {
+    const unheard = bank.filter((q) => !clearedIds.has(String(q.id)));
+    const pool = unheard.length ? unheard : bank; // bank exhausted -> recycle
+    return pool.slice(0, DAILY_QUESTION_TARGET).map((q) => q.id);
+  };
+
+  const gated = tables.gatedLevels !== false;
   let level = state.currentLevel;
-  const replay = state.allCleared;
+  const replay = gated ? state.allCleared : bank.every((q) => clearedIds.has(String(q.id)));
 
   if (replay) {
     level = await leastRecentlyPlayedLevel(tables, scope, bank);
   }
-  let selectedIds = idsForLevel(level);
+  let selectedIds = gated ? idsForLevel(level) : idsUngated();
+  if (!gated) {
+    // Report the level the served riddles actually came from, so the state file
+    // and the parent surface still say something true.
+    level = levelById.get(String(selectedIds[0])) ?? level;
+  }
 
   // The cap has already been applied above — `level` IS the level past the
   // abandoned ones. What is left is to carry the unmastered questions along as
@@ -329,27 +369,42 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // levels are let go: carrying every level the child ever walked away from
   // would grow without bound, and a question they could not do six levels ago
   // is not the practice they need now.
-  const levelsAsc = [...new Set(bank.map((q) => q.level))].sort((a, b) => a - b);
-  const previousLevel = levelsAsc[levelsAsc.indexOf(level) - 1];
-  const carryFrom = !replay && agedOut.has(previousLevel) ? previousLevel : null;
-  const bonusIds = carryFrom === null ? [] : bank
-    .filter((q) => q.level === carryFrom && !clearedIds.has(String(q.id)))
-    .map((q) => q.id)
-    .slice(0, BONUS_CARRY);
+  //
+  // Since ADR-0010 a level is also left behind by the THRESHOLD, with up to
+  // `levelClearSlack` questions unmastered. Those must carry for the same reason
+  // the aged-out ones do — otherwise relaxing the gate would silently drop them
+  // forever, and the ADR's promise that they come back as practice would be
+  // false. So the trigger is "the previous level still holds unmastered
+  // questions", which covers both routes past it.
+  const previousLevel = levelsAscending[levelsAscending.indexOf(level) - 1];
+  const previousUnmastered = previousLevel === undefined ? [] : bank
+    .filter((q) => q.level === previousLevel && !clearedIds.has(String(q.id)));
+  const carryFrom = !replay && previousUnmastered.length ? previousLevel : null;
+  const bonusIds = carryFrom === null ? []
+    : previousUnmastered.map((q) => q.id).slice(0, BONUS_CARRY);
 
   // "This response moved you", not "you have an aged-out level somewhere behind
   // you". Now that the cap is applied by skipping rather than re-firing, the
   // plain `agedOut.size > 0` test stayed true forever — the flag would have lied
   // on every later response and the warn line would have logged on every single
   // request. First session at the new level is what actually happened once.
+  //
+  // carryFrom now also fires for a level left behind by the THRESHOLD, which is
+  // the ordinary path and not an anti-trap event. Only the aged-out route is
+  // reported as the anti-trap, or the flag and the warn line would claim a trap
+  // fired every time a child cleared 8 of 10.
   const startedNewLevel = carryFrom !== null
     && !answerRows.some((row) => levelById.get(String(row.question_id)) === level);
-  if (startedNewLevel) {
+  const antiTrapAdvanced = startedNewLevel && agedOut.has(carryFrom);
+  if (antiTrapAdvanced) {
     logger.warn(
       `[${tables.label}] anti-trap: device ${deviceMac} spent ${ANTI_TRAP_DAY_CAP}+ days on level ${carryFrom} without mastering it; advancing to ${level} with ${bonusIds.length} bonus question(s)`
     );
+  } else if (startedNewLevel) {
+    logger.info(
+      `[${tables.label}] device ${deviceMac} advanced to level ${level} on the threshold; carrying ${bonusIds.length} unmastered question(s) from level ${carryFrom} as practice`
+    );
   }
-  const antiTrapAdvanced = startedNewLevel;
 
   const maxLevel = bank.length ? Math.max(...bank.map((q) => q.level)) : 0;
   const frontierWarning = level !== null && !replay && maxLevel - level < FRONTIER_WARN_LEVELS;
@@ -768,7 +823,12 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
   const scope = answerScope(context);
   const { bank } = await loadBank(tables, context.language);
   const clearedIds = await loadClearedIds(tables, scope, bank);
-  const state = deriveLevelState(bank.map((q) => ({ id: q.id, level: q.level })), clearedIds);
+  // Same threshold the selection uses (ADR-0010), or this reports a child as
+  // still on a level the next session will not serve them.
+  const progressSlack = tables.levelClearSlack || 0;
+  const state = deriveLevelState(
+    bank.map((q) => ({ id: q.id, level: q.level })), clearedIds, new Set(), progressSlack
+  );
 
   // Counts are lifetime totals for the child, not band-scoped: a band change
   // must not erase what they already answered.
@@ -795,7 +855,7 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
   return {
     age_band: WIRE_AGE_BAND,
     current_level: state.currentLevel,
-    levels_completed: countCompletedLevels(bank, clearedIds),
+    levels_completed: countCompletedLevels(bank, clearedIds, new Set(), progressSlack),
     level_total: levelQuestions.length,
     level_cleared: levelQuestions.filter((q) => clearedIds.has(String(q.id))).length,
     counts,
@@ -820,6 +880,9 @@ const progress = async (deviceMac, bankName = DEFAULT_BANK) => {
  */
 const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
+  // The selection's threshold (ADR-0010); the admin card must name the level the
+  // next session will actually serve.
+  const allSlack = tables.levelClearSlack || 0;
   const [devices, bank, answers] = await Promise.all([
     prisma.ai_device.findMany({
       select: { mac_address: true, kid_id: true },
@@ -918,7 +981,8 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
     const state = deriveLevelState(
       bandBank.map((q) => ({ id: q.id, level: q.level })),
       clearedIds,
-      agedOut
+      agedOut,
+      allSlack
     );
     const todayIds = deviceAnswers
       .filter((a) => a.answered_at >= startOfDay)
@@ -938,7 +1002,10 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
       // Mastered levels plus the ones the cap moved the child past — both are
       // levels they will not be asked again. `levels_mastered` keeps the
       // distinction for anyone who needs it; the answer log keeps it in full.
-      levels_completed: countCompletedLevels(bandBank, clearedIds, agedOut),
+      // levels_completed follows the threshold (what the child will not see
+      // again); levels_mastered stays strict — every question cleared — so the
+      // two now differ by the threshold as well as by the anti-trap.
+      levels_completed: countCompletedLevels(bandBank, clearedIds, agedOut, allSlack),
       levels_mastered: countCompletedLevels(bandBank, clearedIds),
       levels_aged_out: agedOut.size,
       max_level: bandBank.length ? Math.max(...bandBank.map((q) => q.level)) : 0,

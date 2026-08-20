@@ -166,3 +166,66 @@ describe('levelCompletedToday', () => {
     expect(levelCompletedToday(bank, new Set(['1', '2']), ['999'])).toBe(false);
   });
 });
+
+/**
+ * ADR-0010's threshold, and the hole it opens if applied as a flat count.
+ *
+ * `levelClearSlack` is tuned for the authored level size of ten. On a level
+ * holding one or two questions a flat slack of 2 clears it with NOTHING
+ * mastered — and since that holds for every level, the entire bank skips itself
+ * into champion replay on a child's first session. Found 2026-08-20 when the
+ * child-scope test (one question per level) started reporting level 1 replay
+ * instead of level 2.
+ */
+describe('allowedUnmastered', () => {
+  const { allowedUnmastered } = require('../../src/services/quiz.logic');
+
+  it('allows the configured slack on a full-size level', () => {
+    expect(allowedUnmastered(10, 2)).toBe(2); // the intended 8 of 10
+  });
+
+  it('allows nothing on levels too small to spare a fifth', () => {
+    expect(allowedUnmastered(1, 2)).toBe(0);
+    expect(allowedUnmastered(2, 2)).toBe(0);
+    expect(allowedUnmastered(4, 2)).toBe(0);
+  });
+
+  it('never exceeds a fifth of the level', () => {
+    expect(allowedUnmastered(5, 2)).toBe(1);
+    expect(allowedUnmastered(20, 2)).toBe(2); // capped by the bank, not the share
+  });
+
+  it('is zero when the bank configures no slack (the ADR-0009 wall)', () => {
+    expect(allowedUnmastered(10, 0)).toBe(0);
+  });
+
+  it('never returns a negative allowance', () => {
+    expect(allowedUnmastered(0, 2)).toBe(0);
+  });
+});
+
+describe('deriveLevelState with a threshold', () => {
+  const { deriveLevelState } = require('../../src/services/quiz.logic');
+  const bank = [
+    ...Array.from({ length: 10 }, (_, i) => ({ id: i + 1, level: 1 })),
+    ...Array.from({ length: 10 }, (_, i) => ({ id: i + 11, level: 2 })),
+  ];
+  const clear = (...ids) => new Set(ids.map(String));
+
+  it('moves on once the level is mastered to the threshold', () => {
+    const state = deriveLevelState(bank, clear(1, 2, 3, 4, 5, 6, 7, 8), new Set(), 2);
+    expect(state.currentLevel).toBe(2);
+  });
+
+  it('holds the child while more than the slack remains', () => {
+    const state = deriveLevelState(bank, clear(1, 2, 3, 4, 5, 6, 7), new Set(), 2);
+    expect(state.currentLevel).toBe(1);
+  });
+
+  it('does not skip a one-question-per-level bank (the 2026-08-20 hole)', () => {
+    const thin = [{ id: 1, level: 1 }, { id: 2, level: 2 }];
+    const state = deriveLevelState(thin, clear(1), new Set(), 2);
+    expect(state.currentLevel).toBe(2);
+    expect(state.allCleared).toBe(false);
+  });
+});
