@@ -219,6 +219,14 @@ const clearUnattributedDeviceRows = async (tx, macAddress) => {
   };
   await tx.quiz_question_answer.deleteMany({ where: answerWhere });
   await tx.riddle_question_answer.deleteMany({ where: answerWhere });
+  // Mirrors adoptUnattributedRows exactly. Omitting a table here is worse than
+  // omitting it there: a toy handed to another family would carry the last
+  // child's jokes-already-heard, wonders and quiz state into the next one's
+  // first session.
+  await tx.math_question_answer.deleteMany({ where: answerWhere });
+  await tx.kid_character_state.deleteMany({ where: answerWhere });
+  await tx.kid_session_progress.deleteMany({ where: answerWhere });
+  await tx.kid_content_seen.deleteMany({ where: answerWhere });
 
   const macKey = ownerKeyForDevice({ mac_address: macAddress });
   for (const { model } of OWNER_KEYED_STORES) {
@@ -236,6 +244,16 @@ const adoptUnattributedRows = async (tx, macAddress, kidId) => {
   };
   await tx.quiz_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
   await tx.riddle_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  // Every table that carries the kid_id-null + device_mac fallback belongs
+  // here, or the fallback is a leak rather than a bridge: rows written while
+  // the device was Unlinked would be stranded at the moment a child is linked,
+  // and the child would silently start from nothing. math_question_answer
+  // (Ginti) and the three character-progress tables were each added with the
+  // fallback and without this line.
+  await tx.math_question_answer.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  await tx.kid_character_state.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  await tx.kid_session_progress.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
+  await tx.kid_content_seen.updateMany({ where: answerWhere, data: { kid_id: BigInt(kidId) } });
 
   const fromKey = ownerKeyForDevice({ mac_address: macAddress });
   const toKey = `kid:${BigInt(kidId)}`;
