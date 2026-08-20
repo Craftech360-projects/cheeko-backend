@@ -106,6 +106,7 @@ async function loadProgress() {
 let bankRows = [];
 let editingId = null;   // null while the form holds a NEW question
 let levelSize = 10;     // active questions a Level holds; per-bank, from the API
+let bankReadOnly = false;   // content banks are browse-only; see renderBank
 
 const cell = (v) => {
   const td = document.createElement('td');
@@ -120,34 +121,71 @@ function renderBank() {
     .filter((r) => !lvl || String(r.level) === lvl)
     .filter((r) => !q || JSON.stringify(r).toLowerCase().includes(q));
 
-  const body = $('bankTable').tBodies[0];
+  const table = $('bankTable');
+  const body = table.tBodies[0];
   body.innerHTML = '';
+
+  // The unscored banks have wildly different shapes — a joke is two lines, a
+  // story is twenty columns — so their headers come from the data rather than
+  // being hardcoded. The quiz-shaped banks keep their curated column order,
+  // which is worth more than uniformity for the one browser people live in.
+  const columns = bankReadOnly
+    ? [...new Set(rows.flatMap((r) => Object.keys(r)))].filter((k) => k !== 'id')
+    : null;
+
+  const head = table.tHead.rows[0];
+  // Captured before the first overwrite so switching back to a scored bank
+  // restores the curated columns rather than leaving the last content bank's.
+  if (!head.dataset.scoredHeader) head.dataset.scoredHeader = head.innerHTML;
+  head.innerHTML = columns
+    ? '<th></th>' + columns.map((c) => `<th>${escHtml(c)}</th>`).join('')
+    : head.dataset.scoredHeader;
+
+  // Creating and importing assume the quiz column set, so both are hidden for
+  // a bank they cannot write.
+  $('bankNew').hidden = bankReadOnly;
+  $('bankImportBtn').hidden = bankReadOnly;
+  if (bankReadOnly) {
+    $('bankForm').hidden = true;
+    $('bankImport').hidden = true;
+  }
+
   rows.forEach((r) => {
     const tr = document.createElement('tr');
-    if (!r.active) tr.className = 'inactive';
-    const edit = document.createElement('td');
-    const btn = document.createElement('button');
-    btn.className = 'btn ghost tiny';
-    btn.textContent = 'Edit';
-    btn.addEventListener('click', () => editQuestion(r));
-    edit.appendChild(btn);
-    const del = document.createElement('button');
-    del.className = 'btn ghost danger tiny';
-    del.textContent = 'Delete';
-    del.addEventListener('click', () => deleteQuestion(r));
-    edit.appendChild(del);
-    tr.appendChild(edit);
-    [r.id, r.level, r.language, r.question_text, r.answer_text,
-     r.accepted_answers, r.distractors, r.teach_text, r.category,
-     r.active ? 'yes' : 'no'].forEach((v) => tr.appendChild(cell(v)));
+    if (r.active === false) tr.className = 'inactive';
+    const actions = document.createElement('td');
+    // No edit or delete for the content banks: the create/update handlers
+    // assume the quiz column set, and authoring for these happens in the CSV
+    // pack. Browsing is what an operator needs here.
+    if (!bankReadOnly) {
+      const btn = document.createElement('button');
+      btn.className = 'btn ghost tiny';
+      btn.textContent = 'Edit';
+      btn.addEventListener('click', () => editQuestion(r));
+      actions.appendChild(btn);
+      const del = document.createElement('button');
+      del.className = 'btn ghost danger tiny';
+      del.textContent = 'Delete';
+      del.addEventListener('click', () => deleteQuestion(r));
+      actions.appendChild(del);
+    }
+    tr.appendChild(actions);
+
+    const values = columns
+      ? columns.map((c) => (typeof r[c] === 'boolean' ? (r[c] ? 'yes' : 'no') : r[c]))
+      : [r.id, r.level, r.language, r.question_text, r.answer_text,
+         r.accepted_answers, r.distractors, r.teach_text, r.category,
+         r.active ? 'yes' : 'no'];
+    values.forEach((v) => tr.appendChild(cell(v)));
     body.appendChild(tr);
   });
 
   // Active count, because the importer's rule is exactly ten ACTIVE per level.
-  const live = rows.filter((r) => r.active).length;
-  $('bankCount').textContent = lvl
+  // levelSize 0 means the bank has no per-level cap to police.
+  const live = rows.filter((r) => r.active !== false).length;
+  $('bankCount').textContent = lvl && levelSize
     ? `level ${lvl}: ${live}/${levelSize} active${live >= levelSize ? ' — FULL' : ''}`
-    : `${rows.length} of ${bankRows.length} · ${live} active`;
+    : `${rows.length} of ${bankRows.length} · ${live} active${bankReadOnly ? ' · read-only' : ''}`;
 }
 
 // Level filter options come from the data, so a bank with 40 levels needs no
@@ -170,7 +208,8 @@ async function loadBank() {
   try {
     const data = await api('GET', '/questions?bank=' + encodeURIComponent($('bankSelect').value));
     bankRows = data.questions || [];
-    levelSize = data.levelSize || 10;
+    levelSize = data.levelSize || 0;
+    bankReadOnly = !!data.readOnly;
     renderLevels();
     renderBank();
   } catch (e) {

@@ -262,9 +262,28 @@ const assertRoomInLevel = async (bankName, data, exceptId = null) => {
 
 // List. Levels are returned alongside so the UI can offer the level filter and
 // show how far each level is from the per-level size the importer enforces.
+// The unscored characters' banks. Read-only here: they have no answer log, no
+// level cap and wildly different shapes (a joke is two lines, a story is twenty
+// columns), so the create/edit/import handlers below — all of which assume the
+// quiz column set — deliberately do not accept them. Browsing is what an
+// operator actually needs; authoring happens in the CSV pack.
+const CONTENT_BANKS = {
+  joke: () => prisma.joke_bank,
+  why: () => prisma.why_bank,
+  word: () => prisma.word_bank,
+  story: () => prisma.story_bank,
+  spell: () => prisma.spell_bank,
+};
+
 router.get('/questions', gate, asyncHandler(async (req, res) => {
+  const requested = String(req.query.bank || '').trim();
+  if (CONTENT_BANKS[requested]) {
+    const rows = await CONTENT_BANKS[requested]().findMany({ orderBy: [{ level: 'asc' }, { code: 'asc' }] });
+    // levelSize 0 tells the UI there is no per-level cap to police here.
+    return success(res, { bank: requested, levelSize: 0, readOnly: true, questions: rows });
+  }
   let bank;
-  try { bank = pickBank(req.query.bank); } catch (err) { return badRequest(res, err.message); }
+  try { bank = pickBank(requested); } catch (err) { return badRequest(res, err.message); }
   const { questions: table, levelSize } = resolveBank(bank);
   const questions = await table.findMany({ orderBy: [{ level: 'asc' }, { id: 'asc' }] });
   success(res, { bank, levelSize, questions });
