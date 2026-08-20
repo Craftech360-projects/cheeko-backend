@@ -3,6 +3,15 @@ const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeMacAddress } = require('../utils/helpers');
 const { normalizeCharacterName } = require('./character-resolver');
+const {
+    isValidTimezone,
+    resolveTimezone,
+    formatDateInTimezone,
+    dateOnlyKey,
+    shiftDateKey,
+    startOfDayInstant,
+    endOfDayInstantExclusive,
+} = require('../utils/timezone');
 
 const CARD_TAP_DEBOUNCE_MS = 60 * 1000;
 
@@ -23,22 +32,6 @@ function ageFromBirthDate(value) {
     return age;
 }
 
-function getDayRange(now = new Date()) {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
-}
-
-function formatLocalDate(value) {
-    const date = new Date(value);
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
 function positiveDurationMs(value) {
     const numeric = Number(value);
     if (!Number.isFinite(numeric) || numeric <= 0) return 0;
@@ -51,18 +44,54 @@ function completedMinuteSeconds(value) {
     return Math.floor(numeric / 60) * 60;
 }
 
-function completedUsageSecondsFromRow(row) {
-    const categoryKeys = [
-        'game_usage_seconds',
-        'card_usage_seconds',
-        'ai_talk_usage_seconds',
-        'radio_usage_seconds',
-    ];
-    const hasCategoryUsage = categoryKeys.some(key => row[key] != null);
+function positiveSeconds(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+    return Math.trunc(numeric);
+}
+
+const USAGE_CATEGORY_KEYS = [
+    'game_usage_seconds',
+    'card_usage_seconds',
+    'ai_talk_usage_seconds',
+    'radio_usage_seconds',
+];
+
+/**
+ * The seconds a rollup row holds, unrounded.
+ *
+ * Rounding belongs to the total about to be shown, not to the row. Flooring
+ * each category of each row threw away up to 59 seconds four times per device
+ * per day, so a day of card taps and quick games could report zero while the
+ * same row held real usage. Callers sum these and floor once, with
+ * completedMinuteSeconds, at whatever granularity they display.
+ */
+function rawUsageSecondsFromRow(row) {
+    const hasCategoryUsage = USAGE_CATEGORY_KEYS.some(key => row[key] != null);
     if (hasCategoryUsage) {
-        return categoryKeys.reduce((sum, key) => sum + completedMinuteSeconds(row[key]), 0);
+        return USAGE_CATEGORY_KEYS.reduce((sum, key) => sum + positiveSeconds(row[key]), 0);
     }
-    return completedMinuteSeconds(row.usage_time_seconds);
+    return positiveSeconds(row.usage_time_seconds);
+}
+
+function completedUsageSecondsForRows(rows) {
+    return completedMinuteSeconds(
+        (rows || []).reduce((sum, row) => sum + rawUsageSecondsFromRow(row), 0)
+    );
+}
+
+/**
+ * Round each trend bar once, after every device's row for that day is in.
+ *
+ * A family with two toys would otherwise lose up to a minute per toy per day.
+ */
+function finalizeTrendPoints(trendMap) {
+    return Array.from(trendMap.values()).map(point => {
+        const usageTimeSeconds = completedMinuteSeconds(point.usage_time_seconds);
+        point.usage_time_seconds = usageTimeSeconds;
+        point.usageTimeSeconds = usageTimeSeconds;
+        return point;
+    });
 }
 
 function safeObject(value) {
@@ -101,118 +130,120 @@ function humanizeKey(value) {
         .replace(/\b\w/g, char => char.toUpperCase());
 }
 
-function getMonthKeyFromReference(value) {
+function getMonthKeyFromReference(value, timezone) {
     if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) return value;
-    return getEventMonthKey({ server_received_at: value || new Date() });
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 7);
+    return getEventMonthKey({ server_received_at: value || new Date() }, timezone);
 }
 
-function dateForMonthStart(monthKey) {
+function monthStartDateKey(monthKey) {
     const [year, month] = String(monthKey).split('-').map(Number);
     if (!year || !month || month < 1 || month > 12) return null;
-    const date = new Date(year, month - 1, 1);
-    date.setHours(0, 0, 0, 0);
-    return date;
+    return `${monthKey}-01`;
 }
 
-function dateForMonthEnd(monthKey) {
+function monthEndDateKey(monthKey) {
     const [year, month] = String(monthKey).split('-').map(Number);
     if (!year || !month || month < 1 || month > 12) return null;
-    const date = new Date(year, month, 0);
-    date.setHours(23, 59, 59, 999);
-    return date;
+    // Day 0 of the next month is the last day of this one.
+    return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 }
 
-function getActivityDetailsRange(period, now = new Date(), selectedMonth = null) {
-    const end = new Date(now);
-    if (period === 'week') {
-        const monthKey = getMonthKeyFromReference(selectedMonth || now);
-        const start = dateForMonthStart(monthKey);
-        const monthEnd = dateForMonthEnd(monthKey);
-        const currentMonthKey = getMonthKeyFromReference(now);
+function shiftMonthKey(monthKey, deltaMonths) {
+    const [year, month] = String(monthKey).split('-').map(Number);
+    if (!year || !month) return null;
+    const index = (year * 12 + (month - 1)) + deltaMonths;
+    return `${String(Math.floor(index / 12)).padStart(4, '0')}-${String((index % 12) + 1).padStart(2, '0')}`;
+}
+
+/**
+ * The window /homepage-activity/details reports on, as date keys in the
+ * parent's zone.
+ *
+ * Date keys rather than instants, because the rows are then re-bucketed per
+ * row by the same zone — the widened instant window below only has to cover
+ * the range, not define it. That is the shape the /progress/* family already
+ * uses, so the summary and the detail behind it now cut the day in the same
+ * place.
+ */
+function getActivityDetailsRange(period, timezone, now = new Date(), selectedMonth = null) {
+    const today = formatDateInTimezone(now, timezone);
+    const currentMonthKey = today.slice(0, 7);
+
+    if (period === 'month') {
+        // Twelve calendar months back to the 1st, ending today.
+        const startMonthKey = shiftMonthKey(currentMonthKey, -11);
         return {
-            start: start || end,
-            end: monthKey === currentMonthKey ? end : (monthEnd || end),
-            monthKey
+            startDate: monthStartDateKey(startMonthKey),
+            endDate: today,
+            monthKey: currentMonthKey,
         };
     }
 
-    if (period === 'month') {
-        const start = new Date(end);
-        start.setDate(1);
-        start.setHours(0, 0, 0, 0);
-        start.setMonth(start.getMonth() - 11);
-        return { start, end, monthKey: getMonthKeyFromReference(now) };
-    }
-
-    const days = period === 'week' ? 7 : 30;
-    const start = new Date(end.getTime() - (days * 24 * 60 * 60 * 1000));
-    return { start, end, monthKey: getMonthKeyFromReference(now) };
+    // 'week' reports one calendar month, split into weeks.
+    const monthKey = getMonthKeyFromReference(selectedMonth || today, timezone);
+    return {
+        startDate: monthStartDateKey(monthKey),
+        endDate: monthKey === currentMonthKey ? today : monthEndDateKey(monthKey),
+        monthKey,
+    };
 }
 
 const PROGRESS_PERIODS = ['today', 'week', 'month'];
 const PROGRESS_DETAIL_METRICS = ['usage', 'cards', 'games', 'ai', 'radio'];
 
-function formatDateInTimezone(value, timezone = 'UTC') {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return null;
-    const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone || 'UTC',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).formatToParts(date);
-    const year = parts.find(part => part.type === 'year')?.value;
-    const month = parts.find(part => part.type === 'month')?.value;
-    const day = parts.find(part => part.type === 'day')?.value;
-    if (!year || !month || !day) return null;
-    return `${year}-${month}-${day}`;
-}
-
-function shiftDateKey(dateKey, deltaDays) {
-    const date = new Date(`${dateKey}T00:00:00.000Z`);
-    date.setUTCDate(date.getUTCDate() + deltaDays);
-    return date.toISOString().slice(0, 10);
-}
-
 function dateOnlyFromKey(dateKey) {
     return new Date(`${dateKey}T00:00:00.000Z`);
 }
 
+function rangeContainsDateKey(range, dateKey) {
+    return Boolean(dateKey) && dateKey >= range.startDate && dateKey <= range.endDate;
+}
+
+/**
+ * The UTC window that is certain to contain every instant belonging to the
+ * range's local days, for any zone.
+ *
+ * A local day D in a zone offset O spans UTC [D 00:00 - O, D 24:00 - O). Zone
+ * offsets run from -12 to +14, so one day of slack at the start and two at the
+ * end cover every zone. The rows are re-filtered per row afterwards, so being
+ * wide costs a few extra rows and nothing else — being narrow would drop a
+ * whole local evening for any zone behind UTC.
+ */
+function rangeInstantWindow(range) {
+    return {
+        gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
+        lte: dateOnlyFromKey(shiftDateKey(range.endDate, 2)),
+    };
+}
+
 async function countRawGameStartsForRange(scope, range) {
-    const dateKeys = new Set(range.dates || []);
-    if (!dateKeys.size || !scope.macAddresses || scope.macAddresses.length === 0) return 0;
+    if (!range.startDate || !scope.macAddresses || scope.macAddresses.length === 0) return 0;
 
     const rows = await prisma.device_analytics_event.findMany({
         where: {
             ...progressOwnerFilter(scope),
             event_name: 'game_start',
-            server_received_at: {
-                gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
-                lte: dateOnlyFromKey(shiftDateKey(range.endDate, 1)),
-            },
+            server_received_at: rangeInstantWindow(range),
         },
         select: { server_received_at: true },
     });
 
-    return (rows || []).filter(row => {
-        const dateKey = formatDateInTimezone(row.server_received_at, scope.timezone);
-        return dateKey && dateKeys.has(dateKey);
-    }).length;
+    return (rows || []).filter(row => rangeContainsDateKey(
+        range,
+        formatDateInTimezone(row.server_received_at, scope.timezone)
+    )).length;
 }
 
 async function getProgressEventsForRange(scope, range, eventName) {
-    const dateKeys = new Set(range.dates || []);
-    if (!dateKeys.size || !scope.macAddresses || scope.macAddresses.length === 0) return [];
+    if (!range.startDate || !scope.macAddresses || scope.macAddresses.length === 0) return [];
     const eventNameWhere = Array.isArray(eventName) ? { in: eventName } : eventName;
 
     const rows = await prisma.device_analytics_event.findMany({
         where: {
             ...progressOwnerFilter(scope),
             event_name: eventNameWhere,
-            server_received_at: {
-                gte: dateOnlyFromKey(shiftDateKey(range.startDate, -1)),
-                lte: dateOnlyFromKey(shiftDateKey(range.endDate, 1)),
-            },
+            server_received_at: rangeInstantWindow(range),
         },
         select: {
             mac_address: true,
@@ -228,16 +259,16 @@ async function getProgressEventsForRange(scope, range, eventName) {
         take: 5000,
     });
 
-    return (rows || []).filter(row => {
-        const dateKey = formatDateInTimezone(row.server_received_at, scope.timezone);
-        return dateKey && dateKeys.has(dateKey);
-    });
+    return (rows || []).filter(row => rangeContainsDateKey(
+        range,
+        formatDateInTimezone(row.server_received_at, scope.timezone)
+    ));
 }
 
 function buildProgressDateRange(period, timezone, now = new Date()) {
-    const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
+    const today = formatDateInTimezone(now, timezone);
     if (period === 'month') {
-        const monthKey = getMonthKeyFromReference(today);
+        const monthKey = getMonthKeyFromReference(today, timezone);
         const startDate = `${monthKey}-01`;
         const dates = [];
         for (let dateKey = startDate; dateKey <= today; dateKey = shiftDateKey(dateKey, 1)) {
@@ -264,13 +295,13 @@ function buildProgressDateRange(period, timezone, now = new Date()) {
 }
 
 function buildProgressCalendarMonthRange(timezone, now = new Date(), selectedMonth = null) {
-    const today = formatDateInTimezone(now, timezone) || formatLocalDate(now);
+    const today = formatDateInTimezone(now, timezone);
     const currentMonthKey = today.slice(0, 7);
-    const monthKey = getMonthKeyFromReference(selectedMonth || today);
-    const startDate = `${monthKey}-01`;
+    const monthKey = getMonthKeyFromReference(selectedMonth || today, timezone);
+    const startDate = monthStartDateKey(monthKey);
     const endDate = monthKey === currentMonthKey
         ? today
-        : formatLocalDate(dateForMonthEnd(monthKey) || now);
+        : monthEndDateKey(monthKey);
     const dates = [];
     for (let dateKey = startDate; dateKey <= endDate; dateKey = shiftDateKey(dateKey, 1)) {
         dates.push(dateKey);
@@ -331,18 +362,16 @@ function usageCategoryItemsFromDailyRows(rows) {
         { key: 'radio', name: 'Radio', duration_seconds: totals.radio, durationSeconds: totals.radio },
     ];
     return {
+        // Floored once over the unrounded total so this agrees with the
+        // progress summary for the same window. Each item rounds on its own,
+        // so the items can add up to slightly less than the total.
+        totalSeconds: completedUsageSecondsForRows(rows),
         items,
-        totalSeconds: items.reduce((sum, item) => sum + item.duration_seconds, 0),
     };
 }
 
 function getDailyUsageRowDateKey(row) {
-    if (!row || !row.date) return null;
-    if (row.date instanceof Date && !Number.isNaN(row.date.getTime())) {
-        return row.date.toISOString().slice(0, 10);
-    }
-    const value = String(row.date).slice(0, 10);
-    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+    return dateOnlyKey(row && row.date);
 }
 
 function getWeekInMonthFromDateKey(dateKey) {
@@ -354,8 +383,8 @@ function getWeekInMonthFromDateKey(dateKey) {
     return Math.floor((day + leadingDaysBeforeFirstMonday - 1) / 7) + 1;
 }
 
-function buildUsageWeekSectionsFromDailyRows(rows, monthReference) {
-    const monthKey = getMonthKeyFromReference(monthReference);
+function buildUsageWeekSectionsFromDailyRows(rows, monthReference, timezone) {
+    const monthKey = getMonthKeyFromReference(monthReference, timezone);
     const grouped = new Map();
     for (const row of rows || []) {
         const dateKey = getDailyUsageRowDateKey(row);
@@ -487,22 +516,13 @@ const MONTH_NAMES = [
     'December'
 ];
 
-function getEventMonthKey(event) {
+function getEventMonthKey(event, timezone) {
     const value = event.server_received_at || event.created_at || event.timestamp || event.event_time;
-    const date = value ? new Date(value) : new Date();
-    if (Number.isNaN(date.getTime())) return null;
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    return `${year}-${month}`;
+    return getDateKeyFromValue(value, timezone)?.slice(0, 7) || null;
 }
 
-function getDateKeyFromValue(value) {
-    const date = value ? new Date(value) : new Date();
-    if (Number.isNaN(date.getTime())) return null;
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+function getDateKeyFromValue(value, timezone) {
+    return formatDateInTimezone(value || new Date(), timezone);
 }
 
 function getMonthLabel(monthKey) {
@@ -511,10 +531,10 @@ function getMonthLabel(monthKey) {
     return `${MONTH_NAMES[monthIndex] || month}, ${year}`;
 }
 
-function groupEventsByMonth(events) {
+function groupEventsByMonth(events, timezone) {
     const grouped = new Map();
     for (const event of events || []) {
-        const monthKey = getEventMonthKey(event);
+        const monthKey = getEventMonthKey(event, timezone);
         if (!monthKey) continue;
         if (!grouped.has(monthKey)) grouped.set(monthKey, []);
         grouped.get(monthKey).push(event);
@@ -532,9 +552,9 @@ function withMonthSections(response, sections, monthsMetadata = null) {
     };
 }
 
-function withWeekSections(response, monthReference, sections) {
+function withWeekSections(response, monthReference, sections, timezone) {
     if (!sections) return response;
-    const monthKey = getMonthKeyFromReference(monthReference);
+    const monthKey = getMonthKeyFromReference(monthReference, timezone);
     const periodLabel = getMonthLabel(monthKey);
     return {
         ...response,
@@ -566,18 +586,18 @@ function toDurationSection(month, grouped) {
     };
 }
 
-function getEventWeekInMonth(event) {
+function getEventWeekInMonth(event, timezone) {
     const value = event.server_received_at || event.created_at || event.timestamp || event.event_time;
-    const dateKey = getDateKeyFromValue(value);
+    const dateKey = getDateKeyFromValue(value, timezone);
     return dateKey ? getWeekInMonthFromDateKey(dateKey) : null;
 }
 
-function groupEventsByWeekInMonth(events, now = new Date()) {
-    const currentMonthKey = getMonthKeyFromReference(now);
+function groupEventsByWeekInMonth(events, now = new Date(), timezone) {
+    const currentMonthKey = getMonthKeyFromReference(now, timezone);
     const grouped = new Map();
     for (const event of events || []) {
-        if (getEventMonthKey(event) !== currentMonthKey) continue;
-        const week = getEventWeekInMonth(event);
+        if (getEventMonthKey(event, timezone) !== currentMonthKey) continue;
+        const week = getEventWeekInMonth(event, timezone);
         if (!week) continue;
         if (!grouped.has(week)) grouped.set(week, []);
         grouped.get(week).push(event);
@@ -585,11 +605,11 @@ function groupEventsByWeekInMonth(events, now = new Date()) {
     return Array.from(grouped.entries()).sort(([left], [right]) => left - right);
 }
 
-function buildMonthPicker(events, now = new Date()) {
-    const currentMonth = getMonthKeyFromReference(now);
-    const currentYear = new Date(now).getFullYear();
+function buildMonthPicker(events, now = new Date(), timezone) {
+    const currentMonth = getMonthKeyFromReference(now, timezone);
+    const currentYear = Number(currentMonth.slice(0, 4));
     const monthKeys = (events || [])
-        .map(getEventMonthKey)
+        .map(event => getEventMonthKey(event, timezone))
         .filter(Boolean)
         .sort();
     const firstActivityMonth = monthKeys[0] || currentMonth;
@@ -626,8 +646,8 @@ function toCountWeekSection(week, grouped) {
     };
 }
 
-function getGamePlayedWeekInMonth(row) {
-    const dateKey = getDateKeyFromValue(row && row.played_at);
+function getGamePlayedWeekInMonth(row, timezone) {
+    const dateKey = getDateKeyFromValue(row && row.played_at, timezone);
     return dateKey ? getWeekInMonthFromDateKey(dateKey) : null;
 }
 
@@ -653,12 +673,12 @@ function formatGamePlayedDetail(row) {
     };
 }
 
-function buildGamePlayedWeekSections(rows, monthReference) {
-    const monthKey = getMonthKeyFromReference(monthReference);
+function buildGamePlayedWeekSections(rows, monthReference, timezone) {
+    const monthKey = getMonthKeyFromReference(monthReference, timezone);
     const grouped = new Map();
     for (const row of rows || []) {
-        if (getMonthKeyFromReference(row.played_at) !== monthKey) continue;
-        const week = getGamePlayedWeekInMonth(row);
+        if (getMonthKeyFromReference(row.played_at, timezone) !== monthKey) continue;
+        const week = getGamePlayedWeekInMonth(row, timezone);
         if (!week) continue;
         if (!grouped.has(week)) grouped.set(week, []);
         grouped.get(week).push(formatGamePlayedDetail(row));
@@ -992,9 +1012,9 @@ async function buildUsageGrouped(events) {
     return grouped;
 }
 
-async function buildMonthSections(events, buildGrouped, sectionBuilder) {
+async function buildMonthSections(events, buildGrouped, sectionBuilder, timezone) {
     const sections = [];
-    for (const [month, monthEvents] of groupEventsByMonth(events)) {
+    for (const [month, monthEvents] of groupEventsByMonth(events, timezone)) {
         const grouped = await buildGrouped(monthEvents);
         const section = sectionBuilder(month, grouped);
         if (section.items.length > 0) sections.push(section);
@@ -1002,9 +1022,9 @@ async function buildMonthSections(events, buildGrouped, sectionBuilder) {
     return sections;
 }
 
-async function buildWeekSections(events, now, buildGrouped, sectionBuilder) {
+async function buildWeekSections(events, now, buildGrouped, sectionBuilder, timezone) {
     const sections = [];
-    for (const [week, weekEvents] of groupEventsByWeekInMonth(events, now)) {
+    for (const [week, weekEvents] of groupEventsByWeekInMonth(events, now, timezone)) {
         const grouped = await buildGrouped(weekEvents);
         const section = sectionBuilder(week, grouped);
         if (section.items.length > 0) sections.push(section);
@@ -1634,7 +1654,16 @@ function collectParentProfileUpdates(data) {
     if (data.preferred_language || data.preferredLanguage || data.language) {
         updates.language = data.preferred_language || data.preferredLanguage || data.language;
     }
-    if (data.timezone) updates.timezone = data.timezone;
+    // A stored zone Intl cannot resolve would turn every /progress/* read for
+    // this account into a 500, so it is refused at the door. A null or blank
+    // value is ignored rather than clearing a zone that already works.
+    if (data.timezone != null && String(data.timezone).trim() !== '') {
+        const timezone = String(data.timezone).trim();
+        if (!isValidTimezone(timezone)) {
+            throw new ApiError('timezone must be an IANA zone name, for example Asia/Kolkata', 400, 400);
+        }
+        updates.timezone = timezone;
+    }
     if (data.email_notifications !== undefined) updates.email_notifications = data.email_notifications;
     if (data.emailNotifications !== undefined) updates.email_notifications = data.emailNotifications;
     if (data.push_notifications !== undefined) updates.push_notifications = data.push_notifications;
@@ -2109,9 +2138,13 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
 
     const user = await prisma.sys_user.findUnique({
         where: { firebase_uid: firebaseUid },
-        select: { id: true },
+        select: {
+            id: true,
+            parent_profile: { select: { timezone: true } },
+        },
     });
     if (!user) throw new ApiError('Access denied', 403, 403);
+    const timezone = resolveTimezone(user.parent_profile?.timezone);
 
     const devices = await prisma.ai_device.findMany({
         where: { user_id: user.id },
@@ -2144,19 +2177,17 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
             ? toDurationResponse(period, new Map())
             : toCountResponse(metric, period, new Map());
         return period === 'month'
-            ? withMonthSections(emptyResponse, [], buildMonthPicker([], now))
-            : withWeekSections(emptyResponse, selectedMonth || now, []);
+            ? withMonthSections(emptyResponse, [], buildMonthPicker([], now, timezone))
+            : withWeekSections(emptyResponse, selectedMonth || now, [], timezone);
     }
 
-    const { start, end, monthKey } = getActivityDetailsRange(period, now, selectedMonth);
+    const range = getActivityDetailsRange(period, timezone, now, selectedMonth);
+    const monthKey = range.monthKey;
     const ownerFilter = await ownerFilterForMacs(macAddresses);
-    const events = await prisma.device_analytics_event.findMany({
+    const fetched = await prisma.device_analytics_event.findMany({
         where: {
             ...ownerFilter,
-            server_received_at: {
-                gte: start,
-                lte: end,
-            }
+            server_received_at: rangeInstantWindow(range),
         },
         select: {
             event_name: true,
@@ -2172,64 +2203,71 @@ async function getHomepageActivityDetails(firebaseUid, options = {}) {
         orderBy: { server_received_at: 'asc' },
         take: 5000,
     });
-    const monthPicker = period === 'month' ? buildMonthPicker(events, now) : null;
+    // The window above is deliberately wide; the parent's calendar day is what
+    // decides membership.
+    const events = (fetched || []).filter(row => rangeContainsDateKey(
+        range,
+        formatDateInTimezone(row.server_received_at, timezone)
+    ));
+    const monthPicker = period === 'month' ? buildMonthPicker(events, now, timezone) : null;
     const weekMonth = period === 'week' ? (monthKey || selectedMonth || now) : now;
 
     if (metric === 'games') {
         const grouped = buildGamesGrouped(events);
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildGamesGrouped, toCountSection)
+            ? await buildMonthSections(events, buildGamesGrouped, toCountSection, timezone)
             : null;
         let weekSections = null;
         if (period === 'week') {
-            const gameRows = await prisma.device_games_played.findMany({
+            const fetchedGameRows = await prisma.device_games_played.findMany({
                 where: {
                     ...ownerFilter,
-                    played_at: {
-                        gte: start,
-                        lte: end,
-                    }
+                    played_at: rangeInstantWindow(range),
                 },
                 orderBy: { played_at: 'desc' },
                 take: 5000,
             });
-            weekSections = (gameRows || []).length > 0
-                ? buildGamePlayedWeekSections(gameRows, weekMonth)
-                : await buildWeekSections(events, weekMonth, buildGamesGrouped, toCountWeekSection);
+            const gameRows = (fetchedGameRows || []).filter(row => rangeContainsDateKey(
+                range,
+                formatDateInTimezone(row.played_at, timezone)
+            ));
+            weekSections = gameRows.length > 0
+                ? buildGamePlayedWeekSections(gameRows, weekMonth, timezone)
+                : await buildWeekSections(events, weekMonth, buildGamesGrouped, toCountWeekSection, timezone);
         }
-        return withWeekSections(withMonthSections(toCountResponse('games', period, grouped), sections, monthPicker), weekMonth, weekSections);
+        return withWeekSections(withMonthSections(toCountResponse('games', period, grouped), sections, monthPicker), weekMonth, weekSections, timezone);
     }
 
     if (metric === 'cards') {
         const grouped = await buildCardsGrouped(events);
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection, timezone)
             : null;
         const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection, timezone)
             : null;
-        return withWeekSections(withMonthSections(toCountResponse('cards', period, grouped), sections, monthPicker), weekMonth, weekSections);
+        return withWeekSections(withMonthSections(toCountResponse('cards', period, grouped), sections, monthPicker), weekMonth, weekSections, timezone);
     }
 
     if (metric === 'ai_interaction') {
         const grouped = await buildAiInteractionGrouped(events);
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection, timezone)
             : null;
         const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection, timezone)
             : null;
-        return withWeekSections(withMonthSections(toCountResponse('ai_interaction', period, grouped), sections, monthPicker), weekMonth, weekSections);
+        return withWeekSections(withMonthSections(toCountResponse('ai_interaction', period, grouped), sections, monthPicker), weekMonth, weekSections, timezone);
     }
 
     const grouped = await buildUsageGrouped(events);
     const sections = period === 'month'
-        ? await buildMonthSections(events, buildUsageGrouped, toDurationSection)
+        ? await buildMonthSections(events, buildUsageGrouped, toDurationSection, timezone)
         : null;
     const weekSections = period === 'week'
-        ? await buildWeekSections(events, weekMonth, buildUsageGrouped, toDurationWeekSection)
+        ? await buildWeekSections(events, weekMonth, buildUsageGrouped, toDurationWeekSection, timezone)
         : null;
-    return withWeekSections(withMonthSections(toDurationResponse(period, grouped), sections, monthPicker), weekMonth, weekSections);
+    return withWeekSections(withMonthSections(toDurationResponse(period, grouped), sections, monthPicker), weekMonth, weekSections, timezone);
 }
 
 function formatRecentAnalyticsCardActivity(row) {
@@ -2443,7 +2481,7 @@ async function resolveProgressScope(firebaseUid, options = {}) {
 
     return {
         userId: user.id,
-        timezone: user.parent_profile?.timezone || 'UTC',
+        timezone: resolveTimezone(user.parent_profile?.timezone),
         macAddresses,
         kidIds: requestedKidId != null
             ? [requestedKidId]
@@ -2487,13 +2525,13 @@ async function resolveAdminProgressScopeByMac(mac) {
     });
     if (!device) throw new ApiError('Device not found', 404, 404);
 
-    let timezone = 'UTC';
+    let timezone = resolveTimezone(null);
     if (device.user_id != null) {
         const profile = await prisma.parent_profile.findUnique({
             where: { user_id: device.user_id },
             select: { timezone: true },
         });
-        timezone = profile?.timezone || 'UTC';
+        timezone = resolveTimezone(profile?.timezone);
     }
 
     return {
@@ -2581,10 +2619,7 @@ async function getProgressSummary(firebaseUid, options = {}) {
         ? projectedGamesCount
         : await countRawGameStartsForRange(scope, range);
 
-    const usageTimeSeconds = (usageRows || []).reduce(
-        (sum, row) => sum + completedUsageSecondsFromRow(row),
-        0
-    );
+    const usageTimeSeconds = completedUsageSecondsForRows(usageRows);
     const cardTapCount = sumBy(cardRows, 'card_tap_count');
     const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
 
@@ -2670,15 +2705,15 @@ async function getProgressTrend(firebaseUid, options = {}) {
     ]);
 
     for (const row of usageRows || []) {
-        const key = formatLocalDate(row.date);
+        const key = dateOnlyKey(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
-        const value = completedUsageSecondsFromRow(row);
-        point.usage_time_seconds += value;
-        point.usageTimeSeconds += value;
+        // Unrounded here; every device for the day is added first and the
+        // bar is floored once, in finalizeTrendPoints below.
+        point.usage_time_seconds += rawUsageSecondsFromRow(row);
     }
     for (const row of cardRows || []) {
-        const key = formatLocalDate(row.date);
+        const key = dateOnlyKey(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
         const value = Number(row.card_tap_count) || 0;
@@ -2686,7 +2721,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
         point.cardTapCount += value;
     }
     for (const row of aiRows || []) {
-        const key = formatLocalDate(row.date);
+        const key = dateOnlyKey(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
         const value = Number(row.ai_interaction_count) || 0;
@@ -2694,7 +2729,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
         point.aiInteractionCount += value;
     }
     for (const row of gameRows || []) {
-        const key = formatLocalDate(row.activity_date);
+        const key = dateOnlyKey(row.activity_date);
         const point = trendMap.get(key);
         if (!point) continue;
         point.games_played += 1;
@@ -2704,7 +2739,7 @@ async function getProgressTrend(firebaseUid, options = {}) {
     return {
         period,
         timezone: scope.timezone,
-        points: Array.from(trendMap.values()),
+        points: finalizeTrendPoints(trendMap),
     };
 }
 
@@ -2758,8 +2793,8 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const { items, totalSeconds } = usageCategoryItemsFromDailyRows(rows);
         let weekSections = null;
         if (period === 'week') {
-            const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date());
-            const monthStart = dateForMonthStart(monthKey);
+            const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone);
+            const monthStart = dateOnlyFromKey(monthStartDateKey(monthKey));
             const monthEnd = dateOnlyFromKey(range.endDate);
             const sectionRows = await prisma.device_usage_daily.findMany({
                 where: {
@@ -2777,7 +2812,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
                     radio_usage_seconds: true,
                 },
             });
-            weekSections = buildUsageWeekSectionsFromDailyRows(sectionRows, monthKey);
+            weekSections = buildUsageWeekSectionsFromDailyRows(sectionRows, monthKey, scope.timezone);
         }
         const paged = items.slice(offset, offset + limit);
         return {
@@ -2791,8 +2826,8 @@ async function getProgressDetails(firebaseUid, options = {}) {
             totalSeconds,
             items: paged,
             ...(weekSections ? {
-                period_label: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
-                periodLabel: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
+                period_label: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone)),
+                periodLabel: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone)),
                 week_sections: weekSections,
                 weekSections,
             } : {}),
@@ -2804,12 +2839,12 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const items = await buildCardProgressDetailItems(events);
         const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
-        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow, scope.timezone) : null;
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection, scope.timezone)
             : null;
         const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection, scope.timezone)
             : null;
         return withWeekSections(withMonthSections({
             metric,
@@ -2820,7 +2855,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: paged,
-        }, sections, monthPicker), weekMonth, weekSections);
+        }, sections, monthPicker), weekMonth, weekSections, scope.timezone);
     }
 
     if (metric === 'ai') {
@@ -2828,12 +2863,12 @@ async function getProgressDetails(firebaseUid, options = {}) {
         const items = await buildAiProgressDetailItems(events);
         const total = items.reduce((sum, item) => sum + item.count, 0);
         const paged = items.slice(offset, offset + limit);
-        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow, scope.timezone) : null;
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection, scope.timezone)
             : null;
         const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection, scope.timezone)
             : null;
         return withWeekSections(withMonthSections({
             metric,
@@ -2844,7 +2879,7 @@ async function getProgressDetails(firebaseUid, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: paged,
-        }, sections, monthPicker), weekMonth, weekSections);
+        }, sections, monthPicker), weekMonth, weekSections, scope.timezone);
     }
 
     if (metric === 'games') {
@@ -2984,10 +3019,7 @@ async function getProgressSummaryByMacAdmin(mac, options = {}) {
         }),
     ]);
 
-    const usageTimeSeconds = (usageRows || []).reduce(
-        (sum, row) => sum + completedUsageSecondsFromRow(row),
-        0
-    );
+    const usageTimeSeconds = completedUsageSecondsForRows(usageRows);
     const cardTapCount = sumBy(cardRows, 'card_tap_count');
     const aiInteractionCount = sumBy(aiRows, 'ai_interaction_count');
 
@@ -3069,15 +3101,15 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
     ]);
 
     for (const row of usageRows || []) {
-        const key = formatLocalDate(row.date);
+        const key = dateOnlyKey(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
-        const value = completedUsageSecondsFromRow(row);
-        point.usage_time_seconds += value;
-        point.usageTimeSeconds += value;
+        // Unrounded here; every device for the day is added first and the
+        // bar is floored once, in finalizeTrendPoints below.
+        point.usage_time_seconds += rawUsageSecondsFromRow(row);
     }
     for (const row of cardRows || []) {
-        const key = formatLocalDate(row.date);
+        const key = dateOnlyKey(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
         const value = Number(row.card_tap_count) || 0;
@@ -3085,7 +3117,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
         point.cardTapCount += value;
     }
     for (const row of aiRows || []) {
-        const key = formatLocalDate(row.date);
+        const key = dateOnlyKey(row.date);
         const point = trendMap.get(key);
         if (!point) continue;
         const value = Number(row.ai_interaction_count) || 0;
@@ -3093,7 +3125,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
         point.aiInteractionCount += value;
     }
     for (const row of gameRows || []) {
-        const key = formatLocalDate(row.activity_date);
+        const key = dateOnlyKey(row.activity_date);
         const point = trendMap.get(key);
         if (!point) continue;
         point.games_played += 1;
@@ -3103,7 +3135,7 @@ async function getProgressTrendByMacAdmin(mac, options = {}) {
     return {
         period,
         timezone: scope.timezone,
-        points: Array.from(trendMap.values()),
+        points: finalizeTrendPoints(trendMap),
     };
 }
 
@@ -3149,8 +3181,8 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
         const { items, totalSeconds } = usageCategoryItemsFromDailyRows(rows);
         let weekSections = null;
         if (period === 'week') {
-            const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date());
-            const monthStart = dateForMonthStart(monthKey);
+            const monthKey = getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone);
+            const monthStart = dateOnlyFromKey(monthStartDateKey(monthKey));
             const monthEnd = dateOnlyFromKey(range.endDate);
             const sectionRows = await prisma.device_usage_daily.findMany({
                 where: {
@@ -3168,7 +3200,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
                     radio_usage_seconds: true,
                 },
             });
-            weekSections = buildUsageWeekSectionsFromDailyRows(sectionRows, monthKey);
+            weekSections = buildUsageWeekSectionsFromDailyRows(sectionRows, monthKey, scope.timezone);
         }
         return {
             metric,
@@ -3181,8 +3213,8 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             totalSeconds,
             items: items.slice(offset, offset + limit),
             ...(weekSections ? {
-                period_label: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
-                periodLabel: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date())),
+                period_label: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone)),
+                periodLabel: getMonthLabel(getMonthKeyFromReference(options.month || options.selected_month || options.selectedMonth || options.now || new Date(), scope.timezone)),
                 week_sections: weekSections,
                 weekSections,
             } : {}),
@@ -3192,12 +3224,12 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
     if (metric === 'cards') {
         const events = await getProgressEventsForRange(scope, range, 'card_session_start');
         const items = await buildCardProgressDetailItems(events);
-        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow, scope.timezone) : null;
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildCardsGrouped, toCountSection)
+            ? await buildMonthSections(events, buildCardsGrouped, toCountSection, scope.timezone)
             : null;
         const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection)
+            ? await buildWeekSections(events, weekMonth, buildCardsGrouped, toCountWeekSection, scope.timezone)
             : null;
         return withWeekSections(withMonthSections({
             metric,
@@ -3208,18 +3240,18 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: items.slice(offset, offset + limit),
-        }, sections, monthPicker), weekMonth, weekSections);
+        }, sections, monthPicker), weekMonth, weekSections, scope.timezone);
     }
 
     if (metric === 'ai') {
         const events = await getProgressEventsForRange(scope, range, ['card_session_start', 'ai_talk_start', 'ai_talk_end']);
         const items = await buildAiProgressDetailItems(events);
-        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow) : null;
+        const monthPicker = period === 'month' ? buildMonthPicker(events, detailNow, scope.timezone) : null;
         const sections = period === 'month'
-            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection)
+            ? await buildMonthSections(events, buildAiInteractionGrouped, toCountSection, scope.timezone)
             : null;
         const weekSections = period === 'week'
-            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection)
+            ? await buildWeekSections(events, weekMonth, buildAiInteractionGrouped, toCountWeekSection, scope.timezone)
             : null;
         return withWeekSections(withMonthSections({
             metric,
@@ -3230,7 +3262,7 @@ async function getProgressDetailsByMacAdmin(mac, options = {}) {
             total_items: items.length,
             totalItems: items.length,
             items: items.slice(offset, offset + limit),
-        }, sections, monthPicker), weekMonth, weekSections);
+        }, sections, monthPicker), weekMonth, weekSections, scope.timezone);
     }
 
     if (metric === 'games') {
@@ -3996,13 +4028,51 @@ async function getKidCharacters(firebaseUid, kidId, options = {}) {
  * Both halves are required: ai_agent is per account, so two siblings share one
  * Quizzy row and the character on its own never tells them apart.
  */
+/**
+ * The day window a session list was asked for, in the parent's zone.
+ *
+ * `date` for a single day, or `from`/`to` for a span; either bound may stand
+ * alone. Absent altogether means every session, which is what every caller
+ * before this asked for.
+ */
+function parseSessionDateWindow(options, timezone) {
+    const dateKey = value => {
+        if (value == null || value === '') return null;
+        const text = String(value).slice(0, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+            throw new ApiError('date, from and to must be YYYY-MM-DD', 400, 400);
+        }
+        return text;
+    };
+
+    const single = dateKey(options.date);
+    const startDate = single || dateKey(options.from);
+    const endDate = single || dateKey(options.to);
+    if (!startDate && !endDate) return null;
+    if (startDate && endDate && endDate < startDate) {
+        throw new ApiError('to must not be earlier than from', 400, 400);
+    }
+
+    // Half-open on purpose: the last local instant of a day is not a round
+    // number in any zone, and `lt` next-midnight never drops or double-counts.
+    const filter = {};
+    if (startDate) filter.gte = startOfDayInstant(startDate, timezone);
+    if (endDate) filter.lt = endOfDayInstantExclusive(endDate, timezone);
+    return { startDate, endDate, filter };
+}
+
 async function getKidCharacterSessions(firebaseUid, kidId, agentId, options = {}) {
     const scope = await resolveProgressScope(firebaseUid, { ...options, kidId });
     const page = parseInt(options.page) || 1;
     const limit = Math.min(parseInt(options.limit) || 20, 100);
+    const window = parseSessionDateWindow(options, scope.timezone);
     // Duplicate rows for one character are read as one character, so the list is
     // whole whichever of them the app names.
-    const where = { kid_id: scope.kidIds[0], agent_id: { in: await siblingAgentIds(scope.kidIds[0], agentId) } };
+    const where = {
+        kid_id: scope.kidIds[0],
+        agent_id: { in: await siblingAgentIds(scope.kidIds[0], agentId) },
+        ...(window ? { started_at: window.filter } : {}),
+    };
 
     const [total, rows] = await Promise.all([
         prisma.voice_sessions.count({ where }),
@@ -4023,6 +4093,11 @@ async function getKidCharacterSessions(firebaseUid, kidId, agentId, options = {}
 
     return {
         total,
+        timezone: scope.timezone,
+        start_date: window?.startDate || null,
+        startDate: window?.startDate || null,
+        end_date: window?.endDate || null,
+        endDate: window?.endDate || null,
         list: rows.map(row => ({
             sessionId: row.session_id,
             startedAt: isoOrNull(row.started_at),
