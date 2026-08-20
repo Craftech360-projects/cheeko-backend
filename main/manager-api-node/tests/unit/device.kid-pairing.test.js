@@ -24,6 +24,13 @@ jest.mock('../../src/config/database', () => {
     },
     quiz_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     riddle_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    // Every table carrying the kid_id-null + device_mac fallback is adopted on
+    // pairing and cleared on unbind; a missing mock here means the real code
+    // calls updateMany on undefined.
+    math_question_answer: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    kid_character_state: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    kid_session_progress: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    kid_content_seen: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_workspace_artifacts: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },

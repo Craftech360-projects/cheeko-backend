@@ -26,6 +26,12 @@ describe('unbind releases a toy for another family', () => {
       device_kid_assignment: { updateMany: jest.fn(async () => ({ count: 0 })), create: jest.fn(), findFirst: jest.fn(async () => null) },
       quiz_question_answer: { deleteMany: deleteManySpy(), updateMany: jest.fn() },
       riddle_question_answer: { deleteMany: deleteManySpy(), updateMany: jest.fn() },
+      // Every table with the kid_id-null + device_mac fallback moves on pairing
+      // and is cleared on unbind; a missing mock calls updateMany on undefined.
+      math_question_answer: { deleteMany: deleteManySpy(), updateMany: jest.fn() },
+      kid_character_state: { deleteMany: deleteManySpy(), updateMany: jest.fn() },
+      kid_session_progress: { deleteMany: deleteManySpy(), updateMany: jest.fn() },
+      kid_content_seen: { deleteMany: deleteManySpy(), updateMany: jest.fn() },
       device_workspace_artifacts: { deleteMany: deleteManySpy() },
       device_memory_documents: { deleteMany: deleteManySpy() },
       device_memory_chunks: { deleteMany: deleteManySpy() },
