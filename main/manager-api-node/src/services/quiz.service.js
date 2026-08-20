@@ -245,7 +245,7 @@ const daysByQuestionId = (rows) => {
  * The device's next batch of scored questions.
  *
  * @param {string} deviceMac
- * @param {'quiz'|'riddle'} [bankName]
+ * @param {'quiz'|'riddle'|'math'} [bankName]
  * @returns {Promise<{age_band: string, age_band_defaulted: boolean, language: string,
  *   level: number|null, replay: boolean, frontier_warning: boolean, questions: Array}>}
  */
@@ -442,7 +442,7 @@ const toQuestionId = (questionId) => {
  * @param {string|number} questionId
  * @param {'correct'|'wrong'|'revealed'} result - validated here so a bad value is
  *   a 400 rather than the table CHECK constraint's 500
- * @param {'quiz'|'riddle'} [bankName]
+ * @param {'quiz'|'riddle'|'math'} [bankName]
  * @returns {Promise<{id: string, question_id: string, result: string, answered_at: Date}>}
  */
 /**
@@ -757,7 +757,7 @@ const recordLevelMilestone = async (tables, context, answeredQuestionId) => {
  * whether a null level is an achievement or an empty bank.
  *
  * @param {string} deviceMac
- * @param {'quiz'|'riddle'} [bankName]
+ * @param {'quiz'|'riddle'|'math'} [bankName]
  * @returns {Promise<{age_band: string, current_level: number|null, levels_completed: number,
  *   level_total: number, level_cleared: number,
  *   counts: Object<string, number>, last_played: Date|null}>}
@@ -985,7 +985,7 @@ const allDeviceProgress = async (bankName = DEFAULT_BANK) => {
  *
  * @param {string} deviceMac
  * @param {number} level - target Level, must exist in the band
- * @param {'quiz'|'riddle'} [bankName]
+ * @param {'quiz'|'riddle'|'math'} [bankName]
  */
 const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);
@@ -1050,7 +1050,7 @@ const setLevel = async (deviceMac, level, bankName = DEFAULT_BANK) => {
  * the only property that matters — one press is one simulated night.
  *
  * @param {string} deviceMac
- * @param {'quiz'|'riddle'} [bankName]
+ * @param {'quiz'|'riddle'|'math'} [bankName]
  */
 const clearDayGate = async (deviceMac, bankName = DEFAULT_BANK) => {
   const tables = resolveBank(bankName);

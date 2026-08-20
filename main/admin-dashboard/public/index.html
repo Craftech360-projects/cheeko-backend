@@ -44,6 +44,7 @@
       <button class="tab active" data-tab="editorView">Personas</button>
       <button class="tab" data-tab="testView">Test device</button>
       <button class="tab" data-tab="bankView">Question bank</button>
+      <button class="tab" data-tab="progressView">Progress</button>
     </nav>
 
     <!-- Editor -->
@@ -124,7 +125,7 @@
         </div>
         <div class="field">
           <label for="testMac">Device MAC</label>
-          <input id="testMac" value="00:16:3e:ac:b5:38" />
+          <input id="testMac" value="68:EE:8F:60:BA:AC" />
         </div>
         <button id="startTest" class="btn">▶ Start</button>
         <button id="stopTest" class="btn ghost danger" hidden>■ Stop</button>
@@ -189,6 +190,7 @@
             <select id="bankSelect">
               <option value="quiz">Quizzy — quiz_question</option>
               <option value="riddle">Riddler — riddle_question</option>
+              <option value="math">Ginti — math_question</option>
             </select>
             <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
           </div>
@@ -294,6 +296,40 @@
                 <th>Answer</th><th>Accepted</th><th>Distractors</th><th>Teach</th>
                 <th>Category</th><th>Active</th>
               </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- Character progress: kid_character_state + kid_session_progress -->
+    <section id="progressView" hidden>
+      <div class="card">
+        <h2>Character progress</h2>
+        <p class="muted">Every character's MEMO-backed progress for one device's child — current state (what the next session restores) and per-session history (what the parent app reads).</p>
+        <div class="row">
+          <input id="progressMac" value="68:EE:8F:60:BA:AC" placeholder="Device MAC" />
+          <button id="progressLoad">Load</button>
+          <span id="progressInfo" class="muted"></span>
+        </div>
+        <p id="progressErr" class="error" hidden></p>
+
+        <h3>Current state</h3>
+        <div style="overflow-x:auto">
+          <table id="progressStateTable" class="bank-table">
+            <thead>
+              <tr><th>Type</th><th>Character</th><th>Updated</th><th>State (MEMO)</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <h3>Session history (latest 50)</h3>
+        <div style="overflow-x:auto">
+          <table id="progressSessionTable" class="bank-table">
+            <thead>
+              <tr><th>When</th><th>Character</th><th>Type</th><th>Parent summary / MEMO</th></tr>
             </thead>
             <tbody></tbody>
           </table>

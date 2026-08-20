@@ -441,6 +441,44 @@ router.post('/questions/import', gate, asyncHandler(async (req, res) => {
   success(res, { ...report, applied: true, created, updated }, `Imported ${created + updated} question(s)`);
 }));
 
+// --- Character progress (all characters, MEMO-backed) ------------------------
+//
+// Reads the Wave-3 tables: kid_character_state (current, upserted) and
+// kid_session_progress (append-only per session). Attribution follows the
+// child; a MAC with no kid falls back to its device rows, mirroring the
+// progress service. BigInt ids are dropped rather than serialized — the UI
+// has no use for them and JSON.stringify throws on BigInt.
+router.get('/character-progress', gate, asyncHandler(async (req, res) => {
+  const mac = String(req.query.mac || '').trim();
+  if (!mac) return badRequest(res, 'mac is required');
+
+  const device = await prisma.ai_device.findFirst({
+    where: { mac_address: { equals: mac, mode: 'insensitive' } },
+    select: { kid_id: true },
+  });
+  const kidId = device?.kid_id ?? null;
+  const scope = kidId
+    ? { kid_id: kidId }
+    : { device_mac: { equals: mac, mode: 'insensitive' }, kid_id: null };
+
+  const [states, sessions] = await Promise.all([
+    prisma.kid_character_state.findMany({ where: scope, orderBy: { updated_at: 'desc' } }),
+    prisma.kid_session_progress.findMany({ where: scope, orderBy: { created_at: 'desc' }, take: 50 }),
+  ]);
+
+  success(res, {
+    kidId: kidId === null ? null : String(kidId),
+    states: states.map((s) => ({
+      state_type: s.state_type, character: s.character, memo: s.memo,
+      data: s.data, updated_at: s.updated_at,
+    })),
+    sessions: sessions.map((s) => ({
+      state_type: s.state_type, character: s.character, memo: s.memo,
+      data: s.data, session_date: s.session_date, created_at: s.created_at,
+    })),
+  });
+}));
+
 // Static dashboard files (this same folder).
 router.use('/', express.static(path.join(__dirname, 'public')));
 

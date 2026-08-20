@@ -16,6 +16,8 @@ const agentRoutes = require('./agent.routes');
 const contentRoutes = require('./content.routes');
 const rfidRoutes = require('./rfid.routes');
 const quizRoutes = require('./quiz.routes');
+const progressRoutes = require('./progress.routes');
+const contentBankRoutes = require('./contentbank.routes');
 const profileRoutes = require('./profile.routes');
 const modelRoutes = require('./model.routes');
 const analyticsRoutes = require('./analytics.routes');
@@ -361,6 +363,8 @@ router.use('/agent', agentRoutes);
 router.use('/content', contentRoutes);
 router.use('/admin/rfid', rfidRoutes);
 router.use('/quiz', quizRoutes);
+router.use('/progress', progressRoutes);
+router.use('/content-bank', contentBankRoutes);
 router.use('/api/mobile', require('./mobile.routes')); // Firebase-backed mobile endpoints (must come first)
 router.use('/api/mobile', profileRoutes); // Legacy profile routes (fallback)
 router.use('/models', modelRoutes);

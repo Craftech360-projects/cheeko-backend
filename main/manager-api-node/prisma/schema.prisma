@@ -1473,6 +1473,179 @@ model riddle_question_answer {
   @@index([kid_id, answered_at], map: "idx_riddle_answer_kid_time")
 }
 
+/// Ginti's bank. Column-identical to quiz_question — same deliberate choice as
+/// riddle_question, so banks.js can query any of the three with no field
+/// mapping. See src/services/banks.js.
+model math_question {
+  id                   BigInt                 @id @default(autoincrement())
+  code                 String                 @unique @db.VarChar(50)
+  question_text        String
+  answer_text          String
+  accepted_answers     Json                   @default("[]")
+  teach_text           String?
+  distractors          Json                   @default("[]")
+  category             String?                @db.VarChar(100)
+  level                Int
+  language             String                 @default("en") @db.VarChar(10)
+  active               Boolean                @default(true)
+  create_date          DateTime               @default(now()) @db.Timestamptz(6)
+  update_date          DateTime               @default(now()) @db.Timestamptz(6)
+  math_question_answer math_question_answer[]
+
+  @@index([language, level], map: "idx_math_question_lang_level")
+}
+
+/// Per-device maths answer log. Separate table for the same reason as the
+/// riddle log: the isolation is the table, not a filter someone can forget.
+model math_question_answer {
+  id            BigInt        @id @default(autoincrement())
+  device_mac    String        @db.VarChar(20)
+  kid_id        BigInt?
+  question_id   BigInt
+  result        String        @db.VarChar(10)
+  answered_at   DateTime      @default(now()) @db.Timestamptz(6)
+  math_question math_question @relation(fields: [question_id], references: [id], onDelete: Restrict)
+
+  @@index([device_mac, question_id], map: "idx_math_answer_device_question")
+  @@index([device_mac, answered_at], map: "idx_math_answer_device_time")
+  @@index([kid_id, answered_at], map: "idx_math_answer_kid_time")
+}
+
+/// Content banks for the unscored characters (Masti/Tara/Mitthu/Nani/Tikku):
+/// content only — no answer tables, no level derivation. No-repeat and
+/// progression live in the character's MEMO (kid_character_state).
+model joke_bank {
+  id          BigInt   @id @default(autoincrement())
+  code        String   @unique @db.VarChar(50)
+  level       Int      @default(1)
+  category    String?  @db.VarChar(100)
+  language    String   @default("en") @db.VarChar(10)
+  setup       String
+  punchline   String
+  active      Boolean  @default(true)
+  create_date DateTime @default(now()) @db.Timestamptz(6)
+  update_date DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([language, level], map: "idx_joke_bank_lang_level")
+}
+
+model why_bank {
+  id            BigInt   @id @default(autoincrement())
+  code          String   @unique @db.VarChar(50)
+  level         Int      @default(1)
+  category      String?  @db.VarChar(100)
+  language      String   @default("en") @db.VarChar(10)
+  question_text String
+  answer_text   String
+  wow_fact      String?
+  try_at_home   String?
+  active        Boolean  @default(true)
+  create_date   DateTime @default(now()) @db.Timestamptz(6)
+  update_date   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([language, level], map: "idx_why_bank_lang_level")
+}
+
+model word_bank {
+  id               BigInt   @id @default(autoincrement())
+  code             String   @unique @db.VarChar(50)
+  level            Int      @default(1)
+  category         String?  @db.VarChar(100)
+  language         String   @default("en") @db.VarChar(10)
+  word             String
+  item_type        String?  @db.VarChar(50)
+  meaning_simple   String?
+  example_sentence String?
+  phonics_chunks   String?
+  spell_difficulty Int?
+  active           Boolean  @default(true)
+  create_date      DateTime @default(now()) @db.Timestamptz(6)
+  update_date      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([language, level], map: "idx_word_bank_lang_level")
+}
+
+model story_bank {
+  id               BigInt   @id @default(autoincrement())
+  code             String   @unique @db.VarChar(50)
+  level            Int      @default(1)
+  tantra           String?  @db.VarChar(100)
+  language         String   @default("en") @db.VarChar(10)
+  title            String
+  moral            String?
+  characters       String?
+  beat1_hook       String?
+  beat2_setting    String?
+  beat3_plot_entry String?
+  beat4_first_half String?
+  beat5_second_half String?
+  beat6_ending     String?
+  choice_question  String?
+  choice_option_a  String?
+  choice_option_b  String?
+  sounds           String?
+  kahavat          String?
+  personalize      String?
+  safety_notes     String?
+  beats_total      Int      @default(6)
+  active           Boolean  @default(true)
+  create_date      DateTime @default(now()) @db.Timestamptz(6)
+  update_date      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([language, level], map: "idx_story_bank_lang_level")
+}
+
+model spell_bank {
+  id               BigInt   @id @default(autoincrement())
+  code             String   @unique @db.VarChar(50)
+  level            Int      @default(1)
+  language         String   @default("en") @db.VarChar(10)
+  word             String
+  phonics_chunks   String?
+  meaning_simple   String?
+  example_sentence String?
+  active           Boolean  @default(true)
+  create_date      DateTime @default(now()) @db.Timestamptz(6)
+  update_date      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([language, level], map: "idx_spell_bank_lang_level")
+}
+
+/// Current per-character state for a child, upserted from the session's final
+/// MEMO line. Restored into the worker's Saved State each session AFTER the 48h
+/// prune, so durable progress (Tikku's ladder, Tara's cliffhanger, Nani's
+/// unfinished story) survives any gap. kid_id NULL rows carry device_mac
+/// attribution for Unlinked devices (partial unique indexes in the migration).
+model kid_character_state {
+  id         BigInt   @id @default(autoincrement())
+  kid_id     BigInt?
+  device_mac String   @db.VarChar(20)
+  state_type String   @db.VarChar(50)
+  character  String?  @db.VarChar(100)
+  memo       String
+  data       Json     @default("{}")
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// Append-only per-session progress log for every character — the parent-app /
+/// analytics feed (parent_summary, jokes told, words practised, ...). One row
+/// per (session, memo type).
+model kid_session_progress {
+  id           BigInt   @id @default(autoincrement())
+  kid_id       BigInt?
+  device_mac   String   @db.VarChar(20)
+  character    String?  @db.VarChar(100)
+  state_type   String   @db.VarChar(50)
+  session_date DateTime @default(now()) @db.Date
+  memo         String
+  data         Json     @default("{}")
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([kid_id, created_at], map: "idx_kid_session_progress_kid_time")
+  @@index([device_mac, created_at], map: "idx_kid_session_progress_mac_time")
+  @@index([state_type, session_date], map: "idx_kid_session_progress_type_date")
+}
+
 /// The Wonder Question (M4): one open, unscored question Quizzy leaves a child
 /// with at the end of a session, and opens the next one by remembering.
 ///

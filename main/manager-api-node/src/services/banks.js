@@ -68,6 +68,17 @@ const BANKS = {
     // enters champion replay. Grow the bank before treating that as a bug.
     levelSize: 10,
   },
+  math: {
+    questions: prisma.math_question,
+    answers: prisma.math_question_answer,
+    answerTable: 'math_question_answer',
+    subject: 'math',
+    label: 'MATH',
+    // Mastery, like Quizzy (ADR-0009): Ginti's prompt promises "a skill the
+    // child did not crack WILL come back on a later day".
+    clearOnReveal: false,
+    levelSize: 10,
+  },
 };
 
 const DEFAULT_BANK = 'quiz';
@@ -92,6 +103,7 @@ const clearedResultsFor = (bank) => (bank?.clearOnReveal ? ['correct', 'revealed
 const CHARACTER_BANK = Object.assign(Object.create(null), {
   quiz_master: 'quiz',
   riddle_master: 'riddle',
+  math_master: 'math',
 });
 
 /**
@@ -101,7 +113,7 @@ const CHARACTER_BANK = Object.assign(Object.create(null), {
  * character at all, and they must keep working unchanged.
  *
  * @param {string} [character] the character's agent_code
- * @returns {'quiz'|'riddle'}
+ * @returns {'quiz'|'riddle'|'math'}
  */
 const bankFor = (character) => CHARACTER_BANK[character] || DEFAULT_BANK;
 
@@ -112,7 +124,7 @@ const bankFor = (character) => CHARACTER_BANK[character] || DEFAULT_BANK;
  * normal thing the API is asked about; a BANK we do not know means a caller
  * invented one, and serving quiz data instead would hide the bug.
  *
- * @param {'quiz'|'riddle'} [bank]
+ * @param {'quiz'|'riddle'|'math'} [bank]
  */
 const resolveBank = (bank = DEFAULT_BANK) => {
   const resolved = BANKS[bank];
@@ -139,7 +151,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * child, so anything unresolvable serves the quiz bank.
  *
  * @param {{character?: string, characterId?: string}} [ref]
- * @returns {Promise<'quiz'|'riddle'>}
+ * @returns {Promise<'quiz'|'riddle'|'math'>}
  */
 const bankForCharacterRef = async (ref = {}) => {
   const character = String(ref.character || '').trim();

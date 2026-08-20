@@ -33,13 +33,37 @@ const FOLDER_CODE = {
   tara: 'science_buddy',
   nani: 'story_explorer',
   mitthu: 'word_wizard',
-  ginti: { code: 'math_master', name: 'Ginti' },      // new
-  spell_bee: { code: 'spell_master', name: 'Tikku' }, // new
+  ginti: 'math_master',      // inserted 2026-08-20
+  spell_bee: 'spell_master', // inserted 2026-08-20
 };
-const BANK_CSV = { quiz: 'quizzy/quizzy-questions.csv', riddle: 'bujho/bujho-riddles.csv' };
+const BANK_CSV = { quiz: 'quizzy/quizzy-questions.csv', riddle: 'bujho/bujho-riddles.csv', math: 'ginti/ginti-sums.csv' };
+
+// Per-folder prompt transforms applied before install. Ginti's pack MEMO type
+// is daily_math, but the worker only scores type=daily_quiz (quiz_state.go:257)
+// — Riddler already shares that type deliberately, so Ginti does too.
+const TRANSFORM = {
+  ginti: (text) => text.split('daily_math').join('daily_quiz'),
+};
 // Rows where the PACK is wrong and the DB is right. 6-8-L01-Q01-a8: the CSV's
 // accepted_answers carries an authoring note ("saat? no - sixty"); DB is clean.
 const SKIP_CODES = new Set(['6-8-L01-Q01-a8']);
+
+// Unscored content banks: CSV -> typed table, upsert-by-code. Columns listed
+// are copied verbatim (int columns coerced); code/level/language/active are
+// handled for every bank.
+const CONTENT_CSV = {
+  joke_bank: { csv: 'masti/masti-jokes.csv', cols: ['category', 'setup', 'punchline'] },
+  why_bank: { csv: 'tara/tara-wonders.csv', cols: ['category', 'question_text', 'answer_text', 'wow_fact', 'try_at_home'] },
+  word_bank: { csv: 'mitthu/mitthu-words.csv', cols: ['category', 'word', 'item_type', 'meaning_simple', 'example_sentence', 'phonics_chunks'], ints: ['spell_difficulty'] },
+  story_bank: {
+    csv: 'nani/nani-stories.csv',
+    cols: ['tantra', 'title', 'moral', 'characters', 'beat1_hook', 'beat2_setting', 'beat3_plot_entry',
+      'beat4_first_half', 'beat5_second_half', 'beat6_ending', 'choice_question', 'choice_option_a',
+      'choice_option_b', 'sounds', 'kahavat', 'personalize', 'safety_notes'],
+    ints: ['beats_total'],
+  },
+  spell_bank: { csv: 'spell_bee/spell-bee-words.csv', cols: ['word', 'phonics_chunks', 'meaning_simple', 'example_sentence'] },
+};
 
 const read = (p) => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n').trim();
 const pipes = (s) => String(s || '').split('|').map((x) => x.trim()).filter(Boolean);
@@ -59,7 +83,7 @@ const readCsvRows = (file) => {
   // ---- backup everything we may touch
   const rows = (await c.query('SELECT * FROM ai_agent_template')).rows;
   const banksBak = {};
-  for (const [bank, table] of [['quiz', 'quiz_question'], ['riddle', 'riddle_question']]) {
+  for (const [bank, table] of [['quiz', 'quiz_question'], ['riddle', 'riddle_question'], ['math', 'math_question']]) {
     banksBak[bank] = (await c.query('SELECT * FROM ' + table + ' ORDER BY code')).rows;
   }
   if (APPLY) {
@@ -74,7 +98,8 @@ const readCsvRows = (file) => {
   // ---- prompts
   for (const [folder, target] of Object.entries(FOLDER_CODE)) {
     const dir = path.join(PACK, folder);
-    const [sys, soul, greet] = ['agent.md', 'soul.md', 'greeting.md'].map((f) => read(path.join(dir, f)));
+    const xf = TRANSFORM[folder] || ((t) => t);
+    const [sys, soul, greet] = ['agent.md', 'soul.md', 'greeting.md'].map((f) => xf(read(path.join(dir, f))));
     if (sys.includes('<!-- LANGUAGE -->')) { console.error('SKIP ' + folder + ': system_prompt contains the LANGUAGE slot (would replace the scaffold)'); continue; }
 
     if (typeof target === 'string') {
@@ -113,14 +138,14 @@ const readCsvRows = (file) => {
   }
 
   // ---- bank content, update-by-code, diff only
+  const BANK_TABLE = { quiz: 'quiz_question', riddle: 'riddle_question', math: 'math_question' };
   for (const [bank, rel] of Object.entries(BANK_CSV)) {
-    const table = bank === 'quiz' ? 'quiz_question' : 'riddle_question';
+    const table = BANK_TABLE[bank];
     const byCode = new Map(banksBak[bank].map((r) => [r.code, r]));
     let same = 0, changed = 0, missing = 0;
     for (const row of readCsvRows(path.join(PACK, rel))) {
       if (SKIP_CODES.has(row.code)) { console.log('  ' + bank + ' ' + row.code + ': skipped (pack row known-bad, DB kept)'); continue; }
       const cur = byCode.get(row.code);
-      if (!cur) { missing++; console.log('  ' + bank + ' ' + row.code + ': NOT IN DB (insert not implemented - investigate first)'); continue; }
       const want = {
         question_text: String(row.question_text).trim(), answer_text: String(row.answer_text).trim(),
         accepted_answers: pipes(row.accepted_answers), distractors: pipes(row.distractors),
@@ -128,6 +153,16 @@ const readCsvRows = (file) => {
         level: parseInt(row.level, 10), language: String(row.language || 'en').trim(),
         active: !['false', '0', 'no'].includes(String(row.active).toLowerCase()),
       };
+      if (!cur) {
+        missing++;
+        if (!APPLY) { console.log('  ' + bank + ' ' + row.code + ': WOULD INSERT'); continue; }
+        await c.query(
+          'INSERT INTO ' + table + ' (code, question_text, answer_text, accepted_answers, distractors, teach_text, category, level, language, active) ' +
+          'VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
+          [row.code, want.question_text, want.answer_text, JSON.stringify(want.accepted_answers), JSON.stringify(want.distractors),
+           want.teach_text, want.category, want.level, want.language, want.active]);
+        continue;
+      }
       const eq = want.question_text === cur.question_text && want.answer_text === cur.answer_text
         && JSON.stringify(want.accepted_answers) === JSON.stringify(cur.accepted_answers)
         && JSON.stringify(want.distractors) === JSON.stringify(cur.distractors)
@@ -142,7 +177,35 @@ const readCsvRows = (file) => {
         [want.question_text, want.answer_text, JSON.stringify(want.accepted_answers), JSON.stringify(want.distractors),
          want.teach_text, want.category, want.level, want.language, want.active, row.code]);
     }
-    console.log(bank + ': ' + same + ' identical, ' + changed + (APPLY ? ' updated, ' : ' to update, ') + missing + ' missing');
+    console.log(bank + ': ' + same + ' identical, ' + changed + (APPLY ? ' updated, ' : ' to update, ') + missing + (APPLY ? ' inserted' : ' to insert'));
+  }
+
+  // ---- unscored content banks, upsert-by-code
+  for (const [table, spec] of Object.entries(CONTENT_CSV)) {
+    const existing = new Map((await c.query('SELECT code FROM ' + table)).rows.map((r) => [r.code, true]));
+    let inserted = 0, updated = 0;
+    for (const row of readCsvRows(path.join(PACK, spec.csv))) {
+      const code = String(row.code || '').trim();
+      if (!code) continue;
+      const fields = { level: parseInt(row.level, 10) || 1, language: String(row.language || 'en').trim() || 'en',
+        active: !['false', '0', 'no'].includes(String(row.active).toLowerCase()) };
+      for (const col of spec.cols) fields[col] = String(row[col] || '').trim() || null;
+      for (const col of spec.ints || []) fields[col] = row[col] !== '' && row[col] != null ? parseInt(row[col], 10) : null;
+      const names = Object.keys(fields);
+      if (!APPLY) { existing.has(code) ? updated++ : inserted++; continue; }
+      const vals = names.map((n) => fields[n]);
+      if (existing.has(code)) {
+        const sets = names.map((n, i) => '"' + n + '"=$' + (i + 2)).join(', ');
+        await c.query('UPDATE ' + table + ' SET ' + sets + ', update_date=now() WHERE code=$1', [code, ...vals]);
+        updated++;
+      } else {
+        const cols = ['code', ...names].map((n) => '"' + n + '"').join(', ');
+        const marks = ['code', ...names].map((_, i) => '$' + (i + 1)).join(', ');
+        await c.query('INSERT INTO ' + table + ' (' + cols + ') VALUES (' + marks + ')', [code, ...vals]);
+        inserted++;
+      }
+    }
+    console.log(table + ': ' + inserted + (APPLY ? ' inserted, ' : ' to insert, ') + updated + (APPLY ? ' updated' : ' to update'));
   }
 
   await c.end();

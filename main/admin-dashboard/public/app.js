@@ -44,6 +44,7 @@ function logout() {
   $('editorView').hidden = true;
   $('testView').hidden = true;
   $('bankView').hidden = true;
+  $('progressView').hidden = true;
   $('tabs').hidden = true;
   $('logout').hidden = true;
   $('loginView').hidden = false;
@@ -54,9 +55,50 @@ function showTab(id) {
   $('editorView').hidden = id !== 'editorView';
   $('testView').hidden = id !== 'testView';
   $('bankView').hidden = id !== 'bankView';
+  $('progressView').hidden = id !== 'progressView';
   document.querySelectorAll('.tab').forEach((b) =>
     b.classList.toggle('active', b.dataset.tab === id));
   if (id === 'bankView' && !bankRows.length) loadBank();
+  if (id === 'progressView') loadProgress();
+}
+
+// ---- character progress (kid_character_state / kid_session_progress) ----
+const escHtml = (s) => String(s ?? '').replace(/[&<>"]/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const shortTime = (t) => String(t || '').slice(0, 16).replace('T', ' ');
+
+async function loadProgress() {
+  $('progressErr').hidden = true;
+  const mac = $('progressMac').value.trim();
+  if (!mac) return;
+  try {
+    const data = await api('GET', '/character-progress?mac=' + encodeURIComponent(mac));
+    $('progressInfo').textContent = data.kidId
+      ? 'child id ' + data.kidId
+      : 'device not linked to a child (device-scoped rows)';
+
+    $('progressStateTable').querySelector('tbody').innerHTML = data.states.length
+      ? data.states.map((s) => '<tr>'
+          + '<td>' + escHtml(s.state_type) + '</td>'
+          + '<td>' + escHtml(s.character || '') + '</td>'
+          + '<td>' + escHtml(shortTime(s.updated_at)) + '</td>'
+          + '<td title="' + escHtml(s.memo) + '">' + escHtml(s.memo) + '</td>'
+          + '</tr>').join('')
+      : '<tr><td colspan="4" class="muted">no state yet - play a session first</td></tr>';
+
+    $('progressSessionTable').querySelector('tbody').innerHTML = data.sessions.length
+      ? data.sessions.map((s) => '<tr>'
+          + '<td>' + escHtml(shortTime(s.created_at)) + '</td>'
+          + '<td>' + escHtml(s.character || '') + '</td>'
+          + '<td>' + escHtml(s.state_type) + '</td>'
+          + '<td title="' + escHtml(s.memo) + '">'
+          + escHtml((s.data && s.data.parent_summary) || s.memo) + '</td>'
+          + '</tr>').join('')
+      : '<tr><td colspan="4" class="muted">no sessions recorded yet</td></tr>';
+  } catch (e) {
+    $('progressErr').textContent = e.message;
+    $('progressErr').hidden = false;
+  }
 }
 
 // ---- question bank ----
@@ -423,6 +465,8 @@ $('bankImportBtn').addEventListener('click', () => {
 });
 $('csvRun').addEventListener('click', runCsvImport);
 $('csvCancel').addEventListener('click', () => { $('bankImport').hidden = true; });
+$('progressLoad').addEventListener('click', loadProgress);
+$('progressMac').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadProgress(); });
 document.querySelectorAll('.tab').forEach((b) =>
   b.addEventListener('click', () => showTab(b.dataset.tab)));
 
