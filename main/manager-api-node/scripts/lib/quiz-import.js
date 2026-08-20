@@ -223,4 +223,13 @@ function planImport(rows) {
   };
 }
 
-module.exports = { parseQuizRow, normalizeAgeBand, planImport, AGE_BANDS, SHARED_BAND };
+// ponytail: lives here, not in admin-dashboard.routes.js, because that folder
+// is outside this package and can't resolve 'xlsx' from its node_modules lookup.
+// raw:true matches the CLI: it stops the reader turning codes and levels into
+// dates or numbers behind our back.
+function readCsv(csv) {
+  const workbook = XLSX.read(csv, { type: 'string', raw: true });
+  return XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: '' });
+}
+
+module.exports = { parseQuizRow, normalizeAgeBand, planImport, readCsv, AGE_BANDS, SHARED_BAND };

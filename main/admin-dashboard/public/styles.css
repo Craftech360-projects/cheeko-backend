@@ -511,3 +511,27 @@ kbd {
   border-radius: 5px;
   background: var(--surface);
 }
+
+/* --- Question bank table --- */
+.bank-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.bank-table th,
+.bank-table td {
+  padding: 0.4rem 0.55rem;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+.bank-table th { position: sticky; top: 0; background: var(--bg-secondary); font-weight: 600; }
+.bank-table td { max-width: 22rem; }
+.bank-table tr.inactive { opacity: 0.45; }
+.btn.tiny { padding: 0.15rem 0.5rem; font-size: 0.75rem; }
+.bank-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Same reason as #greetingPrompt: a question is one sentence and teach text is
+   one breath — neither wants the 70vh document-editor height. */
+#qText, #qTeach { min-height: 4.5rem; }

@@ -43,6 +43,7 @@
     <nav id="tabs" class="tabs" hidden>
       <button class="tab active" data-tab="editorView">Personas</button>
       <button class="tab" data-tab="testView">Test device</button>
+      <button class="tab" data-tab="bankView">Question bank</button>
     </nav>
 
     <!-- Editor -->
@@ -178,6 +179,128 @@
       <!-- Agent audio elements are attached here; must be in the DOM to play. -->
       <div id="audioSink" hidden></div>
     </section>
+
+    <!-- Question bank: the curated table Quizzy/Riddler actually pull from -->
+    <section id="bankView" hidden>
+      <div class="card toolbar">
+        <div class="field">
+          <label for="bankSelect">Bank</label>
+          <div class="select-wrap">
+            <select id="bankSelect">
+              <option value="quiz">Quizzy — quiz_question</option>
+              <option value="riddle">Riddler — riddle_question</option>
+            </select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <label for="bankLevel">Level</label>
+          <div class="select-wrap">
+            <select id="bankLevel"><option value="">All levels</option></select>
+            <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="field">
+          <label for="bankFilter">Filter</label>
+          <input id="bankFilter" placeholder="text, answer, category…" />
+        </div>
+        <button id="bankNew" class="btn">+ New question</button>
+        <button id="bankImportBtn" class="btn ghost">⬆ Import CSV</button>
+        <button id="bankRefresh" class="btn ghost">Refresh</button>
+        <span id="bankCount" class="pill">—</span>
+      </div>
+
+      <!-- CSV import. Same sheet the CLI importer takes; upserts by code. -->
+      <div class="card" id="bankImport" hidden>
+        <label>Import questions from CSV</label>
+        <p class="hint">Columns: <code>code, level, category, language, question_text,
+          answer_text, accepted_answers, distractors, teach_text, active</code>.
+          Lists use <code>|</code>, never commas. Rows are matched by <code>code</code>,
+          so re-uploading the same file updates instead of duplicating.</p>
+        <div class="bank-form">
+          <div class="field">
+            <label for="csvFile">CSV file</label>
+            <input id="csvFile" type="file" accept=".csv,text/csv" />
+          </div>
+          <div class="field">
+            <label for="csvDryRun">Mode</label>
+            <div class="select-wrap">
+              <select id="csvDryRun">
+                <option value="true">Dry run — check only, write nothing</option>
+                <option value="false">Import — write to the database</option>
+              </select>
+              <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+          </div>
+        </div>
+        <div class="actionbar">
+          <button id="csvRun" class="btn">Run</button>
+          <button id="csvCancel" class="btn ghost">Close</button>
+          <span id="csvStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+        <pre id="csvReport" class="testlog" hidden></pre>
+      </div>
+
+      <!-- Edit / create form. Hidden until a row is picked or + New is used. -->
+      <div class="card" id="bankForm" hidden>
+        <label id="bankFormTitle">Edit question</label>
+        <div class="bank-form">
+          <div class="field">
+            <label for="qLevel">Level</label>
+            <input id="qLevel" type="number" min="1" value="1" />
+          </div>
+          <div class="field">
+            <label for="qLanguage">Language</label>
+            <input id="qLanguage" value="en" />
+          </div>
+          <div class="field">
+            <label for="qCategory">Category</label>
+            <input id="qCategory" placeholder="optional" />
+          </div>
+          <div class="field">
+            <label for="qActive">Active</label>
+            <div class="select-wrap">
+              <select id="qActive">
+                <option value="true">yes — served to children</option>
+                <option value="false">no — retired</option>
+              </select>
+              <svg class="select-arrow" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+          </div>
+        </div>
+        <label for="qText">Question</label>
+        <textarea id="qText" rows="2"></textarea>
+        <label for="qAnswer">Answer</label>
+        <input id="qAnswer" />
+        <label for="qAccepted">Accepted answers <span class="hint">comma separated</span></label>
+        <input id="qAccepted" placeholder="four, 4" />
+        <label for="qDistractors">Distractors <span class="hint">comma separated — wrong options for the narrowing hint</span></label>
+        <input id="qDistractors" placeholder="three, five" />
+        <label for="qTeach">Teach text <span class="hint">the one-breath explanation for the guided Door</span></label>
+        <textarea id="qTeach" rows="2"></textarea>
+        <div class="actionbar">
+          <button id="qSave" class="btn">Save</button>
+          <button id="qCancel" class="btn ghost">Cancel</button>
+          <span id="qStatus" class="status" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="overflow:auto">
+          <table id="bankTable" class="bank-table">
+            <thead>
+              <tr>
+                <th></th><th>ID</th><th>Lvl</th><th>Lang</th><th>Question</th>
+                <th>Answer</th><th>Accepted</th><th>Distractors</th><th>Teach</th>
+                <th>Category</th><th>Active</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
   </main>
 
   <script src="app.js"></script>

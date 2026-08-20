@@ -43,6 +43,15 @@ const BANKS = {
     // The flag exists because the two characters share one service, so without
     // it this line would have changed Riddler in the same commit.
     clearOnReveal: false,
+    // Active questions per Level. The importer already enforces this for quiz
+    // (a sheet whose level does not hold exactly ten is rejected); naming it
+    // here lets the admin editor refuse an eleventh instead of quietly creating
+    // a Level the next import would reject.
+    //
+    // Per-bank because the banks genuinely differ: quiz levels hold ten,
+    // riddle levels hold eighty. One shared constant would lock Riddler out of
+    // its own bank.
+    levelSize: 10,
   },
   riddle: {
     questions: prisma.riddle_question,
@@ -54,6 +63,10 @@ const BANKS = {
     // riddle — repeating it until solved teaches nothing and only frustrates.
     // Riddler keeps flow; Quizzy takes mastery.
     clearOnReveal: true,
+    // Trimmed from 80 to 10 on 2026-08-19 to match quiz. Riddler now holds 30
+    // questions across 3 levels, so a child clears the bank in ~3 days and
+    // enters champion replay. Grow the bank before treating that as a bug.
+    levelSize: 10,
   },
 };
 
