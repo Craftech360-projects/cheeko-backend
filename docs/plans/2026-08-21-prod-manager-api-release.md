@@ -14,9 +14,12 @@ five migrations that create `kid_character_state`, the content banks and the
 math bank do not exist on that box; its tree is at `4b725c56`, which predates
 them. They arrive only by moving the code forward.
 
-And on prod the two are the same action: `server.js` calls
-`runPrismaMigrations()` on boot, so `pm2 restart manager-api` applies every
-newly-arrived migration in one go, with no gate between them.
+**Correction, proven during the 2026-08-21 run:** this is NOT true on prod.
+Prod sets `SKIP_DB_SYNC=1`, so boot logs "Skipping required Prisma table guard"
+and applies nothing. The restart brings up new code against the OLD schema, and
+migrations need an explicit `npx prisma migrate deploy`. That is a safer design
+than dev's auto-migrate — but it means the window between restart and migrate
+runs new code against a schema missing its tables, so keep the two adjacent.
 
 ## Scope
 
@@ -57,12 +60,16 @@ rows, so it is the one to have a backup for.
 
 ## Pre-flight
 
-1. **Database backup / PITR checkpoint.** Confirm one exists and note the
-   timestamp. The backfill is idempotent but it is still a write to six live
-   analytics tables.
-2. **`DEFAULT_PARENT_TIMEZONE`.** New in `.env.example` (`Asia/Kolkata`). Confirm
-   it is set in prod's `.env` before restart, or confirm the code defaults
-   safely without it.
+1. **Database backup / PITR checkpoint.** Prod is **DigitalOcean managed
+   Postgres** (`db-postgresql-blr1-93302`), not Supabase — DO takes automated
+   daily backups with PITR, so a restore point exists by default. For the
+   backfill specifically, snapshot the exact rows it will touch first; on
+   2026-08-21 that was only 93 rows across the six tables, saved to
+   `/root/rollup-backfill-reversal-20260821.json`. Reversal is
+   `UPDATE <t> SET kid_id=NULL WHERE id IN (...)`.
+2. ~~**`DEFAULT_PARENT_TIMEZONE`.**~~ **Resolved — no action needed.** It is
+   absent from prod's `.env`, and `src/utils/timezone.js:44` falls back to
+   `Asia/Kolkata`, which is the same value `.env.example` suggests.
 3. ~~**`npm install` adds a package named `i` (^0.3.7).**~~ **Done — fixed in
    `98f86536`.** It was worse than cruft: `i` was in `package.json` but absent
    from `package-lock.json` entirely, so manifest and lock disagreed. `npm ci`
@@ -83,15 +90,18 @@ rows, so it is the one to have a backup for.
 ```
 1. Back up / checkpoint the prod database.
 2. git -C /root/xiaozhi-esp32-server fetch && git log --oneline HEAD..origin/main
-   -> 20 code commits through 98f86536. Docs-only commits added after it are
-      expected and change nothing that ships; check the code delta, not the raw
-      count: `git diff --stat 4b725c56..origin/main -- main/` should stay at
-      58 files / +5421 / -414 unless someone landed real work.
+   -> check the code delta, not the raw commit count (docs commits keep
+      landing on top): `git diff --stat 4b725c56..origin/main -- main/` reads
+      49 files / +4935 / -410. (The 58 / +5421 / -414 figure quoted earlier in
+      this doc is the WHOLE-repo diff including docs/ — do not compare it
+      against a `-- main/` filter, as an earlier draft of this line did.)
 3. git pull
 4. cd main/manager-api-node && npm install
 5. npx prisma generate          <- MANDATORY, see below
-6. pm2 restart manager-api      <- this applies all 5 migrations
-7. pm2 logs manager-api --lines 50   -> confirm 5 migrations applied, no errors
+6. pm2 restart manager-api      <- new code, schema NOT yet migrated
+7. npx prisma migrate status    -> expect the 5 listed as not applied
+8. npx prisma migrate deploy    <- THIS applies them (SKIP_DB_SYNC=1 on prod)
+9. pm2 logs manager-api --lines 60   -> confirm no errors
 ```
 
 **Step 5 is not optional.** The prisma schema changed; without `prisma generate`
