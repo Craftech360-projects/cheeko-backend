@@ -1,4 +1,4 @@
-# Prod manager-api release: `4b725c56` → `e3205553`
+# Prod manager-api release: `4b725c56` → `98f86536`
 
 Plan for bringing production (`139.59.7.72`) up to the current manager-api,
 which is what "apply the pending migrations to prod" actually requires. Written
@@ -20,13 +20,17 @@ newly-arrived migration in one go, with no gate between them.
 
 ## Scope
 
-18 commits, 57 files, +5192 / -414.
+20 commits, 58 files, +5421 / -414.
+
+Target is `98f86536`, not `e3205553`: the two pre-flight fix-ups below are
+committed on top, so they ship with the release rather than being applied by
+hand on the box.
 
 | area | changed | needs restart |
 |---|---|---|
 | `manager-api-node/src` | 13 files | **yes** |
 | `manager-api-node/prisma` | 7 files (5 new migrations) | via restart |
-| `manager-api-node/tests`, `scripts` | 17 files | no |
+| `manager-api-node/tests`, `scripts` | 18 files | no |
 | `admin-dashboard`, `founder-dashboard-web` | 8 files | dashboards only |
 | `mqtt-gateway` | **doc only** | **no — leave gw-0..3 alone** |
 
@@ -59,10 +63,11 @@ rows, so it is the one to have a backup for.
 2. **`DEFAULT_PARENT_TIMEZONE`.** New in `.env.example` (`Asia/Kolkata`). Confirm
    it is set in prod's `.env` before restart, or confirm the code defaults
    safely without it.
-3. **`npm install` adds a package named `i` (^0.3.7).** It appears in
-   `package.json` without any import that needs it — almost certainly an
-   accidental `npm i` artefact. Decide before shipping: drop it from
-   `package.json` in a fix-up commit, or accept it. Do not discover it on prod.
+3. ~~**`npm install` adds a package named `i` (^0.3.7).**~~ **Done — fixed in
+   `98f86536`.** It was worse than cruft: `i` was in `package.json` but absent
+   from `package-lock.json` entirely, so manifest and lock disagreed. `npm ci`
+   would have failed outright and `npm install` would have rewritten the lock
+   mid-release. Nothing imports it. Removed, and the two files agree again.
 4. **Confirm which Manager API the EKS worker pods call.** Still unanswered.
    Reading the k8s Secret is blocked by the permission classifier, so this needs
    a human. If the pods point at this prod manager, they have been POSTing
@@ -78,7 +83,10 @@ rows, so it is the one to have a backup for.
 ```
 1. Back up / checkpoint the prod database.
 2. git -C /root/xiaozhi-esp32-server fetch && git log --oneline HEAD..origin/main
-   -> confirm exactly the 18 expected commits, nothing else
+   -> 20 code commits through 98f86536. Docs-only commits added after it are
+      expected and change nothing that ships; check the code delta, not the raw
+      count: `git diff --stat 4b725c56..origin/main -- main/` should stay at
+      58 files / +5421 / -414 unless someone landed real work.
 3. git pull
 4. cd main/manager-api-node && npm install
 5. npx prisma generate          <- MANDATORY, see below
@@ -102,11 +110,23 @@ step 5, since the fix landed on 2026-07-25 and prod is older.
    `INSERT`s missing ones, so Ginti, Tikku and Vanya get created and the other
    eight get current prompts. Note `TRANSFORM` is now empty (`e3205553`), so
    Ginti installs as authored with `daily_math`.
-2. **Rename the riddle character by hand.** The installer's `UPDATE` path sets
-   only the three prompt columns — **not `agent_name`** — so prod's row stays
-   `riddler`. This matters: `liveKitToollessCharacters` in the worker matches on
+2. **Rename the riddle character.** The installer's `UPDATE` path sets only the
+   three prompt columns — **not `agent_name`** — so prod's row stays `riddler`.
+   This matters: `liveKitToollessCharacters` in the worker matches on
    `agent_name` and now contains `"bujho"`, so a `riddler` row gets handed the
-   tools its own prompt forbids, silently. One guarded `UPDATE` fixes it.
+   tools its own prompt forbids, silently.
+
+   `scripts/rename-riddler-to-bujho.js` ships in this release for it:
+
+   ```
+   node scripts/rename-riddler-to-bujho.js            # report only
+   node scripts/rename-riddler-to-bujho.js --apply    # perform the rename
+   ```
+
+   It matches on `agent_code` rather than the display name, no-ops when the row
+   is already `Bujho`, refuses if `agent_code` is duplicated, guards the write
+   on the name it just read, and re-reads afterwards to confirm. Verified
+   report-only against the dev box, which is already renamed.
 
 Run these only after step 7 is verified. They are independently revertible; the
 release is not.
