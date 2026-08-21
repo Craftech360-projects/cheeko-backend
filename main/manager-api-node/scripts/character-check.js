@@ -19,7 +19,12 @@ const ago = (d) => {
 };
 
 (async () => {
-  const c = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  // Strip sslmode: newer pg treats 'require' as verify-full, which rejects the
+  // managed provider's chain. Verification is set on the ssl option instead.
+  const c = new Client({
+    connectionString: (process.env.DATABASE_URL || '').replace(/[?&]sslmode=[^&]*/, ''),
+    ssl: { rejectUnauthorized: false },
+  });
   await c.connect();
 
   const dev = (await c.query(
