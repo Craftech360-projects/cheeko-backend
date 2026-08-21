@@ -38,12 +38,16 @@ const FOLDER_CODE = {
 };
 const BANK_CSV = { quiz: 'quizzy/quizzy-questions.csv', riddle: 'bujho/bujho-riddles.csv', math: 'ginti/ginti-sums.csv' };
 
-// Per-folder prompt transforms applied before install. Ginti's pack MEMO type
-// is daily_math, but the worker only scores type=daily_quiz (quiz_state.go:257)
-// — Riddler already shares that type deliberately, so Ginti does too.
-const TRANSFORM = {
-  ginti: (text) => text.split('daily_math').join('daily_quiz'),
-};
+// Per-folder prompt transforms applied before install. Empty on purpose: a
+// transform here rewrites the prompt behind the author's back, so a diff of
+// pack against DB reports drift that is really this script's own doing.
+//
+// Ginti's daily_math used to be rewritten to daily_quiz, because the worker
+// scored only that one literal. But the label is also the scoreboard filename
+// and the kid_character_state state_type, so it put Quizzy, Bujho and Ginti on
+// one shared row that they overwrote in turn. picoclaw ec14877 scores
+// daily_riddle and daily_math too, so each character now installs as authored.
+const TRANSFORM = {};
 // Rows where the PACK is wrong and the DB is right. 6-8-L01-Q01-a8: the CSV's
 // accepted_answers carries an authoring note ("saat? no - sixty"); DB is clean.
 const SKIP_CODES = new Set(['6-8-L01-Q01-a8']);
