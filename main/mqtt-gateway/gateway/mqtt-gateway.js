@@ -202,6 +202,11 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence, deviceMac) {
       runtimeAgentName: data.runtimeAgentName || null,
       languageName: data.languageName || null,
       languageCode: data.languageCode || null,
+      // The character's sprite folder and the four state artwork URLs.
+      // This return is an explicit whitelist, so a field the lookup API adds
+      // is invisible to the gateway until it is named here - which is why a
+      // card_ai reply carried the character's NAME but never its artwork.
+      character: data.character || null,
     };
   } catch (error) {
     logger.error(
