@@ -86,11 +86,11 @@ const read = (p) => fs.readFileSync(p, 'utf8').trim();
       'INSERT INTO ai_agent_template (agent_code, agent_name, system_prompt, soul, greeting_prompt, ' +
       '  asr_model_id, vad_model_id, llm_model_id, tts_model_id, tts_voice_id, sarvam_voice_id, elevenlabs_voice_id, ' +
       '  mem_model_id, intent_model_id, lang_code, language, chat_history_conf, is_visible, sort) ' +
-      'SELECT $1, $2, $3, $4, $5, ' +
+      'SELECT $1::text, $2::text, $3::text, $4::text, $5::text, ' +
       '  asr_model_id, vad_model_id, llm_model_id, tts_model_id, tts_voice_id, sarvam_voice_id, elevenlabs_voice_id, ' +
       '  mem_model_id, intent_model_id, lang_code, language, chat_history_conf, 1, coalesce(sort,0)+100 ' +
       "FROM ai_agent_template WHERE agent_code='Cheeko' " +
-      '  AND NOT EXISTS (SELECT 1 FROM ai_agent_template t WHERE t.agent_code=$1)',
+      '  AND NOT EXISTS (SELECT 1 FROM ai_agent_template t WHERE t.agent_code=$1::text)',
       [w.code, w.name, sys, soul, greet]);
     console.log(res.rowCount === 1
       ? `  ${w.code.padEnd(16)} INSERTED as ${w.name}`
