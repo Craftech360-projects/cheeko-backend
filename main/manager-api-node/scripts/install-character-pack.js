@@ -87,7 +87,13 @@ const readCsvRows = (file) => {
 };
 
 (async () => {
-  const c = new Client({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+  // Strip sslmode: newer pg treats 'require' as an alias for 'verify-full', which
+  // rejects the managed provider's self-signed chain outright. Verification is
+  // configured on the ssl option below instead.
+  const c = new Client({
+    connectionString: (process.env.DATABASE_URL || '').replace(/[?&]sslmode=[^&]*/, ''),
+    ssl: { rejectUnauthorized: false },
+  });
   await c.connect();
   const stamp = new Date().toISOString().slice(0, 10);
   const bakDir = path.join(__dirname, '..', 'backups', 'character-pack-' + stamp);
