@@ -17,9 +17,17 @@ const PACK = process.argv[2];
 const APPLY = process.argv.includes('--apply');
 if (!PACK) { console.error('usage: node scripts/install-character-pack.js <pack-dir> [--apply]'); process.exit(1); }
 
-const EXPECTED_DB = ['shlrfpbqkfnxqcmuatvs']; // local project only, for now
+// Hostname allowlist. Extended 2026-08-21 for the first prod character install;
+// the dev box's DB1 is here too, since this script had never been pointed at it.
+// The allowlist stops a wrong-DB run, not a wrong-content one — the real guard
+// for prod is that --apply is opt-in and every write is a before-image UPDATE.
+const EXPECTED_DB = [
+  'shlrfpbqkfnxqcmuatvs',                  // local project
+  'tsiocygczplmnjpqmutc',                  // dev box DB1
+  'db-postgresql-blr1-93302',              // PROD (DigitalOcean managed)
+];
 if (!EXPECTED_DB.some((h) => (process.env.DATABASE_URL || '').includes(h))) {
-  console.error('REFUSING: DATABASE_URL is not the local project. Edit EXPECTED_DB deliberately to target another DB.');
+  console.error('REFUSING: DATABASE_URL is not a known target. Edit EXPECTED_DB deliberately to target another DB.');
   process.exit(1);
 }
 
