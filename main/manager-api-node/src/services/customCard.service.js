@@ -19,10 +19,23 @@ const { prisma } = require('../config/database');
 const uploadService = require('./upload.service');
 const rfidService = require('./rfid.service');
 const { normalizeMacAddress, packCodeForMac } = require('../utils/helpers');
+const { toLvglRgb565Bin } = require('../utils/lvglImage');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10 MB, matches the client-side check
+
+// Pictures are far smaller than recordings, and every one of them is decoded by
+// an ffmpeg subprocess, so the ceiling is lower than the audio one.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5 MB
+
+// A second ceiling, on the canvas rather than the file, because the two are only
+// loosely related: zlib will expand 5 MB of flat-colour PNG into gigabytes, and
+// the decoder allocates the whole frame before anything is scaled down. 40 MP is
+// far above any photograph that fits in 5 MB, and puts the worst case at roughly
+// 160 MB of RGBA per conversion — bounded in turn by the concurrency gate in
+// lvglImage.
+const MAX_IMAGE_PIXELS = 40 * 1000 * 1000;
 
 // Same ceiling as a catalogue content pack.
 const MAX_ITEMS = 10;
@@ -33,6 +46,15 @@ const MAX_ITEMS = 10;
 const ALLOWED_AUDIO = {
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav'
+};
+
+// The formats a parent's phone actually produces. Whatever arrives is converted
+// to an LVGL binary before it reaches storage, so this list bounds what we are
+// willing to decode, not what the toy can render.
+const ALLOWED_IMAGE = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg'
 };
 
 /**
@@ -97,6 +119,199 @@ const validateAudioUpload = (file, fallbackName) => {
 };
 
 /**
+ * Identify a picture from its magic bytes.
+ * PNG: the 8-byte signature. JPEG: SOI followed by the first marker.
+ * @returns {'.png'|'.jpg'|null}
+ */
+const sniffImageExtension = (buffer) => {
+  if (!buffer || buffer.length < 8) return null;
+
+  if (buffer.toString('hex', 0, 8) === '89504e470d0a1a0a') return '.png';
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return '.jpg';
+
+  return null;
+};
+
+/**
+ * A JPEG's dimensions, read by walking the marker segments to the frame header.
+ *
+ * Everything before SOS is a marker with a big-endian length, so the walk is a
+ * hop from one to the next until an SOFn turns up; SOFn carries precision, then
+ * height, then width. Null once entropy-coded data starts, or if the file runs
+ * out first — a JPEG whose frame header we cannot find is one ffmpeg will not
+ * decode either.
+ */
+const jpegDimensions = (buffer) => {
+  let offset = 2; // past SOI
+
+  while (offset + 4 <= buffer.length) {
+    if (buffer[offset] !== 0xff) return null;
+
+    const marker = buffer[offset + 1];
+    // Fill bytes, and the standalone markers that carry no payload.
+    if (marker === 0xff) {
+      offset += 1;
+      continue;
+    }
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+      offset += 2;
+      continue;
+    }
+    // Start of scan: the compressed data begins, and marker walking ends.
+    if (marker === 0xda) return null;
+
+    // SOF0..SOF15, minus the three markers that share the range but are not
+    // frame headers: DHT (c4), JPG (c8) and DAC (cc).
+    const isFrameHeader = marker >= 0xc0 && marker <= 0xcf
+      && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isFrameHeader) {
+      if (offset + 9 > buffer.length) return null;
+      return { width: buffer.readUInt16BE(offset + 7), height: buffer.readUInt16BE(offset + 5) };
+    }
+
+    const length = buffer.readUInt16BE(offset + 2);
+    if (length < 2) return null;
+    offset += 2 + length;
+  }
+
+  return null;
+};
+
+/**
+ * The picture's dimensions as its own header declares them, or null when they
+ * cannot be read. Cheap — no decoder involved, which is the whole point: this
+ * has to run before anything allocates a frame.
+ *
+ * PNG's IHDR is mandated to be the first chunk, so its width and height sit at
+ * fixed offsets.
+ */
+const imageDimensions = (buffer, sniffed) => {
+  if (sniffed === '.png') {
+    if (buffer.length < 24) return null;
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+  }
+  if (sniffed === '.jpg') return jpegDimensions(buffer);
+  return null;
+};
+
+/**
+ * Validate an uploaded picture. Same shape as validateAudioUpload: size, then
+ * magic bytes, then agreement with the extension.
+ *
+ * The order differs in one way — the sniff comes first and the extension is
+ * only a cross-check, because it is optional. Flutter's MultipartFile.fromBytes()
+ * sends no filename unless one is passed explicitly, and rejecting a perfectly
+ * good PNG for having no name is the bug the audio validator already had to work
+ * around with its `fallbackName`. The magic bytes are the control either way.
+ *
+ * @returns {{ext: string, mimeType: string}}
+ * @throws {ApiError} with a human-readable message for the app's error mapper
+ */
+const validateImageUpload = (file) => {
+  if (!file || !file.buffer || file.buffer.length === 0) {
+    throw new ApiError('That picture is empty. Please choose a different one.', 400);
+  }
+  if (file.buffer.length > MAX_IMAGE_BYTES) {
+    throw new ApiError('That picture is larger than 5 MB. Please choose a smaller one.', 400);
+  }
+
+  const sniffed = sniffImageExtension(file.buffer);
+  if (!sniffed) {
+    throw new ApiError('Only PNG and JPEG pictures are supported.', 400);
+  }
+
+  const ext = extensionOf(file.originalname);
+  if (ext && !ALLOWED_IMAGE[ext]) {
+    throw new ApiError('Only PNG and JPEG pictures are supported.', 400);
+  }
+  // Compared by MIME type so .jpeg and .jpg both agree with a sniffed JPEG.
+  if (ext && ALLOWED_IMAGE[ext] !== ALLOWED_IMAGE[sniffed]) {
+    throw new ApiError(`The file contents do not match its ${ext} extension.`, 400);
+  }
+
+  // Unreadable dimensions are let through rather than rejected: ffmpeg has to
+  // find the same header we could not, so it will fail on its own, and the
+  // timeout in lvglImage is the backstop.
+  const size = imageDimensions(file.buffer, sniffed);
+  if (size && size.width * size.height > MAX_IMAGE_PIXELS) {
+    throw new ApiError(
+      `That picture is ${size.width} by ${size.height} pixels, which is too large to process. Please choose a smaller one.`,
+      400
+    );
+  }
+
+  return { ext: sniffed, mimeType: ALLOWED_IMAGE[sniffed] };
+};
+
+/**
+ * Convert a validated picture into the LVGL binary the toy renders.
+ *
+ * Kept separate from the upload so a batch can convert everything before storing
+ * anything: this is the last step that can fail cheaply, and a bad third picture
+ * must not leave the first two sitting in the bucket.
+ *
+ * A decode failure past validation means a file whose header is honest but whose
+ * body is not — a truncated PNG, say. That is the parent's file being wrong, so
+ * it is a 400 in the same words as an unsupported type; anything else (ffmpeg
+ * missing, timing out) is ours and stays a 500.
+ */
+const toDeviceImage = async (file) => {
+  try {
+    return await toLvglRgb565Bin(file.buffer);
+  } catch (error) {
+    if (error.decodeFailed) {
+      logger.warn(`[CUSTOM-CARD] Image decode failed: ${error.message}`);
+      throw new ApiError('Only PNG and JPEG pictures are supported.', 400);
+    }
+    throw error;
+  }
+};
+
+/** Store a converted picture and return the public URL to hang on the item. */
+const uploadDeviceImage = async (bin, mac) => {
+  const { url } = await uploadService.uploadCustomCardImage(bin, mac);
+  return url;
+};
+
+/**
+ * Pair the multipart parts of an add request.
+ *
+ * A picture is matched to a recording by its field-name index — `image_2` goes
+ * with the second `files` part — never by the order the parts arrive in. Part
+ * ordering is not guaranteed across HTTP clients, and positional pairing would
+ * silently put one recording's picture on another. `image` is the companion of
+ * the single-part `file` shape.
+ *
+ * @param {Object} filesByField - multer's req.files
+ * @returns {{uploads: Array, images: Array}} images[i] belongs to uploads[i],
+ *   or is null
+ */
+const pairCustomCardUploads = (filesByField = {}) => {
+  const many = filesByField.files || [];
+  const single = filesByField.file || [];
+  const lone = filesByField.image || [];
+
+  // An image_N past the end of `files`, or a bare `image` with no `file`, is a
+  // client that mis-numbered its parts. Dropping the picture silently would look
+  // like the upload having worked.
+  const numberedOrphan = Object.keys(filesByField).some((field) => {
+    const match = /^image_(\d+)$/.exec(field);
+    return match && Number(match[1]) > many.length;
+  });
+  if (numberedOrphan || (lone.length > 0 && single.length === 0)) {
+    throw new ApiError('Each picture must go with a recording.', 400);
+  }
+
+  return {
+    uploads: [...many, ...single],
+    images: [
+      ...many.map((_, index) => (filesByField[`image_${index + 1}`] || [])[0] || null),
+      ...single.map(() => lone[0] || null)
+    ]
+  };
+};
+
+/**
  * Verify the device belongs to the authenticated parent.
  * Answers "not found" rather than "forbidden" so the endpoint cannot be used to
  * probe which MACs are registered to other parents.
@@ -154,7 +369,11 @@ const serializePack = (device, pack, items = []) => {
           itemNumber: item.item_number,
           title: item.title,
           fileUrl: item.audio_url,
-          sizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null
+          sizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null,
+          // null when no artwork is set. Public CloudFront URL, same rules as
+          // fileUrl. Deliberately not mirrored at pack level: the pack-level
+          // fields describe items[0] and predate artwork.
+          imageUrl: item.image_url || null
         }))
       }
       : null
@@ -169,7 +388,8 @@ const CONTENT_ITEM_FIELDS = {
   item_number: true,
   title: true,
   audio_url: true,
-  audio_size_bytes: true
+  audio_size_bytes: true,
+  image_url: true
 };
 
 const loadPackItems = (packId) =>
@@ -190,13 +410,16 @@ const keyFromUrl = (url) => (url ? String(url).split('/').slice(3).join('/') : n
  * would go silent with nothing on the server to explain why. An orphaned object
  * is the cheaper failure.
  *
- * deleteCustomCardAudio ignores keys outside the customcard prefix, which is
+ * deleteCustomCardObject ignores keys outside the customcard prefix, which is
  * what stops a pack that somehow references catalogue audio from deleting it.
+ * Pictures live under the same prefix, so they are swept by the same guard.
  */
-const deleteOrphanedAudio = async (before, keptUrls) => {
+const deleteOrphanedObjects = async (before, keptUrls) => {
   for (const item of before) {
-    if (item.audio_url && !keptUrls.has(item.audio_url)) {
-      await uploadService.deleteCustomCardAudio(keyFromUrl(item.audio_url));
+    for (const url of [item.audio_url, item.image_url]) {
+      if (url && !keptUrls.has(url)) {
+        await uploadService.deleteCustomCardObject(keyFromUrl(url));
+      }
     }
   }
 };
@@ -250,9 +473,11 @@ const writePackItems = async (device, pack, items, userId) => {
   const before = await loadPackItems(pack.id);
   const nextVersion = String(Number(pack.version || 0) + 1);
   // Hash covers the whole set, so adding, removing or reordering all register as
-  // a change — not just a different first recording.
+  // a change — not just a different first recording. The picture is part of it:
+  // without it, changing only the artwork leaves the hash where it was, the tap
+  // handshake answers card_up_to_date, and the toy never fetches the new file.
   const contentHash = createHash('sha256')
-    .update(items.map((item) => `${item.itemNumber}:${item.audioUrl}`).join('|'))
+    .update(items.map((item) => `${item.itemNumber}:${item.audioUrl}:${item.imageUrl || ''}`).join('|'))
     .digest('hex');
 
   await rfidService.updateContentPack({
@@ -263,7 +488,10 @@ const writePackItems = async (device, pack, items, userId) => {
     active: true
   }, userId);
 
-  await deleteOrphanedAudio(before, new Set(items.map((item) => item.audioUrl)));
+  await deleteOrphanedObjects(
+    before,
+    new Set(items.flatMap((item) => [item.audioUrl, item.imageUrl]).filter(Boolean))
+  );
 
   const saved = await prisma.rfid_content_pack.findFirst({ where: { id: pack.id } });
   const savedItems = await loadPackItems(pack.id);
@@ -279,8 +507,33 @@ const toItemPayload = (item) => ({
   itemNumber: item.item_number,
   title: item.title,
   audioUrl: item.audio_url,
-  audioSizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null
+  audioSizeBytes: item.audio_size_bytes ? Number(item.audio_size_bytes) : null,
+  // Always present, never undefined. updateContentPack re-matches rows by
+  // item_number and falls back to the existing row's value for anything left
+  // undefined, so on a renumber an absent imageUrl would graft the picture of
+  // whichever item used to hold that number onto this one.
+  imageUrl: item.image_url || null
 });
+
+/**
+ * The device, pack and item a per-item request names, or the 404 that says which
+ * of the three was missing.
+ */
+const loadTargetItem = async (userId, mac, itemNumber) => {
+  const device = await assertDeviceOwnedByUser(userId, mac);
+  const pack = await findPackForMac(device.mac_address);
+  if (!pack) {
+    throw new ApiError('This device has no custom card content.', 404);
+  }
+
+  const existing = await loadPackItems(pack.id);
+  const target = existing.find((item) => item.item_number === Number(itemNumber));
+  if (!target) {
+    throw new ApiError('That recording could not be found on this card.', 404);
+  }
+
+  return { device, pack, existing, target };
+};
 
 /**
  * Add one or more recordings to the device's custom card.
@@ -291,8 +544,10 @@ const toItemPayload = (item) => ({
  * truncated upload reads as a bug from the app.
  *
  * @param {Array|Object} files - multer file object(s)
+ * @param {{title?: string, images?: Array}} [options] - images[i] is the
+ *   optional picture for files[i], already paired by pairCustomCardUploads
  */
-const addCustomCardContent = async (userId, mac, files, { title } = {}) => {
+const addCustomCardContent = async (userId, mac, files, { title, images = [] } = {}) => {
   const uploads = (Array.isArray(files) ? files : [files]).filter(Boolean);
   if (uploads.length === 0) {
     throw new ApiError('Please choose a recording to upload.', 400);
@@ -301,7 +556,14 @@ const addCustomCardContent = async (userId, mac, files, { title } = {}) => {
   const device = await assertDeviceOwnedByUser(userId, mac);
   // Validate every file before uploading any, so a bad third file cannot leave
   // the first two sitting in storage.
-  const validated = uploads.map((file) => ({ file, ...validateAudioUpload(file, title) }));
+  const validated = uploads.map((file, index) => ({
+    file,
+    image: images[index] || null,
+    ...validateAudioUpload(file, title)
+  }));
+  for (const entry of validated) {
+    if (entry.image) validateImageUpload(entry.image);
+  }
 
   const pack = await ensurePackForDevice(device, userId);
   const existing = await loadPackItems(pack.id);
@@ -311,6 +573,12 @@ const addCustomCardContent = async (userId, mac, files, { title } = {}) => {
       `This card holds up to ${MAX_ITEMS} recordings. It already has ${existing.length}, so ${validated.length} more will not fit — remove one first.`,
       400
     );
+  }
+
+  // Decode before any upload, for the same all-or-nothing reason as validation:
+  // ffmpeg failing on the third picture must not leave two in the bucket.
+  for (const entry of validated) {
+    if (entry.image) entry.imageBin = await toDeviceImage(entry.image);
   }
 
   const appended = [];
@@ -327,7 +595,8 @@ const addCustomCardContent = async (userId, mac, files, { title } = {}) => {
       itemNumber,
       title: entry.file.originalname || title || `Recording ${itemNumber}`,
       audioUrl: url,
-      audioSizeBytes: entry.file.buffer.length
+      audioSizeBytes: entry.file.buffer.length,
+      imageUrl: entry.imageBin ? await uploadDeviceImage(entry.imageBin, device.mac_address) : null
     });
   }
 
@@ -341,25 +610,22 @@ const addCustomCardContent = async (userId, mac, files, { title } = {}) => {
  * silently move it to position 3 and reorder the card under the parent. Here the
  * item number is preserved and only that slot's audio changes. The old object is
  * removed by the orphan sweep in writePackItems.
+ *
+ * A picture may ride along, but is optional: this endpoint replaces the
+ * recording, so sending no picture keeps the one already on the item rather than
+ * clearing it. Artwork on its own goes through setCustomCardItemImage.
  */
-const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title } = {}) => {
+const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title, image } = {}) => {
   if (!file) {
     throw new ApiError('Please choose a recording to upload.', 400);
   }
 
-  const device = await assertDeviceOwnedByUser(userId, mac);
+  const { device, pack, existing } = await loadTargetItem(userId, mac, itemNumber);
+
   const { ext, mimeType } = validateAudioUpload(file, title);
+  if (image) validateImageUpload(image);
 
-  const pack = await findPackForMac(device.mac_address);
-  if (!pack) {
-    throw new ApiError('This device has no custom card content.', 404);
-  }
-
-  const existing = await loadPackItems(pack.id);
-  const target = existing.find((item) => item.item_number === Number(itemNumber));
-  if (!target) {
-    throw new ApiError('That recording could not be found on this card.', 404);
-  }
+  const imageBin = image ? await toDeviceImage(image) : null;
 
   const { url } = await uploadService.uploadCustomCardAudio(
     file.buffer,
@@ -367,6 +633,7 @@ const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title } = 
     file.originalname || `recording${ext}`,
     mimeType
   );
+  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, device.mac_address) : null;
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -374,8 +641,50 @@ const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title } = 
         itemNumber: item.item_number,
         title: file.originalname || title || item.title,
         audioUrl: url,
-        audioSizeBytes: file.buffer.length
+        audioSizeBytes: file.buffer.length,
+        imageUrl: imageUrl || item.image_url || null
       }
+      : toItemPayload(item)
+  ));
+
+  return writePackItems(device, pack, items, userId);
+};
+
+/**
+ * Set one item's artwork without touching its recording.
+ *
+ * Goes through writePackItems like every other write, so the version bump, the
+ * content hash and the sweep of the picture it replaces all happen in one place.
+ */
+const setCustomCardItemImage = async (userId, mac, itemNumber, file) => {
+  if (!file) {
+    throw new ApiError('Please choose a picture to upload.', 400);
+  }
+
+  const { device, pack, existing } = await loadTargetItem(userId, mac, itemNumber);
+  validateImageUpload(file);
+
+  const imageUrl = await uploadDeviceImage(await toDeviceImage(file), device.mac_address);
+
+  const items = existing.map((item) => (
+    item.item_number === Number(itemNumber)
+      ? { ...toItemPayload(item), imageUrl }
+      : toItemPayload(item)
+  ));
+
+  return writePackItems(device, pack, items, userId);
+};
+
+/**
+ * Clear one item's artwork, keeping the recording. Idempotent — an item with no
+ * picture is not an error, it is already in the state being asked for.
+ */
+const clearCustomCardItemImage = async (userId, mac, itemNumber) => {
+  const { device, pack, existing } = await loadTargetItem(userId, mac, itemNumber);
+
+  const items = existing.map((item) => (
+    item.item_number === Number(itemNumber)
+      ? { ...toItemPayload(item), imageUrl: null }
       : toItemPayload(item)
   ));
 
@@ -412,9 +721,17 @@ module.exports = {
   addCustomCardContent,
   replaceCustomCardItem,
   deleteCustomCardItem,
+  setCustomCardItemImage,
+  clearCustomCardItemImage,
+  pairCustomCardUploads,
   MAX_ITEMS,
   // exported for tests
   validateAudioUpload,
+  validateImageUpload,
   sniffAudioExtension,
-  MAX_UPLOAD_BYTES
+  sniffImageExtension,
+  imageDimensions,
+  MAX_UPLOAD_BYTES,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_PIXELS
 };

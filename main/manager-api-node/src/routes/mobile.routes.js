@@ -28,15 +28,44 @@ const kidAvatarUpload = multer({
     },
 });
 
-// Custom card audio. The 10 MB ceiling mirrors the client-side check; the real
-// enforcement (extension + sniffed magic bytes + size) lives in customCard.service
-// so a forged Content-Type cannot get past it. multer's own limit only exists to
-// stop us buffering an oversized body in memory, and its error is remapped to a
-// 400 with a readable sentence rather than the default 500/LIMIT_FILE_SIZE.
+// Custom card audio and artwork. The 10 MB ceiling mirrors the client-side check
+// for a recording; a picture's own 5 MB ceiling is enforced in the service,
+// because multer's limit is per-request and cannot differ by field. The real
+// enforcement (extension + sniffed magic bytes + size) lives in
+// customCard.service so a forged Content-Type cannot get past it. multer's limit
+// only exists to stop us buffering an oversized body in memory, and its error is
+// remapped to a 400 with a readable sentence rather than the default
+// 500/LIMIT_FILE_SIZE.
+//
+// The filter is a cheap first pass, not the control, which is why
+// application/octet-stream is on the list: Flutter sends it for any part built
+// from bytes, and rejecting it would turn away perfectly good uploads. Magic
+// bytes decide in the service.
+const CUSTOM_CARD_MIMES = [
+    'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/wave',
+    'image/png', 'image/jpeg', 'image/jpg',
+    'application/octet-stream',
+];
+
 const customCardUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+        if (CUSTOM_CARD_MIMES.includes((file.mimetype || '').toLowerCase())) {
+            cb(null, true);
+        } else {
+            cb(new ApiError('Only MP3 or WAV recordings and PNG or JPEG pictures can be uploaded.', 400));
+        }
+    },
 });
+
+// image_1..image_10 pair with the files parts by field-name index, `image` with
+// the single-file `file` part. Built once so POST and the service agree on the
+// field names.
+const CUSTOM_CARD_IMAGE_FIELDS = [
+    ...Array.from({ length: customCardService.MAX_ITEMS }, (_, i) => ({ name: `image_${i + 1}`, maxCount: 1 })),
+    { name: 'image', maxCount: 1 },
+];
 
 const handleUploadErrors = (uploadMiddleware) => (req, res, next) => {
     uploadMiddleware(req, res, (err) => {
@@ -283,14 +312,16 @@ router.get('/devices/:mac/custom-card', asyncHandler(async (req, res) => {
 // Adds recordings to the device's pack, creating it on first upload. Appends up
 // to MAX_ITEMS so a parent can build the card up over several sessions.
 // Accepts either `files` (up to 10) or a single `file`, so the shipped app's
-// one-file-per-upload call keeps working unchanged.
+// one-file-per-upload call keeps working unchanged. Each recording may carry one
+// picture: `image_N` for the Nth `files` part, `image` for `file`.
 router.post('/devices/:mac/custom-card/content',
     handleUploadErrors(customCardUpload.fields([
         { name: 'files', maxCount: customCardService.MAX_ITEMS },
         { name: 'file', maxCount: 1 },
+        ...CUSTOM_CARD_IMAGE_FIELDS,
     ])),
     asyncHandler(async (req, res) => {
-        const uploads = [...(req.files?.files || []), ...(req.files?.file || [])];
+        const { uploads, images } = customCardService.pairCustomCardUploads(req.files);
         if (uploads.length === 0) {
             return badRequest(res, 'Please choose a recording to upload.');
         }
@@ -306,7 +337,7 @@ router.post('/devices/:mac/custom-card/content',
             req.mobileUser.id,
             req.params.mac,
             uploads,
-            { title: req.body?.title }
+            { title: req.body?.title, images }
         );
 
         res.status(201).json({ code: 0, msg: 'success', data: card });
@@ -314,16 +345,22 @@ router.post('/devices/:mac/custom-card/content',
 );
 
 // Swaps the audio at one position. Unlike delete + re-add, the item keeps its
-// number, so the card does not reorder under the parent.
+// number, so the card does not reorder under the parent. A picture may ride
+// along; sending one alone belongs on the dedicated route below, because this
+// endpoint's meaning is "replace the recording".
 router.put('/devices/:mac/custom-card/content/:itemNumber',
     handleUploadErrors(customCardUpload.fields([
         { name: 'file', maxCount: 1 },
         { name: 'files', maxCount: 1 },
+        { name: 'image', maxCount: 1 },
     ])),
     asyncHandler(async (req, res) => {
         const upload = (req.files?.file || [])[0] || (req.files?.files || [])[0];
+        const image = (req.files?.image || [])[0];
         if (!upload) {
-            return badRequest(res, 'Please choose a recording to upload.');
+            return badRequest(res, image
+                ? 'To change only the picture, use the picture endpoint for this recording.'
+                : 'Please choose a recording to upload.');
         }
 
         const card = await customCardService.replaceCustomCardItem(
@@ -331,7 +368,40 @@ router.put('/devices/:mac/custom-card/content/:itemNumber',
             req.params.mac,
             req.params.itemNumber,
             upload,
-            { title: req.body?.title }
+            { title: req.body?.title, image }
+        );
+        success(res, card);
+    })
+);
+
+// Changes one recording's artwork without re-uploading the recording itself.
+router.put('/devices/:mac/custom-card/content/:itemNumber/image',
+    handleUploadErrors(customCardUpload.fields([
+        { name: 'image', maxCount: 1 },
+    ])),
+    asyncHandler(async (req, res) => {
+        const image = (req.files?.image || [])[0];
+        if (!image) {
+            return badRequest(res, 'Please choose a picture to upload.');
+        }
+
+        const card = await customCardService.setCustomCardItemImage(
+            req.mobileUser.id,
+            req.params.mac,
+            req.params.itemNumber,
+            image
+        );
+        success(res, card);
+    })
+);
+
+// Clears one recording's artwork, keeping the recording.
+router.delete('/devices/:mac/custom-card/content/:itemNumber/image',
+    asyncHandler(async (req, res) => {
+        const card = await customCardService.clearCustomCardItemImage(
+            req.mobileUser.id,
+            req.params.mac,
+            req.params.itemNumber
         );
         success(res, card);
     })
