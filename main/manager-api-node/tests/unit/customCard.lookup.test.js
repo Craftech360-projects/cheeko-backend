@@ -77,6 +77,24 @@ describe('custom card lookup', () => {
     ]);
   });
 
+  it('carries a recording\'s artwork through to the device', async () => {
+    const withImage = { ...ITEM, image_url: 'https://cdn.example/customcard_aabbccddeeff/y.bin' };
+    mockPrisma.$queryRaw.mockImplementation((strings) => {
+      const sql = Array.isArray(strings) ? strings.join(' ') : String(strings);
+      return Promise.resolve(sql.includes('information_schema') ? [] : [withImage]);
+    });
+    mockPrisma.custom_card.findFirst.mockResolvedValue({ id: BigInt(5), rfid_uid: UID });
+    mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(PACK);
+
+    const result = await rfidService.lookupCardByUid(UID, MAC);
+
+    // The gateway turns items[].imageUrl into the images list the toy downloads;
+    // dropping it here is invisible until a card plays with a blank screen.
+    expect(result.items).toEqual([
+      expect.objectContaining({ sequence: 1, imageUrl: withImage.image_url })
+    ]);
+  });
+
   it('reports an issued card with no recording as unknown', async () => {
     mockPrisma.custom_card.findFirst.mockResolvedValue({ id: BigInt(5), rfid_uid: UID });
     mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(null);

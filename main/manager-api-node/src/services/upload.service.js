@@ -358,15 +358,48 @@ async function uploadCustomCardAudio(fileBuffer, deviceMac, filename, mimeType) 
 }
 
 /**
- * Delete a retired custom card audio object. Best-effort: an orphaned object is
- * preferable to failing a request whose DB write already succeeded.
+ * Upload a converted custom card picture to S3, alongside that device's audio.
+ *
+ * Same prefix as the recordings on purpose: deleteCustomCardObject only touches
+ * keys under `customcard`, so sharing it means the existing orphan sweep covers
+ * pictures too, and a picture stays inside its own device's namespace.
+ *
+ * The body is already an LVGL binary — octet-stream, not an image type, because
+ * that is what the toy downloads and writes to the SD card verbatim.
+ *
+ * The key is a fresh UUID every time. CloudFront caches these for a year, so a
+ * deterministic key would have a replaced picture serve the old bytes forever.
+ * @param {Buffer} binBuffer - LVGL RGB565 binary
+ * @param {string} deviceMac - MAC of the device the picture belongs to
+ * @returns {Promise<{s3Key: string, url: string}>}
  */
-async function deleteCustomCardAudio(s3Key) {
+async function uploadCustomCardImage(binBuffer, deviceMac) {
+  const s3Key = `${customCardFolder(deviceMac)}/${randomUUID()}.bin`;
+
+  await s3Client.send(new PutObjectCommand({
+    Bucket: S3_BUCKET,
+    Key: s3Key,
+    Body: binBuffer,
+    ContentType: 'application/octet-stream',
+    CacheControl: 'max-age=31536000'
+  }));
+
+  const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
+  logger.info('Custom card image uploaded to S3', { s3Key, deviceMac, size: binBuffer.length });
+  return { s3Key, url };
+}
+
+/**
+ * Delete a retired custom card object — a recording or a picture. Best-effort:
+ * an orphaned object is preferable to failing a request whose DB write already
+ * succeeded.
+ */
+async function deleteCustomCardObject(s3Key) {
   if (!s3Key || !s3Key.startsWith('customcard') || s3Key.includes('..')) return;
   try {
     await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: s3Key }));
   } catch (error) {
-    logger.warn(`Failed to delete retired custom card audio ${s3Key}: ${error.message}`);
+    logger.warn(`Failed to delete retired custom card object ${s3Key}: ${error.message}`);
   }
 }
 
@@ -379,5 +412,8 @@ module.exports = {
   listImagineImages,
   listImagineImagesForKid,
   uploadCustomCardAudio,
-  deleteCustomCardAudio
+  uploadCustomCardImage,
+  deleteCustomCardObject,
+  // Pre-image name, kept so nothing that still calls it breaks.
+  deleteCustomCardAudio: deleteCustomCardObject
 };
