@@ -1677,6 +1677,11 @@ model kid_wonder_question {
   kid_id     BigInt?
   question   String
   asked_at   DateTime @default(now()) @db.Timestamptz(6)
+  /// Stamped when the question is served back to the child. Null means "still
+  /// owed": the serving read takes the newest null one, so a question is
+  /// recalled once and then retires. Without it the newest row was recalled at
+  /// the start of every session until a different one happened to be stored.
+  recalled_at DateTime? @db.Timestamptz(6)
 
   @@index([kid_id, asked_at(sort: Desc)], map: "idx_kid_wonder_kid_time")
   @@index([device_mac, asked_at(sort: Desc)], map: "idx_kid_wonder_device_time")
