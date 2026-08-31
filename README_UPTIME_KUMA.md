@@ -21,9 +21,38 @@ Not using `host.docker.internal`.
 
 ## Uptime Kuma Runtime
 
+Kuma moved off this box to a dedicated EC2 instance in May 2026. The details below are current as
+of 2026-08-31.
+
+- Host: EC2 `16.112.52.71` (SSH alias `aws-kuma-production`), ap-south-2, instance
+  `i-0c1d60b5df6d3220d`, user `ec2-user`, key `~/.ssh/kuma-ap-south-2.pem`
+- Elastic IP: `eipalloc-0f0a1b78be1cf3404` — the address is permanent, do not expect it to change
 - Container name: `uptime-kuma`
-- UI: `http://127.0.0.1:3001`
-- DB path in container: `/app/data/kuma.db`
+- UI: `http://16.112.52.71:3001` — reachable **only from the admin CIDR**, see below
+- DB path in container: `/app/data/kuma.db`; on host `/opt/uptime-kuma/data`
+- Backups: `/opt/uptime-kuma/backups`, nightly 02:30 UTC via the `kuma-backup.timer` systemd unit,
+  7-day retention. `cronie` is not installed on this host — use systemd timers, not `/etc/cron.d`.
+
+### Network access
+
+Security group `sg-0ca72b10de2f2e764` allows ports 22 and 3001 from the admin CIDR only. If SSH
+starts hanging, your public IP has changed. Re-open it from anywhere (the AWS API is not
+IP-restricted):
+
+```bash
+IP=$(curl -s https://checkip.amazonaws.com)
+aws ec2 authorize-security-group-ingress --region ap-south-2 --group-id sg-0ca72b10de2f2e764 \
+  --ip-permissions "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=$IP/32,Description=admin-ssh}]" \
+                   "IpProtocol=tcp,FromPort=3001,ToPort=3001,IpRanges=[{CidrIp=$IP/32,Description=admin-kuma-ui}]"
+```
+
+### Monitor inventory
+
+The table further down this file is **stale** and is being replaced. The current design and rollout
+plan live in the picoclaw repo:
+
+- `docs/monitoring/monitoring-redesign-design.md`
+- `docs/monitoring/monitoring-redesign-plan.md`
 
 ## Manager API Health Endpoints
 
