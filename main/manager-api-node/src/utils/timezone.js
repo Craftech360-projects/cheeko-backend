@@ -33,6 +33,11 @@ function isValidTimezone(value) {
     if (typeof value !== 'string') return false;
     const name = value.trim();
     if (!name || name.length > MAX_TIMEZONE_LENGTH) return false;
+    // An offset is not a zone. V8 accepts '+05:30' as a timeZone now (it did not
+    // when this was written), and a fixed offset cannot follow DST — a parent
+    // stored as '+02:00' would have their day cut at the wrong hour for half the
+    // year. Zone names start with a letter; offsets start with + or -.
+    if (!/^[A-Za-z]/.test(name)) return false;
     try {
         new Intl.DateTimeFormat('en-US', { timeZone: name });
         return true;
