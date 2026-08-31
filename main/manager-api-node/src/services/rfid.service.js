@@ -853,6 +853,61 @@ const buildContentPackResponse = async (pack, normalizedUid) => {
  *   device's own and there is nothing to look up without it.
  * @returns {Promise<Object>} Card mapping with question data
  */
+/**
+ * The four conversation-state sprites for an AI character, if it has artwork.
+ *
+ * The device shows a different picture while connecting, listening, thinking
+ * and talking, read from /sdcard/cheeko/chars/<sd_folder>/. Returning the URLs
+ * here is what lets a character that only exists in the backend reach a child's
+ * device - before this, the sprites had to be copied onto the SD card by hand.
+ *
+ * ALL FOUR OR NOTHING. A half-populated folder is a character that loses its
+ * face partway through talking, which reads as a crash rather than as missing
+ * content. The firmware enforces the same rule and ignores a short set.
+ *
+ * Never throws: artwork is an enhancement, so a lookup failure must not stop a
+ * child talking to the character. Returns null and the conversation runs with
+ * the drawn face.
+ */
+const buildCharacterArt = async (agentName) => {
+  if (!agentName) return null;
+  try {
+    const tpl = await prisma.ai_agent_template.findFirst({
+      // Case-insensitive: agent_name is capitalised for most characters
+      // ("Cheeko", "Tara") but not all ("quizzy"), and the name on the card is
+      // free text. An exact match would silently give the character no face.
+      where: { agent_name: { equals: agentName, mode: 'insensitive' } },
+      select: {
+        sd_folder: true,
+        art_version: true,
+        art_connect_url: true,
+        art_listen_url: true,
+        art_think_url: true,
+        art_talk_url: true,
+      },
+    });
+    if (!tpl || !tpl.sd_folder) return null;
+    if (!tpl.art_connect_url || !tpl.art_listen_url ||
+        !tpl.art_think_url || !tpl.art_talk_url) {
+      logger.info(`[RFID-LOOKUP] Character '${agentName}' has incomplete artwork - omitting`);
+      return null;
+    }
+    return {
+      folder: tpl.sd_folder,
+      version: tpl.art_version || 1,
+      assets: [
+        { state: 'connect', url: tpl.art_connect_url },
+        { state: 'listen', url: tpl.art_listen_url },
+        { state: 'think', url: tpl.art_think_url },
+        { state: 'talk', url: tpl.art_talk_url },
+      ],
+    };
+  } catch (err) {
+    logger.warn(`[RFID-LOOKUP] Character art lookup failed for '${agentName}': ${err.message}`);
+    return null;
+  }
+};
+
 const lookupCardByUid = async (rfidUid, mac) => {
   const normalizedUid = rfidUid.toUpperCase().replace(/[:-]/g, '');
   logger.info(`[RFID-LOOKUP] lookupCardByUid: uid=${normalizedUid}, mac=${mac || 'none'}`);
@@ -893,6 +948,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
         const actionData = series.action_data || {};
         const agentName = actionData.agent_name || null;
         logger.info(`[RFID-LOOKUP] Series AI card: series_id=${series.id}, agent=${agentName || 'default'}`);
+        const seriesCharacter = await buildCharacterArt(agentName);
         return {
           rfid_uid: normalizedUid,
           source: 'bulk_range',
@@ -903,6 +959,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
           actionType: agentName ? 'agent' : null,
           actionData: actionData,
           agentName: agentName,
+          character: seriesCharacter,
         };
       }
 
@@ -998,6 +1055,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
     // workers exist. Upgrade path: plumb device user_id in and resolve the ai_agent row by name.
     const runtimeAgentName = resolveRuntimeAgentName({ runtime_agent_name: actionData.runtime_agent_name || null });
     logger.info(`[RFID-LOOKUP] AI card detected (no content_pack_id): uid=${normalizedUid}, agent=${agentName || 'default'}, runtimeAgentName=${runtimeAgentName}, language=${languageCode || 'default'}`);
+    const character = await buildCharacterArt(agentName);
     return {
       rfid_uid: normalizedUid,
       contentType: 'prompt',
@@ -1012,6 +1070,7 @@ const lookupCardByUid = async (rfidUid, mac) => {
       languageCode: languageCode,
       languageName: languageName,
       voiceId: voiceId,
+      character: character,
     };
   }
 

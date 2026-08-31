@@ -202,6 +202,11 @@ async function fetchRfidContentFromManagerApi(rfidUid, sequence, deviceMac) {
       runtimeAgentName: data.runtimeAgentName || null,
       languageName: data.languageName || null,
       languageCode: data.languageCode || null,
+      // The character's sprite folder and the four state artwork URLs.
+      // This return is an explicit whitelist, so a field the lookup API adds
+      // is invisible to the gateway until it is named here - which is why a
+      // card_ai reply carried the character's NAME but never its artwork.
+      character: data.character || null,
     };
   } catch (error) {
     logger.error(
@@ -1252,7 +1257,21 @@ class MQTTGateway {
             this.mqttPublish(`devices/p2p/${clientId}`, {
               type: "card_ai",
               rfid_uid: rfidUid,
-              ...(cardAgentName ? { agent_name: cardAgentName } : {}),
+              // The firmware reads agentName (camelCase) - agent_name alone was
+              // silently dropped, so a character card started a conversation as
+              // whoever happened to be selected instead of the card's character.
+              // Both keys go out: camelCase for the firmware, snake_case so any
+              // older build still behaves as before.
+              ...(cardAgentName
+                ? { agentName: cardAgentName, agent_name: cardAgentName }
+                : {}),
+              // The character's sprite URLs. The other card_ai sender (the
+              // active-connection path in virtual-connection.js) spreads the
+              // whole lookup payload and so has always included these; this
+              // hand-built one did not. Without them the device has nothing to
+              // download and falls back to the default face - and this is the
+              // path EVERY tap takes when no session is already open.
+              ...(rfidContent.character ? { character: rfidContent.character } : {}),
             });
             return;
           }

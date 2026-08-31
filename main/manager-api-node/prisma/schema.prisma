@@ -90,6 +90,16 @@ model ai_agent_template {
 
   @@index([agent_code])
   @@index([is_visible])
+  // Character conversation artwork. The device reads four state sprites from
+  // /sdcard/cheeko/chars/<sd_folder>/. sd_folder is capped at 8 characters
+  // because the SD card is mounted without long-filename support - a longer
+  // name is not slow, it is invisible.
+  sd_folder          String?   @db.VarChar(8)
+  art_version        Int?      @default(1)
+  art_connect_url    String?
+  art_listen_url     String?
+  art_think_url      String?
+  art_talk_url       String?
 }
 
 model ai_device {
