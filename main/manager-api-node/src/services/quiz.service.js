@@ -437,8 +437,13 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // Diagnostic-grade, like the attempt log: the quiz must still run if this read
   // fails. A missing wonder question costs a warm opening line, nothing more.
   let wonderQuestion = null;
+  let wonderHistory = [];
   try {
     wonderQuestion = await takePendingWonderQuestion(context);
+    // What she has already asked. Without it "leave them a different one" has no
+    // referent: the model reads its own session summaries and hands back the
+    // same question in slightly different words.
+    wonderHistory = await recentWonderQuestions(context);
   } catch (error) {
     logger.warn(`[${tables.label}] wonder question read failed for ${deviceMac}: ${error.message}`);
   }
@@ -449,6 +454,8 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
     age_band_defaulted: context.profileMissing,
     // Null when the child has never been left one. Never gates anything.
     wonder_question: wonderQuestion,
+    // Newest first, including the one served above. Never gates anything.
+    recent_wonder_questions: wonderHistory,
     language,
     level,
     replay,
@@ -537,8 +544,12 @@ const recordWonderQuestion = async (deviceMac, question) => {
   // is the backstop for when it is not: refusing the duplicate leaves the older
   // row as the most recent, so nothing changes for the child, but the table stops
   // recording the loop as if it were two separate moments of curiosity.
-  const previous = await lastWonderQuestion(context);
-  if (previous && normaliseWonder(previous) === normaliseWonder(text)) {
+  // Against the last few, not just the latest: the model cycles a small set of
+  // stock questions, so "not the same as last time" let the bee question back in
+  // every third session.
+  const previous = await recentWonderQuestions(context);
+  const normalised = normaliseWonder(text);
+  if (previous.some((question) => normaliseWonder(question) === normalised)) {
     logger.warn(`[quiz] wonder question repeated verbatim for ${deviceMac}; not stored`);
     return { id: null, question: text, asked_at: null, duplicate: true };
   }
@@ -556,24 +567,42 @@ const wonderScope = (context) => (
     : { device_mac: macFilter(context.deviceMac), kid_id: null }
 );
 
+// How many past questions the model is shown, and dedupes against. Five is
+// roughly a fortnight of play, and short enough to keep the prompt block small.
+// ponytail: a flat count, not a time window — a child who plays twice a year
+// does not need protecting from a repeat they will not remember.
+const WONDER_HISTORY_SIZE = 5;
+
+// Long enough that a child restarting the toy is not "reminded" of the question
+// they were asked ninety seconds ago, short enough that morning and evening play
+// are still separate visits. ponytail: fixed; make it a setting only if a parent
+// ever asks for one.
+const WONDER_RECALL_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+
 /**
- * The last Wonder Question this child was left with, recalled or not.
+ * The last few Wonder Questions this child has been asked, newest first.
  *
  * Read by child when there is one, else by device — mirroring answerScope, so an
  * unpaired toy handed to a sibling does not surface the previous child's
  * curiosity.
  *
- * This is the DEDUPE read, not the serving read: it must keep seeing questions
- * already recalled, or the model echoing back the one it just opened with would
- * be stored as new and asked again tomorrow.
+ * Recalled rows are INCLUDED. This is the history read, not the serving read:
+ * its whole job is to remember what has already been asked.
  */
-const lastWonderQuestion = async (context) => {
-  const row = await prisma.kid_wonder_question.findFirst({
+const recentWonderQuestions = async (context, take = WONDER_HISTORY_SIZE) => {
+  const rows = await prisma.kid_wonder_question.findMany({
     where: wonderScope(context),
     orderBy: { asked_at: 'desc' },
+    take,
     select: { question: true },
   });
-  return row ? row.question : null;
+  return rows.map((row) => row.question);
+};
+
+/** The single most recent one, or null. */
+const lastWonderQuestion = async (context) => {
+  const [question] = await recentWonderQuestions(context, 1);
+  return question ?? null;
 };
 
 /**
@@ -591,9 +620,17 @@ const lastWonderQuestion = async (context) => {
  * opening line, against the loop this replaces — and it keeps the "recall once"
  * rule true without a second round trip from the worker.
  */
-const takePendingWonderQuestion = async (context) => {
+const takePendingWonderQuestion = async (context, now = new Date()) => {
   const row = await prisma.kid_wonder_question.findFirst({
-    where: { ...wonderScope(context), recalled_at: null },
+    where: {
+      ...wonderScope(context),
+      recalled_at: null,
+      // Not one from the session that just ended. A child who finishes a level
+      // and starts the next hears the closing question again nine seconds later
+      // as "the question I left you with", which is not a memory, it is a
+      // stutter. Observed on dev 2026-08-31: asked 06:40:36, recalled 06:40:45.
+      asked_at: { lt: new Date(now.getTime() - WONDER_RECALL_COOLDOWN_MS) },
+    },
     orderBy: { asked_at: 'desc' },
     select: { id: true, question: true },
   });
@@ -1201,6 +1238,7 @@ module.exports = {
   recordUnresolvedAttempts,
   recordWonderQuestion,
   lastWonderQuestion,
+  recentWonderQuestions,
   takePendingWonderQuestion,
   // Exported for tests: the Door ladder is the part of the payload most likely
   // to be got wrong quietly.

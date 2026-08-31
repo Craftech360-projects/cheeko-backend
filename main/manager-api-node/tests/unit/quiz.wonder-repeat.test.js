@@ -13,6 +13,7 @@
 const mockCreate = jest.fn();
 const mockFindFirst = jest.fn();
 const mockUpdate = jest.fn();
+const mockFindMany = jest.fn();
 
 jest.mock('../../src/config/database', () => ({
   prisma: {
@@ -22,6 +23,7 @@ jest.mock('../../src/config/database', () => ({
       create: (...a) => mockCreate(...a),
       findFirst: (...a) => mockFindFirst(...a),
       update: (...a) => mockUpdate(...a),
+      findMany: (...a) => mockFindMany(...a),
     },
   },
 }));
@@ -40,11 +42,16 @@ beforeEach(() => {
   mockCreate.mockResolvedValue({ id: 4n, asked_at: new Date('2026-08-15T09:00:00Z') });
   mockFindFirst.mockResolvedValue(null);
   mockUpdate.mockResolvedValue({});
+  mockFindMany.mockResolvedValue([]);
 });
+
+// The dedupe read is now a list, so a test that used to seed "the previous one"
+// seeds the history instead.
+const history = (...questions) => mockFindMany.mockResolvedValue(questions.map((question) => ({ question })));
 
 describe('recordWonderQuestion', () => {
   it('stores a genuinely new question', async () => {
-    mockFindFirst.mockResolvedValue({ question: BEE });
+    history(BEE);
 
     const result = await quizService.recordWonderQuestion(MAC, 'I wonder where rain goes after it lands?');
 
@@ -53,7 +60,7 @@ describe('recordWonderQuestion', () => {
   });
 
   it('refuses the same question twice', async () => {
-    mockFindFirst.mockResolvedValue({ question: BEE });
+    history(BEE);
 
     const result = await quizService.recordWonderQuestion(MAC, BEE);
 
@@ -62,7 +69,7 @@ describe('recordWonderQuestion', () => {
   });
 
   it('sees through re-punctuation and casing', async () => {
-    mockFindFirst.mockResolvedValue({ question: BEE });
+    history(BEE);
 
     await quizService.recordWonderQuestion(MAC, '  I Wonder if you can imagine what it would be like to see the world with EYES like a bee!!  ');
 
@@ -114,13 +121,46 @@ describe('takePendingWonderQuestion', () => {
   });
 
   it('still dedupes against a question that has already been recalled', async () => {
-    mockFindFirst.mockResolvedValue({ question: BEE });
+    history(BEE);
 
     const result = await quizService.recordWonderQuestion(MAC, BEE);
 
     expect(result.duplicate).toBe(true);
-    expect(mockFindFirst).toHaveBeenCalledWith(
+    expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.not.objectContaining({ recalled_at: null }) })
     );
+  });
+
+  // Asked at 06:40:36, recalled at 06:40:45 on dev: the child finished a level,
+  // started the next, and was "reminded" of the question from nine seconds ago.
+  it('will not recall a question from the session that just ended', async () => {
+    await quizService.takePendingWonderQuestion(context, new Date('2026-08-31T06:40:45Z'));
+
+    const { where } = mockFindFirst.mock.calls[0][0];
+    expect(where.asked_at.lt).toEqual(new Date('2026-08-31T03:40:45Z'));
+  });
+});
+
+// "Leave them a different one" needs something to be different FROM. Without
+// this list the model re-reads its own summaries and reworks the same question.
+describe('recentWonderQuestions', () => {
+  const context = { kidId: 15n, deviceMac: MAC };
+
+  it('returns the last few, recalled ones included', async () => {
+    history(BEE, 'Why do stars come out at night?');
+
+    expect(await quizService.recentWonderQuestions(context)).toEqual([
+      BEE, 'Why do stars come out at night?',
+    ]);
+    expect(mockFindMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5 }));
+  });
+
+  it('refuses a repeat of any of them, not just the newest', async () => {
+    history('Why do stars come out at night?', BEE);
+
+    const result = await quizService.recordWonderQuestion(MAC, BEE);
+
+    expect(result.duplicate).toBe(true);
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 });
