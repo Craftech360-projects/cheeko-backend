@@ -438,7 +438,7 @@ const nextQuestions = async (deviceMac, bankName = DEFAULT_BANK) => {
   // fails. A missing wonder question costs a warm opening line, nothing more.
   let wonderQuestion = null;
   try {
-    wonderQuestion = await lastWonderQuestion(context);
+    wonderQuestion = await takePendingWonderQuestion(context);
   } catch (error) {
     logger.warn(`[${tables.label}] wonder question read failed for ${deviceMac}: ${error.message}`);
   }
@@ -550,23 +550,61 @@ const recordWonderQuestion = async (deviceMac, question) => {
   return { id: String(row.id), question: text, asked_at: row.asked_at };
 };
 
+const wonderScope = (context) => (
+  context.kidId
+    ? { kid_id: context.kidId }
+    : { device_mac: macFilter(context.deviceMac), kid_id: null }
+);
+
 /**
- * The last Wonder Question this child was left with, or null.
+ * The last Wonder Question this child was left with, recalled or not.
  *
  * Read by child when there is one, else by device — mirroring answerScope, so an
  * unpaired toy handed to a sibling does not surface the previous child's
  * curiosity.
+ *
+ * This is the DEDUPE read, not the serving read: it must keep seeing questions
+ * already recalled, or the model echoing back the one it just opened with would
+ * be stored as new and asked again tomorrow.
  */
 const lastWonderQuestion = async (context) => {
-  const where = context.kidId
-    ? { kid_id: context.kidId }
-    : { device_mac: macFilter(context.deviceMac), kid_id: null };
   const row = await prisma.kid_wonder_question.findFirst({
-    where,
+    where: wonderScope(context),
     orderBy: { asked_at: 'desc' },
     select: { question: true },
   });
   return row ? row.question : null;
+};
+
+/**
+ * The Wonder Question this child is still owed, retired as it is served.
+ *
+ * A question is recalled ONCE. Until `recalled_at` existed the read was simply
+ * "the newest row", which retired only when a different question was stored —
+ * and the write happens only in the after-Question-Ten MEMO. Sessions that end
+ * mid-quiz, second sessions on a day already complete, and echoes refused as
+ * duplicates all left the same row newest, so the child was asked the same
+ * question at the top of every session. Kid 21 got the same one for eight days.
+ *
+ * Stamped on read, not on delivery: a session that fetches and dies before
+ * speaking burns the question. That is the cheap failure of the two — one lost
+ * opening line, against the loop this replaces — and it keeps the "recall once"
+ * rule true without a second round trip from the worker.
+ */
+const takePendingWonderQuestion = async (context) => {
+  const row = await prisma.kid_wonder_question.findFirst({
+    where: { ...wonderScope(context), recalled_at: null },
+    orderBy: { asked_at: 'desc' },
+    select: { id: true, question: true },
+  });
+  if (!row) return null;
+  // Before returning it: a failed stamp must not serve the question, or the
+  // caller's catch turns into exactly the repeat this exists to stop.
+  await prisma.kid_wonder_question.update({
+    where: { id: row.id },
+    data: { recalled_at: new Date() },
+  });
+  return row.question;
 };
 
 /**
@@ -1163,6 +1201,7 @@ module.exports = {
   recordUnresolvedAttempts,
   recordWonderQuestion,
   lastWonderQuestion,
+  takePendingWonderQuestion,
   // Exported for tests: the Door ladder is the part of the payload most likely
   // to be got wrong quietly.
   toQuestion,
