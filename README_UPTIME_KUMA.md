@@ -35,9 +35,30 @@ of 2026-08-31.
 
 ### Network access
 
-Security group `sg-0ca72b10de2f2e764` allows ports 22 and 3001 from the admin CIDR only. If SSH
-starts hanging, your public IP has changed. Re-open it from anywhere (the AWS API is not
-IP-restricted):
+Security group `sg-0ca72b10de2f2e764` allows ports 22 and 3001 from the admin CIDR only.
+Locked down 2026-08-31; before that both ports were open to `0.0.0.0/0` over plain HTTP.
+
+#### "I can't reach Kuma any more"
+
+**Symptom:** SSH *hangs* and eventually times out, and the UI never loads — rather than being
+refused or showing an error. A refused connection means the service is down; a hang means packets
+are being dropped, which is what a security group does.
+
+**Cause, nine times out of ten:** your home/office public IP changed. Indian broadband rotates the
+address on router reboot or ISP lease renewal, so this will happen eventually and is not a fault.
+
+**Check:**
+
+```bash
+curl -s https://checkip.amazonaws.com
+aws ec2 describe-security-groups --region ap-south-2 --group-id sg-0ca72b10de2f2e764 \
+  --query 'SecurityGroups[0].IpPermissions[].IpRanges[].CidrIp' --output text
+```
+
+If those two do not match, that is the whole problem.
+
+**Fix.** This works from anywhere, because the **AWS API is not IP-restricted** — only the instance
+is. You can never lock yourself out permanently as long as you have AWS credentials:
 
 ```bash
 IP=$(curl -s https://checkip.amazonaws.com)
