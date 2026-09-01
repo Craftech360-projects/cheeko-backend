@@ -224,6 +224,13 @@ describe('mobile API sweep — kids', () => {
     await probe('GET /kids/:kidId/imagine', () =>
       request(app).get(`${BASE}/kids/${KID_ID}/imagine?limit=10`));
   });
+
+  // The custom card belongs to the child, not the toy: 200 with a null
+  // contentPack before anything is recorded is the normal answer here.
+  it('GET /kids/:kidId/custom-card', async () => {
+    await probe('GET /kids/:kidId/custom-card', () =>
+      request(app).get(`${BASE}/kids/${KID_ID}/custom-card`));
+  });
 });
 
 describe('mobile API sweep — agents', () => {
@@ -278,7 +285,6 @@ describe('mobile API sweep — devices', () => {
     ['GET /devices/:mac/games-played', '/games-played?period=week'],
     ['GET /devices/:mac/radio-played', '/radio-played?period=week'],
     ['GET /devices/:mac/imagine', '/imagine?limit=10'],
-    ['GET /devices/:mac/custom-card', '/custom-card'],
   ];
 
   it.each(deviceCases)('%s', async (name, suffix) => {

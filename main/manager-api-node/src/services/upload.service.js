@@ -321,25 +321,29 @@ async function deleteKidAvatarByUrl(url) {
 }
 
 /**
- * Upload a parent-recorded custom card audio file to S3 under customcard_<mac>/.
+ * Upload a parent-recorded custom card audio file to S3 under customcard_kid<id>/.
  * Returns a public CloudFront URL: the toy downloads this straight from the
  * content manifest, exactly like catalogue audio, so it cannot be a signed URL
  * that expires while the manifest sits cached on the device.
  * ponytail: unguessable key, not access control — a leaked URL is readable.
  * Upgrade path: CloudFront signed URLs if a recording must be truly private.
  * @param {Buffer} fileBuffer - Audio buffer
- * @param {string} deviceMac - MAC of the device the recording belongs to
+ * @param {bigint|number|string} kidId - the child the recording belongs to
  * @param {string} filename - Original filename (used only for the extension)
  * @param {string} mimeType - Validated MIME type
  * @returns {Promise<{s3Key: string, url: string}>}
  */
-function customCardFolder(deviceMac) {
-  return `customcard_${String(deviceMac || '').toLowerCase().replace(/[^0-9a-f]/g, '')}`;
+// The `customcard` prefix is load-bearing: deleteCustomCardObject refuses any
+// key that does not start with it, which is what stops a pack that somehow
+// references catalogue audio from deleting it. A layout like `kid42/customcard/`
+// would slip past that guard and take the orphan sweep silently dead with it.
+function customCardFolder(kidId) {
+  return `customcard_kid${kidId}`;
 }
 
-async function uploadCustomCardAudio(fileBuffer, deviceMac, filename, mimeType) {
+async function uploadCustomCardAudio(fileBuffer, kidId, filename, mimeType) {
   const ext = (path.extname(filename || '') || '.mp3').toLowerCase();
-  const s3Key = `${customCardFolder(deviceMac)}/${randomUUID()}${ext}`;
+  const s3Key = `${customCardFolder(kidId)}/${randomUUID()}${ext}`;
 
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
@@ -353,16 +357,16 @@ async function uploadCustomCardAudio(fileBuffer, deviceMac, filename, mimeType) 
   // this straight out of the download manifest, and a signed URL would expire
   // while the manifest sits cached on the toy.
   const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
-  logger.info('Custom card audio uploaded to S3', { s3Key, deviceMac, size: fileBuffer.length });
+  logger.info('Custom card audio uploaded to S3', { s3Key, kidId: String(kidId), size: fileBuffer.length });
   return { s3Key, url };
 }
 
 /**
- * Upload a converted custom card picture to S3, alongside that device's audio.
+ * Upload a converted custom card picture to S3, alongside that child's audio.
  *
  * Same prefix as the recordings on purpose: deleteCustomCardObject only touches
  * keys under `customcard`, so sharing it means the existing orphan sweep covers
- * pictures too, and a picture stays inside its own device's namespace.
+ * pictures too, and a picture stays inside its own child's namespace.
  *
  * The body is already an LVGL binary — octet-stream, not an image type, because
  * that is what the toy downloads and writes to the SD card verbatim.
@@ -370,11 +374,11 @@ async function uploadCustomCardAudio(fileBuffer, deviceMac, filename, mimeType) 
  * The key is a fresh UUID every time. CloudFront caches these for a year, so a
  * deterministic key would have a replaced picture serve the old bytes forever.
  * @param {Buffer} binBuffer - LVGL RGB565 binary
- * @param {string} deviceMac - MAC of the device the picture belongs to
+ * @param {bigint|number|string} kidId - the child the picture belongs to
  * @returns {Promise<{s3Key: string, url: string}>}
  */
-async function uploadCustomCardImage(binBuffer, deviceMac) {
-  const s3Key = `${customCardFolder(deviceMac)}/${randomUUID()}.bin`;
+async function uploadCustomCardImage(binBuffer, kidId) {
+  const s3Key = `${customCardFolder(kidId)}/${randomUUID()}.bin`;
 
   await s3Client.send(new PutObjectCommand({
     Bucket: S3_BUCKET,
@@ -385,7 +389,7 @@ async function uploadCustomCardImage(binBuffer, deviceMac) {
   }));
 
   const url = `${IMAGINE_PUBLIC_BASE}/${s3Key}`;
-  logger.info('Custom card image uploaded to S3', { s3Key, deviceMac, size: binBuffer.length });
+  logger.info('Custom card image uploaded to S3', { s3Key, kidId: String(kidId), size: binBuffer.length });
   return { s3Key, url };
 }
 

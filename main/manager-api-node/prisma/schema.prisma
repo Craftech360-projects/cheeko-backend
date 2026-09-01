@@ -674,8 +674,10 @@ model kid_profile {
 }
 
 /// Allowlist of issued custom-card UIDs. Membership is what makes a UID a custom
-/// card; the content itself lives in rfid_content_pack CUSTOM_<MAC>, keyed on the
-/// tapping device. kid_id is legacy — new rows leave it null.
+/// card; the content itself lives in rfid_content_pack CUSTOM_KID_<kidId>, keyed
+/// on the child paired to the tapping toy. kid_id is legacy — new rows leave it
+/// null: binding a physical UID to a child would mean a card only works for one
+/// kid, the opposite of the "any blank card, any toy" model the cards ship under.
 model custom_card {
   id          BigInt       @id @default(autoincrement())
   kid_id      BigInt?      @unique

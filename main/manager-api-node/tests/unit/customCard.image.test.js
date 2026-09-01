@@ -16,6 +16,7 @@ jest.mock('../../src/utils/lvglImage', () => ({
 }));
 
 const mockPrisma = {
+  kid_profile: { findFirst: jest.fn() },
   ai_device: { findFirst: jest.fn() },
   rfid_content_pack: { findFirst: jest.fn(), upsert: jest.fn() },
   content_item: { findMany: jest.fn() }
@@ -35,12 +36,13 @@ jest.mock('../../src/services/rfid.service', () => mockRfid);
 
 const customCardService = require('../../src/services/customCard.service');
 
-const USER_ID = 42;
+const USER_ID = 7;
+const KID_ID = 42;
 const MAC = 'AA:BB:CC:DD:EE:FF';
-const PACK = { id: BigInt(7), pack_code: 'CUSTOM_AABBCCDDEEFF', name: 'Custom Card', version: '1' };
+const PACK = { id: BigInt(7), pack_code: 'CUSTOM_KID_42', name: 'Custom Card', version: '1' };
 
-const AUDIO = (n) => `https://cdn.test/customcard_aabbccddeeff/audio${n}.mp3`;
-const IMAGE = (n) => `https://cdn.test/customcard_aabbccddeeff/image${n}.bin`;
+const AUDIO = (n) => `https://cdn.test/customcard_kid42/audio${n}.mp3`;
+const IMAGE = (n) => `https://cdn.test/customcard_kid42/image${n}.bin`;
 
 // ── fixtures ──────────────────────────────────────────────────────────────
 
@@ -138,9 +140,10 @@ beforeEach(() => {
   rows = [];
   writes = [];
 
-  mockPrisma.ai_device.findFirst.mockResolvedValue({
-    id: BigInt(1), mac_address: MAC, alias: 'Nursery', kid_id: null
-  });
+  mockPrisma.kid_profile.findFirst.mockResolvedValue({ id: BigInt(KID_ID), name: 'Aarav' });
+  // The toy the child is currently paired to — informational only; the pack is
+  // theirs whether or not this returns anything.
+  mockPrisma.ai_device.findFirst.mockResolvedValue({ mac_address: MAC });
   mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(PACK);
   mockPrisma.rfid_content_pack.upsert.mockResolvedValue(PACK);
   mockPrisma.content_item.findMany.mockImplementation(async () => rows.map((row) => ({ ...row })));
@@ -281,7 +284,7 @@ describe('pairCustomCardUploads', () => {
 describe('custom card artwork write path', () => {
   it('attaches each picture to its own recording', async () => {
     const card = await customCardService.addCustomCardContent(
-      USER_ID, MAC, [asUpload(MP3.buffer, 'a.mp3'), asUpload(MP3.buffer, 'b.mp3')],
+      USER_ID, KID_ID, [asUpload(MP3.buffer, 'a.mp3'), asUpload(MP3.buffer, 'b.mp3')],
       { images: [null, PNG] }
     );
 
@@ -294,7 +297,7 @@ describe('custom card artwork write path', () => {
 
   it('uploads nothing when one picture in a batch is bad', async () => {
     await expect(customCardService.addCustomCardContent(
-      USER_ID, MAC, [asUpload(MP3.buffer, 'a.mp3'), asUpload(MP3.buffer, 'b.mp3')],
+      USER_ID, KID_ID, [asUpload(MP3.buffer, 'a.mp3'), asUpload(MP3.buffer, 'b.mp3')],
       { images: [PNG, asUpload(Buffer.from('not a picture'), 'b.png')] }
     )).rejects.toThrow('Only PNG and JPEG pictures are supported.');
 
@@ -305,10 +308,10 @@ describe('custom card artwork write path', () => {
   });
 
   it('moves the content hash when only the picture changes', async () => {
-    await customCardService.addCustomCardContent(USER_ID, MAC, [MP3], {});
+    await customCardService.addCustomCardContent(USER_ID, KID_ID, [MP3], {});
     const before = lastWrite().contentHash;
 
-    await customCardService.setCustomCardItemImage(USER_ID, MAC, 1, PNG);
+    await customCardService.setCustomCardItemImage(USER_ID, KID_ID, 1, PNG);
 
     // The toy compares the hash first. If artwork sat outside it, the tap
     // handshake would answer card_up_to_date and the new picture would never
@@ -318,20 +321,20 @@ describe('custom card artwork write path', () => {
   });
 
   it('clears artwork without touching the recording, and sweeps the old object', async () => {
-    await customCardService.addCustomCardContent(USER_ID, MAC, [MP3], { images: [PNG] });
+    await customCardService.addCustomCardContent(USER_ID, KID_ID, [MP3], { images: [PNG] });
 
-    await customCardService.clearCustomCardItemImage(USER_ID, MAC, 1);
+    await customCardService.clearCustomCardItemImage(USER_ID, KID_ID, 1);
 
     expect(lastWrite().items).toEqual([
       expect.objectContaining({ itemNumber: 1, audioUrl: AUDIO(1), imageUrl: null })
     ]);
-    expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith('customcard_aabbccddeeff/image1.bin');
+    expect(mockUpload.deleteCustomCardObject).toHaveBeenCalledWith('customcard_kid42/image1.bin');
   });
 
   it('keeps the existing picture when a recording is replaced without one', async () => {
-    await customCardService.addCustomCardContent(USER_ID, MAC, [MP3], { images: [PNG] });
+    await customCardService.addCustomCardContent(USER_ID, KID_ID, [MP3], { images: [PNG] });
 
-    await customCardService.replaceCustomCardItem(USER_ID, MAC, 1, asUpload(MP3.buffer, 'new.mp3'), {});
+    await customCardService.replaceCustomCardItem(USER_ID, KID_ID, 1, asUpload(MP3.buffer, 'new.mp3'), {});
 
     expect(lastWrite().items[0]).toEqual(expect.objectContaining({
       audioUrl: AUDIO(2),
@@ -341,12 +344,12 @@ describe('custom card artwork write path', () => {
 
   it('renumbers each surviving picture with its own recording', async () => {
     await customCardService.addCustomCardContent(
-      USER_ID, MAC,
+      USER_ID, KID_ID,
       [asUpload(MP3.buffer, 'a.mp3'), asUpload(MP3.buffer, 'b.mp3'), asUpload(MP3.buffer, 'c.mp3')],
       { images: [PNG, PNG, PNG] }
     );
 
-    await customCardService.deleteCustomCardItem(USER_ID, MAC, 1);
+    await customCardService.deleteCustomCardItem(USER_ID, KID_ID, 1);
 
     // updateContentPack falls back to the existing row at the same item_number
     // for anything left undefined, so items 2 and 3 sliding down to 1 and 2 is
@@ -357,15 +360,15 @@ describe('custom card artwork write path', () => {
     ]);
     // Only the deleted item's two objects go.
     expect(mockUpload.deleteCustomCardObject.mock.calls.map(([key]) => key).sort()).toEqual([
-      'customcard_aabbccddeeff/audio1.mp3',
-      'customcard_aabbccddeeff/image1.bin'
+      'customcard_kid42/audio1.mp3',
+      'customcard_kid42/image1.bin'
     ]);
   });
 
   it('404s for an item that is not on the card', async () => {
-    await customCardService.addCustomCardContent(USER_ID, MAC, [MP3], {});
+    await customCardService.addCustomCardContent(USER_ID, KID_ID, [MP3], {});
 
-    await expect(customCardService.setCustomCardItemImage(USER_ID, MAC, 4, PNG))
+    await expect(customCardService.setCustomCardItemImage(USER_ID, KID_ID, 4, PNG))
       .rejects.toThrow('That recording could not be found on this card.');
   });
 });

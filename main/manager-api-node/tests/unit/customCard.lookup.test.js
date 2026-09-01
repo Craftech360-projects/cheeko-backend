@@ -2,8 +2,9 @@
 
 /**
  * Custom card resolution: the allowlist decides *whether* a UID is a custom card,
- * the tapping MAC decides *which* pack plays. These are the three outcomes the
- * device depends on, and the ones that silently regress if the two halves drift.
+ * and the child paired to the tapping toy decides *which* pack plays. These are
+ * the outcomes the device depends on, and the ones that silently regress if the
+ * two halves drift.
  */
 
 const mockPrisma = {
@@ -11,6 +12,7 @@ const mockPrisma = {
   rfid_card_mapping: { findFirst: jest.fn() },
   rfid_series: { findFirst: jest.fn() },
   custom_card: { findFirst: jest.fn() },
+  ai_device: { findFirst: jest.fn() },
   rfid_content_pack: { findFirst: jest.fn() }
 };
 
@@ -23,11 +25,12 @@ const rfidService = require('../../src/services/rfid.service');
 
 const MAC = 'AA:BB:CC:DD:EE:FF';
 const UID = '04A1B2C3';
+const KID_ID = BigInt(42);
 
 const PACK = {
   id: BigInt(77),
-  pack_code: 'CUSTOM_AABBCCDDEEFF',
-  name: 'Nursery — Custom Card',
+  pack_code: 'CUSTOM_KID_42',
+  name: 'Aarav — Custom Card',
   content_type: 'rfidcontent',
   version: '3',
   content_hash: 'abc123'
@@ -38,7 +41,7 @@ const ITEM = {
   content_pack_id: BigInt(77),
   item_number: 1,
   title: 'grandma-story.mp3',
-  audio_url: 'https://cdn.example/customcard_aabbccddeeff/x.mp3',
+  audio_url: 'https://cdn.example/customcard_kid42/x.mp3',
   image_url: null,
   lyrics_text: null,
   story_number: null,
@@ -55,22 +58,28 @@ beforeEach(() => {
   });
   mockPrisma.rfid_card_mapping.findFirst.mockResolvedValue(null);
   mockPrisma.rfid_series.findFirst.mockResolvedValue(null);
+  // The tapping toy, paired to a child, unless a test says otherwise.
+  mockPrisma.ai_device.findFirst.mockResolvedValue({ kid_id: KID_ID });
 });
 
 describe('custom card lookup', () => {
-  it('resolves an issued card to the tapping device pack, shaped like a content card', async () => {
+  it('resolves an issued card to the pack of the child on the tapping toy', async () => {
     mockPrisma.custom_card.findFirst.mockResolvedValue({ id: BigInt(5), rfid_uid: UID });
     mockPrisma.rfid_content_pack.findFirst.mockResolvedValue(PACK);
 
     const result = await rfidService.lookupCardByUid(UID, MAC);
 
-    // Derived from the MAC, separator-insensitive — the upload path builds the
-    // same code, and a mismatch here means silent playback of nothing.
+    // The MAC is looked up normalized — the toy may send it with any separators.
+    expect(mockPrisma.ai_device.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { mac_address: MAC } })
+    );
+    // Derived from the child, not the toy — the upload path builds the same
+    // code, and a mismatch here means silent playback of nothing.
     expect(mockPrisma.rfid_content_pack.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { pack_code: 'CUSTOM_AABBCCDDEEFF', active: true } })
+      expect.objectContaining({ where: { pack_code: 'CUSTOM_KID_42', active: true } })
     );
     expect(result.contentType).toBe('rfidcontent');
-    expect(result.packCode).toBe('CUSTOM_AABBCCDDEEFF');
+    expect(result.packCode).toBe('CUSTOM_KID_42');
     expect(result.version).toBe('3');
     expect(result.items).toEqual([
       expect.objectContaining({ sequence: 1, audioUrl: ITEM.audio_url })
@@ -78,7 +87,7 @@ describe('custom card lookup', () => {
   });
 
   it('carries a recording\'s artwork through to the device', async () => {
-    const withImage = { ...ITEM, image_url: 'https://cdn.example/customcard_aabbccddeeff/y.bin' };
+    const withImage = { ...ITEM, image_url: 'https://cdn.example/customcard_kid42/y.bin' };
     mockPrisma.$queryRaw.mockImplementation((strings) => {
       const sql = Array.isArray(strings) ? strings.join(' ') : String(strings);
       return Promise.resolve(sql.includes('information_schema') ? [] : [withImage]);
@@ -108,6 +117,32 @@ describe('custom card lookup', () => {
     mockPrisma.custom_card.findFirst.mockResolvedValue(null);
 
     expect(await rfidService.lookupCardByUid(UID, MAC)).toBeNull();
+    expect(mockPrisma.ai_device.findFirst).not.toHaveBeenCalled();
     expect(mockPrisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('plays nothing on an unpaired toy', async () => {
+    mockPrisma.custom_card.findFirst.mockResolvedValue({ id: BigInt(5), rfid_uid: UID });
+    mockPrisma.ai_device.findFirst.mockResolvedValue({ kid_id: null });
+
+    // The deliberate regression of kid-only binding: a toy handed to a sibling
+    // before a child is picked must not play the previous child's recordings.
+    expect(await rfidService.lookupCardByUid(UID, MAC)).toBeNull();
+    expect(mockPrisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('returns null when the tapping MAC is not a registered device', async () => {
+    mockPrisma.custom_card.findFirst.mockResolvedValue({ id: BigInt(5), rfid_uid: UID });
+    mockPrisma.ai_device.findFirst.mockResolvedValue(null);
+
+    expect(await rfidService.lookupCardByUid(UID, MAC)).toBeNull();
+    expect(mockPrisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('returns null when no MAC was supplied at all', async () => {
+    mockPrisma.custom_card.findFirst.mockResolvedValue({ id: BigInt(5), rfid_uid: UID });
+
+    expect(await rfidService.lookupCardByUid(UID)).toBeNull();
+    expect(mockPrisma.ai_device.findFirst).not.toHaveBeenCalled();
   });
 });

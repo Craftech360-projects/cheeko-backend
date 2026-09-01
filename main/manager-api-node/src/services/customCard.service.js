@@ -1,15 +1,17 @@
 /**
  * Custom Card Service
  *
- * Parent-uploaded audio for a device's custom RFID cards.
+ * Parent-uploaded audio for a child's custom RFID cards.
  *
- * Ownership model: a custom pack belongs to a *device*, not a kid or a card.
- * `custom_card` is a flat allowlist of issued custom-card UIDs with no device
- * binding — tapping any issued custom card on a toy plays that toy's own pack.
- * The parent proves ownership of the MAC, never of the card.
+ * Ownership model: a custom pack belongs to a *child*, not a toy or a card, so
+ * the recordings follow the child to a new toy and a toy handed to a sibling
+ * never plays them. `custom_card` is a flat allowlist of issued custom-card
+ * UIDs with no child binding — tapping any issued custom card on a toy plays
+ * the pack of the child paired to it, and nothing at all if it is unpaired. The
+ * parent proves ownership of the child, never of the card.
  *
  * Storage model: the audio is a normal `rfid_content_pack` (pack_code
- * CUSTOM_<MAC>) holding a single `content_item`, so the tap handshake, the
+ * CUSTOM_KID_<kidId>) holding a single `content_item`, so the tap handshake, the
  * download manifest and the ESP32 download path are the stock content-card ones
  * — there is no second content path to maintain.
  */
@@ -18,7 +20,7 @@ const { createHash } = require('crypto');
 const { prisma } = require('../config/database');
 const uploadService = require('./upload.service');
 const rfidService = require('./rfid.service');
-const { normalizeMacAddress, packCodeForMac } = require('../utils/helpers');
+const { packCodeForKid } = require('../utils/helpers');
 const { toLvglRgb565Bin } = require('../utils/lvglImage');
 const { ApiError } = require('../middleware/errorHandler');
 const logger = require('../utils/logger');
@@ -268,8 +270,8 @@ const toDeviceImage = async (file) => {
 };
 
 /** Store a converted picture and return the public URL to hang on the item. */
-const uploadDeviceImage = async (bin, mac) => {
-  const { url } = await uploadService.uploadCustomCardImage(bin, mac);
+const uploadDeviceImage = async (bin, kidId) => {
+  const { url } = await uploadService.uploadCustomCardImage(bin, kidId);
   return url;
 };
 
@@ -312,48 +314,67 @@ const pairCustomCardUploads = (filesByField = {}) => {
 };
 
 /**
- * Verify the device belongs to the authenticated parent.
+ * Verify the child belongs to the authenticated parent.
  * Answers "not found" rather than "forbidden" so the endpoint cannot be used to
- * probe which MACs are registered to other parents.
- * @returns {Promise<Object>} the ai_device row
+ * probe which kid ids exist.
+ * @returns {Promise<Object>} the kid_profile row
  */
-const assertDeviceOwnedByUser = async (userId, mac) => {
-  const normalizedMac = normalizeMacAddress(mac);
-  if (!normalizedMac) {
-    throw new ApiError('That device address is not valid.', 400);
+const assertKidOwnedByUser = async (userId, kidId) => {
+  let id;
+  try {
+    id = BigInt(kidId);
+  } catch {
+    throw new ApiError('That child could not be found.', 404);
   }
 
-  const device = await prisma.ai_device.findFirst({
-    where: { mac_address: normalizedMac, user_id: BigInt(userId) },
-    select: { id: true, mac_address: true, alias: true, kid_id: true }
+  const kid = await prisma.kid_profile.findFirst({
+    where: { id, user_id: BigInt(userId) },
+    select: { id: true, name: true }
   });
-  if (!device) {
-    throw new ApiError('That device could not be found.', 404);
+  if (!kid) {
+    throw new ApiError('That child could not be found.', 404);
   }
-  return device;
+  return kid;
 };
 
-const findPackForMac = (mac) =>
-  prisma.rfid_content_pack.findFirst({ where: { pack_code: packCodeForMac(mac) } });
+const findPackForKid = (kidId) =>
+  prisma.rfid_content_pack.findFirst({ where: { pack_code: packCodeForKid(kidId) } });
 
 /**
- * Shape a device's pack into the response the Flutter app renders.
+ * The toy this child's recordings will play on right now, or null when they
+ * have none. Informational only — the pack is the child's either way, and the
+ * app uses this to tell a parent their recordings are silent until pairing.
+ */
+const currentDeviceMacForKid = async (kidId) => {
+  const device = await prisma.ai_device.findFirst({
+    where: { kid_id: BigInt(kidId) },
+    select: { mac_address: true }
+  });
+  return device?.mac_address || null;
+};
+
+/**
+ * Shape a child's pack into the response the Flutter app renders.
  * contentPack is null when nothing has been uploaded yet — not an error.
  * `items` is the full list; `fileUrl`/`fileName` mirror the first item so a
  * client written against the single-recording shape keeps working.
+ *
+ * `deviceMac` is which toy this will play on, not who owns it, and is null for
+ * a child with no toy paired.
  */
-const serializePack = (device, pack, items = []) => {
+const serializePack = (kid, pack, items = [], deviceMac = null) => {
   const first = items[0] || null;
 
   return {
-    macAddress: device.mac_address,
-    deviceAlias: device.alias || null,
+    kidId: String(kid.id),
+    kidName: kid.name || null,
+    deviceMac: deviceMac || null,
     maxItems: MAX_ITEMS,
     contentPack: pack
       ? {
         id: String(pack.id),
         packCode: pack.pack_code,
-        macAddress: device.mac_address,
+        kidId: String(kid.id),
         title: first?.title || pack.name,
         fileName: first?.title || null,
         // Public CloudFront URL — the same one the toy downloads, so what the
@@ -425,29 +446,29 @@ const deleteOrphanedObjects = async (before, keptUrls) => {
 };
 
 /**
- * GET the device's custom pack.
+ * GET the child's custom pack.
  * @returns {Promise<Object>} always shaped; contentPack is null before first upload
  */
-const getCustomCardForDevice = async (userId, mac) => {
-  const device = await assertDeviceOwnedByUser(userId, mac);
-  const pack = await findPackForMac(device.mac_address);
+const getCustomCardForKid = async (userId, kidId) => {
+  const kid = await assertKidOwnedByUser(userId, kidId);
+  const pack = await findPackForKid(kid.id);
   const items = pack ? await loadPackItems(pack.id) : [];
-  return serializePack(device, pack, items);
+  return serializePack(kid, pack, items, await currentDeviceMacForKid(kid.id));
 };
 
 /**
- * Ensure the device has a pack row, creating an empty one on first use.
+ * Ensure the child has a pack row, creating an empty one on first use.
  * Item writes go through rfidService.updateContentPack from here on, so this
  * only has to establish the pack itself.
  */
-const ensurePackForDevice = async (device, userId) => {
-  const packCode = packCodeForMac(device.mac_address);
+const ensurePackForKid = async (kid, userId) => {
+  const packCode = packCodeForKid(kid.id);
 
   return prisma.rfid_content_pack.upsert({
     where: { pack_code: packCode },
     create: {
       pack_code: packCode,
-      name: device.alias ? `${device.alias} — Custom Card` : 'Custom Card',
+      name: kid.name ? `${kid.name} — Custom Card` : 'Custom Card',
       content_type: 'rfidcontent',
       total_items: 0,
       version: '0',
@@ -459,7 +480,7 @@ const ensurePackForDevice = async (device, userId) => {
 };
 
 /**
- * Write a new item set for the device's pack, then clean up storage.
+ * Write a new item set for the child's pack, then clean up storage.
  *
  * The DB write is delegated to rfidService.updateContentPack — the same function
  * the dashboard's content pack editor uses — so item ordering, total_items and
@@ -469,7 +490,7 @@ const ensurePackForDevice = async (device, userId) => {
  * Version and hash move on every write. The toy compares hash first and falls
  * back to version, so both have to change or it keeps playing its cached copy.
  */
-const writePackItems = async (device, pack, items, userId) => {
+const writePackItems = async (kid, pack, items, userId) => {
   const before = await loadPackItems(pack.id);
   const nextVersion = String(Number(pack.version || 0) + 1);
   // Hash covers the whole set, so adding, removing or reordering all register as
@@ -497,10 +518,10 @@ const writePackItems = async (device, pack, items, userId) => {
   const savedItems = await loadPackItems(pack.id);
 
   logger.info(
-    `[CUSTOM-CARD] Wrote ${savedItems.length} item(s) for mac=${device.mac_address}: pack_code=${pack.pack_code}, version=${nextVersion}`
+    `[CUSTOM-CARD] Wrote ${savedItems.length} item(s) for kid=${kid.id}: pack_code=${pack.pack_code}, version=${nextVersion}`
   );
 
-  return serializePack(device, saved, savedItems);
+  return serializePack(kid, saved, savedItems, await currentDeviceMacForKid(kid.id));
 };
 
 const toItemPayload = (item) => ({
@@ -516,14 +537,14 @@ const toItemPayload = (item) => ({
 });
 
 /**
- * The device, pack and item a per-item request names, or the 404 that says which
+ * The child, pack and item a per-item request names, or the 404 that says which
  * of the three was missing.
  */
-const loadTargetItem = async (userId, mac, itemNumber) => {
-  const device = await assertDeviceOwnedByUser(userId, mac);
-  const pack = await findPackForMac(device.mac_address);
+const loadTargetItem = async (userId, kidId, itemNumber) => {
+  const kid = await assertKidOwnedByUser(userId, kidId);
+  const pack = await findPackForKid(kid.id);
   if (!pack) {
-    throw new ApiError('This device has no custom card content.', 404);
+    throw new ApiError('This child has no custom card content.', 404);
   }
 
   const existing = await loadPackItems(pack.id);
@@ -532,11 +553,11 @@ const loadTargetItem = async (userId, mac, itemNumber) => {
     throw new ApiError('That recording could not be found on this card.', 404);
   }
 
-  return { device, pack, existing, target };
+  return { kid, pack, existing, target };
 };
 
 /**
- * Add one or more recordings to the device's custom card.
+ * Add one or more recordings to the child's custom card.
  *
  * Appends rather than replaces: a parent building a card up over several
  * sessions must not lose what is already on it. Capped at MAX_ITEMS, and an
@@ -547,13 +568,13 @@ const loadTargetItem = async (userId, mac, itemNumber) => {
  * @param {{title?: string, images?: Array}} [options] - images[i] is the
  *   optional picture for files[i], already paired by pairCustomCardUploads
  */
-const addCustomCardContent = async (userId, mac, files, { title, images = [] } = {}) => {
+const addCustomCardContent = async (userId, kidId, files, { title, images = [] } = {}) => {
   const uploads = (Array.isArray(files) ? files : [files]).filter(Boolean);
   if (uploads.length === 0) {
     throw new ApiError('Please choose a recording to upload.', 400);
   }
 
-  const device = await assertDeviceOwnedByUser(userId, mac);
+  const kid = await assertKidOwnedByUser(userId, kidId);
   // Validate every file before uploading any, so a bad third file cannot leave
   // the first two sitting in storage.
   const validated = uploads.map((file, index) => ({
@@ -565,12 +586,12 @@ const addCustomCardContent = async (userId, mac, files, { title, images = [] } =
     if (entry.image) validateImageUpload(entry.image);
   }
 
-  const pack = await ensurePackForDevice(device, userId);
+  const pack = await ensurePackForKid(kid, userId);
   const existing = await loadPackItems(pack.id);
 
   if (existing.length + validated.length > MAX_ITEMS) {
     throw new ApiError(
-      `This card holds up to ${MAX_ITEMS} recordings. It already has ${existing.length}, so ${validated.length} more will not fit — remove one first.`,
+      `This card holds up to ${MAX_ITEMS} recordings for one child. It already has ${existing.length}, so ${validated.length} more will not fit — remove one first.`,
       400
     );
   }
@@ -585,7 +606,7 @@ const addCustomCardContent = async (userId, mac, files, { title, images = [] } =
   for (const [index, entry] of validated.entries()) {
     const { url } = await uploadService.uploadCustomCardAudio(
       entry.file.buffer,
-      device.mac_address,
+      kid.id,
       entry.file.originalname || `recording${entry.ext}`,
       entry.mimeType
     );
@@ -596,11 +617,11 @@ const addCustomCardContent = async (userId, mac, files, { title, images = [] } =
       title: entry.file.originalname || title || `Recording ${itemNumber}`,
       audioUrl: url,
       audioSizeBytes: entry.file.buffer.length,
-      imageUrl: entry.imageBin ? await uploadDeviceImage(entry.imageBin, device.mac_address) : null
+      imageUrl: entry.imageBin ? await uploadDeviceImage(entry.imageBin, kid.id) : null
     });
   }
 
-  return writePackItems(device, pack, [...existing.map(toItemPayload), ...appended], userId);
+  return writePackItems(kid, pack, [...existing.map(toItemPayload), ...appended], userId);
 };
 
 /**
@@ -615,12 +636,12 @@ const addCustomCardContent = async (userId, mac, files, { title, images = [] } =
  * recording, so sending no picture keeps the one already on the item rather than
  * clearing it. Artwork on its own goes through setCustomCardItemImage.
  */
-const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title, image } = {}) => {
+const replaceCustomCardItem = async (userId, kidId, itemNumber, file, { title, image } = {}) => {
   if (!file) {
     throw new ApiError('Please choose a recording to upload.', 400);
   }
 
-  const { device, pack, existing } = await loadTargetItem(userId, mac, itemNumber);
+  const { kid, pack, existing } = await loadTargetItem(userId, kidId, itemNumber);
 
   const { ext, mimeType } = validateAudioUpload(file, title);
   if (image) validateImageUpload(image);
@@ -629,11 +650,11 @@ const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title, ima
 
   const { url } = await uploadService.uploadCustomCardAudio(
     file.buffer,
-    device.mac_address,
+    kid.id,
     file.originalname || `recording${ext}`,
     mimeType
   );
-  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, device.mac_address) : null;
+  const imageUrl = imageBin ? await uploadDeviceImage(imageBin, kid.id) : null;
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -647,7 +668,7 @@ const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title, ima
       : toItemPayload(item)
   ));
 
-  return writePackItems(device, pack, items, userId);
+  return writePackItems(kid, pack, items, userId);
 };
 
 /**
@@ -656,15 +677,15 @@ const replaceCustomCardItem = async (userId, mac, itemNumber, file, { title, ima
  * Goes through writePackItems like every other write, so the version bump, the
  * content hash and the sweep of the picture it replaces all happen in one place.
  */
-const setCustomCardItemImage = async (userId, mac, itemNumber, file) => {
+const setCustomCardItemImage = async (userId, kidId, itemNumber, file) => {
   if (!file) {
     throw new ApiError('Please choose a picture to upload.', 400);
   }
 
-  const { device, pack, existing } = await loadTargetItem(userId, mac, itemNumber);
+  const { kid, pack, existing } = await loadTargetItem(userId, kidId, itemNumber);
   validateImageUpload(file);
 
-  const imageUrl = await uploadDeviceImage(await toDeviceImage(file), device.mac_address);
+  const imageUrl = await uploadDeviceImage(await toDeviceImage(file), kid.id);
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -672,15 +693,15 @@ const setCustomCardItemImage = async (userId, mac, itemNumber, file) => {
       : toItemPayload(item)
   ));
 
-  return writePackItems(device, pack, items, userId);
+  return writePackItems(kid, pack, items, userId);
 };
 
 /**
  * Clear one item's artwork, keeping the recording. Idempotent — an item with no
  * picture is not an error, it is already in the state being asked for.
  */
-const clearCustomCardItemImage = async (userId, mac, itemNumber) => {
-  const { device, pack, existing } = await loadTargetItem(userId, mac, itemNumber);
+const clearCustomCardItemImage = async (userId, kidId, itemNumber) => {
+  const { kid, pack, existing } = await loadTargetItem(userId, kidId, itemNumber);
 
   const items = existing.map((item) => (
     item.item_number === Number(itemNumber)
@@ -688,36 +709,30 @@ const clearCustomCardItemImage = async (userId, mac, itemNumber) => {
       : toItemPayload(item)
   ));
 
-  return writePackItems(device, pack, items, userId);
+  return writePackItems(kid, pack, items, userId);
 };
 
 /**
- * Remove one recording from the device's card, and its object from storage.
+ * Remove one recording from the child's card, and its object from storage.
  * Survivors are renumbered so item_number stays contiguous — the toy selects by
  * sequence, and a gap would have it ask for an item that is not there.
+ *
+ * The renumbering is why an itemNumber is only valid against the list it came
+ * from: every mutating endpoint returns the complete current card, and a client
+ * must rebuild from that response rather than reuse a number read before it.
  */
-const deleteCustomCardItem = async (userId, mac, itemNumber) => {
-  const device = await assertDeviceOwnedByUser(userId, mac);
-  const pack = await findPackForMac(device.mac_address);
-  if (!pack) {
-    throw new ApiError('This device has no custom card content.', 404);
-  }
-
-  const existing = await loadPackItems(pack.id);
-  const target = existing.find((item) => item.item_number === Number(itemNumber));
-  if (!target) {
-    throw new ApiError('That recording could not be found on this card.', 404);
-  }
+const deleteCustomCardItem = async (userId, kidId, itemNumber) => {
+  const { kid, pack, existing } = await loadTargetItem(userId, kidId, itemNumber);
 
   const items = existing
     .filter((item) => item.item_number !== Number(itemNumber))
     .map((item, index) => ({ ...toItemPayload(item), itemNumber: index + 1 }));
 
-  return writePackItems(device, pack, items, userId);
+  return writePackItems(kid, pack, items, userId);
 };
 
 module.exports = {
-  getCustomCardForDevice,
+  getCustomCardForKid,
   addCustomCardContent,
   replaceCustomCardItem,
   deleteCustomCardItem,
