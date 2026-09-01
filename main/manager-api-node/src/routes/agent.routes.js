@@ -836,6 +836,7 @@ router.get('/current-character/:mac',
         language: result.language ?? null,
         sarvamVoiceId: result.sarvamVoiceId ?? null,
         elevenlabsVoiceId: result.elevenlabsVoiceId ?? null,
+        smallestVoiceId: result.smallestVoiceId ?? null,
       };
       logger.info(`[AGENT] GET /current-character/${req.params.mac} response: ${JSON.stringify(response)}`);
       success(res, response);
@@ -879,6 +880,7 @@ router.get('/device/:mac/current-character',
         language: result.language ?? null,
         sarvamVoiceId: result.sarvamVoiceId ?? null,
         elevenlabsVoiceId: result.elevenlabsVoiceId ?? null,
+        smallestVoiceId: result.smallestVoiceId ?? null,
       };
       logger.info(`[AGENT] GET /device/${req.params.mac}/current-character response: ${JSON.stringify(response)}`);
       success(res, response);
@@ -998,6 +1000,7 @@ router.post('/device/:mac/set-character',
         language: result.language ?? null,
         sarvamVoiceId: result.sarvamVoiceId ?? null,
         elevenlabsVoiceId: result.elevenlabsVoiceId ?? null,
+        smallestVoiceId: result.smallestVoiceId ?? null,
       };
       logger.info(`[AGENT] POST /device/${req.params.mac}/set-character response: ${JSON.stringify(response)}`);
       success(res, response);
@@ -1038,6 +1041,7 @@ router.post('/device/:mac/cycle-character',
         language: result.language ?? null,
         sarvamVoiceId: result.sarvamVoiceId ?? null,
         elevenlabsVoiceId: result.elevenlabsVoiceId ?? null,
+        smallestVoiceId: result.smallestVoiceId ?? null,
       };
       logger.info(`[AGENT] POST /device/${req.params.mac}/cycle-character response: ${JSON.stringify(response)}`);
       success(res, response);

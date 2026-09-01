@@ -18,7 +18,7 @@ const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || "cheeko-agent
  * @param {object} params - macAddress, deviceId, character, characterId, language, childProfile, sessionConfig
  * @returns {string} JSON string for dispatch metadata
  */
-function buildDispatchMetadata({ macAddress, deviceId, character, characterId = null, language = null, sarvamVoiceId = null, elevenlabsVoiceId = null, childProfile, sessionConfig = {} }) {
+function buildDispatchMetadata({ macAddress, deviceId, character, characterId = null, language = null, sarvamVoiceId = null, elevenlabsVoiceId = null, smallestVoiceId = null, childProfile, sessionConfig = {} }) {
   // ADR-0004: the worker reads a stable shape, so parent_rule is always present —
   // null when the child has no rule. Passing childProfile through verbatim left the
   // key `undefined`, and JSON.stringify drops undefined keys entirely.
@@ -40,6 +40,7 @@ function buildDispatchMetadata({ macAddress, deviceId, character, characterId = 
     language: language,
     sarvam_voice_id: sarvamVoiceId,
     elevenlabs_voice_id: elevenlabsVoiceId,
+    smallest_voice_id: smallestVoiceId,
     child_profile: childProfile ? { ...childProfile, parent_rule: parentRule } : null,
     session_language_code: sessionConfig.languageCode || null,
     session_language_name: sessionConfig.languageName || null,
