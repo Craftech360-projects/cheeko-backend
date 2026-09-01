@@ -31,7 +31,7 @@ const DEFAULT_RUNTIME_AGENT = process.env.LIVEKIT_DEFAULT_AGENT || 'cheeko-agent
 
 function buildDispatchMetadata({
   macAddress, deviceId, character, characterId = null, language = null,
-  sarvamVoiceId = null, elevenlabsVoiceId = null, childProfile, sessionConfig = {},
+  sarvamVoiceId = null, elevenlabsVoiceId = null, smallestVoiceId = null, childProfile, sessionConfig = {},
 }) {
   return JSON.stringify({
     device_mac: macAddress,
@@ -41,6 +41,7 @@ function buildDispatchMetadata({
     language: language,
     sarvam_voice_id: sarvamVoiceId,
     elevenlabs_voice_id: elevenlabsVoiceId,
+    smallest_voice_id: smallestVoiceId,
     child_profile: childProfile || null,
     session_language_code: sessionConfig.languageCode || null,
     session_language_name: sessionConfig.languageName || null,
@@ -78,6 +79,7 @@ async function resolveCharacter(managerApiUrl, mac, characterName) {
     characterId: d.characterId ?? null,
     language: d.language ?? null,
     sarvamVoiceId: d.sarvamVoiceId ?? null,
+    smallestVoiceId: d.smallestVoiceId ?? null,
   };
 }
 
@@ -119,6 +121,7 @@ async function startSession({ livekit, managerApiUrl, managerSecret, mac, charac
     characterId: character?.characterId ?? null,
     language: character?.language ?? null,
     sarvamVoiceId: character?.sarvamVoiceId ?? null,
+    smallestVoiceId: character?.smallestVoiceId ?? null,
     childProfile,
     sessionConfig: {},
   });

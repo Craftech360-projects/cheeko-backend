@@ -63,6 +63,7 @@ router.get('/templates/:id', gate, asyncHandler(async (req, res) => {
     soul: t.soul,
     sarvamVoiceId: t.sarvamVoiceId,
     elevenlabsVoiceId: t.elevenlabsVoiceId,
+    smallestVoiceId: t.smallestVoiceId,
   });
 }));
 
@@ -89,6 +90,7 @@ router.post('/templates', gate, asyncHandler(async (req, res) => {
       langCode: b.langCode,
       sarvamVoiceId: b.sarvamVoiceId,
       elevenlabsVoiceId: b.elevenlabsVoiceId,
+      smallestVoiceId: b.smallestVoiceId,
     });
     success(res, { id }, 'Created');
   } catch (err) {
@@ -106,6 +108,7 @@ router.put('/templates/:id', gate, asyncHandler(async (req, res) => {
       soul: req.body.soul,
       sarvamVoiceId: req.body.sarvamVoiceId,
       elevenlabsVoiceId: req.body.elevenlabsVoiceId,
+      smallestVoiceId: req.body.smallestVoiceId,
     });
     success(res, null, 'Saved');
   } catch (err) {
