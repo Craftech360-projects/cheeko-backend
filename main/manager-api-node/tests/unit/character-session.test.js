@@ -57,6 +57,7 @@ describe('character session contract (getCharacterSession / getCurrentCharacter)
       soul: 'I am warm.',
       sarvamVoiceId: null,
       elevenlabsVoiceId: null,
+      smallestVoiceId: null,
     });
   });
 

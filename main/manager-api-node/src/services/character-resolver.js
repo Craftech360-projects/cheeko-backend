@@ -17,6 +17,7 @@ const resolveSessionForCharacter = (character, { language } = {}) => ({
   soul: character.soul ?? null,
   sarvamVoiceId: character.sarvam_voice_id ?? null,
   elevenlabsVoiceId: character.elevenlabs_voice_id ?? null,
+  smallestVoiceId: character.smallest_voice_id ?? null,
 });
 
 module.exports = { resolveRuntimeAgentName, resolveSessionForCharacter, normalizeCharacterName };
