@@ -1,5 +1,5 @@
 {
-  "watch": ["src/", "server.js"],
+  "watch": ["src/", "server.js", "../admin-dashboard/"],
   "ext": "js,json",
   "ignore": ["node_modules/", "tests/", "coverage/", "logs/"],
   "exec": "node server.js",
