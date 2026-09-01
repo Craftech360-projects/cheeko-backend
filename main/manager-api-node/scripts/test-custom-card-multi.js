@@ -6,7 +6,7 @@
  * one file at a time (its cap check rejects before uploading anything), and only
  * ever deleted item 1, so mid-list renumbering was untested.
  *
- *   node scripts/test-custom-card-multi.js <mac> <userId> <fileA> <fileB> <fileC>
+ *   node scripts/test-custom-card-multi.js <kidId> <userId> <fileA> <fileB> <fileC>
  */
 
 require('dotenv').config();
@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { S3Client, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const customCardService = require('../src/services/customCard.service');
-const { packCodeForMac } = require('../src/utils/helpers');
+const { packCodeForKid } = require('../src/utils/helpers');
 const { prisma } = require('../src/config/database');
 
 const s3 = new S3Client({
@@ -50,14 +50,14 @@ const check = (label, ok, detail = '') => {
 };
 
 (async () => {
-  const [mac, userId, ...files] = process.argv.slice(2);
-  if (!mac || !userId || files.length < 3) {
-    throw new Error('usage: node scripts/test-custom-card-multi.js <mac> <userId> <fileA> <fileB> <fileC>');
+  const [kidId, userId, ...files] = process.argv.slice(2);
+  if (!kidId || !userId || files.length < 3) {
+    throw new Error('usage: node scripts/test-custom-card-multi.js <kidId> <userId> <fileA> <fileB> <fileC>');
   }
 
   // Clean slate so item numbers are deterministic.
   const startPack = await prisma.rfid_content_pack.findFirst({
-    where: { pack_code: packCodeForMac(mac) },
+    where: { pack_code: packCodeForKid(kidId) },
   });
   if (startPack) {
     const stale = await prisma.content_item.findMany({
@@ -66,14 +66,14 @@ const check = (label, ok, detail = '') => {
       orderBy: { item_number: 'desc' },
     });
     for (const item of stale) {
-      await customCardService.deleteCustomCardItem(userId, mac, item.item_number);
+      await customCardService.deleteCustomCardItem(userId, kidId, item.item_number);
     }
     console.log(`(cleared ${stale.length} pre-existing item(s))\n`);
   }
 
   // ── 1. All three files in ONE request ────────────────────────────────────
   console.log(`--- multi-upload: ${files.map((f) => path.basename(f)).join(', ')} ---`);
-  const packed = await customCardService.addCustomCardContent(userId, mac, files.map(fakeUpload), {});
+  const packed = await customCardService.addCustomCardContent(userId, kidId, files.map(fakeUpload), {});
   const items = packed.contentPack.items;
   const keys = items.map((i) => keyFromUrl(i.fileUrl));
 
@@ -95,7 +95,7 @@ const check = (label, ok, detail = '') => {
 
   // ── 2. Replace the MIDDLE item in place ──────────────────────────────────
   console.log(`\n--- replace item 2 in place with ${path.basename(files[2])} ---`);
-  const swapped = await customCardService.replaceCustomCardItem(userId, mac, 2, fakeUpload(files[2]), {});
+  const swapped = await customCardService.replaceCustomCardItem(userId, kidId, 2, fakeUpload(files[2]), {});
   const swappedItems = swapped.contentPack.items;
   const newKey2 = keyFromUrl(swappedItems[1].fileUrl);
 
@@ -113,7 +113,7 @@ const check = (label, ok, detail = '') => {
 
   // ── 3. Delete the MIDDLE item ────────────────────────────────────────────
   console.log('\n--- delete middle item (2) ---');
-  const after = await customCardService.deleteCustomCardItem(userId, mac, 2);
+  const after = await customCardService.deleteCustomCardItem(userId, kidId, 2);
   const afterItems = after.contentPack.items;
 
   check('middle: two items left', after.contentPack.totalItems === 2, `${after.contentPack.totalItems}`);

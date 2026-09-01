@@ -10,7 +10,7 @@
 const { Prisma } = require('@prisma/client');
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
-const { normalizeMacAddress, packCodeForMac } = require('../utils/helpers');
+const { normalizeMacAddress, packCodeForKid } = require('../utils/helpers');
 const { resolveRuntimeAgentName } = require('./character-resolver');
 const { extractBySequence, countItems } = require('../utils/mdParser');
 const qdrantService = require('./integrations/qdrant.service');
@@ -725,11 +725,12 @@ const getCardsByQuestionId = async (questionId) => {
 };
 
 /**
- * Resolve a custom card to the tapping device's pack.
+ * Resolve a custom card to the pack of the child paired to the tapping toy.
  * `custom_card` is a flat allowlist of issued UIDs with no device binding, so
- * membership decides *whether* it is a custom card and the MAC decides *which*
- * pack plays. Returns null when the UID is not an issued custom card, when no
- * MAC was supplied, or when that device has no recording yet.
+ * membership decides *whether* it is a custom card and the tapping toy's child
+ * decides *which* pack plays. Returns null when the UID is not an issued custom
+ * card, when no MAC was supplied, when the toy is unknown or unpaired, or when
+ * that child has no recording yet.
  * @param {string} normalizedUid
  * @param {string} [mac]
  * @returns {Promise<Object|null>} rfid_content_pack row
@@ -741,8 +742,21 @@ const resolveCustomCardPack = async (normalizedUid, mac) => {
     const issued = await prisma.custom_card.findFirst({ where: { rfid_uid: normalizedUid } });
     if (!issued) return null;
 
+    // The MAC is an address, not an owner: it says which toy tapped, and the
+    // toy's paired child says whose recordings play. An unpaired toy has no
+    // child and therefore no pack — deliberately, so a toy handed to a sibling
+    // cannot play the previous child's recordings.
+    const device = await prisma.ai_device.findFirst({
+      where: { mac_address: normalizeMacAddress(mac) },
+      select: { kid_id: true }
+    });
+    if (!device?.kid_id) {
+      logger.info(`[RFID-LOOKUP] Custom card uid=${normalizedUid} tapped on mac=${mac} with ${device ? 'no child paired' : 'no such device'}; nothing to play`);
+      return null;
+    }
+
     return await prisma.rfid_content_pack.findFirst({
-      where: { pack_code: packCodeForMac(mac), active: true }
+      where: { pack_code: packCodeForKid(device.kid_id), active: true }
     });
   } catch (err) {
     logger.error('[RFID-LOOKUP] Custom card pack resolution error:', err);
@@ -982,9 +996,10 @@ const lookupCardByUid = async (rfidUid, mac) => {
     }
 
     // Fallback: custom card. `custom_card` is a flat allowlist of issued UIDs —
-    // being in it is what makes a card custom. There is no card-to-device
-    // binding: any issued custom card plays the pack of whichever toy it is
-    // tapped on, so the second hop is keyed on the MAC, not the UID.
+    // being in it is what makes a card custom. There is no card-to-child
+    // binding: any issued custom card plays the pack of the child paired to the
+    // tapping toy, so the second hop is keyed on that child, not the UID. An
+    // unpaired toy has no child and plays nothing.
     let customCard = null;
     try {
       customCard = await prisma.custom_card.findFirst({
@@ -1001,13 +1016,14 @@ const lookupCardByUid = async (rfidUid, mac) => {
       const pack = await resolveCustomCardPack(normalizedUid, mac);
 
       if (pack) {
+        // packCode carries the child the toy is paired to: CUSTOM_KID_<kidId>.
         logger.info(`[RFID-LOOKUP] Custom card resolved: uid=${normalizedUid}, mac=${mac}, packCode=${pack.pack_code}`);
         return buildContentPackResponse(pack, normalizedUid);
       }
 
-      // Issued but nothing recorded yet: null, so the gateway answers
-      // card_unknown. Returning a prompt card here instead made the toy open a
-      // full LLM session just to speak one fixed sentence.
+      // Issued but nothing recorded yet, or the toy has no child: null, so the
+      // gateway answers card_unknown. Returning a prompt card here instead made
+      // the toy open a full LLM session just to speak one fixed sentence.
       logger.info(`[RFID-LOOKUP] Custom card uid=${normalizedUid} has no pack for mac=${mac || 'none'} yet, treating as unknown`);
       return null;
     }
@@ -2852,7 +2868,7 @@ const recordCardTap = async (payload = {}) => {
   let updateAvailable = false;
   let updateReason = null;
   // Custom cards no longer need special-casing here: they resolve to a real
-  // rfid_content_pack (CUSTOM_<MAC>), which the packCode fallback above already
+  // rfid_content_pack (CUSTOM_KID_<kidId>), which the packCode fallback above already
   // picks up, so they get the same version/hash handshake as any content card.
   if (cardType === 'content' && contentPack) {
     if (latestContentHash) {
@@ -4176,62 +4192,55 @@ const updateContentPack = async (data, userId) => {
     try {
       existingItemMap = buildExistingContentItemMap(await listContentItemsCompat(data.id));
     } catch (existingErr) {
+      // Read-only, and only feeds the "fall back to the existing row for
+      // anything left undefined" behaviour below. Failing to read it is not a
+      // reason to refuse the write, so this catch stays.
       logger.error('Failed to load existing content items before update:', existingErr);
     }
 
-    // Delete existing
-    try {
-      await prisma.content_item.deleteMany({
+    const contentItemColumns = data.items.length > 0 ? await getContentItemColumns() : null;
+    const itemsData = data.items.map((item, index) => {
+      const payloadItemNumber = getFirstDefined(item.itemNumber, item.item_number, item.sequence, index + 1);
+      const existingItem = item.id !== undefined && item.id !== null
+        ? existingItemMap.byId.get(String(item.id))
+        : existingItemMap.byItemNumber.get(Number(payloadItemNumber));
+      const normalized = normalizeContentPackItemPayload(item, index, existingItem);
+
+      const row = {
+        content_pack_id: BigInt(data.id),
+        item_number: normalized.itemNumber,
+        title: normalized.title,
+        description: normalized.description || null,
+        audio_url: normalized.audioUrl,
+        audio_size_bytes: normalized.audioSizeBytes || null,
+        audio_duration_ms: normalized.audioDurationMs || null,
+        images_json: normalized.imagesJson || null,
+        image_url: normalized.imageUrl,
+        lyrics_text: normalized.text || null,
+        updater: userId ? BigInt(userId) : null,
+        active: true
+      };
+      return appendOptionalContentItemFields(row, normalized, contentItemColumns);
+    });
+
+    // Delete-all-then-reinsert, in one transaction and with nothing swallowed.
+    // Both halves used to be caught and logged, which meant a failed delete
+    // answered 200 with the rows still there (the custom-card delete bug) and a
+    // failed insert answered 200 with the whole pack wiped. A rollback leaves
+    // the pack exactly as it was, and the throw becomes a 500 the caller can
+    // see.
+    await prisma.$transaction(async (tx) => {
+      await tx.content_item.deleteMany({
         where: { content_pack_id: BigInt(data.id) }
       });
-    } catch (delErr) {
-      logger.error('Failed to delete existing content items:', delErr);
-    }
-
-    // Insert new
-    if (data.items.length > 0) {
-      const contentItemColumns = await getContentItemColumns();
-      const itemsData = data.items.map((item, index) => {
-        const payloadItemNumber = getFirstDefined(item.itemNumber, item.item_number, item.sequence, index + 1);
-        const existingItem = item.id !== undefined && item.id !== null
-          ? existingItemMap.byId.get(String(item.id))
-          : existingItemMap.byItemNumber.get(Number(payloadItemNumber));
-        const normalized = normalizeContentPackItemPayload(item, index, existingItem);
-
-        const row = {
-          content_pack_id: BigInt(data.id),
-          item_number: normalized.itemNumber,
-          title: normalized.title,
-          description: normalized.description || null,
-          audio_url: normalized.audioUrl,
-          audio_size_bytes: normalized.audioSizeBytes || null,
-          audio_duration_ms: normalized.audioDurationMs || null,
-          images_json: normalized.imagesJson || null,
-          image_url: normalized.imageUrl,
-          lyrics_text: normalized.text || null,
-          updater: userId ? BigInt(userId) : null,
-          active: true
-        };
-        return appendOptionalContentItemFields(row, normalized, contentItemColumns);
-      });
-
-      try {
-        await prisma.content_item.createMany({ data: itemsData });
-        // Update total_items count
-        await prisma.rfid_content_pack.updateMany({
-          where: { id: BigInt(data.id) },
-          data: { total_items: itemsData.length }
-        });
-      } catch (itemsError) {
-        logger.error('Failed to update content items:', itemsError);
+      if (itemsData.length > 0) {
+        await tx.content_item.createMany({ data: itemsData });
       }
-    } else {
-      // All items removed
-      await prisma.rfid_content_pack.updateMany({
+      await tx.rfid_content_pack.updateMany({
         where: { id: BigInt(data.id) },
-        data: { total_items: 0 }
+        data: { total_items: itemsData.length }
       });
-    }
+    });
   }
 
   return null;
@@ -4666,7 +4675,7 @@ const deleteCategories = async (ids) => {
 // =============================================
 // Custom Card Admin Methods
 // custom_card is a flat allowlist of issued UIDs; the content lives in
-// rfid_content_pack CUSTOM_<MAC>, one per device.
+// rfid_content_pack CUSTOM_KID_<kidId>, one per child.
 // =============================================
 
 /**
@@ -4723,12 +4732,28 @@ const deleteCustomCards = async (ids) => {
 };
 
 /**
- * List every per-device custom pack with its device and current recording.
- * The pack code carries a separator-stripped MAC, so the device join has to
- * strip too — there is no FK to follow.
+ * List every per-child custom pack with the child that owns it, the toy it is
+ * currently playing on, and its first recording.
+ *
+ * The pack code carries the kid id, so the owner join parses it back out —
+ * there is no FK to follow. The device join is a LEFT JOIN through the child
+ * and answers "which toy is this on right now", which is null for a child with
+ * no toy paired.
  */
 const getCustomPackList = async () => {
+  // The custom packs are filtered into a MATERIALIZED CTE before the cast, not
+  // alongside it in a WHERE: a join condition is free to be evaluated on rows
+  // the filter would have excluded, and `'nursery_rhymes'::bigint` is an error,
+  // not a no-match. MATERIALIZED stops the planner inlining that guarantee away;
+  // the set is only the custom packs, so there is nothing to pay for it. The
+  // regexp is the same reasoning — it bounds the cast to digits rather than
+  // trusting a LIKE to have already done so.
   const rows = await prisma.$queryRaw`
+    WITH custom AS MATERIALIZED (
+      SELECT p.*, SUBSTRING(p.pack_code FROM '^CUSTOM_KID_([0-9]+)$')::bigint AS owner_kid_id
+      FROM rfid_content_pack p
+      WHERE p.pack_code ~ '^CUSTOM_KID_[0-9]+$'
+    )
     SELECT
       p.id,
       p.pack_code,
@@ -4738,14 +4763,16 @@ const getCustomPackList = async () => {
       p.total_items,
       p.active,
       p.update_date,
+      k.id AS kid_id,
+      k.name AS kid_name,
       d.mac_address,
       d.alias AS device_alias,
       i.title AS item_title,
       i.audio_url AS item_audio_url,
       i.audio_size_bytes AS item_size_bytes
-    FROM rfid_content_pack p
-    LEFT JOIN ai_device d
-      ON UPPER(REPLACE(REPLACE(d.mac_address, ':', ''), '-', '')) = REPLACE(p.pack_code, 'CUSTOM_', '')
+    FROM custom p
+    JOIN kid_profile k ON k.id = p.owner_kid_id
+    LEFT JOIN ai_device d ON d.kid_id = k.id
     LEFT JOIN LATERAL (
       SELECT title, audio_url, audio_size_bytes
       FROM content_item
@@ -4753,7 +4780,6 @@ const getCustomPackList = async () => {
       ORDER BY item_number ASC
       LIMIT 1
     ) i ON true
-    WHERE p.pack_code LIKE 'CUSTOM=_%' ESCAPE '='
     ORDER BY p.update_date DESC NULLS LAST
   `;
 
@@ -4761,6 +4787,9 @@ const getCustomPackList = async () => {
     id: Number(row.id),
     packCode: row.pack_code,
     name: row.name,
+    kidId: String(row.kid_id),
+    kidName: row.kid_name || null,
+    // "Currently playing on", not the owner — null for a child with no toy.
     macAddress: row.mac_address || null,
     deviceAlias: row.device_alias || null,
     version: row.version,

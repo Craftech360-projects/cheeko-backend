@@ -2,10 +2,10 @@
  * Manual integration test: custom card create + replace, including the S3 cleanup.
  *
  * Hits real S3 and the real DB — run against dev only.
- *   node scripts/test-custom-card-upload.js <mac> <userId> <fileA> <fileB>
+ *   node scripts/test-custom-card-upload.js <kidId> <userId> <fileA> <fileB>
  *
  * Verifies, in order:
- *   1. First upload creates the device pack and puts the object in S3
+ *   1. First upload creates the child's pack and puts the object in S3
  *   2. Second upload replaces it, bumps the version and the content hash
  *   3. The FIRST object is gone from S3 — a replaced recording must not linger
  */
@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { S3Client, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const customCardService = require('../src/services/customCard.service');
+const { packCodeForKid } = require('../src/utils/helpers');
 const { prisma } = require('../src/config/database');
 
 const s3 = new S3Client({
@@ -51,9 +52,9 @@ const check = (label, ok, detail = '') => {
 };
 
 (async () => {
-  const [mac, userId, fileA, fileB] = process.argv.slice(2);
-  if (!mac || !userId || !fileA || !fileB) {
-    throw new Error('usage: node scripts/test-custom-card-upload.js <mac> <userId> <fileA> <fileB>');
+  const [kidId, userId, fileA, fileB] = process.argv.slice(2);
+  if (!kidId || !userId || !fileA || !fileB) {
+    throw new Error('usage: node scripts/test-custom-card-upload.js <kidId> <userId> <fileA> <fileB>');
   }
 
   console.log(`bucket=${BUCKET} region=${process.env.AWS_DEFAULT_REGION}`);
@@ -61,7 +62,7 @@ const check = (label, ok, detail = '') => {
 
   // Start from a clean card so the cap assertions are deterministic.
   const startPack = await prisma.rfid_content_pack.findFirst({
-    where: { pack_code: require('../src/utils/helpers').packCodeForMac(mac) },
+    where: { pack_code: packCodeForKid(kidId) },
   });
   if (startPack) {
     const stale = await prisma.content_item.findMany({
@@ -70,20 +71,20 @@ const check = (label, ok, detail = '') => {
       orderBy: { item_number: 'desc' },
     });
     for (const item of stale) {
-      await customCardService.deleteCustomCardItem(userId, mac, item.item_number);
+      await customCardService.deleteCustomCardItem(userId, kidId, item.item_number);
     }
     console.log(`(cleared ${stale.length} pre-existing item(s))\n`);
   }
 
   // ── 1. Create ────────────────────────────────────────────────────────────
   console.log(`--- upload A: ${path.basename(fileA)} ---`);
-  const first = await customCardService.addCustomCardContent(userId, mac, [fakeUpload(fileA)], {
+  const first = await customCardService.addCustomCardContent(userId, kidId, [fakeUpload(fileA)], {
     title: path.basename(fileA),
   });
   const keyA = keyFromUrl(first.contentPack.fileUrl);
   console.log(`pack=${first.contentPack.packCode} version=${first.contentPack.version}`);
 
-  check('A: folder is customcard_<mac>', keyA.startsWith(`customcard_${mac.toLowerCase().replace(/[^0-9a-f]/g, '')}/`), keyA);
+  check('A: folder is customcard_kid<id>', keyA.startsWith(`customcard_kid${kidId}/`), keyA);
   check('A: object exists in S3', await exists(keyA));
   check('A: one item', first.contentPack.totalItems === 1, `${first.contentPack.totalItems}`);
   check('A: size recorded', first.contentPack.sizeBytes === fs.statSync(fileA).size,
@@ -97,7 +98,7 @@ const check = (label, ok, detail = '') => {
 
   // ── 2. Append (must NOT wipe the first) ──────────────────────────────────
   console.log(`\n--- upload B (append): ${path.basename(fileB)} ---`);
-  const second = await customCardService.addCustomCardContent(userId, mac, [fakeUpload(fileB)], {
+  const second = await customCardService.addCustomCardContent(userId, kidId, [fakeUpload(fileB)], {
     title: path.basename(fileB),
   });
   const keyB = keyFromUrl(second.contentPack.items[1]?.fileUrl);
@@ -122,7 +123,7 @@ const check = (label, ok, detail = '') => {
   const overflow = Array.from({ length: customCardService.MAX_ITEMS }, () => fakeUpload(fileA));
   let capMsg = null;
   try {
-    await customCardService.addCustomCardContent(userId, mac, overflow, {});
+    await customCardService.addCustomCardContent(userId, kidId, overflow, {});
   } catch (err) {
     capMsg = err.message;
   }
@@ -136,7 +137,7 @@ const check = (label, ok, detail = '') => {
 
   // ── 4. Delete one, and its object ────────────────────────────────────────
   console.log('\n--- delete item 1 ---');
-  const afterDelete = await customCardService.deleteCustomCardItem(userId, mac, 1);
+  const afterDelete = await customCardService.deleteCustomCardItem(userId, kidId, 1);
   check('delete: one item left', afterDelete.contentPack.totalItems === 1, `${afterDelete.contentPack.totalItems}`);
   check('delete: survivor renumbered to 1', afterDelete.contentPack.items[0]?.itemNumber === 1);
   check('delete: survivor is file B', keyFromUrl(afterDelete.contentPack.items[0]?.fileUrl) === keyB);

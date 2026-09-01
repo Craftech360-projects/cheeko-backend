@@ -80,6 +80,15 @@ const handleUploadErrors = (uploadMiddleware) => (req, res, next) => {
     });
 };
 
+// The stored URL is <publicBase>/<key>; strip scheme + host to recover the key.
+// deleteCustomCardObject ignores anything outside the customcard prefix, so a
+// pack that somehow referenced catalogue audio cannot delete it from here.
+const sweepCustomCardUrls = async (urls = []) => {
+    for (const url of urls) {
+        await uploadService.deleteCustomCardObject(String(url).split('/').slice(3).join('/'));
+    }
+};
+
 const defaultDeviceName = (index) => `Cheeko - ${index + 1}`;
 
 const mobileDeviceDisplayName = (device, index) => {
@@ -269,7 +278,10 @@ router.put('/kids/:id', asyncHandler(async (req, res) => {
 
 router.delete('/kids/:id', asyncHandler(async (req, res) => {
     const deleted = await mobileService.deleteKid(req.firebaseUser.uid, req.params.id);
+    // Storage is swept only after the delete has committed, so a failed
+    // transaction can never leave rows pointing at objects that are gone.
     await uploadService.deleteKidAvatarByUrl(deleted.avatar_url);
+    await sweepCustomCardUrls(deleted.retired);
     success(res, null, 'Kid profile deleted');
 }));
 
@@ -301,20 +313,21 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
 
 // ─── Custom Card ────────────────────────────────────────────────────────────
 
-// Custom content belongs to a device, not to a kid or to a particular card: any
-// issued custom card tapped on this toy plays this pack. Always 200 — a null
-// contentPack means "nothing recorded yet", which is a normal state, not an error.
-router.get('/devices/:mac/custom-card', asyncHandler(async (req, res) => {
-    const card = await customCardService.getCustomCardForDevice(req.mobileUser.id, req.params.mac);
+// Custom content belongs to a child, not to a toy or to a particular card: any
+// issued custom card tapped on the toy that child is paired to plays this pack,
+// and it follows them to a new toy. Always 200 — a null contentPack means
+// "nothing recorded yet", which is a normal state, not an error.
+router.get('/kids/:kidId/custom-card', asyncHandler(async (req, res) => {
+    const card = await customCardService.getCustomCardForKid(req.mobileUser.id, req.params.kidId);
     success(res, card);
 }));
 
-// Adds recordings to the device's pack, creating it on first upload. Appends up
+// Adds recordings to the child's pack, creating it on first upload. Appends up
 // to MAX_ITEMS so a parent can build the card up over several sessions.
 // Accepts either `files` (up to 10) or a single `file`, so the shipped app's
 // one-file-per-upload call keeps working unchanged. Each recording may carry one
 // picture: `image_N` for the Nth `files` part, `image` for `file`.
-router.post('/devices/:mac/custom-card/content',
+router.post('/kids/:kidId/custom-card/content',
     handleUploadErrors(customCardUpload.fields([
         { name: 'files', maxCount: customCardService.MAX_ITEMS },
         { name: 'file', maxCount: 1 },
@@ -326,16 +339,16 @@ router.post('/devices/:mac/custom-card/content',
             return badRequest(res, 'Please choose a recording to upload.');
         }
 
-        // The path segment is authoritative; a repeated mac field must agree with
-        // it so a mismatched body cannot write to a different toy.
-        const bodyMac = req.body?.mac || req.body?.macAddress;
-        if (bodyMac && String(bodyMac).toUpperCase() !== String(req.params.mac).toUpperCase()) {
-            return badRequest(res, 'The device in the request does not match the one being updated.');
+        // The path segment is authoritative; a repeated kid field must agree with
+        // it so a mismatched body cannot write to another child's card.
+        const bodyKidId = req.body?.kidId || req.body?.kid_id;
+        if (bodyKidId && String(bodyKidId) !== String(req.params.kidId)) {
+            return badRequest(res, 'The child in the request does not match the one being updated.');
         }
 
         const card = await customCardService.addCustomCardContent(
             req.mobileUser.id,
-            req.params.mac,
+            req.params.kidId,
             uploads,
             { title: req.body?.title, images }
         );
@@ -348,7 +361,7 @@ router.post('/devices/:mac/custom-card/content',
 // number, so the card does not reorder under the parent. A picture may ride
 // along; sending one alone belongs on the dedicated route below, because this
 // endpoint's meaning is "replace the recording".
-router.put('/devices/:mac/custom-card/content/:itemNumber',
+router.put('/kids/:kidId/custom-card/content/:itemNumber',
     handleUploadErrors(customCardUpload.fields([
         { name: 'file', maxCount: 1 },
         { name: 'files', maxCount: 1 },
@@ -365,7 +378,7 @@ router.put('/devices/:mac/custom-card/content/:itemNumber',
 
         const card = await customCardService.replaceCustomCardItem(
             req.mobileUser.id,
-            req.params.mac,
+            req.params.kidId,
             req.params.itemNumber,
             upload,
             { title: req.body?.title, image }
@@ -375,7 +388,7 @@ router.put('/devices/:mac/custom-card/content/:itemNumber',
 );
 
 // Changes one recording's artwork without re-uploading the recording itself.
-router.put('/devices/:mac/custom-card/content/:itemNumber/image',
+router.put('/kids/:kidId/custom-card/content/:itemNumber/image',
     handleUploadErrors(customCardUpload.fields([
         { name: 'image', maxCount: 1 },
     ])),
@@ -387,7 +400,7 @@ router.put('/devices/:mac/custom-card/content/:itemNumber/image',
 
         const card = await customCardService.setCustomCardItemImage(
             req.mobileUser.id,
-            req.params.mac,
+            req.params.kidId,
             req.params.itemNumber,
             image
         );
@@ -395,24 +408,27 @@ router.put('/devices/:mac/custom-card/content/:itemNumber/image',
     })
 );
 
-// Clears one recording's artwork, keeping the recording.
-router.delete('/devices/:mac/custom-card/content/:itemNumber/image',
+// Clears one recording's artwork, keeping the recording. Stays registered ahead
+// of the bare /content/:itemNumber delete below, so the more specific path wins.
+router.delete('/kids/:kidId/custom-card/content/:itemNumber/image',
     asyncHandler(async (req, res) => {
         const card = await customCardService.clearCustomCardItemImage(
             req.mobileUser.id,
-            req.params.mac,
+            req.params.kidId,
             req.params.itemNumber
         );
         success(res, card);
     })
 );
 
-// Removes one recording and its stored object. Survivors are renumbered.
-router.delete('/devices/:mac/custom-card/content/:itemNumber',
+// Removes one recording and its stored object. Survivors are renumbered, so the
+// response is the card the client must rebuild its list from — an itemNumber
+// read before this call is stale the moment the response lands.
+router.delete('/kids/:kidId/custom-card/content/:itemNumber',
     asyncHandler(async (req, res) => {
         const card = await customCardService.deleteCustomCardItem(
             req.mobileUser.id,
-            req.params.mac,
+            req.params.kidId,
             req.params.itemNumber
         );
         success(res, card);
@@ -427,7 +443,15 @@ router.get('/check-email', asyncHandler(async (req, res) => {
 }));
 
 router.delete('/account', asyncHandler(async (req, res) => {
-    const result = await mobileService.deleteUserAccount(req.firebaseUser.uid);
+    const { retired, avatar_urls: avatarUrls, ...result } =
+        await mobileService.deleteUserAccount(req.firebaseUser.uid);
+    // Same post-commit ordering as the single-kid delete above. The two URL
+    // lists are the sweep's input, not part of the response body — the shape
+    // the app parses stays what it was.
+    for (const avatarUrl of avatarUrls || []) {
+        await uploadService.deleteKidAvatarByUrl(avatarUrl);
+    }
+    await sweepCustomCardUrls(retired);
     res.json(result);
 }));
 

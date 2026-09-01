@@ -1,7 +1,7 @@
 const { prisma } = require('../config/database');
 const logger = require('../utils/logger');
 const { ApiError } = require('../middleware/errorHandler');
-const { normalizeMacAddress } = require('../utils/helpers');
+const { normalizeMacAddress, packCodeForKid } = require('../utils/helpers');
 const { normalizeCharacterName } = require('./character-resolver');
 const {
     isValidTimezone,
@@ -2037,6 +2037,38 @@ async function updateKid(firebaseUid, kidId, data) {
     };
 }
 
+/**
+ * Delete a child's custom-card pack and its items, returning the storage URLs
+ * the caller must sweep once the transaction has committed.
+ *
+ * The pack is keyed by pack_code rather than an FK, so nothing cascades: without
+ * this the pack, its items and every S3 object behind them outlive the child
+ * forever. An FK would not have helped either — it cannot reach S3, so this
+ * function has to exist regardless.
+ *
+ * The sweep is deliberately the caller's job and deliberately after the commit:
+ * deleting objects first and then failing the write would leave rows pointing at
+ * files that are gone. An orphaned object is the cheaper failure.
+ *
+ * @returns {Promise<string[]>} audio and image URLs to delete from storage
+ */
+async function deleteCustomPackForKid(tx, kidId) {
+    const pack = await tx.rfid_content_pack.findFirst({
+        where: { pack_code: packCodeForKid(kidId) },
+        select: { id: true },
+    });
+    if (!pack) return [];
+
+    const items = await tx.content_item.findMany({
+        where: { content_pack_id: pack.id },
+        select: { audio_url: true, image_url: true },
+    });
+    await tx.content_item.deleteMany({ where: { content_pack_id: pack.id } });
+    await tx.rfid_content_pack.delete({ where: { id: pack.id } });
+
+    return items.flatMap((item) => [item.audio_url, item.image_url]).filter(Boolean);
+}
+
 async function deleteKid(firebaseUid, kidId) {
     const user = await prisma.sys_user.findUnique({
         where: { firebase_uid: firebaseUid },
@@ -2049,15 +2081,18 @@ async function deleteKid(firebaseUid, kidId) {
     });
     if (!kid) throw new Error('Kid profile not found');
 
-    await prisma.$transaction([
-        prisma.ai_device.updateMany({
+    let retired = [];
+    await prisma.$transaction(async (tx) => {
+        await tx.ai_device.updateMany({
             where: { kid_id: BigInt(kidId) },
             data: { kid_id: null, update_date: new Date() },
-        }),
-        prisma.kid_profile.delete({ where: { id: BigInt(kidId) } }),
-    ]);
-    // Returned so the caller can clean up the publicly-served avatar object
-    return { success: true, avatar_url: kid.avatar_url };
+        });
+        retired = await deleteCustomPackForKid(tx, kidId);
+        await tx.kid_profile.delete({ where: { id: BigInt(kidId) } });
+    });
+    // Returned so the caller can clean up the publicly-served objects: the
+    // avatar, and every custom-card recording and picture the child owned.
+    return { success: true, avatar_url: kid.avatar_url, retired };
 }
 
 // ─── RPC Replacements ───────────────────────────────────────────────────────
@@ -2075,15 +2110,33 @@ async function deleteUserAccount(firebaseUid) {
     });
     if (!user) throw new Error('User not found');
 
-    // Delete all user references (Cascade should handle most if set up, but doing it explicitly for safety)
-    await prisma.$transaction([
-        prisma.kid_profile.deleteMany({ where: { user_id: user.id } }),
-        prisma.parent_profile.deleteMany({ where: { user_id: user.id } }),
-        prisma.ai_device.deleteMany({ where: { user_id: user.id } }),
-        prisma.sys_user.delete({ where: { id: user.id } })
-    ]);
+    const kids = await prisma.kid_profile.findMany({
+        where: { user_id: user.id },
+        select: { id: true, avatar_url: true },
+    });
 
-    return { success: true, user_id: firebaseUid, deleted_at: new Date().toISOString() };
+    // Delete all user references (Cascade should handle most if set up, but doing it explicitly for safety)
+    const retired = [];
+    await prisma.$transaction(async (tx) => {
+        // Custom packs hang off pack_code, not an FK, so deleting the children
+        // does not reach them. Same reasoning as deleteKid — see there.
+        for (const kid of kids) {
+            retired.push(...await deleteCustomPackForKid(tx, kid.id));
+        }
+        await tx.kid_profile.deleteMany({ where: { user_id: user.id } });
+        await tx.parent_profile.deleteMany({ where: { user_id: user.id } });
+        await tx.ai_device.deleteMany({ where: { user_id: user.id } });
+        await tx.sys_user.delete({ where: { id: user.id } });
+    });
+
+    // Swept by the route after the commit, alongside the avatars.
+    return {
+        success: true,
+        user_id: firebaseUid,
+        deleted_at: new Date().toISOString(),
+        retired,
+        avatar_urls: kids.map((kid) => kid.avatar_url).filter(Boolean),
+    };
 }
 
 async function getHomepageActivity(firebaseUid, options = {}) {

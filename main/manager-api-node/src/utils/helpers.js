@@ -202,13 +202,21 @@ const sleep = (ms) => {
 };
 
 /**
- * Content pack code for a device's custom card: CUSTOM_<MAC>, separators stripped.
+ * Content pack code for a child's custom card: CUSTOM_KID_<kidId>.
+ *
  * Lives here rather than in customCard.service because rfid.service needs it too,
  * and a service-to-service import in both directions would be a require cycle.
- * @param {string} mac
+ *
+ * The same ownership rule as `ownerKeyForDevice` below, with a deliberately
+ * different fallback: that one falls back to `mac:` for an unpaired toy because
+ * a workspace must always exist, whereas a custom pack has no fallback at all —
+ * it must never be shared between children, so an unpaired toy simply resolves
+ * to no pack.
+ *
+ * @param {bigint|number|string} kidId
  * @returns {string}
  */
-const packCodeForMac = (mac) => `CUSTOM_${String(mac || '').toUpperCase().replace(/[^0-9A-F]/g, '')}`;
+const packCodeForKid = (kidId) => `CUSTOM_KID_${BigInt(kidId)}`;
 
 /**
  * Who owns a device's workspace and durable memory.
@@ -250,5 +258,5 @@ module.exports = {
   transformKeysToCamel,
   transformKeysToSnake,
   sleep,
-  packCodeForMac
+  packCodeForKid
 };

@@ -35,6 +35,11 @@ jest.mock('../../src/config/database', () => {
     device_memory_documents: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     device_memory_chunks: { updateMany: jest.fn(), findMany: jest.fn(), update: jest.fn(), delete: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
     imagine_image: { updateMany: jest.fn(), deleteMany: jest.fn(async () => ({ count: 0 })) },
+    // Mocked so a stray call is caught rather than throwing on undefined.
+    // Nothing on the pairing path may touch these — see the custom pack tests
+    // at the bottom of this file.
+    rfid_content_pack: { findFirst: jest.fn(), updateMany: jest.fn(), delete: jest.fn(), deleteMany: jest.fn() },
+    content_item: { findMany: jest.fn(), deleteMany: jest.fn() },
     $transaction: jest.fn(),
   };
   return { prisma };
@@ -505,6 +510,59 @@ describe('device pairing to a child', () => {
 
       expect(prisma.device_kid_assignment.updateMany).not.toHaveBeenCalled();
       expect(prisma.device_kid_assignment.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // A custom card pack is keyed on the child (CUSTOM_KID_<id>), so it needs no
+  // handover: the recordings follow the child to the new toy by construction.
+  // These assertions are the guarantee that rests on — the day something starts
+  // moving packs on pairing is the day the binding quietly reverts to the toy.
+  describe('custom card packs are not part of the handover', () => {
+    const expectPacksUntouched = () => {
+      expect(prisma.rfid_content_pack.findFirst).not.toHaveBeenCalled();
+      expect(prisma.rfid_content_pack.updateMany).not.toHaveBeenCalled();
+      expect(prisma.rfid_content_pack.delete).not.toHaveBeenCalled();
+      expect(prisma.rfid_content_pack.deleteMany).not.toHaveBeenCalled();
+      expect(prisma.content_item.deleteMany).not.toHaveBeenCalled();
+    };
+
+    it('pairing a child to a toy leaves every pack alone', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      expectPacksUntouched();
+    });
+
+    it('moving a child to a different toy leaves their pack where it is', async () => {
+      prisma.kid_profile.findFirst.mockResolvedValue({ id: 9n });
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-2', mac_address: MAC, kid_id: null,
+      });
+      prisma.ai_device.findMany.mockResolvedValue([{ mac_address: 'FF:EE:DD:CC:BB:AA' }]);
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-2', kid_id: 9n });
+
+      await deviceService.assignKidByMac(MAC, '9', 12n);
+
+      // The old toy is released, the pack is not — that is the whole point.
+      expect(prisma.ai_device.update).toHaveBeenCalled();
+      expectPacksUntouched();
+    });
+
+    it('unbinding a toy leaves the child\'s pack intact', async () => {
+      prisma.ai_device.findFirst.mockResolvedValue({
+        id: 'device-1', mac_address: MAC, user_id: 12n, kid_id: 9n,
+      });
+      prisma.device_kid_assignment.findFirst.mockResolvedValue({ id: 5n, kid_id: 9n });
+      prisma.ai_device.update.mockResolvedValue({ id: 'device-1' });
+
+      await deviceService.unbindDevice(12, MAC);
+
+      expectPacksUntouched();
     });
   });
 });
