@@ -47,6 +47,7 @@ describe('resolveSessionForCharacter', () => {
       soul: 'I am warm and curious.',
       sarvamVoiceId: null,
       elevenlabsVoiceId: null,
+      smallestVoiceId: null,
     });
   });
 
