@@ -831,6 +831,16 @@ const parseIfMatch = (header) => {
 const versionMatches = (packVersion, ifMatch) =>
   ifMatch === null || ifMatch === '*' || String(packVersion ?? '0') === ifMatch;
 
+/**
+ * The tag GET offers for `If-None-Match`: a hash of the serialized card, not
+ * the pack version. `deviceMac` and `kidName` are in the body and change
+ * without any card write, so a version-keyed 304 kept answering "no toy paired"
+ * after a toy was paired, until the next edit happened to bump the version.
+ * `If-Match` on PATCH is still the version — that fences a write against the
+ * pack, which is the thing being written.
+ */
+const cardETag = (card) => createHash('sha256').update(JSON.stringify(card)).digest('hex').slice(0, 32);
+
 const STALE_CARD_MESSAGE = 'Someone else updated this card. Here is the latest version.';
 
 /** The whole card as GET would answer it. */
@@ -1003,6 +1013,7 @@ module.exports = {
   addCustomCardContent,
   patchCustomCardItem,
   parseIfMatch,
+  cardETag,
   replaceCustomCardItem,
   deleteCustomCardItem,
   setCustomCardItemImage,

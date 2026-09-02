@@ -278,33 +278,50 @@ describe('the multipart parts', () => {
 // ── freshness ───────────────────────────────────────────────────────────────
 
 describe('ETag on GET', () => {
-  it('offers the pack version, and answers 304 when the client already has it', async () => {
+  it('offers a tag for the body, and answers 304 when the client already has it', async () => {
     const first = await request(app).get(CARD);
     expect(first.status).toBe(200);
-    expect(first.headers.etag).toBe('"4"');
+    expect(first.headers.etag).toMatch(/^"[0-9a-f]{32}"$/);
 
-    const second = await request(app).get(CARD).set('If-None-Match', '"4"');
+    const second = await request(app).get(CARD).set('If-None-Match', first.headers.etag);
     expect(second.status).toBe(304);
     expect(second.body).toEqual({});
   });
 
-  it('answers 200 again once the version has moved', async () => {
+  it('answers 200 again once the card has been edited', async () => {
+    const before = (await request(app).get(CARD)).headers.etag;
     await request(app).patch(`${CARD}/content/1`).field('title', 'Moved on');
 
-    const res = await request(app).get(CARD).set('If-None-Match', '"4"');
+    const res = await request(app).get(CARD).set('If-None-Match', before);
 
     expect(res.status).toBe(200);
-    expect(res.headers.etag).toBe('"5"');
+    expect(res.headers.etag).not.toBe(before);
     expect(res.body.data.contentPack.items[0].title).toBe('Moved on');
   });
 
-  it('sets no ETag for a child with no pack at all', async () => {
+  // Pairing writes nothing to the pack. A tag keyed on the version answered 304
+  // here, and the app kept showing "no toy paired" until the next edit.
+  it('answers 200 once a toy is paired, even though the pack version has not moved', async () => {
+    prisma.ai_device.findFirst.mockResolvedValue(null);
+    const unpaired = await request(app).get(CARD);
+    expect(unpaired.body.data.deviceMac).toBeNull();
+
+    prisma.ai_device.findFirst.mockResolvedValue({ mac_address: MAC });
+    const res = await request(app).get(CARD).set('If-None-Match', unpaired.headers.etag);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.deviceMac).toBe(MAC);
+    expect(res.body.data.contentPack.version).toBe('4');
+  });
+
+  it('tags a child with no pack too, so "nothing recorded yet" revalidates the same way', async () => {
     prisma.rfid_content_pack.findFirst.mockResolvedValue(null);
 
     const res = await request(app).get(CARD);
 
     expect(res.status).toBe(200);
     expect(res.body.data.contentPack).toBeNull();
+    expect(res.headers.etag).toMatch(/^"[0-9a-f]{32}"$/);
   });
 });
 

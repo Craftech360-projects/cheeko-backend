@@ -25,8 +25,8 @@ Headers: `If-Match: "<version>"` fences the write, `Idempotency-Key` makes a
 retry replay instead of writing twice. Both optional.
 
 Answers `200` with the whole card in the `{code, msg, data}` envelope and an
-`ETag` carrying the new version — the same shape `GET` answers with, so the
-client adopts it wholesale.
+`ETag` carrying the new version. The card is the same shape `GET` answers with,
+so the client adopts it wholesale; `GET`'s own `ETag` is a body hash (below).
 
 | Situation | Status | `data` |
 |---|---|---|
@@ -42,7 +42,11 @@ Every `msg` is a plain sentence written for a parent, because the app surfaces
 
 ## What else changed
 
-- **`ETag` on `GET`**, from the pack version. `If-None-Match` → `304`.
+- **`ETag` on `GET`**, a hash of the response body rather than the pack version:
+  `deviceMac` and `kidName` change without a card write, and a version-keyed
+  tag kept answering `304` "no toy paired" after a toy was paired, until the
+  next edit. `If-None-Match` → `304`. `If-Match` on `PATCH` is still the
+  version, read from `contentPack.version` in the body.
 - **Every write bumps the version**, once per request, on `PATCH` and on all
   four legacy routes. The version is a monotonic integer serialised as a string.
 - **`Idempotency-Key`** on `PATCH` and `POST /content`, stored in the new
@@ -62,6 +66,13 @@ Every `msg` is a plain sentence written for a parent, because the app surfaces
   browser cannot revalidate and re-downloads every 142 KB frame on every view.
   The CloudFront side (forward `Origin`, keep those two headers) is a
   distribution setting the script cannot make; its header block says what to do.
+- **Cache-Control on existing objects.** Everything uploaded before this branch
+  carries `max-age=31536000`, and with keys now reused, the first edit of such a
+  card serves the old bytes from client caches for up to a year — an edge
+  invalidation does not reach those. `scripts/reset-customcard-cache-control.js`
+  copies each object over itself with `no-cache`, once, and invalidates
+  `/customcard*` when `CLOUDFRONT_DISTRIBUTION_ID` is set. Run it once after
+  deploy.
 - **Rate limits.** Unchanged: the existing global limiter in `src/app.js`
   applies. No per-parent write limit was added.
 - **S3 object versioning** is the only recovery path for a picture a parent

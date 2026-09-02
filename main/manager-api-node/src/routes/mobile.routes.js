@@ -372,22 +372,21 @@ router.post('/kids/:id/avatar', kidAvatarUpload.single('file'), asyncHandler(asy
 // issued custom card tapped on the toy that child is paired to plays this pack,
 // and it follows them to a new toy. Always 200 — a null contentPack means
 // "nothing recorded yet", which is a normal state, not an error.
-// The pack version doubles as the ETag: one monotonic integer that answers "am I
-// current?" for the app's per-screen refetch and for the toy alike, without
-// either of them downloading a card they already have.
+// The ETag is a hash of the body, not the pack version: `deviceMac` and
+// `kidName` change without a card write (pairing a toy bumps nothing), and a
+// version-keyed 304 kept answering "no toy paired" until the next edit. The
+// version is still what `If-Match` fences a PATCH with — it is in the body.
 router.get('/kids/:kidId/custom-card', asyncHandler(async (req, res) => {
     const card = await customCardService.getCustomCardForKid(req.mobileUser.id, req.params.kidId);
-    const version = card.contentPack?.version ?? null;
+    const etag = customCardService.cardETag(card);
 
-    if (version !== null) {
-        res.set('ETag', `"${version}"`);
-        const offered = String(req.get('If-None-Match') || '')
-            .split(',')
-            .map((tag) => customCardService.parseIfMatch(tag))
-            .filter(Boolean);
-        if (offered.some((tag) => tag === '*' || tag === String(version))) {
-            return res.status(304).end();
-        }
+    res.set('ETag', `"${etag}"`);
+    const offered = String(req.get('If-None-Match') || '')
+        .split(',')
+        .map((tag) => customCardService.parseIfMatch(tag))
+        .filter(Boolean);
+    if (offered.some((tag) => tag === '*' || tag === etag)) {
+        return res.status(304).end();
     }
 
     success(res, card);
